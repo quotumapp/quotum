@@ -1,0 +1,38 @@
+# Dependencies
+node_modules
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build artifacts
+dist
+coverage
+*.log
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Documentation
+*.md
+LICENSE
+
+# Tests
+tests
+*.test.ts
+*.spec.ts
+__tests__
+
+# Scripts
+scripts
+
+# CI/CD
+.github

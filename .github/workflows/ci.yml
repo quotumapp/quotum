@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Public contributions run with a read-only token and no repository secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Boundaries, types, lint, format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-bun
+      - run: bun run quality
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-bun
+      - run: bun run test
+
+  integration:
+    name: Integration tests (Postgres)
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-bun
+      - run: bun run test:integration
+
+  e2e:
+    name: End-to-end tests
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-bun
+      - run: bun run test:e2e
+
+  image:
+    name: Container image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+      - name: Read package version
+        id: package
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - name: Build (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          tags: quotum-api:ci
+          build-args: |
+            BUILD_VERSION=${{ steps.package.outputs.version }}
+            BUILD_COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  version:
+    name: Version bump reminder
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare package.json version with the base branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=1 origin "$BASE_SHA"
+          base_version=$(git show "$BASE_SHA:package.json" | jq -r .version)
+          pr_version=$(jq -r .version package.json)
+          echo "Base version: $base_version"
+          echo "PR version:   $pr_version"
+          if [ "$base_version" = "$pr_version" ]; then
+            echo "::warning::package.json version is unchanged; bump it if this change ships in a release."
+          fi
+
+  audit:
+    name: Dependency audit
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-bun
+      - run: bun audit --audit-level=moderate
+
+  bundle-size:
+    name: Bundle size
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-bun
+      - name: Build and check the 10 MB limit
+        run: |
+          bun build src/index.ts --outdir ./dist --minify --target bun
+          du -sh dist/
+          size=$(du -sb dist | cut -f1)
+          if [ "$size" -gt 10485760 ]; then
+            echo "::error::Bundle size exceeds the 10 MB limit"
+            exit 1
+          fi

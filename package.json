@@ -1,0 +1,48 @@
+{
+	"name": "quotum-api",
+	"version": "0.5.0",
+	"exports": {
+		"./sdk": "./src/sdk/index.ts"
+	},
+	"bin": {
+		"billing-catalog": "./scripts/billing-catalog.ts"
+	},
+	"scripts": {
+		"dev": "bun run --hot src/index.ts",
+		"migrate": "bun run src/migrate.ts",
+		"migrate:status": "bun run src/migrate.ts status",
+		"catalog:provision": "bun run scripts/provision-catalog.ts",
+		"catalog": "bun run scripts/billing-catalog.ts",
+		"test": "bun test tests",
+		"test:e2e": "bun run scripts/test-e2e.ts",
+		"test:integration": "bun run scripts/test-integration.ts",
+		"test:stripe-entrypoint": "bun run src/testing/test-stripe-entrypoint.ts",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"format": "biome format --write .",
+		"format:check": "biome format .",
+		"quality": "bun run typecheck && bun run lint && bun run format:check",
+		"quality:fix": "bun run lint:fix && bun run format"
+	},
+	"dependencies": {
+		"@apple/app-store-server-library": "3.1.0",
+		"@googleapis/androidpublisher": "37.0.0",
+		"@sentry/bun": "^10.70.0",
+		"drizzle-orm": "^0.45.2",
+		"google-auth-library": "11.0.2",
+		"hono": "^4.13.2",
+		"stripe": "22.5.0",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.8",
+		"@testcontainers/postgresql": "^12.1.0",
+		"@types/bun": "latest",
+		"typescript": "^7.0.2"
+	},
+	"overrides": {
+		"form-data": "4.0.6",
+		"google-auth-library": "11.0.2"
+	}
+}

@@ -1,0 +1,22 @@
+name: Set up Bun
+description: Install the pinned Bun release, restore the install cache, and install dependencies from bun.lock.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.4.2
+
+    - name: Restore Bun install cache
+      uses: actions/cache@v6
+      with:
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+        restore-keys: |
+          bun-${{ runner.os }}-
+
+    - name: Install dependencies
+      shell: bash
+      run: bun install --frozen-lockfile
