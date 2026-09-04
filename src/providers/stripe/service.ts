@@ -29,7 +29,6 @@ import type {
 	RecordStripeSubscriptionProjectionInput,
 	StoreEventReplayJobRow,
 	StripeBillingAccountSummary,
-	StripeCatalog,
 	StripeCheckoutRequestState,
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,
@@ -48,6 +47,7 @@ import type {
 	NormalizedStripeCreditPurchaseCommand,
 	NormalizedStripeCreditReversalCommand,
 	NormalizedStripeSubscriptionCommand,
+	StripeCatalog,
 } from "./types";
 
 export interface StripeBillingServiceConfig {

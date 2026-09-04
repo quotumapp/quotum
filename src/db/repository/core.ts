@@ -1,6 +1,7 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type { BillingProvider, EntitlementSnapshot } from "../../billing/types";
 import type { ProjectContext } from "../../projects/context";
+import type { BillingProjectRecord } from "../../projects/types";
 import { RepositoryModule } from "./base";
 import { materializeTopupAllocation, reversePurchaseAllocations } from "./catalog-allocations";
 import {
@@ -17,11 +18,7 @@ import {
 import { upsertPurchase } from "./mutations";
 import { executeOne } from "./query";
 import { recordStoreEventProcessingResult } from "./store-events";
-import type {
-	BillingProjectRecord,
-	BillingProjectRow,
-	RecordPurchaseProjectionInput,
-} from "./types";
+import type { BillingProjectRow, RecordPurchaseProjectionInput } from "./types";
 import { requireNonBlank } from "./validation";
 
 export class CoreBillingRepository extends RepositoryModule {

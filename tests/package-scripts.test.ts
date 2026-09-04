@@ -19,6 +19,10 @@ describe("package scripts", () => {
 		expect(packageJson.scripts?.["migrate:status"]).toBe("bun run src/migrate.ts status");
 		expect(packageJson.scripts?.["test:e2e"]).toBe("bun run scripts/test-e2e.ts");
 		expect(packageJson.scripts?.["test:integration"]).toBe("bun run scripts/test-integration.ts");
+		expect(packageJson.scripts?.["check:boundaries"]).toBe(
+			"bun run scripts/check-module-boundaries.ts",
+		);
+		expect(packageJson.scripts?.quality).toContain("bun run check:boundaries");
 		expect(postgresLib).toContain("postgres:18-alpine");
 		expect(postgresLib).toContain("@testcontainers/postgresql");
 		expect(postgresLib).toContain("PostgreSqlContainer");

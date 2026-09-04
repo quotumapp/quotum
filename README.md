@@ -656,10 +656,48 @@ provide price amounts in minor currency units through
 `BILLING_TEST_FAKE_STRIPE_PRICE_AMOUNTS_JSON='{"price_credits_10":499}'`. These switches are accepted
 only by the guarded test entrypoint and never by the production entrypoint.
 
+## Internal Module Boundaries
+
+The private-beta API is one deployable modular service backed by one Postgres database. Module
+ownership is enforced by `bun run check:boundaries`, which parses every repository TypeScript
+source with the TypeScript compiler. Every source file must match exactly one owner; unclassified
+or overlapping files and unresolved relative imports fail the check. Static imports, type-only
+imports, import types, re-exports, literal dynamic imports, and `require` calls all count as
+dependencies. Compiler-resolved TypeScript path aliases, package `imports`, absolute imports, and
+the package's own exports are resolved to their repository owner as well.
+
+| Owner | Current or reserved files | Allowed internal dependencies |
+| --- | --- | --- |
+| Billing | `src/admin/**`, `src/app/**`, `src/billing/**`, `src/catalog/**`, `src/db/**`, `src/http/**`, `src/observability/**`, `src/operations/**`, `src/projects/**`, `src/projections/**`, `src/providers/**`, `src/sdk/**`, `src/workers/**`, `src/env.ts`, and billing operational scripts | Billing and shared |
+| Platform | Reserved `src/platform/**` | Platform and shared |
+| Shared | Reserved `src/shared/**` | Shared only |
+| Composition | `src/app.ts`, `src/index.ts`, `src/runtime.ts`, `src/migrate.ts`, and `src/shutdown.ts` | Billing, platform, shared, and other composition entrypoints |
+| Test support | `tests/**`, `src/testing/**`, test/scenario runners, and `scripts/lib/**` | All owners |
+
+The policy is deny-by-default. Billing and platform cannot import one another directly, including
+through the package's own SDK export, and shared code cannot depend on either domain. Production
+modules cannot import composition or test-support code. The current environment, HTTP,
+observability, persistence, provider, SDK, and worker code is deliberately billing-owned; it is not
+made shared merely because more than one future module may need similar infrastructure.
+
+Platform and shared code are also forbidden from importing current billing persistence, Drizzle,
+Postgres clients, or Bun SQL APIs; shared code therefore cannot wrap those APIs as an indirect
+platform escape hatch. The first platform-persistence increment will introduce a schema-neutral
+query executor for injection into platform repositories. That increment will keep the port on the
+consumer side, supply the concrete adapter from composition, and add table-aware ownership checks
+with the first platform migration. Until then there is no platform SQL escape hatch.
+
+All future platform-owned tables must use the `platform_` prefix. This increment reserves and
+documents the convention; SQL/table-aware enforcement is intentionally deferred until the first
+platform migration exists. Future platform-to-billing operations will likewise use platform-owned
+typed ports with adapters wired by composition, while direct platform-to-billing imports remain
+permanently denied.
+
 ## Verification
 
 ```sh
 bun install
+bun run check:boundaries
 bun run quality
 bun run test
 bun run test:integration

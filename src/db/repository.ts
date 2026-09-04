@@ -48,6 +48,8 @@ import type {
 	PublishedCatalog,
 } from "../catalog/types";
 import type { ProjectContext } from "../projects/context";
+import type { BillingProjectRecord } from "../projects/types";
+import type { StripeCatalog } from "../providers/stripe/types";
 import { db as defaultDb } from "./client";
 import { AppleBillingRepository } from "./repository/apple";
 import { AutoTopupJobRepository } from "./repository/auto-topup-jobs";
@@ -64,7 +66,6 @@ import { StoreEventReplayBillingRepository } from "./repository/store-event-repl
 import { StripeBillingRepository } from "./repository/stripe";
 import { SubscriptionReconciliationBillingRepository } from "./repository/subscription-reconciliation";
 import type {
-	BillingProjectRecord,
 	CompleteStripeCheckoutRequestInput,
 	ExpiredSubscriptionReconciliationResult,
 	GetStripeProviderCustomerInput,
@@ -84,7 +85,6 @@ import type {
 	StoreEventReplayJobRow,
 	StoreKitRecordingResult,
 	StripeBillingAccountSummary,
-	StripeCatalog,
 	StripeCheckoutRequestState,
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,
@@ -95,7 +95,6 @@ import type {
 export type { GrantAllocationInput } from "./repository/metering";
 export { ProjectScopedBillingRepository } from "./repository/project-scoped";
 export type {
-	BillingProjectRecord,
 	CompleteStripeCheckoutRequestInput,
 	ExpiredSubscriptionReconciliationResult,
 	GetStripeProviderCustomerInput,
@@ -115,7 +114,6 @@ export type {
 	StoreEventReplayJobRow,
 	StoreKitRecordingResult,
 	StripeBillingAccountSummary,
-	StripeCatalog,
 	StripeCheckoutRequestState,
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,

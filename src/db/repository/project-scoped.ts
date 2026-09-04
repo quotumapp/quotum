@@ -11,6 +11,7 @@ import type {
 } from "../../billing/recurring";
 import type { BillingProvider, EntitlementSnapshot } from "../../billing/types";
 import type { ProjectContext } from "../../projects/context";
+import type { StripeCatalog } from "../../providers/stripe/types";
 import type { BillingRepository } from "../repository";
 import type {
 	CompleteStripeCheckoutRequestInput,
@@ -28,7 +29,6 @@ import type {
 	RecordStripeSubscriptionProjectionInput,
 	StoreKitRecordingResult,
 	StripeBillingAccountSummary,
-	StripeCatalog,
 	StripeCheckoutRequestState,
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,

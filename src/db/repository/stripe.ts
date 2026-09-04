@@ -2,6 +2,7 @@ import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError, PersistenceConflictError } from "../../billing/errors";
 import type { PurchaseStatus } from "../../billing/types";
 import type { ProjectContext } from "../../projects/context";
+import type { StripeCatalog } from "../../providers/stripe/types";
 import { RepositoryModule } from "./base";
 import {
 	materializeSubscriptionAllocations,
@@ -47,7 +48,6 @@ import type {
 	RecordStripeSkippedEventInput,
 	RecordStripeSubscriptionProjectionInput,
 	StripeBillingAccountSummary,
-	StripeCatalog,
 	StripeCheckoutRequestState,
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,

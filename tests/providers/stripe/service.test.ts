@@ -4,12 +4,12 @@ import type { AutoTopupJob } from "../../../src/billing/auto-topup";
 import type {
 	ProviderSubscriptionReconciliationRow,
 	StoreEventReplayJobRow,
-	StripeCatalog,
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,
 	StripeWebStoreProductRow,
 } from "../../../src/db/repository";
 import { StripeBillingService } from "../../../src/providers/stripe/service";
+import type { StripeCatalog } from "../../../src/providers/stripe/types";
 
 const config = {
 	checkoutSuccessUrl: "https://app.voysee.com/billing/success?session_id={CHECKOUT_SESSION_ID}",

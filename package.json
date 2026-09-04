@@ -1,6 +1,6 @@
 {
 	"name": "quotum-api",
-	"version": "0.5.0",
+	"version": "0.5.2",
 	"exports": {
 		"./sdk": "./src/sdk/index.ts"
 	},
@@ -17,12 +17,13 @@
 		"test:e2e": "bun run scripts/test-e2e.ts",
 		"test:integration": "bun run scripts/test-integration.ts",
 		"test:stripe-entrypoint": "bun run src/testing/test-stripe-entrypoint.ts",
+		"check:boundaries": "bun run scripts/check-module-boundaries.ts",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",
 		"format:check": "biome format .",
-		"quality": "bun run typecheck && bun run lint && bun run format:check",
+		"quality": "bun run check:boundaries && bun run typecheck && bun run lint && bun run format:check",
 		"quality:fix": "bun run lint:fix && bun run format"
 	},
 	"dependencies": {

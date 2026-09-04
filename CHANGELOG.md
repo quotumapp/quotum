@@ -10,6 +10,14 @@ Before 1.0 the schema ships as baseline files under `migrations/` that evolve in
 checksum-verified; recreate a database from them rather than migrating it. Incremental migrations
 start at 1.0.
 
+## [0.5.2] - 2026-09-04
+
+### Added
+
+- `bun run check:boundaries`, enforcing module ownership, dependency direction, SQL placement, and
+  migration rules; it runs inside `bun run quality` and in CI.
+- CI gate that runs the operator console contract checks against each API change.
+
 ## [0.5.0] - 2026-09-03
 
 First release under the `quotum-api` name.

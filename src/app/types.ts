@@ -16,7 +16,6 @@ import type {
 } from "../billing/insights";
 import type { MeteringServiceLike } from "../billing/metering";
 import type { CatalogControlPlaneLike } from "../catalog/types";
-import type { BillingProjectRecord, StripeCatalog } from "../db/repository";
 import type { BillingEnv } from "../env";
 import type { BillingLogger } from "../observability/logger";
 import type { BillingMetrics } from "../observability/metrics";
@@ -26,6 +25,8 @@ import type {
 	ProjectProviderServiceOverrides,
 	ProjectProviderServices,
 } from "../projects/providers";
+import type { BillingProjectRecord } from "../projects/types";
+import type { StripeCatalog } from "../providers/stripe/types";
 
 export type BillingHonoEnv = { Variables: { project: ProjectContext; requestId: string } };
 export type BillingContext = Context<BillingHonoEnv>;
