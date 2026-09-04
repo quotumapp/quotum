@@ -1,29 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { BillingRepository } from "../../src/db/repository";
+import { projectInstanceContext } from "../helpers/project-context";
 import { FakeDatabase } from "./repository-fixture";
 
 describe("BillingRepository core", () => {
-	it("upserts a billing project from the authenticated context", async () => {
-		const database = new FakeDatabase([
-			[{ id: "project-id", key: "voysee", name: "Voysee", active: true }],
-		]);
-		const repository = new BillingRepository(database as never);
-
-		await expect(
-			repository.upsertProject({ projectKey: "voysee" }, { name: "Voysee", active: true }),
-		).resolves.toEqual({ id: "project-id", key: "voysee", name: "Voysee", active: true });
-
-		const queries = database.queries.join("\n");
-		expect(queries).toContain("INSERT INTO projects");
-		expect(queries).not.toContain("INSERT INTO billing.projects");
-		expect(queries).toContain("ON CONFLICT (key) DO UPDATE");
-		expect(queries).toContain('"voysee"');
-		expect(queries).toContain('"Voysee"');
-	});
-
 	it("reads entitlement snapshots from billing tables", async () => {
 		const database = new FakeDatabase([
-			[{ id: "project-id" }],
 			[{ id: "customer-id" }],
 			[
 				{
@@ -37,7 +19,7 @@ describe("BillingRepository core", () => {
 		const repository = new BillingRepository(database as never);
 
 		await expect(
-			repository.getEntitlementSnapshot({ projectKey: "wiseley" }, "user-1"),
+			repository.getEntitlementSnapshot(projectInstanceContext("wiseley"), "user-1"),
 		).resolves.toEqual({
 			billingAccountId: "user-1",
 			generatedAt: expect.any(String),
@@ -51,20 +33,18 @@ describe("BillingRepository core", () => {
 			],
 		});
 		const queries = database.queries.join("\n");
-		expect(queries).toContain("WHERE p.key = $1");
-		expect(queries).toContain('"wiseley"');
-		expect(queries).not.toContain("WHERE p.key = " + "'voysee'");
+		expect(queries).not.toContain("FROM projects");
 		expect(queries).toContain("FROM entitlements");
 		expect(queries).not.toContain("FROM billing.entitlements");
 		expect(queries).toContain("e.project_id = $1");
-		expect(queries).toContain('"project-id"');
+		expect(queries).toContain(JSON.stringify(projectInstanceContext("wiseley").projectInstanceId));
 	});
 
 	it("reads null-expiry subscription entitlements as inactive while preserving purchase entitlements", async () => {
-		const database = new FakeDatabase([[{ id: "project-id" }], [{ id: "customer-id" }], []]);
+		const database = new FakeDatabase([[{ id: "customer-id" }], []]);
 		const repository = new BillingRepository(database as never);
 
-		await repository.getEntitlementSnapshot({ projectKey: "wiseley" }, "user-1");
+		await repository.getEntitlementSnapshot(projectInstanceContext("wiseley"), "user-1");
 
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("e.source_purchase_id IS NOT NULL");
@@ -74,16 +54,10 @@ describe("BillingRepository core", () => {
 	});
 
 	it("recomputes entitlements from cancelled subscriptions until non-null expiry", async () => {
-		const database = new FakeDatabase([
-			[{ id: "project-id" }],
-			[{ id: "customer-id" }],
-			[],
-			[{ id: "customer-id" }],
-			[],
-		]);
+		const database = new FakeDatabase([[{ id: "customer-id" }], [], [{ id: "customer-id" }], []]);
 		const repository = new BillingRepository(database as never);
 
-		await repository.recomputeCustomerEntitlements({ projectKey: "wiseley" }, "user-1");
+		await repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1");
 
 		const queries = database.queries.join("\n");
 		expect(queries).toContain(
@@ -96,7 +70,6 @@ describe("BillingRepository core", () => {
 
 	it("creates provider customer tokens inside the supplied project", async () => {
 		const database = new FakeDatabase([
-			[{ id: "project-id" }],
 			[{ id: "customer-id" }],
 			[],
 			[{ id: "provider-customer-id" }],
@@ -104,28 +77,20 @@ describe("BillingRepository core", () => {
 		const repository = new BillingRepository(database as never);
 
 		const token = await repository.getOrCreateProviderCustomerToken(
-			{ projectKey: "wiseley" },
+			projectInstanceContext("wiseley"),
 			"user-1",
 			"apple",
 		);
 
 		expect(token).toBeString();
 		const queries = database.queries.join("\n");
-		expect(queries).toContain("WHERE p.key = $1");
-		expect(queries).toContain('"wiseley"');
-		expect(queries).not.toContain("WHERE p.key = " + "'voysee'");
+		expect(queries).not.toContain("FROM projects");
 		expect(queries).toContain("pc.project_id = $1");
-		expect(queries).toContain('"project-id"');
+		expect(queries).toContain(JSON.stringify(projectInstanceContext("wiseley").projectInstanceId));
 	});
 
 	it("retries rolled-back billing transactions after PostgreSQL deadlocks", async () => {
-		const database = new FakeDatabase([
-			[{ id: "project-id" }],
-			[{ id: "customer-id" }],
-			[],
-			[{ id: "customer-id" }],
-			[],
-		]);
+		const database = new FakeDatabase([[{ id: "customer-id" }], [], [{ id: "customer-id" }], []]);
 		const runTransaction = database.transaction.bind(database);
 		let attempts = 0;
 		database.transaction = async (callback) => {
@@ -137,7 +102,7 @@ describe("BillingRepository core", () => {
 		};
 		const repository = new BillingRepository(database as never);
 
-		await repository.recomputeCustomerEntitlements({ projectKey: "wiseley" }, "user-1");
+		await repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1");
 
 		expect(attempts).toBe(3);
 	});

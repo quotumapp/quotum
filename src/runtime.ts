@@ -1,5 +1,6 @@
 import { createApp } from "./app";
 import { EntitlementService } from "./billing/entitlements";
+import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
 import { closePool } from "./db/client";
 import { BillingRepository } from "./db/repository";
 import {
@@ -18,6 +19,7 @@ import {
 import { BillingAdminOperations } from "./operations/admin";
 import { ProjectionHttpClient } from "./projections/http-client";
 import type { ProjectRuntimeConfig } from "./projects/config";
+import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "./projects/context";
 import { AppleStoreKitClient, buildAppleStoreKitConfig } from "./providers/apple/client";
 import { AppleStoreKitService } from "./providers/apple/service";
 import { GooglePlayDeveloperClient } from "./providers/google/client";
@@ -59,9 +61,10 @@ type WorkerProjectProviders = {
 export interface BillingRuntimeDependencies {
 	sentry?: SentryClientLike;
 	readinessCheck?: () => boolean | Promise<boolean>;
+	projectContextResolver?: ProjectInstanceContextResolver;
 	stripeClientFactory?: (
 		config: StripeBillingConfig,
-		projectKey: string,
+		projectInstanceKey: string,
 	) => StripeBillingClientDependency;
 }
 
@@ -80,54 +83,83 @@ export function createBillingRuntimeApp(
 					config: env.sentry,
 				});
 	const metrics = createInMemoryBillingMetrics();
-	const projectionDelivery = new ProjectionHttpClient({ projects: env.projects, metrics });
+	const projectContextResolver =
+		dependencies.projectContextResolver ?? new PostgresProjectInstanceContextResolver();
+	const projectionDelivery = new ProjectionHttpClient({
+		projects: env.projectRuntime,
+		metrics,
+	});
 	const projectionSyncRepository = new ProjectionSyncJobRepository(billingRepository);
 	const storeEventReplayRepository = new StoreEventReplayJobRepository(billingRepository);
 	const subscriptionReconciliationRepository = new ProviderSubscriptionReconciliationRepository(
 		billingRepository,
 	);
+	const projectRuntimeConfig = (project: ProjectInstanceContext): ProjectRuntimeConfig => {
+		const config = env.projectRuntime.find(
+			(candidate) => candidate.projectInstanceKey === project.projectInstanceKey,
+		);
+		if (config === undefined) {
+			throw new Error(`Billing project instance is not configured: ${project.projectInstanceKey}`);
+		}
+		return config;
+	};
 	const stripeServiceCache = new Map<string, StripeBillingService>();
-	const stripeServiceForProject = (project: ProjectRuntimeConfig): StripeBillingService | null => {
-		if (project.stripe === null || project.stripe === undefined) {
+	const stripeServiceForProject = (
+		project: ProjectInstanceContext,
+	): StripeBillingService | null => {
+		const runtimeConfig = projectRuntimeConfig(project);
+		if (runtimeConfig.stripe === null || runtimeConfig.stripe === undefined) {
 			return null;
 		}
-		const cached = stripeServiceCache.get(project.key);
+		const cached = stripeServiceCache.get(project.projectInstanceId);
 		if (cached !== undefined) {
 			return cached;
 		}
 
-		const config = buildStripeConfig(project.stripe);
+		const config = buildStripeConfig(runtimeConfig.stripe);
 		const service = new StripeBillingService({
 			config: {
 				...config,
-				projectKey: project.key,
-				projectionContract: project.projectionContract ?? "billing_state_v1",
+				projectKey: project.projectInstanceKey,
+				projectionContract: runtimeConfig.projectionContract ?? "billing_state_v1",
 			},
 			client:
-				dependencies.stripeClientFactory?.(config, project.key) ?? new StripeBillingClient(config),
-			repository: billingRepository.forProject({ projectKey: project.key }),
+				dependencies.stripeClientFactory?.(config, project.projectInstanceKey) ??
+				new StripeBillingClient(config),
+			repository: billingRepository.forProject(project),
 		});
-		stripeServiceCache.set(project.key, service);
+		stripeServiceCache.set(project.projectInstanceId, service);
 		return service;
 	};
+	const projectProviderServices =
+		dependencies.stripeClientFactory === undefined
+			? undefined
+			: Object.fromEntries(
+					env.projectRuntime.map((config) => [
+						config.projectInstanceKey,
+						{
+							stripeBillingService:
+								config.stripe === null || config.stripe === undefined
+									? null
+									: createDeferredStripeBillingService(
+											config.projectInstanceKey,
+											projectContextResolver,
+											stripeServiceForProject,
+										),
+						},
+					]),
+				);
 	const workerProviderCache = new Map<string, WorkerProjectProviders>();
-	const providersForProject = (projectKey: string): WorkerProjectProviders => {
-		const cached = workerProviderCache.get(projectKey);
+	const providersForProject = (project: ProjectInstanceContext): WorkerProjectProviders => {
+		const cached = workerProviderCache.get(project.projectInstanceId);
 		if (cached !== undefined) {
 			return cached;
 		}
 
-		const project = env.projects.find(
-			(candidate) => candidate.key === projectKey && candidate.active,
-		);
-		if (project === undefined) {
-			throw new Error(`Billing project is not configured: ${projectKey}`);
-		}
-
-		const projectContext = { projectKey };
-		const apple = project.apple ?? null;
-		const googlePlay = project.googlePlay ?? null;
-		const stripe = project.stripe ?? null;
+		const runtimeConfig = projectRuntimeConfig(project);
+		const apple = runtimeConfig.apple ?? null;
+		const googlePlay = runtimeConfig.googlePlay ?? null;
+		const stripe = runtimeConfig.stripe ?? null;
 		const providers = {
 			apple:
 				apple === null
@@ -136,7 +168,7 @@ export function createBillingRuntimeApp(
 							bundleId: apple.bundleId,
 							environment: apple.environment,
 							client: new AppleStoreKitClient(buildAppleStoreKitConfig(apple)),
-							repository: billingRepository.forProject(projectContext),
+							repository: billingRepository.forProject(project),
 						}),
 			google:
 				googlePlay === null
@@ -146,12 +178,12 @@ export function createBillingRuntimeApp(
 							return new GooglePlayBillingService({
 								config,
 								client: new GooglePlayDeveloperClient(config),
-								repository: billingRepository.forProject(projectContext),
+								repository: billingRepository.forProject(project),
 							});
 						})(),
 			stripe: stripe === null ? null : stripeServiceForProject(project),
 		};
-		workerProviderCache.set(projectKey, providers);
+		workerProviderCache.set(project.projectInstanceId, providers);
 		return providers;
 	};
 	const projectionSyncWorker = new ProjectionSyncWorker({
@@ -161,6 +193,7 @@ export function createBillingRuntimeApp(
 		concurrency: 5,
 		repository: projectionSyncRepository,
 		delivery: projectionDelivery,
+		projectContextResolver,
 		logger,
 		metrics,
 	});
@@ -170,6 +203,7 @@ export function createBillingRuntimeApp(
 		batchSize: 25,
 		repository: storeEventReplayRepository,
 		providers: providersForProject,
+		projectContextResolver,
 		logger,
 		metrics,
 	});
@@ -180,6 +214,7 @@ export function createBillingRuntimeApp(
 		staleAfterMs: env.providerReconciliationStaleAfterMs,
 		repository: subscriptionReconciliationRepository,
 		providers: providersForProject,
+		projectContextResolver,
 		logger,
 		metrics,
 	});
@@ -191,9 +226,12 @@ export function createBillingRuntimeApp(
 	const recurringBillingWorker = new RecurringBillingWorker({
 		workerId: env.workerId,
 		repository: billingRepository,
-		providerForProject(projectKey) {
-			const stripe = providersForProject(projectKey).stripe;
-			if (stripe === null) throw new Error(`Stripe is not configured for ${projectKey}`);
+		projectContextResolver,
+		providerForProject(project) {
+			const stripe = providersForProject(project).stripe;
+			if (stripe === null) {
+				throw new Error(`Stripe is not configured for ${project.projectInstanceKey}`);
+			}
 			return stripe;
 		},
 		logger,
@@ -202,9 +240,12 @@ export function createBillingRuntimeApp(
 	const autoTopupWorker = new AutoTopupWorker({
 		workerId: env.workerId,
 		repository: billingRepository,
-		providerForProject(projectKey) {
-			const stripe = providersForProject(projectKey).stripe;
-			if (stripe === null) throw new Error(`Stripe is not configured for ${projectKey}`);
+		projectContextResolver,
+		providerForProject(project) {
+			const stripe = providersForProject(project).stripe;
+			if (stripe === null) {
+				throw new Error(`Stripe is not configured for ${project.projectInstanceKey}`);
+			}
 			return stripe;
 		},
 		logger,
@@ -274,12 +315,8 @@ export function createBillingRuntimeApp(
 	return createApp({
 		env,
 		entitlementService: new EntitlementService(billingRepository),
-		projectProviderServices: Object.fromEntries(
-			env.projects.map((project) => [
-				project.key,
-				{ stripeBillingService: stripeServiceForProject(project) },
-			]),
-		),
+		projectContextResolver,
+		projectProviderServices,
 		adminOperations,
 		logger,
 		metrics,
@@ -288,5 +325,34 @@ export function createBillingRuntimeApp(
 			dependencies.sentry === undefined || env.sentry.dsn === null
 				? undefined
 				: createSentryRequestMiddleware(dependencies.sentry),
+	});
+}
+
+function createDeferredStripeBillingService(
+	projectInstanceKey: string,
+	projectContextResolver: ProjectInstanceContextResolver,
+	serviceForProject: (project: ProjectInstanceContext) => StripeBillingService | null,
+): StripeBillingService {
+	return new Proxy({} as StripeBillingService, {
+		get(_target, property) {
+			if (property === "then") return undefined;
+			return async (...args: unknown[]) => {
+				const result = await projectContextResolver.resolveInstanceKey(projectInstanceKey);
+				if (result.kind !== "resolved") {
+					throw new Error(
+						`Billing project instance could not be resolved for Stripe: ${result.kind}`,
+					);
+				}
+				const service = serviceForProject(result.context);
+				if (service === null) {
+					throw new Error(`Stripe is not configured for ${projectInstanceKey}`);
+				}
+				const method = Reflect.get(service, property);
+				if (typeof method !== "function") {
+					throw new Error(`Stripe billing service method is unavailable: ${String(property)}`);
+				}
+				return await Reflect.apply(method, service, args);
+			};
+		},
 	});
 }

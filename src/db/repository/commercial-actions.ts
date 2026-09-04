@@ -7,10 +7,10 @@ import type {
 	StoredCommercialActionPreview,
 } from "../../billing/commercial";
 import { InvalidRequestError, PersistenceConflictError } from "../../billing/errors";
-import type { ProjectContext } from "../../projects/context";
+import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
-import { resolveProjectId } from "./identities";
 import { executeOne, jsonb } from "./query";
+import type { QueryExecutor } from "./types";
 
 interface PreviewRow {
 	intent: CommercialActionIntent;
@@ -27,11 +27,11 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 
 export class CommercialActionRepository extends RepositoryModule {
 	async createCommercialActionPreview(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		draft: CommercialPreviewDraft,
 	): Promise<CommercialActionPreview> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const previewToken = crypto.randomUUID();
 			const expiresAt = new Date(Date.now() + 15 * 60_000);
 			const preview: CommercialActionPreview = {
@@ -58,17 +58,17 @@ export class CommercialActionRepository extends RepositoryModule {
 	}
 
 	async getCommercialActionPreview(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		previewToken: string,
 	): Promise<StoredCommercialActionPreview> {
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const row = await previewRow(this.database, projectId, billingAccountId, previewToken, false);
 		return storedPreview(row);
 	}
 
 	async beginCommercialActionExecution(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: {
 			billingAccountId: string;
 			previewToken: string;
@@ -78,7 +78,7 @@ export class CommercialActionRepository extends RepositoryModule {
 		},
 	): Promise<StoredCommercialActionPreview> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const row = await previewRow(tx, projectId, input.billingAccountId, input.previewToken, true);
 			if (row.intent_hash !== input.intentHash) {
 				throw new PersistenceConflictError(
@@ -125,7 +125,7 @@ export class CommercialActionRepository extends RepositoryModule {
 	}
 
 	async completeCommercialActionExecution(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: {
 			billingAccountId: string;
 			previewToken: string;
@@ -134,7 +134,7 @@ export class CommercialActionRepository extends RepositoryModule {
 		},
 	): Promise<CommercialActionExecutionResult> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const row = await executeOne<{ execution_result: CommercialActionExecutionResult }>(
 				tx,
 				drizzleSql`
@@ -161,7 +161,7 @@ export class CommercialActionRepository extends RepositoryModule {
 }
 
 async function previewRow(
-	executor: Parameters<typeof resolveProjectId>[0],
+	executor: QueryExecutor,
 	projectId: string,
 	billingAccountId: string,
 	previewToken: string,

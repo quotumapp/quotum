@@ -5,6 +5,7 @@ import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 
@@ -26,25 +27,23 @@ localDescribe("authoritative metering flows", () => {
 	});
 
 	it("converts raw usage exactly, records an inline deduction receipt, and rejects duplicate keys", async () => {
-		await context.repository.grantAllocation(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "account_1",
-				featureKey: "ai_credits",
-				quantity: "10",
-				sourceKind: "operator",
-				sourceKey: "fixture:account_1",
-			},
-		);
+		await context.repository.grantAllocation(integrationProjectContext(), {
+			billingAccountId: "account_1",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "fixture:account_1",
+		});
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
 		});
 		expect(
-			await context.repository.checkUsage(
-				{ projectKey: "voysee" },
-				{ billingAccountId: "account_1", featureKey: "model_tokens", quantity: "125" },
-			),
+			await context.repository.checkUsage(integrationProjectContext(), {
+				billingAccountId: "account_1",
+				featureKey: "model_tokens",
+				quantity: "125",
+			}),
 		).toMatchObject({ allowed: true, walletQuantity: "0.625" });
 
 		const check = await usageRequest(app, authHeaders(), "account_1", "check", {
@@ -112,37 +111,28 @@ localDescribe("authoritative metering flows", () => {
 	});
 
 	it("explores signed usage with cursors, series, and a provider-neutral billing summary", async () => {
-		await context.repository.grantAllocation(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "insights_account",
-				featureKey: "ai_credits",
-				quantity: "10",
-				sourceKind: "operator",
-				sourceKey: "fixture:insights_account",
-			},
-		);
-		const original = await context.repository.consumeUsage(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "insights_account",
-				featureKey: "model_tokens",
-				quantity: "400",
-				idempotencyKey: "insights:consume",
-			},
-		);
-		await context.repository.correctUsage(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "insights_account",
-				originalUsageEventId: original.usageEventId ?? "",
-				originalRecordedAt: new Date(original.recordedAt ?? ""),
-				quantity: "100",
-				idempotencyKey: "insights:correction",
-				actor: "integration-test",
-				reason: "remove duplicated tokens",
-			},
-		);
+		await context.repository.grantAllocation(integrationProjectContext(), {
+			billingAccountId: "insights_account",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "fixture:insights_account",
+		});
+		const original = await context.repository.consumeUsage(integrationProjectContext(), {
+			billingAccountId: "insights_account",
+			featureKey: "model_tokens",
+			quantity: "400",
+			idempotencyKey: "insights:consume",
+		});
+		await context.repository.correctUsage(integrationProjectContext(), {
+			billingAccountId: "insights_account",
+			originalUsageEventId: original.usageEventId ?? "",
+			originalRecordedAt: new Date(original.recordedAt ?? ""),
+			quantity: "100",
+			idempotencyKey: "insights:correction",
+			actor: "integration-test",
+			reason: "remove duplicated tokens",
+		});
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
@@ -208,16 +198,13 @@ localDescribe("authoritative metering flows", () => {
 	});
 
 	it("serializes concurrent reservations and confirms or releases held capacity", async () => {
-		await context.repository.grantAllocation(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "account_2",
-				featureKey: "ai_credits",
-				quantity: "10",
-				sourceKind: "operator",
-				sourceKey: "fixture:account_2",
-			},
-		);
+		await context.repository.grantAllocation(integrationProjectContext(), {
+			billingAccountId: "account_2",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "fixture:account_2",
+		});
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
@@ -270,16 +257,13 @@ localDescribe("authoritative metering flows", () => {
 	});
 
 	it("suppresses worker redelivery in its own idempotency lane", async () => {
-		await context.repository.grantAllocation(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "worker_account",
-				featureKey: "ai_credits",
-				quantity: "10",
-				sourceKind: "operator",
-				sourceKey: "fixture:worker_account",
-			},
-		);
+		await context.repository.grantAllocation(integrationProjectContext(), {
+			billingAccountId: "worker_account",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "fixture:worker_account",
+		});
 		const input = {
 			billingAccountId: "worker_account",
 			featureKey: "model_tokens",
@@ -287,8 +271,14 @@ localDescribe("authoritative metering flows", () => {
 			deliveryId: "usage-delivery:1",
 			requestContextId: "request-context:1",
 		};
-		const accepted = await context.repository.consumeWorkerUsage({ projectKey: "voysee" }, input);
-		const redelivery = await context.repository.consumeWorkerUsage({ projectKey: "voysee" }, input);
+		const accepted = await context.repository.consumeWorkerUsage(
+			integrationProjectContext(),
+			input,
+		);
+		const redelivery = await context.repository.consumeWorkerUsage(
+			integrationProjectContext(),
+			input,
+		);
 
 		expect(accepted).toMatchObject({
 			applied: true,
@@ -307,16 +297,13 @@ localDescribe("authoritative metering flows", () => {
 	});
 
 	it("records append-only partial corrections and restores only eligible source allocations", async () => {
-		await context.repository.grantAllocation(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "correction_account",
-				featureKey: "ai_credits",
-				quantity: "10",
-				sourceKind: "operator",
-				sourceKey: "fixture:correction_account",
-			},
-		);
+		await context.repository.grantAllocation(integrationProjectContext(), {
+			billingAccountId: "correction_account",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "fixture:correction_account",
+		});
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
@@ -356,18 +343,15 @@ localDescribe("authoritative metering flows", () => {
 			deductions: [expect.objectContaining({ quantity: "-0.5" })],
 		});
 
-		const finalCorrection = await context.repository.correctUsage(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "correction_account",
-				originalUsageEventId: original.usageEventId,
-				originalRecordedAt: new Date(original.recordedAt),
-				quantity: "300",
-				idempotencyKey: "correction:final",
-				actor: "billing-test",
-				reason: "fully reverse the remaining usage",
-			},
-		);
+		const finalCorrection = await context.repository.correctUsage(integrationProjectContext(), {
+			billingAccountId: "correction_account",
+			originalUsageEventId: original.usageEventId,
+			originalRecordedAt: new Date(original.recordedAt),
+			quantity: "300",
+			idempotencyKey: "correction:final",
+			actor: "billing-test",
+			reason: "fully reverse the remaining usage",
+		});
 		expect(finalCorrection).toMatchObject({
 			quantity: "-300",
 			walletQuantity: "-1.5",
@@ -434,7 +418,7 @@ localDescribe("authoritative metering flows", () => {
 			entities: 1,
 			active_versions: 1,
 		});
-		const project = { projectKey: "voysee" };
+		const project = integrationProjectContext();
 		const subject = {
 			billingAccountId: "cap_account",
 			featureKey: "api_requests",
@@ -565,7 +549,7 @@ localDescribe("authoritative metering flows", () => {
 		const first = await context.repository.runMeteringMaintenance(50);
 		expect(first.rolledOverAllocations).toBe(1);
 		const balance = await context.repository.getMeteringBalance(
-			{ projectKey: "voysee" },
+			integrationProjectContext(),
 			"account_rollover",
 			"ai_credits",
 		);
@@ -612,37 +596,28 @@ localDescribe("authoritative metering flows", () => {
 			JOIN features feature ON feature.project_id = item.project_id AND feature.id = item.feature_id
 			WHERE feature.key = 'api_requests'
 		`;
-		await context.repository.controlsEnterprise.upsertControl(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "account_spend",
-				controlKind: "spend_limit",
-				currency: "USD",
-				limitValue: "300",
-				interval: "lifetime",
-				actor: "integration-test",
-			},
-		);
+		await context.repository.controlsEnterprise.upsertControl(integrationProjectContext(), {
+			billingAccountId: "account_spend",
+			controlKind: "spend_limit",
+			currency: "USD",
+			limitValue: "300",
+			interval: "lifetime",
+			actor: "integration-test",
+		});
 
-		const first = await context.repository.consumeUsage(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "account_spend",
-				featureKey: "api_requests",
-				quantity: "300",
-				idempotencyKey: "spend:first",
-			},
-		);
+		const first = await context.repository.consumeUsage(integrationProjectContext(), {
+			billingAccountId: "account_spend",
+			featureKey: "api_requests",
+			quantity: "300",
+			idempotencyKey: "spend:first",
+		});
 		expect(first).toMatchObject({ allowed: true, balance: { consumed: "300" } });
-		const denied = await context.repository.consumeUsage(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "account_spend",
-				featureKey: "api_requests",
-				quantity: "100",
-				idempotencyKey: "spend:denied",
-			},
-		);
+		const denied = await context.repository.consumeUsage(integrationProjectContext(), {
+			billingAccountId: "account_spend",
+			featureKey: "api_requests",
+			quantity: "100",
+			idempotencyKey: "spend:denied",
+		});
 		expect(denied).toMatchObject({
 			allowed: false,
 			reason: "control_limit_exceeded",
@@ -655,27 +630,21 @@ localDescribe("authoritative metering flows", () => {
 			},
 		});
 
-		await context.repository.correctUsage(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "account_spend",
-				originalUsageEventId: first.usageEventId ?? "",
-				originalRecordedAt: new Date(first.recordedAt ?? ""),
-				quantity: "100",
-				idempotencyKey: "spend:correction",
-				actor: "integration-test",
-				reason: "remove duplicate requests",
-			},
-		);
-		const afterCorrection = await context.repository.consumeUsage(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "account_spend",
-				featureKey: "api_requests",
-				quantity: "100",
-				idempotencyKey: "spend:after-correction",
-			},
-		);
+		await context.repository.correctUsage(integrationProjectContext(), {
+			billingAccountId: "account_spend",
+			originalUsageEventId: first.usageEventId ?? "",
+			originalRecordedAt: new Date(first.recordedAt ?? ""),
+			quantity: "100",
+			idempotencyKey: "spend:correction",
+			actor: "integration-test",
+			reason: "remove duplicate requests",
+		});
+		const afterCorrection = await context.repository.consumeUsage(integrationProjectContext(), {
+			billingAccountId: "account_spend",
+			featureKey: "api_requests",
+			quantity: "100",
+			idempotencyKey: "spend:after-correction",
+		});
 		expect(afterCorrection).toMatchObject({ allowed: true, balance: { consumed: "300" } });
 		const [control] = await context.sql<Array<{ consumed: string; receipts: number }>>`
 			SELECT control_window.consumed_value::text AS consumed,
@@ -688,35 +657,26 @@ localDescribe("authoritative metering flows", () => {
 	});
 
 	it("expires holds, closes periods, and sweeps bounded metering state", async () => {
-		await context.repository.grantAllocation(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "maintenance_account",
-				featureKey: "ai_credits",
-				quantity: "10",
-				sourceKind: "operator",
-				sourceKey: "fixture:maintenance_account",
-			},
-		);
-		await context.repository.consumeUsage(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "maintenance_account",
-				featureKey: "model_tokens",
-				quantity: "100",
-				idempotencyKey: "maintenance:consume",
-			},
-		);
-		await context.repository.reserveUsage(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "maintenance_account",
-				featureKey: "model_tokens",
-				quantity: "100",
-				expiresInSeconds: 300,
-				idempotencyKey: "maintenance:reserve",
-			},
-		);
+		await context.repository.grantAllocation(integrationProjectContext(), {
+			billingAccountId: "maintenance_account",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "fixture:maintenance_account",
+		});
+		await context.repository.consumeUsage(integrationProjectContext(), {
+			billingAccountId: "maintenance_account",
+			featureKey: "model_tokens",
+			quantity: "100",
+			idempotencyKey: "maintenance:consume",
+		});
+		await context.repository.reserveUsage(integrationProjectContext(), {
+			billingAccountId: "maintenance_account",
+			featureKey: "model_tokens",
+			quantity: "100",
+			expiresInSeconds: 300,
+			idempotencyKey: "maintenance:reserve",
+		});
 
 		await context.sql`
 			UPDATE reservations

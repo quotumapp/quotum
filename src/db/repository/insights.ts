@@ -9,9 +9,8 @@ import type {
 	UsageSeriesInput,
 	UsageSeriesPoint,
 } from "../../billing/insights";
-import type { ProjectContext } from "../../projects/context";
+import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
-import { resolveProjectId } from "./identities";
 import { executeOne, executeRows } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -21,10 +20,10 @@ interface CustomerRow {
 
 export class BillingInsightsRepository extends RepositoryModule {
 	async listUsageEvents(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: UsageEventListInput,
 	): Promise<UsageEventPage> {
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const customer = await requireCustomer(this.database, projectId, input.billingAccountId);
 		const rows = await executeRows<{
 			id: string;
@@ -91,10 +90,10 @@ export class BillingInsightsRepository extends RepositoryModule {
 	}
 
 	async getUsageSeries(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: UsageSeriesInput,
 	): Promise<UsageSeriesPoint[]> {
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const customer = await requireCustomer(this.database, projectId, input.billingAccountId);
 		const rows = await executeRows<{
 			period_start: Date | string;
@@ -134,10 +133,10 @@ export class BillingInsightsRepository extends RepositoryModule {
 	}
 
 	async getCustomerBillingSummary(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<CustomerBillingSummary> {
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const customer = await executeOne<CustomerRow>(
 			this.database,
 			drizzleSql`

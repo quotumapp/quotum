@@ -13,8 +13,10 @@ import {
 	createNoopBillingMetrics,
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
+import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
 import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
 import { startLeaseHeartbeat } from "./lease-heartbeat";
+import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface SubscriptionReconciliationProvider {
 	reconcileSubscription(
@@ -29,7 +31,7 @@ export interface SubscriptionReconciliationProviders {
 }
 
 export type SubscriptionReconciliationProviderSelector = (
-	projectKey: string,
+	project: ProjectInstanceContext,
 ) => SubscriptionReconciliationProviders;
 
 export interface SubscriptionReconciliationRepository {
@@ -65,6 +67,7 @@ export interface SubscriptionReconciliationWorkerOptions {
 	staleAfterMs: number;
 	repository: SubscriptionReconciliationRepository;
 	providers: SubscriptionReconciliationProviders | SubscriptionReconciliationProviderSelector;
+	projectContextResolver: ProjectInstanceContextResolver;
 	now?: () => Date;
 	jitterMs?: () => number;
 	logger?: BillingLogger;
@@ -91,6 +94,7 @@ export class SubscriptionReconciliationWorker {
 	private readonly providers:
 		| SubscriptionReconciliationProviders
 		| SubscriptionReconciliationProviderSelector;
+	private readonly projectContextResolver: ProjectInstanceContextResolver;
 	private readonly now: () => Date;
 	private readonly jitterMs: () => number;
 	private readonly logger: BillingLogger;
@@ -104,6 +108,7 @@ export class SubscriptionReconciliationWorker {
 		staleAfterMs,
 		repository,
 		providers,
+		projectContextResolver,
 		now = () => new Date(),
 		jitterMs = () => Math.floor(Math.random() * 1000),
 		logger = createNoopBillingLogger(),
@@ -116,6 +121,7 @@ export class SubscriptionReconciliationWorker {
 		this.staleAfterMs = staleAfterMs;
 		this.repository = repository;
 		this.providers = providers;
+		this.projectContextResolver = projectContextResolver;
 		this.now = now;
 		this.jitterMs = jitterMs;
 		this.logger = logger;
@@ -231,7 +237,11 @@ export class SubscriptionReconciliationWorker {
 		let result: { status: "processed" | "skipped" };
 
 		try {
-			const provider = this.providerFor(subscription);
+			const project = await resolveClaimedProjectInstance(this.projectContextResolver, {
+				projectInstanceId: subscription.project_id,
+				projectInstanceKey: subscription.project_key,
+			});
+			const provider = this.providerFor(subscription, project);
 			result = await provider.reconcileSubscription(subscription);
 		} catch (error) {
 			await this.markFailedSafely(subscription, error);
@@ -254,9 +264,10 @@ export class SubscriptionReconciliationWorker {
 
 	private providerFor(
 		subscription: ProviderSubscriptionReconciliationRow,
+		project: ProjectInstanceContext,
 	): SubscriptionReconciliationProvider {
 		const provider = subscription.provider;
-		const reconciliationProvider = this.providersFor(subscription.project_key)[provider];
+		const reconciliationProvider = this.providersFor(project)[provider];
 		if (reconciliationProvider === null) {
 			throw new Error(`Subscription reconciliation provider is not configured: ${provider}`);
 		}
@@ -264,8 +275,8 @@ export class SubscriptionReconciliationWorker {
 		return reconciliationProvider;
 	}
 
-	private providersFor(projectKey: string): SubscriptionReconciliationProviders {
-		return typeof this.providers === "function" ? this.providers(projectKey) : this.providers;
+	private providersFor(project: ProjectInstanceContext): SubscriptionReconciliationProviders {
+		return typeof this.providers === "function" ? this.providers(project) : this.providers;
 	}
 
 	private async markFailed(

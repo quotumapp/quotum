@@ -9,27 +9,28 @@ import { registerCustomerRoutes } from "./app/customer-routes";
 import { registerInsightsRoutes } from "./app/insights-routes";
 import { registerMeteringRoutes } from "./app/metering-routes";
 import { createProjectProviderServiceResolver } from "./app/provider-services";
-import type {
-	BillingHonoEnv,
-	BillingProjectProvisionerLike,
-	AppDependencies as CreateAppDependencies,
-} from "./app/types";
+import type { BillingHonoEnv, AppDependencies as CreateAppDependencies } from "./app/types";
 import { registerWebhookRoutes } from "./app/webhook-routes";
 import { EntitlementService } from "./billing/entitlements";
 import { BillingError, classifyBillingError, isBillingError } from "./billing/errors";
 import { MeteringService } from "./billing/metering";
+import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
 import { AdminBillingRepository } from "./db/admin-repository";
 import { checkPostgresHealth } from "./db/client";
 import { BillingRepository } from "./db/repository";
-import type { BillingEnv } from "./env";
 import { requireApiKey } from "./http/api-key";
-import { createFixedWindowRateLimiter, requestProjectIpAndPath } from "./http/rate-limit";
+import {
+	createFixedWindowRateLimiter,
+	rateLimitMiddleware,
+	requestIp,
+	requestProjectIpAndPath,
+} from "./http/rate-limit";
 import { createNoopBillingLogger, safelyLogError } from "./observability/logger";
 import {
 	createInMemoryBillingMetrics,
 	safelyIncrementBillingMetric,
 } from "./observability/metrics";
-import { createProjectApiKeyResolver } from "./projects/config";
+import { isTenantTrafficEligible, type ProjectInstanceContextResolver } from "./projects/context";
 
 const privateApiMaxBodyBytes = 256 * 1024;
 
@@ -63,7 +64,7 @@ export function createApp({
 	metrics,
 	readinessCheck,
 	requestObservabilityMiddleware,
-	adminProjectProvisioner,
+	projectContextResolver,
 }: CreateAppDependencies): Hono<BillingHonoEnv> {
 	const app = new Hono<BillingHonoEnv>();
 	const billingLogger = logger ?? createNoopBillingLogger();
@@ -112,8 +113,7 @@ export function createApp({
 		});
 		return adminRepository;
 	};
-	const getProjectProvisioner = (): BillingProjectProvisionerLike | null =>
-		adminProjectProvisioner !== undefined ? adminProjectProvisioner : getRepository();
+	const contextResolver = projectContextResolver ?? new PostgresProjectInstanceContextResolver();
 	const checkReady = readinessCheck ?? checkPostgresHealth;
 	const webhookLimiter = createFixedWindowRateLimiter({
 		windowMs: env.rateLimit.windowMs,
@@ -131,10 +131,18 @@ export function createApp({
 		windowMs: env.rateLimit.windowMs,
 		limit: env.rateLimit.meteringLimit,
 	});
+	const projectResolutionLimiter = createFixedWindowRateLimiter({
+		windowMs: env.rateLimit.windowMs,
+		// This aggregate guard is intentionally looser than any individual downstream policy.
+		limit: Math.min(
+			Number.MAX_SAFE_INTEGER,
+			env.rateLimit.verifyLimit + env.rateLimit.adminLimit + env.rateLimit.meteringLimit,
+		),
+	});
 	const rateLimitKeyOptions = {
 		trustProxyHeaders: env.rateLimit.trustProxyHeaders,
 		knownProjectKeys: new Set(
-			env.projects.filter((project) => project.active).map(({ key }) => key),
+			env.projectRuntime.map(({ projectInstanceKey }) => projectInstanceKey),
 		),
 	};
 	const rateLimitKey = (c: Context): string => requestProjectIpAndPath(c, rateLimitKeyOptions);
@@ -196,7 +204,7 @@ export function createApp({
 
 	registerWebhookRoutes({
 		app,
-		projects: env.projects,
+		contextResolver,
 		webhookLimiter,
 		rateLimitKey,
 		providerServices,
@@ -206,14 +214,21 @@ export function createApp({
 		readRequestText,
 	});
 
-	if (env.authMode === "api_key") {
-		if (env.projects.length === 0) {
-			throw new Error("Project API keys are required when BILLING_AUTH_MODE is api_key");
-		}
+	// Provider webhooks terminate in the routes registered above and retain their own
+	// pre-resolution limiter. This guard bounds database-backed resolution for the ordinary API.
+	app.use(
+		"/v1/*",
+		rateLimitMiddleware({
+			limiter: projectResolutionLimiter,
+			key: (c) => requestIp(c, rateLimitKeyOptions),
+			headers: "rejected_only",
+		}),
+	);
 
-		app.use("/v1/*", requireApiKey(createProjectApiKeyResolver(env.projects)));
+	if (env.authMode === "api_key") {
+		app.use("/v1/*", requireApiKey(contextResolver));
 	} else {
-		app.use("/v1/*", requireGatewayProjectContext(env.projects));
+		app.use("/v1/*", requireGatewayProjectContext(contextResolver));
 	}
 
 	app.use("/v1/*", rejectCallerProjectSelectors);
@@ -266,9 +281,7 @@ export function createApp({
 		billingMetrics,
 		billingLogger,
 		getAdminBillingReader,
-		getProjectProvisioner,
 		adminOperations: adminOperations ?? null,
-		parsePrivateJson,
 	});
 	registerCatalogRoutes({
 		app,
@@ -291,7 +304,7 @@ export function createApp({
 }
 
 function requireGatewayProjectContext(
-	projects: BillingEnv["projects"],
+	resolver: ProjectInstanceContextResolver,
 ): MiddlewareHandler<BillingHonoEnv> {
 	return async (c, next) => {
 		const projectKey = c.req.header("x-billing-project-key")?.trim();
@@ -302,7 +315,15 @@ function requireGatewayProjectContext(
 				401,
 			);
 		}
-		if (!projects.some((project) => project.key === projectKey && project.active)) {
+		const resolution = await resolver.resolveInstanceKey(projectKey);
+		if (resolution.kind === "unavailable") {
+			throw new BillingError(
+				"Billing project context is unavailable",
+				"BILLING_PROJECT_CONTEXT_UNAVAILABLE",
+				503,
+			);
+		}
+		if (resolution.kind !== "resolved" || !isTenantTrafficEligible(resolution.context)) {
 			throw new BillingError(
 				"Billing project is not configured",
 				"BILLING_PROJECT_NOT_CONFIGURED",
@@ -310,7 +331,7 @@ function requireGatewayProjectContext(
 			);
 		}
 
-		c.set("project", { projectKey });
+		c.set("project", resolution.context);
 		await next();
 	};
 }

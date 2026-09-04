@@ -8,10 +8,9 @@ import {
 } from "../billing/decimal";
 import { BillingError, InvalidRequestError, PersistenceConflictError } from "../billing/errors";
 import { RepositoryModule } from "../db/repository/base";
-import { resolveProjectId } from "../db/repository/identities";
 import { executeOne, executeRows, jsonb } from "../db/repository/query";
 import type { QueryExecutor } from "../db/repository/types";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 import type {
 	CatalogControlIntent,
 	CatalogControlPlaneLike,
@@ -45,7 +44,7 @@ interface DraftRow {
 }
 
 export class CatalogControlPlane extends RepositoryModule implements CatalogControlPlaneLike {
-	async getPublished(project: ProjectContext): Promise<PublishedCatalog> {
+	async getPublished(project: ProjectInstanceContext): Promise<PublishedCatalog> {
 		const projectState = await readProjectCatalog(this.database, project, false);
 		if (projectState.revision_id === null || projectState.revision === null) {
 			return {
@@ -83,7 +82,10 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		};
 	}
 
-	async preview(project: ProjectContext, input: CatalogPreviewInput): Promise<CatalogPreview> {
+	async preview(
+		project: ProjectInstanceContext,
+		input: CatalogPreviewInput,
+	): Promise<CatalogPreview> {
 		const catalog = normalizeCatalog(input.catalog);
 		return await this.transaction(async (tx) => {
 			const projectState = await readProjectCatalog(tx, project, false);
@@ -140,7 +142,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 	}
 
 	async publish(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: CatalogPublishInput,
 	): Promise<CatalogPublishResult> {
 		const catalog = normalizeCatalog(input.catalog);
@@ -356,10 +358,10 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 
 async function readProjectCatalog(
 	executor: QueryExecutor,
-	project: ProjectContext,
+	project: ProjectInstanceContext,
 	lock: boolean,
 ): Promise<ProjectCatalogRow> {
-	const projectId = await resolveProjectId(executor, project);
+	const projectId = project.projectInstanceId;
 	const row = await executeOne<ProjectCatalogRow>(
 		executor,
 		drizzleSql`
@@ -372,7 +374,7 @@ async function readProjectCatalog(
 			${lock ? drizzleSql`FOR UPDATE OF p` : drizzleSql``}
 		`,
 	);
-	if (row === null) throw new Error(`Billing project ${project.projectKey} was not found`);
+	if (row === null) throw new Error(`Billing project ${project.projectInstanceKey} was not found`);
 	return row;
 }
 

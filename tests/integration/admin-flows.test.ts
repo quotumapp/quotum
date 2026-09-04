@@ -17,6 +17,7 @@ import {
 	describeLocalPostgres,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
+import { integrationProjectCredential } from "./helpers/platform-fixture";
 import { createRecordingProjectionFetch, runProjectionWorkerOnce } from "./helpers/worker-fixture";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
@@ -561,7 +562,7 @@ localDescribe("Admin flows integration", () => {
 		const eventId = "00000000-0000-4000-8000-000000000001";
 		const operationApp = createOperationApp({
 			async replayStoreEvent(project, inputEventId: string) {
-				calls.push(`replay:${project.projectKey}:${inputEventId}`);
+				calls.push(`replay:${project.projectInstanceKey}:${inputEventId}`);
 				return { eventId: inputEventId, status: "processed" as const };
 			},
 			async runSubscriptionReconciliation() {
@@ -740,7 +741,6 @@ async function withAdminReadApp<T>(
 			connection.db as never,
 		),
 		logger,
-		adminProjectProvisioner: null,
 	});
 
 	try {
@@ -755,18 +755,12 @@ function createOperationApp(adminOperations: BillingAdminOperations): ReturnType
 		env: context.env,
 		adminBillingReader: null,
 		adminOperations,
-		adminProjectProvisioner: null,
 		metrics: createInMemoryBillingMetrics(),
 	});
 }
 
 function authHeaders(projectKey: "voysee" | "wiseley" = "voysee"): HeadersInit {
-	const project = context.env.projects.find((candidate) => candidate.key === projectKey);
-	if (project === undefined) {
-		throw new Error(`unknown integration project ${projectKey}`);
-	}
-
-	return { authorization: `Bearer ${project.apiKey}` };
+	return { authorization: `Bearer ${integrationProjectCredential(projectKey)}` };
 }
 
 function operatorHeaders(projectKey: "voysee" | "wiseley" = "voysee"): HeadersInit {
@@ -784,7 +778,8 @@ function createRealReplayOperationApp(calls: string[]): ReturnType<typeof create
 				maxAttempts: context.env.storeEventReplayMaxAttempts,
 				batchSize: 25,
 				repository: context.repository,
-				providers: (projectKey) => adminReplayProvidersForProject(projectKey, calls),
+				projectContextResolver: context.projectContextResolver,
+				providers: (project) => adminReplayProvidersForProject(project.projectInstanceKey, calls),
 				now: () => new Date(Date.now() + 60_000),
 				jitterMs: () => 0,
 			}),

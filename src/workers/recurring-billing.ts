@@ -8,28 +8,40 @@ import {
 	createNoopBillingMetrics,
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
+import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
+import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface RecurringBillingWorkerRepository {
 	claimSubscriptionChanges(workerId: string, limit: number): Promise<SubscriptionChangeOperation[]>;
 	markSubscriptionChangeApplied(
-		project: { projectKey: string },
+		projectInstanceId: string,
 		changeId: string,
 		providerRequestId: string,
+		workerId: string,
 	): Promise<void>;
-	markSubscriptionChangeFailed(changeId: string, error: string): Promise<void>;
+	markSubscriptionChangeFailed(
+		projectInstanceId: string,
+		changeId: string,
+		error: string,
+		workerId: string,
+	): Promise<void>;
 	materializeAndClaimUsageInvoicePeriods(
 		workerId: string,
 		limit: number,
 	): Promise<{ materialized: number; jobs: UsageInvoiceJob[] }>;
 	markUsageInvoiceSucceeded(
+		projectInstanceId: string,
 		jobKind: UsageInvoiceJob["jobKind"],
 		jobId: string,
 		externalInvoiceId: string,
+		workerId: string,
 	): Promise<void>;
 	markUsageInvoiceFailed(
+		projectInstanceId: string,
 		jobKind: UsageInvoiceJob["jobKind"],
 		jobId: string,
 		error: string,
+		workerId: string,
 	): Promise<void>;
 }
 
@@ -48,7 +60,8 @@ export class RecurringBillingWorker {
 			workerId: string;
 			batchSize?: number;
 			repository: RecurringBillingWorkerRepository;
-			providerForProject(projectKey: string): RecurringBillingWorkerProvider;
+			projectContextResolver: ProjectInstanceContextResolver;
+			providerForProject(project: ProjectInstanceContext): RecurringBillingWorkerProvider;
 			logger: RecurringBillingWorkerLogger;
 			metrics?: BillingMetrics;
 		},
@@ -66,13 +79,21 @@ export class RecurringBillingWorker {
 		);
 		for (const change of changes) {
 			try {
+				const project = await resolveClaimedProjectInstance(
+					this.dependencies.projectContextResolver,
+					{
+						projectInstanceId: change.projectInstanceId,
+						projectInstanceKey: change.projectKey,
+					},
+				);
 				const providerRequestId = await this.dependencies
-					.providerForProject(change.projectKey)
+					.providerForProject(project)
 					.applySubscriptionChange(change);
 				await this.dependencies.repository.markSubscriptionChangeApplied(
-					{ projectKey: change.projectKey },
+					change.projectInstanceId,
 					change.changeId,
 					providerRequestId,
+					this.dependencies.workerId,
 				);
 				subscriptionChangesApplied += 1;
 				this.recordJob("subscription_change", "succeeded");
@@ -80,8 +101,10 @@ export class RecurringBillingWorker {
 				failed += 1;
 				this.recordJob("subscription_change", "failed");
 				await this.dependencies.repository.markSubscriptionChangeFailed(
+					change.projectInstanceId,
 					change.changeId,
 					errorMessage(error),
+					this.dependencies.workerId,
 				);
 				this.dependencies.logger.error("Subscription change failed", error, {
 					projectKey: change.projectKey,
@@ -96,13 +119,22 @@ export class RecurringBillingWorker {
 		);
 		for (const job of usage.jobs) {
 			try {
+				const project = await resolveClaimedProjectInstance(
+					this.dependencies.projectContextResolver,
+					{
+						projectInstanceId: job.projectInstanceId,
+						projectInstanceKey: job.projectKey,
+					},
+				);
 				const externalInvoiceId = await this.dependencies
-					.providerForProject(job.projectKey)
+					.providerForProject(project)
 					.createUsageInvoice(job);
 				await this.dependencies.repository.markUsageInvoiceSucceeded(
+					job.projectInstanceId,
 					job.jobKind,
 					job.jobId,
 					externalInvoiceId,
+					this.dependencies.workerId,
 				);
 				if (job.jobKind === "period") usageInvoicesCreated += 1;
 				else usageAdjustmentsCreated += 1;
@@ -111,9 +143,11 @@ export class RecurringBillingWorker {
 				failed += 1;
 				this.recordJob(`usage_${job.jobKind}`, "failed");
 				await this.dependencies.repository.markUsageInvoiceFailed(
+					job.projectInstanceId,
 					job.jobKind,
 					job.jobId,
 					errorMessage(error),
+					this.dependencies.workerId,
 				);
 				this.dependencies.logger.error("Stripe usage invoice failed", error, {
 					projectKey: job.projectKey,

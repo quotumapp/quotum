@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { EntitlementSnapshot } from "../../src/billing/types";
+import { parseProjectApiCredential } from "../../src/platform/credentials/project-api-token";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import { expectTableCounts } from "./helpers/db-assertions";
@@ -8,6 +9,7 @@ import {
 	describeLocalPostgres,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
+import { integrationProjectCredential } from "./helpers/platform-fixture";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 let context: LocalPostgresContext;
@@ -43,6 +45,43 @@ localDescribe("billing auth and tenancy integration", () => {
 		});
 		expect(allowed.status).toBe(200);
 		expectEmptySnapshot((await allowed.json()).data, "integration_user");
+	});
+
+	it("applies project credential revocation on the next request", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const credential = integrationProjectCredential("voysee");
+		const parsed = parseProjectApiCredential(credential);
+		if (parsed === null) throw new Error("Expected a versioned integration credential");
+
+		const beforeRevocation = await app.request("/v1/billing-accounts/revoked_user/entitlements", {
+			headers: authHeaders("voysee"),
+		});
+		expect(beforeRevocation.status).toBe(200);
+
+		try {
+			await context.sql`
+				UPDATE platform_project_api_credentials
+				SET revoked_at = now(), updated_at = now()
+				WHERE id = ${parsed.credentialId}
+			`;
+			const afterRevocation = await app.request("/v1/billing-accounts/revoked_user/entitlements", {
+				headers: authHeaders("voysee"),
+			});
+			expect(afterRevocation.status).toBe(401);
+			expect(await afterRevocation.json()).toEqual({
+				success: false,
+				error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+			});
+		} finally {
+			await context.sql`
+				UPDATE platform_project_api_credentials
+				SET revoked_at = NULL, updated_at = now()
+				WHERE id = ${parsed.credentialId}
+			`;
+		}
 	});
 
 	it("rejects query project selectors before Google provider calls or durable writes", async () => {
@@ -108,33 +147,38 @@ localDescribe("billing auth and tenancy integration", () => {
 		expect(apple.calls).toEqual([]);
 	});
 
-	it("returns 404 for inactive project Apple webhooks before provider calls", async () => {
-		const inactiveEnv = {
-			...context.env,
-			projects: context.env.projects.map((project) =>
-				project.key === "wiseley" ? { ...project, active: false } : project,
-			),
-		};
+	it("applies every inactive lifecycle on the next request while allowing webhooks to drain", async () => {
 		const { app, apple } = createIntegrationApp({
-			env: inactiveEnv,
+			env: context.env,
 			repository: context.repository,
 		});
+		const blockedStatuses = ["inactive", "suspended", "deactivating", "deactivated"] as const;
 
-		const response = await app.request("/v1/projects/wiseley/webhooks/apple", {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ signedPayload: "signed-notification" }),
-		});
+		try {
+			for (const lifecycleStatus of blockedStatuses) {
+				await context.sql`
+					UPDATE projects
+					SET lifecycle_status = ${lifecycleStatus}
+					WHERE key = 'wiseley'
+				`;
+				const privateResponse = await app.request(
+					"/v1/billing-accounts/integration_user/entitlements",
+					{ headers: { authorization: `Bearer ${integrationProjectCredential("wiseley")}` } },
+				);
+				const callsBeforeWebhook = apple.calls.length;
+				const webhookResponse = await app.request("/v1/projects/wiseley/webhooks/apple", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ signedPayload: `signed-notification-${lifecycleStatus}` }),
+				});
 
-		expect(response.status).toBe(404);
-		expect(await response.json()).toEqual({
-			success: false,
-			error: {
-				code: "BILLING_PROJECT_NOT_CONFIGURED",
-				message: "Billing project is not configured",
-			},
-		});
-		expect(apple.calls).toEqual([]);
+				expect(privateResponse.status).toBe(401);
+				expect(webhookResponse.status).toBe(200);
+				expect(apple.calls.length).toBeGreaterThan(callsBeforeWebhook);
+			}
+		} finally {
+			await context.sql`UPDATE projects SET lifecycle_status = 'active' WHERE key = 'wiseley'`;
+		}
 	});
 
 	it("keeps project API key entitlement reads isolated", async () => {
@@ -213,47 +257,25 @@ localDescribe("billing auth and tenancy integration", () => {
 		expectEmptySnapshot((await allowed.json()).data, "gateway_user");
 	});
 
-	it("routes the legacy Apple webhook alias to the Voysee project", async () => {
+	it("does not expose the removed unscoped Apple webhook alias", async () => {
 		const { app, apple, authHeaders } = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
 		});
 
-		const tokenResponse = await app.request(
-			"/v1/billing-accounts/integration_user/providers/apple/account-token",
-			{
-				headers: authHeaders("voysee"),
-			},
-		);
-
-		expect(tokenResponse.status).toBe(200);
-		const tokenBody = await tokenResponse.json();
-		apple.setAppAccountToken(tokenBody.data.appAccountToken);
-
-		const webhook = await withIsoDateSqlParameters(() =>
-			app.request("/v1/webhooks/apple", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ signedPayload: "signed-notification" }),
-			}),
-		);
-
-		expect(webhook.status).toBe(200);
-		const body = await webhook.json();
-		expect(body.success).toBe(true);
-		expect(body.data.status).toBe("processed");
-		expectActivePremiumSnapshot(body.data.entitlements, "integration_user");
-		expect(apple.calls).toEqual(["verifyNotification:signed-notification"]);
-		await expectTableCounts(context.sql, {
-			customers: 1,
-			provider_customers: 1,
-			purchases: 1,
-			subscriptions: 1,
-			entitlements: 1,
-			store_events: 1,
-			projection_sync_jobs: 1,
+		const webhook = await app.request("/v1/webhooks/apple", {
+			method: "POST",
+			headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+			body: JSON.stringify({ signedPayload: "signed-notification" }),
 		});
-		await expectAppleAliasDurableRows();
+
+		expect(webhook.status).toBe(404);
+		const body = await webhook.json();
+		expect(body).toEqual({
+			success: false,
+			error: { code: "NOT_FOUND", message: "Route not found" },
+		});
+		expect(apple.calls).toEqual([]);
 	});
 });
 
@@ -287,50 +309,6 @@ function expectActivePremiumSnapshot(
 // so the integration suite exercises the real serialization instead of patching Date.
 async function withIsoDateSqlParameters<T>(callback: () => T | Promise<T>): Promise<T> {
 	return await callback();
-}
-
-async function expectAppleAliasDurableRows(): Promise<void> {
-	const rows = await context.sql<
-		{
-			store_event_project_key: string;
-			store_event_status: string;
-			store_event_type: string;
-			store_event_transaction_id: string | null;
-			projection_project_key: string;
-			projection_reason: string;
-			projection_status: string;
-			projection_payload_billing_account_id: string | null;
-		}[]
-	>`
-		SELECT
-			store_projects.key AS store_event_project_key,
-			store_events.processing_status AS store_event_status,
-			store_events.event_type AS store_event_type,
-			store_events.transaction_id AS store_event_transaction_id,
-			projection_projects.key AS projection_project_key,
-			projection_sync_jobs.reason AS projection_reason,
-			projection_sync_jobs.status AS projection_status,
-			projection_sync_jobs.payload->>'billingAccountId' AS projection_payload_billing_account_id
-		FROM store_events
-		JOIN projects store_projects ON store_projects.id = store_events.project_id
-		JOIN projection_sync_jobs ON projection_sync_jobs.project_id = store_events.project_id
-		JOIN projects projection_projects ON projection_projects.id = projection_sync_jobs.project_id
-		WHERE store_events.provider = 'apple'
-			AND store_events.external_event_id = '00000000-0000-0000-0000-000000000001'
-	`;
-
-	expect(rows).toEqual([
-		{
-			store_event_project_key: "voysee",
-			store_event_status: "processed",
-			store_event_type: "DID_RENEW",
-			store_event_transaction_id: "200000000000001",
-			projection_project_key: "voysee",
-			projection_reason: "provider_webhook",
-			projection_status: "pending",
-			projection_payload_billing_account_id: "integration_user",
-		},
-	]);
 }
 
 async function expectEntitlementProjectCounts(expected: {

@@ -1,7 +1,6 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type { BillingProvider, EntitlementSnapshot } from "../../billing/types";
-import type { ProjectContext } from "../../projects/context";
-import type { BillingProjectRecord } from "../../projects/types";
+import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import { materializeTopupAllocation, reversePurchaseAllocations } from "./catalog-allocations";
 import {
@@ -9,70 +8,37 @@ import {
 	getEntitlementSnapshot,
 	recomputeCustomerEntitlements,
 } from "./entitlements";
-import {
-	ensureCustomer,
-	getStoreProductById,
-	resolveProjectId,
-	upsertProviderCustomer,
-} from "./identities";
+import { ensureCustomer, getStoreProductById, upsertProviderCustomer } from "./identities";
 import { upsertPurchase } from "./mutations";
 import { executeOne } from "./query";
 import { recordStoreEventProcessingResult } from "./store-events";
-import type { BillingProjectRow, RecordPurchaseProjectionInput } from "./types";
+import type { RecordPurchaseProjectionInput } from "./types";
 import { requireNonBlank } from "./validation";
 
 export class CoreBillingRepository extends RepositoryModule {
-	async upsertProject(
-		project: ProjectContext,
-		input: { name: string; active: boolean },
-	): Promise<BillingProjectRecord> {
-		requireNonBlank(project.projectKey, "p_project_key");
-		requireNonBlank(input.name, "p_name");
-		const row = await executeOne<BillingProjectRow>(
-			this.database,
-			drizzleSql`
-			INSERT INTO projects (key, name, active)
-			VALUES (${project.projectKey}, ${input.name}, ${input.active})
-			ON CONFLICT (key) DO UPDATE SET
-				name = EXCLUDED.name,
-				active = EXCLUDED.active,
-				updated_at = now()
-			RETURNING id, key, name, active
-		`,
-		);
-		if (row === null) {
-			throw new Error(`billing project ${project.projectKey} could not be persisted`);
-		}
-		return { id: row.id, key: row.key, name: row.name, active: row.active };
-	}
-
 	async getEntitlementSnapshot(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<EntitlementSnapshot> {
-		return await getEntitlementSnapshot(
-			this.database,
-			await resolveProjectId(this.database, project),
-			billingAccountId,
-		);
+		return await getEntitlementSnapshot(this.database, project.projectInstanceId, billingAccountId);
 	}
 
 	async recomputeCustomerEntitlements(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<EntitlementSnapshot> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			return await recomputeCustomerEntitlements(tx, projectId, billingAccountId);
 		});
 	}
 
 	async recordPurchaseAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordPurchaseProjectionInput,
 	): Promise<EntitlementSnapshot> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
 			const storeProduct = await getStoreProductById(tx, projectId, {
 				storeProductId: input.storeProductId,
@@ -151,13 +117,13 @@ export class CoreBillingRepository extends RepositoryModule {
 	}
 
 	async getOrCreateProviderCustomerToken(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		provider: BillingProvider,
 	): Promise<string> {
 		requireNonBlank(billingAccountId, "p_billing_account_id");
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await ensureCustomer(tx, projectId, billingAccountId);
 			const existing = await executeOne<{ external_customer_id: string }>(
 				tx,

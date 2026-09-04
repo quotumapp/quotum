@@ -1,15 +1,16 @@
 import { describe, expect, it } from "bun:test";
 import { BillingError } from "../../src/billing/errors";
 import { BillingAdminOperations } from "../../src/operations/admin";
-import type { ProjectContext } from "../../src/projects/context";
+import type { ProjectInstanceContext } from "../../src/projects/context";
+import { projectInstanceContext } from "../helpers/project-context";
 
 const validStoreEventId = "123e4567-e89b-12d3-a456-426614174000";
 const validProjectionJobId = "123e4567-e89b-12d3-a456-426614174001";
-const project: ProjectContext = { projectKey: "voysee" };
+const project = projectInstanceContext();
 
 describe("BillingAdminOperations", () => {
 	it("replays a store event by id", async () => {
-		const calls: Array<{ project: ProjectContext; eventId: string }> = [];
+		const calls: Array<{ project: ProjectInstanceContext; eventId: string }> = [];
 		const operations = new BillingAdminOperations({
 			replayWorker: {
 				runOne(inputProject, eventId) {
@@ -31,7 +32,7 @@ describe("BillingAdminOperations", () => {
 	});
 
 	it("trims store event ids before replaying", async () => {
-		const calls: Array<{ project: ProjectContext; eventId: string }> = [];
+		const calls: Array<{ project: ProjectInstanceContext; eventId: string }> = [];
 		const operations = new BillingAdminOperations({
 			replayWorker: {
 				runOne(inputProject, eventId) {
@@ -136,7 +137,7 @@ describe("BillingAdminOperations", () => {
 	});
 
 	it("requeues failed projection jobs through the project-scoped repository", async () => {
-		const calls: Array<{ project: ProjectContext; jobId: string }> = [];
+		const calls: Array<{ project: ProjectInstanceContext; jobId: string }> = [];
 		const operations = new BillingAdminOperations({
 			replayWorker: {
 				runOne() {

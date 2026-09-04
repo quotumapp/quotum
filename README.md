@@ -73,6 +73,8 @@ Implemented:
 - Backend-only dashboard/admin API for customer drilldown, support search, global ops lists,
   read-only catalog context, and store-event detail inspection.
 - Configurable service auth with `BILLING_AUTH_MODE=api_key|gateway`.
+- Database-authoritative organizations, logical projects, project instances, and one-way-hashed
+  project credentials, with an exact-manifest bootstrap command and no runtime JSON auth fallback.
 - Event replay and subscription reconciliation workers with protected admin operations.
 - Prometheus metrics endpoint and per-route-family rate limits.
 
@@ -93,6 +95,41 @@ Apply the billing database migrations to the target Postgres database:
 ```sh
 POSTGRES_URI="postgres://postgres:postgres@127.0.0.1:5432/voysee_billing" bun run migrate
 ```
+
+Before 1.0 the schema files under `migrations/` evolve in place; recreate development databases
+instead of migrating them. After it is applied, create the initial platform topology and
+credentials from an explicit manifest:
+
+```sh
+export POSTGRES_URI="postgres://postgres:postgres@127.0.0.1:5432/voysee_billing"
+export BILLING_PLATFORM_BOOTSTRAP_JSON='{
+  "version": 1,
+  "organizations": [{
+    "slug": "voysee",
+    "name": "Voysee",
+    "projects": [{
+      "key": "voysee",
+      "name": "Voysee",
+      "instances": [{
+        "key": "voysee-production",
+        "environment": "production",
+        "lifecycleStatus": "active",
+        "issueCredential": true
+      }]
+    }]
+  }]
+}'
+umask 077
+bun run platform:bootstrap -- --apply --credentials-out ./platform-credentials.json
+bun run platform:bootstrap -- --check
+```
+
+The bootstrap is empty-or-exact and idempotent: it refuses undeclared rows or topology drift.
+`--check` exits nonzero until both the topology and every declared credential are present. The
+credentials file is created exclusively with mode `0600`, fsynced, never printed to stdout, and
+contains the only copy of each new plaintext token. Move those tokens into the calling backend's
+secret store, then remove the local file. A lost token cannot be read back; revoke it and issue a
+new credential through an approved operational procedure.
 
 Database requirements:
 
@@ -122,54 +159,20 @@ Database requirements:
 Required:
 
 - `POSTGRES_URI`
-- `BILLING_PROJECTS_JSON`
-  Defines every billing project, including its project key, project API key, projection callback
-  URL, projection secret, optional active state, and optional provider config. Projection delivery
-  is always an HTTP `POST` to `<projectionUrl>/internal/billing/projections`; `projectionUrl`
-  should be the product backend base URL. Production projection URLs must be HTTPS public URLs;
-  localhost, private, and link-local IP destinations are rejected at startup. Projects default to
-  `"active": true`; set `"active": false` to stop API-key auth, gateway auth, project webhook
-  routing, provider service resolution, and projection delivery for that project.
+- `BILLING_PROJECT_RUNTIME_JSON`
+  Defines only runtime delivery and provider adapters for every database project instance. Its
+  `projectInstanceKey` values must exactly match the `projects` rows or `/ready` returns `503`.
+  Identity, lifecycle, environment, credentials, and catalog declarations are deliberately not
+  accepted here. Projection delivery is an HTTP `POST` to
+  `<projectionUrl>/internal/billing/projections`; production URLs must be public HTTPS URLs.
 
   ```json
   [
     {
-      "key": "voysee",
-      "apiKey": "voysee-service-key-123456",
-      "active": true,
+      "projectInstanceKey": "voysee-production",
       "projectionUrl": "https://voysee.example.com",
       "projectionSecret": "voysee-projection-secret",
       "projectionContract": "billing_state_v1",
-      "catalog": [
-		{
-		  "key": "wiseley_premium_annual",
-		  "name": "Wiseley Premium Annual",
-		  "kind": "subscription",
-		  "plan": "premium",
-		  "currency": "USD",
-		  "amountCents": 4999,
-		  "credits": 1,
-		  "interval": "year",
-		  "entitlementKey": "paid",
-		  "externalProductId": "prod_wiseley_premium",
-		  "externalPriceId": "price_wiseley_premium_annual",
-		  "active": true
-		},
-        {
-          "key": "credits_100",
-          "name": "100 credits",
-          "kind": "topup",
-          "plan": null,
-          "currency": "USD",
-          "amountCents": 499,
-          "credits": 100,
-          "interval": null,
-          "entitlementKey": "paid",
-          "externalProductId": "prod_credits_100",
-          "externalPriceId": "price_credits_100",
-          "active": true
-        }
-      ],
       "apple": {
         "bundleId": "com.voysee.app",
         "appAppleId": 1234567890,
@@ -186,7 +189,7 @@ Required:
         "serviceAccountKeyFile": null,
         "obfuscatedAccountIdSecret": "account-link-secret",
         "previousObfuscatedAccountIdSecrets": [],
-        "rtdnAudience": "https://billing.example.com/v1/projects/voysee/webhooks/google",
+        "rtdnAudience": "https://billing.example.com/v1/projects/voysee-production/webhooks/google",
         "rtdnServiceAccountEmail": "pubsub-push@example.iam.gserviceaccount.com",
         "rtdnAuthorizedParty": "pubsub-push-client-id",
         "enablePublisherMutations": true
@@ -207,11 +210,23 @@ Required:
 
   Provider configuration is strictly project-scoped. Omitting `apple`, `googlePlay`, or `stripe`
   (or setting it to `null`) disables that provider for the project.
-  `projectionContract` accepts only `billing_state_v1` and defaults to it. Startup reads the
-  published Postgres catalog and never reconciles catalog declarations from the environment.
-  `POSTGRES_URI=... BILLING_PROJECTS_JSON='[...]' bun run catalog:provision` is an explicit
-  development bootstrap for project and provider-product rows; after a versioned catalog revision
-  is published it leaves that project's catalog untouched.
+  `projectionContract` accepts only `billing_state_v1` and defaults to it. The schema is strict:
+  legacy `key`, `apiKey`, `active`, and `catalog` fields fail startup instead of being ignored.
+  Project credentials use the versioned `qpk_v1.<credential-id>.<secret>` format; only their
+  SHA-256 verifiers are stored in `platform_project_api_credentials`. Revocation, expiration, and
+  project lifecycle changes take effect on the next request, and a database outage fails auth
+  closed with `503`—there is no JSON fallback.
+
+Catalog import is a separate, explicit development command for already-bootstrapped instances:
+
+```sh
+POSTGRES_URI=... \
+BILLING_CATALOG_IMPORT_JSON='[{"projectInstanceKey":"voysee-production","catalog":[...]}]' \
+bun run catalog:provision
+```
+
+After a versioned catalog revision is published, the import leaves that project's catalog
+untouched. Production catalog changes should use the preview/publish contract.
 
 Required in production:
 
@@ -449,7 +464,8 @@ Trusted app backends can also create Customer Portal Sessions with
 polling returns `{sessionId,status,paymentStatus,customerEmail,productKey}`. Email and
 product key are present only after the Session is paid.
 
-Legacy `/v1/webhooks/*` routes remain only as temporary Voysee aliases during migration.
+Legacy unscoped `/v1/webhooks/*` aliases have been removed. Provider endpoints must use the
+canonical project-instance route `/v1/projects/:projectKey/webhooks/:provider`.
 
 ## Metering and Catalog
 
@@ -529,8 +545,9 @@ bun run catalog push ./billing.catalog.ts
 
 ## Admin Operations
 
-Admin and service routes require trusted backend access. In `api_key` auth mode, callers use
-`Authorization: Bearer <project apiKey>` from `BILLING_PROJECTS_JSON`. In `gateway` auth mode,
+Admin and service routes require trusted backend access. In `api_key` auth mode, callers use a
+database-issued project credential from the trusted backend's secret store as
+`Authorization: Bearer <project credential>`. In `gateway` auth mode,
 billing-level API-key checks are disabled for non-webhook `/v1/*` routes only when
 `BILLING_TRUST_GATEWAY_PROJECT_HEADER=true`; the gateway or upstream backend must enforce access and
 send `x-billing-project-key`. Provider webhooks remain public from the billing API-key perspective
@@ -628,20 +645,22 @@ http://localhost:3000/livez
 http://localhost:3000/ready
 ```
 
-`/livez` is a static liveness check. `/ready` queries current Postgres health, becomes unavailable
-during database loss, and recovers without restarting the process. `/health` remains a public
-liveness alias for compatibility.
+`/livez` is a static liveness check. `/ready` queries current Postgres health and requires the
+runtime configuration's project-instance keys to exactly equal the database instance set. It
+becomes unavailable during database loss and recovers without restarting the process. `/health`
+remains a public liveness alias for compatibility.
 
 The release image includes a guarded, network-free Stripe boundary for cross-service tests:
 
 ```sh
 BILLING_ENV=test BILLING_TEST_FAKE_STRIPE=true \
 POSTGRES_URI="postgres://postgres:postgres@127.0.0.1:5432/billing_test" \
-BILLING_PROJECTS_JSON='[...]' bun run test:stripe-entrypoint
+BILLING_PROJECT_RUNTIME_JSON='[...]' bun run test:stripe-entrypoint
 ```
 
-The configured JSON still needs the project, catalog, projection, and Stripe fields shown above,
-using an `sk_test_*` key and webhook secret. Fake Checkout returns `cs_fake_*` at
+The database must already be migrated and bootstrapped, with the catalog imported or published.
+The runtime JSON needs the project-instance key, projection delivery, and Stripe fields shown
+above, using an `sk_test_*` key and webhook secret. Fake Checkout returns `cs_fake_*` at
 `https://checkout.stripe.test`, polling returns `complete`/`paid`, and Portal returns
 `https://billing.stripe.test`. Send normal signed events to
 `POST /v1/projects/:projectKey/webhooks/stripe`; compute the Stripe `v1` signature as HMAC-SHA256
@@ -658,20 +677,21 @@ only by the guarded test entrypoint and never by the production entrypoint.
 
 ## Internal Module Boundaries
 
-The private-beta API is one deployable modular service backed by one Postgres database. Module
-ownership is enforced by `bun run check:boundaries`, which parses every repository TypeScript
-source with the TypeScript compiler. Every source file must match exactly one owner; unclassified
-or overlapping files and unresolved relative imports fail the check. Static imports, type-only
-imports, import types, re-exports, literal dynamic imports, and `require` calls all count as
-dependencies. Compiler-resolved TypeScript path aliases, package `imports`, absolute imports, and
-the package's own exports are resolved to their repository owner as well.
+The private-beta API is one deployable modular service backed by one Postgres database. Module and
+table ownership is enforced by `bun run check:boundaries`, which parses every repository TypeScript
+source with the TypeScript compiler and inspects every ordered SQL migration. Every TypeScript
+source file must match exactly one owner; unclassified or overlapping files and unresolved relative
+imports fail the check. Static imports, type-only imports, import types, re-exports, literal dynamic
+imports, and `require` calls all count as dependencies. Compiler-resolved TypeScript path aliases,
+package `imports`, absolute imports, and the package's own exports are resolved to their repository
+owner as well.
 
 | Owner | Current or reserved files | Allowed internal dependencies |
 | --- | --- | --- |
-| Billing | `src/admin/**`, `src/app/**`, `src/billing/**`, `src/catalog/**`, `src/db/**`, `src/http/**`, `src/observability/**`, `src/operations/**`, `src/projects/**`, `src/projections/**`, `src/providers/**`, `src/sdk/**`, `src/workers/**`, `src/env.ts`, and billing operational scripts | Billing and shared |
-| Platform | Reserved `src/platform/**` | Platform and shared |
+| Billing | `src/admin/**`, `src/app/**`, `src/billing/**`, `src/catalog/**`, `src/db/**`, `src/http/**`, `src/observability/**`, `src/operations/**`, `src/projects/**`, `src/projections/**`, `src/providers/**`, `src/sdk/**`, `src/workers/**`, `src/env.ts`, and `scripts/billing-catalog.ts` | Billing and shared |
+| Platform | `src/platform/**` | Platform and shared |
 | Shared | Reserved `src/shared/**` | Shared only |
-| Composition | `src/app.ts`, `src/index.ts`, `src/runtime.ts`, `src/migrate.ts`, and `src/shutdown.ts` | Billing, platform, shared, and other composition entrypoints |
+| Composition | `src/composition/**`, `src/app.ts`, `src/index.ts`, `src/platform-bootstrap.ts`, `src/runtime.ts`, `src/migrate.ts`, `src/shutdown.ts`, and `scripts/provision-catalog.ts` | Billing, platform, shared, and other composition entrypoints |
 | Test support | `tests/**`, `src/testing/**`, test/scenario runners, and `scripts/lib/**` | All owners |
 
 The policy is deny-by-default. Billing and platform cannot import one another directly, including
@@ -680,18 +700,21 @@ modules cannot import composition or test-support code. The current environment,
 observability, persistence, provider, SDK, and worker code is deliberately billing-owned; it is not
 made shared merely because more than one future module may need similar infrastructure.
 
-Platform and shared code are also forbidden from importing current billing persistence, Drizzle,
-Postgres clients, or Bun SQL APIs; shared code therefore cannot wrap those APIs as an indirect
-platform escape hatch. The first platform-persistence increment will introduce a schema-neutral
-query executor for injection into platform repositories. That increment will keep the port on the
-consumer side, supply the concrete adapter from composition, and add table-aware ownership checks
-with the first platform migration. Until then there is no platform SQL escape hatch.
+Platform and shared code are also forbidden from importing billing persistence, Drizzle, Postgres
+clients, or Bun SQL APIs; shared code therefore cannot wrap those APIs as an indirect platform
+escape hatch. Platform repositories instead receive their consumer-owned, schema-neutral query
+executor from composition. Every platform `executor.query` call must pass inline static SQL as
+`executor.query({ text, values })`; computed, concatenated, interpolated, or otherwise indirect SQL
+fails the boundary check because its table ownership cannot be proven.
 
-All future platform-owned tables must use the `platform_` prefix. This increment reserves and
-documents the convention; SQL/table-aware enforcement is intentionally deferred until the first
-platform migration exists. Future platform-to-billing operations will likewise use platform-owned
-typed ports with adapters wired by composition, while direct platform-to-billing imports remain
-permanently denied.
+Platform-owned tables use the `platform_` prefix. Static platform SQL may reference only those
+tables, while billing source and billing migrations may not reference them. The sole cross-domain
+SQL exception is the path-exact `src/composition/project-instance-persistence.ts` adapter. Migration
+`001_platform.sql` owns the platform schema and may mutate `platform_*` plus `projects`. Every other migration is rejected if it touches a `platform_*` table. Dynamic SQL is
+denied in migrations except for the reviewed usage partition block in
+`003_metering_and_pricing.sql`.
+Future platform-to-billing operations continue to use platform-owned typed ports with adapters wired
+by composition, while direct platform-to-billing imports remain permanently denied.
 
 ## Verification
 
@@ -748,6 +771,13 @@ is defined by
 The accepted modular-monolith, environment separation, project-scoped Postgres, shared-capacity,
 and tenant-recovery boundary is defined by
 [ADR-0007](../quotum-docs/adr/0007-adopt-a-modular-monolith-with-project-scoped-postgres-isolation.md).
+Release `0.6.0` delivers the next ADR-0007 increment: persisted organizations, logical projects,
+environment-specific project instances, database-issued credentials, database-authoritative
+`ProjectInstanceContext`, exact runtime-directory readiness, and platform table ownership checks.
+ADR-0007 remains partial. The next increment is the schema-wide tenant-isolation audit: verify every
+tenant table, composite foreign key, uniqueness constraint, project-first index/query, raw SQL path,
+worker claim/completion path, provider event, and adversarial cross-project/environment case. The
+broader shared-capacity, tenant-recovery, and future service-extraction gates remain later work.
 The accepted responsibility, versioned retention, durable privacy-operation, tenant-export, legal-
 hold, and restore-replay boundary is defined by
 [ADR-0008](../quotum-docs/adr/0008-define-versioned-data-retention-privacy-operations-and-tenant-export.md).

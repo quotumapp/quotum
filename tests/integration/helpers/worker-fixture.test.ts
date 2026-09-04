@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { ProjectionSyncJobRow, StoreEventReplayJobRow } from "../../../src/db/repository";
 import { createIntegrationBillingEnv } from "./local-postgres";
+import { integrationProjectContext } from "./platform-fixture";
 import { runProjectionWorkerOnce, runStoreEventReplayWorkerOnce } from "./worker-fixture";
 
 describe("worker fixture helpers", () => {
@@ -8,11 +9,9 @@ describe("worker fixture helpers", () => {
 		const env = createIntegrationBillingEnv(
 			"postgresql://postgres:postgres@127.0.0.1:5432/postgres",
 			{
-				projects: [
+				projectRuntime: [
 					{
-						key: "voysee",
-						apiKey: "voysee-integration-api-key",
-						active: true,
+						projectInstanceKey: "voysee",
 						projectionUrl: "https://projection.test",
 						projectionSecret: "voysee-projection-secret",
 					},
@@ -103,7 +102,7 @@ describe("worker fixture helpers", () => {
 function projectionJob(): ProjectionSyncJobRow {
 	return {
 		id: "job-1",
-		project_id: "project-1",
+		project_id: integrationProjectContext().projectInstanceId,
 		project_key: "voysee",
 		customer_id: "customer-1",
 		idempotency_key: "idem-1",
@@ -134,7 +133,7 @@ function projectionJob(): ProjectionSyncJobRow {
 function storeEvent(): StoreEventReplayJobRow {
 	return {
 		id: "event-1",
-		project_id: "project-1",
+		project_id: integrationProjectContext().projectInstanceId,
 		project_key: "voysee",
 		provider: "stripe",
 		channel: "web",

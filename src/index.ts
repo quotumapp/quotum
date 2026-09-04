@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/bun";
-import { checkPostgresHealth, initializePostgresHealth } from "./db/client";
+import { createBillingReadinessCheck } from "./composition/runtime-readiness";
+import { initializePostgresHealth } from "./db/client";
 import { loadEnv } from "./env";
 import { initializeSentry } from "./observability/sentry";
 import { createBillingRuntimeApp } from "./runtime";
@@ -10,7 +11,7 @@ await initializePostgresHealth();
 
 const app = createBillingRuntimeApp(env, {
 	sentry: Sentry,
-	readinessCheck: checkPostgresHealth,
+	readinessCheck: createBillingReadinessCheck(env.projectRuntime),
 });
 
 export default app;

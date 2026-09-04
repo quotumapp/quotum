@@ -13,6 +13,7 @@ import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 import {
@@ -22,7 +23,7 @@ import {
 } from "./helpers/phase3-fixtures";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
-const project = { projectKey: "voysee" } as const;
+const project = integrationProjectContext();
 const actor = "phase3-release-test";
 let context: LocalPostgresContext;
 
@@ -174,6 +175,7 @@ localDescribe("Phase 3 release journeys", () => {
 		const provider = stripeService();
 		const worker = (workerId: string) =>
 			new AutoTopupWorker({
+				projectContextResolver: context.projectContextResolver,
 				workerId,
 				repository: context.repository,
 				providerForProject: () => provider,
@@ -238,6 +240,7 @@ localDescribe("Phase 3 release journeys", () => {
 		await consume(fixture, actionAccount, "6", "worker-topup-action:trigger");
 		const actionProvider = stripeService({ paymentBehavior: "action_required" });
 		const actionRun = await new AutoTopupWorker({
+			projectContextResolver: context.projectContextResolver,
 			workerId: "topup-action",
 			repository: context.repository,
 			providerForProject: () => actionProvider,
@@ -334,6 +337,7 @@ localDescribe("Phase 3 release journeys", () => {
 		await closeUsageWindows(context.sql);
 
 		const worker = new RecurringBillingWorker({
+			projectContextResolver: context.projectContextResolver,
 			workerId: "tier-worker",
 			repository: context.repository,
 			providerForProject: () => stripeService(),
@@ -489,6 +493,7 @@ localDescribe("Phase 3 release journeys", () => {
 		).toBe(200);
 
 		const worker = new RecurringBillingWorker({
+			projectContextResolver: context.projectContextResolver,
 			workerId: "migration-worker",
 			repository: context.repository,
 			providerForProject: () => stripeService(),

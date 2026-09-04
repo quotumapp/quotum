@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AutoTopupJob } from "../../src/billing/auto-topup";
 import { AutoTopupWorker } from "../../src/workers/auto-topup";
+import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const job: AutoTopupJob = {
 	jobId: "job-1",
@@ -19,11 +20,15 @@ const job: AutoTopupJob = {
 	consecutiveFailures: 0,
 	maxConsecutiveFailures: 3,
 };
+const workerProjectResolver = projectContextResolver({
+	contexts: [projectInstanceContext("voysee", { projectInstanceId: job.projectId })],
+});
 
 describe("AutoTopupWorker", () => {
 	it("records a successful off-session top-up", async () => {
 		const calls: unknown[] = [];
 		const worker = new AutoTopupWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
 				async claimAutoTopupJobs() {
@@ -80,6 +85,7 @@ describe("AutoTopupWorker", () => {
 	it("opens the circuit when Stripe requires customer action", async () => {
 		const failures: unknown[] = [];
 		const worker = new AutoTopupWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
 				async claimAutoTopupJobs() {
@@ -130,6 +136,7 @@ describe("AutoTopupWorker", () => {
 	it("retries transient failures and lets the repository open the circuit at the limit", async () => {
 		const attempts: Array<Date | null> = [];
 		const worker = new AutoTopupWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
 				async claimAutoTopupJobs() {
@@ -159,6 +166,7 @@ describe("AutoTopupWorker", () => {
 		expect(attempts[0]).toBeInstanceOf(Date);
 
 		const finalWorker = new AutoTopupWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
 				async claimAutoTopupJobs() {

@@ -18,6 +18,7 @@ import {
 	type SubscriptionReconciliationRepository,
 	SubscriptionReconciliationWorker,
 } from "../../../src/workers/subscription-reconciliation";
+import { integrationProjectContextResolver } from "./platform-fixture";
 
 export interface ProjectionRequest {
 	url: string;
@@ -73,7 +74,8 @@ export async function runProjectionWorkerOnce({
 		maxAttempts,
 		batchSize,
 		repository,
-		delivery: new ProjectionHttpClient({ projects: env.projects, fetch }),
+		delivery: new ProjectionHttpClient({ projects: env.projectRuntime, fetch }),
+		projectContextResolver: integrationProjectContextResolver(),
 		now,
 		jitterMs: () => 0,
 		metrics,
@@ -105,6 +107,7 @@ export async function runStoreEventReplayWorkerOnce({
 		batchSize,
 		repository,
 		providers,
+		projectContextResolver: integrationProjectContextResolver(),
 		now,
 		jitterMs: () => 0,
 	});
@@ -136,6 +139,7 @@ export async function runSubscriptionReconciliationWorkerOnce({
 		staleAfterMs: env.providerReconciliationStaleAfterMs,
 		repository,
 		providers,
+		projectContextResolver: integrationProjectContextResolver(),
 		now,
 		jitterMs: () => 0,
 	});

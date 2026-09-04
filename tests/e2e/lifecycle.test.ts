@@ -6,7 +6,7 @@ import {
 	stripeCheckoutSessionObject,
 	stripeEvent,
 } from "../integration/helpers/fake-provider-clients";
-import { e2eServiceEnv, signStripeWebhook } from "./helpers/e2e-env";
+import { e2eApiKey, e2eServiceEnv, signStripeWebhook } from "./helpers/e2e-env";
 import { describeE2e } from "./helpers/gating";
 import { type BillingServiceProcess, startBillingService } from "./helpers/service-process";
 import { createTcpProxy, type TcpProxy } from "./helpers/tcp-proxy";
@@ -41,11 +41,14 @@ e2eDescribe("E2E lifecycle", () => {
 		service = await startBillingService(e2eServiceEnv({ postgresUri: proxiedPostgresUri(proxy) }));
 
 		await expectStatus("/ready", 200);
+		await expectAuthenticatedProjectStatus(200);
 		await proxy.stop();
 		await waitForStatus("/ready", 503);
 		await expectStatus("/livez", 200);
+		await expectAuthenticatedProjectStatus(503, "BILLING_PROJECT_CONTEXT_UNAVAILABLE");
 		await proxy.start();
 		await waitForStatus("/ready", 200);
+		await expectAuthenticatedProjectStatus(200);
 	});
 
 	it("recovers readiness after a startup-time Postgres outage", async () => {
@@ -132,6 +135,16 @@ async function waitForStatus(path: string, status: number): Promise<void> {
 		async () => (await service?.request(path))?.status === status,
 		`${path} status ${status}`,
 	);
+}
+
+async function expectAuthenticatedProjectStatus(status: number, errorCode?: string): Promise<void> {
+	const response = await service?.request("/v1/billing-accounts/e2e-auth-probe/entitlements", {
+		headers: { authorization: `Bearer ${e2eApiKey}` },
+	});
+	expect(response?.status).toBe(status);
+	if (errorCode !== undefined) {
+		expect(await response?.json()).toMatchObject({ error: { code: errorCode } });
+	}
 }
 
 async function postSignedStripeWebhook(event: Record<string, unknown>): Promise<Response> {

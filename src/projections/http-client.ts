@@ -95,9 +95,7 @@ export class ProjectionHttpClient implements ProjectionDelivery {
 	}
 
 	private projectFor(projectKey: string): ProjectRuntimeConfig {
-		const project = this.projects.find(
-			(candidate) => candidate.key === projectKey && candidate.active,
-		);
+		const project = this.projects.find((candidate) => candidate.projectInstanceKey === projectKey);
 		if (project === undefined) {
 			throw new Error(`Billing project ${projectKey} is not configured`);
 		}

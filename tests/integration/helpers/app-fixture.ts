@@ -16,6 +16,7 @@ import {
 	createFakeGooglePlayClient,
 	createFakeStripeBillingClient,
 } from "./fake-provider-clients";
+import { integrationProjectContext, integrationProjectCredential } from "./platform-fixture";
 
 type StripeEventFixture = ReturnType<typeof import("./fake-provider-clients").stripeEvent>;
 
@@ -75,10 +76,11 @@ export function createIntegrationApp({
 		StripeBillingService
 	> = {};
 
-	for (const project of env.projects) {
-		const projectRepository = repository.forProject({ projectKey: project.key });
+	for (const project of env.projectRuntime) {
+		const projectContext = integrationProjectContext(project.projectInstanceKey);
+		const projectRepository = repository.forProject(projectContext);
 
-		projectProviderServices[project.key] = {
+		projectProviderServices[project.projectInstanceKey] = {
 			appleStoreKitService: new AppleStoreKitService({
 				bundleId: "com.voysee.app",
 				environment: "sandbox",
@@ -148,7 +150,7 @@ export function createIntegrationApp({
 			}),
 			stripeBillingService: new StripeBillingService({
 				config: {
-					projectKey: project.key,
+					projectKey: project.projectInstanceKey,
 					projectionContract: project.projectionContract ?? "billing_state_v1",
 					checkoutSuccessUrl:
 						"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
@@ -178,7 +180,6 @@ export function createIntegrationApp({
 		},
 		projectProviderServices,
 		adminOperations,
-		adminProjectProvisioner: repository,
 		logger,
 		metrics,
 	});
@@ -190,12 +191,14 @@ export function createIntegrationApp({
 		google,
 		stripe,
 		authHeaders(projectKey = "voysee"): HeadersInit {
-			const project = env.projects.find((candidate) => candidate.key === projectKey);
+			const project = env.projectRuntime.find(
+				(candidate) => candidate.projectInstanceKey === projectKey,
+			);
 			if (project === undefined) {
 				throw new Error(`unknown integration project ${projectKey}`);
 			}
 
-			return { authorization: `Bearer ${project.apiKey}` };
+			return { authorization: `Bearer ${integrationProjectCredential(projectKey)}` };
 		},
 	};
 }

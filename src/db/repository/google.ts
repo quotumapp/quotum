@@ -1,7 +1,7 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError } from "../../billing/errors";
 import type { ProjectionPayload, PurchaseKind, PurchaseStatus } from "../../billing/types";
-import type { ProjectContext } from "../../projects/context";
+import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import {
 	materializeSubscriptionAllocations,
@@ -20,7 +20,6 @@ import {
 	findGoogleCustomerByPurchaseTokens,
 	findGoogleCustomerBySubscriptionTokens,
 	getGoogleStoreProduct,
-	resolveProjectId,
 	upsertProviderCustomer,
 } from "./identities";
 import {
@@ -46,14 +45,14 @@ import { isInvalidatedStatus, requireNonBlank, stripNulls } from "./validation";
 
 export class GoogleBillingRepository extends RepositoryModule {
 	async getOrCreateGoogleProviderCustomer(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		obfuscatedAccountId: string,
 	): Promise<string> {
 		requireNonBlank(billingAccountId, "p_billing_account_id");
 		requireNonBlank(obfuscatedAccountId, "p_obfuscated_account_id");
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await ensureCustomer(tx, projectId, billingAccountId);
 			await upsertProviderCustomer(tx, projectId, {
 				customerId: customer.id,
@@ -66,12 +65,12 @@ export class GoogleBillingRepository extends RepositoryModule {
 	}
 
 	async getGoogleAndroidProductKind(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		externalProductId: string,
 	): Promise<"consumable" | "non_consumable"> {
 		requireNonBlank(externalProductId, "p_external_product_id");
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const row = await executeOne<{ product_type: PurchaseKind }>(
 				tx,
 				drizzleSql`
@@ -100,11 +99,11 @@ export class GoogleBillingRepository extends RepositoryModule {
 	}
 
 	async recordGooglePurchaseAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordGooglePurchaseProjectionInput,
 	): Promise<GooglePlayRecordingResult> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const quantity = input.quantity ?? 1;
 			if (quantity <= 0) {
 				throw new Error("p_quantity must be greater than zero");
@@ -391,11 +390,11 @@ export class GoogleBillingRepository extends RepositoryModule {
 	}
 
 	async recordGoogleVoidedPurchaseAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordGoogleVoidedPurchaseProjectionInput,
 	): Promise<GooglePlayRecordingResult> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const target = await findGoogleVoidedTarget(tx, projectId, input.purchaseToken);
 
 			if (target === null) {

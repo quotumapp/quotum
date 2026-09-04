@@ -32,9 +32,9 @@ import {
 	NotFoundBillingError,
 	PersistenceConflictError,
 } from "../../billing/errors";
-import type { ProjectContext } from "../../projects/context";
+import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
-import { ensureCustomer, resolveProjectId } from "./identities";
+import { ensureCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -54,11 +54,11 @@ export class ControlsEnterpriseRepository
 	implements ControlsEnterpriseRepositoryLike
 {
 	async upsertControl(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ControlPolicyInput,
 	): Promise<EffectiveControl> {
 		const persisted = await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await ensureCustomer(
 				tx,
 				projectId,
@@ -149,11 +149,11 @@ export class ControlsEnterpriseRepository
 	}
 
 	async listEffectiveControls(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		entityId?: string | null,
 	): Promise<EffectiveControl[]> {
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const customer = await requireCustomer(this.database, projectId, billingAccountId);
 		const entity = await resolveEntity(this.database, projectId, customer.id, entityId ?? null);
 		return await resolveEffectiveControls(this.database, {
@@ -164,7 +164,7 @@ export class ControlsEnterpriseRepository
 	}
 
 	async createEntity(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: {
 			billingAccountId: string;
 			externalId: string;
@@ -172,7 +172,7 @@ export class ControlsEnterpriseRepository
 			metadata?: Record<string, unknown>;
 		},
 	): Promise<EntityRecord> {
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const customer = await ensureCustomer(
 			this.database,
 			projectId,
@@ -195,8 +195,11 @@ export class ControlsEnterpriseRepository
 		return entityRecord(row);
 	}
 
-	async listEntities(project: ProjectContext, billingAccountId: string): Promise<EntityRecord[]> {
-		const projectId = await resolveProjectId(this.database, project);
+	async listEntities(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+	): Promise<EntityRecord[]> {
+		const projectId = project.projectInstanceId;
 		const customer = await requireCustomer(this.database, projectId, billingAccountId);
 		const rows = await executeRows<EntityDbRow>(
 			this.database,
@@ -211,11 +214,11 @@ export class ControlsEnterpriseRepository
 	}
 
 	async createUsageAlert(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: UsageAlertInput,
 	): Promise<UsageAlertRecord> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
 			const entity = await resolveEntity(tx, projectId, customer.id, input.entityId ?? null);
 			const feature = await requireFeature(tx, projectId, input.featureKey);
@@ -279,10 +282,10 @@ export class ControlsEnterpriseRepository
 	}
 
 	async listUsageAlerts(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<UsageAlertRecord[]> {
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const customer = await requireCustomer(this.database, projectId, billingAccountId);
 		const rows = await executeRows<
 			AlertDbRow & {
@@ -319,13 +322,13 @@ export class ControlsEnterpriseRepository
 	}
 
 	async listUsageAlertEvents(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		limit: number,
 	): Promise<UsageAlertEvent[]> {
 		if (!Number.isInteger(limit) || limit < 1 || limit > 500)
 			throw new InvalidRequestError("limit must be between 1 and 500");
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const customer = await requireCustomer(this.database, projectId, billingAccountId);
 		const rows = await executeRows<{
 			id: string | number | bigint;
@@ -364,11 +367,11 @@ export class ControlsEnterpriseRepository
 	}
 
 	async upsertAutoTopupPolicy(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AutoTopupPolicyInput,
 	): Promise<AutoTopupPolicyRecord> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
 			const entity = await resolveEntity(tx, projectId, customer.id, input.entityId ?? null);
 			const feature = await requireFeature(tx, projectId, input.featureKey);
@@ -492,12 +495,12 @@ export class ControlsEnterpriseRepository
 	}
 
 	async getAutoTopupPolicy(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		featureKey: string,
 		entityId?: string | null,
 	): Promise<AutoTopupPolicyRecord | null> {
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const customer = await requireCustomer(this.database, projectId, billingAccountId);
 		const entity = await resolveEntity(this.database, projectId, customer.id, entityId ?? null);
 		const row = await executeOne<{ id: string | number | bigint }>(
@@ -516,13 +519,13 @@ export class ControlsEnterpriseRepository
 	}
 
 	async resetAutoTopupCircuit(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		policyId: string,
 		actor: string,
 	): Promise<AutoTopupPolicyRecord> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await requireCustomer(tx, projectId, billingAccountId);
 			const row = await executeOne(
 				tx,
@@ -546,7 +549,7 @@ export class ControlsEnterpriseRepository
 	}
 
 	async previewEnterpriseContract(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: EnterpriseContractInput,
 	): Promise<EnterpriseContractPreview> {
 		return await this.transaction(async (tx) => {
@@ -645,7 +648,7 @@ export class ControlsEnterpriseRepository
 	}
 
 	async publishEnterpriseContract(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: EnterpriseContractInput & { previewToken: string },
 	): Promise<EnterpriseContractRecord> {
 		return await this.transaction(async (tx) => {
@@ -726,10 +729,10 @@ export class ControlsEnterpriseRepository
 	}
 
 	async listEnterpriseContracts(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<EnterpriseContractRecord[]> {
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const customer = await requireCustomer(this.database, projectId, billingAccountId);
 		const rows = await executeRows<{ id: string | number | bigint }>(
 			this.database,
@@ -748,13 +751,13 @@ export class ControlsEnterpriseRepository
 	}
 
 	async terminateEnterpriseContract(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		contractId: string,
 		actor: string,
 	): Promise<EnterpriseContractRecord> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await requireCustomer(tx, projectId, billingAccountId);
 			const row = await executeOne<{ id: string | number | bigint }>(
 				tx,
@@ -781,7 +784,7 @@ export class ControlsEnterpriseRepository
 	}
 
 	async previewCatalogMigration(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: CatalogMigrationInput,
 	): Promise<CatalogMigrationPreview> {
 		return await this.transaction(async (tx) => {
@@ -814,7 +817,7 @@ export class ControlsEnterpriseRepository
 	}
 
 	async publishCatalogMigration(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: CatalogMigrationInput & { previewToken: string },
 	): Promise<CatalogMigrationResult> {
 		return await this.transaction(async (tx) => {
@@ -894,11 +897,11 @@ export class ControlsEnterpriseRepository
 	}
 
 	async listLicensePools(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<LicensePoolRecord[]> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await requireCustomer(tx, projectId, billingAccountId);
 			await executeOne(
 				tx,
@@ -975,7 +978,7 @@ export class ControlsEnterpriseRepository
 	}
 
 	async assignLicense(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: {
 			billingAccountId: string;
 			poolId: string;
@@ -985,7 +988,7 @@ export class ControlsEnterpriseRepository
 		},
 	): Promise<LicenseAssignmentRecord> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
 			const entity = await resolveEntity(tx, projectId, customer.id, input.entityId);
 			if (entity === null)
@@ -1042,11 +1045,11 @@ export class ControlsEnterpriseRepository
 	}
 
 	async revokeLicense(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: { billingAccountId: string; assignmentId: string; actor: string },
 	): Promise<LicenseAssignmentRecord> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
 			const row = await executeOne<AssignmentDbRow & { entity_external_id: string }>(
 				tx,
@@ -1075,7 +1078,7 @@ export class ControlsEnterpriseRepository
 	}
 
 	async checkEntityLicense(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: {
 			billingAccountId: string;
 			entityId: string;
@@ -1090,7 +1093,7 @@ export class ControlsEnterpriseRepository
 			1_000_000,
 		);
 		await this.listLicensePools(project, input.billingAccountId);
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const customer = await requireCustomer(this.database, projectId, input.billingAccountId);
 		const entity = await resolveEntity(this.database, projectId, customer.id, input.entityId);
 		if (entity === null) throw new NotFoundBillingError("Entity was not found", "ENTITY_NOT_FOUND");
@@ -1457,10 +1460,10 @@ async function requireAutoTopupPolicy(
 
 async function contractContext(
 	executor: QueryExecutor,
-	project: ProjectContext,
+	project: ProjectInstanceContext,
 	input: EnterpriseContractInput,
 ) {
-	const projectId = await resolveProjectId(executor, project);
+	const projectId = project.projectInstanceId;
 	const customer = await requireCustomer(executor, projectId, input.billingAccountId);
 	if (!Number.isInteger(input.version) || input.version < 1)
 		throw new InvalidRequestError("Contract version must be positive");
@@ -1531,10 +1534,10 @@ async function requireContract(
 
 async function migrationContext(
 	executor: QueryExecutor,
-	project: ProjectContext,
+	project: ProjectInstanceContext,
 	input: CatalogMigrationInput,
 ) {
-	const projectId = await resolveProjectId(executor, project);
+	const projectId = project.projectInstanceId;
 	const resolveVersion = async (key: string, version: number) => {
 		if (!Number.isInteger(version) || version < 1)
 			throw new InvalidRequestError("Plan version must be positive");

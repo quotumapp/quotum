@@ -1,7 +1,6 @@
 import { sql as drizzleSql } from "drizzle-orm";
-import type { ProjectContext } from "../../projects/context";
+import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
-import { resolveProjectId } from "./identities";
 import { parseStoreEventReplayJobRow } from "./parsers";
 import { assertUpdated, executeOne, executeRows } from "./query";
 import type { StoreEventReplayJobRow } from "./types";
@@ -50,11 +49,11 @@ export class StoreEventReplayBillingRepository extends RepositoryModule {
 
 	async claimStoreEventReplayJobById(
 		workerId: string,
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		eventId: string,
 	): Promise<StoreEventReplayJobRow> {
 		requireNonBlank(workerId, "p_worker_id");
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const row = await executeOne(
 			this.database,
 			drizzleSql`

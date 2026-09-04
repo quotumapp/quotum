@@ -3,6 +3,7 @@ import type { ProjectionSyncJobRow } from "../../src/db/repository";
 import type { BillingLogger } from "../../src/observability/logger";
 import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import { ProjectionSyncWorker } from "../../src/workers/projection-sync";
+import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const job = {
 	id: "job_1",
@@ -32,6 +33,9 @@ const job = {
 	created_at: "2026-05-31T00:00:00.000Z",
 	updated_at: "2026-05-31T00:00:00.000Z",
 } satisfies ProjectionSyncJobRow;
+const workerProjectResolver = projectContextResolver({
+	contexts: [projectInstanceContext("voysee", { projectInstanceId: job.project_id })],
+});
 
 function createRecordingLogger() {
 	const infos: Array<{ message: string; context?: Record<string, unknown> }> = [];
@@ -55,6 +59,7 @@ describe("ProjectionSyncWorker", () => {
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, infos } = createRecordingLogger();
 		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 10,
 			batchSize: 5,
@@ -108,6 +113,7 @@ describe("ProjectionSyncWorker", () => {
 		];
 		const succeeded: string[] = [];
 		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 10,
 			batchSize: 3,
@@ -155,6 +161,7 @@ describe("ProjectionSyncWorker", () => {
 	it("forwards projection job identity and purchase context to delivery", async () => {
 		const synced: unknown[] = [];
 		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 10,
 			batchSize: 5,
@@ -223,6 +230,7 @@ describe("ProjectionSyncWorker", () => {
 	it("forwards reversal context to delivery", async () => {
 		const synced: unknown[] = [];
 		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 10,
 			batchSize: 5,
@@ -294,6 +302,7 @@ describe("ProjectionSyncWorker", () => {
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, errors } = createRecordingLogger();
 		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 10,
 			batchSize: 5,
@@ -367,6 +376,7 @@ describe("ProjectionSyncWorker", () => {
 			},
 		};
 		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 10,
 			batchSize: 5,
@@ -417,6 +427,7 @@ describe("ProjectionSyncWorker", () => {
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, errors } = createRecordingLogger();
 		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 10,
 			batchSize: 5,

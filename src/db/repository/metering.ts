@@ -39,7 +39,7 @@ import {
 	calculateTieredUsageCharge,
 	calculateUsageCharge,
 } from "../../billing/pricing";
-import type { ProjectContext } from "../../projects/context";
+import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import type { ControlDenial } from "./controls-runtime";
 import {
@@ -54,7 +54,7 @@ import {
 	scheduleAutoTopupIfNeeded,
 } from "./controls-runtime";
 import { enqueueProjectionSyncJob, getEntitlementSnapshot } from "./entitlements";
-import { ensureCustomer, resolveProjectId } from "./identities";
+import { ensureCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -208,12 +208,12 @@ export interface GrantAllocationInput {
 
 export class MeteringBillingRepository extends RepositoryModule {
 	async getBalance(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		featureKey: string,
 		entityExternalId?: string | null,
 	): Promise<MeteringBalance> {
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const feature = await requireMeteredFeature(this.database, projectId, featureKey);
 		const customer = await findCustomer(this.database, projectId, billingAccountId);
 		const entityId = await resolveEntityId(
@@ -243,8 +243,11 @@ export class MeteringBillingRepository extends RepositoryModule {
 			: await readBalance(this.database, projectId, customer.id, feature, entityId);
 	}
 
-	async check(project: ProjectContext, input: MeteringSubjectInput): Promise<MeteringDecision> {
-		const projectId = await resolveProjectId(this.database, project);
+	async check(
+		project: ProjectInstanceContext,
+		input: MeteringSubjectInput,
+	): Promise<MeteringDecision> {
+		const projectId = project.projectInstanceId;
 		await validateOccurredAt(this.database, projectId, input.occurredAt ?? null);
 		const customer = await findCustomer(this.database, projectId, input.billingAccountId);
 		const entityId = await resolveEntityId(
@@ -318,11 +321,11 @@ export class MeteringBillingRepository extends RepositoryModule {
 	}
 
 	async consume(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: MeteringMutationInput,
 	): Promise<ConsumeUsageResult> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
 			const entityId = await resolveEntityId(tx, projectId, customer.id, input.entityId);
@@ -508,11 +511,11 @@ export class MeteringBillingRepository extends RepositoryModule {
 	}
 
 	async consumeWorkerDelivery(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: WorkerMeteringMutationInput,
 	): Promise<WorkerConsumeUsageResult> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
 			const claimed = await claimWorkerDelivery(
 				tx,
@@ -711,7 +714,10 @@ export class MeteringBillingRepository extends RepositoryModule {
 		});
 	}
 
-	async reserve(project: ProjectContext, input: ReserveUsageInput): Promise<ReservationResult> {
+	async reserve(
+		project: ProjectInstanceContext,
+		input: ReserveUsageInput,
+	): Promise<ReservationResult> {
 		if (
 			!Number.isInteger(input.expiresInSeconds) ||
 			input.expiresInSeconds < 1 ||
@@ -721,7 +727,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 		}
 
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
 			const entityId = await resolveEntityId(tx, projectId, customer.id, input.entityId);
@@ -875,11 +881,11 @@ export class MeteringBillingRepository extends RepositoryModule {
 	}
 
 	async confirm(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ConfirmReservationInput,
 	): Promise<FinalizeReservationResult> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
 			const reservation = await lockReservation(tx, projectId, customer.id, input.reservationId);
@@ -1105,11 +1111,11 @@ export class MeteringBillingRepository extends RepositoryModule {
 	}
 
 	async release(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ReleaseReservationInput,
 	): Promise<FinalizeReservationResult> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
 			const reservation = await lockReservation(tx, projectId, customer.id, input.reservationId);
 			await claimClientKey(
@@ -1147,7 +1153,10 @@ export class MeteringBillingRepository extends RepositoryModule {
 		});
 	}
 
-	async correct(project: ProjectContext, input: CorrectUsageInput): Promise<UsageCorrectionResult> {
+	async correct(
+		project: ProjectInstanceContext,
+		input: CorrectUsageInput,
+	): Promise<UsageCorrectionResult> {
 		if (Number.isNaN(input.originalRecordedAt.getTime())) {
 			throw new InvalidRequestError("originalRecordedAt must be a valid timestamp");
 		}
@@ -1156,7 +1165,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 		const correctionQuantity = positiveDecimal(input.quantity, "quantity");
 
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
 			await claimClientKey(
@@ -1304,11 +1313,11 @@ export class MeteringBillingRepository extends RepositoryModule {
 	}
 
 	async grantAllocation(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: GrantAllocationInput,
 	): Promise<{ allocationId: string; duplicate: boolean; balance: MeteringBalance }> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
 			const entityId = await resolveEntityId(tx, projectId, customer.id, input.entityId);
 			const feature = await requireMeteredFeature(tx, projectId, input.featureKey);

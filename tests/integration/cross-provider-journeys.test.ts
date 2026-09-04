@@ -207,8 +207,8 @@ localDescribe("Cross-provider journeys integration", () => {
 function withProjectionUrl(projectionUrl: string): LocalPostgresContext["env"] {
 	return {
 		...context.env,
-		projects: context.env.projects.map((project) =>
-			project.key === "voysee" ? { ...project, projectionUrl } : project,
+		projectRuntime: context.env.projectRuntime.map((project) =>
+			project.projectInstanceKey === "voysee" ? { ...project, projectionUrl } : project,
 		),
 	};
 }

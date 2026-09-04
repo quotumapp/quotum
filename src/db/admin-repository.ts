@@ -31,7 +31,7 @@ import type {
 	StoreEventProcessingStatus,
 	SubscriptionStatus,
 } from "../billing/types";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 import { db as defaultDb } from "./client";
 import { BillingRepository } from "./repository";
 
@@ -65,23 +65,26 @@ export class AdminBillingRepository implements AdminBillingReader {
 	) {}
 
 	async getCustomerByBillingAccountId(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<AdminCustomerDetail> {
 		const customer = await this.getCustomer(
 			project,
 			drizzleSql`c.billing_account_id = ${billingAccountId}`,
 		);
-		return await this.customerDetail(customer);
+		return await this.customerDetail(project, customer);
 	}
 
-	async getCustomerById(project: ProjectContext, customerId: string): Promise<AdminCustomerDetail> {
+	async getCustomerById(
+		project: ProjectInstanceContext,
+		customerId: string,
+	): Promise<AdminCustomerDetail> {
 		const customer = await this.getCustomer(project, drizzleSql`c.id = ${customerId}`);
-		return await this.customerDetail(customer);
+		return await this.customerDetail(project, customer);
 	}
 
 	async searchCustomers(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminCustomerSearchInput,
 	): Promise<AdminListResult<AdminCustomerSearchResult>> {
 		const cursor = input.cursor === null ? null : decodeAdminCursor(input.cursor);
@@ -269,7 +272,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 	}
 
 	async listPurchases(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminPurchaseListInput,
 	): Promise<AdminListResult<AdminPurchase>> {
 		const rows = await executeRows<AdminPurchase & AdminRowIdentity>(
@@ -321,7 +324,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 	}
 
 	async listSubscriptions(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminSubscriptionListInput & { statuses?: readonly SubscriptionStatus[] },
 	): Promise<AdminListResult<AdminSubscription>> {
 		const staleBefore = input.staleBefore ?? this.defaultStaleBefore();
@@ -376,7 +379,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 	}
 
 	async listStoreEvents(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminStoreEventListInput,
 	): Promise<AdminListResult<AdminStoreEvent>> {
 		const rows = await executeRows<AdminStoreEvent & AdminRowIdentity>(
@@ -425,7 +428,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 	}
 
 	async getStoreEvent(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminStoreEventDetailInput,
 	): Promise<AdminStoreEvent> {
 		const row = await executeOne<AdminStoreEvent & { rawPayload?: Record<string, unknown> }>(
@@ -464,7 +467,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 	}
 
 	async listProjectionJobs(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminProjectionJobListInput,
 	): Promise<AdminListResult<AdminProjectionJob>> {
 		const rows = await executeRows<AdminProjectionJob & AdminRowIdentity>(
@@ -509,7 +512,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 	}
 
 	async listCatalogProducts(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminCatalogProductListInput,
 	): Promise<AdminListResult<AdminCatalogProduct>> {
 		const rows = await executeRows<AdminCatalogProduct & AdminRowIdentity>(
@@ -538,7 +541,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 	}
 
 	async listCatalogStoreProducts(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminCatalogStoreProductListInput,
 	): Promise<AdminListResult<AdminCatalogStoreProduct>> {
 		const rows = await executeRows<AdminCatalogStoreProduct & AdminRowIdentity>(
@@ -577,7 +580,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 	}
 
 	async getStatsSummary(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminStatsSummaryInput,
 	): Promise<AdminStatsSummary> {
 		const staleBefore = this.defaultStaleBefore();
@@ -667,7 +670,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 	}
 
 	private async getCustomer(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		condition: DrizzleSQL,
 	): Promise<AdminCustomer> {
 		const row = await executeOne<AdminCustomer>(
@@ -694,9 +697,11 @@ export class AdminBillingRepository implements AdminBillingReader {
 		return normalizeCustomer(row);
 	}
 
-	private async customerDetail(customer: AdminCustomer): Promise<AdminCustomerDetail> {
+	private async customerDetail(
+		project: ProjectInstanceContext,
+		customer: AdminCustomer,
+	): Promise<AdminCustomerDetail> {
 		const repository = new BillingRepository(this.database as never);
-		const project = { projectKey: customer.projectKey };
 		const [
 			providerCustomers,
 			activeSubscriptions,
@@ -712,7 +717,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 							pc.external_customer_id AS "externalCustomerId",
 							pc.created_at AS "createdAt"
 						FROM provider_customers pc
-						WHERE pc.project_id = (SELECT projects.id FROM projects projects WHERE projects.key = ${customer.projectKey})
+						WHERE pc.project_id = ${project.projectInstanceId}
 							AND pc.customer_id = ${customer.id}
 						ORDER BY pc.created_at DESC
 						LIMIT ${customerDetailRelatedRowsLimit}
@@ -746,7 +751,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 		return {
 			customer,
 			entitlementSnapshot: await repository.getEntitlementSnapshot(
-				{ projectKey: customer.projectKey },
+				project,
 				customer.billingAccountId,
 			),
 			providerCustomers: providerCustomers.map((row) => ({
@@ -789,13 +794,8 @@ function where(conditions: Array<DrizzleSQL | null>): DrizzleSQL {
 	return drizzleSql`WHERE ${drizzleSql.join(present, drizzleSql` AND `)}`;
 }
 
-function projectFilter(project: ProjectContext, tableAlias: string): DrizzleSQL {
-	return drizzleSql`${drizzleSql.identifier(tableAlias)}.project_id = (
-		SELECT projects.id
-		FROM projects projects
-		WHERE projects.key = ${project.projectKey}
-			AND projects.active = true
-	)`;
+function projectFilter(project: ProjectInstanceContext, tableAlias: string): DrizzleSQL {
+	return drizzleSql`${drizzleSql.identifier(tableAlias)}.project_id = ${project.projectInstanceId}`;
 }
 
 function commonFilters(

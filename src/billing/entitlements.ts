@@ -1,10 +1,10 @@
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 import { BillingError } from "./errors";
 import type { EntitlementSnapshot } from "./types";
 
 export interface EntitlementRepository {
 	getEntitlementSnapshot(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<EntitlementSnapshot>;
 }
@@ -13,7 +13,7 @@ export class EntitlementService {
 	constructor(private readonly repository: EntitlementRepository) {}
 
 	async getSnapshot(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<EntitlementSnapshot> {
 		const normalizedUserId = billingAccountId.trim();

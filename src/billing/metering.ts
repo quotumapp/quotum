@@ -1,4 +1,4 @@
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 
 export type RateCardPath = "direct" | "pinned" | "additive";
 export type ReservationStatus = "active" | "confirmed" | "released" | "expired";
@@ -182,51 +182,69 @@ export interface MeteringMaintenanceResult {
 
 export interface MeteringServiceLike {
 	getBalance(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		featureKey: string,
 		entityId?: string | null,
 	): Promise<MeteringBalance>;
-	check(project: ProjectContext, input: MeteringSubjectInput): Promise<MeteringDecision>;
-	consume(project: ProjectContext, input: MeteringMutationInput): Promise<ConsumeUsageResult>;
-	reserve(project: ProjectContext, input: ReserveUsageInput): Promise<ReservationResult>;
+	check(project: ProjectInstanceContext, input: MeteringSubjectInput): Promise<MeteringDecision>;
+	consume(
+		project: ProjectInstanceContext,
+		input: MeteringMutationInput,
+	): Promise<ConsumeUsageResult>;
+	reserve(project: ProjectInstanceContext, input: ReserveUsageInput): Promise<ReservationResult>;
 	confirm(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ConfirmReservationInput,
 	): Promise<FinalizeReservationResult>;
 	release(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ReleaseReservationInput,
 	): Promise<FinalizeReservationResult>;
-	correct(project: ProjectContext, input: CorrectUsageInput): Promise<UsageCorrectionResult>;
+	correct(
+		project: ProjectInstanceContext,
+		input: CorrectUsageInput,
+	): Promise<UsageCorrectionResult>;
 }
 
 interface MeteringRepositoryLike {
 	getMeteringBalance(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		featureKey: string,
 		entityId?: string | null,
 	): Promise<MeteringBalance>;
-	checkUsage(project: ProjectContext, input: MeteringSubjectInput): Promise<MeteringDecision>;
-	consumeUsage(project: ProjectContext, input: MeteringMutationInput): Promise<ConsumeUsageResult>;
-	reserveUsage(project: ProjectContext, input: ReserveUsageInput): Promise<ReservationResult>;
+	checkUsage(
+		project: ProjectInstanceContext,
+		input: MeteringSubjectInput,
+	): Promise<MeteringDecision>;
+	consumeUsage(
+		project: ProjectInstanceContext,
+		input: MeteringMutationInput,
+	): Promise<ConsumeUsageResult>;
+	reserveUsage(
+		project: ProjectInstanceContext,
+		input: ReserveUsageInput,
+	): Promise<ReservationResult>;
 	confirmUsageReservation(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ConfirmReservationInput,
 	): Promise<FinalizeReservationResult>;
 	releaseUsageReservation(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ReleaseReservationInput,
 	): Promise<FinalizeReservationResult>;
-	correctUsage(project: ProjectContext, input: CorrectUsageInput): Promise<UsageCorrectionResult>;
+	correctUsage(
+		project: ProjectInstanceContext,
+		input: CorrectUsageInput,
+	): Promise<UsageCorrectionResult>;
 }
 
 export class MeteringService implements MeteringServiceLike {
 	constructor(private readonly repository: MeteringRepositoryLike) {}
 
 	async getBalance(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		featureKey: string,
 		entityId?: string | null,
@@ -239,36 +257,45 @@ export class MeteringService implements MeteringServiceLike {
 		);
 	}
 
-	async check(project: ProjectContext, input: MeteringSubjectInput): Promise<MeteringDecision> {
+	async check(
+		project: ProjectInstanceContext,
+		input: MeteringSubjectInput,
+	): Promise<MeteringDecision> {
 		return await this.repository.checkUsage(project, input);
 	}
 
 	async consume(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: MeteringMutationInput,
 	): Promise<ConsumeUsageResult> {
 		return await this.repository.consumeUsage(project, input);
 	}
 
-	async reserve(project: ProjectContext, input: ReserveUsageInput): Promise<ReservationResult> {
+	async reserve(
+		project: ProjectInstanceContext,
+		input: ReserveUsageInput,
+	): Promise<ReservationResult> {
 		return await this.repository.reserveUsage(project, input);
 	}
 
 	async confirm(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ConfirmReservationInput,
 	): Promise<FinalizeReservationResult> {
 		return await this.repository.confirmUsageReservation(project, input);
 	}
 
 	async release(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ReleaseReservationInput,
 	): Promise<FinalizeReservationResult> {
 		return await this.repository.releaseUsageReservation(project, input);
 	}
 
-	async correct(project: ProjectContext, input: CorrectUsageInput): Promise<UsageCorrectionResult> {
+	async correct(
+		project: ProjectInstanceContext,
+		input: CorrectUsageInput,
+	): Promise<UsageCorrectionResult> {
 		return await this.repository.correctUsage(project, input);
 	}
 }

@@ -13,13 +13,6 @@ import type {
 	SubscriptionStatus,
 } from "../../billing/types";
 
-export interface BillingProjectRow {
-	id: string;
-	key: string;
-	name: string;
-	active: boolean;
-}
-
 export interface ProjectionSyncJobRow {
 	id: string;
 	project_id: string;

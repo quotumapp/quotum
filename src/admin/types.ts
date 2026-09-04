@@ -9,7 +9,7 @@ import type {
 	StoreEventProcessingStatus,
 	SubscriptionStatus,
 } from "../billing/types";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 
 export interface AdminPagination {
 	limit: number;
@@ -211,44 +211,47 @@ export interface AdminCustomerSearchResult {
 
 export interface AdminBillingReader {
 	getCustomerByBillingAccountId(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<AdminCustomerDetail>;
-	getCustomerById(project: ProjectContext, customerId: string): Promise<AdminCustomerDetail>;
+	getCustomerById(
+		project: ProjectInstanceContext,
+		customerId: string,
+	): Promise<AdminCustomerDetail>;
 	searchCustomers(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminCustomerSearchInput,
 	): Promise<AdminListResult<AdminCustomerSearchResult>>;
 	listPurchases(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminPurchaseListInput,
 	): Promise<AdminListResult<AdminPurchase>>;
 	listSubscriptions(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminSubscriptionListInput,
 	): Promise<AdminListResult<AdminSubscription>>;
 	listStoreEvents(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminStoreEventListInput,
 	): Promise<AdminListResult<AdminStoreEvent>>;
 	getStoreEvent(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminStoreEventDetailInput,
 	): Promise<AdminStoreEvent>;
 	listProjectionJobs(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminProjectionJobListInput,
 	): Promise<AdminListResult<AdminProjectionJob>>;
 	listCatalogProducts(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminCatalogProductListInput,
 	): Promise<AdminListResult<AdminCatalogProduct>>;
 	listCatalogStoreProducts(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminCatalogStoreProductListInput,
 	): Promise<AdminListResult<AdminCatalogStoreProduct>>;
 	getStatsSummary(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AdminStatsSummaryInput,
 	): Promise<AdminStatsSummary>;
 }

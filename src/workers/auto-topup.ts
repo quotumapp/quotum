@@ -10,7 +10,9 @@ import {
 	createNoopBillingMetrics,
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
+import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
 import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
+import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface AutoTopupWorkerRepository {
 	claimAutoTopupJobs(workerId: string, limit: number, staleBefore: Date): Promise<AutoTopupJob[]>;
@@ -49,7 +51,8 @@ export class AutoTopupWorker {
 			batchSize?: number;
 			staleAfterMs?: number;
 			repository: AutoTopupWorkerRepository;
-			providerForProject(projectKey: string): AutoTopupWorkerProvider;
+			projectContextResolver: ProjectInstanceContextResolver;
+			providerForProject(project: ProjectInstanceContext): AutoTopupWorkerProvider;
 			logger: AutoTopupWorkerLogger;
 			metrics?: BillingMetrics;
 		},
@@ -72,8 +75,15 @@ export class AutoTopupWorker {
 		};
 		for (const job of jobs) {
 			try {
+				const project = await resolveClaimedProjectInstance(
+					this.dependencies.projectContextResolver,
+					{
+						projectInstanceId: job.projectId,
+						projectInstanceKey: job.projectKey,
+					},
+				);
 				const charge = await this.dependencies
-					.providerForProject(job.projectKey)
+					.providerForProject(project)
 					.createAutoTopupCharge(job);
 				if (charge.status === "succeeded") {
 					const completion = await this.dependencies.repository.markAutoTopupSucceeded(

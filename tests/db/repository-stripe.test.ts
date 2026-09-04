@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { BillingRepository } from "../../src/db/repository";
+import { projectInstanceContext } from "../helpers/project-context";
 import { FakeDatabase, stripeReversalInput, stripeSubscriptionInput } from "./repository-fixture";
 
 describe("BillingRepository Stripe", () => {
 	it("looks up Stripe web catalog products inside the supplied project", async () => {
 		const database = new FakeDatabase([
-			[{ id: "project-id" }],
 			[
 				{
 					value: {
@@ -29,23 +29,20 @@ describe("BillingRepository Stripe", () => {
 		const repository = new BillingRepository(database as never);
 
 		const product = await repository.getStripeWebStoreProductByKey(
-			{ projectKey: "wiseley" },
+			projectInstanceContext("wiseley"),
 			"credits_100",
 		);
 
 		expect(product.storeProductId).toBe("store-product-id");
 		const queries = database.queries.join("\n");
-		expect(queries).toContain("WHERE p.key = $1");
-		expect(queries).toContain('"wiseley"');
-		expect(queries).not.toContain("WHERE p.key = " + "'voysee'");
+		expect(queries).not.toContain("FROM projects");
 		expect(queries).toContain("sp.project_id = $1");
-		expect(queries).toContain('"project-id"');
+		expect(queries).toContain(JSON.stringify(projectInstanceContext("wiseley").projectInstanceId));
 	});
 
 	it("skips Stripe reversals when BIGINT amount comparison would be unsafe", async () => {
 		const unsafeAmount = "9007199254740993";
 		const database = new FakeDatabase([
-			[{ id: "project-id" }],
 			[{ purchase_id: "purchase-id", customer_id: "customer-id" }],
 			[{ id: "customer-id" }],
 			[
@@ -67,7 +64,7 @@ describe("BillingRepository Stripe", () => {
 
 		await expect(
 			repository.recordStripeCreditReversalAndEnqueueProjection(
-				{ projectKey: "wiseley" },
+				projectInstanceContext("wiseley"),
 				stripeReversalInput({
 					reversalAmount: Number(unsafeAmount),
 					rawPayload: { id: "re_unsafe", amount: Number(unsafeAmount) },
@@ -88,7 +85,6 @@ describe("BillingRepository Stripe", () => {
 
 	it("records skipped Stripe reversal events for invalid original catalog amounts", async () => {
 		const database = new FakeDatabase([
-			[{ id: "project-id" }],
 			[{ purchase_id: "purchase-id", customer_id: "customer-id" }],
 			[{ id: "customer-id" }],
 			[
@@ -110,7 +106,7 @@ describe("BillingRepository Stripe", () => {
 
 		await expect(
 			repository.recordStripeCreditReversalAndEnqueueProjection(
-				{ projectKey: "wiseley" },
+				projectInstanceContext("wiseley"),
 				stripeReversalInput(),
 			),
 		).resolves.toEqual({
@@ -128,7 +124,6 @@ describe("BillingRepository Stripe", () => {
 
 	it("processes partial Stripe refunds with tracked reversed money and credit amounts", async () => {
 		const database = new FakeDatabase([
-			[{ id: "project-id" }],
 			[{ purchase_id: "purchase-id", customer_id: "customer-id" }],
 			[{ id: "customer-id" }],
 			[
@@ -160,7 +155,7 @@ describe("BillingRepository Stripe", () => {
 
 		await expect(
 			repository.recordStripeCreditReversalAndEnqueueProjection(
-				{ projectKey: "wiseley" },
+				projectInstanceContext("wiseley"),
 				stripeReversalInput({
 					reversalAmount: 250,
 					rawPayload: { id: "re_partial", amount: 250 },
@@ -194,7 +189,6 @@ describe("BillingRepository Stripe", () => {
 
 	it("records Stripe subscription events without synthetic purchase rows", async () => {
 		const database = new FakeDatabase([
-			[{ id: "project-id" }],
 			[{ id: "customer-id", billing_account_id: "user-1" }],
 			[{ id: "provider-customer-id" }],
 			[
@@ -230,7 +224,7 @@ describe("BillingRepository Stripe", () => {
 
 		await expect(
 			repository.recordStripeSubscriptionAndEnqueueProjection(
-				{ projectKey: "wiseley" },
+				projectInstanceContext("wiseley"),
 				stripeSubscriptionInput(),
 			),
 		).resolves.toMatchObject({
@@ -245,7 +239,6 @@ describe("BillingRepository Stripe", () => {
 
 	it("guards subscription conflict updates with provider ordering and monotonic expiry", async () => {
 		const database = new FakeDatabase([
-			[{ id: "project-id" }],
 			[{ id: "customer-id", billing_account_id: "user-1" }],
 			[{ id: "provider-customer-id" }],
 			[
@@ -273,7 +266,7 @@ describe("BillingRepository Stripe", () => {
 		const repository = new BillingRepository(database as never);
 
 		await repository.recordStripeSubscriptionAndEnqueueProjection(
-			{ projectKey: "wiseley" },
+			projectInstanceContext("wiseley"),
 			stripeSubscriptionInput(),
 		);
 

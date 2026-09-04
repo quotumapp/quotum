@@ -1,11 +1,10 @@
 import type { Context, Hono } from "hono";
 import { z } from "zod";
 import { BillingError, isBillingError } from "../billing/errors";
-import type { BillingEnv } from "../env";
 import { type RateLimitResult, rateLimitMiddleware } from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
 import {
 	requireAppleStoreKitService,
 	requireGooglePlayBillingService,
@@ -17,7 +16,7 @@ type RateLimiter = { check(key: string): RateLimitResult };
 
 export interface WebhookRoutesDependencies {
 	app: Hono<BillingHonoEnv>;
-	projects: BillingEnv["projects"];
+	contextResolver: ProjectInstanceContextResolver;
 	webhookLimiter: RateLimiter;
 	rateLimitKey: (c: Context) => string;
 	providerServices: ProjectProviderServiceResolver;
@@ -46,7 +45,7 @@ const googleWebhookSchema = z
 
 export function registerWebhookRoutes({
 	app,
-	projects,
+	contextResolver,
 	webhookLimiter,
 	rateLimitKey,
 	providerServices,
@@ -55,8 +54,16 @@ export function registerWebhookRoutes({
 	parseJson,
 	readRequestText,
 }: WebhookRoutesDependencies): void {
-	const webhookProject = (projectKey: string): ProjectContext => {
-		if (!projects.some((project) => project.key === projectKey && project.active)) {
+	const webhookProject = async (projectKey: string): Promise<ProjectInstanceContext> => {
+		const resolution = await contextResolver.resolveInstanceKey(projectKey);
+		if (resolution.kind === "unavailable") {
+			throw new BillingError(
+				"Billing project context is unavailable",
+				"BILLING_PROJECT_CONTEXT_UNAVAILABLE",
+				503,
+			);
+		}
+		if (resolution.kind !== "resolved") {
 			throw new BillingError(
 				"Billing project is not configured",
 				"BILLING_PROJECT_NOT_CONFIGURED",
@@ -64,12 +71,12 @@ export function registerWebhookRoutes({
 			);
 		}
 
-		return { projectKey };
+		return resolution.context;
 	};
 	const withWebhookFailureRecording = async <T>(
 		provider: "apple" | "google" | "stripe",
 		message: string,
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		run: () => Promise<T>,
 	): Promise<T> => {
 		try {
@@ -81,12 +88,12 @@ export function registerWebhookRoutes({
 				provider,
 				error,
 				message,
-				project.projectKey,
+				project.projectInstanceKey,
 			);
 			throw error;
 		}
 	};
-	const handleAppleWebhook = async (c: BillingContext, project: ProjectContext) =>
+	const handleAppleWebhook = async (c: BillingContext, project: ProjectInstanceContext) =>
 		withWebhookFailureRecording("apple", "Apple webhook failed", project, async () => {
 			const body = await parseJson(c.req.raw, publicWebhookMaxBodyBytes);
 			const parsed = appleWebhookSchema.safeParse(body);
@@ -99,7 +106,7 @@ export function registerWebhookRoutes({
 			).handleNotification(parsed.data);
 			return c.json({ success: true, data: result });
 		});
-	const handleGoogleWebhook = async (c: BillingContext, project: ProjectContext) =>
+	const handleGoogleWebhook = async (c: BillingContext, project: ProjectInstanceContext) =>
 		withWebhookFailureRecording("google", "Google webhook failed", project, async () => {
 			const authorizationHeader = c.req.header("authorization") ?? null;
 			if (!hasBearerToken(authorizationHeader)) {
@@ -127,7 +134,7 @@ export function registerWebhookRoutes({
 			});
 			return c.json({ success: true, data: result });
 		});
-	const handleStripeWebhook = async (c: BillingContext, project: ProjectContext) =>
+	const handleStripeWebhook = async (c: BillingContext, project: ProjectInstanceContext) =>
 		withWebhookFailureRecording("stripe", "Stripe webhook failed", project, async () => {
 			const rawBody = await readRequestText(c.req.raw, publicWebhookMaxBodyBytes);
 			const result = await requireStripeBillingService(
@@ -139,18 +146,6 @@ export function registerWebhookRoutes({
 			return c.json({ success: true, data: result });
 		});
 
-	app.use(
-		"/v1/webhooks/apple",
-		rateLimitMiddleware({ limiter: webhookLimiter, key: rateLimitKey }),
-	);
-	app.use(
-		"/v1/webhooks/google",
-		rateLimitMiddleware({ limiter: webhookLimiter, key: rateLimitKey }),
-	);
-	app.use(
-		"/v1/webhooks/stripe",
-		rateLimitMiddleware({ limiter: webhookLimiter, key: rateLimitKey }),
-	);
 	app.use(
 		"/v1/projects/:projectKey/webhooks/stripe",
 		rateLimitMiddleware({ limiter: webhookLimiter, key: rateLimitKey }),
@@ -165,22 +160,16 @@ export function registerWebhookRoutes({
 	);
 
 	app.post("/v1/projects/:projectKey/webhooks/apple", async (c) =>
-		handleAppleWebhook(c, webhookProject(c.req.param("projectKey"))),
+		handleAppleWebhook(c, await webhookProject(c.req.param("projectKey"))),
 	);
 
 	app.post("/v1/projects/:projectKey/webhooks/google", async (c) =>
-		handleGoogleWebhook(c, webhookProject(c.req.param("projectKey"))),
+		handleGoogleWebhook(c, await webhookProject(c.req.param("projectKey"))),
 	);
-
-	app.post("/v1/webhooks/apple", async (c) => handleAppleWebhook(c, { projectKey: "voysee" }));
-
-	app.post("/v1/webhooks/google", async (c) => handleGoogleWebhook(c, { projectKey: "voysee" }));
 
 	app.post("/v1/projects/:projectKey/webhooks/stripe", async (c) =>
-		handleStripeWebhook(c, webhookProject(c.req.param("projectKey"))),
+		handleStripeWebhook(c, await webhookProject(c.req.param("projectKey"))),
 	);
-
-	app.post("/v1/webhooks/stripe", async (c) => handleStripeWebhook(c, { projectKey: "voysee" }));
 }
 
 function recordWebhookFailure(

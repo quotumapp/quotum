@@ -1,16 +1,33 @@
 import { timingSafeEqual } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
-import type { ProjectApiKeyResolver } from "../projects/config";
-import type { ProjectContext } from "../projects/context";
+import {
+	isTenantTrafficEligible,
+	type ProjectInstanceContext,
+	type ProjectInstanceContextResolver,
+} from "../projects/context";
 
 export function requireApiKey(
-	expectedApiKeyOrResolver: string | ProjectApiKeyResolver,
-): MiddlewareHandler<{ Variables: { project: ProjectContext } }> {
+	resolver: ProjectInstanceContextResolver,
+): MiddlewareHandler<{ Variables: { project: ProjectInstanceContext } }> {
 	return async (c, next) => {
-		const authorization = c.req.header("authorization");
-		const project = resolveProjectContext(expectedApiKeyOrResolver, authorization);
+		const token = parseBearerToken(c.req.header("authorization"));
+		const resolution =
+			token === null ? { kind: "not_found" as const } : await resolver.resolveCredential(token);
 
-		if (project === null) {
+		if (resolution.kind === "unavailable") {
+			return c.json(
+				{
+					success: false,
+					error: {
+						code: "BILLING_PROJECT_CONTEXT_UNAVAILABLE",
+						message: "Billing project context is unavailable",
+					},
+				},
+				503,
+			);
+		}
+
+		if (resolution.kind !== "resolved" || !isTenantTrafficEligible(resolution.context)) {
 			return c.json(
 				{
 					success: false,
@@ -23,22 +40,9 @@ export function requireApiKey(
 			);
 		}
 
-		c.set("project", project);
+		c.set("project", resolution.context);
 		await next();
 	};
-}
-
-function resolveProjectContext(
-	expectedApiKeyOrResolver: string | ProjectApiKeyResolver,
-	authorization: string | undefined,
-): ProjectContext | null {
-	if (typeof expectedApiKeyOrResolver === "string") {
-		const expected = `Bearer ${expectedApiKeyOrResolver}`;
-		return constantTimeEquals(authorization ?? "", expected) ? { projectKey: "voysee" } : null;
-	}
-
-	const token = parseBearerToken(authorization);
-	return token === null ? null : expectedApiKeyOrResolver(token);
 }
 
 function parseBearerToken(authorization: string | undefined): string | null {

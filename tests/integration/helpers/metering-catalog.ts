@@ -1,5 +1,6 @@
 import type { CatalogIntent } from "../../../src/catalog/types";
 import type { BillingRepository } from "../../../src/db/repository";
+import { integrationProjectContext } from "./platform-fixture";
 
 export const aiCreditsCatalog: CatalogIntent = {
 	features: [
@@ -74,7 +75,7 @@ export async function publishAiCreditsCatalog(
 	repository: BillingRepository,
 	projectKey = "voysee",
 ): Promise<void> {
-	const project = { projectKey };
+	const project = integrationProjectContext(projectKey);
 	const preview = await repository.previewCatalog(project, {
 		expectedRevision: null,
 		actor: "integration-catalog-fixture",

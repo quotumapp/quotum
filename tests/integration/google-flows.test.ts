@@ -13,6 +13,7 @@ import {
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 import { publishAiCreditsCatalog } from "./helpers/metering-catalog";
@@ -168,7 +169,7 @@ localDescribe("Google route flows integration", () => {
 		expect(response.status).toBe(200);
 		expect(
 			await context.repository.getMeteringBalance(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				"integration_user",
 				"ai_credits",
 			),
@@ -388,7 +389,7 @@ localDescribe("Google route flows integration", () => {
 		});
 		expect(
 			await context.repository.getMeteringBalance(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				"integration_user",
 				"ai_credits",
 			),
@@ -417,7 +418,7 @@ localDescribe("Google route flows integration", () => {
 		});
 		expect(
 			await context.repository.getMeteringBalance(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				"integration_user",
 				"ai_credits",
 			),
@@ -440,7 +441,7 @@ localDescribe("Google route flows integration", () => {
 		});
 		expect(
 			await context.repository.getMeteringBalance(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				"integration_user",
 				"ai_credits",
 			),

@@ -1,5 +1,4 @@
 import type { Context, Hono, MiddlewareHandler } from "hono";
-import { z } from "zod";
 import {
 	parseBillingAccountIdParam,
 	parseCatalogProductListQuery,
@@ -25,8 +24,8 @@ import { type RateLimitResult, rateLimitMiddleware } from "../http/rate-limit";
 import { type BillingLogger, safelyLogInfo } from "../observability/logger";
 import type { BillingMetrics } from "../observability/metrics";
 import type { BillingAdminOperations } from "../operations/admin";
-import type { ProjectContext } from "../projects/context";
-import type { BillingContext, BillingHonoEnv, BillingProjectProvisionerLike } from "./types";
+import type { ProjectInstanceContext } from "../projects/context";
+import type { BillingContext, BillingHonoEnv } from "./types";
 
 type RateLimiter = { check(key: string): RateLimitResult };
 
@@ -38,15 +37,8 @@ export interface AdminRoutesDependencies {
 	billingMetrics: BillingMetrics;
 	billingLogger: BillingLogger;
 	getAdminBillingReader: () => AdminBillingReader | null;
-	getProjectProvisioner: () => BillingProjectProvisionerLike | null;
 	adminOperations: BillingAdminOperations | null;
-	parsePrivateJson(request: Request): Promise<unknown>;
 }
-
-const adminProjectUpsertBodySchema = z.object({
-	name: z.string().trim().min(1),
-	active: z.boolean().optional(),
-});
 
 export function registerAdminRoutes({
 	app,
@@ -56,9 +48,7 @@ export function registerAdminRoutes({
 	billingMetrics,
 	billingLogger,
 	getAdminBillingReader,
-	getProjectProvisioner,
 	adminOperations,
-	parsePrivateJson,
 }: AdminRoutesDependencies): void {
 	app.use("/v1/admin/*", rateLimitMiddleware({ limiter: adminLimiter, key: rateLimitKey }));
 	app.use("/v1/admin/store-events/:eventId/replay", requireOperatorApiKey(operatorApiKey));
@@ -166,7 +156,7 @@ export function registerAdminRoutes({
 		const detailQuery = parseStoreEventDetailQuery(queryParams(c));
 		if (detailQuery.includeRawPayload) {
 			safelyLogInfo(billingLogger, "Billing admin raw store event payload read", {
-				projectKey: project.projectKey,
+				projectKey: project.projectInstanceKey,
 				eventId,
 			});
 		}
@@ -216,7 +206,7 @@ export function registerAdminRoutes({
 		const project = privateProject(c);
 		const eventId = c.req.param("eventId");
 		safelyLogInfo(billingLogger, "Billing admin store event replay requested", {
-			projectKey: project.projectKey,
+			projectKey: project.projectInstanceKey,
 			eventId,
 		});
 		const result = await requireBillingAdminOperations(adminOperations).replayStoreEvent(
@@ -229,7 +219,7 @@ export function registerAdminRoutes({
 	app.post("/v1/admin/reconciliation/subscriptions/run", async (c) => {
 		const project = privateProject(c);
 		safelyLogInfo(billingLogger, "Billing admin subscription reconciliation requested", {
-			projectKey: project.projectKey,
+			projectKey: project.projectInstanceKey,
 		});
 		const result =
 			await requireBillingAdminOperations(adminOperations).runSubscriptionReconciliation();
@@ -240,26 +230,12 @@ export function registerAdminRoutes({
 		const project = privateProject(c);
 		const jobId = c.req.param("jobId");
 		safelyLogInfo(billingLogger, "Billing admin projection retry requested", {
-			projectKey: project.projectKey,
+			projectKey: project.projectInstanceKey,
 			jobId,
 		});
 		const result = await requireBillingAdminOperations(adminOperations).retryProjectionSyncJob(
 			project,
 			jobId,
-		);
-		return c.json({ success: true, data: result });
-	});
-
-	app.post("/v1/admin/projects", async (c) => {
-		const body = await parsePrivateJson(c.req.raw);
-		const parsed = adminProjectUpsertBodySchema.safeParse(body);
-		if (!parsed.success) {
-			throw new BillingError("Invalid project body", "INVALID_REQUEST", 400);
-		}
-
-		const result = await requireBillingProjectProvisioner(getProjectProvisioner()).upsertProject(
-			privateProject(c),
-			{ name: parsed.data.name, active: parsed.data.active ?? true },
 		);
 		return c.json({ success: true, data: result });
 	});
@@ -297,7 +273,7 @@ export function requireOperatorApiKey(operatorApiKey: string | null): Middleware
 	};
 }
 
-function privateProject(c: BillingContext): ProjectContext {
+function privateProject(c: BillingContext): ProjectInstanceContext {
 	const project = c.get("project");
 	if (project === undefined) {
 		throw new BillingError("Billing project context is required", "BILLING_PROJECT_REQUIRED", 401);
@@ -335,20 +311,6 @@ function requireAdminBillingReader(reader: AdminBillingReader | null): AdminBill
 	}
 
 	return reader;
-}
-
-function requireBillingProjectProvisioner(
-	provisioner: BillingProjectProvisionerLike | null,
-): BillingProjectProvisionerLike {
-	if (provisioner === null) {
-		throw new BillingError(
-			"Billing project provisioner is not configured",
-			"BILLING_ADMIN_NOT_CONFIGURED",
-			501,
-		);
-	}
-
-	return provisioner;
 }
 
 function requireBillingAdminOperations(

@@ -82,11 +82,14 @@ export function createFixedWindowRateLimiter(options: {
 export function rateLimitMiddleware(options: {
 	limiter: { check(key: string): RateLimitResult };
 	key: (c: Context) => string;
+	headers?: "always" | "rejected_only";
 }): MiddlewareHandler {
 	return async (c, next) => {
 		const result = options.limiter.check(options.key(c));
-		c.header("ratelimit-remaining", String(result.remaining));
-		c.header("ratelimit-reset", result.resetAt.toISOString());
+		if (options.headers !== "rejected_only" || !result.allowed) {
+			c.header("ratelimit-remaining", String(result.remaining));
+			c.header("ratelimit-reset", result.resetAt.toISOString());
+		}
 
 		if (!result.allowed) {
 			return c.json(
@@ -102,8 +105,12 @@ export function rateLimitMiddleware(options: {
 	};
 }
 
+export function requestIp(c: Context, options: RequestRateLimitKeyOptions = {}): string {
+	return requestClientIp(c, options);
+}
+
 export function requestIpAndPath(c: Context, options: RequestRateLimitKeyOptions = {}): string {
-	const ip = requestClientIp(c, options);
+	const ip = requestIp(c, options);
 	const pathname = normalizedRateLimitPath(new URL(c.req.url).pathname);
 
 	return `${ip}:${pathname}`;
@@ -115,7 +122,7 @@ export function requestProjectIpAndPath(
 ): string {
 	const ip = requestClientIp(c, options);
 	const pathname = normalizedRateLimitPath(new URL(c.req.url).pathname);
-	const projectKey = rateLimitProjectKey(c, pathname, options.knownProjectKeys);
+	const projectKey = rateLimitProjectKey(c, options.knownProjectKeys);
 
 	return `${projectKey}:${ip}:${pathname}`;
 }
@@ -135,14 +142,13 @@ function requestClientIp(c: Context, options: RequestRateLimitKeyOptions): strin
 	}
 }
 
-function rateLimitProjectKey(
-	c: Context,
-	pathname: string,
-	knownProjectKeys?: ReadonlySet<string>,
-): string {
-	const contextProject = c.get("project") as { projectKey?: unknown } | undefined;
-	if (typeof contextProject?.projectKey === "string" && contextProject.projectKey.trim() !== "") {
-		return `project:${contextProject.projectKey}`;
+function rateLimitProjectKey(c: Context, knownProjectKeys?: ReadonlySet<string>): string {
+	const contextProject = c.get("project") as { projectInstanceKey?: unknown } | undefined;
+	if (
+		typeof contextProject?.projectInstanceKey === "string" &&
+		contextProject.projectInstanceKey.trim() !== ""
+	) {
+		return `project:${contextProject.projectInstanceKey}`;
 	}
 
 	const paramProjectKey = c.req.param("projectKey")?.trim();
@@ -152,10 +158,6 @@ function rateLimitProjectKey(
 		(knownProjectKeys === undefined || knownProjectKeys.has(paramProjectKey))
 	) {
 		return `project:${paramProjectKey}`;
-	}
-
-	if (/^\/v1\/webhooks\/(?:apple|google|stripe)$/.test(pathname)) {
-		return "project:voysee";
 	}
 
 	return "project:unknown";

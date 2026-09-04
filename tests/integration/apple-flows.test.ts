@@ -12,6 +12,7 @@ import {
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 import { publishAiCreditsCatalog } from "./helpers/metering-catalog";
@@ -140,7 +141,7 @@ localDescribe("Apple route flows integration", () => {
 		if (catalogState.allocations !== 1) throw new Error(JSON.stringify(catalogState));
 		expect(
 			await context.repository.getMeteringBalance(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				"integration_user",
 				"ai_credits",
 			),
@@ -168,17 +169,17 @@ localDescribe("Apple route flows integration", () => {
 			projectionIdempotencyKey: "apple:catalog-topup:1",
 		};
 		await context.repository.recordStoreKitTransactionAndEnqueueProjection(
-			{ projectKey: "voysee" },
+			integrationProjectContext(),
 			topupInput,
 		);
 		await context.repository.recordStoreKitTransactionAndEnqueueProjection(
-			{ projectKey: "voysee" },
+			integrationProjectContext(),
 			topupInput,
 		);
 
 		expect(
 			await context.repository.getMeteringBalance(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				"integration_user",
 				"ai_credits",
 			),
@@ -254,7 +255,7 @@ localDescribe("Apple route flows integration", () => {
 
 		await withIsoDateSqlParameters(() =>
 			context.repository.recordStoreKitTransactionAndEnqueueProjection(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				{
 					billingAccountId: "integration_user",
 					appAccountToken: null,
@@ -281,7 +282,7 @@ localDescribe("Apple route flows integration", () => {
 		);
 		await withIsoDateSqlParameters(() =>
 			context.repository.recordStoreKitTransactionAndEnqueueProjection(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				{
 					billingAccountId: null,
 					appAccountToken: null,
@@ -354,7 +355,7 @@ localDescribe("Apple route flows integration", () => {
 		};
 
 		await context.repository.recordStoreKitTransactionAndEnqueueProjection(
-			{ projectKey: "voysee" },
+			integrationProjectContext(),
 			{
 				...base,
 				billingAccountId: "integration_user",
@@ -369,7 +370,7 @@ localDescribe("Apple route flows integration", () => {
 			},
 		);
 		await context.repository.recordStoreKitTransactionAndEnqueueProjection(
-			{ projectKey: "voysee" },
+			integrationProjectContext(),
 			{
 				...base,
 				billingAccountId: null,
@@ -384,7 +385,7 @@ localDescribe("Apple route flows integration", () => {
 			},
 		);
 		await context.repository.recordStoreKitTransactionAndEnqueueProjection(
-			{ projectKey: "voysee" },
+			integrationProjectContext(),
 			{
 				...base,
 				billingAccountId: null,

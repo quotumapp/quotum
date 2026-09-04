@@ -83,18 +83,14 @@ export const publicBillingTableResetOrder = [
 
 export const integrationProjects = [
 	{
-		key: "voysee",
+		projectInstanceKey: "voysee",
 		name: "Voysee",
-		apiKey: "voysee-integration-api-key",
-		active: true,
 		projectionUrl: "https://voysee.projection.integration.test",
 		projectionSecret: "voysee-projection-secret",
 	},
 	{
-		key: "wiseley",
+		projectInstanceKey: "wiseley",
 		name: "Wiseley",
-		apiKey: "wiseley-integration-api-key",
-		active: true,
 		projectionUrl: "https://wiseley.projection.integration.test",
 		projectionSecret: "wiseley-projection-secret",
 	},
@@ -227,7 +223,6 @@ export async function resetPublicBillingTables(sql: SQL): Promise<void> {
 			features,
 			catalog_audit_log,
 			catalog_drafts,
-			catalog_revisions,
 			projection_sync_jobs,
 			store_events,
 			entitlements,
@@ -239,6 +234,9 @@ export async function resetPublicBillingTables(sql: SQL): Promise<void> {
 			customers
 		RESTART IDENTITY CASCADE
 	`;
+	// `projects.published_catalog_revision_id` references catalog revisions. Truncating
+	// that parent with CASCADE would also erase the platform-owned project instances.
+	await sql`DELETE FROM catalog_revisions`;
 }
 
 export async function seedIntegrationProjectsAndCatalog(
@@ -246,14 +244,14 @@ export async function seedIntegrationProjectsAndCatalog(
 	projects: readonly IntegrationProjectFixture[] = integrationProjects,
 ): Promise<void> {
 	for (const project of projects) {
-		await sql`
-			INSERT INTO projects (key, name, active)
-			VALUES (${project.key}, ${project.name}, true)
-			ON CONFLICT (key) DO UPDATE SET
-				name = EXCLUDED.name,
-				active = EXCLUDED.active,
-				updated_at = now()
+		const rows = await sql<Array<{ id: string }>>`
+			SELECT id
+			FROM projects
+			WHERE key = ${project.projectInstanceKey}
 		`;
+		if (rows[0] === undefined) {
+			throw new Error(`Integration project ${project.projectInstanceKey} was not bootstrapped`);
+		}
 
 		for (const product of seededProducts) {
 			await sql`
@@ -269,7 +267,7 @@ export async function seedIntegrationProjectsAndCatalog(
 				SELECT id, ${product.key}, ${product.entitlementKey}, ${product.creditAmount},
 					${product.name}, ${product.type}, true
 				FROM projects
-				WHERE key = ${project.key}
+				WHERE key = ${project.projectInstanceKey}
 				ON CONFLICT (project_id, key) DO UPDATE SET
 					entitlement_key = EXCLUDED.entitlement_key,
 					credit_amount = EXCLUDED.credit_amount,
@@ -302,7 +300,7 @@ export async function seedIntegrationProjectsAndCatalog(
 					FROM projects
 					JOIN products ON products.project_id = projects.id
 						AND products.key = ${storeProduct.productKey}
-					WHERE projects.key = ${project.key}
+					WHERE projects.key = ${project.projectInstanceKey}
 					ON CONFLICT (project_id, provider, external_product_id)
 					WHERE external_price_id IS NULL
 					DO UPDATE SET
@@ -336,7 +334,7 @@ export async function seedIntegrationProjectsAndCatalog(
 					FROM projects
 					JOIN products ON products.project_id = projects.id
 						AND products.key = ${storeProduct.productKey}
-					WHERE projects.key = ${project.key}
+					WHERE projects.key = ${project.projectInstanceKey}
 					ON CONFLICT (project_id, provider, external_product_id, external_price_id)
 					WHERE external_price_id IS NOT NULL
 					DO UPDATE SET

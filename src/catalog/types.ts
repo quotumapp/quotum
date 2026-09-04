@@ -1,5 +1,5 @@
 import type { BillingChannel, BillingProvider } from "../billing/types";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 
 export interface CatalogFeatureIntent {
 	key: string;
@@ -161,7 +161,10 @@ export interface PublishedCatalog {
 }
 
 export interface CatalogControlPlaneLike {
-	getPublished?(project: ProjectContext): Promise<PublishedCatalog>;
-	preview(project: ProjectContext, input: CatalogPreviewInput): Promise<CatalogPreview>;
-	publish(project: ProjectContext, input: CatalogPublishInput): Promise<CatalogPublishResult>;
+	getPublished?(project: ProjectInstanceContext): Promise<PublishedCatalog>;
+	preview(project: ProjectInstanceContext, input: CatalogPreviewInput): Promise<CatalogPreview>;
+	publish(
+		project: ProjectInstanceContext,
+		input: CatalogPublishInput,
+	): Promise<CatalogPublishResult>;
 }

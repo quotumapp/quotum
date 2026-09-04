@@ -1,28 +1,36 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { type BillingDatabase, db as defaultDb } from "../db/client";
-import type { BillingEnv } from "../env";
-import type { BillingCatalogDeclaration } from "../projects/config";
+import type { ProjectInstanceContextResolver } from "../projects/context";
+import type { BillingCatalogDeclaration, ProjectCatalogImport } from "./import-config";
 
-export async function syncConfiguredProjectsAndCatalog(
-	env: Pick<BillingEnv, "projects">,
+export async function syncConfiguredCatalog(
+	imports: readonly ProjectCatalogImport[],
+	contextResolver: ProjectInstanceContextResolver,
 	database: BillingDatabase = defaultDb,
 ): Promise<void> {
+	const resolvedImports = await Promise.all(
+		imports.map(async (project) => {
+			const resolution = await contextResolver.resolveInstanceKey(project.projectInstanceKey);
+			if (resolution.kind !== "resolved") {
+				throw new Error(
+					`Catalog import project instance ${project.projectInstanceKey} is not available: ${resolution.kind}`,
+				);
+			}
+			return { project, context: resolution.context };
+		}),
+	);
+
 	await database.transaction(async (tx) => {
-		for (const project of env.projects) {
+		for (const { project, context } of resolvedImports) {
 			const rows = await tx.execute<{
-				id: string;
 				published_catalog_revision_id: string | number | bigint | null;
 			}>(drizzleSql`
-				INSERT INTO projects (key, name, active)
-				VALUES (${project.key}, ${project.key}, ${project.active})
-				ON CONFLICT (key) DO UPDATE SET
-					active = EXCLUDED.active,
-					updated_at = now()
-				RETURNING id, published_catalog_revision_id
+				SELECT published_catalog_revision_id
+				FROM projects
+				WHERE id = ${context.projectInstanceId}
 			`);
-			const projectId = rows[0]?.id;
-			if (projectId === undefined) {
-				throw new Error(`Billing project ${project.key} could not be synchronized`);
+			if (rows[0] === undefined) {
+				throw new Error(`Billing project instance ${project.projectInstanceKey} was not found`);
 			}
 
 			// This command is an explicit development import. Once the versioned control plane has
@@ -32,8 +40,8 @@ export async function syncConfiguredProjectsAndCatalog(
 				continue;
 			}
 
-			for (const declaration of project.catalog ?? []) {
-				await syncCatalogDeclaration(tx as BillingDatabase, projectId, declaration);
+			for (const declaration of project.catalog) {
+				await syncCatalogDeclaration(tx as BillingDatabase, context.projectInstanceId, declaration);
 			}
 		}
 	});

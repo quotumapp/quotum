@@ -1,12 +1,12 @@
 import { BillingError } from "../billing/errors";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 import type { SubscriptionReconciliationRunResult } from "../workers/subscription-reconciliation";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface BillingAdminReplayWorker {
 	runOne(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		eventId: string,
 	): Promise<{
 		eventId: string;
@@ -20,7 +20,7 @@ export interface BillingAdminReconciliationWorker {
 
 export interface BillingAdminProjectionRepository {
 	retryProjectionSyncJob(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		jobId: string,
 	): Promise<{ jobId: string; status: "pending" }>;
 }
@@ -44,7 +44,7 @@ export class BillingAdminOperations {
 		this.projectionRepository = projectionRepository;
 	}
 
-	async replayStoreEvent(project: ProjectContext, eventId: string) {
+	async replayStoreEvent(project: ProjectInstanceContext, eventId: string) {
 		const trimmedEventId = eventId.trim();
 		if (!uuidPattern.test(trimmedEventId)) {
 			throw new BillingError("Invalid store event id", "INVALID_REQUEST", 400);
@@ -57,7 +57,7 @@ export class BillingAdminOperations {
 		return this.reconciliationWorker.runOnce();
 	}
 
-	retryProjectionSyncJob(project: ProjectContext, jobId: string) {
+	retryProjectionSyncJob(project: ProjectInstanceContext, jobId: string) {
 		const trimmedJobId = jobId.trim();
 		if (!uuidPattern.test(trimmedJobId)) {
 			throw new BillingError("Invalid projection job id", "INVALID_REQUEST", 400);

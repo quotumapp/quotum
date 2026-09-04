@@ -32,6 +32,7 @@ export interface SubscriptionChangePreview {
 
 export interface SubscriptionChangeOperation {
 	changeId: string;
+	projectInstanceId: string;
 	projectKey: string;
 	status: "pending" | "processing" | "applied" | "failed" | "cancelled";
 	changeKind: "upgrade" | "downgrade" | "quantity";
@@ -53,6 +54,7 @@ export interface UsageInvoiceJob {
 	jobId: string;
 	periodId: string;
 	adjustmentId: string | null;
+	projectInstanceId: string;
 	projectKey: string;
 	billingAccountId: string;
 	externalCustomerId: string;

@@ -1,14 +1,20 @@
 import type { SQL } from "bun";
+import { PostgresProjectInstanceContextResolver } from "../../../src/composition/project-instance-persistence";
 import { type BillingDatabase, createBillingDatabaseConnection } from "../../../src/db/client";
 import { BillingRepository } from "../../../src/db/repository";
 import type { BillingEnv } from "../../../src/env";
+import type { ProjectInstanceContextResolver } from "../../../src/projects/context";
 import { integrationProjects } from "./catalog-fixtures";
+import { integrationProjectContexts } from "./platform-fixture";
+
+export { integrationProjectContext } from "./platform-fixture";
 
 export interface LocalPostgresContext {
 	env: BillingEnv;
 	sql: SQL;
 	db: BillingDatabase;
 	repository: BillingRepository;
+	projectContextResolver: ProjectInstanceContextResolver;
 }
 
 export function isPostgresIntegrationEnabled(
@@ -42,6 +48,7 @@ export async function createLocalPostgresContext(): Promise<LocalPostgresContext
 		sql: connection.sql,
 		db: connection.db,
 		repository: new BillingRepository(connection.db as never),
+		projectContextResolver: new PostgresProjectInstanceContextResolver(connection.sql),
 	};
 }
 
@@ -54,7 +61,22 @@ export function createIntegrationBillingEnv(
 		authMode: "api_key",
 		operatorApiKey: "billing-integration-operator-key",
 		trustGatewayProjectHeader: false,
-		projects: integrationProjects.map(({ name: _name, ...project }) => project),
+		projectRuntime: integrationProjectContexts().map((context) => {
+			const configured = integrationProjects.find(
+				(project) => project.projectInstanceKey === context.projectInstanceKey,
+			);
+			return configured === undefined
+				? {
+						projectInstanceKey: context.projectInstanceKey,
+						projectionUrl: `https://${context.projectInstanceKey}.projection.integration.test`,
+						projectionSecret: `${context.projectInstanceKey}-projection-secret`,
+					}
+				: {
+						projectInstanceKey: configured.projectInstanceKey,
+						projectionUrl: configured.projectionUrl,
+						projectionSecret: configured.projectionSecret,
+					};
+		}),
 		runtimeEnvironment: "test",
 		workerId: "integration-worker",
 		workerPollIntervalMs: 5000,

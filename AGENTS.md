@@ -2,12 +2,13 @@
 
 ## Project Structure & Module Organization
 
-This is a Bun/TypeScript billing service. Runtime code lives in `src/`: `app.ts` and `app/` build
-the Hono API; `index.ts` and `runtime.ts` start the service and its six polling runtimes; `env.ts`
-validates configuration; `billing/` contains domain logic; `catalog/` owns versioned publication;
-`db/` contains the Drizzle/Postgres client and repository domains; `workers/` contains projection,
-provider-replay, reconciliation, metering-maintenance, recurring-billing, and automatic-top-up workers;
-and `projections/` contains HTTP projection delivery. Tests live in `tests/` and mirror the source
+This is a Bun/TypeScript modular billing service. Runtime code lives in `src/`: `app.ts` and `app/`
+build the Hono API; `index.ts`, `runtime.ts`, and `composition/` wire the service; `env.ts` validates
+configuration; `platform/` owns organizations, logical projects, instances, and credentials behind
+consumer-owned ports; `billing/` contains billing domain logic; `catalog/` owns versioned
+publication; `db/` contains billing-owned Drizzle/Postgres repositories; `workers/` contains
+projection, provider-replay, reconciliation, metering-maintenance, recurring-billing, and automatic
+top-up workers; and `projections/` contains HTTP projection delivery. Tests mirror the source
 areas, with real-Postgres journeys under `tests/integration/` and process-level journeys under
 `tests/e2e/`. Database schema changes belong in ordered files under `migrations/`.
 
@@ -17,13 +18,23 @@ areas, with real-Postgres journeys under `tests/integration/` and process-level 
 - `bun run dev`: run `src/index.ts` with Bun hot reload.
 - `POSTGRES_URI=... bun run migrate`: apply pending SQL migrations from `migrations/`.
 - `POSTGRES_URI=... bun run migrate:status`: inspect migration status and checksums.
+- Before 1.0 the schema files under `migrations/` evolve in place; recreate development databases
+  instead of migrating them.
+- `POSTGRES_URI=... BILLING_PLATFORM_BOOTSTRAP_JSON=... bun run platform:bootstrap -- --check`:
+  verify the exact platform topology and declared credentials; it exits nonzero until both exist.
+- `bun run platform:bootstrap -- --apply --credentials-out ./platform-credentials.json` with
+  `POSTGRES_URI` and `BILLING_PLATFORM_BOOTSTRAP_JSON`: apply the exact topology and create a new,
+  exclusive-mode `0600` file containing one-time plaintext project credentials.
+- `POSTGRES_URI=... BILLING_CATALOG_IMPORT_JSON=... bun run catalog:provision`: explicitly import a
+  development catalog for database-bootstrapped project instances.
+- `bun run check:boundaries`: enforce source ownership, dependency, SQL, and migration boundaries.
 - `bun run test`: run the Bun test suite under `tests/`.
 - `bun run test:integration`: run Docker-backed Postgres integration tests under `tests/integration/`.
 - `bun run test:e2e`: run black-box E2E tests that boot the real service process.
 - `bun run typecheck`: run TypeScript with `tsc --noEmit`.
 - `bun run lint`: run Biome checks.
 - `bun run format:check`: verify Biome formatting.
-- `bun run quality`: run typecheck, lint, and format checks together.
+- `bun run quality`: run boundary, typecheck, lint, and format checks together.
 
 Apply the current schema with `POSTGRES_URI=... bun run migrate`. Do not add external database API,
 RLS, role-grant, or stored-procedure assumptions back into this service.
@@ -51,6 +62,11 @@ The current history is minimal and uses a concise imperative subject, for exampl
 ## Security & Configuration Tips
 
 Never commit `POSTGRES_URI`, project API keys, projection secrets, provider credentials, or
-production database URLs. Billing never writes product app databases directly; configure project
-`projectionUrl` and `projectionSecret` values through `BILLING_PROJECTS_JSON` when exercising
-projection delivery. Treat SQL migrations and provider webhook handling as security-sensitive code.
+production database URLs. Project identity and credential verifiers are database-owned; plaintext
+credentials are issued once by `platform:bootstrap`; move its `0600` output into a backend secret
+store and remove the local file. Billing never writes product app databases directly. Configure
+projection and provider adapters through `BILLING_PROJECT_RUNTIME_JSON`; use
+`BILLING_CATALOG_IMPORT_JSON` only for the explicit development import command.
+`BILLING_PROJECTS_JSON` is rejected. Only canonical project-instance webhooks under
+`/v1/projects/:projectKey/webhooks/:provider` exist; unscoped `/v1/webhooks/*` aliases are removed.
+Treat SQL migrations, bootstrap output, and provider webhook handling as security-sensitive code.

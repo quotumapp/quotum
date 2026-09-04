@@ -1,7 +1,7 @@
 import { BillingError, NotConfiguredError } from "../billing/errors";
 import type { BillingRepository } from "../db/repository";
 import type { AppleBillingEnv, BillingEnv, GooglePlayBillingEnv, StripeBillingEnv } from "../env";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 import { AppleStoreKitClient, buildAppleStoreKitConfig } from "../providers/apple/client";
 import { AppleStoreKitService } from "../providers/apple/service";
 import { GooglePlayDeveloperClient } from "../providers/google/client";
@@ -34,15 +34,17 @@ export function createProjectProviderServiceResolver({
 }): ProjectProviderServiceResolver {
 	const cache = new Map<string, ProjectProviderServiceSet>();
 
-	const servicesForProject = (project: ProjectContext) => {
-		const cached = cache.get(project.projectKey);
+	const servicesForProject = (project: ProjectInstanceContext) => {
+		const cached = cache.get(project.projectInstanceKey);
 		if (cached !== undefined) {
 			return cached;
 		}
 
-		const overrides = projectProviderServices?.[project.projectKey];
-		const projectConfig = env.projects.find((candidate) => candidate.key === project.projectKey);
-		if (projectConfig === undefined || !projectConfig.active) {
+		const overrides = projectProviderServices?.[project.projectInstanceKey];
+		const projectConfig = env.projectRuntime.find(
+			(candidate) => candidate.projectInstanceKey === project.projectInstanceKey,
+		);
+		if (projectConfig === undefined) {
 			throw new BillingError(
 				"Billing project is not configured",
 				"BILLING_PROJECT_NOT_CONFIGURED",
@@ -86,7 +88,7 @@ export function createProjectProviderServiceResolver({
 							),
 						),
 		};
-		cache.set(project.projectKey, services);
+		cache.set(project.projectInstanceKey, services);
 		return services;
 	};
 
@@ -122,7 +124,7 @@ function legacyService<Service>(
 }
 
 function createAppleStoreKitServiceFromConfig(
-	project: ProjectContext,
+	project: ProjectInstanceContext,
 	apple: AppleBillingEnv | null,
 	getRepository: () => BillingRepository,
 ): AppleStoreKitService | null {
@@ -139,7 +141,7 @@ function createAppleStoreKitServiceFromConfig(
 }
 
 function createGooglePlayBillingServiceFromConfig(
-	project: ProjectContext,
+	project: ProjectInstanceContext,
 	googlePlay: GooglePlayBillingEnv | null,
 	getRepository: () => BillingRepository,
 ): GooglePlayBillingService | null {
@@ -156,7 +158,7 @@ function createGooglePlayBillingServiceFromConfig(
 }
 
 function createStripeBillingServiceFromConfig(
-	project: ProjectContext,
+	project: ProjectInstanceContext,
 	stripe: StripeBillingEnv | null,
 	projectionContract: "billing_state_v1",
 	getRepository: () => BillingRepository,
@@ -167,7 +169,7 @@ function createStripeBillingServiceFromConfig(
 
 	const config = buildStripeConfig(stripe);
 	return new StripeBillingService({
-		config: { ...config, projectKey: project.projectKey, projectionContract },
+		config: { ...config, projectKey: project.projectInstanceKey, projectionContract },
 		client: new StripeBillingClient(config),
 		repository: getRepository().forProject(project),
 	});

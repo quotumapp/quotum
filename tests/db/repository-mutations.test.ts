@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { BillingRepository } from "../../src/db/repository";
+import { projectInstanceContext } from "../helpers/project-context";
 import { FakeDatabase, purchaseProjectionInput } from "./repository-fixture";
 
 describe("BillingRepository mutations", () => {
 	it("guards purchase conflict updates against terminal status regressions", async () => {
 		const database = new FakeDatabase([
-			[{ id: "project-id" }],
 			[{ id: "customer-id", billing_account_id: "user-1" }],
 			[
 				{
@@ -28,7 +28,7 @@ describe("BillingRepository mutations", () => {
 		const repository = new BillingRepository(database as never);
 
 		await repository.recordPurchaseAndEnqueueProjection(
-			{ projectKey: "wiseley" },
+			projectInstanceContext("wiseley"),
 			purchaseProjectionInput(),
 		);
 
@@ -41,24 +41,21 @@ describe("BillingRepository mutations", () => {
 	});
 
 	it("deduplicates null external store events with a stable fingerprint", async () => {
-		const database = new FakeDatabase([[{ id: "project-id" }], [{ id: "store-event-id" }]]);
+		const database = new FakeDatabase([[{ id: "store-event-id" }]]);
 		const repository = new BillingRepository(database as never);
 
 		await expect(
-			repository.recordStripeSkippedEvent(
-				{ projectKey: "wiseley" },
-				{
-					eventType: "checkout.session.completed",
-					externalEventId: null,
-					transactionId: "pi_null_event",
-					purchaseKind: "consumable",
-					processingError: "Stripe customer could not be resolved for credit purchase",
-					rawPayload: {
-						id: "cs_null_event",
-						data: { object: { id: "cs_null_event", payment_intent: "pi_null_event" } },
-					},
+			repository.recordStripeSkippedEvent(projectInstanceContext("wiseley"), {
+				eventType: "checkout.session.completed",
+				externalEventId: null,
+				transactionId: "pi_null_event",
+				purchaseKind: "consumable",
+				processingError: "Stripe customer could not be resolved for credit purchase",
+				rawPayload: {
+					id: "cs_null_event",
+					data: { object: { id: "cs_null_event", payment_intent: "pi_null_event" } },
 				},
-			),
+			}),
 		).resolves.toEqual({
 			processingStatus: "skipped",
 			billingAccountId: null,
@@ -73,20 +70,17 @@ describe("BillingRepository mutations", () => {
 	});
 
 	it("does not update processing store events through external event conflict handling", async () => {
-		const database = new FakeDatabase([[{ id: "project-id" }], [{ id: "store-event-id" }]]);
+		const database = new FakeDatabase([[{ id: "store-event-id" }]]);
 		const repository = new BillingRepository(database as never);
 
-		await repository.recordStripeSkippedEvent(
-			{ projectKey: "wiseley" },
-			{
-				eventType: "checkout.session.completed",
-				externalEventId: "evt_processing_duplicate",
-				transactionId: "pi_processing_duplicate",
-				purchaseKind: "consumable",
-				processingError: "Stripe customer could not be resolved for credit purchase",
-				rawPayload: { id: "evt_processing_duplicate" },
-			},
-		);
+		await repository.recordStripeSkippedEvent(projectInstanceContext("wiseley"), {
+			eventType: "checkout.session.completed",
+			externalEventId: "evt_processing_duplicate",
+			transactionId: "pi_processing_duplicate",
+			purchaseKind: "consumable",
+			processingError: "Stripe customer could not be resolved for credit purchase",
+			rawPayload: { id: "evt_processing_duplicate" },
+		});
 
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("store_events.processing_status IN ('pending', 'skipped', 'failed')");

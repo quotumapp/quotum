@@ -1,9 +1,8 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError, PersistenceConflictError } from "../../billing/errors";
 import type { ProjectionSyncStatus } from "../../billing/types";
-import type { ProjectContext } from "../../projects/context";
+import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
-import { resolveProjectId } from "./identities";
 import { parseProjectionSyncJobRow } from "./parsers";
 import { assertUpdated, executeOne, executeRows } from "./query";
 import type { ProjectionSyncJobRow } from "./types";
@@ -143,10 +142,10 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 	}
 
 	async retryProjectionSyncJob(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		jobId: string,
 	): Promise<{ jobId: string; status: "pending" }> {
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const retried = await executeOne<{ id: string }>(
 			this.database,
 			drizzleSql`

@@ -1,4 +1,4 @@
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 
 export type ControlKind = "spend_limit" | "usage_limit";
 export type ControlInterval = "month" | "year" | "lifetime";
@@ -186,14 +186,17 @@ export interface EntityLicenseDecision {
 }
 
 export interface ControlsEnterpriseRepositoryLike {
-	upsertControl(project: ProjectContext, input: ControlPolicyInput): Promise<EffectiveControl>;
+	upsertControl(
+		project: ProjectInstanceContext,
+		input: ControlPolicyInput,
+	): Promise<EffectiveControl>;
 	listEffectiveControls(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		entityId?: string | null,
 	): Promise<EffectiveControl[]>;
 	createEntity(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: {
 			billingAccountId: string;
 			externalId: string;
@@ -201,59 +204,68 @@ export interface ControlsEnterpriseRepositoryLike {
 			metadata?: Record<string, unknown>;
 		},
 	): Promise<EntityRecord>;
-	listEntities(project: ProjectContext, billingAccountId: string): Promise<EntityRecord[]>;
-	createUsageAlert(project: ProjectContext, input: UsageAlertInput): Promise<UsageAlertRecord>;
-	listUsageAlerts(project: ProjectContext, billingAccountId: string): Promise<UsageAlertRecord[]>;
+	listEntities(project: ProjectInstanceContext, billingAccountId: string): Promise<EntityRecord[]>;
+	createUsageAlert(
+		project: ProjectInstanceContext,
+		input: UsageAlertInput,
+	): Promise<UsageAlertRecord>;
+	listUsageAlerts(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+	): Promise<UsageAlertRecord[]>;
 	listUsageAlertEvents(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		limit: number,
 	): Promise<UsageAlertEvent[]>;
 	upsertAutoTopupPolicy(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: AutoTopupPolicyInput,
 	): Promise<AutoTopupPolicyRecord>;
 	getAutoTopupPolicy(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		featureKey: string,
 		entityId?: string | null,
 	): Promise<AutoTopupPolicyRecord | null>;
 	resetAutoTopupCircuit(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		policyId: string,
 		actor: string,
 	): Promise<AutoTopupPolicyRecord>;
 	previewEnterpriseContract(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: EnterpriseContractInput,
 	): Promise<EnterpriseContractPreview>;
 	publishEnterpriseContract(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: EnterpriseContractInput & { previewToken: string },
 	): Promise<EnterpriseContractRecord>;
 	listEnterpriseContracts(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<EnterpriseContractRecord[]>;
 	terminateEnterpriseContract(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		contractId: string,
 		actor: string,
 	): Promise<EnterpriseContractRecord>;
 	previewCatalogMigration(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: CatalogMigrationInput,
 	): Promise<CatalogMigrationPreview>;
 	publishCatalogMigration(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: CatalogMigrationInput & { previewToken: string },
 	): Promise<CatalogMigrationResult>;
-	listLicensePools(project: ProjectContext, billingAccountId: string): Promise<LicensePoolRecord[]>;
+	listLicensePools(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+	): Promise<LicensePoolRecord[]>;
 	assignLicense(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: {
 			billingAccountId: string;
 			poolId: string;
@@ -263,11 +275,11 @@ export interface ControlsEnterpriseRepositoryLike {
 		},
 	): Promise<LicenseAssignmentRecord>;
 	revokeLicense(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: { billingAccountId: string; assignmentId: string; actor: string },
 	): Promise<LicenseAssignmentRecord>;
 	checkEntityLicense(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: {
 			billingAccountId: string;
 			entityId: string;
@@ -280,39 +292,39 @@ export interface ControlsEnterpriseRepositoryLike {
 export class ControlsEnterpriseService {
 	constructor(private readonly repository: ControlsEnterpriseRepositoryLike) {}
 
-	upsertControl(project: ProjectContext, input: ControlPolicyInput) {
+	upsertControl(project: ProjectInstanceContext, input: ControlPolicyInput) {
 		return this.repository.upsertControl(project, input);
 	}
 	listEffectiveControls(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		entityId?: string | null,
 	) {
 		return this.repository.listEffectiveControls(project, billingAccountId, entityId);
 	}
 	createEntity(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: Parameters<ControlsEnterpriseRepositoryLike["createEntity"]>[1],
 	) {
 		return this.repository.createEntity(project, input);
 	}
-	listEntities(project: ProjectContext, billingAccountId: string) {
+	listEntities(project: ProjectInstanceContext, billingAccountId: string) {
 		return this.repository.listEntities(project, billingAccountId);
 	}
-	createUsageAlert(project: ProjectContext, input: UsageAlertInput) {
+	createUsageAlert(project: ProjectInstanceContext, input: UsageAlertInput) {
 		return this.repository.createUsageAlert(project, input);
 	}
-	listUsageAlerts(project: ProjectContext, billingAccountId: string) {
+	listUsageAlerts(project: ProjectInstanceContext, billingAccountId: string) {
 		return this.repository.listUsageAlerts(project, billingAccountId);
 	}
-	listUsageAlertEvents(project: ProjectContext, billingAccountId: string, limit: number) {
+	listUsageAlertEvents(project: ProjectInstanceContext, billingAccountId: string, limit: number) {
 		return this.repository.listUsageAlertEvents(project, billingAccountId, limit);
 	}
-	upsertAutoTopupPolicy(project: ProjectContext, input: AutoTopupPolicyInput) {
+	upsertAutoTopupPolicy(project: ProjectInstanceContext, input: AutoTopupPolicyInput) {
 		return this.repository.upsertAutoTopupPolicy(project, input);
 	}
 	getAutoTopupPolicy(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		featureKey: string,
 		entityId?: string | null,
@@ -320,27 +332,27 @@ export class ControlsEnterpriseService {
 		return this.repository.getAutoTopupPolicy(project, billingAccountId, featureKey, entityId);
 	}
 	resetAutoTopupCircuit(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		policyId: string,
 		actor: string,
 	) {
 		return this.repository.resetAutoTopupCircuit(project, billingAccountId, policyId, actor);
 	}
-	previewEnterpriseContract(project: ProjectContext, input: EnterpriseContractInput) {
+	previewEnterpriseContract(project: ProjectInstanceContext, input: EnterpriseContractInput) {
 		return this.repository.previewEnterpriseContract(project, input);
 	}
 	publishEnterpriseContract(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: EnterpriseContractInput & { previewToken: string },
 	) {
 		return this.repository.publishEnterpriseContract(project, input);
 	}
-	listEnterpriseContracts(project: ProjectContext, billingAccountId: string) {
+	listEnterpriseContracts(project: ProjectInstanceContext, billingAccountId: string) {
 		return this.repository.listEnterpriseContracts(project, billingAccountId);
 	}
 	terminateEnterpriseContract(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		contractId: string,
 		actor: string,
@@ -352,32 +364,32 @@ export class ControlsEnterpriseService {
 			actor,
 		);
 	}
-	previewCatalogMigration(project: ProjectContext, input: CatalogMigrationInput) {
+	previewCatalogMigration(project: ProjectInstanceContext, input: CatalogMigrationInput) {
 		return this.repository.previewCatalogMigration(project, input);
 	}
 	publishCatalogMigration(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: CatalogMigrationInput & { previewToken: string },
 	) {
 		return this.repository.publishCatalogMigration(project, input);
 	}
-	listLicensePools(project: ProjectContext, billingAccountId: string) {
+	listLicensePools(project: ProjectInstanceContext, billingAccountId: string) {
 		return this.repository.listLicensePools(project, billingAccountId);
 	}
 	assignLicense(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: Parameters<ControlsEnterpriseRepositoryLike["assignLicense"]>[1],
 	) {
 		return this.repository.assignLicense(project, input);
 	}
 	revokeLicense(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: Parameters<ControlsEnterpriseRepositoryLike["revokeLicense"]>[1],
 	) {
 		return this.repository.revokeLicense(project, input);
 	}
 	checkEntityLicense(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: Parameters<ControlsEnterpriseRepositoryLike["checkEntityLicense"]>[1],
 	) {
 		return this.repository.checkEntityLicense(project, input);

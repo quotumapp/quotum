@@ -6,6 +6,14 @@ import type {
 import type { BillingLogger } from "../../src/observability/logger";
 import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import { SubscriptionReconciliationWorker } from "../../src/workers/subscription-reconciliation";
+import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
+
+const workerProjectResolver = projectContextResolver({
+	contexts: [
+		projectInstanceContext("voysee", { projectInstanceId: "project_1" }),
+		projectInstanceContext("wiseley", { projectInstanceId: "project_2" }),
+	],
+});
 
 const subscription = (
 	overrides: Partial<ProviderSubscriptionReconciliationRow> = {},
@@ -118,6 +126,7 @@ describe("SubscriptionReconciliationWorker", () => {
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, infos } = createRecordingLogger();
 		const worker = new SubscriptionReconciliationWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 10,
@@ -186,6 +195,7 @@ describe("SubscriptionReconciliationWorker", () => {
 		const { calls, repository } = createRepository({ subscriptions: rows });
 		const providerCalls: ProviderSubscriptionReconciliationRow[] = [];
 		const worker = new SubscriptionReconciliationWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 10,
@@ -247,15 +257,16 @@ describe("SubscriptionReconciliationWorker", () => {
 		});
 		const providerCalls: string[] = [];
 		const worker = new SubscriptionReconciliationWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
 			staleAfterMs: 60_000,
 			repository,
-			providers: (projectKey) => ({
+			providers: (project) => ({
 				apple: {
 					reconcileSubscription: async (row) => {
-						providerCalls.push(`${projectKey}:${row.id}`);
+						providerCalls.push(`${project.projectInstanceKey}:${row.id}`);
 						return { status: "processed" };
 					},
 				},
@@ -277,6 +288,7 @@ describe("SubscriptionReconciliationWorker", () => {
 				succeedError: finalizationError,
 			});
 			const worker = new SubscriptionReconciliationWorker({
+				projectContextResolver: workerProjectResolver,
 				workerId: "worker-a",
 				maxAttempts: 3,
 				batchSize: 10,
@@ -326,6 +338,7 @@ describe("SubscriptionReconciliationWorker", () => {
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, errors } = createRecordingLogger();
 		const worker = new SubscriptionReconciliationWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 10,
@@ -397,6 +410,7 @@ describe("SubscriptionReconciliationWorker", () => {
 			],
 		});
 		const worker = new SubscriptionReconciliationWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 10,
@@ -439,6 +453,7 @@ describe("SubscriptionReconciliationWorker", () => {
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, errors } = createRecordingLogger();
 		const worker = new SubscriptionReconciliationWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 10,
@@ -495,6 +510,7 @@ describe("SubscriptionReconciliationWorker", () => {
 		const { repository } = createRepository({ subscriptions: rows });
 		const renewed: string[] = [];
 		const worker = new SubscriptionReconciliationWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 10,
@@ -531,6 +547,7 @@ describe("SubscriptionReconciliationWorker", () => {
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, errors } = createRecordingLogger();
 		const worker = new SubscriptionReconciliationWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 10,

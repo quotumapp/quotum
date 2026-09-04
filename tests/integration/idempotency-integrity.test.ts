@@ -12,7 +12,10 @@ import type {
 } from "../../src/db/repository";
 import { createGoogleObfuscatedAccountId } from "../../src/providers/google/account-link";
 import { createIntegrationApp } from "./helpers/app-fixture";
-import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
+import {
+	resetAndSeedIntegrationData,
+	seedIntegrationProjectsAndCatalog,
+} from "./helpers/catalog-fixtures";
 import { expectProjectionJob, expectTableCounts } from "./helpers/db-assertions";
 import {
 	stripeCheckoutSessionObject,
@@ -22,6 +25,7 @@ import {
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 
@@ -251,7 +255,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 	it("does not let stale subscription events regress newer entitlement state", async () => {
 		const newer = await withIsoDateSqlParameters(() =>
 			context.repository.recordStripeSubscriptionAndEnqueueProjection(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				stripeSubscriptionProjectionInput({
 					billingAccountId: "monotonic_subscription_user",
 					stripeSubscriptionId: "sub_monotonic",
@@ -269,7 +273,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 		);
 		const stale = await withIsoDateSqlParameters(() =>
 			context.repository.recordStripeSubscriptionAndEnqueueProjection(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				stripeSubscriptionProjectionInput({
 					billingAccountId: null,
 					stripeSubscriptionId: "sub_monotonic",
@@ -326,7 +330,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 
 		await withIsoDateSqlParameters(() =>
 			context.repository.recordPurchaseAndEnqueueProjection(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				purchaseProjectionInput({
 					billingAccountId: "monotonic_purchase_user",
 					storeProductId,
@@ -341,7 +345,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 		);
 		await withIsoDateSqlParameters(() =>
 			context.repository.recordPurchaseAndEnqueueProjection(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				purchaseProjectionInput({
 					billingAccountId: "monotonic_purchase_user",
 					storeProductId,
@@ -356,7 +360,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 		);
 		const stale = await withIsoDateSqlParameters(() =>
 			context.repository.recordPurchaseAndEnqueueProjection(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				purchaseProjectionInput({
 					billingAccountId: "monotonic_purchase_user",
 					storeProductId,
@@ -538,88 +542,120 @@ localDescribe("billing idempotency and integrity integration", () => {
 		expect(projectionPayload.purchase?.transactionId).toBe("pi_payment_intent_repeat");
 	});
 
-	it("allows same external provider ids in different projects", async () => {
+	it("isolates colliding customer, provider, and idempotency ids across project instances", async () => {
+		const projectInstanceKeys = ["voysee", "voysee-sandbox", "wiseley", "wiseley-sandbox"] as const;
+		await seedIntegrationProjectsAndCatalog(
+			context.sql,
+			projectInstanceKeys.map((projectInstanceKey) => ({
+				projectInstanceKey,
+				name: `${projectInstanceKey} isolation fixture`,
+				projectionUrl: `https://${projectInstanceKey}.projection.integration.test`,
+				projectionSecret: `${projectInstanceKey}-projection-secret`,
+			})),
+		);
 		const fixture = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
 		});
 
-		const voysee = await withIsoDateSqlParameters(() =>
-			verifyGoogleConsumable(fixture, "purchase_token_cross_project", "voysee"),
-		);
-		const wiseley = await withIsoDateSqlParameters(() =>
-			verifyGoogleConsumable(fixture, "purchase_token_cross_project", "wiseley"),
+		const responses = await Promise.all(
+			projectInstanceKeys.map((projectInstanceKey) =>
+				withIsoDateSqlParameters(() =>
+					verifyGoogleConsumable(fixture, "purchase_token_cross_project", projectInstanceKey),
+				),
+			),
 		);
 
-		expect(voysee.status).toBe(200);
-		expect(wiseley.status).toBe(200);
+		expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200]);
 		await expectTableCounts(context.sql, {
-			customers: 2,
-			provider_customers: 2,
-			purchases: 2,
+			customers: 4,
+			provider_customers: 4,
+			purchases: 4,
 			subscriptions: 0,
 			entitlements: 0,
-			store_events: 2,
-			projection_sync_jobs: 2,
+			store_events: 4,
+			projection_sync_jobs: 4,
 		});
-		await expectProviderScopedPurchases(context.sql, "google", "purchase_token_cross_project", [
-			{
+		await expectProviderScopedPurchases(
+			context.sql,
+			"google",
+			"purchase_token_cross_project",
+			projectInstanceKeys.map((projectKey) => ({
 				billing_account_id: "integration_user",
-				project_key: "voysee",
+				project_key: projectKey,
 				purchase_kind: "consumable",
 				status: "completed",
 				transaction_id: "purchase_token_cross_project",
-			},
-			{
+			})),
+		);
+		await expectProviderCustomerBindings(
+			context.sql,
+			"google",
+			googleAccountId("integration_user"),
+			projectInstanceKeys.map((projectKey) => ({
 				billing_account_id: "integration_user",
-				project_key: "wiseley",
-				purchase_kind: "consumable",
-				status: "completed",
-				transaction_id: "purchase_token_cross_project",
-			},
-		]);
+				external_customer_id: googleAccountId("integration_user"),
+				project_key: projectKey,
+				provider: "google",
+			})),
+		);
 		await expectStoreEventsByExternalId(
 			context.sql,
 			"google",
 			"google:purchase_token_cross_project:purchase_verified",
-			[
-				{
-					billing_account_id: "integration_user",
-					event_type: "purchase_verified",
-					external_event_id: "google:purchase_token_cross_project:purchase_verified",
-					project_key: "voysee",
-					processing_status: "processed",
-					transaction_id: "purchase_token_cross_project",
-				},
-				{
-					billing_account_id: "integration_user",
-					event_type: "purchase_verified",
-					external_event_id: "google:purchase_token_cross_project:purchase_verified",
-					project_key: "wiseley",
-					processing_status: "processed",
-					transaction_id: "purchase_token_cross_project",
-				},
-			],
+			projectInstanceKeys.map((projectKey) => ({
+				billing_account_id: "integration_user",
+				event_type: "purchase_verified",
+				external_event_id: "google:purchase_token_cross_project:purchase_verified",
+				project_key: projectKey,
+				processing_status: "processed",
+				transaction_id: "purchase_token_cross_project",
+			})),
 		);
 		await expectProjectionJobsByKey(
 			context.sql,
 			"google:purchase_token_cross_project:purchase_verified",
-			[
-				{
-					billing_account_id: "integration_user",
-					idempotency_key: "google:purchase_token_cross_project:purchase_verified",
-					project_key: "voysee",
-					reason: "purchase_verified",
-					status: "pending",
-				},
-				{
-					billing_account_id: "integration_user",
-					idempotency_key: "google:purchase_token_cross_project:purchase_verified",
-					project_key: "wiseley",
-					reason: "purchase_verified",
-					status: "pending",
-				},
-			],
+			projectInstanceKeys.map((projectKey) => ({
+				billing_account_id: "integration_user",
+				idempotency_key: "google:purchase_token_cross_project:purchase_verified",
+				project_key: projectKey,
+				reason: "purchase_verified",
+				status: "pending",
+			})),
+		);
+
+		const workerId = "project-instance-isolation-worker";
+		const claimed = await context.repository.claimProjectionSyncJobs(workerId, 10);
+		expect(claimed).toHaveLength(4);
+		expect(new Set(claimed.map((job) => job.project_key))).toEqual(new Set(projectInstanceKeys));
+		expect(new Set(claimed.map((job) => job.idempotency_key))).toEqual(
+			new Set(["google:purchase_token_cross_project:purchase_verified"]),
+		);
+		const first = claimed[0];
+		const otherProject = claimed.find((job) => job.project_id !== first?.project_id);
+		if (first === undefined || otherProject === undefined) {
+			throw new Error("Expected claimed jobs from multiple project instances");
+		}
+		await expect(
+			context.repository.markProjectionSyncJobSucceeded(
+				otherProject.project_id,
+				first.id,
+				workerId,
+			),
+		).rejects.toThrow("is not locked by worker");
+		for (const job of claimed) {
+			await context.repository.markProjectionSyncJobSucceeded(job.project_id, job.id, workerId);
+		}
+		await expectProjectionJobsByKey(
+			context.sql,
+			"google:purchase_token_cross_project:purchase_verified",
+			projectInstanceKeys.map((projectKey) => ({
+				billing_account_id: "integration_user",
+				idempotency_key: "google:purchase_token_cross_project:purchase_verified",
+				project_key: projectKey,
+				reason: "purchase_verified",
+				status: "succeeded",
+			})),
 		);
 	});
 

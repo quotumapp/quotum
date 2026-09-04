@@ -1,14 +1,15 @@
 import { describe, expect, it } from "bun:test";
 import { BillingRepository } from "../../src/db/repository";
+import { projectInstanceContext } from "../helpers/project-context";
 import { FakeDatabase } from "./repository-fixture";
 
 describe("BillingRepository Google", () => {
 	it("matches Google voided purchase targets by purchase token only", async () => {
-		const database = new FakeDatabase([[{ id: "project-id" }], [], [], [{ id: "store-event-id" }]]);
+		const database = new FakeDatabase([[], [], [{ id: "store-event-id" }]]);
 		const repository = new BillingRepository(database as never);
 
 		await repository.recordGoogleVoidedPurchaseAndEnqueueProjection(
-			{ projectKey: "wiseley" },
+			projectInstanceContext("wiseley"),
 			{
 				purchaseToken: "purchase-token-mismatch",
 				orderId: "GPA.1111-2222-3333-44444",

@@ -47,8 +47,7 @@ import type {
 	CatalogPublishResult,
 	PublishedCatalog,
 } from "../catalog/types";
-import type { ProjectContext } from "../projects/context";
-import type { BillingProjectRecord } from "../projects/types";
+import type { ProjectInstanceContext } from "../projects/context";
 import type { StripeCatalog } from "../providers/stripe/types";
 import { db as defaultDb } from "./client";
 import { AppleBillingRepository } from "./repository/apple";
@@ -187,26 +186,19 @@ export class BillingRepository {
 		return await this.autoTopupJobs.markAutoTopupFailed(projectId, jobId, workerId, input);
 	}
 
-	forProject(project: ProjectContext): ProjectScopedBillingRepository {
+	forProject(project: ProjectInstanceContext): ProjectScopedBillingRepository {
 		return new ProjectScopedBillingRepository(this, project);
 	}
 
-	async upsertProject(
-		project: ProjectContext,
-		input: { name: string; active: boolean },
-	): Promise<BillingProjectRecord> {
-		return await this.core.upsertProject(project, input);
-	}
-
 	async getEntitlementSnapshot(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<EntitlementSnapshot> {
 		return await this.core.getEntitlementSnapshot(project, billingAccountId);
 	}
 
 	async recomputeCustomerEntitlements(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<EntitlementSnapshot> {
 		return await this.core.recomputeCustomerEntitlements(project, billingAccountId);
@@ -241,7 +233,7 @@ export class BillingRepository {
 	}
 
 	async retryProjectionSyncJob(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		jobId: string,
 	): Promise<{ jobId: string; status: "pending" }> {
 		return await this.projectionJobs.retryProjectionSyncJob(project, jobId);
@@ -256,7 +248,7 @@ export class BillingRepository {
 
 	async claimStoreEventReplayJobById(
 		workerId: string,
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		eventId: string,
 	): Promise<StoreEventReplayJobRow> {
 		return await this.storeEventReplay.claimStoreEventReplayJobById(workerId, project, eventId);
@@ -353,14 +345,14 @@ export class BillingRepository {
 	}
 
 	async recordPurchaseAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordPurchaseProjectionInput,
 	): Promise<EntitlementSnapshot> {
 		return await this.core.recordPurchaseAndEnqueueProjection(project, input);
 	}
 
 	async getOrCreateProviderCustomerToken(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		provider: BillingProvider,
 	): Promise<string> {
@@ -368,14 +360,14 @@ export class BillingRepository {
 	}
 
 	async getStripeWebStoreProductByKey(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		productKey: string,
 	): Promise<StripeWebStoreProductRow> {
 		return await this.stripe.getStripeWebStoreProductByKey(project, productKey);
 	}
 
 	async getStripeRecurringCheckoutPlanByKey(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		planKey: string,
 		billingAccountId: string,
 	): Promise<StripeRecurringCheckoutPlan> {
@@ -386,54 +378,57 @@ export class BillingRepository {
 		);
 	}
 
-	async hasActiveBasePlan(project: ProjectContext, billingAccountId: string): Promise<boolean> {
+	async hasActiveBasePlan(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+	): Promise<boolean> {
 		return await this.stripe.hasActiveBasePlan(project, billingAccountId);
 	}
 
 	async prepareSubscriptionChange(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: SubscriptionChangeInput,
 	): Promise<SubscriptionChangeOperation> {
 		return await this.recurringPricing.prepareSubscriptionChange(project, input);
 	}
 
 	async previewSubscriptionChange(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: Omit<SubscriptionChangeInput, "idempotencyKey" | "expectedStateFingerprint">,
 	): Promise<SubscriptionChangePreview> {
 		return await this.recurringPricing.previewSubscriptionChange(project, input);
 	}
 
 	async createCommercialActionPreview(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		draft: CommercialPreviewDraft,
 	): Promise<CommercialActionPreview> {
 		return await this.commercialActions.createCommercialActionPreview(project, draft);
 	}
 
 	async listUsageEvents(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: UsageEventListInput,
 	): Promise<UsageEventPage> {
 		return await this.insights.listUsageEvents(project, input);
 	}
 
 	async getUsageSeries(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: UsageSeriesInput,
 	): Promise<UsageSeriesPoint[]> {
 		return await this.insights.getUsageSeries(project, input);
 	}
 
 	async getCustomerBillingSummary(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<CustomerBillingSummary> {
 		return await this.insights.getCustomerBillingSummary(project, billingAccountId);
 	}
 
 	async getCommercialActionPreview(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		previewToken: string,
 	): Promise<StoredCommercialActionPreview> {
@@ -445,7 +440,7 @@ export class BillingRepository {
 	}
 
 	async beginCommercialActionExecution(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: {
 			billingAccountId: string;
 			previewToken: string;
@@ -458,7 +453,7 @@ export class BillingRepository {
 	}
 
 	async completeCommercialActionExecution(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: {
 			billingAccountId: string;
 			previewToken: string;
@@ -477,15 +472,31 @@ export class BillingRepository {
 	}
 
 	async markSubscriptionChangeApplied(
-		project: ProjectContext,
+		projectInstanceId: string,
 		changeId: string,
 		providerRequestId: string,
+		workerId: string,
 	): Promise<void> {
-		await this.recurringPricing.markSubscriptionChangeApplied(project, changeId, providerRequestId);
+		await this.recurringPricing.markSubscriptionChangeApplied(
+			projectInstanceId,
+			changeId,
+			providerRequestId,
+			workerId,
+		);
 	}
 
-	async markSubscriptionChangeFailed(changeId: string, error: string): Promise<void> {
-		await this.recurringPricing.markSubscriptionChangeFailed(changeId, error);
+	async markSubscriptionChangeFailed(
+		projectInstanceId: string,
+		changeId: string,
+		error: string,
+		workerId: string,
+	): Promise<void> {
+		await this.recurringPricing.markSubscriptionChangeFailed(
+			projectInstanceId,
+			changeId,
+			error,
+			workerId,
+		);
 	}
 
 	async materializeAndClaimUsageInvoicePeriods(
@@ -496,97 +507,113 @@ export class BillingRepository {
 	}
 
 	async markUsageInvoiceSucceeded(
+		projectInstanceId: string,
 		jobKind: UsageInvoiceJob["jobKind"],
 		jobId: string,
 		externalInvoiceId: string,
+		workerId: string,
 	): Promise<void> {
-		await this.recurringPricing.markUsageInvoiceSucceeded(jobKind, jobId, externalInvoiceId);
+		await this.recurringPricing.markUsageInvoiceSucceeded(
+			projectInstanceId,
+			jobKind,
+			jobId,
+			externalInvoiceId,
+			workerId,
+		);
 	}
 
 	async markUsageInvoiceFailed(
+		projectInstanceId: string,
 		jobKind: UsageInvoiceJob["jobKind"],
 		jobId: string,
 		error: string,
+		workerId: string,
 	): Promise<void> {
-		await this.recurringPricing.markUsageInvoiceFailed(jobKind, jobId, error);
+		await this.recurringPricing.markUsageInvoiceFailed(
+			projectInstanceId,
+			jobKind,
+			jobId,
+			error,
+			workerId,
+		);
 	}
 
-	async listStripeCatalog(project: ProjectContext): Promise<StripeCatalog> {
+	async listStripeCatalog(project: ProjectInstanceContext): Promise<StripeCatalog> {
 		return await this.stripe.listStripeCatalog(project);
 	}
 
 	async getStripeBillingAccountSummary(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<StripeBillingAccountSummary> {
 		return await this.stripe.getStripeBillingAccountSummary(project, billingAccountId);
 	}
 
 	async prepareStripeCheckoutRequest(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: PrepareStripeCheckoutRequestInput,
 	): Promise<StripeCheckoutRequestState> {
 		return await this.stripe.prepareStripeCheckoutRequest(project, input);
 	}
 
 	async completeStripeCheckoutRequest(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: CompleteStripeCheckoutRequestInput,
 	): Promise<StripeCheckoutRequestState> {
 		return await this.stripe.completeStripeCheckoutRequest(project, input);
 	}
 
 	async getStripeProviderCustomer(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: GetStripeProviderCustomerInput,
 	): Promise<string | null> {
 		return await this.stripe.getStripeProviderCustomer(project, input);
 	}
 
 	async linkStripeProviderCustomer(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: LinkStripeProviderCustomerInput,
 	): Promise<string> {
 		return await this.stripe.linkStripeProviderCustomer(project, input);
 	}
 
 	async recordStripeCreditPurchaseAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordStripeCreditPurchaseProjectionInput,
 	): Promise<StripeRecordingResult> {
 		return await this.stripe.recordStripeCreditPurchaseAndEnqueueProjection(project, input);
 	}
 
 	async recordStripeSubscriptionAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordStripeSubscriptionProjectionInput,
 	): Promise<StripeRecordingResult> {
 		return await this.stripe.recordStripeSubscriptionAndEnqueueProjection(project, input);
 	}
 
 	async recordStripeCreditReversalAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordStripeCreditReversalProjectionInput,
 	): Promise<StripeRecordingResult> {
 		return await this.stripe.recordStripeCreditReversalAndEnqueueProjection(project, input);
 	}
 
 	async recordStripeSkippedEvent(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordStripeSkippedEventInput,
 	): Promise<StripeRecordingResult> {
 		return await this.stripe.recordStripeSkippedEvent(project, input);
 	}
 
 	async recordStoreKitTransactionAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordStoreKitTransactionProjectionInput,
 	): Promise<StoreKitRecordingResult> {
 		return await this.apple.recordStoreKitTransactionAndEnqueueProjection(project, input);
 	}
 
 	async getOrCreateGoogleProviderCustomer(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		obfuscatedAccountId: string,
 	): Promise<string> {
@@ -598,28 +625,28 @@ export class BillingRepository {
 	}
 
 	async getGoogleAndroidProductKind(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		externalProductId: string,
 	): Promise<"consumable" | "non_consumable"> {
 		return await this.google.getGoogleAndroidProductKind(project, externalProductId);
 	}
 
 	async recordGooglePurchaseAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordGooglePurchaseProjectionInput,
 	): Promise<GooglePlayRecordingResult> {
 		return await this.google.recordGooglePurchaseAndEnqueueProjection(project, input);
 	}
 
 	async recordGoogleVoidedPurchaseAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordGoogleVoidedPurchaseProjectionInput,
 	): Promise<GooglePlayRecordingResult> {
 		return await this.google.recordGoogleVoidedPurchaseAndEnqueueProjection(project, input);
 	}
 
 	async getMeteringBalance(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 		featureKey: string,
 		entityId?: string | null,
@@ -628,56 +655,56 @@ export class BillingRepository {
 	}
 
 	async checkUsage(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: MeteringSubjectInput,
 	): Promise<MeteringDecision> {
 		return await this.metering.check(project, input);
 	}
 
 	async consumeUsage(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: MeteringMutationInput,
 	): Promise<ConsumeUsageResult> {
 		return await this.metering.consume(project, input);
 	}
 
 	async consumeWorkerUsage(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: WorkerMeteringMutationInput,
 	): Promise<WorkerConsumeUsageResult> {
 		return await this.metering.consumeWorkerDelivery(project, input);
 	}
 
 	async reserveUsage(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ReserveUsageInput,
 	): Promise<ReservationResult> {
 		return await this.metering.reserve(project, input);
 	}
 
 	async confirmUsageReservation(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ConfirmReservationInput,
 	): Promise<FinalizeReservationResult> {
 		return await this.metering.confirm(project, input);
 	}
 
 	async releaseUsageReservation(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: ReleaseReservationInput,
 	): Promise<FinalizeReservationResult> {
 		return await this.metering.release(project, input);
 	}
 
 	async correctUsage(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: CorrectUsageInput,
 	): Promise<UsageCorrectionResult> {
 		return await this.metering.correct(project, input);
 	}
 
 	async grantAllocation(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: GrantAllocationInput,
 	): Promise<{ allocationId: string; duplicate: boolean; balance: MeteringBalance }> {
 		return await this.metering.grantAllocation(project, input);
@@ -692,18 +719,18 @@ export class BillingRepository {
 	}
 
 	async previewCatalog(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: CatalogPreviewInput,
 	): Promise<CatalogPreview> {
 		return await this.catalog.preview(project, input);
 	}
 
-	async getPublishedCatalog(project: ProjectContext): Promise<PublishedCatalog> {
+	async getPublishedCatalog(project: ProjectInstanceContext): Promise<PublishedCatalog> {
 		return await this.catalog.getPublished(project);
 	}
 
 	async publishCatalog(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: CatalogPublishInput,
 	): Promise<CatalogPublishResult> {
 		return await this.catalog.publish(project, input);

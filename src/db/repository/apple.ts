@@ -1,6 +1,6 @@
 import { NotFoundBillingError } from "../../billing/errors";
 import type { ProjectionPayload } from "../../billing/types";
-import type { ProjectContext } from "../../projects/context";
+import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import {
 	materializeSubscriptionAllocations,
@@ -17,7 +17,6 @@ import {
 	findCustomerByProviderCustomer,
 	findCustomerBySubscription,
 	getAppleStoreProduct,
-	resolveProjectId,
 	upsertProviderCustomer,
 } from "./identities";
 import { findAppleInvalidationTarget } from "./invalidations";
@@ -34,11 +33,11 @@ import { isInvalidatedStatus } from "./validation";
 
 export class AppleBillingRepository extends RepositoryModule {
 	async recordStoreKitTransactionAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordStoreKitTransactionProjectionInput,
 	): Promise<StoreKitRecordingResult> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const isRefundReversal = input.eventType === "REFUND_REVERSED";
 			let customer: CustomerIdentityRow | null = null;
 			let storeProduct: StoreProductIdentityRow | null = null;

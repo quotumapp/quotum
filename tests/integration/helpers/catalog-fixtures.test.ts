@@ -66,10 +66,15 @@ describe("integration catalog fixtures", () => {
 	});
 
 	it("defines deterministic projects with HTTP projection delivery config", () => {
-		expect(integrationProjects.map((project) => project.key)).toEqual(["voysee", "wiseley"]);
+		expect(integrationProjects.map((project) => project.projectInstanceKey)).toEqual([
+			"voysee",
+			"wiseley",
+		]);
 		for (const project of integrationProjects) {
-			expect(project.projectionUrl).toBe(`https://${project.key}.projection.integration.test`);
-			expect(project.projectionSecret).toBe(`${project.key}-projection-secret`);
+			expect(project.projectionUrl).toBe(
+				`https://${project.projectInstanceKey}.projection.integration.test`,
+			);
+			expect(project.projectionSecret).toBe(`${project.projectInstanceKey}-projection-secret`);
 		}
 	});
 

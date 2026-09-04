@@ -10,6 +10,23 @@ Before 1.0 the schema ships as baseline files under `migrations/` that evolve in
 checksum-verified; recreate a database from them rather than migrating it. Incremental migrations
 start at 1.0.
 
+## [0.6.0] - 2026-09-05
+
+### Added
+
+- Database-authoritative organizations, logical projects, environment-specific project instances,
+  and one-way-hashed project credentials (`001_platform.sql`).
+- `bun run platform:bootstrap` for exact-manifest topology and one-time credential issuance.
+- `BILLING_CATALOG_IMPORT_JSON` with `bun run catalog:provision` for development catalog imports.
+
+### Changed
+
+- Request and worker context resolves from the database instead of static configuration.
+
+### Upgrade
+
+- Recreate databases from the baseline files; pre-1.0 releases do not migrate data in place.
+
 ## [0.5.2] - 2026-09-04
 
 ### Added

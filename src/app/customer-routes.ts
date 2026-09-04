@@ -5,7 +5,7 @@ import { BillingError, isBillingError } from "../billing/errors";
 import { type RateLimitResult, rateLimitMiddleware } from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 import {
 	requireAppleStoreKitService,
 	requireGooglePlayBillingService,
@@ -403,7 +403,13 @@ export function registerCustomerRoutes({
 			const snapshot = await verifyPurchase();
 			return c.json({ success: true, data: snapshot });
 		} catch (error) {
-			recordVerificationFailure(billingMetrics, billingLogger, provider, error, project.projectKey);
+			recordVerificationFailure(
+				billingMetrics,
+				billingLogger,
+				provider,
+				error,
+				project.projectInstanceKey,
+			);
 			throw error;
 		}
 	});
@@ -428,7 +434,7 @@ async function optionalPrivateJson(
 	return await parsePrivateJson(request);
 }
 
-function privateProject(c: BillingContext): ProjectContext {
+function privateProject(c: BillingContext): ProjectInstanceContext {
 	const project = c.get("project");
 	if (project === undefined) {
 		throw new BillingError("Billing project context is required", "BILLING_PROJECT_REQUIRED", 401);

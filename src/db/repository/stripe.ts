@@ -1,7 +1,7 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError, PersistenceConflictError } from "../../billing/errors";
 import type { PurchaseStatus } from "../../billing/types";
-import type { ProjectContext } from "../../projects/context";
+import type { ProjectInstanceContext } from "../../projects/context";
 import type { StripeCatalog } from "../../providers/stripe/types";
 import { RepositoryModule } from "./base";
 import {
@@ -19,7 +19,6 @@ import {
 	ensureCustomer,
 	findCustomerBySubscription,
 	getStripeStoreProduct,
-	resolveProjectId,
 	resolveStripeCustomer,
 	upsertProviderCustomer,
 } from "./identities";
@@ -56,8 +55,8 @@ import type {
 import { requireNonBlank, requireStripeCustomerId, stripNulls } from "./validation";
 
 export class StripeBillingRepository extends RepositoryModule {
-	async listStripeCatalog(project: ProjectContext): Promise<StripeCatalog> {
-		const projectId = await resolveProjectId(this.database, project);
+	async listStripeCatalog(project: ProjectInstanceContext): Promise<StripeCatalog> {
+		const projectId = project.projectInstanceId;
 		const rows = await executeRows<{
 			price_component_id: string | number | bigint;
 			plan_key: string;
@@ -230,11 +229,11 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async getStripeBillingAccountSummary(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<StripeBillingAccountSummary> {
 		requireNonBlank(billingAccountId, "p_billing_account_id");
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const customer = await executeOne<{ id: string }>(
 			this.database,
 			drizzleSql`
@@ -328,11 +327,11 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async prepareStripeCheckoutRequest(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: PrepareStripeCheckoutRequestInput,
 	): Promise<StripeCheckoutRequestState> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId, null);
 			const planVersionId = input.planVersionId ?? null;
 			const target = await executeOne<{ valid: boolean }>(
@@ -413,11 +412,11 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async completeStripeCheckoutRequest(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: CompleteStripeCheckoutRequestInput,
 	): Promise<StripeCheckoutRequestState> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId, null);
 			const row = await checkoutRequestState(tx, {
 				projectId,
@@ -464,11 +463,11 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async getStripeWebStoreProductByKey(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		productKey: string,
 	): Promise<StripeWebStoreProductRow> {
 		requireNonBlank(productKey, "p_product_key");
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const row = await executeOne(
 			this.database,
 			drizzleSql`
@@ -517,13 +516,13 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async getStripeRecurringCheckoutPlanByKey(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		planKey: string,
 		billingAccountId: string,
 	): Promise<StripeRecurringCheckoutPlan> {
 		requireNonBlank(planKey, "p_plan_key");
 		requireNonBlank(billingAccountId, "p_billing_account_id");
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const plan = await executeOne<{
 			plan_version_id: string | number | bigint;
 			plan_key: string;
@@ -648,9 +647,12 @@ export class StripeBillingRepository extends RepositoryModule {
 		};
 	}
 
-	async hasActiveBasePlan(project: ProjectContext, billingAccountId: string): Promise<boolean> {
+	async hasActiveBasePlan(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+	): Promise<boolean> {
 		requireNonBlank(billingAccountId, "p_billing_account_id");
-		const projectId = await resolveProjectId(this.database, project);
+		const projectId = project.projectInstanceId;
 		const row = await executeOne<{ active: boolean }>(
 			this.database,
 			drizzleSql`
@@ -673,11 +675,11 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async getStripeProviderCustomer(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: GetStripeProviderCustomerInput,
 	): Promise<string | null> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId, input.email);
 			const row = await executeOne<{ external_customer_id: string }>(
 				tx,
@@ -696,12 +698,12 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async linkStripeProviderCustomer(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: LinkStripeProviderCustomerInput,
 	): Promise<string> {
 		requireStripeCustomerId(input.stripeCustomerId);
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId, input.email);
 			const existing = await executeOne<{ customer_id: string }>(
 				tx,
@@ -756,11 +758,11 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async recordStripeCreditPurchaseAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordStripeCreditPurchaseProjectionInput,
 	): Promise<StripeRecordingResult> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const resolved = await resolveStripeCustomer(tx, projectId, {
 				billingAccountId: input.billingAccountId,
 				stripeCustomerId: input.stripeCustomerId,
@@ -904,11 +906,11 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async recordStripeSubscriptionAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordStripeSubscriptionProjectionInput,
 	): Promise<StripeRecordingResult> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const transactionId = input.invoiceId ?? input.stripeSubscriptionId;
 
 			if (input.subscriptionStatus === "billing_retry") {
@@ -1165,11 +1167,11 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async recordStripeCreditReversalAndEnqueueProjection(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordStripeCreditReversalProjectionInput,
 	): Promise<StripeRecordingResult> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const target = await findStripeCreditReversalTarget(tx, projectId, input.paymentIntentId);
 			if (target === null) {
 				await recordStripeSkippedEventInTransaction(tx, projectId, {
@@ -1362,11 +1364,11 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async recordStripeSkippedEvent(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: RecordStripeSkippedEventInput,
 	): Promise<StripeRecordingResult> {
 		return await this.transaction(async (tx) => {
-			await recordStripeSkippedEventInTransaction(tx, await resolveProjectId(tx, project), input);
+			await recordStripeSkippedEventInTransaction(tx, project.projectInstanceId, input);
 			return skippedStripeRecordingResult();
 		});
 	}

@@ -10,9 +10,10 @@ import {
 	createNoopBillingMetrics,
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
 import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
 import { startLeaseHeartbeat } from "./lease-heartbeat";
+import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface StoreEventReplayProvider {
 	replayStoreEvent(event: StoreEventReplayJobRow): Promise<StoreEventReplayProviderResult>;
@@ -29,7 +30,9 @@ export interface StoreEventReplayProviders {
 	stripe: StoreEventReplayProvider | null;
 }
 
-export type StoreEventReplayProviderSelector = (projectKey: string) => StoreEventReplayProviders;
+export type StoreEventReplayProviderSelector = (
+	project: ProjectInstanceContext,
+) => StoreEventReplayProviders;
 
 export interface StoreEventReplayRunResult {
 	claimed: number;
@@ -49,7 +52,7 @@ export interface StoreEventReplayRepository {
 
 	claimStoreEventReplayJobById(
 		workerId: string,
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		eventId: string,
 	): Promise<StoreEventReplayJobRow>;
 
@@ -79,6 +82,7 @@ export interface StoreEventReplayWorkerOptions {
 	batchSize: number;
 	repository: StoreEventReplayRepository;
 	providers: StoreEventReplayProviders | StoreEventReplayProviderSelector;
+	projectContextResolver: ProjectInstanceContextResolver;
 	now?: () => Date;
 	jitterMs?: () => number;
 	logger?: BillingLogger;
@@ -92,6 +96,7 @@ export class StoreEventReplayWorker {
 	private readonly batchSize: number;
 	private readonly repository: StoreEventReplayRepository;
 	private readonly providers: StoreEventReplayProviders | StoreEventReplayProviderSelector;
+	private readonly projectContextResolver: ProjectInstanceContextResolver;
 	private readonly now: () => Date;
 	private readonly jitterMs: () => number;
 	private readonly logger: BillingLogger;
@@ -104,6 +109,7 @@ export class StoreEventReplayWorker {
 		batchSize,
 		repository,
 		providers,
+		projectContextResolver,
 		now = () => new Date(),
 		jitterMs = () => Math.floor(Math.random() * 1000),
 		logger = createNoopBillingLogger(),
@@ -115,6 +121,7 @@ export class StoreEventReplayWorker {
 		this.batchSize = batchSize;
 		this.repository = repository;
 		this.providers = providers;
+		this.projectContextResolver = projectContextResolver;
 		this.now = now;
 		this.jitterMs = jitterMs;
 		this.logger = logger;
@@ -162,14 +169,17 @@ export class StoreEventReplayWorker {
 		}
 	}
 
-	async runOne(project: ProjectContext, eventId: string): Promise<StoreEventReplayOneResult> {
+	async runOne(
+		project: ProjectInstanceContext,
+		eventId: string,
+	): Promise<StoreEventReplayOneResult> {
 		const event = await this.repository.claimStoreEventReplayJobById(
 			this.workerId,
 			project,
 			eventId,
 		);
 		const stopHeartbeat = this.startLeaseHeartbeat([event]);
-		const status = await this.processEvent(event).finally(stopHeartbeat);
+		const status = await this.processEvent(event, project).finally(stopHeartbeat);
 		return { eventId: event.id, status };
 	}
 
@@ -201,11 +211,19 @@ export class StoreEventReplayWorker {
 
 	private async processEvent(
 		event: StoreEventReplayJobRow,
+		resolvedProject?: ProjectInstanceContext,
 	): Promise<"processed" | "ignored" | "retryable" | "failed"> {
 		let result: StoreEventReplayProviderResult;
 
 		try {
-			const provider = this.providerFor(event);
+			const project =
+				resolvedProject ??
+				(await resolveClaimedProjectInstance(this.projectContextResolver, {
+					projectInstanceId: event.project_id,
+					projectInstanceKey: event.project_key,
+				}));
+			assertClaimedProjectIdentity(project, event.project_id, event.project_key);
+			const provider = this.providerFor(event, project);
 			result = await provider.replayStoreEvent(event);
 		} catch (error) {
 			await this.markFailedSafely(event, error);
@@ -254,13 +272,16 @@ export class StoreEventReplayWorker {
 		}
 	}
 
-	private providerFor(event: StoreEventReplayJobRow): StoreEventReplayProvider {
+	private providerFor(
+		event: StoreEventReplayJobRow,
+		project: ProjectInstanceContext,
+	): StoreEventReplayProvider {
 		const provider = event.provider;
 		if (provider !== "apple" && provider !== "google" && provider !== "stripe") {
 			throw new Error(`Unsupported store event replay provider: ${provider}`);
 		}
 
-		const replayProvider = this.providersFor(event.project_key)[provider];
+		const replayProvider = this.providersFor(project)[provider];
 		if (replayProvider === null) {
 			throw new Error(`Store event replay provider is not configured: ${provider}`);
 		}
@@ -268,8 +289,8 @@ export class StoreEventReplayWorker {
 		return replayProvider;
 	}
 
-	private providersFor(projectKey: string): StoreEventReplayProviders {
-		return typeof this.providers === "function" ? this.providers(projectKey) : this.providers;
+	private providersFor(project: ProjectInstanceContext): StoreEventReplayProviders {
+		return typeof this.providers === "function" ? this.providers(project) : this.providers;
 	}
 
 	private async markFailed(event: StoreEventReplayJobRow, error: unknown): Promise<void> {
@@ -300,5 +321,18 @@ export class StoreEventReplayWorker {
 				result: "failed",
 			});
 		}
+	}
+}
+
+function assertClaimedProjectIdentity(
+	project: ProjectInstanceContext,
+	projectInstanceId: string,
+	projectInstanceKey: string,
+): void {
+	if (
+		project.projectInstanceId !== projectInstanceId ||
+		project.projectInstanceKey !== projectInstanceKey
+	) {
+		throw new Error("Claimed work project identity does not match the platform project instance");
 	}
 }

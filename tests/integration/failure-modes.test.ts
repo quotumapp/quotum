@@ -210,8 +210,8 @@ function withProjectionUrl(
 ): LocalPostgresContext["env"] {
 	return {
 		...env,
-		projects: env.projects.map((project) =>
-			project.key === "voysee" ? { ...project, projectionUrl } : project,
+		projectRuntime: env.projectRuntime.map((project) =>
+			project.projectInstanceKey === "voysee" ? { ...project, projectionUrl } : project,
 		),
 	};
 }

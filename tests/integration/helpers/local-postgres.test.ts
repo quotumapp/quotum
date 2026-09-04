@@ -4,6 +4,7 @@ import {
 	createLocalPostgresContext,
 	isPostgresIntegrationEnabled,
 } from "./local-postgres";
+import { integrationProjectContexts } from "./platform-fixture";
 
 describe("local Postgres integration helper", () => {
 	it("is disabled unless RUN_POSTGRES_INTEGRATION_TESTS is exactly 1", () => {
@@ -26,22 +27,21 @@ describe("local Postgres integration helper", () => {
 			"postgresql://postgres:postgres@127.0.0.1:5432/postgres",
 		);
 
-		expect(env.projects).toEqual([
-			{
-				key: "voysee",
-				apiKey: "voysee-integration-api-key",
-				active: true,
-				projectionUrl: "https://voysee.projection.integration.test",
-				projectionSecret: "voysee-projection-secret",
-			},
-			{
-				key: "wiseley",
-				apiKey: "wiseley-integration-api-key",
-				active: true,
-				projectionUrl: "https://wiseley.projection.integration.test",
-				projectionSecret: "wiseley-projection-secret",
-			},
-		]);
+		expect(env.projectRuntime).toHaveLength(integrationProjectContexts().length);
+		expect(env.projectRuntime).toEqual(
+			expect.arrayContaining([
+				{
+					projectInstanceKey: "voysee",
+					projectionUrl: "https://voysee.projection.integration.test",
+					projectionSecret: "voysee-projection-secret",
+				},
+				{
+					projectInstanceKey: "wiseley",
+					projectionUrl: "https://wiseley.projection.integration.test",
+					projectionSecret: "wiseley-projection-secret",
+				},
+			]),
+		);
 	});
 
 	it("applies explicit env overrides last", () => {
@@ -56,11 +56,9 @@ describe("local Postgres integration helper", () => {
 					meteringLimit: 4,
 					trustProxyHeaders: true,
 				},
-				projects: [
+				projectRuntime: [
 					{
-						key: "voysee",
-						apiKey: "override-key",
-						active: true,
+						projectInstanceKey: "voysee",
 						projectionUrl: "http://localhost:1234",
 						projectionSecret: "override-secret",
 					},
@@ -70,11 +68,9 @@ describe("local Postgres integration helper", () => {
 
 		expect(env.rateLimit.verifyLimit).toBe(2);
 		expect(env.rateLimit.trustProxyHeaders).toBe(true);
-		expect(env.projects).toEqual([
+		expect(env.projectRuntime).toEqual([
 			{
-				key: "voysee",
-				apiKey: "override-key",
-				active: true,
+				projectInstanceKey: "voysee",
 				projectionUrl: "http://localhost:1234",
 				projectionSecret: "override-secret",
 			},

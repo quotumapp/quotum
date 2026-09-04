@@ -11,7 +11,9 @@ import {
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
 import type { ProjectionDelivery } from "../projections/delivery";
+import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
 import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
+import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface ProjectionSyncRepository {
 	claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]>;
@@ -32,6 +34,7 @@ export interface ProjectionSyncWorkerOptions {
 	concurrency?: number;
 	repository: ProjectionSyncRepository;
 	delivery: ProjectionDelivery;
+	projectContextResolver: ProjectInstanceContextResolver;
 	now?: () => Date;
 	jitterMs?: () => number;
 	logger?: BillingLogger;
@@ -51,6 +54,7 @@ export class ProjectionSyncWorker {
 	private readonly concurrency: number;
 	private readonly repository: ProjectionSyncRepository;
 	private readonly delivery: ProjectionDelivery;
+	private readonly projectContextResolver: ProjectInstanceContextResolver;
 	private readonly now: () => Date;
 	private readonly jitterMs: () => number;
 	private readonly logger: BillingLogger;
@@ -63,6 +67,7 @@ export class ProjectionSyncWorker {
 		concurrency,
 		repository,
 		delivery,
+		projectContextResolver,
 		now = () => new Date(),
 		jitterMs = () => Math.floor(Math.random() * 1000),
 		logger = createNoopBillingLogger(),
@@ -74,6 +79,7 @@ export class ProjectionSyncWorker {
 		this.concurrency = positiveIntegerOrDefault(concurrency, batchSize);
 		this.repository = repository;
 		this.delivery = delivery;
+		this.projectContextResolver = projectContextResolver;
 		this.now = now;
 		this.jitterMs = jitterMs;
 		this.logger = logger;
@@ -103,12 +109,12 @@ export class ProjectionSyncWorker {
 		}
 	}
 
-	private async syncJob(job: ProjectionSyncJobRow): Promise<void> {
+	private async syncJob(job: ProjectionSyncJobRow, project: ProjectInstanceContext): Promise<void> {
 		const { billingAccountId, generatedAt, entitlements, balances, reason, purchase, reversal } =
 			job.payload;
 		await this.delivery.deliver({
 			schemaVersion: 1,
-			projectKey: job.project_key,
+			projectKey: project.projectInstanceKey,
 			jobId: job.id,
 			idempotencyKey: job.idempotency_key,
 			billingAccountId,
@@ -153,7 +159,11 @@ export class ProjectionSyncWorker {
 
 	private async syncClaimedJob(job: ProjectionSyncJobRow): Promise<"succeeded" | "failed"> {
 		try {
-			await this.syncJob(job);
+			const project = await resolveClaimedProjectInstance(this.projectContextResolver, {
+				projectInstanceId: job.project_id,
+				projectInstanceKey: job.project_key,
+			});
+			await this.syncJob(job, project);
 		} catch (error) {
 			await this.markFailedSafely(job, error);
 			safelyIncrementBillingMetric(this.metrics, "billing_projection_sync_jobs_total", {

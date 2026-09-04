@@ -1,11 +1,14 @@
 import { describe, expect, it } from "bun:test";
 import {
+	analyzeMigrationTableOwnership,
 	analyzeModuleBoundaries,
+	analyzeRepositoryBoundaries,
 	type BoundarySourceFile,
 	defaultModuleBoundaryRules,
 	type ModuleBoundaryRule,
 	platformTablePrefix,
 	readBoundaryAnalysisOptions,
+	readBoundaryMigrationFiles,
 	readBoundarySourceFiles,
 } from "../../scripts/lib/module-boundaries";
 
@@ -39,6 +42,15 @@ describe("module boundaries", () => {
 				"src/app.ts",
 				'import "./billing/example"; import "./platform/example"; import "./shared/value"; export {};',
 			),
+			source(
+				"src/composition/wire-platform.ts",
+				'import "../billing/example"; import "../platform/example"; export {};',
+			),
+			source(
+				"scripts/provision-catalog.ts",
+				'import "../src/composition/wire-platform"; export {};',
+			),
+			source("src/platform-bootstrap.ts", 'import "./composition/wire-platform"; export {};'),
 			source("tests/example.test.ts", 'import "../src/app"; export {};'),
 		]);
 
@@ -245,15 +257,196 @@ describe("module boundaries", () => {
 		).toEqual(["CONTRACT_PERSISTENCE_LEAK"]);
 	});
 
+	it("allows static platform queries only against platform-owned tables", async () => {
+		const violations = await analyzeModuleBoundaries([
+			source(
+				"src/platform/persistence/organization-repository.ts",
+				[
+					"declare const executor: { query<T>(statement: unknown): Promise<T[]> };",
+					"void executor.query({",
+					'\ttext: "SELECT o.id FROM platform_organizations o JOIN platform_projects p ON p.organization_id = o.id WHERE o.slug = $1",',
+					'\tvalues: ["merchant"],',
+					"});",
+				].join("\n"),
+			),
+		]);
+
+		expect(violations).toEqual([]);
+	});
+
+	it("rejects platform queries against billing tables", async () => {
+		const violations = await analyzeModuleBoundaries([
+			source(
+				"src/platform/persistence/project-repository.ts",
+				'declare const executor: any; void executor.query({ text: "SELECT id FROM projects", values: [] });',
+			),
+		]);
+
+		expect(violations.map((violation) => violation.code)).toEqual(["FORBIDDEN_TABLE_ACCESS"]);
+		expect(violations[0]?.message).toContain("platform source owns only platform_* tables");
+	});
+
+	it("rejects non-static SQL in platform persistence", async () => {
+		const violations = await analyzeModuleBoundaries([
+			source(
+				"src/platform/persistence/dynamic-concatenation.ts",
+				'declare const executor: any; declare const table: string; void executor.query({ text: "SELECT * FROM " + table, values: [] });',
+			),
+			source(
+				"src/platform/persistence/dynamic-template.ts",
+				[
+					"declare const executor: any; declare const id: string; void executor.query({ text: `SELECT * FROM platform_projects WHERE id = '${",
+					"id}'`, values: [] });",
+				].join(""),
+			),
+			source(
+				"src/platform/persistence/dynamic-unsafe.ts",
+				"declare const executor: any; declare const statement: string; void executor.unsafe(statement);",
+			),
+			source(
+				"src/platform/persistence/dynamic-variable.ts",
+				"declare const executor: any; declare const statement: any; void executor.query(statement);",
+			),
+		]);
+
+		expect(violations.map((violation) => violation.code)).toEqual([
+			"NON_STATIC_SQL",
+			"NON_STATIC_SQL",
+			"NON_STATIC_SQL",
+			"NON_STATIC_SQL",
+		]);
+	});
+
+	it("rejects non-static SQL outside platform persistence", async () => {
+		const violations = await analyzeModuleBoundaries([
+			source(
+				"src/platform/application/unsafe-query.ts",
+				[
+					"declare const executor: { query<T>(statement: unknown): Promise<T[]> };",
+					"declare const statement: { text: string; values: readonly unknown[] };",
+					"void executor.query(statement);",
+				].join("\n"),
+			),
+		]);
+
+		expect(violations.map((violation) => violation.code)).toEqual(["NON_STATIC_SQL"]);
+		expect(violations[0]?.message).toContain("dynamic platform SQL");
+	});
+
+	it("rejects platform table references from billing source", async () => {
+		const violations = await analyzeModuleBoundaries([
+			source("src/billing/raw-query.ts", 'const query = "SELECT * FROM platform_projects";'),
+			source("src/db/platform-schema.ts", 'const table = pgTable("platform_organizations", {});'),
+		]);
+
+		expect(violations.map((violation) => violation.code)).toEqual([
+			"FORBIDDEN_TABLE_ACCESS",
+			"FORBIDDEN_TABLE_ACCESS",
+		]);
+	});
+
+	it("keeps cross-domain SQL on the named projects composition adapter", async () => {
+		const allowed = await analyzeModuleBoundaries([
+			source(
+				"src/composition/project-instance-persistence.ts",
+				'const query = "SELECT s.id FROM subscriptions s JOIN platform_projects p ON true";',
+			),
+		]);
+		const violations = await analyzeModuleBoundaries([
+			source(
+				"src/composition/other-adapter.ts",
+				'const query = "SELECT * FROM platform_projects";',
+			),
+		]);
+
+		expect(allowed).toEqual([]);
+		expect(violations.map((violation) => violation.code)).toEqual(["FORBIDDEN_TABLE_ACCESS"]);
+	});
+
+	it("allows the platform migration to own platform tables and the projects seam", () => {
+		const violations = analyzeMigrationTableOwnership([
+			source(
+				"migrations/001_platform.sql",
+				[
+					"-- SELECT * FROM forbidden_comment_table;",
+					"SELECT 'FROM forbidden_string_table' FROM projects;",
+					"DELETE FROM projects WHERE key = 'legacy';",
+					"CREATE TABLE platform_projects (id UUID PRIMARY KEY);",
+					"CREATE TABLE platform_credentials (project_id UUID REFERENCES projects(id));",
+					"ALTER TABLE projects ADD COLUMN platform_project_id UUID REFERENCES platform_projects(id);",
+					"CREATE INDEX idx_platform_projects_id ON platform_projects (id);",
+				].join("\n"),
+			),
+		]);
+
+		expect(violations).toEqual([]);
+	});
+
+	it("rejects billing table access from the platform migration", () => {
+		const violations = analyzeMigrationTableOwnership([
+			source(
+				"migrations/001_platform.sql",
+				[
+					"UPDATE metering_settings SET raw_usage_retention_days = 1;",
+					"DELETE FROM worker_delivery_claims;",
+					"ALTER TABLE commercial_action_previews ADD COLUMN unsafe BOOLEAN;",
+					"SELECT * FROM subscriptions;",
+				].join("\n"),
+			),
+		]);
+
+		expect(violations.map((violation) => violation.code)).toEqual([
+			"FORBIDDEN_TABLE_ACCESS",
+			"FORBIDDEN_TABLE_ACCESS",
+			"FORBIDDEN_TABLE_ACCESS",
+			"FORBIDDEN_TABLE_ACCESS",
+		]);
+	});
+
+	it("rejects platform tables in every other migration", () => {
+		expect(
+			analyzeMigrationTableOwnership([
+				source(
+					"migrations/002_billing_core.sql",
+					"INSERT INTO platform_projects (id) VALUES ('00000000-0000-0000-0000-000000000000');",
+				),
+			]).map((violation) => violation.code),
+		).toEqual(["FORBIDDEN_TABLE_ACCESS"]);
+	});
+
+	it("allows dynamic SQL only in the path-exact reviewed migrations", () => {
+		const violations = analyzeMigrationTableOwnership([
+			source(
+				"migrations/003_metering_and_pricing.sql",
+				"DO $$ BEGIN EXECUTE format('CREATE TABLE %I PARTITION OF usage_events', partition_name); END $$;",
+			),
+		]);
+
+		expect(violations).toEqual([]);
+	});
+
+	it("rejects dynamic SQL ownership bypasses in every other migration", () => {
+		const violations = analyzeMigrationTableOwnership([
+			source(
+				"migrations/002_billing_core.sql",
+				"DO $$ BEGIN EXECUTE format('DROP TABLE platform_projects'); END $$;",
+			),
+		]);
+
+		expect(violations.map((violation) => violation.code)).toEqual(["NON_STATIC_SQL"]);
+		expect(violations[0]?.message).toContain("path-exact reviewed migrations");
+	});
+
 	it("reserves the platform table prefix", () => {
 		expect(platformTablePrefix).toBe("platform_");
 	});
 
-	it("passes against the repository source graph", async () => {
-		const [files, options] = await Promise.all([
+	it("passes against the repository source and migration graph", async () => {
+		const [sourceFiles, migrationFiles, options] = await Promise.all([
 			readBoundarySourceFiles(process.cwd()),
+			readBoundaryMigrationFiles(process.cwd()),
 			readBoundaryAnalysisOptions(process.cwd()),
 		]);
-		expect(await analyzeModuleBoundaries(files, options)).toEqual([]);
+		expect(await analyzeRepositoryBoundaries(sourceFiles, migrationFiles, options)).toEqual([]);
 	});
 });

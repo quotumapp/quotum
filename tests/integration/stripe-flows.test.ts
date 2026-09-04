@@ -25,6 +25,7 @@ import {
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 import { publishAiCreditsCatalog } from "./helpers/metering-catalog";
@@ -630,7 +631,7 @@ localDescribe("Stripe route flows integration", () => {
 		expect(duplicate.status).toBe(200);
 		expect(
 			await context.repository.getMeteringBalance(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				"integration_user",
 				"ai_credits",
 			),
@@ -906,7 +907,7 @@ localDescribe("Stripe route flows integration", () => {
 		expect(updatedResponse.status).toBe(200);
 		expect(
 			await context.repository.getMeteringBalance(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				"integration_user",
 				"ai_credits",
 			),
@@ -1085,7 +1086,7 @@ localDescribe("Stripe route flows integration", () => {
 	it("publishes top-up and reversal state without legacy mutation operations", async () => {
 		await withIsoDateSqlParameters(() =>
 			context.repository.recordStripeCreditPurchaseAndEnqueueProjection(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				{
 					purchaseKind: "consumable",
 					billingAccountId: "operation_topup_user",
@@ -1106,7 +1107,7 @@ localDescribe("Stripe route flows integration", () => {
 		);
 		await withIsoDateSqlParameters(() =>
 			context.repository.recordStripeCreditReversalAndEnqueueProjection(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				stripeOperationReversalInput({
 					reversalId: "re_operation_topup",
 					paymentIntentId: "pi_operation_topup",
@@ -1118,7 +1119,7 @@ localDescribe("Stripe route flows integration", () => {
 		);
 		await withIsoDateSqlParameters(() =>
 			context.repository.recordStripeCreditReversalAndEnqueueProjection(
-				{ projectKey: "voysee" },
+				integrationProjectContext(),
 				stripeOperationReversalInput({
 					reversalReason: "dispute",
 					reversalId: "dp_operation_topup",

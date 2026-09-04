@@ -14,9 +14,12 @@ import {
 	isNamedImports,
 	isNamespaceImport,
 	isObjectBindingPattern,
+	isObjectLiteralExpression,
 	isPropertyAccessExpression,
+	isPropertyAssignment,
 	isQualifiedName,
 	isStringLiteralLikeNode,
+	isTemplateExpression,
 	isVariableDeclaration,
 	type Node,
 	type SourceFile,
@@ -53,7 +56,9 @@ export type BoundaryViolationCode =
 	| "CONTRACT_PERSISTENCE_LEAK"
 	| "FORBIDDEN_DEPENDENCY"
 	| "FORBIDDEN_PERSISTENCE_ACCESS"
+	| "FORBIDDEN_TABLE_ACCESS"
 	| "NON_LITERAL_MODULE_REFERENCE"
+	| "NON_STATIC_SQL"
 	| "UNCLASSIFIED_FILE"
 	| "UNRESOLVED_INTERNAL_IMPORT";
 
@@ -71,18 +76,18 @@ export interface AnalyzeModuleBoundaryOptions {
 }
 
 const compositionPaths = new Set([
+	"scripts/provision-catalog.ts",
 	"src/app.ts",
 	"src/index.ts",
 	"src/migrate.ts",
+	"src/platform-bootstrap.ts",
 	"src/runtime.ts",
 	"src/shutdown.ts",
 ]);
 
-const billingPaths = new Set([
-	"scripts/billing-catalog.ts",
-	"scripts/provision-catalog.ts",
-	"src/env.ts",
-]);
+const compositionPrefixes = ["src/composition/"] as const;
+
+const billingPaths = new Set(["scripts/billing-catalog.ts", "src/env.ts"]);
 
 const billingPrefixes = [
 	"src/admin/",
@@ -129,7 +134,7 @@ export const defaultModuleBoundaryRules: readonly ModuleBoundaryRule[] = [
 	{
 		owner: "composition",
 		description: "application composition and lifecycle entrypoints",
-		matches: (path) => compositionPaths.has(path),
+		matches: (path) => compositionPaths.has(path) || hasPrefix(path, compositionPrefixes),
 	},
 	{
 		owner: "test_support",
@@ -158,9 +163,29 @@ const ignoredSourceDirectories = new Set([
 ]);
 const allowedNonLiteralModuleReferencePaths = new Set(["scripts/billing-catalog.ts"]);
 const selfPackageName = "quotum-api";
+const crossDomainProjectPersistenceAdapterPath = "src/composition/project-instance-persistence.ts";
+const platformSqlExecutionMethodNames = new Set(["execute", "query", "raw", "unsafe"]);
+const platformProjectIdentityMigrationPath = "migrations/001_platform.sql";
+const reviewedDynamicSqlMigrationPaths = new Set(["migrations/003_metering_and_pricing.sql"]);
+const platformMigrationMutableBillingTables = new Set(["projects"]);
 
 export async function readBoundarySourceFiles(root: string): Promise<BoundarySourceFile[]> {
 	const paths = await collectTypeScriptPaths(root);
+	return await Promise.all(
+		paths.map(async (path) => ({
+			path,
+			source: await readFile(join(root, ...path.split("/")), "utf8"),
+		})),
+	);
+}
+
+export async function readBoundaryMigrationFiles(root: string): Promise<BoundarySourceFile[]> {
+	const migrationRoot = join(root, "migrations");
+	const entries = await readdir(migrationRoot, { withFileTypes: true });
+	const paths = entries
+		.filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
+		.map((entry) => `migrations/${entry.name}`)
+		.sort((left, right) => left.localeCompare(right));
 	return await Promise.all(
 		paths.map(async (path) => ({
 			path,
@@ -270,6 +295,7 @@ export async function analyzeModuleBoundaries(
 					throw new Error(`TypeScript did not parse boundary-analysis source ${path}`);
 				}
 				const references = collectModuleReferences(sourceFile);
+				violations.push(...analyzeSourceTableOwnership(path, owner, sourceFile));
 
 				if (owner === "platform" || owner === "shared") {
 					for (const node of findBunSqlReferences(sourceFile)) {
@@ -381,7 +407,432 @@ export async function analyzeModuleBoundaries(
 		await api.close();
 	}
 
-	return violations.sort(
+	return sortBoundaryViolations(violations);
+}
+
+export function analyzeMigrationTableOwnership(
+	migrationFiles: readonly BoundarySourceFile[],
+): BoundaryViolation[] {
+	const violations: BoundaryViolation[] = [];
+
+	for (const file of migrationFiles) {
+		const path = normalizeRepoPath(file.path);
+		if (!reviewedDynamicSqlMigrationPaths.has(path)) {
+			for (const reference of collectDynamicSqlReferences(file.source)) {
+				violations.push({
+					code: "NON_STATIC_SQL",
+					path,
+					line: lineForOffset(file.source, reference.offset),
+					message: `${path} cannot use dynamic SQL (${reference.construct}); only the path-exact reviewed migrations ${[...reviewedDynamicSqlMigrationPaths].join(" and ")} are exempt`,
+				});
+			}
+		}
+		for (const reference of collectSqlTableReferences(file.source)) {
+			if (path === platformProjectIdentityMigrationPath) {
+				if (
+					reference.table.startsWith(platformTablePrefix) ||
+					platformMigrationMutableBillingTables.has(reference.table)
+				) {
+					continue;
+				}
+
+				violations.push({
+					code: "FORBIDDEN_TABLE_ACCESS",
+					path,
+					line: lineForOffset(file.source, reference.offset),
+					message: `${path} cannot ${reference.access} billing table ${reference.table}; the platform migrations own platform_* and the explicit projects seam only`,
+				});
+				continue;
+			}
+
+			if (reference.table.startsWith(platformTablePrefix)) {
+				violations.push({
+					code: "FORBIDDEN_TABLE_ACCESS",
+					path,
+					line: lineForOffset(file.source, reference.offset),
+					message: `${path} cannot ${reference.access} platform-owned table ${reference.table}; only the platform migrations own the platform schema`,
+				});
+			}
+		}
+	}
+
+	return sortBoundaryViolations(violations);
+}
+
+export async function analyzeRepositoryBoundaries(
+	sourceFiles: readonly BoundarySourceFile[],
+	migrationFiles: readonly BoundarySourceFile[],
+	options: AnalyzeModuleBoundaryOptions = {},
+): Promise<BoundaryViolation[]> {
+	return sortBoundaryViolations([
+		...(await analyzeModuleBoundaries(sourceFiles, options)),
+		...analyzeMigrationTableOwnership(migrationFiles),
+	]);
+}
+
+interface StaticTextFragment {
+	node: Node;
+	text: string;
+}
+
+type SqlTableAccess = "ddl" | "read" | "reference" | "write";
+
+interface SqlTableReference {
+	access: SqlTableAccess;
+	offset: number;
+	table: string;
+	qualifiedTable: string;
+}
+
+function analyzeSourceTableOwnership(
+	path: string,
+	owner: ModuleOwner,
+	sourceFile: SourceFile,
+): BoundaryViolation[] {
+	const violations: BoundaryViolation[] = [];
+
+	if (owner === "platform") {
+		for (const query of findPlatformQueries(sourceFile)) {
+			if (query.text !== null) {
+				continue;
+			}
+			violations.push({
+				code: "NON_STATIC_SQL",
+				path,
+				line: lineForNode(sourceFile, query.node),
+				message: `${path} must pass an inline string literal to platform SQL calls; dynamic platform SQL cannot be ownership-checked`,
+			});
+		}
+	}
+
+	for (const fragment of collectStaticTextFragments(sourceFile)) {
+		for (const reference of collectSourceTableReferences(fragment.text)) {
+			const line =
+				lineForNode(sourceFile, fragment.node) +
+				countLineBreaks(fragment.text.slice(0, reference.offset));
+
+			if (owner === "billing" && reference.table.startsWith(platformTablePrefix)) {
+				violations.push({
+					code: "FORBIDDEN_TABLE_ACCESS",
+					path,
+					line,
+					message: `${path} cannot reference platform-owned table ${reference.table}`,
+				});
+				continue;
+			}
+
+			if (owner === "platform" && !reference.table.startsWith(platformTablePrefix)) {
+				violations.push({
+					code: "FORBIDDEN_TABLE_ACCESS",
+					path,
+					line,
+					message: `${path} cannot ${reference.access} ${reference.table}; platform source owns only platform_* tables`,
+				});
+				continue;
+			}
+
+			if (owner !== "composition") {
+				continue;
+			}
+
+			// This is the one path-exact adapter allowed to coordinate platform and billing tables.
+			// Keeping the exception here, rather than on the composition owner, prevents it from
+			// becoming a general-purpose SQL escape hatch.
+			if (
+				path !== crossDomainProjectPersistenceAdapterPath &&
+				reference.table.startsWith(platformTablePrefix)
+			) {
+				violations.push({
+					code: "FORBIDDEN_TABLE_ACCESS",
+					path,
+					line,
+					message: `${path} cannot reference platform-owned table ${reference.table}; cross-domain SQL is restricted to ${crossDomainProjectPersistenceAdapterPath}`,
+				});
+			}
+		}
+	}
+
+	return deduplicateViolations(violations);
+}
+
+function findPlatformQueries(sourceFile: SourceFile): Array<{ node: Node; text: string | null }> {
+	const queries: Array<{ node: Node; text: string | null }> = [];
+	const visit = (node: Node) => {
+		if (isCallExpression(node) && isQueryMethod(node.expression)) {
+			const statement = node.arguments[0];
+			if (statement === undefined || !isObjectLiteralExpression(statement)) {
+				queries.push({ node: statement ?? node, text: null });
+			} else {
+				const textProperty = statement.properties.find(
+					(property) => isPropertyAssignment(property) && propertyName(property.name) === "text",
+				);
+				if (
+					textProperty !== undefined &&
+					isPropertyAssignment(textProperty) &&
+					isStringLiteralLikeNode(textProperty.initializer)
+				) {
+					queries.push({ node: textProperty.initializer, text: textProperty.initializer.text });
+				} else {
+					queries.push({ node: textProperty ?? statement, text: null });
+				}
+			}
+		}
+		node.forEachChild(visit);
+	};
+	visit(sourceFile);
+	return queries;
+}
+
+interface DynamicSqlReference {
+	construct: string;
+	offset: number;
+}
+
+function collectDynamicSqlReferences(source: string): DynamicSqlReference[] {
+	const sql = maskSqlCommentsAndStrings(source);
+	const pattern = /\bexecute\s+format\s*\(|\bexecute\b|\bformat\s*\(/giu;
+	return [...sql.matchAll(pattern)].map((match) => ({
+		construct: match[0].trim().replace(/\s+/gu, " "),
+		offset: match.index,
+	}));
+}
+
+function isQueryMethod(node: Node): boolean {
+	if (isIdentifier(node)) {
+		return platformSqlExecutionMethodNames.has(node.text);
+	}
+	if (isPropertyAccessExpression(node)) {
+		return platformSqlExecutionMethodNames.has(node.name.text);
+	}
+	return (
+		isElementAccessExpression(node) &&
+		isStringLiteralLikeNode(node.argumentExpression) &&
+		platformSqlExecutionMethodNames.has(node.argumentExpression.text)
+	);
+}
+
+function propertyName(node: Node): string | null {
+	return isIdentifier(node) || isStringLiteralLikeNode(node) ? node.text : null;
+}
+
+function collectStaticTextFragments(sourceFile: SourceFile): StaticTextFragment[] {
+	const fragments: StaticTextFragment[] = [];
+	const visit = (node: Node) => {
+		if (
+			isCallExpression(node) &&
+			isIdentifier(node.expression) &&
+			isTableDeclarationFunction(node.expression.text) &&
+			node.arguments[0] !== undefined &&
+			isStringLiteralLikeNode(node.arguments[0])
+		) {
+			fragments.push({ node: node.arguments[0], text: `CREATE TABLE ${node.arguments[0].text}` });
+		} else if (isStringLiteralLikeNode(node)) {
+			fragments.push({ node, text: node.text });
+		} else if (isTemplateExpression(node)) {
+			fragments.push({
+				node,
+				text: [node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join(
+					" __dynamic_sql_value__ ",
+				),
+			});
+		}
+		node.forEachChild(visit);
+	};
+	visit(sourceFile);
+	return fragments;
+}
+
+function isTableDeclarationFunction(name: string): boolean {
+	return name === "pgTable" || name === "mysqlTable" || name === "sqliteTable";
+}
+
+function collectSourceTableReferences(source: string): SqlTableReference[] {
+	return collectSqlTableReferences(source);
+}
+
+function collectSqlTableReferences(source: string): SqlTableReference[] {
+	const sql = maskSqlCommentsAndStrings(source);
+	const identifier =
+		'(?:(?:"(?:[^"]|"")*")|(?:[a-z_][a-z0-9_$]*))(?:\\s*\\.\\s*(?:(?:"(?:[^"]|"")*")|(?:[a-z_][a-z0-9_$]*)))*';
+	const patterns: Array<{ access: SqlTableAccess; pattern: RegExp }> = [
+		{
+			access: "write",
+			pattern: new RegExp(
+				`\\b(?:insert\\s+into|delete\\s+from)\\s+(?:only\\s+)?(${identifier})`,
+				"giu",
+			),
+		},
+		{
+			access: "write",
+			pattern: new RegExp(`(?<!on\\s)\\bupdate\\s+(?:only\\s+)?(${identifier})`, "giu"),
+		},
+		{
+			access: "ddl",
+			pattern: new RegExp(
+				`\\b(?:create\\s+(?:(?:global|local)\\s+)?(?:(?:temporary|temp|unlogged)\\s+)?table|alter\\s+table|drop\\s+table|truncate(?:\\s+table)?|lock\\s+table)\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?(?:only\\s+)?(${identifier})`,
+				"giu",
+			),
+		},
+		{
+			access: "ddl",
+			pattern: new RegExp(
+				`\\bcreate\\s+(?:unique\\s+)?index\\s+(?:concurrently\\s+)?(?:if\\s+not\\s+exists\\s+)?${identifier}\\s+on\\s+(?:only\\s+)?(${identifier})`,
+				"giu",
+			),
+		},
+		{
+			access: "reference",
+			pattern: new RegExp(`\\breferences\\s+(${identifier})`, "giu"),
+		},
+		{
+			access: "read",
+			pattern: new RegExp(`\\b(?:from|join)\\s+(?:only\\s+)?(${identifier})`, "giu"),
+		},
+	];
+	const cteNames = collectSqlCteNames(sql, identifier);
+	const byLocation = new Map<string, SqlTableReference>();
+
+	for (const { access, pattern } of patterns) {
+		for (const match of sql.matchAll(pattern)) {
+			const rawTable = match[1];
+			if (rawTable === undefined) {
+				continue;
+			}
+			const relativeOffset = match[0].lastIndexOf(rawTable);
+			const offset = match.index + relativeOffset;
+			const table = normalizeSqlIdentifier(rawTable);
+			const qualifiedTable = normalizeSqlQualifiedIdentifier(rawTable);
+			if (
+				table === "__dynamic_sql_value__" ||
+				(access === "read" &&
+					(cteNames.has(table) || isSqlFunctionCall(sql, offset + rawTable.length)))
+			) {
+				continue;
+			}
+			const key = `${offset}:${table}`;
+			const current = byLocation.get(key);
+			if (
+				current === undefined ||
+				tableAccessPriority(access) > tableAccessPriority(current.access)
+			) {
+				byLocation.set(key, { access, offset, table, qualifiedTable });
+			}
+		}
+	}
+
+	return [...byLocation.values()].sort((left, right) => left.offset - right.offset);
+}
+
+function collectSqlCteNames(source: string, identifier: string): Set<string> {
+	const names = new Set<string>();
+	const pattern = new RegExp(
+		`(?:\\bwith\\s+(?:recursive\\s+)?|,)\\s*(${identifier})(?:\\s*\\([^)]*\\))?\\s+as\\s*\\(`,
+		"giu",
+	);
+	for (const match of source.matchAll(pattern)) {
+		if (match[1] !== undefined) {
+			names.add(normalizeSqlIdentifier(match[1]));
+		}
+	}
+	return names;
+}
+
+function normalizeSqlIdentifier(identifier: string): string {
+	const segment = identifier.split(".").at(-1)?.trim() ?? identifier;
+	return segment.startsWith('"') && segment.endsWith('"')
+		? segment.slice(1, -1).replaceAll('""', '"').toLowerCase()
+		: segment.toLowerCase();
+}
+
+function normalizeSqlQualifiedIdentifier(identifier: string): string {
+	return identifier
+		.split(".")
+		.map((segment) => normalizeSqlIdentifier(segment.trim()))
+		.join(".");
+}
+
+function isSqlFunctionCall(source: string, offset: number): boolean {
+	return source.slice(offset).trimStart().startsWith("(");
+}
+
+function tableAccessPriority(access: SqlTableAccess): number {
+	return access === "write" ? 4 : access === "ddl" ? 3 : access === "reference" ? 2 : 1;
+}
+
+function maskSqlCommentsAndStrings(source: string): string {
+	const chars = source.split("");
+	let index = 0;
+	while (index < chars.length) {
+		if (chars[index] === "-" && chars[index + 1] === "-") {
+			while (index < chars.length && chars[index] !== "\n") {
+				chars[index] = " ";
+				index += 1;
+			}
+			continue;
+		}
+		if (chars[index] === "/" && chars[index + 1] === "*") {
+			chars[index] = " ";
+			chars[index + 1] = " ";
+			index += 2;
+			while (index < chars.length && !(chars[index] === "*" && chars[index + 1] === "/")) {
+				if (chars[index] !== "\n") {
+					chars[index] = " ";
+				}
+				index += 1;
+			}
+			if (index < chars.length) {
+				chars[index] = " ";
+				chars[index + 1] = " ";
+				index += 2;
+			}
+			continue;
+		}
+		if (chars[index] === "'") {
+			chars[index] = " ";
+			index += 1;
+			while (index < chars.length) {
+				if (chars[index] === "'" && chars[index + 1] === "'") {
+					chars[index] = " ";
+					chars[index + 1] = " ";
+					index += 2;
+					continue;
+				}
+				if (chars[index] === "'") {
+					chars[index] = " ";
+					index += 1;
+					break;
+				}
+				if (chars[index] !== "\n") {
+					chars[index] = " ";
+				}
+				index += 1;
+			}
+			continue;
+		}
+		index += 1;
+	}
+	return chars.join("");
+}
+
+function countLineBreaks(source: string): number {
+	return source.match(/\n/gu)?.length ?? 0;
+}
+
+function lineForOffset(source: string, offset: number): number {
+	return countLineBreaks(source.slice(0, offset)) + 1;
+}
+
+function deduplicateViolations(violations: readonly BoundaryViolation[]): BoundaryViolation[] {
+	const byIdentity = new Map<string, BoundaryViolation>();
+	for (const violation of violations) {
+		const key = `${violation.code}:${violation.path}:${violation.line}:${violation.message}`;
+		byIdentity.set(key, violation);
+	}
+	return [...byIdentity.values()];
+}
+
+function sortBoundaryViolations(violations: readonly BoundaryViolation[]): BoundaryViolation[] {
+	return [...violations].sort(
 		(left, right) =>
 			left.path.localeCompare(right.path) ||
 			left.line - right.line ||

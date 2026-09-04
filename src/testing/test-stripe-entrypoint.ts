@@ -1,4 +1,4 @@
-import { syncConfiguredProjectsAndCatalog } from "../catalog/provision";
+import { createBillingReadinessCheck } from "../composition/runtime-readiness";
 import { initializePostgresHealth } from "../db/client";
 import { loadEnv } from "../env";
 import {
@@ -14,11 +14,11 @@ if (process.env.BILLING_ENV !== "test" || process.env.BILLING_TEST_FAKE_STRIPE !
 }
 
 const env = loadEnv();
-await syncConfiguredProjectsAndCatalog(env);
 await initializePostgresHealth();
 
 const app = createBillingRuntimeApp(env, {
 	stripeClientFactory: (config) => new FakeStripeBillingClient(config, fakeStripeOptions()),
+	readinessCheck: createBillingReadinessCheck(env.projectRuntime),
 });
 
 export default app;

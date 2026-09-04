@@ -10,7 +10,7 @@ import type {
 	SubscriptionChangePreview,
 } from "../../billing/recurring";
 import type { BillingProvider, EntitlementSnapshot } from "../../billing/types";
-import type { ProjectContext } from "../../projects/context";
+import type { ProjectInstanceContext } from "../../projects/context";
 import type { StripeCatalog } from "../../providers/stripe/types";
 import type { BillingRepository } from "../repository";
 import type {
@@ -38,7 +38,7 @@ import type {
 export class ProjectScopedBillingRepository {
 	constructor(
 		private readonly repository: BillingRepository,
-		private readonly project: ProjectContext,
+		private readonly project: ProjectInstanceContext,
 	) {}
 
 	async getEntitlementSnapshot(billingAccountId: string): Promise<EntitlementSnapshot> {
@@ -133,8 +133,17 @@ export class ProjectScopedBillingRepository {
 		return await this.repository.completeCommercialActionExecution(this.project, input);
 	}
 
-	async markSubscriptionChangeApplied(changeId: string, providerRequestId: string): Promise<void> {
-		await this.repository.markSubscriptionChangeApplied(this.project, changeId, providerRequestId);
+	async markSubscriptionChangeApplied(
+		changeId: string,
+		providerRequestId: string,
+		workerId: string,
+	): Promise<void> {
+		await this.repository.markSubscriptionChangeApplied(
+			this.project.projectInstanceId,
+			changeId,
+			providerRequestId,
+			workerId,
+		);
 	}
 
 	async listStripeCatalog(): Promise<StripeCatalog> {

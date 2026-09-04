@@ -1,31 +1,9 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError } from "../../billing/errors";
 import type { BillingChannel, BillingProvider } from "../../billing/types";
-import type { ProjectContext } from "../../projects/context";
 import { executeOne } from "./query";
 import type { CustomerIdentityRow, QueryExecutor, StoreProductIdentityRow } from "./types";
 import { requireNonBlank, requireStripeCustomerId } from "./validation";
-
-export async function resolveProjectId(
-	executor: QueryExecutor,
-	project: ProjectContext,
-): Promise<string> {
-	requireNonBlank(project.projectKey, "p_project_key");
-	const row = await executeOne<{ id: string }>(
-		executor,
-		drizzleSql`
-		SELECT p.id
-		FROM projects p
-		WHERE p.key = ${project.projectKey}
-			AND p.active = true
-		LIMIT 1
-	`,
-	);
-	if (row === null) {
-		throw new Error(`billing project ${project.projectKey} was not found`);
-	}
-	return row.id;
-}
 
 export async function ensureCustomer(
 	executor: QueryExecutor,

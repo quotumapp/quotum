@@ -147,8 +147,6 @@ interface StripeBillingRepositoryDependency {
 		result: CommercialActionExecutionResult;
 	}): Promise<CommercialActionExecutionResult>;
 
-	markSubscriptionChangeApplied?(changeId: string, providerRequestId: string): Promise<void>;
-
 	getStripeProviderCustomer(input: GetStripeProviderCustomerInput): Promise<string | null>;
 
 	linkStripeProviderCustomer(input: LinkStripeProviderCustomerInput): Promise<string>;

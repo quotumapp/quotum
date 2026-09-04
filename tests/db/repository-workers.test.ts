@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { BillingRepository } from "../../src/db/repository";
+import { projectInstanceContext } from "../helpers/project-context";
 import { FakeDatabase, purchaseProjectionInput } from "./repository-fixture";
 
 describe("BillingRepository workers", () => {
@@ -67,7 +68,6 @@ describe("BillingRepository workers", () => {
 
 	it("records projection resync requests with durable boolean state", async () => {
 		const database = new FakeDatabase([
-			[{ id: "project-id" }],
 			[{ id: "customer-id", billing_account_id: "user-1" }],
 			[
 				{
@@ -90,7 +90,7 @@ describe("BillingRepository workers", () => {
 		const repository = new BillingRepository(database as never);
 
 		await repository.recordPurchaseAndEnqueueProjection(
-			{ projectKey: "wiseley" },
+			projectInstanceContext("wiseley"),
 			purchaseProjectionInput(),
 		);
 
@@ -121,7 +121,6 @@ describe("BillingRepository workers", () => {
 
 	it("claims store event replay jobs by id inside the authenticated project", async () => {
 		const database = new FakeDatabase([
-			[{ id: "project-id" }],
 			[
 				{
 					id: "event-id",
@@ -152,16 +151,15 @@ describe("BillingRepository workers", () => {
 
 		const row = await repository.claimStoreEventReplayJobById(
 			"worker-a",
-			{ projectKey: "wiseley" },
+			projectInstanceContext("wiseley"),
 			"event-id",
 		);
 
 		expect(row.project_key).toBe("wiseley");
 		const queries = database.queries.join("\n");
-		expect(queries).toContain("WHERE p.key = $1");
-		expect(queries).toContain('"wiseley"');
+		expect(queries).not.toContain("SELECT p.id FROM projects p");
 		expect(queries).toContain("events.project_id = $3");
-		expect(queries).toContain('"project-id"');
+		expect(queries).toContain(JSON.stringify(projectInstanceContext("wiseley").projectInstanceId));
 	});
 
 	it("marks projection failures with retry or terminal state", async () => {
@@ -188,11 +186,11 @@ describe("BillingRepository workers", () => {
 	});
 
 	it("requeues terminal projection failures for an authenticated project", async () => {
-		const database = new FakeDatabase([[{ id: "project-id" }], [{ id: "job-id" }]]);
+		const database = new FakeDatabase([[{ id: "job-id" }]]);
 		const repository = new BillingRepository(database as never);
 
 		await expect(
-			repository.retryProjectionSyncJob({ projectKey: "wiseley" }, "job-id"),
+			repository.retryProjectionSyncJob(projectInstanceContext("wiseley"), "job-id"),
 		).resolves.toEqual({ jobId: "job-id", status: "pending" });
 
 		const queries = database.queries.join("\n");
@@ -200,7 +198,7 @@ describe("BillingRepository workers", () => {
 		expect(queries).toContain("attempts = 0");
 		expect(queries).toContain("last_error = NULL");
 		expect(queries).toContain("next_attempt_at = now()");
-		expect(queries).toContain('"project-id"');
+		expect(queries).toContain(JSON.stringify(projectInstanceContext("wiseley").projectInstanceId));
 	});
 
 	it("binds null for terminal projection failures", async () => {
@@ -296,5 +294,52 @@ describe("BillingRepository workers", () => {
 		await expect(
 			repository.markProjectionSyncJobSucceeded("project-id", "job-id", "worker-a"),
 		).rejects.toThrow("projection sync job job-id is not locked by worker worker-a");
+	});
+
+	it("fences every recurring-billing finalizer by captured project and worker lease", async () => {
+		const database = new FakeDatabase([
+			[{ id: "change-id" }],
+			[],
+			[{ status: "pending" }],
+			[{ id: "period-id" }],
+			[{ id: "adjustment-id" }],
+		]);
+		const repository = new BillingRepository(database as never);
+
+		await repository.markSubscriptionChangeApplied(
+			"project-id",
+			"change-id",
+			"provider-request-id",
+			"worker-a",
+		);
+		await repository.markSubscriptionChangeFailed(
+			"project-id",
+			"change-id",
+			"provider failed",
+			"worker-a",
+		);
+		await repository.markUsageInvoiceSucceeded(
+			"project-id",
+			"period",
+			"period-id",
+			"invoice-id",
+			"worker-a",
+		);
+		await repository.markUsageInvoiceFailed(
+			"project-id",
+			"adjustment",
+			"adjustment-id",
+			"invoice failed",
+			"worker-a",
+		);
+
+		for (const query of [database.queries[0], database.queries[2], ...database.queries.slice(3)]) {
+			expect(query).toContain("project_id =");
+			expect(query).toContain("locked_by =");
+		}
+		for (const params of [database.params[0], database.params[2], ...database.params.slice(3)]) {
+			expect(params).toContain("project-id");
+			expect(params).toContain("worker-a");
+		}
 	});
 });

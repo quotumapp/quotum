@@ -7,6 +7,7 @@ import { expectTableCounts } from "./helpers/db-assertions";
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 
@@ -104,7 +105,7 @@ localDescribe("customer entitlement route integration", () => {
 		await seedSubscriptionExpiryFixtures(context.sql);
 
 		const recomputed = await context.repository.recomputeCustomerEntitlements(
-			{ projectKey: "voysee" },
+			integrationProjectContext(),
 			"subscription_lifecycle_user",
 		);
 		const lifecycleResponse = await app.request(

@@ -4,22 +4,19 @@ import { loadEnv } from "../src/env";
 const postgresUri = "postgresql://postgres:postgres@127.0.0.1:5432/postgres";
 const operatorApiKey = "billing-operator-key-secret";
 const project = {
-	key: "voysee",
-	apiKey: "voysee-service-key-123456",
+	projectInstanceKey: "voysee",
 	projectionUrl: "https://voysee.example.com",
 	projectionSecret: "voysee-projection-secret",
 };
-const projectsJson = JSON.stringify([project]);
+const runtimeJson = JSON.stringify([project]);
 const parsedProject = {
 	...project,
-	active: true,
 	projectionContract: "billing_state_v1" as const,
-	catalog: [],
 };
 const developmentSource = {
 	POSTGRES_URI: postgresUri,
 	BILLING_ENV: "development",
-	BILLING_PROJECTS_JSON: projectsJson,
+	BILLING_PROJECT_RUNTIME_JSON: runtimeJson,
 } as const;
 
 describe("loadEnv", () => {
@@ -46,7 +43,7 @@ describe("loadEnv", () => {
 			postgresUri,
 			authMode: "api_key",
 			operatorApiKey: null,
-			projects: [parsedProject],
+			projectRuntime: [parsedProject],
 			runtimeEnvironment: "development",
 			trustGatewayProjectHeader: false,
 			workerId: "worker-a",
@@ -149,58 +146,46 @@ describe("loadEnv", () => {
 		expect(env.operatorApiKey).toBe(operatorApiKey);
 	});
 
-	it("parses project-scoped API keys and active state", () => {
+	it("parses more than one project runtime entry", () => {
 		const env = loadEnv({
 			...developmentSource,
-			BILLING_PROJECTS_JSON: JSON.stringify([
+			BILLING_PROJECT_RUNTIME_JSON: JSON.stringify([
 				project,
 				{
-					key: "wiseley",
-					apiKey: "wiseley-service-key-123456",
-					active: false,
+					projectInstanceKey: "wiseley",
 					projectionUrl: "https://wiseley.example.com",
 					projectionSecret: "wiseley-projection-secret",
 				},
 			]),
 		});
 
-		expect(env.projects).toEqual([
+		expect(env.projectRuntime).toEqual([
 			parsedProject,
 			{
-				key: "wiseley",
-				apiKey: "wiseley-service-key-123456",
-				active: false,
+				projectInstanceKey: "wiseley",
 				projectionUrl: "https://wiseley.example.com",
 				projectionSecret: "wiseley-projection-secret",
 				projectionContract: "billing_state_v1",
-				catalog: [],
 			},
 		]);
 	});
 
-	it("rejects duplicate project keys and API keys", () => {
+	it("rejects duplicate project instance keys", () => {
 		const secondProject = {
 			...project,
-			key: "wiseley",
-			apiKey: "wiseley-service-key-123456",
+			projectInstanceKey: "wiseley",
 			projectionUrl: "https://wiseley.example.com",
 		};
 
 		expect(() =>
 			loadEnv({
 				...developmentSource,
-				BILLING_PROJECTS_JSON: JSON.stringify([project, { ...secondProject, key: project.key }]),
-			}),
-		).toThrow("BILLING_PROJECTS_JSON contains duplicate project keys");
-		expect(() =>
-			loadEnv({
-				...developmentSource,
-				BILLING_PROJECTS_JSON: JSON.stringify([
+				BILLING_PROJECT_RUNTIME_JSON: JSON.stringify([
 					project,
-					{ ...secondProject, apiKey: project.apiKey },
+					{ ...secondProject, projectInstanceKey: project.projectInstanceKey },
 				]),
 			}),
-		).toThrow("BILLING_PROJECTS_JSON contains duplicate project API keys");
+		).toThrow("BILLING_PROJECT_RUNTIME_JSON contains duplicate project instance keys");
 	});
 
 	it("parses per-project provider configuration", () => {
@@ -211,7 +196,7 @@ describe("loadEnv", () => {
 		};
 		const env = loadEnv({
 			...developmentSource,
-			BILLING_PROJECTS_JSON: JSON.stringify([
+			BILLING_PROJECT_RUNTIME_JSON: JSON.stringify([
 				{
 					...project,
 					apple: {
@@ -247,7 +232,7 @@ describe("loadEnv", () => {
 			]),
 		});
 
-		expect(env.projects[0]).toMatchObject({
+		expect(env.projectRuntime[0]).toMatchObject({
 			apple: { bundleId: "com.voysee.app", environment: "production" },
 			googlePlay: {
 				packageName: "com.voysee.app",
@@ -256,30 +241,6 @@ describe("loadEnv", () => {
 			},
 			stripe: { secretKey: "sk_test_voysee", webhookSecret: "whsec_voysee" },
 		});
-	});
-
-	it("accepts monthly and annual subscription catalog intervals", () => {
-		const catalog = ["month", "year"].map((interval) => ({
-			key: `wiseley_premium_${interval}`,
-			name: `Wiseley Premium ${interval}`,
-			kind: "subscription",
-			plan: "premium",
-			currency: "USD",
-			amountCents: interval === "month" ? 799 : 4999,
-			credits: 1,
-			interval,
-			entitlementKey: "paid",
-			externalProductId: `prod_wiseley_${interval}`,
-			externalPriceId: `price_wiseley_${interval}`,
-			active: true,
-		}));
-
-		const env = loadEnv({
-			...developmentSource,
-			BILLING_PROJECTS_JSON: JSON.stringify([{ ...project, catalog }]),
-		});
-
-		expect(env.projects[0]?.catalog?.map((item) => item.interval)).toEqual(["month", "year"]);
 	});
 
 	it("validates each project's provider configuration", () => {
@@ -324,9 +285,9 @@ describe("loadEnv", () => {
 			expect(() =>
 				loadEnv({
 					...developmentSource,
-					BILLING_PROJECTS_JSON: JSON.stringify([{ ...project, ...provider }]),
+					BILLING_PROJECT_RUNTIME_JSON: JSON.stringify([{ ...project, ...provider }]),
 				}),
-			).toThrow("BILLING_PROJECTS_JSON is invalid");
+			).toThrow("BILLING_PROJECT_RUNTIME_JSON is invalid");
 		}
 	});
 
@@ -358,7 +319,7 @@ describe("loadEnv", () => {
 				POSTGRES_URI: postgresUri,
 				BILLING_ENV: "development",
 			}),
-		).toThrow("BILLING_PROJECTS_JSON is required");
+		).toThrow("BILLING_PROJECT_RUNTIME_JSON is required");
 		expect(() =>
 			loadEnv({
 				POSTGRES_URI: postgresUri,
@@ -366,9 +327,9 @@ describe("loadEnv", () => {
 				BILLING_AUTH_MODE: "gateway",
 				BILLING_TRUST_GATEWAY_PROJECT_HEADER: "true",
 			}),
-		).toThrow("BILLING_PROJECTS_JSON is required");
-		expect(() => loadEnv({ ...developmentSource, BILLING_PROJECTS_JSON: "[]" })).toThrow(
-			"BILLING_PROJECTS_JSON is invalid",
+		).toThrow("BILLING_PROJECT_RUNTIME_JSON is required");
+		expect(() => loadEnv({ ...developmentSource, BILLING_PROJECT_RUNTIME_JSON: "[]" })).toThrow(
+			"BILLING_PROJECT_RUNTIME_JSON is invalid",
 		);
 	});
 
@@ -376,11 +337,33 @@ describe("loadEnv", () => {
 		expect(() =>
 			loadEnv({
 				...developmentSource,
-				BILLING_PROJECTS_JSON: JSON.stringify([
-					{ key: "voysee", apiKey: "voysee-service-key-123456" },
-				]),
+				BILLING_PROJECT_RUNTIME_JSON: JSON.stringify([{ projectInstanceKey: "voysee" }]),
 			}),
-		).toThrow("BILLING_PROJECTS_JSON is invalid");
+		).toThrow("BILLING_PROJECT_RUNTIME_JSON is invalid");
+	});
+
+	it("rejects the removed combined project configuration", () => {
+		expect(() =>
+			loadEnv({
+				...developmentSource,
+				BILLING_PROJECTS_JSON: runtimeJson,
+			}),
+		).toThrow("BILLING_PROJECTS_JSON has been removed");
+	});
+
+	it("rejects legacy identity and catalog fields in runtime configuration", () => {
+		for (const legacyField of [
+			{ apiKey: "plaintext-key-must-not-be-retained" },
+			{ active: true },
+			{ catalog: [] },
+		]) {
+			expect(() =>
+				loadEnv({
+					...developmentSource,
+					BILLING_PROJECT_RUNTIME_JSON: JSON.stringify([{ ...project, ...legacyField }]),
+				}),
+			).toThrow("BILLING_PROJECT_RUNTIME_JSON is invalid");
+		}
 	});
 
 	it("rejects obsolete projection adapter configuration", () => {
@@ -399,7 +382,7 @@ describe("loadEnv", () => {
 			loadEnv({
 				POSTGRES_URI: postgresUri,
 				BILLING_ENV: "production",
-				BILLING_PROJECTS_JSON: projectsJson,
+				BILLING_PROJECT_RUNTIME_JSON: runtimeJson,
 			}),
 		).toThrow("BILLING_OPERATOR_API_KEY is required in production");
 	});
@@ -428,7 +411,7 @@ describe("loadEnv", () => {
 					POSTGRES_URI: postgresUri,
 					BILLING_ENV: "production",
 					BILLING_OPERATOR_API_KEY: operatorApiKey,
-					BILLING_PROJECTS_JSON: JSON.stringify([{ ...project, projectionUrl }]),
+					BILLING_PROJECT_RUNTIME_JSON: JSON.stringify([{ ...project, projectionUrl }]),
 				}),
 			).toThrow("Production billing project projectionUrl must be an HTTPS public URL");
 		}
@@ -439,10 +422,10 @@ describe("loadEnv", () => {
 			POSTGRES_URI: postgresUri,
 			BILLING_ENV: "production",
 			BILLING_OPERATOR_API_KEY: operatorApiKey,
-			BILLING_PROJECTS_JSON: projectsJson,
+			BILLING_PROJECT_RUNTIME_JSON: runtimeJson,
 		});
 
-		expect(env.projects).toEqual([parsedProject]);
+		expect(env.projectRuntime).toEqual([parsedProject]);
 	});
 
 	it("rejects non-HTTPS Stripe redirects and allowed origins in production", () => {
@@ -464,7 +447,7 @@ describe("loadEnv", () => {
 					POSTGRES_URI: postgresUri,
 					BILLING_ENV: "production",
 					BILLING_OPERATOR_API_KEY: operatorApiKey,
-					BILLING_PROJECTS_JSON: JSON.stringify([
+					BILLING_PROJECT_RUNTIME_JSON: JSON.stringify([
 						{ ...project, stripe: { ...stripe, ...override } },
 					]),
 				}),
@@ -475,7 +458,7 @@ describe("loadEnv", () => {
 	it("fails closed when required configuration is missing", () => {
 		expect(() => loadEnv({})).toThrow("POSTGRES_URI is required");
 		expect(() => loadEnv({ POSTGRES_URI: postgresUri, BILLING_ENV: "development" })).toThrow(
-			"BILLING_PROJECTS_JSON is required",
+			"BILLING_PROJECT_RUNTIME_JSON is required",
 		);
 	});
 

@@ -16,6 +16,7 @@ import { expectProjectionJob, expectStoreEvent, expectTableCounts } from "./help
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 import {
@@ -234,7 +235,7 @@ localDescribe("Worker flows integration", () => {
 		const secondPurchasedAt = new Date("2026-06-01T00:00:00.000Z");
 
 		await context.repository.recordGooglePurchaseAndEnqueueProjection(
-			{ projectKey: "voysee" },
+			integrationProjectContext(),
 			manualProjectionPurchaseInput({
 				purchasedAt: firstPurchasedAt,
 				externalEventId: "evt_projection_resync_first",
@@ -247,7 +248,7 @@ localDescribe("Worker flows integration", () => {
 		});
 
 		await context.repository.recordGooglePurchaseAndEnqueueProjection(
-			{ projectKey: "voysee" },
+			integrationProjectContext(),
 			manualProjectionPurchaseInput({
 				purchasedAt: secondPurchasedAt,
 				externalEventId: "evt_projection_resync_second",
@@ -319,7 +320,7 @@ localDescribe("Worker flows integration", () => {
 		const result = await runStoreEventReplayWorkerOnce({
 			env: context.env,
 			repository: context.repository,
-			providers: (projectKey) => replayProvidersForProject(projectKey, calls),
+			providers: (project) => replayProvidersForProject(project.projectInstanceKey, calls),
 		});
 
 		expect(result).toEqual({
@@ -382,7 +383,7 @@ localDescribe("Worker flows integration", () => {
 
 	it("replays null-external-id store events without inserting duplicate store event rows", async () => {
 		const initial = await context.repository.recordGooglePurchaseAndEnqueueProjection(
-			{ projectKey: "voysee" },
+			integrationProjectContext(),
 			googleNullExternalReplayInput(),
 		);
 		expect(initial.processingStatus).toBe("skipped");
@@ -410,7 +411,7 @@ localDescribe("Worker flows integration", () => {
 					async replayStoreEvent(event) {
 						expect(event.external_event_id).toBeNull();
 						const replayed = await context.repository.recordGooglePurchaseAndEnqueueProjection(
-							{ projectKey: event.project_key },
+							integrationProjectContext(event.project_key),
 							googleNullExternalReplayInput({ replayStoreEventId: event.id }),
 						);
 						return replayed.processingStatus === "processed"
@@ -469,7 +470,7 @@ localDescribe("Worker flows integration", () => {
 		const result = await runSubscriptionReconciliationWorkerOnce({
 			env: context.env,
 			repository: context.repository,
-			providers: (projectKey) => reconciliationProvidersForProject(projectKey, calls),
+			providers: (project) => reconciliationProvidersForProject(project.projectInstanceKey, calls),
 		});
 
 		expect(result).toEqual({
@@ -524,7 +525,7 @@ localDescribe("Worker flows integration", () => {
 				enablePublisherMutations: true,
 			},
 			client: fixture.google.client,
-			repository: context.repository.forProject({ projectKey: "voysee" }),
+			repository: context.repository.forProject(integrationProjectContext()),
 		});
 
 		const result = await runSubscriptionReconciliationWorkerOnce({

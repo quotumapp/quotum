@@ -1,4 +1,4 @@
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 import type {
 	ExpiredSubscriptionReconciliationResult,
 	ProjectionSyncJobRow,
@@ -54,7 +54,7 @@ export interface StoreEventReplayJobRepositorySource {
 	claimStoreEventReplayJobs(workerId: string, limit: number): Promise<StoreEventReplayJobRow[]>;
 	claimStoreEventReplayJobById(
 		workerId: string,
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		eventId: string,
 	): Promise<StoreEventReplayJobRow>;
 	markStoreEventReplayJobSucceeded(
@@ -88,7 +88,7 @@ export class StoreEventReplayJobRepository implements StoreEventReplayJobReposit
 
 	async claimStoreEventReplayJobById(
 		workerId: string,
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		eventId: string,
 	): Promise<StoreEventReplayJobRow> {
 		return await this.source.claimStoreEventReplayJobById(workerId, project, eventId);

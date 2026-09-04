@@ -2,7 +2,7 @@ import type { Context, Hono } from "hono";
 import { z } from "zod";
 import { BillingError } from "../billing/errors";
 import { decodeUsageCursor, encodeUsageCursor } from "../billing/insights";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 import type { BillingContext, BillingHonoEnv, BillingInsightsServiceLike } from "./types";
 
 const accountParamsSchema = z.object({ billingAccountId: z.string().trim().min(1) });
@@ -105,7 +105,7 @@ function accountId(c: Context): string {
 	return parsed.data.billingAccountId;
 }
 
-function privateProject(c: BillingContext): ProjectContext {
+function privateProject(c: BillingContext): ProjectInstanceContext {
 	const project = c.get("project");
 	if (project === undefined) {
 		throw new BillingError("Billing project context is required", "BILLING_PROJECT_REQUIRED", 401);

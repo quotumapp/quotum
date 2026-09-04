@@ -12,6 +12,7 @@ import {
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 import type { ProjectionRequest } from "./helpers/worker-fixture";
@@ -183,7 +184,7 @@ localDescribe("Worker concurrency integration", () => {
 		expect(projection.requests).toHaveLength(0);
 
 		await expect(
-			context.repository.retryProjectionSyncJob({ projectKey: "voysee" }, jobs[0].id),
+			context.repository.retryProjectionSyncJob(integrationProjectContext(), jobs[0].id),
 		).resolves.toEqual({ jobId: jobs[0].id, status: "pending" });
 		const recoveredProjection = createRecordingProjectionFetch();
 		const recovered = await runProjectionWorkerOnce({

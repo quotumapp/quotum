@@ -18,9 +18,8 @@ import type {
 	SubscriptionChangePreview,
 	UsageInvoiceJob,
 } from "../../billing/recurring";
-import type { ProjectContext } from "../../projects/context";
+import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
-import { resolveProjectId } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -67,6 +66,7 @@ interface ResolvedSubscriptionChange {
 
 interface ChangeRow {
 	id: string;
+	project_id: string;
 	project_key: string;
 	status: "pending" | "processing" | "applied" | "failed" | "cancelled";
 	change_kind: "upgrade" | "downgrade" | "quantity";
@@ -80,22 +80,22 @@ interface ChangeRow {
 
 export class RecurringPricingRepository extends RepositoryModule {
 	async previewSubscriptionChange(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: Omit<SubscriptionChangeInput, "idempotencyKey" | "expectedStateFingerprint">,
 	): Promise<SubscriptionChangePreview> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const resolved = await resolveSubscriptionChange(tx, projectId, input);
 			return subscriptionChangePreview(resolved);
 		});
 	}
 
 	async prepareSubscriptionChange(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		input: SubscriptionChangeInput,
 	): Promise<SubscriptionChangeOperation> {
 		return await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
+			const projectId = project.projectInstanceId;
 			const resolved = await resolveSubscriptionChange(tx, projectId, input);
 			const { context, quantities, changeKind, effectiveMode, effectiveAt, prorationBehavior } =
 				resolved;
@@ -225,12 +225,12 @@ export class RecurringPricingRepository extends RepositoryModule {
 	}
 
 	async markSubscriptionChangeApplied(
-		project: ProjectContext,
+		projectInstanceId: string,
 		changeId: string,
 		providerRequestId: string,
+		workerId: string,
 	): Promise<void> {
 		await this.transaction(async (tx) => {
-			const projectId = await resolveProjectId(tx, project);
 			const row = await executeOne(
 				tx,
 				drizzleSql`
@@ -238,20 +238,20 @@ export class RecurringPricingRepository extends RepositoryModule {
 					SET status = 'applied', provider_request_id = ${providerRequestId}, applied_at = now(),
 						last_error = NULL, locked_at = NULL, locked_by = NULL, updated_at = now()
 					FROM subscriptions subscriptions
-					WHERE changes.project_id = ${projectId} AND changes.id = ${changeId}
+					WHERE changes.project_id = ${projectInstanceId} AND changes.id = ${changeId}
 						AND changes.subscription_id = subscriptions.id
-						AND changes.status = 'processing'
+						AND changes.status = 'processing' AND changes.locked_by = ${workerId}
 					RETURNING changes.id
 				`,
 			);
-			if (row === null) throw new Error(`Subscription change ${changeId} was not processing`);
+			if (row === null) throw new Error(`Subscription change ${changeId} was not owned by worker`);
 			await executeRows(
 				tx,
 				drizzleSql`
 					UPDATE catalog_migration_jobs
 					SET status = 'applied', applied_at = now(), last_error = NULL,
 						locked_at = NULL, locked_by = NULL, updated_at = now()
-					WHERE project_id = ${projectId}
+					WHERE project_id = ${projectInstanceId}
 						AND subscription_change_id = ${changeId}
 						AND status = 'waiting_provider'
 				`,
@@ -259,7 +259,12 @@ export class RecurringPricingRepository extends RepositoryModule {
 		});
 	}
 
-	async markSubscriptionChangeFailed(changeId: string, error: string): Promise<void> {
+	async markSubscriptionChangeFailed(
+		projectInstanceId: string,
+		changeId: string,
+		error: string,
+		workerId: string,
+	): Promise<void> {
 		await this.transaction(async (tx) => {
 			const row = await executeOne<{ status: "pending" | "failed" }>(
 				tx,
@@ -268,10 +273,12 @@ export class RecurringPricingRepository extends RepositoryModule {
 					SET status = CASE WHEN attempts >= 8 THEN 'failed' ELSE 'pending' END,
 						last_error = CASE WHEN attempts >= 8 THEN ${error} ELSE NULL END,
 						locked_at = NULL, locked_by = NULL, updated_at = now()
-					WHERE id = ${changeId} AND status = 'processing'
+					WHERE project_id = ${projectInstanceId} AND id = ${changeId}
+						AND status = 'processing' AND locked_by = ${workerId}
 					RETURNING status
 				`,
 			);
+			if (row === null) throw new Error(`Subscription change ${changeId} was not owned by worker`);
 			if (row?.status === "failed") {
 				await executeRows(
 					tx,
@@ -279,7 +286,8 @@ export class RecurringPricingRepository extends RepositoryModule {
 						UPDATE catalog_migration_jobs
 						SET status = 'failed', last_error = ${error}, locked_at = NULL,
 							locked_by = NULL, updated_at = now()
-						WHERE subscription_change_id = ${changeId}
+						WHERE project_id = ${projectInstanceId}
+							AND subscription_change_id = ${changeId}
 							AND status = 'waiting_provider'
 					`,
 				);
@@ -444,9 +452,11 @@ export class RecurringPricingRepository extends RepositoryModule {
 	}
 
 	async markUsageInvoiceSucceeded(
+		projectInstanceId: string,
 		jobKind: UsageInvoiceJob["jobKind"],
 		jobId: string,
 		externalInvoiceId: string,
+		workerId: string,
 	): Promise<void> {
 		const row = await executeOne(
 			this.database,
@@ -455,26 +465,30 @@ export class RecurringPricingRepository extends RepositoryModule {
 					UPDATE usage_invoice_periods
 					SET status = 'invoiced', external_invoice_id = ${externalInvoiceId}, invoiced_at = now(),
 						last_error = NULL, locked_at = NULL, locked_by = NULL, updated_at = now()
-					WHERE id = ${jobId}::uuid AND status = 'processing'
+					WHERE project_id = ${projectInstanceId} AND id = ${jobId}::uuid
+						AND status = 'processing' AND locked_by = ${workerId}
 					RETURNING id
 				`
 				: drizzleSql`
 					UPDATE usage_invoice_adjustments
 					SET status = 'invoiced', external_invoice_id = ${externalInvoiceId}, invoiced_at = now(),
 						last_error = NULL, locked_at = NULL, locked_by = NULL, updated_at = now()
-					WHERE id = ${jobId}::bigint AND status = 'processing'
+					WHERE project_id = ${projectInstanceId} AND id = ${jobId}::bigint
+						AND status = 'processing' AND locked_by = ${workerId}
 					RETURNING id
 				`,
 		);
-		if (row === null) throw new Error(`Usage invoice ${jobKind} ${jobId} was not processing`);
+		if (row === null) throw new Error(`Usage invoice ${jobKind} ${jobId} was not owned by worker`);
 	}
 
 	async markUsageInvoiceFailed(
+		projectInstanceId: string,
 		jobKind: UsageInvoiceJob["jobKind"],
 		jobId: string,
 		error: string,
+		workerId: string,
 	): Promise<void> {
-		await executeRows(
+		const row = await executeOne(
 			this.database,
 			jobKind === "period"
 				? drizzleSql`
@@ -482,16 +496,21 @@ export class RecurringPricingRepository extends RepositoryModule {
 					SET status = CASE WHEN attempts >= 8 THEN 'failed' ELSE 'pending' END,
 						last_error = CASE WHEN attempts >= 8 THEN ${error} ELSE NULL END,
 						locked_at = NULL, locked_by = NULL, updated_at = now()
-					WHERE id = ${jobId}::uuid AND status = 'processing'
+					WHERE project_id = ${projectInstanceId} AND id = ${jobId}::uuid
+						AND status = 'processing' AND locked_by = ${workerId}
+					RETURNING id
 				`
 				: drizzleSql`
 					UPDATE usage_invoice_adjustments
 					SET status = CASE WHEN attempts >= 8 THEN 'failed' ELSE 'pending' END,
 						last_error = CASE WHEN attempts >= 8 THEN ${error} ELSE NULL END,
 						locked_at = NULL, locked_by = NULL, updated_at = now()
-					WHERE id = ${jobId}::bigint AND status = 'processing'
+					WHERE project_id = ${projectInstanceId} AND id = ${jobId}::bigint
+						AND status = 'processing' AND locked_by = ${workerId}
+					RETURNING id
 				`,
 		);
+		if (row === null) throw new Error(`Usage invoice ${jobKind} ${jobId} was not owned by worker`);
 	}
 }
 
@@ -1074,7 +1093,7 @@ async function buildChangeOperation(
 		executor,
 		drizzleSql`
 			SELECT
-				changes.id, project.key AS project_key, changes.status, changes.change_kind,
+				changes.id, changes.project_id, project.key AS project_key, changes.status, changes.change_kind,
 				changes.effective_mode, changes.effective_at, changes.proration_behavior,
 				subscription.external_subscription_id, changes.to_plan_version_id,
 				changes.requested_quantities
@@ -1166,6 +1185,7 @@ async function buildChangeOperation(
 	}
 	return {
 		changeId: change.id,
+		projectInstanceId: change.project_id,
 		projectKey: change.project_key,
 		status: change.status,
 		changeKind: change.change_kind,
@@ -1184,6 +1204,7 @@ async function usageInvoicePeriodJob(
 ): Promise<UsageInvoiceJob> {
 	const row = await executeOne<{
 		period_id: string;
+		project_id: string;
 		project_key: string;
 		billing_account_id: string;
 		external_customer_id: string;
@@ -1201,7 +1222,7 @@ async function usageInvoicePeriodJob(
 		executor,
 		drizzleSql`
 			SELECT
-				period.id AS period_id, project.key AS project_key,
+				period.id AS period_id, period.project_id, project.key AS project_key,
 				customer.billing_account_id, provider_customer.external_customer_id,
 				subscription.external_subscription_id, store.external_product_id,
 				feature.key AS feature_key, period.period_start_at, period.period_end_at,
@@ -1235,6 +1256,7 @@ async function usageInvoicePeriodJob(
 		jobId: row.period_id,
 		periodId: row.period_id,
 		adjustmentId: null,
+		projectInstanceId: row.project_id,
 		projectKey: row.project_key,
 		billingAccountId: row.billing_account_id,
 		externalCustomerId: row.external_customer_id,
@@ -1286,6 +1308,7 @@ async function usageInvoiceAdjustmentJob(
 	const row = await executeOne<{
 		job_id: string | number | bigint;
 		period_id: string;
+		project_id: string;
 		project_key: string;
 		billing_account_id: string;
 		external_customer_id: string;
@@ -1304,7 +1327,8 @@ async function usageInvoiceAdjustmentJob(
 		executor,
 		drizzleSql`
 			SELECT
-				adjustment.id AS job_id, period.id AS period_id, project.key AS project_key,
+				adjustment.id AS job_id, period.id AS period_id, adjustment.project_id,
+				project.key AS project_key,
 				customer.billing_account_id, provider_customer.external_customer_id,
 				subscription.external_subscription_id, store.external_product_id,
 				feature.key AS feature_key, period.period_start_at, period.period_end_at,
@@ -1345,6 +1369,7 @@ async function usageInvoiceAdjustmentJob(
 		jobId: String(row.job_id),
 		periodId: row.period_id,
 		adjustmentId: String(row.job_id),
+		projectInstanceId: row.project_id,
 		projectKey: row.project_key,
 		billingAccountId: row.billing_account_id,
 		externalCustomerId: row.external_customer_id,

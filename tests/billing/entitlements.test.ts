@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { EntitlementService } from "../../src/billing/entitlements";
+import { projectInstanceContext } from "../helpers/project-context";
 
 describe("EntitlementService", () => {
 	it("returns entitlement snapshots from the repository", async () => {
@@ -20,7 +21,7 @@ describe("EntitlementService", () => {
 			},
 		});
 
-		const snapshot = await service.getSnapshot({ projectKey: "wiseley" }, "user_1");
+		const snapshot = await service.getSnapshot(projectInstanceContext("wiseley"), "user_1");
 
 		expect(snapshot.entitlements[0]).toEqual({
 			key: "premium",
@@ -40,7 +41,7 @@ describe("EntitlementService", () => {
 			},
 		});
 
-		await expect(service.getSnapshot({ projectKey: "wiseley" }, " ")).rejects.toThrow(
+		await expect(service.getSnapshot(projectInstanceContext("wiseley"), " ")).rejects.toThrow(
 			"billingAccountId is required",
 		);
 		expect(called).toBe(false);

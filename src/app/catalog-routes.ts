@@ -2,7 +2,7 @@ import type { Hono } from "hono";
 import { z } from "zod";
 import { BillingError, InvalidRequestError } from "../billing/errors";
 import type { CatalogControlPlaneLike } from "../catalog/types";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 import { requireOperatorApiKey } from "./admin-routes";
 import type { BillingContext, BillingHonoEnv } from "./types";
 
@@ -235,7 +235,7 @@ function parseSchema<T>(schema: z.ZodType<T>, value: unknown, message: string): 
 	return parsed.data;
 }
 
-function privateProject(c: BillingContext): ProjectContext {
+function privateProject(c: BillingContext): ProjectInstanceContext {
 	const project = c.get("project");
 	if (project === undefined) {
 		throw new BillingError("Billing project context is required", "BILLING_PROJECT_REQUIRED", 401);

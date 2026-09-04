@@ -4,11 +4,12 @@ import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
-const project = { projectKey: "voysee" } as const;
+const project = integrationProjectContext();
 let context: LocalPostgresContext;
 
 localDescribe("Phase 3 controls and automatic top-ups", () => {
@@ -343,10 +344,27 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		});
 		expect(await context.repository.claimSubscriptionChanges("other-worker", 10)).toEqual([]);
 
+		await expect(
+			context.repository.markSubscriptionChangeApplied(
+				integrationProjectContext("wiseley").projectInstanceId,
+				change?.changeId ?? "",
+				"sub_migrate_stripe",
+				"migration-worker",
+			),
+		).rejects.toThrow("was not owned by worker");
+		await expect(
+			context.repository.markSubscriptionChangeApplied(
+				project.projectInstanceId,
+				change?.changeId ?? "",
+				"sub_migrate_stripe",
+				"stale-worker",
+			),
+		).rejects.toThrow("was not owned by worker");
 		await context.repository.markSubscriptionChangeApplied(
-			project,
+			project.projectInstanceId,
 			change?.changeId ?? "",
 			"sub_migrate_stripe",
+			"migration-worker",
 		);
 		const jobs = await context.sql<
 			Array<{ provider: string; status: string; last_error: string | null }>

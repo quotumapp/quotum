@@ -259,8 +259,8 @@ function withProjectionUrls(
 ): LocalPostgresContext["env"] {
 	return {
 		...env,
-		projects: env.projects.map((project) => {
-			const projectionUrl = urls[project.key as "voysee" | "wiseley"];
+		projectRuntime: env.projectRuntime.map((project) => {
+			const projectionUrl = urls[project.projectInstanceKey as "voysee" | "wiseley"];
 			return projectionUrl === undefined ? project : { ...project, projectionUrl };
 		}),
 	};
@@ -357,13 +357,14 @@ function createStripeReplayAdminOperations(
 			maxAttempts: env.storeEventReplayMaxAttempts,
 			batchSize: 25,
 			repository: context.repository,
-			providers: (projectKey) => ({
+			projectContextResolver: context.projectContextResolver,
+			providers: (project) => ({
 				apple: null,
 				google: null,
 				stripe: new StripeBillingService({
 					config: stripeConfig(),
 					client: replayOnlyStripeClient(),
-					repository: context.repository.forProject({ projectKey }),
+					repository: context.repository.forProject(project),
 				}),
 			}),
 			now: () => new Date(),

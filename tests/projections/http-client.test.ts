@@ -6,16 +6,12 @@ import type { ProjectRuntimeConfig } from "../../src/projects/config";
 
 const projects: ProjectRuntimeConfig[] = [
 	{
-		key: "voysee",
-		apiKey: "voysee-service-key-123456",
-		active: true,
+		projectInstanceKey: "voysee",
 		projectionUrl: "https://voysee.example.com/",
 		projectionSecret: "voysee-projection-secret",
 	},
 	{
-		key: "wiseley",
-		apiKey: "wiseley-service-key-123456",
-		active: true,
+		projectInstanceKey: "wiseley",
 		projectionUrl: "https://wiseley.example.com/app?ignored=true#fragment",
 		projectionSecret: "wiseley-projection-secret",
 	},

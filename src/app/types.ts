@@ -20,15 +20,14 @@ import type { BillingEnv } from "../env";
 import type { BillingLogger } from "../observability/logger";
 import type { BillingMetrics } from "../observability/metrics";
 import type { BillingAdminOperations } from "../operations/admin";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
 import type {
 	ProjectProviderServiceOverrides,
 	ProjectProviderServices,
 } from "../projects/providers";
-import type { BillingProjectRecord } from "../projects/types";
 import type { StripeCatalog } from "../providers/stripe/types";
 
-export type BillingHonoEnv = { Variables: { project: ProjectContext; requestId: string } };
+export type BillingHonoEnv = { Variables: { project: ProjectInstanceContext; requestId: string } };
 export type BillingContext = Context<BillingHonoEnv>;
 
 export interface AppleStoreKitServiceLike {
@@ -112,18 +111,17 @@ export interface StripeBillingServiceLike {
 	handleWebhook(input: { rawBody: string; signatureHeader: string | null }): Promise<unknown>;
 }
 
-export interface BillingProjectProvisionerLike {
-	upsertProject(
-		project: ProjectContext,
-		input: { name: string; active: boolean },
-	): Promise<BillingProjectRecord>;
-}
-
 export interface BillingInsightsServiceLike {
-	listUsageEvents(project: ProjectContext, input: UsageEventListInput): Promise<UsageEventPage>;
-	getUsageSeries(project: ProjectContext, input: UsageSeriesInput): Promise<UsageSeriesPoint[]>;
+	listUsageEvents(
+		project: ProjectInstanceContext,
+		input: UsageEventListInput,
+	): Promise<UsageEventPage>;
+	getUsageSeries(
+		project: ProjectInstanceContext,
+		input: UsageSeriesInput,
+	): Promise<UsageSeriesPoint[]>;
 	getCustomerBillingSummary(
-		project: ProjectContext,
+		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<CustomerBillingSummary>;
 }
@@ -149,13 +147,13 @@ export interface AppDependencies {
 	metrics?: BillingMetrics;
 	readinessCheck?: () => boolean | Promise<boolean>;
 	requestObservabilityMiddleware?: MiddlewareHandler<BillingHonoEnv>;
-	adminProjectProvisioner?: BillingProjectProvisionerLike | null;
+	projectContextResolver?: ProjectInstanceContextResolver;
 }
 
 export interface ProjectProviderServiceResolver {
-	appleStoreKitService(project: ProjectContext): AppleStoreKitServiceLike | null;
-	googlePlayBillingService(project: ProjectContext): GooglePlayBillingServiceLike | null;
-	stripeBillingService(project: ProjectContext): StripeBillingServiceLike | null;
+	appleStoreKitService(project: ProjectInstanceContext): AppleStoreKitServiceLike | null;
+	googlePlayBillingService(project: ProjectInstanceContext): GooglePlayBillingServiceLike | null;
+	stripeBillingService(project: ProjectInstanceContext): StripeBillingServiceLike | null;
 }
 
 export type ProjectProviderServiceSet = ProjectProviderServices<

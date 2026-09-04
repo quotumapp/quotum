@@ -1,34 +1,12 @@
-import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { ProjectionContract } from "../billing/types";
 import type { AppleBillingEnv, GooglePlayBillingEnv, StripeBillingEnv } from "../env";
-import type { ProjectContext } from "./context";
-
-export type ProjectApiKeyResolver = (apiKey: string) => ProjectContext | null;
-
-export interface BillingCatalogDeclaration {
-	key: string;
-	name: string;
-	kind: "subscription" | "topup";
-	plan: string | null;
-	currency: string;
-	amountCents: number;
-	credits: number;
-	interval: "month" | "year" | null;
-	entitlementKey: string;
-	externalProductId: string;
-	externalPriceId: string;
-	active: boolean;
-}
 
 export interface ProjectRuntimeConfig {
-	key: string;
-	apiKey: string;
-	active: boolean;
+	projectInstanceKey: string;
 	projectionUrl: string;
 	projectionSecret: string;
 	projectionContract?: ProjectionContract;
-	catalog?: BillingCatalogDeclaration[];
 	apple?: AppleBillingEnv | null;
 	googlePlay?: GooglePlayBillingEnv | null;
 	stripe?: StripeBillingEnv | null;
@@ -45,6 +23,7 @@ const appleProjectConfigSchema = z
 		enableOnlineChecks: z.boolean(),
 		rootCertificatesDir: z.string().trim().min(1).nullable(),
 	})
+	.strict()
 	.superRefine((config, context) => {
 		if (config.environment !== "production") {
 			return;
@@ -72,6 +51,7 @@ const googlePlayProjectConfigSchema = z
 		rtdnAuthorizedParty: z.string().trim().min(1).nullable().default(null),
 		enablePublisherMutations: z.boolean(),
 	})
+	.strict()
 	.superRefine((config, context) => {
 		if ((config.serviceAccountJson === null) === (config.serviceAccountKeyFile === null)) {
 			context.addIssue({
@@ -124,6 +104,7 @@ const stripeProjectConfigSchema = z
 			.max(64)
 			.default("qfmxzjpa"),
 	})
+	.strict()
 	.superRefine((config, context) => {
 		if (!config.checkoutSuccessUrl.includes("{CHECKOUT_SESSION_ID}")) {
 			context.addIssue({
@@ -141,57 +122,22 @@ const stripeProjectConfigSchema = z
 		}
 	});
 
-const catalogDeclarationSchema = z
+const projectRuntimeConfigSchema = z
 	.object({
-		key: z.string().trim().min(1).max(120),
-		name: z.string().trim().min(1).max(120),
-		kind: z.enum(["subscription", "topup"]),
-		plan: z.string().trim().min(1).max(120).nullable(),
-		currency: z
+		projectInstanceKey: z
 			.string()
 			.trim()
-			.regex(/^[A-Za-z]{3}$/u)
-			.transform((value) => value.toUpperCase()),
-		amountCents: z.number().int().positive().max(1_000_000),
-		credits: z.number().int().positive().max(100_000),
-		interval: z.enum(["month", "year"]).nullable(),
-		entitlementKey: z.string().trim().min(1).max(120).default("paid"),
-		externalProductId: z.string().trim().min(1).max(256),
-		externalPriceId: z.string().trim().min(1).max(256),
-		active: z.boolean().default(true),
+			.min(1)
+			.max(80)
+			.regex(/^[a-z0-9][a-z0-9_-]*$/, "project key must be a lowercase slug"),
+		projectionUrl: z.string().trim().url(),
+		projectionSecret: z.string().trim().min(1),
+		projectionContract: z.enum(["billing_state_v1"]).default("billing_state_v1"),
+		apple: appleProjectConfigSchema.nullable().optional(),
+		googlePlay: googlePlayProjectConfigSchema.nullable().optional(),
+		stripe: stripeProjectConfigSchema.nullable().optional(),
 	})
-	.superRefine((declaration, context) => {
-		const subscription = declaration.kind === "subscription";
-		if (subscription !== (declaration.plan !== null && declaration.interval !== null)) {
-			context.addIssue({
-				code: "custom",
-				message: "subscription catalog items require a plan and billing interval",
-			});
-		}
-		if (!subscription && (declaration.plan !== null || declaration.interval !== null)) {
-			context.addIssue({
-				code: "custom",
-				message: "top-up catalog items cannot contain subscription facts",
-			});
-		}
-	});
-
-const projectRuntimeConfigSchema = z.object({
-	key: z
-		.string()
-		.trim()
-		.min(1)
-		.regex(/^[a-z0-9][a-z0-9_-]*$/, "project key must be a lowercase slug"),
-	apiKey: z.string().min(16),
-	active: z.boolean().default(true),
-	projectionUrl: z.string().trim().url(),
-	projectionSecret: z.string().trim().min(1),
-	projectionContract: z.enum(["billing_state_v1"]).default("billing_state_v1"),
-	catalog: z.array(catalogDeclarationSchema).max(16).default([]),
-	apple: appleProjectConfigSchema.nullable().optional(),
-	googlePlay: googlePlayProjectConfigSchema.nullable().optional(),
-	stripe: stripeProjectConfigSchema.nullable().optional(),
-});
+	.strict();
 
 const projectRuntimeConfigsSchema = z.array(projectRuntimeConfigSchema).min(1);
 
@@ -200,28 +146,20 @@ export function parseProjectRuntimeConfigs(value: string): ProjectRuntimeConfig[
 	try {
 		parsedJson = JSON.parse(value);
 	} catch {
-		throw new Error("BILLING_PROJECTS_JSON must be valid JSON");
+		throw new Error("BILLING_PROJECT_RUNTIME_JSON must be valid JSON");
 	}
 
 	const parsed = projectRuntimeConfigsSchema.safeParse(parsedJson);
 	if (!parsed.success) {
-		throw new Error("BILLING_PROJECTS_JSON is invalid");
+		throw new Error("BILLING_PROJECT_RUNTIME_JSON is invalid");
 	}
 
 	const seenKeys = new Set<string>();
-	const seenApiKeys = new Set<string>();
 	for (const project of parsed.data) {
-		if (seenKeys.has(project.key)) {
-			throw new Error("BILLING_PROJECTS_JSON contains duplicate project keys");
+		if (seenKeys.has(project.projectInstanceKey)) {
+			throw new Error("BILLING_PROJECT_RUNTIME_JSON contains duplicate project instance keys");
 		}
-		if (seenApiKeys.has(project.apiKey)) {
-			throw new Error("BILLING_PROJECTS_JSON contains duplicate project API keys");
-		}
-		seenKeys.add(project.key);
-		seenApiKeys.add(project.apiKey);
-		if (new Set(project.catalog.map((item) => item.key)).size !== project.catalog.length) {
-			throw new Error("BILLING_PROJECTS_JSON contains duplicate catalog keys");
-		}
+		seenKeys.add(project.projectInstanceKey);
 	}
 
 	return parsed.data.map((project) =>
@@ -250,31 +188,4 @@ function defaultStripeOrigins(config: {
 			),
 		),
 	];
-}
-
-export function createProjectApiKeyResolver(
-	projects: readonly ProjectRuntimeConfig[],
-): ProjectApiKeyResolver {
-	return (apiKey) => {
-		let resolvedProject: ProjectContext | null = null;
-
-		for (const project of projects) {
-			if (project.active && constantTimeEquals(apiKey, project.apiKey)) {
-				resolvedProject = { projectKey: project.key };
-			}
-		}
-
-		return resolvedProject;
-	};
-}
-
-function constantTimeEquals(actual: string, expected: string): boolean {
-	const actualBuffer = Buffer.from(actual, "utf8");
-	const expectedBuffer = Buffer.from(expected, "utf8");
-
-	if (actualBuffer.byteLength !== expectedBuffer.byteLength) {
-		return false;
-	}
-
-	return timingSafeEqual(actualBuffer, expectedBuffer);
 }

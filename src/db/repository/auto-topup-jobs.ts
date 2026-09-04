@@ -299,7 +299,7 @@ async function lockClaimedJob(
 			state.interval_started_at, state.purchases_in_interval, state.spend_minor_in_interval,
 			state.consecutive_failures
 		FROM auto_topup_jobs job
-		JOIN projects project ON project.id = job.project_id AND project.active = true
+		JOIN projects project ON project.id = job.project_id
 		JOIN customers customer ON customer.project_id = job.project_id AND customer.id = job.customer_id
 		JOIN auto_topup_policies policy
 			ON policy.project_id = job.project_id AND policy.id = job.policy_id

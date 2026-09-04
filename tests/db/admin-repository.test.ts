@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { AdminBillingRepository } from "../../src/db/admin-repository";
 import { renderDrizzleSql } from "../helpers/drizzle-sql";
+import { projectInstanceContext } from "../helpers/project-context";
 
 class FakeDatabase {
 	queries: string[] = [];
@@ -20,10 +21,11 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		await repository.searchCustomers(
-			{ projectKey: "wiseley" },
-			{ query: "GPA.123", limit: 10, cursor: null },
-		);
+		await repository.searchCustomers(projectInstanceContext("wiseley"), {
+			query: "GPA.123",
+			limit: 10,
+			cursor: null,
+		});
 
 		const query = database.queries[0];
 		expect(query).toContain("'billing_account_id'::text");
@@ -62,10 +64,10 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		const result = await repository.listCatalogProducts(
-			{ projectKey: "wiseley" },
-			{ limit: 1, cursor: null },
-		);
+		const result = await repository.listCatalogProducts(projectInstanceContext("wiseley"), {
+			limit: 1,
+			cursor: null,
+		});
 
 		expect(result.nextCursor).not.toBeNull();
 		expect(result.items[0]).not.toHaveProperty("cursorCreatedAt");
@@ -101,16 +103,19 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		const result = await repository.listPurchases(
-			{ projectKey: "wiseley" },
-			{ limit: 10, cursor: null, provider: "stripe" },
-		);
+		const result = await repository.listPurchases(projectInstanceContext("wiseley"), {
+			limit: 10,
+			cursor: null,
+			provider: "stripe",
+		});
 
 		expect(result.nextCursor).toBeNull();
 		expect(result.items[0]?.purchasedAt).toBe("2026-01-01T00:00:00.000Z");
 		expect(result.items[0]?.provider).toBe("stripe");
 		expect(database.queries[0]).toContain("project_id =");
-		expect(database.queries[0]).toContain('"wiseley"');
+		expect(database.queries[0]).toContain(
+			JSON.stringify(projectInstanceContext("wiseley").projectInstanceId),
+		);
 	});
 
 	it("computes a default staleBefore for subscription needs-attention queries", async () => {
@@ -123,10 +128,11 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		await repository.listSubscriptions(
-			{ projectKey: "wiseley" },
-			{ limit: 10, cursor: null, needsAttention: true },
-		);
+		await repository.listSubscriptions(projectInstanceContext("wiseley"), {
+			limit: 10,
+			cursor: null,
+			needsAttention: true,
+		});
 
 		expect(database.queries[0]).toContain("provider_reconciled_at");
 		expect(database.queries[0]).toContain("project_id =");
@@ -139,7 +145,7 @@ describe("AdminBillingRepository", () => {
 		);
 
 		await expect(
-			repository.getCustomerByBillingAccountId({ projectKey: "wiseley" }, "missing-user"),
+			repository.getCustomerByBillingAccountId(projectInstanceContext("wiseley"), "missing-user"),
 		).rejects.toThrow("Billing customer was not found");
 	});
 
@@ -170,7 +176,7 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		await repository.getCustomerByBillingAccountId({ projectKey: "wiseley" }, "user-1");
+		await repository.getCustomerByBillingAccountId(projectInstanceContext("wiseley"), "user-1");
 
 		expect(database.queries.join("\n")).toContain(",6]");
 		expect(database.queries.join("\n")).toContain('"s".status IN');
@@ -197,7 +203,7 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		const result = await repository.getStatsSummary({ projectKey: "wiseley" }, {});
+		const result = await repository.getStatsSummary(projectInstanceContext("wiseley"), {});
 
 		expect(result.storeEvents).toEqual({
 			pending: 0,
@@ -237,10 +243,10 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		await repository.getStatsSummary(
-			{ projectKey: "wiseley" },
-			{ provider: "stripe", from: "2026-01-01T00:00:00.000Z" },
-		);
+		await repository.getStatsSummary(projectInstanceContext("wiseley"), {
+			provider: "stripe",
+			from: "2026-01-01T00:00:00.000Z",
+		});
 
 		// queries[0] = store event counts, queries[1] = projection job counts
 		expect(database.queries[0]).toContain('"se".provider =');

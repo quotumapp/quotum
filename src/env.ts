@@ -63,7 +63,7 @@ export interface BillingEnv {
 	authMode: BillingAuthMode;
 	operatorApiKey: string | null;
 	trustGatewayProjectHeader: boolean;
-	projects: ProjectRuntimeConfig[];
+	projectRuntime: ProjectRuntimeConfig[];
 	runtimeEnvironment: BillingRuntimeEnvironment;
 	workerId: string;
 	workerPollIntervalMs: number;
@@ -81,7 +81,7 @@ export interface BillingEnv {
 const envSchema = z.object({
 	POSTGRES_URI: requiredString("POSTGRES_URI"),
 	BILLING_OPERATOR_API_KEY: optionalString(),
-	BILLING_PROJECTS_JSON: requiredString("BILLING_PROJECTS_JSON"),
+	BILLING_PROJECT_RUNTIME_JSON: requiredString("BILLING_PROJECT_RUNTIME_JSON"),
 	BILLING_AUTH_MODE: z.enum(["api_key", "gateway"]).default("api_key"),
 	BILLING_TRUST_GATEWAY_PROJECT_HEADER: z.enum(["true", "false"]).default("false"),
 	BILLING_ENV: z.enum(["development", "test", "production"]).default("production"),
@@ -134,6 +134,11 @@ const envSchema = z.object({
 });
 
 export function loadEnv(source: Record<string, string | undefined> = process.env): BillingEnv {
+	if (source.BILLING_PROJECTS_JSON !== undefined) {
+		throw new Error(
+			"BILLING_PROJECTS_JSON has been removed; use database bootstrap and BILLING_PROJECT_RUNTIME_JSON",
+		);
+	}
 	if (source.BILLING_PROJECTION_ADAPTER !== undefined) {
 		throw new Error(
 			"BILLING_PROJECTION_ADAPTER has been removed; configure project projectionUrl and projectionSecret",
@@ -150,12 +155,12 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 			"BILLING_TRUST_GATEWAY_PROJECT_HEADER must be true when BILLING_AUTH_MODE is gateway",
 		);
 	}
-	const projects = parseProjectRuntimeConfigs(parsed.BILLING_PROJECTS_JSON);
+	const projectRuntime = parseProjectRuntimeConfigs(parsed.BILLING_PROJECT_RUNTIME_JSON);
 	const operatorApiKey = parseOperatorApiKey(parsed.BILLING_OPERATOR_API_KEY);
 	if (parsed.BILLING_ENV === "production") {
 		assertProductionOperatorApiKey(operatorApiKey);
-		assertProductionProjectionProjects(projects);
-		assertProductionStripeProjects(projects);
+		assertProductionProjectionProjects(projectRuntime);
+		assertProductionStripeProjects(projectRuntime);
 	}
 
 	return {
@@ -163,7 +168,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 		authMode,
 		operatorApiKey,
 		trustGatewayProjectHeader,
-		projects,
+		projectRuntime,
 		runtimeEnvironment: parsed.BILLING_ENV,
 		workerId: parsed.BILLING_WORKER_ID ?? `billing-worker-${crypto.randomUUID()}`,
 		workerPollIntervalMs: Number.parseInt(parsed.BILLING_WORKER_POLL_INTERVAL_MS, 10),

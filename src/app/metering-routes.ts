@@ -8,7 +8,7 @@ import {
 	safelyIncrementBillingMetric,
 	safelyObserveBillingMetric,
 } from "../observability/metrics";
-import type { ProjectContext } from "../projects/context";
+import type { ProjectInstanceContext } from "../projects/context";
 import type { BillingContext, BillingHonoEnv } from "./types";
 
 type RateLimiter = { check(key: string): RateLimitResult };
@@ -321,7 +321,7 @@ async function optionalPrivateJson(
 	return request.body === null ? {} : await parsePrivateJson(request);
 }
 
-function privateProject(c: BillingContext): ProjectContext {
+function privateProject(c: BillingContext): ProjectInstanceContext {
 	const project = c.get("project");
 	if (project === undefined) {
 		throw new BillingError("Billing project context is required", "BILLING_PROJECT_REQUIRED", 401);

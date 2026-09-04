@@ -2,8 +2,15 @@ import { describe, expect, it } from "bun:test";
 import type { StoreEventReplayJobRow } from "../../src/db/repository";
 import type { BillingLogger } from "../../src/observability/logger";
 import { type BillingMetrics, createInMemoryBillingMetrics } from "../../src/observability/metrics";
-import type { ProjectContext } from "../../src/projects/context";
+import type { ProjectInstanceContext } from "../../src/projects/context";
 import { StoreEventReplayWorker } from "../../src/workers/store-event-replay";
+import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
+
+const workerContexts = [
+	projectInstanceContext("voysee", { projectInstanceId: "project_1" }),
+	projectInstanceContext("wiseley", { projectInstanceId: "project_2" }),
+];
+const workerProjectResolver = projectContextResolver({ contexts: workerContexts });
 
 const storeEvent = (overrides: Partial<StoreEventReplayJobRow> = {}): StoreEventReplayJobRow => ({
 	id: "event_1",
@@ -45,7 +52,7 @@ function createRepository(
 			},
 			claimStoreEventReplayJobById: async (
 				workerId: string,
-				project: ProjectContext,
+				project: ProjectInstanceContext,
 				eventId: string,
 			) => {
 				calls.push({ method: "claimStoreEventReplayJobById", workerId, project, eventId });
@@ -136,6 +143,7 @@ describe("StoreEventReplayWorker", () => {
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, infos } = createRecordingLogger();
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
@@ -197,14 +205,15 @@ describe("StoreEventReplayWorker", () => {
 		const providerCalls: string[] = [];
 		const { repository } = createRepository(events);
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
 			repository,
-			providers: (projectKey) => ({
+			providers: (project) => ({
 				apple: {
 					replayStoreEvent: async (event) => {
-						providerCalls.push(`${projectKey}:${event.id}`);
+						providerCalls.push(`${project.projectInstanceKey}:${event.id}`);
 						return { status: "processed" };
 					},
 				},
@@ -222,6 +231,7 @@ describe("StoreEventReplayWorker", () => {
 		const events = [storeEvent()];
 		const { calls, repository } = createRepository(events);
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
@@ -253,6 +263,7 @@ describe("StoreEventReplayWorker", () => {
 	it("marks ignored provider results succeeded and increments ignored", async () => {
 		const { calls, repository } = createRepository([storeEvent()]);
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
@@ -287,6 +298,7 @@ describe("StoreEventReplayWorker", () => {
 			succeedError: finalizationError,
 		});
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
@@ -316,6 +328,7 @@ describe("StoreEventReplayWorker", () => {
 	it("marks retryable provider results failed with a retry timestamp", async () => {
 		const { calls, repository } = createRepository([storeEvent({ attempts: 1 })]);
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
@@ -353,6 +366,7 @@ describe("StoreEventReplayWorker", () => {
 		];
 		const { calls, repository } = createRepository(events);
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
@@ -386,6 +400,7 @@ describe("StoreEventReplayWorker", () => {
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, errors } = createRecordingLogger();
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
@@ -436,6 +451,7 @@ describe("StoreEventReplayWorker", () => {
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, errors } = createRecordingLogger();
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
@@ -486,8 +502,11 @@ describe("StoreEventReplayWorker", () => {
 	});
 
 	it("runOne claims by event id and uses the same dispatch semantics", async () => {
-		const { calls, repository } = createRepository([storeEvent({ id: "event_target" })]);
+		const { calls, repository } = createRepository([
+			storeEvent({ id: "event_target", project_id: "project_2", project_key: "wiseley" }),
+		]);
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
@@ -501,7 +520,8 @@ describe("StoreEventReplayWorker", () => {
 			},
 		});
 
-		const project = { projectKey: "wiseley" };
+		const project = workerContexts[1];
+		if (project === undefined) throw new Error("missing Wiseley test project context");
 		const result = await worker.runOne(project, "event_target");
 
 		expect(result).toEqual({ eventId: "event_target", status: "processed" });
@@ -525,6 +545,7 @@ describe("StoreEventReplayWorker", () => {
 		const { repository } = createRepository(events);
 		const renewed: string[] = [];
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,
@@ -556,6 +577,7 @@ describe("StoreEventReplayWorker", () => {
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, errors } = createRecordingLogger();
 		const worker = new StoreEventReplayWorker({
+			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
 			maxAttempts: 3,
 			batchSize: 5,

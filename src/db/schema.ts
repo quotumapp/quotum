@@ -28,6 +28,7 @@ import type {
 	StoreEventProcessingStatus,
 	SubscriptionStatus,
 } from "../billing/types";
+import type { ProjectEnvironment, ProjectLifecycleStatus } from "../projects/context";
 
 const metadataColumn = () =>
 	jsonb("metadata").$type<Record<string, unknown>>().notNull().default({});
@@ -40,14 +41,24 @@ export const projects = pgTable(
 	"projects",
 	{
 		id: uuid("id").primaryKey().defaultRandom(),
+		platformProjectId: uuid("platform_project_id").notNull(),
 		key: text("key").notNull(),
 		name: text("name").notNull(),
-		active: boolean("active").notNull().default(true),
+		environment: text("environment").$type<ProjectEnvironment>().notNull(),
+		lifecycleStatus: text("lifecycle_status").$type<ProjectLifecycleStatus>().notNull(),
+		internalProject: boolean("internal_project").notNull(),
 		publishedCatalogRevisionId: bigint("published_catalog_revision_id", { mode: "number" }),
 		metadata: metadataColumn(),
 		...timestampColumns(),
 	},
-	(table) => [uniqueIndex("idx_billing_projects_key").on(table.key)],
+	(table) => [
+		uniqueIndex("idx_billing_projects_key").on(table.key),
+		index("idx_billing_projects_platform_project").on(table.platformProjectId),
+		unique("projects_platform_project_environment_unique").on(
+			table.platformProjectId,
+			table.environment,
+		),
+	],
 );
 
 export const customers = pgTable(

@@ -4,6 +4,7 @@ import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 
@@ -484,15 +485,12 @@ localDescribe("catalog control plane", () => {
 				},
 			],
 		});
-		const usage = await context.repository.consumeUsage(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "phase2-metered-account",
-				featureKey: "api_calls",
-				quantity: "11000",
-				idempotencyKey: "phase2-overage-consume",
-			},
-		);
+		const usage = await context.repository.consumeUsage(integrationProjectContext(), {
+			billingAccountId: "phase2-metered-account",
+			featureKey: "api_calls",
+			quantity: "11000",
+			idempotencyKey: "phase2-overage-consume",
+		});
 		expect(usage.allowed).toBe(true);
 		expect(usage.balance.available).toBe("0");
 		if (usage.usageEventId === null || usage.recordedAt === null) {
@@ -537,23 +535,40 @@ localDescribe("catalog control plane", () => {
 		});
 		const periodJob = invoiceClaim.jobs[0];
 		if (periodJob === undefined) throw new Error("Expected a usage invoice period job");
+		await expect(
+			context.repository.markUsageInvoiceSucceeded(
+				integrationProjectContext("wiseley").projectInstanceId,
+				periodJob.jobKind,
+				periodJob.jobId,
+				"in_wrong_project",
+				"phase2-worker",
+			),
+		).rejects.toThrow("was not owned by worker");
+		await expect(
+			context.repository.markUsageInvoiceSucceeded(
+				integrationProjectContext().projectInstanceId,
+				periodJob.jobKind,
+				periodJob.jobId,
+				"in_stale_worker",
+				"stale-worker",
+			),
+		).rejects.toThrow("was not owned by worker");
 		await context.repository.markUsageInvoiceSucceeded(
+			integrationProjectContext().projectInstanceId,
 			periodJob.jobKind,
 			periodJob.jobId,
 			"in_phase2_usage",
+			"phase2-worker",
 		);
-		await context.repository.correctUsage(
-			{ projectKey: "voysee" },
-			{
-				billingAccountId: "phase2-metered-account",
-				originalUsageEventId: usage.usageEventId,
-				originalRecordedAt: new Date(usage.recordedAt),
-				quantity: "2000",
-				reason: "late usage correction",
-				actor: "phase2-test",
-				idempotencyKey: "phase2-overage-correction",
-			},
-		);
+		await context.repository.correctUsage(integrationProjectContext(), {
+			billingAccountId: "phase2-metered-account",
+			originalUsageEventId: usage.usageEventId,
+			originalRecordedAt: new Date(usage.recordedAt),
+			quantity: "2000",
+			reason: "late usage correction",
+			actor: "phase2-test",
+			idempotencyKey: "phase2-overage-correction",
+		});
 		const adjustmentClaim = await context.repository.materializeAndClaimUsageInvoicePeriods(
 			"phase2-worker",
 			10,

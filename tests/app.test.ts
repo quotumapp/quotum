@@ -10,23 +10,23 @@ import type {
 	AdminStoreEvent,
 	AdminSubscription,
 } from "../src/admin/types";
-import { createApp } from "../src/app";
+import { createApp as createBillingApp } from "../src/app";
+import type { AppDependencies } from "../src/app/types";
 import { EntitlementService } from "../src/billing/entitlements";
 import { BillingError, InternalBillingError } from "../src/billing/errors";
 import type { BillingEnv } from "../src/env";
 import type { BillingLogger } from "../src/observability/logger";
 import { type BillingMetrics, createInMemoryBillingMetrics } from "../src/observability/metrics";
 import { BillingAdminOperations } from "../src/operations/admin";
+import { projectContextResolver, projectInstanceContext } from "./helpers/project-context";
 
 const env: BillingEnv = {
 	postgresUri: "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
 	authMode: "api_key",
 	operatorApiKey: "operator-secret-key",
-	projects: [
+	projectRuntime: [
 		{
-			key: "voysee",
-			apiKey: "secret",
-			active: true,
+			projectInstanceKey: "voysee",
 			projectionUrl: "https://voysee.example.com",
 			projectionSecret: "voysee-projection-secret",
 		},
@@ -85,11 +85,31 @@ function withAuthMode(authMode: BillingEnv["authMode"]): BillingEnv {
 	};
 }
 
-function withProjects(projects: BillingEnv["projects"]): BillingEnv {
+function withProjects(projectRuntime: BillingEnv["projectRuntime"]): BillingEnv {
 	return {
 		...env,
-		projects,
+		projectRuntime,
 	};
+}
+
+function createApp(dependencies: AppDependencies) {
+	const contexts = dependencies.env.projectRuntime.map((project) =>
+		projectInstanceContext(project.projectInstanceKey),
+	);
+	return createBillingApp({
+		...dependencies,
+		projectContextResolver:
+			dependencies.projectContextResolver ??
+			projectContextResolver({
+				contexts,
+				credentials: {
+					secret: "voysee",
+					"voysee-service-key-123456": "voysee",
+					"wiseley-service-key-123456": "wiseley",
+					"inactive-project-key-123456": "inactive",
+				},
+			}),
+	});
 }
 
 function createRecordingLogger() {
@@ -614,6 +634,99 @@ describe("billing app", () => {
 		expect(response.status).toBe(401);
 	});
 
+	it("rate limits unknown credentials before another database-backed resolution", async () => {
+		let credentialResolutionCalls = 0;
+		const app = createApp({
+			env: withRateLimit({
+				verifyLimit: 1,
+				adminLimit: 1,
+				meteringLimit: 1,
+				trustProxyHeaders: true,
+			}),
+			projectContextResolver: {
+				async resolveCredential() {
+					credentialResolutionCalls += 1;
+					return { kind: "not_found" as const };
+				},
+				async resolveInstanceKey() {
+					throw new Error("Gateway resolution should not be called in API-key mode");
+				},
+				async resolveInstanceId() {
+					throw new Error("Worker resolution should not be called by HTTP authentication");
+				},
+			},
+		});
+		const unknownCredential = (suffix: number) =>
+			`qpk_v1.00000000-0000-4000-8000-${String(suffix).padStart(12, "0")}.${"A".repeat(43)}`;
+		const request = (suffix: number, ip: string) =>
+			app.request("/v1/catalog", {
+				headers: {
+					authorization: `Bearer ${unknownCredential(suffix)}`,
+					"cf-connecting-ip": ip,
+				},
+			});
+
+		for (let suffix = 1; suffix <= 3; suffix += 1) {
+			const response = await request(suffix, "203.0.113.50");
+			expect(response.status).toBe(401);
+			expect(response.headers.get("ratelimit-remaining")).toBeNull();
+		}
+		const limited = await request(4, "203.0.113.50");
+		const otherIp = await request(5, "203.0.113.51");
+
+		expect(limited.status).toBe(429);
+		expect(limited.headers.get("ratelimit-remaining")).toBe("0");
+		expect(await limited.json()).toEqual({
+			success: false,
+			error: { code: "RATE_LIMITED", message: "Too many requests" },
+		});
+		expect(otherIp.status).toBe(401);
+		expect(credentialResolutionCalls).toBe(4);
+	});
+
+	it("rate limits unknown gateway projects before another database-backed resolution", async () => {
+		let projectResolutionCalls = 0;
+		const gatewayEnv = withAuthMode("gateway");
+		const app = createApp({
+			env: {
+				...gatewayEnv,
+				rateLimit: {
+					...gatewayEnv.rateLimit,
+					verifyLimit: 1,
+					adminLimit: 1,
+					meteringLimit: 1,
+					trustProxyHeaders: true,
+				},
+			},
+			projectContextResolver: {
+				async resolveCredential() {
+					throw new Error("Credential resolution should not be called in gateway mode");
+				},
+				async resolveInstanceKey() {
+					projectResolutionCalls += 1;
+					return { kind: "not_found" as const };
+				},
+				async resolveInstanceId() {
+					throw new Error("Worker resolution should not be called by HTTP authentication");
+				},
+			},
+		});
+		const request = (suffix: number, ip: string) =>
+			app.request("/v1/catalog", {
+				headers: {
+					"x-billing-project-key": `unknown-${suffix}`,
+					"cf-connecting-ip": ip,
+				},
+			});
+
+		for (let suffix = 1; suffix <= 3; suffix += 1) {
+			expect((await request(suffix, "203.0.113.60")).status).toBe(404);
+		}
+		expect((await request(4, "203.0.113.60")).status).toBe(429);
+		expect((await request(5, "203.0.113.61")).status).toBe(404);
+		expect(projectResolutionCalls).toBe(4);
+	});
+
 	it("protects admin replay routes with API key auth", async () => {
 		const calls: string[] = [];
 		const app = createApp({
@@ -722,7 +835,7 @@ describe("billing app", () => {
 		const service = new EntitlementService({
 			getEntitlementSnapshot(project, billingAccountId) {
 				return Promise.resolve({
-					billingAccountId: `${project.projectKey}:${billingAccountId}`,
+					billingAccountId: `${project.projectInstanceKey}:${billingAccountId}`,
 					generatedAt: "2026-05-31T00:00:00.000Z",
 					entitlements: [],
 				});
@@ -779,20 +892,23 @@ describe("billing app", () => {
 		expect(replay.status).toBe(200);
 	});
 
-	it("rejects inactive project credentials and webhook routes", async () => {
+	it("rejects inactive project credentials while allowing provider webhooks to drain", async () => {
 		const entitlementCalls: string[] = [];
 		const webhookCalls: string[] = [];
 		const inactiveEnv = withProjects([
 			{
-				key: "voysee",
-				apiKey: "inactive-project-key-123456",
+				projectInstanceKey: "voysee",
 				projectionUrl: "https://voysee.example.com",
 				projectionSecret: "voysee-projection-secret",
-				active: false,
 			},
 		]);
+		const inactiveContext = projectInstanceContext("voysee", { lifecycleStatus: "inactive" });
 		const app = createApp({
 			env: inactiveEnv,
+			projectContextResolver: projectContextResolver({
+				contexts: [inactiveContext],
+				credentials: { "inactive-project-key-123456": "voysee" },
+			}),
 			entitlementService: new EntitlementService({
 				getEntitlementSnapshot(_project, billingAccountId) {
 					entitlementCalls.push(billingAccountId);
@@ -826,15 +942,44 @@ describe("billing app", () => {
 			success: false,
 			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
 		});
-		expect(webhook.status).toBe(404);
-		expect(await webhook.json()).toEqual({
-			success: false,
-			error: {
-				code: "BILLING_PROJECT_NOT_CONFIGURED",
-				message: "Billing project is not configured",
+		expect(webhook.status).toBe(200);
+		expect(entitlementCalls).toEqual([]);
+		expect(webhookCalls).toEqual(["apple"]);
+	});
+
+	it("fails gateway and webhook project resolution closed when persistence is unavailable", async () => {
+		const webhookCalls: string[] = [];
+		const app = createApp({
+			env: withAuthMode("gateway"),
+			projectContextResolver: projectContextResolver({ unavailable: true }),
+			appleStoreKitService: {
+				...appleStoreKitService,
+				handleNotification() {
+					webhookCalls.push("apple");
+					return appleStoreKitService.handleNotification();
+				},
 			},
 		});
-		expect(entitlementCalls).toEqual([]);
+
+		const gateway = await app.request("/v1/billing-accounts/user_1/entitlements", {
+			headers: { "x-billing-project-key": "voysee" },
+		});
+		const webhook = await app.request("/v1/projects/voysee/webhooks/apple", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ signedPayload: "signed-payload" }),
+		});
+
+		for (const response of [gateway, webhook]) {
+			expect(response.status).toBe(503);
+			expect(await response.json()).toEqual({
+				success: false,
+				error: {
+					code: "BILLING_PROJECT_CONTEXT_UNAVAILABLE",
+					message: "Billing project context is unavailable",
+				},
+			});
+		}
 		expect(webhookCalls).toEqual([]);
 	});
 
@@ -843,18 +988,14 @@ describe("billing app", () => {
 			env: {
 				...withProjects([
 					{
-						key: "voysee",
-						apiKey: "voysee-service-key-123456",
+						projectInstanceKey: "voysee",
 						projectionUrl: "https://voysee.example.com",
 						projectionSecret: "voysee-projection-secret",
-						active: true,
 					},
 					{
-						key: "wiseley",
-						apiKey: "wiseley-service-key-123456",
+						projectInstanceKey: "wiseley",
 						projectionUrl: "https://wiseley.example.com",
 						projectionSecret: "wiseley-projection-secret",
-						active: true,
 					},
 				]),
 				rateLimit: {
@@ -898,12 +1039,12 @@ describe("billing app", () => {
 			stripeBillingService,
 		});
 
-		const apple = await app.request("/v1/webhooks/apple", {
+		const apple = await app.request("/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "signed-payload" }),
 		});
-		const stripe = await app.request("/v1/webhooks/stripe", {
+		const stripe = await app.request("/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: { "stripe-signature": "t=123,v1=abc" },
 			body: "{}",
@@ -922,7 +1063,7 @@ describe("billing app", () => {
 			adminOperations: new BillingAdminOperations({
 				replayWorker: {
 					runOne(project, eventId: string) {
-						calls.push({ projectKey: project.projectKey, eventId });
+						calls.push({ projectKey: project.projectInstanceKey, eventId });
 						return Promise.resolve({ eventId, status: "processed" as const });
 					},
 				},
@@ -1056,7 +1197,7 @@ describe("billing app", () => {
 				},
 				projectionRepository: {
 					retryProjectionSyncJob(project, jobId) {
-						calls.push({ projectKey: project.projectKey, jobId });
+						calls.push({ projectKey: project.projectInstanceKey, jobId });
 						return Promise.resolve({ jobId, status: "pending" as const });
 					},
 				},
@@ -1225,18 +1366,14 @@ describe("billing app", () => {
 		const app = createApp({
 			env: {
 				...env,
-				projects: [
+				projectRuntime: [
 					{
-						key: "voysee",
-						apiKey: "voysee-service-key-123456",
-						active: true,
+						projectInstanceKey: "voysee",
 						projectionUrl: "https://voysee.example.com",
 						projectionSecret: "voysee-projection-secret",
 					},
 					{
-						key: "wiseley",
-						apiKey: "wiseley-service-key-123456",
-						active: true,
+						projectInstanceKey: "wiseley",
 						projectionUrl: "https://wiseley.example.com",
 						projectionSecret: "wiseley-projection-secret",
 					},
@@ -1245,7 +1382,7 @@ describe("billing app", () => {
 			adminBillingReader: {
 				...reader,
 				listPurchases(project, input) {
-					projects.push(project.projectKey);
+					projects.push(project.projectInstanceKey);
 					return reader.listPurchases(project, input);
 				},
 			},
@@ -1764,18 +1901,14 @@ describe("billing app", () => {
 		const app = createApp({
 			env: {
 				...env,
-				projects: [
+				projectRuntime: [
 					{
-						key: "voysee",
-						apiKey: "voysee-service-key-123456",
-						active: true,
+						projectInstanceKey: "voysee",
 						projectionUrl: "https://voysee.example.com",
 						projectionSecret: "voysee-projection-secret",
 					},
 					{
-						key: "wiseley",
-						apiKey: "wiseley-service-key-123456",
-						active: true,
+						projectInstanceKey: "wiseley",
 						projectionUrl: "https://wiseley.example.com",
 						projectionSecret: "wiseley-projection-secret",
 					},
@@ -1837,18 +1970,14 @@ describe("billing app", () => {
 		const app = createApp({
 			env: {
 				...env,
-				projects: [
+				projectRuntime: [
 					{
-						key: "voysee",
-						apiKey: "voysee-service-key-123456",
-						active: true,
+						projectInstanceKey: "voysee",
 						projectionUrl: "https://voysee.example.com",
 						projectionSecret: "voysee-projection-secret",
 					},
 					{
-						key: "wiseley",
-						apiKey: "wiseley-service-key-123456",
-						active: true,
+						projectInstanceKey: "wiseley",
 						projectionUrl: "https://wiseley.example.com",
 						projectionSecret: "wiseley-projection-secret",
 					},
@@ -1911,18 +2040,14 @@ describe("billing app", () => {
 		const app = createApp({
 			env: {
 				...env,
-				projects: [
+				projectRuntime: [
 					{
-						key: "voysee",
-						apiKey: "voysee-service-key-123456",
-						active: true,
+						projectInstanceKey: "voysee",
 						projectionUrl: "https://voysee.example.com",
 						projectionSecret: "voysee-projection-secret",
 					},
 					{
-						key: "wiseley",
-						apiKey: "wiseley-service-key-123456",
-						active: true,
+						projectInstanceKey: "wiseley",
 						projectionUrl: "https://wiseley.example.com",
 						projectionSecret: "wiseley-projection-secret",
 					},
@@ -2049,7 +2174,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/webhooks/stripe", {
+		const response = await app.request("/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -2089,7 +2214,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/webhooks/stripe", {
+		const response = await app.request("/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: { "stripe-signature": "t=123,v1=abc" },
 			body: "{}",
@@ -2122,7 +2247,7 @@ describe("billing app", () => {
 		const app = createApp({ env, stripeBillingService: null });
 
 		for (const request of [
-			new Request("http://localhost/v1/webhooks/stripe", {
+			new Request("http://localhost/v1/projects/voysee/webhooks/stripe", {
 				method: "POST",
 				body: "{}",
 			}),
@@ -2544,7 +2669,7 @@ describe("billing app", () => {
 
 	it("accepts public Apple webhooks without API key auth", async () => {
 		const app = createApp({ env, appleStoreKitService });
-		const response = await app.request("/v1/webhooks/apple", {
+		const response = await app.request("/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
@@ -2566,7 +2691,7 @@ describe("billing app", () => {
 
 	it("accepts public Google webhooks without API key auth", async () => {
 		const app = createApp({ env, googlePlayBillingService });
-		const response = await app.request("/v1/webhooks/google", {
+		const response = await app.request("/v1/projects/voysee/webhooks/google", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer google-oidc-token",
@@ -2616,7 +2741,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/webhooks/google", {
+		const response = await app.request("/v1/projects/voysee/webhooks/google", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer google-oidc-token",
@@ -2661,7 +2786,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/webhooks/google", {
+		const response = await app.request("/v1/projects/voysee/webhooks/google", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: "{",
@@ -2683,7 +2808,7 @@ describe("billing app", () => {
 		const { logger, errors } = createRecordingLogger();
 		const app = createApp({ env, appleStoreKitService, metrics, logger });
 
-		const response = await app.request("/v1/webhooks/apple", {
+		const response = await app.request("/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({}),
@@ -2764,7 +2889,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/webhooks/google", {
+		const response = await app.request("/v1/projects/voysee/webhooks/google", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer invalid-google-token",
@@ -2787,7 +2912,7 @@ describe("billing app", () => {
 
 	it("rejects oversized public webhook bodies", async () => {
 		const app = createApp({ env, appleStoreKitService });
-		const response = await app.request("/v1/webhooks/apple", {
+		const response = await app.request("/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -2816,7 +2941,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/webhooks/apple", {
+		const response = await app.request("/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "" }),
@@ -2900,11 +3025,21 @@ describe("billing app", () => {
 	});
 
 	it("limits public webhooks by IP and path with separate Apple, Google, and Stripe buckets", async () => {
+		let projectResolutionCalls = 0;
+		const resolver = projectContextResolver();
 		const app = createApp({
 			env: withRateLimit({ webhookLimit: 1 }),
 			appleStoreKitService,
 			googlePlayBillingService,
 			stripeBillingService,
+			projectContextResolver: {
+				resolveCredential: (credential) => resolver.resolveCredential(credential),
+				resolveInstanceKey: async (projectInstanceKey) => {
+					projectResolutionCalls += 1;
+					return await resolver.resolveInstanceKey(projectInstanceKey);
+				},
+				resolveInstanceId: (projectInstanceId) => resolver.resolveInstanceId(projectInstanceId),
+			},
 		});
 
 		const appleHeaders = {
@@ -2921,12 +3056,12 @@ describe("billing app", () => {
 			"x-forwarded-for": "203.0.113.20",
 		};
 
-		const appleAllowed = await app.request("/v1/webhooks/apple", {
+		const appleAllowed = await app.request("/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: appleHeaders,
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
 		});
-		const googleAllowed = await app.request("/v1/webhooks/google", {
+		const googleAllowed = await app.request("/v1/projects/voysee/webhooks/google", {
 			method: "POST",
 			headers: googleHeaders,
 			body: JSON.stringify({
@@ -2934,17 +3069,17 @@ describe("billing app", () => {
 				subscription: "sub",
 			}),
 		});
-		const stripeAllowed = await app.request("/v1/webhooks/stripe", {
+		const stripeAllowed = await app.request("/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: stripeHeaders,
 			body: "{}",
 		});
-		const appleLimited = await app.request("/v1/webhooks/apple", {
+		const appleLimited = await app.request("/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: appleHeaders,
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
 		});
-		const stripeLimited = await app.request("/v1/webhooks/stripe", {
+		const stripeLimited = await app.request("/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: stripeHeaders,
 			body: "{}",
@@ -2955,6 +3090,7 @@ describe("billing app", () => {
 		expect(stripeAllowed.status).toBe(200);
 		expect(appleLimited.status).toBe(429);
 		expect(stripeLimited.status).toBe(429);
+		expect(projectResolutionCalls).toBe(3);
 		expect(await appleLimited.json()).toEqual({
 			success: false,
 			error: { code: "RATE_LIMITED", message: "Too many requests" },
@@ -2971,7 +3107,7 @@ describe("billing app", () => {
 			appleStoreKitService,
 		});
 
-		const first = await app.request("/v1/webhooks/apple", {
+		const first = await app.request("/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -2980,7 +3116,7 @@ describe("billing app", () => {
 			},
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
 		});
-		const sameFirstIp = await app.request("/v1/webhooks/apple", {
+		const sameFirstIp = await app.request("/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -2989,7 +3125,7 @@ describe("billing app", () => {
 			},
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
 		});
-		const differentCloudflareIp = await app.request("/v1/webhooks/apple", {
+		const differentCloudflareIp = await app.request("/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -3039,76 +3175,18 @@ describe("billing app", () => {
 		});
 	});
 
-	it("provisions the authenticated project through POST /v1/admin/projects", async () => {
-		const calls: Array<{ projectKey: string; input: { name: string; active: boolean } }> = [];
-		const app = createApp({
-			env,
-			adminProjectProvisioner: {
-				upsertProject: async (project, input) => {
-					calls.push({ projectKey: project.projectKey, input });
-					return {
-						id: "project-id",
-						key: project.projectKey,
-						name: input.name,
-						active: input.active,
-					};
-				},
-			},
-		});
-
+	it("does not expose the retired project provisioning route", async () => {
+		const app = createApp({ env });
 		const response = await app.request("/v1/admin/projects", {
 			method: "POST",
 			headers: { authorization: "Bearer secret", "content-type": "application/json" },
 			body: JSON.stringify({ name: "Voysee" }),
 		});
 
-		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({
-			success: true,
-			data: { id: "project-id", key: "voysee", name: "Voysee", active: true },
-		});
-		expect(calls).toEqual([{ projectKey: "voysee", input: { name: "Voysee", active: true } }]);
-	});
-
-	it("rejects an invalid project body on POST /v1/admin/projects", async () => {
-		const app = createApp({
-			env,
-			adminProjectProvisioner: {
-				upsertProject: async () => {
-					throw new Error("should not be called");
-				},
-			},
-		});
-
-		const response = await app.request("/v1/admin/projects", {
-			method: "POST",
-			headers: { authorization: "Bearer secret", "content-type": "application/json" },
-			body: JSON.stringify({ name: "   " }),
-		});
-
-		expect(response.status).toBe(400);
+		expect(response.status).toBe(404);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "INVALID_REQUEST", message: "Invalid project body" },
-		});
-	});
-
-	it("returns not-configured when the project provisioner is explicitly null", async () => {
-		const app = createApp({ env, adminProjectProvisioner: null });
-
-		const response = await app.request("/v1/admin/projects", {
-			method: "POST",
-			headers: { authorization: "Bearer secret", "content-type": "application/json" },
-			body: JSON.stringify({ name: "Voysee" }),
-		});
-
-		expect(response.status).toBe(501);
-		expect(await response.json()).toEqual({
-			success: false,
-			error: {
-				code: "BILLING_ADMIN_NOT_CONFIGURED",
-				message: "Billing project provisioner is not configured",
-			},
+			error: { code: "NOT_FOUND", message: "Route not found" },
 		});
 	});
 });
