@@ -256,6 +256,7 @@ export function createApp({
 		meteringLimiter,
 		rateLimitKey,
 		meteringService: {
+			getOperation: (...args) => getMeteringService().getOperation(...args),
 			getBalance: (...args) => getMeteringService().getBalance(...args),
 			check: (...args) => getMeteringService().check(...args),
 			consume: (...args) => getMeteringService().consume(...args),

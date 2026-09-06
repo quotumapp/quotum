@@ -2,6 +2,38 @@ import { describe, expect, it } from "bun:test";
 import { BillingClient } from "../../src/sdk/client";
 
 describe("BillingClient", () => {
+	it("looks up recovery with encoded account/operation IDs and no replacement mutation", async () => {
+		const calls: Request[] = [];
+		const expected = {
+			operation: "consume",
+			operationId: "job/1?retry#stable",
+			status: "processing",
+			completedAt: null,
+			outcome: null,
+		} as const;
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			fetch: async (input, init) => {
+				calls.push(new Request(input, init));
+				return Response.json({ success: true, data: expected });
+			},
+		});
+		expect(
+			await client.usage.getOperation({
+				billingAccountId: "account/one",
+				operation: "consume",
+				operationId: expected.operationId,
+			}),
+		).toEqual(expected);
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.method).toBe("GET");
+		expect(calls[0]?.url).toBe(
+			"https://billing.example.com/v1/billing-accounts/account%2Fone/usage/operations/consume/job%2F1%3Fretry%23stable",
+		);
+		expect(calls[0]?.headers.get("authorization")).toBe("Bearer project-secret");
+		expect(calls[0]?.headers.has("idempotency-key")).toBe(false);
+	});
 	it("keeps credentials in backend requests and returns typed commercial previews", async () => {
 		const calls: Request[] = [];
 		const client = new BillingClient({

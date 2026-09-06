@@ -1,4 +1,5 @@
 import type { ProjectInstanceContext } from "../projects/context";
+import type { UsageOperationLookupInput, UsageOperationLookupResult } from "./usage-operations";
 
 export type RateCardPath = "direct" | "pinned" | "additive";
 export type ReservationStatus = "active" | "confirmed" | "released" | "expired";
@@ -181,6 +182,10 @@ export interface MeteringMaintenanceResult {
 }
 
 export interface MeteringServiceLike {
+	getOperation(
+		project: ProjectInstanceContext,
+		input: UsageOperationLookupInput,
+	): Promise<UsageOperationLookupResult>;
 	getBalance(
 		project: ProjectInstanceContext,
 		billingAccountId: string,
@@ -208,6 +213,10 @@ export interface MeteringServiceLike {
 }
 
 interface MeteringRepositoryLike {
+	getUsageOperation(
+		project: ProjectInstanceContext,
+		input: UsageOperationLookupInput,
+	): Promise<UsageOperationLookupResult>;
 	getMeteringBalance(
 		project: ProjectInstanceContext,
 		billingAccountId: string,
@@ -241,6 +250,13 @@ interface MeteringRepositoryLike {
 }
 
 export class MeteringService implements MeteringServiceLike {
+	async getOperation(
+		project: ProjectInstanceContext,
+		input: UsageOperationLookupInput,
+	): Promise<UsageOperationLookupResult> {
+		return await this.repository.getUsageOperation(project, input);
+	}
+
 	constructor(private readonly repository: MeteringRepositoryLike) {}
 
 	async getBalance(

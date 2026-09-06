@@ -445,6 +445,12 @@ CREATE TABLE IF NOT EXISTS client_idempotency_claims (
 	request_fingerprint TEXT NOT NULL CHECK (char_length(request_fingerprint) = 64),
 	expires_at TIMESTAMPTZ NOT NULL,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	recovery_version SMALLINT NOT NULL DEFAULT 0 CHECK (recovery_version IN (0, 1)),
+	retention_policy_version TEXT NOT NULL DEFAULT 'usage-recovery-v1'
+  CHECK (retention_policy_version = 'usage-recovery-v1'),
+	completed_at TIMESTAMPTZ,
+	result_expires_at TIMESTAMPTZ,
+	outcome JSONB,
 	CONSTRAINT client_idempotency_claims_scope_unique UNIQUE (
 		project_id,
 		customer_id,
@@ -454,7 +460,17 @@ CREATE TABLE IF NOT EXISTS client_idempotency_claims (
 	CONSTRAINT client_idempotency_claims_project_customer_fk FOREIGN KEY (project_id, customer_id)
 		REFERENCES customers(project_id, id)
 		ON DELETE CASCADE,
-	CONSTRAINT client_idempotency_claims_expiry_check CHECK (expires_at > created_at)
+	CONSTRAINT client_idempotency_claims_expiry_check CHECK (expires_at > created_at),
+	CONSTRAINT client_operation_completion_check CHECK (
+  (completed_at IS NULL AND result_expires_at IS NULL AND outcome IS NULL)
+  OR (completed_at IS NOT NULL AND result_expires_at IS NOT NULL
+   AND result_expires_at >= completed_at + INTERVAL '24 hours'
+   AND expires_at >= result_expires_at
+   AND (recovery_version = 0 OR expires_at >= completed_at + INTERVAL '168 hours'))
+ ),
+	CONSTRAINT client_operation_outcome_bound CHECK (
+  outcome IS NULL OR (jsonb_typeof(outcome) = 'object' AND octet_length(outcome::text) <= 65536)
+ )
 );
 
 CREATE TABLE IF NOT EXISTS worker_delivery_claims (
@@ -1702,6 +1718,10 @@ CREATE INDEX IF NOT EXISTS idx_billing_commercial_previews_account_created
 
 CREATE INDEX IF NOT EXISTS idx_billing_usage_events_customer_feature_time
 	ON usage_events (project_id, customer_id, meter_feature_id, recorded_at DESC, id DESC);
+
+CREATE INDEX idx_client_operation_result_expiry
+ ON client_idempotency_claims (result_expires_at, id)
+ WHERE outcome IS NOT NULL AND completed_at IS NOT NULL;
 
 -- Constraints on tables defined in earlier files that reference this file's tables.
 ALTER TABLE projects

@@ -543,6 +543,61 @@ bun run catalog diff ./billing.catalog.ts
 bun run catalog push ./billing.catalog.ts
 ```
 
+## Usage Operation Recovery
+
+API `0.7.0` adds recovery for the existing synchronous consume, reserve, confirm, release and
+correction endpoints. Keep the same caller-owned `Idempotency-Key` after a timeout, lost response,
+`5xx` or restart. Its scope is `(projectInstanceId, billingAccountId, operation kind, key)`.
+Same-input replay returns the original domain result, including a denial, without reevaluating
+today's balance or catalog. Different semantic input returns `409 IDEMPOTENCY_CONFLICT`.
+Preserve semantic metadata and `occurredAt` across retries; put per-attempt tracing in transport
+headers, which are not part of the operation fingerprint.
+
+```http
+GET /v1/billing-accounts/account_123/usage/operations/consume/job_789
+Authorization: Bearer <database-issued project credential>
+```
+
+This project-authenticated, metering-rate-limited lookup uses the standard success envelope.
+Its data contains `operation`, `operationId`, `status`, `completedAt` and `outcome`. Processing
+operations have null completion/outcome; completed operations return a compact receipt with the
+original decision, event/reservation references and balance totals, without allocation arrays or
+rate-card tiers. URL-encode account and operation IDs independently. The backend SDK exposes
+`client.usage.getOperation({ billingAccountId, operation, operationId })`; it does not yet automate
+retry/recovery or generate replacement keys.
+
+- `409 OPERATION_IN_PROGRESS`: another transaction owns the operation. Look up/retry the same
+  identity and input within the caller's deadline; an in-progress response is not proof of commit.
+- `409 OPERATION_RESULT_EXPIRED`: the identity is retained but its original result is unavailable.
+  Do not mint another key to repeat the charge.
+- `404 OPERATION_NOT_FOUND`: no retained identity exists. After an uncertain request, retry only
+  the original input/key, never a new logical operation.
+
+Accounting, projection intent, claim and terminal result commit in one transaction. A non-blocking
+transaction-scoped advisory lock prevents concurrent duplicate execution. Proven rollback removes
+all these effects; an unknown commit must be recovered from the authoritative database.
+
+The `usage-recovery-v1` technical policy retains outcomes for at least 24 hours after completion and
+identities/fingerprints for at least seven days, honoring longer configured client TTLs. Expired
+results remain deduplication tombstones until identity expiry; unresolved claims are never swept.
+Identity expiry ends the guarantee: callers must never reuse an old operation ID for new work.
+Detailed mutation results are limited to 64 KiB of stored domain JSON; exceeding the bound returns
+`500 OPERATION_OUTCOME_TOO_LARGE` and rolls back the complete mutation. Compact command responses,
+broader reservation changes and Public Usage API/SDK GA remain separate increments.
+Accounts with sufficiently large allocation breakdowns can repeatedly hit this bound; retries alone
+will not resolve it. Stop retrying that operation and investigate the account's allocation/provenance
+size. This increment does not commit a charge while discarding its required recoverable outcome.
+
+**Upgrade from 0.6.0:** drain old API usage writers and metering-maintenance workers, recreate the
+database from the baseline files, then start the new build. Do not mix old writers/sweepers with
+this build. Legacy claims retain their identities
+for at least seven additional days and return `OPERATION_RESULT_EXPIRED`, since their original
+outcomes cannot safely be reconstructed. Rolling back to old binaries requires keeping usage
+traffic stopped until a compatible build is restored.
+An incomplete drain is unsupported: post-migration old-writer claims can remain unresolved, and
+old sweepers can remove retained identities. Stop usage traffic and reconcile such a rollout before
+resuming; do not delete unknown-outcome claims or create replacement keys to force progress.
+
 ## Admin Operations
 
 Admin and service routes require trusted backend access. In `api_key` auth mode, callers use a
@@ -774,7 +829,10 @@ and tenant-recovery boundary is defined by
 Release `0.6.0` delivers the next ADR-0007 increment: persisted organizations, logical projects,
 environment-specific project instances, database-issued credentials, database-authoritative
 `ProjectInstanceContext`, exact runtime-directory readiness, and platform table ownership checks.
-ADR-0007 remains partial. The next increment is the schema-wide tenant-isolation audit: verify every
+Release `0.7.0` integrates usage-operation recovery onto that context and migration history. It does
+not include the unmerged merchant schema or identity implementation. The next increment integrates
+merchant authority/provisioning through the released directory and consumer-owned module ports.
+ADR-0007 remains partial. Follow integration with the schema-wide tenant-isolation audit: verify every
 tenant table, composite foreign key, uniqueness constraint, project-first index/query, raw SQL path,
 worker claim/completion path, provider event, and adversarial cross-project/environment case. The
 broader shared-capacity, tenant-recovery, and future service-extraction gates remain later work.

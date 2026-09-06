@@ -2,6 +2,7 @@ import type { Context, Hono } from "hono";
 import { z } from "zod";
 import { BillingError, InvalidRequestError } from "../billing/errors";
 import type { MeteringServiceLike } from "../billing/metering";
+import { usageOperationKinds } from "../billing/usage-operations";
 import { type RateLimitResult, rateLimitMiddleware } from "../http/rate-limit";
 import {
 	type BillingMetrics,
@@ -24,6 +25,11 @@ export interface MeteringRoutesDependencies {
 
 const subjectParamsSchema = z.object({
 	billingAccountId: z.string().trim().min(1).max(256),
+});
+
+const operationParamsSchema = subjectParamsSchema.extend({
+	operation: z.enum(usageOperationKinds),
+	operationId: z.string().trim().min(1).max(200),
 });
 
 const balanceParamsSchema = subjectParamsSchema.extend({
@@ -127,6 +133,19 @@ export function registerMeteringRoutes({
 		);
 		return c.json({ success: true, data: balance });
 	});
+
+	app.get(
+		"/v1/billing-accounts/:billingAccountId/usage/operations/:operation/:operationId",
+		async (c) => {
+			const params = parseSchema(
+				operationParamsSchema,
+				c.req.param(),
+				"Invalid usage operation parameters",
+			);
+			const result = await meteringService.getOperation(privateProject(c), params);
+			return c.json({ success: true, data: result });
+		},
+	);
 
 	app.post("/v1/billing-accounts/:billingAccountId/usage/check", async (c) => {
 		const params = parseSchema(
@@ -262,6 +281,7 @@ export function registerMeteringRoutes({
 }
 
 function meteringOperation(path: string): string {
+	if (path.includes("/usage/operations/")) return "lookup";
 	if (path.endsWith("/check")) return "check";
 	if (path.endsWith("/consume")) return "consume";
 	if (path.endsWith("/confirm")) return "confirm";

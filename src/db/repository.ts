@@ -39,6 +39,10 @@ import type {
 	UsageInvoiceJob,
 } from "../billing/recurring";
 import type { BillingProvider, EntitlementSnapshot } from "../billing/types";
+import type {
+	UsageOperationLookupInput,
+	UsageOperationLookupResult,
+} from "../billing/usage-operations";
 import { CatalogControlPlane } from "../catalog/control-plane";
 import type {
 	CatalogPreview,
@@ -659,6 +663,13 @@ export class BillingRepository {
 		input: MeteringSubjectInput,
 	): Promise<MeteringDecision> {
 		return await this.metering.check(project, input);
+	}
+
+	async getUsageOperation(
+		project: ProjectInstanceContext,
+		input: UsageOperationLookupInput,
+	): Promise<UsageOperationLookupResult> {
+		return await this.metering.getOperation(project, input);
 	}
 
 	async consumeUsage(

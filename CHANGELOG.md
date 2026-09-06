@@ -10,6 +10,21 @@ Before 1.0 the schema ships as baseline files under `migrations/` that evolve in
 checksum-verified; recreate a database from them rather than migrating it. Incremental migrations
 start at 1.0.
 
+## [0.7.0] - 2026-09-06
+
+### Added
+
+- Durable usage-operation recovery for consume, reserve, confirm, release, and correction
+  (recovery columns on `client_idempotency_claims`): same-input replays return the original result,
+  conflicting input returns `409 IDEMPOTENCY_CONFLICT`, and
+  `GET .../usage/operations/:operation/:operationId` exposes the retained outcome.
+- SDK support through `client.usage.getOperation`.
+
+### Upgrade
+
+- Drain usage writers and metering-maintenance workers, recreate the database from the baseline
+  files, then start the new build. Do not run old and new writers together.
+
 ## [0.6.0] - 2026-09-05
 
 ### Added

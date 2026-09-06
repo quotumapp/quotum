@@ -18,6 +18,10 @@ import type {
 } from "../billing/metering";
 import type { EntitlementSnapshot } from "../billing/types";
 import type {
+	UsageOperationLookupInput,
+	UsageOperationLookupResult,
+} from "../billing/usage-operations";
+import type {
 	CatalogIntent,
 	CatalogPreview,
 	CatalogPublishResult,
@@ -104,6 +108,10 @@ export class BillingClient {
 				this.request<MeteringDecision>(
 					`/v1/billing-accounts/${segment(input.billingAccountId)}/usage/check`,
 					{ method: "POST", body: meteringBody(input) },
+				),
+			getOperation: (input: UsageOperationLookupInput) =>
+				this.request<UsageOperationLookupResult>(
+					`/v1/billing-accounts/${segment(input.billingAccountId)}/usage/operations/${segment(input.operation)}/${segment(input.operationId)}`,
 				),
 			consume: (
 				input: MeteringSubjectInput & { metadata?: Record<string, unknown> },

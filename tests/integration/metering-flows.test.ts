@@ -26,7 +26,7 @@ localDescribe("authoritative metering flows", () => {
 		await context.sql.close();
 	});
 
-	it("converts raw usage exactly, records an inline deduction receipt, and rejects duplicate keys", async () => {
+	it("converts raw usage exactly, records an inline deduction receipt, and replays duplicate keys", async () => {
 		await context.repository.grantAllocation(integrationProjectContext(), {
 			billingAccountId: "account_1",
 			featureKey: "ai_credits",
@@ -85,8 +85,8 @@ localDescribe("authoritative metering flows", () => {
 		expect(consumedData.deductions).toEqual([
 			expect.objectContaining({ quantity: "0.625", sourceKey: "fixture:account_1" }),
 		]);
-		expect(duplicate.status).toBe(409);
-		expect((await duplicate.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
+		expect(duplicate.status).toBe(200);
+		expect((await duplicate.json()).data).toEqual(consumedData);
 
 		const events = await context.sql<
 			Array<{
@@ -685,7 +685,8 @@ localDescribe("authoritative metering flows", () => {
 		`;
 		await context.sql`
 			UPDATE client_idempotency_claims
-			SET created_at = now() - INTERVAL '2 days', expires_at = now() - INTERVAL '1 day'
+			SET created_at = now() - INTERVAL '9 days', completed_at = now() - INTERVAL '8 days',
+				result_expires_at = now() - INTERVAL '7 days', expires_at = now() - INTERVAL '1 day'
 		`;
 		await context.sql`
 			INSERT INTO worker_delivery_claims (

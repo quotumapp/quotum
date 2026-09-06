@@ -1583,6 +1583,11 @@ export const clientIdempotencyClaims = pgTable(
 		idempotencyKey: text("idempotency_key").notNull(),
 		requestFingerprint: text("request_fingerprint").notNull(),
 		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+		recoveryVersion: smallint("recovery_version").notNull().default(0),
+		retentionPolicyVersion: text("retention_policy_version").notNull().default("usage-recovery-v1"),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+		resultExpiresAt: timestamp("result_expires_at", { withTimezone: true }),
+		outcome: jsonb("outcome"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(table) => [
@@ -1592,6 +1597,25 @@ export const clientIdempotencyClaims = pgTable(
 			table.operation,
 			table.idempotencyKey,
 		),
+		check(
+			"client_operation_completion_check",
+			sql`
+   (completed_at IS NULL AND result_expires_at IS NULL AND outcome IS NULL)
+   OR (completed_at IS NOT NULL AND result_expires_at IS NOT NULL
+    AND result_expires_at >= completed_at + INTERVAL '24 hours'
+    AND expires_at >= result_expires_at
+    AND (recovery_version = 0 OR expires_at >= completed_at + INTERVAL '168 hours'))
+  `,
+		),
+		check(
+			"client_operation_outcome_bound",
+			sql`
+   outcome IS NULL OR (jsonb_typeof(outcome) = 'object' AND octet_length(outcome::text) <= 65536)
+  `,
+		),
+		index("idx_client_operation_result_expiry")
+			.on(table.resultExpiresAt, table.id)
+			.where(sql`outcome IS NOT NULL AND completed_at IS NOT NULL`),
 		index("idx_billing_client_idempotency_expiry").on(table.expiresAt),
 	],
 );

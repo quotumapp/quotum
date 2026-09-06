@@ -39,6 +39,13 @@ import {
 	calculateTieredUsageCharge,
 	calculateUsageCharge,
 } from "../../billing/pricing";
+import type {
+	UsageOperationInput,
+	UsageOperationKind,
+	UsageOperationLookupInput,
+	UsageOperationLookupResult,
+	UsageOperationResult,
+} from "../../billing/usage-operations";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import type { ControlDenial } from "./controls-runtime";
@@ -57,6 +64,11 @@ import { enqueueProjectionSyncJob, getEntitlementSnapshot } from "./entitlements
 import { ensureCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
+import {
+	expireUsageOperationResults,
+	lookupUsageOperation,
+	runUsageOperation,
+} from "./usage-operations";
 
 interface FeatureRow {
 	id: string | number | bigint;
@@ -207,6 +219,27 @@ export interface GrantAllocationInput {
 }
 
 export class MeteringBillingRepository extends RepositoryModule {
+	private async operationTransaction<I extends UsageOperationInput, T extends UsageOperationResult>(
+		project: ProjectInstanceContext,
+		operation: UsageOperationKind,
+		input: I,
+		callback: (tx: QueryExecutor, input: I) => Promise<T>,
+	): Promise<T> {
+		const normalizedInput = { ...input, billingAccountId: input.billingAccountId.trim() };
+		return await this.transaction((tx) =>
+			runUsageOperation(tx, project, operation, normalizedInput, () =>
+				callback(tx, normalizedInput),
+			),
+		);
+	}
+
+	async getOperation(
+		project: ProjectInstanceContext,
+		input: UsageOperationLookupInput,
+	): Promise<UsageOperationLookupResult> {
+		return await this.transaction((tx) => lookupUsageOperation(tx, project, input));
+	}
+
 	async getBalance(
 		project: ProjectInstanceContext,
 		billingAccountId: string,
@@ -324,7 +357,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 		project: ProjectInstanceContext,
 		input: MeteringMutationInput,
 	): Promise<ConsumeUsageResult> {
-		return await this.transaction(async (tx) => {
+		return await this.operationTransaction(project, "consume", input, async (tx, input) => {
 			const projectId = project.projectInstanceId;
 			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
@@ -334,14 +367,6 @@ export class MeteringBillingRepository extends RepositoryModule {
 			const requestedQuantity = positiveDecimal(input.quantity, "quantity", feature.credit_scale);
 			const meterLimit = await resolveMeterLimit(tx, projectId, customer.id, feature);
 			if (meterLimit !== null) {
-				await claimClientKey(
-					tx,
-					projectId,
-					customer.id,
-					"consume",
-					input.idempotencyKey,
-					mutationFingerprint("consume", input, requestedQuantity),
-				);
 				const preflight = await checkMeterLimit(
 					tx,
 					projectId,
@@ -402,15 +427,6 @@ export class MeteringBillingRepository extends RepositoryModule {
 			}
 			const rate = await resolveRateDecision(tx, projectId, customer.id, input.featureKey);
 			validateFilters(rate.meter, input.filters);
-			const fingerprint = mutationFingerprint("consume", input, requestedQuantity);
-			await claimClientKey(
-				tx,
-				projectId,
-				customer.id,
-				"consume",
-				input.idempotencyKey,
-				fingerprint,
-			);
 			const walletQuantity = await calculateWalletQuantity(tx, rate, requestedQuantity);
 			const rows = await lockAllocations(tx, projectId, customer.id, rate.wallet, entityId);
 			const currentBalance = balanceFromRows(rate.wallet, rows);
@@ -726,7 +742,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 			throw new InvalidRequestError("expiresInSeconds must be an integer between 1 and 86400");
 		}
 
-		return await this.transaction(async (tx) => {
+		return await this.operationTransaction(project, "reserve", input, async (tx, input) => {
 			const projectId = project.projectInstanceId;
 			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
@@ -736,14 +752,6 @@ export class MeteringBillingRepository extends RepositoryModule {
 			const requestedQuantity = positiveDecimal(input.quantity, "quantity", feature.credit_scale);
 			const meterLimit = await resolveMeterLimit(tx, projectId, customer.id, feature);
 			if (meterLimit !== null) {
-				await claimClientKey(
-					tx,
-					projectId,
-					customer.id,
-					"reserve",
-					input.idempotencyKey,
-					mutationFingerprint("reserve", input, requestedQuantity),
-				);
 				return await reserveMeterLimit(tx, {
 					projectId,
 					customerId: customer.id,
@@ -757,14 +765,6 @@ export class MeteringBillingRepository extends RepositoryModule {
 			}
 			const rate = await resolveRateDecision(tx, projectId, customer.id, input.featureKey);
 			validateFilters(rate.meter, input.filters);
-			await claimClientKey(
-				tx,
-				projectId,
-				customer.id,
-				"reserve",
-				input.idempotencyKey,
-				mutationFingerprint("reserve", input, requestedQuantity),
-			);
 			const walletQuantity = await calculateWalletQuantity(tx, rate, requestedQuantity);
 			const rows = await lockAllocations(tx, projectId, customer.id, rate.wallet, entityId);
 			const currentBalance = balanceFromRows(rate.wallet, rows);
@@ -884,22 +884,12 @@ export class MeteringBillingRepository extends RepositoryModule {
 		project: ProjectInstanceContext,
 		input: ConfirmReservationInput,
 	): Promise<FinalizeReservationResult> {
-		return await this.transaction(async (tx) => {
+		return await this.operationTransaction(project, "confirm", input, async (tx, input) => {
 			const projectId = project.projectInstanceId;
 			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
 			const reservation = await lockReservation(tx, projectId, customer.id, input.reservationId);
 			const quantity = positiveDecimal(input.quantity, "quantity", reservation.meter_scale);
-			await claimClientKey(
-				tx,
-				projectId,
-				customer.id,
-				"confirm",
-				input.idempotencyKey,
-				sha256Hex(
-					stableJson({ operation: "confirm", reservationId: input.reservationId, quantity }),
-				),
-			);
 
 			if (reservation.status === "confirmed") {
 				if (databaseDecimal(reservation.confirmed_quantity, "confirmed quantity") !== quantity) {
@@ -1114,18 +1104,10 @@ export class MeteringBillingRepository extends RepositoryModule {
 		project: ProjectInstanceContext,
 		input: ReleaseReservationInput,
 	): Promise<FinalizeReservationResult> {
-		return await this.transaction(async (tx) => {
+		return await this.operationTransaction(project, "release", input, async (tx, input) => {
 			const projectId = project.projectInstanceId;
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
 			const reservation = await lockReservation(tx, projectId, customer.id, input.reservationId);
-			await claimClientKey(
-				tx,
-				projectId,
-				customer.id,
-				"release",
-				input.idempotencyKey,
-				sha256Hex(stableJson({ operation: "release", reservationId: input.reservationId })),
-			);
 
 			if (reservation.status === "confirmed") {
 				throw new PersistenceConflictError(
@@ -1164,26 +1146,10 @@ export class MeteringBillingRepository extends RepositoryModule {
 		const reason = requiredAuditText(input.reason, "reason", 500);
 		const correctionQuantity = positiveDecimal(input.quantity, "quantity");
 
-		return await this.transaction(async (tx) => {
+		return await this.operationTransaction(project, "correct", input, async (tx, input) => {
 			const projectId = project.projectInstanceId;
 			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
-			await claimClientKey(
-				tx,
-				projectId,
-				customer.id,
-				"correct",
-				input.idempotencyKey,
-				sha256Hex(
-					stableJson({
-						operation: "correct",
-						billingAccountId: input.billingAccountId.trim(),
-						originalUsageEventId: input.originalUsageEventId,
-						originalRecordedAt: input.originalRecordedAt.toISOString(),
-						quantity: correctionQuantity,
-					}),
-				),
-			);
 			const original = await lockOriginalUsageEvent(
 				tx,
 				projectId,
@@ -1492,6 +1458,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 				`,
 			);
 
+			await expireUsageOperationResults(tx, limit);
 			const deletedClientClaims = await deleteExpiredRows(tx, "client_idempotency_claims", limit);
 			const deletedWorkerClaims = await deleteExpiredRows(tx, "worker_delivery_claims", limit);
 			const expiredDrafts = await executeRows<{ id: string }>(
@@ -1715,6 +1682,7 @@ async function deleteExpiredRows(
 				SELECT id
 				FROM ${drizzleSql.raw(table)}
 				WHERE expires_at <= now()
+					${table === "client_idempotency_claims" ? drizzleSql`AND completed_at IS NOT NULL` : drizzleSql``}
 				ORDER BY expires_at, id
 				LIMIT ${limit}
 				FOR UPDATE SKIP LOCKED
@@ -3714,65 +3682,6 @@ async function purchaseActions(
 	);
 }
 
-async function claimClientKey(
-	executor: QueryExecutor,
-	projectId: string,
-	customerId: string,
-	operation: string,
-	idempotencyKey: string,
-	fingerprint: string,
-): Promise<void> {
-	const key = idempotencyKey.trim();
-	if (key.length < 1 || key.length > 200) {
-		throw new InvalidRequestError("Idempotency-Key must contain between 1 and 200 characters");
-	}
-	await executeRows(
-		executor,
-		drizzleSql`
-			DELETE FROM client_idempotency_claims
-			WHERE project_id = ${projectId}
-				AND customer_id = ${customerId}
-				AND operation = ${operation}
-				AND idempotency_key = ${key}
-				AND expires_at <= now()
-		`,
-	);
-	const inserted = await executeOne<{ id: string | number | bigint }>(
-		executor,
-		drizzleSql`
-			INSERT INTO client_idempotency_claims (
-				project_id,
-				customer_id,
-				operation,
-				idempotency_key,
-				request_fingerprint,
-				expires_at
-			)
-			VALUES (
-				${projectId},
-				${customerId},
-				${operation},
-				${key},
-				${fingerprint},
-				now() + make_interval(
-					secs => COALESCE(
-						(SELECT client_idempotency_ttl_seconds FROM metering_settings WHERE project_id = ${projectId}),
-						86400
-					)
-				)
-			)
-			ON CONFLICT (project_id, customer_id, operation, idempotency_key) DO NOTHING
-			RETURNING id
-		`,
-	);
-	if (inserted === null) {
-		throw new PersistenceConflictError(
-			"The idempotency key has already been claimed",
-			"IDEMPOTENCY_CONFLICT",
-		);
-	}
-}
-
 async function claimWorkerDelivery(
 	executor: QueryExecutor,
 	projectId: string,
@@ -3823,23 +3732,6 @@ async function claimWorkerDelivery(
 		`,
 	);
 	return row !== null;
-}
-
-function mutationFingerprint(
-	operation: "consume" | "reserve",
-	input: MeteringMutationInput,
-	quantity: string,
-): string {
-	return sha256Hex(
-		stableJson({
-			operation,
-			billingAccountId: input.billingAccountId.trim(),
-			featureKey: input.featureKey.trim(),
-			quantity,
-			entityId: input.entityId?.trim() || null,
-			filters: input.filters ?? null,
-		}),
-	);
 }
 
 async function insertUsageEvent(
