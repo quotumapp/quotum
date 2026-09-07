@@ -21,6 +21,57 @@ const violationCodes = async (files: readonly BoundarySourceFile[]) =>
 	(await analyzeModuleBoundaries(files)).map((violation) => violation.code);
 
 describe("module boundaries", () => {
+	it("permits only the path-specific merchant schema adapter", async () => {
+		expect(
+			await violationCodes([
+				source(
+					"src/platform/persistence/auth-schema.ts",
+					'import {pgTable} from "drizzle-orm/pg-core";',
+				),
+			]),
+		).toEqual([]);
+		expect(
+			await violationCodes([
+				source("src/platform/service.ts", 'import {pgTable} from "drizzle-orm/pg-core";'),
+			]),
+		).toContain("FORBIDDEN_PERSISTENCE_ACCESS");
+		expect(
+			await violationCodes([
+				source(
+					"src/platform/persistence/auth-schema.ts",
+					'import {drizzle} from "drizzle-orm/bun-sql";',
+				),
+			]),
+		).toContain("FORBIDDEN_PERSISTENCE_ACCESS");
+	});
+	it("recognizes locking and conflict clauses without hiding real cross-domain writes", async () => {
+		expect(
+			await violationCodes([
+				source(
+					"src/platform/store.ts",
+					"const a = `INSERT INTO platform_memberships(id) VALUES(1) ON CONFLICT DO UPDATE SET id=1`; const b = `SELECT id FROM platform_memberships FOR UPDATE OF platform_memberships`; ",
+				),
+			]),
+		).toEqual([]);
+		expect(
+			await violationCodes([
+				source("src/platform/store.ts", "const a = `UPDATE subscriptions SET status='active'`; "),
+			]),
+		).toContain("FORBIDDEN_TABLE_ACCESS");
+		expect(
+			analyzeMigrationTableOwnership([
+				source(
+					"migrations/004_merchant.sql",
+					"CREATE TABLE platform_modes (id uuid REFERENCES projects(id));",
+				),
+			]),
+		).toEqual([]);
+		expect(
+			analyzeMigrationTableOwnership([
+				source("migrations/004_merchant.sql", "UPDATE projects SET name='bad';"),
+			]).map((v) => v.code),
+		).toContain("FORBIDDEN_TABLE_ACCESS");
+	});
 	it("allows ownership-local, shared, composition, and test-support dependencies", async () => {
 		const violations = await analyzeModuleBoundaries([
 			source("src/shared/identifier.ts", "export type Identifier = string;"),

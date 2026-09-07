@@ -77,6 +77,7 @@ export interface AnalyzeModuleBoundaryOptions {
 
 const compositionPaths = new Set([
 	"scripts/provision-catalog.ts",
+	"scripts/merchant-service-principal.ts",
 	"src/app.ts",
 	"src/index.ts",
 	"src/migrate.ts",
@@ -113,7 +114,12 @@ const testSupportPaths = new Set([
 	"scripts/test-migration-integrity.ts",
 ]);
 
-const testSupportPrefixes = ["scripts/lib/", "src/testing/", "tests/"] as const;
+const testSupportPrefixes = [
+	"scripts/lib/",
+	"src/testing/",
+	"tests/",
+	"integration/merchant/",
+] as const;
 
 export const defaultModuleBoundaryRules: readonly ModuleBoundaryRule[] = [
 	{
@@ -160,6 +166,7 @@ const ignoredSourceDirectories = new Set([
 	"coverage",
 	"dist",
 	"node_modules",
+	"local-sandbox",
 ]);
 const allowedNonLiteralModuleReferencePaths = new Set(["scripts/billing-catalog.ts"]);
 const selfPackageName = "quotum-api";
@@ -389,7 +396,11 @@ export async function analyzeModuleBoundaries(
 
 					if (
 						(owner === "platform" || owner === "shared") &&
-						isRestrictedPersistencePackage(reference.specifier)
+						isRestrictedPersistencePackage(reference.specifier) &&
+						!(
+							path === "src/platform/persistence/auth-schema.ts" &&
+							reference.specifier === "drizzle-orm/pg-core"
+						)
 					) {
 						violations.push({
 							code: "FORBIDDEN_PERSISTENCE_ACCESS",
@@ -428,6 +439,20 @@ export function analyzeMigrationTableOwnership(
 			}
 		}
 		for (const reference of collectSqlTableReferences(file.source)) {
+			if (path === "migrations/004_merchant.sql") {
+				if (
+					reference.table.startsWith(platformTablePrefix) ||
+					(reference.table === "projects" && reference.access === "reference")
+				)
+					continue;
+				violations.push({
+					code: "FORBIDDEN_TABLE_ACCESS",
+					path,
+					line: lineForOffset(file.source, reference.offset),
+					message: `${path} cannot ${reference.access} billing table ${reference.table}; merchant schema owns platform_* and references projects only`,
+				});
+				continue;
+			}
 			if (path === platformProjectIdentityMigrationPath) {
 				if (
 					reference.table.startsWith(platformTablePrefix) ||
@@ -664,7 +689,10 @@ function collectSqlTableReferences(source: string): SqlTableReference[] {
 		},
 		{
 			access: "write",
-			pattern: new RegExp(`(?<!on\\s)\\bupdate\\s+(?:only\\s+)?(${identifier})`, "giu"),
+			pattern: new RegExp(
+				`(?<!on\\s)\\bupdate\\s+(?!(?:set|of)\\b)(?:only\\s+)?(${identifier})`,
+				"giu",
+			),
 		},
 		{
 			access: "ddl",

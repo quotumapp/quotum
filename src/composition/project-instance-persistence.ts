@@ -30,6 +30,7 @@ interface SqlClient {
 interface ProjectContextRow {
 	organization_id: string;
 	organization_slug: string;
+	organization_status?: "active" | "suspended" | "removed";
 	logical_project_id: string;
 	logical_project_key: string;
 	project_instance_id: string;
@@ -37,6 +38,7 @@ interface ProjectContextRow {
 	environment: string;
 	lifecycle_status: string;
 	internal_project: boolean;
+	runtime_unconfigured?: boolean;
 }
 
 interface CredentialContextRow extends ProjectContextRow {
@@ -85,6 +87,14 @@ export class BunPlatformUnitOfWork implements PlatformUnitOfWork {
 
 export class BunProjectInstanceStore implements PlatformProjectInstanceStore {
 	constructor(private readonly executor: PlatformQueryExecutor) {}
+
+	async forProject(platformProjectId: string): Promise<readonly PlatformProjectInstanceRecord[]> {
+		const rows = await this.executor.query<Parameters<typeof mapProjectInstanceRow>[0]>({
+			text: "SELECT id,platform_project_id,key,name,environment,lifecycle_status,internal_project FROM projects WHERE platform_project_id=$1 ORDER BY environment",
+			values: [platformProjectId],
+		});
+		return rows.map(mapProjectInstanceRow);
+	}
 
 	async list(): Promise<readonly PlatformProjectInstanceRecord[]> {
 		const rows = await this.executor.query<{
@@ -180,13 +190,15 @@ export class PostgresProjectInstanceContextResolver implements ProjectInstanceCo
 						credentials.revoked_at,
 						organizations.id AS organization_id,
 						organizations.slug AS organization_slug,
+                            organizations.status AS organization_status,
 						logical_projects.id AS logical_project_id,
 						logical_projects.key AS logical_project_key,
 						instances.id AS project_instance_id,
 						instances.key AS project_instance_key,
 						instances.environment,
 						instances.lifecycle_status,
-						instances.internal_project
+						instances.internal_project,
+                            EXISTS(SELECT 1 FROM platform_project_runtime_modes modes WHERE modes.project_instance_id=instances.id) AS runtime_unconfigured
 					FROM platform_project_api_credentials credentials
 					JOIN projects instances ON instances.id = credentials.project_instance_id
 					JOIN platform_projects logical_projects
@@ -236,13 +248,15 @@ export class PostgresProjectInstanceContextResolver implements ProjectInstanceCo
 						SELECT
 							organizations.id AS organization_id,
 							organizations.slug AS organization_slug,
+                            organizations.status AS organization_status,
 							logical_projects.id AS logical_project_id,
 							logical_projects.key AS logical_project_key,
 							instances.id AS project_instance_id,
 							instances.key AS project_instance_key,
 							instances.environment,
 							instances.lifecycle_status,
-							instances.internal_project
+							instances.internal_project,
+                            EXISTS(SELECT 1 FROM platform_project_runtime_modes modes WHERE modes.project_instance_id=instances.id) AS runtime_unconfigured
 						FROM projects instances
 						JOIN platform_projects logical_projects
 							ON logical_projects.id = instances.platform_project_id
@@ -254,13 +268,15 @@ export class PostgresProjectInstanceContextResolver implements ProjectInstanceCo
 						SELECT
 							organizations.id AS organization_id,
 							organizations.slug AS organization_slug,
+                            organizations.status AS organization_status,
 							logical_projects.id AS logical_project_id,
 							logical_projects.key AS logical_project_key,
 							instances.id AS project_instance_id,
 							instances.key AS project_instance_key,
 							instances.environment,
 							instances.lifecycle_status,
-							instances.internal_project
+							instances.internal_project,
+                            EXISTS(SELECT 1 FROM platform_project_runtime_modes modes WHERE modes.project_instance_id=instances.id) AS runtime_unconfigured
 						FROM projects instances
 						JOIN platform_projects logical_projects
 							ON logical_projects.id = instances.platform_project_id
@@ -286,13 +302,16 @@ export async function checkProjectRuntimeConfiguration(
 ): Promise<boolean> {
 	try {
 		const executor = new BunPlatformQueryExecutor(client as unknown as SqlClient);
-		const rows = await executor.query<{ key: string }>({
-			text: "SELECT key FROM projects ORDER BY key",
+		const rows = await executor.query<{ key: string; unconfigured?: boolean }>({
+			text: "SELECT key, EXISTS(SELECT 1 FROM platform_project_runtime_modes modes WHERE modes.project_instance_id=projects.id) AS unconfigured FROM projects ORDER BY key",
 			values: [],
 		});
 		const databaseKeys = rows.map((row) => row.key).sort();
 		const runtimeKeys = projectRuntime.map((project) => project.projectInstanceKey).sort();
-		return JSON.stringify(databaseKeys) === JSON.stringify(runtimeKeys);
+		return (
+			rows.every((row) => row.unconfigured || runtimeKeys.includes(row.key)) &&
+			runtimeKeys.every((key) => databaseKeys.includes(key))
+		);
 	} catch {
 		return false;
 	}
@@ -335,6 +354,10 @@ function mapProjectContextRow(row: ProjectContextRow): ProjectInstanceContext {
 		environment: row.environment as ProjectEnvironment,
 		lifecycleStatus: row.lifecycle_status as ProjectLifecycleStatus,
 		internalProject: row.internal_project,
+		...(row.runtime_unconfigured ? { runtimeUnconfigured: true } : {}),
+		...(row.organization_status && row.organization_status !== "active"
+			? { organizationStatus: row.organization_status }
+			: {}),
 	};
 }
 

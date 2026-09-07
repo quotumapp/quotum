@@ -160,14 +160,14 @@ const catalogSchema = z
 	})
 	.strict();
 
-const previewSchema = z
+export const previewSchema = z
 	.object({
 		expectedRevision: z.number().int().positive().safe().nullable(),
 		catalog: catalogSchema,
 	})
 	.strict();
 
-const publishSchema = z
+export const publishSchema = z
 	.object({
 		expectedRevision: z.number().int().positive().safe().nullable(),
 		previewToken: z.string().regex(/^[a-f0-9]{64}$/),

@@ -128,6 +128,8 @@ export interface BillingInsightsServiceLike {
 
 export interface AppDependencies {
 	env: BillingEnv;
+	/** Internal in-process adapters may supply already-authorized project context. */
+	projectAuthentication?: MiddlewareHandler<BillingHonoEnv>;
 	entitlementService?: EntitlementService;
 	meteringService?: MeteringServiceLike;
 	controlsEnterpriseService?: ControlsEnterpriseRepositoryLike;

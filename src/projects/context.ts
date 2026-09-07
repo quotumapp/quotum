@@ -20,6 +20,8 @@ export interface ProjectInstanceContext {
 	readonly environment: ProjectEnvironment;
 	readonly lifecycleStatus: ProjectLifecycleStatus;
 	readonly internalProject: boolean;
+	readonly runtimeUnconfigured?: boolean;
+	readonly organizationStatus?: "active" | "suspended" | "removed";
 }
 
 export type ProjectInstanceLookupResult =
@@ -35,5 +37,9 @@ export interface ProjectInstanceContextResolver {
 }
 
 export function isTenantTrafficEligible(context: ProjectInstanceContext): boolean {
-	return context.lifecycleStatus === "active" && !context.internalProject;
+	return (
+		context.lifecycleStatus === "active" &&
+		!context.internalProject &&
+		(context.organizationStatus === undefined || context.organizationStatus === "active")
+	);
 }

@@ -46,7 +46,12 @@ export function operationFingerprint(
 			filters: "filters" in input ? (input.filters ?? {}) : {},
 			occurredAt: "occurredAt" in input ? (input.occurredAt?.toISOString() ?? null) : null,
 			metadata: "metadata" in input ? (input.metadata ?? {}) : {},
-			expiresInSeconds: "expiresInSeconds" in input ? input.expiresInSeconds : null,
+			expiresInSeconds:
+				operation === "reserve"
+					? "expiresInSeconds" in input
+						? (input.expiresInSeconds ?? 300)
+						: 300
+					: null,
 			reservationId: "reservationId" in input ? input.reservationId : null,
 			originalUsageEventId: "originalUsageEventId" in input ? input.originalUsageEventId : null,
 			originalRecordedAt:

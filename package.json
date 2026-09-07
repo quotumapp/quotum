@@ -1,6 +1,6 @@
 {
 	"name": "quotum-api",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"exports": {
 		"./sdk": "./src/sdk/index.ts"
 	},
@@ -25,7 +25,8 @@
 		"format": "biome format --write .",
 		"format:check": "biome format .",
 		"quality": "bun run check:boundaries && bun run typecheck && bun run lint && bun run format:check",
-		"quality:fix": "bun run lint:fix && bun run format"
+		"quality:fix": "bun run lint:fix && bun run format",
+		"test:merchant:integration": "bun run scripts/test-integration.ts integration/merchant"
 	},
 	"dependencies": {
 		"@apple/app-store-server-library": "3.1.0",
@@ -35,7 +36,8 @@
 		"google-auth-library": "11.0.2",
 		"hono": "^4.13.2",
 		"stripe": "22.5.0",
-		"zod": "^4.4.3"
+		"zod": "^4.4.3",
+		"better-auth": "1.7.2"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.8",
@@ -46,5 +48,9 @@
 	"overrides": {
 		"form-data": "4.0.6",
 		"google-auth-library": "11.0.2"
+	},
+	"packageManager": "bun@1.4.2",
+	"engines": {
+		"bun": ">=1.4.0 <1.5.0"
 	}
 }

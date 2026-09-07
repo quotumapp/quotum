@@ -30,7 +30,7 @@ const entityBody = z
 	})
 	.strict();
 
-const controlBody = z
+export const controlBody = z
 	.object({
 		entityId: z.string().trim().min(1).max(200).nullable().optional(),
 		controlKind: z.enum(["spend_limit", "usage_limit"]),
@@ -68,7 +68,7 @@ const autoTopupBody = z
 	.strict();
 
 const contractControl = controlBody.omit({ entityId: true }).strict();
-const contractBody = z
+export const contractBody = z
 	.object({
 		billingAccountId: z.string().trim().min(1).max(200),
 		contractKey: z.string().trim().min(1).max(120),
@@ -82,7 +82,7 @@ const contractBody = z
 	})
 	.strict();
 
-const migrationBody = z
+export const migrationBody = z
 	.object({
 		fromPlanKey: z.string().trim().min(1).max(120),
 		fromVersion: z.number().int().positive().safe(),

@@ -11,6 +11,9 @@ CREATE TABLE platform_organizations (
 	name TEXT NOT NULL,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	member_limit integer NOT NULL DEFAULT 3 CHECK(member_limit > 0),
+	production_limit integer NOT NULL DEFAULT 1 CHECK(production_limit >= 0),
+	status text NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended','removed')),
 	CONSTRAINT platform_organizations_slug_format_check CHECK (
 		char_length(slug) BETWEEN 1 AND 80
 		AND slug ~ '^[a-z0-9][a-z0-9_-]*$'
@@ -117,3 +120,11 @@ CREATE INDEX idx_platform_project_api_credentials_instance
 CREATE INDEX idx_platform_project_api_credentials_active_instance
 	ON platform_project_api_credentials (project_instance_id, created_at DESC)
 	WHERE revoked_at IS NULL;
+
+-- New merchant instances can operate before provider/projection configuration exists.
+-- Existing bootstrapped instances remain subject to exact external runtime configuration.
+CREATE TABLE platform_project_runtime_modes (
+ project_instance_id uuid PRIMARY KEY REFERENCES projects(id) ON DELETE RESTRICT,
+ mode text NOT NULL CHECK(mode = 'unconfigured'),
+ created_at timestamptz NOT NULL DEFAULT now()
+);

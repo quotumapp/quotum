@@ -79,9 +79,31 @@ localDescribe("platform project identity persistence", () => {
 			ORDER BY table_name
 		`;
 		expect(tables.map((row) => row.table_name)).toEqual([
+			"platform_audit_events",
+			"platform_auth_accounts",
+			"platform_auth_links",
+			"platform_auth_rate_limits",
+			"platform_auth_sessions",
+			"platform_auth_two_factors",
+			"platform_auth_users",
+			"platform_auth_verifications",
+			"platform_external_identities",
+			"platform_idempotency",
+			"platform_invitations",
+			"platform_memberships",
+			"platform_merchant_sessions",
+			"platform_onboarding_drafts",
 			"platform_organizations",
+			"platform_policy_acceptances",
+			"platform_principals",
 			"platform_project_api_credentials",
+			"platform_project_runtime_modes",
 			"platform_projects",
+			"platform_provisioning_operations",
+			"platform_provisioning_steps",
+			"platform_rate_limits",
+			"platform_service_principals",
+			"platform_step_up_grants",
 		]);
 
 		const constraints = await context.sql<Array<{ table_name: string; constraint_name: string }>>`

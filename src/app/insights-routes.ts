@@ -6,7 +6,7 @@ import type { ProjectInstanceContext } from "../projects/context";
 import type { BillingContext, BillingHonoEnv, BillingInsightsServiceLike } from "./types";
 
 const accountParamsSchema = z.object({ billingAccountId: z.string().trim().min(1) });
-const usageEventsQuerySchema = z
+export const usageEventsQuerySchema = z
 	.object({
 		featureKey: z.string().trim().min(1).optional(),
 		entityId: z.string().trim().min(1).optional(),
@@ -17,7 +17,7 @@ const usageEventsQuerySchema = z
 		cursor: z.string().trim().min(1).optional(),
 	})
 	.strict();
-const usageSeriesQuerySchema = z
+export const usageSeriesQuerySchema = z
 	.object({
 		featureKey: z.string().trim().min(1).optional(),
 		from: z.iso.datetime({ offset: true }).optional(),
@@ -89,7 +89,11 @@ export function registerInsightsRoutes(input: {
 	});
 }
 
-function dateRange(fromValue: string | undefined, toValue: string | undefined, maxDays: number) {
+export function dateRange(
+	fromValue: string | undefined,
+	toValue: string | undefined,
+	maxDays: number,
+) {
 	const to = toValue === undefined ? new Date() : new Date(toValue);
 	const from =
 		fromValue === undefined ? new Date(to.getTime() - 30 * 24 * 60 * 60_000) : new Date(fromValue);

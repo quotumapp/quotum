@@ -110,7 +110,8 @@ async function evaluateControls(
 			window = await executeOne(
 				executor,
 				drizzleSql`
-				SELECT id, consumed_value::text AS consumed_value, held_value::text AS held_value
+				SELECT id, consumed_value::text AS consumed_value,
+                    COALESCE((SELECT sum(hold.held_value) FROM reservation_control_holds hold JOIN reservations r ON r.project_id=hold.project_id AND r.id=hold.reservation_id WHERE hold.project_id=control_windows.project_id AND hold.control_window_id=control_windows.id AND r.status='active' AND r.expires_at>clock_timestamp()),0)::text AS held_value
 				FROM control_windows
 				WHERE project_id = ${input.projectId}
 					AND control_policy_id = ${control.policyId}::bigint

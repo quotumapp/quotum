@@ -44,6 +44,12 @@ export function createProjectProviderServiceResolver({
 		const projectConfig = env.projectRuntime.find(
 			(candidate) => candidate.projectInstanceKey === project.projectInstanceKey,
 		);
+		if (projectConfig === undefined && project.runtimeUnconfigured)
+			return {
+				appleStoreKitService: null,
+				googlePlayBillingService: null,
+				stripeBillingService: null,
+			};
 		if (projectConfig === undefined) {
 			throw new BillingError(
 				"Billing project is not configured",

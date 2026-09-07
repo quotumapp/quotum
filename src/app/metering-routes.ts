@@ -61,7 +61,7 @@ const usageBodySchema = z
 	.strict();
 
 const reserveBodySchema = usageBodySchema.extend({
-	expiresInSeconds: z.number().int().min(1).max(86400),
+	expiresInSeconds: z.number().int().min(1).max(86400).default(300),
 });
 
 const confirmBodySchema = z
@@ -74,7 +74,7 @@ const confirmBodySchema = z
 
 const emptyBodySchema = z.object({}).strict();
 
-const correctionBodySchema = z
+export const correctionBodySchema = z
 	.object({
 		originalRecordedAt: z.iso.datetime({ offset: true }),
 		quantity: z.string().trim().min(1).max(80),

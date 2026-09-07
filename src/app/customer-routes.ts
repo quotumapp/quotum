@@ -111,10 +111,12 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 		.strict(),
 ]);
 
-const commercialActionPreviewBodySchema = z
+export const commercialActionPreviewBodySchema = z
 	.object({ intent: commercialActionIntentSchema })
 	.strict();
-const commercialActionExecuteBodySchema = z.object({ previewToken: z.string().uuid() }).strict();
+export const commercialActionExecuteBodySchema = z
+	.object({ previewToken: z.string().uuid() })
+	.strict();
 
 const purchaseVerificationSchema = z
 	.discriminatedUnion("provider", [

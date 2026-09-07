@@ -29,6 +29,7 @@ import {
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 import { publishAiCreditsCatalog } from "./helpers/metering-catalog";
+import { seedPhase3CatalogMigration, seedPhase3ControlCatalog } from "./helpers/phase3-fixtures";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 let context: LocalPostgresContext;
@@ -237,6 +238,44 @@ localDescribe("Stripe route flows integration", () => {
 			status: "executed",
 			execution_idempotency_key: "commercial:checkout:1",
 			has_result: true,
+		});
+	});
+
+	it("previews subscription changes through the project-scoped repository", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const response = await app.request(
+			"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+			{
+				method: "POST",
+				headers: {
+					...authHeaders("voysee"),
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({
+					intent: {
+						kind: "subscription_change",
+						externalSubscriptionId: "sub_migrate_stripe",
+						targetPlanKey: "migration-plan",
+						quantities: { licensed_seats: 8 },
+						effectiveMode: "immediate",
+					},
+				}),
+			},
+		);
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({
+			success: true,
+			data: {
+				action: "subscription_change",
+				billingAccountId: "migration-stripe",
+				effectiveMode: "immediate",
+			},
 		});
 	});
 

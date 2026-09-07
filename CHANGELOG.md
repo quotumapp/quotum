@@ -10,6 +10,25 @@ Before 1.0 the schema ships as baseline files under `migrations/` that evolve in
 checksum-verified; recreate a database from them rather than migrating it. Incremental migrations
 start at 1.0.
 
+## [0.8.0] - 2026-09-07
+
+### Added
+
+- Merchant platform: session authentication with email OTP and Google sign-in, step-up grants for
+  sensitive actions, team membership, onboarding, transactional email, and a service-principal
+  script for the merchant proxy (`004_merchant.sql`).
+- Merchant integration test suite under `integration/merchant/`.
+- Reservation safeguards: confirming more than the reserved quantity returns
+  `RESERVATION_QUANTITY_EXCEEDED`, changed confirmations return `RESERVATION_ALREADY_CONFIRMED`,
+  and expired holds are reclaimed transactionally.
+- `METER_RATE_NOT_ACTIVATED` guard preventing implicit repricing when an account uses a newly
+  published meter absent from its purchased catalog.
+
+### Changed
+
+- Production requires merchant authentication configuration (`MERCHANT_AUTH_SECRET`,
+  `MERCHANT_ORIGIN`, approved legal versions, and email transport).
+
 ## [0.7.0] - 2026-09-06
 
 ### Added

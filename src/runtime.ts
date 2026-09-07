@@ -1,6 +1,11 @@
 import { createApp } from "./app";
+import { createProjectProviderServiceResolver } from "./app/provider-services";
+import type { AppDependencies } from "./app/types";
 import { EntitlementService } from "./billing/entitlements";
+import { createMerchantBillingPort } from "./composition/merchant-billing";
+import { attachMerchantRuntime, type MerchantRuntimeOptions } from "./composition/merchant-runtime";
 import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
+import { AdminBillingRepository } from "./db/admin-repository";
 import { closePool } from "./db/client";
 import { BillingRepository } from "./db/repository";
 import {
@@ -59,6 +64,8 @@ type WorkerProjectProviders = {
 };
 
 export interface BillingRuntimeDependencies {
+	merchant?: MerchantRuntimeOptions;
+	projectProviderServices?: AppDependencies["projectProviderServices"];
 	sentry?: SentryClientLike;
 	readinessCheck?: () => boolean | Promise<boolean>;
 	projectContextResolver?: ProjectInstanceContextResolver;
@@ -132,7 +139,8 @@ export function createBillingRuntimeApp(
 		return service;
 	};
 	const projectProviderServices =
-		dependencies.stripeClientFactory === undefined
+		dependencies.projectProviderServices ??
+		(dependencies.stripeClientFactory === undefined
 			? undefined
 			: Object.fromEntries(
 					env.projectRuntime.map((config) => [
@@ -148,7 +156,7 @@ export function createBillingRuntimeApp(
 										),
 						},
 					]),
-				);
+				));
 	const workerProviderCache = new Map<string, WorkerProjectProviders>();
 	const providersForProject = (project: ProjectInstanceContext): WorkerProjectProviders => {
 		const cached = workerProviderCache.get(project.projectInstanceId);
@@ -156,6 +164,11 @@ export function createBillingRuntimeApp(
 			return cached;
 		}
 
+		if (
+			project.runtimeUnconfigured &&
+			!env.projectRuntime.some((config) => config.projectInstanceKey === project.projectInstanceKey)
+		)
+			return { apple: null, google: null, stripe: null };
 		const runtimeConfig = projectRuntimeConfig(project);
 		const apple = runtimeConfig.apple ?? null;
 		const googlePlay = runtimeConfig.googlePlay ?? null;
@@ -312,7 +325,7 @@ export function createBillingRuntimeApp(
 		],
 	});
 
-	return createApp({
+	const staff = createApp({
 		env,
 		entitlementService: new EntitlementService(billingRepository),
 		projectContextResolver,
@@ -326,6 +339,25 @@ export function createBillingRuntimeApp(
 				? undefined
 				: createSentryRequestMiddleware(dependencies.sentry),
 	});
+	const merchantBilling = createMerchantBillingPort({
+		repository: billingRepository,
+		reader: new AdminBillingRepository({
+			providerReconciliationStaleAfterMs: env.providerReconciliationStaleAfterMs,
+		}),
+		resolver: projectContextResolver,
+		providers: createProjectProviderServiceResolver({
+			env,
+			getRepository: () => billingRepository,
+			projectProviderServices,
+			legacyServices: {
+				appleStoreKitService: undefined,
+				googlePlayBillingService: undefined,
+				stripeBillingService: undefined,
+			},
+		}),
+		operations: adminOperations,
+	});
+	return attachMerchantRuntime(staff, merchantBilling, dependencies.merchant);
 }
 
 function createDeferredStripeBillingService(

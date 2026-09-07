@@ -227,9 +227,14 @@ export class MeteringBillingRepository extends RepositoryModule {
 	): Promise<T> {
 		const normalizedInput = { ...input, billingAccountId: input.billingAccountId.trim() };
 		return await this.transaction((tx) =>
-			runUsageOperation(tx, project, operation, normalizedInput, () =>
-				callback(tx, normalizedInput),
-			),
+			runUsageOperation(tx, project, operation, normalizedInput, async () => {
+				await expireSubjectReservations(
+					tx,
+					project.projectInstanceId,
+					normalizedInput.billingAccountId,
+				);
+				return callback(tx, normalizedInput);
+			}),
 		);
 	}
 
@@ -540,6 +545,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 				input.requestContextId,
 			);
 			if (!claimed) return { applied: false, result: null };
+			await expireSubjectReservations(tx, projectId, input.billingAccountId);
 
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
 			const entityId = await resolveEntityId(tx, projectId, customer.id, input.entityId);
@@ -734,15 +740,16 @@ export class MeteringBillingRepository extends RepositoryModule {
 		project: ProjectInstanceContext,
 		input: ReserveUsageInput,
 	): Promise<ReservationResult> {
+		const normalized = { ...input, expiresInSeconds: input.expiresInSeconds ?? 300 };
 		if (
-			!Number.isInteger(input.expiresInSeconds) ||
-			input.expiresInSeconds < 1 ||
-			input.expiresInSeconds > 86400
+			!Number.isInteger(normalized.expiresInSeconds) ||
+			normalized.expiresInSeconds < 1 ||
+			normalized.expiresInSeconds > 86400
 		) {
 			throw new InvalidRequestError("expiresInSeconds must be an integer between 1 and 86400");
 		}
 
-		return await this.operationTransaction(project, "reserve", input, async (tx, input) => {
+		return await this.operationTransaction(project, "reserve", normalized, async (tx, input) => {
 			const projectId = project.projectInstanceId;
 			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
@@ -895,22 +902,36 @@ export class MeteringBillingRepository extends RepositoryModule {
 				if (databaseDecimal(reservation.confirmed_quantity, "confirmed quantity") !== quantity) {
 					throw new PersistenceConflictError(
 						"Reservation was confirmed with different usage facts",
-						"RESERVATION_FINALIZED",
+						"RESERVATION_ALREADY_CONFIRMED",
 					);
 				}
 				return await finalizedReservationResult(tx, reservation);
 			}
-			if (reservation.status !== "active") {
-				throw new PersistenceConflictError(
-					`Reservation is already ${reservation.status}`,
-					"RESERVATION_FINALIZED",
-				);
-			}
+			if (reservation.status === "expired")
+				return await finalizedReservationResult(tx, reservation);
+			if (reservation.status === "released")
+				throw new PersistenceConflictError("Reservation has been released", "RESERVATION_RELEASED");
 			if (new Date(reservation.expires_at).getTime() <= Date.now()) {
 				await releaseReservationHolds(tx, reservation, "expired");
 				return await finalizedReservationResult(
 					tx,
 					await lockReservation(tx, projectId, customer.id, input.reservationId),
+				);
+			}
+			if (
+				decimalToUnits(quantity, reservation.meter_scale) >
+				decimalToUnits(
+					databaseDecimal(
+						reservation.requested_quantity,
+						"reserved quantity",
+						reservation.meter_scale,
+					),
+					reservation.meter_scale,
+				)
+			) {
+				throw new PersistenceConflictError(
+					"Confirmed quantity exceeds the reserved authorization",
+					"RESERVATION_QUANTITY_EXCEEDED",
 				);
 			}
 			if (reservation.usage_window_id !== null) {
@@ -1109,12 +1130,8 @@ export class MeteringBillingRepository extends RepositoryModule {
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
 			const reservation = await lockReservation(tx, projectId, customer.id, input.reservationId);
 
-			if (reservation.status === "confirmed") {
-				throw new PersistenceConflictError(
-					"A confirmed reservation cannot be released",
-					"RESERVATION_FINALIZED",
-				);
-			}
+			if (reservation.status === "confirmed")
+				return await finalizedReservationResult(tx, reservation);
 			if (reservation.status === "active") {
 				await releaseReservationHolds(
 					tx,
@@ -3070,6 +3087,23 @@ async function resolveRateDecision(
 		`,
 	);
 	if (additive !== null) {
+		const purchased =
+			customerId === null
+				? null
+				: await executeOne<{ id: string }>(
+						executor,
+						drizzleSql`
+            SELECT id FROM subscriptions WHERE project_id=${projectId} AND customer_id=${customerId}
+            AND catalog_revision_id IS NOT NULL AND status IN ('active','grace_period','billing_retry','cancelled')
+            AND (expires_at IS NULL OR expires_at>clock_timestamp()) LIMIT 1
+        `,
+					);
+		if (purchased)
+			throw new BillingError(
+				"The purchased revision does not price this meter; activate a fixed rate revision before use",
+				"METER_RATE_NOT_ACTIVATED",
+				409,
+			);
 		return await rateDecisionFromRow(executor, projectId, meter, additive, "additive");
 	}
 
@@ -3351,7 +3385,9 @@ async function readBalance(
 		executor,
 		drizzleSql`
 			SELECT allocation.id, allocation.quantity, allocation.reversed_quantity,
-				allocation.consumed_quantity, allocation.held_quantity, allocation.source_kind,
+				allocation.consumed_quantity,
+                COALESCE((SELECT sum(holds.held_quantity - holds.consumed_quantity) FROM reservation_allocations holds JOIN reservations r ON r.project_id=holds.project_id AND r.id=holds.reservation_id WHERE holds.project_id=allocation.project_id AND holds.allocation_id=allocation.id AND r.status='active' AND r.expires_at>clock_timestamp()),0) AS held_quantity,
+                allocation.source_kind,
 				allocation.source_key, allocation.expires_at, allocation.created_at,
 				allocation.reversed_at, entity.external_id AS entity_external_id,
 				allocation.rollover_origin_allocation_id, allocation.rollover_policy_revision,
@@ -4314,6 +4350,27 @@ async function insufficientMeterLimitConfirmation(
 	};
 }
 
+/** Reclaim a subject's expired holds before authorization, independent of worker timing. */
+async function expireSubjectReservations(
+	executor: QueryExecutor,
+	projectId: string,
+	billingAccountId: string,
+): Promise<void> {
+	const rows = await executeRows<{ id: string; customer_id: string }>(
+		executor,
+		drizzleSql`
+  SELECT r.id,r.customer_id FROM reservations r JOIN customers c ON c.project_id=r.project_id AND c.id=r.customer_id
+  WHERE r.project_id=${projectId} AND c.billing_account_id=${billingAccountId} AND r.status='active' AND r.expires_at<=clock_timestamp()
+  ORDER BY r.id FOR UPDATE OF r
+ `,
+	);
+	for (const row of rows) {
+		const reservation = await lockReservation(executor, projectId, row.customer_id, row.id);
+		if (reservation.status === "active")
+			await releaseReservationHolds(executor, reservation, "expired");
+	}
+}
+
 async function releaseReservationHolds(
 	executor: QueryExecutor,
 	reservation: ReservationRow,
@@ -4353,7 +4410,7 @@ async function releaseReservationHolds(
 		executor,
 		drizzleSql`
 			UPDATE reservations
-			SET status = ${status}, finalized_at = now(), updated_at = now()
+			SET status = ${status}, finalized_at = CASE WHEN ${status}='expired' THEN expires_at ELSE clock_timestamp() END, updated_at = now()
 			WHERE project_id = ${reservation.project_id}
 				AND id = ${reservation.id}
 				AND status = 'active'

@@ -53,18 +53,18 @@ export async function seedPhase3ControlCatalog(sql: SQL): Promise<void> {
 	`;
 }
 
-export async function seedPhase3CatalogMigration(sql: SQL): Promise<void> {
+export async function seedPhase3CatalogMigration(sql: SQL, projectKey = "voysee"): Promise<void> {
 	await sql`
 		INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
 		SELECT id, 'licensed_seats', 'Licensed seats', 'metered', 'non_consumable', 'seat', 0
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = ${projectKey}
 	`;
 	await sql`
 		WITH target AS (
 			SELECT project.id AS project_id, revision.id AS revision_id
 			FROM projects project
 			JOIN catalog_revisions revision ON revision.project_id = project.id
-			WHERE project.key = 'voysee' AND revision.revision = 1
+			WHERE project.key = ${projectKey} AND revision.revision = 1
 		), plan AS (
 			INSERT INTO plans (project_id, key, name)
 			SELECT project_id, 'migration-plan', 'Migration plan' FROM target
@@ -83,7 +83,7 @@ export async function seedPhase3CatalogMigration(sql: SQL): Promise<void> {
 		UPDATE plans SET active_version_id = version.id
 		FROM plan_versions version
 		WHERE plans.project_id = version.project_id AND plans.id = version.plan_id
-			AND plans.key = 'migration-plan' AND version.version = 2
+			AND plans.key = 'migration-plan' AND version.version = 2 AND plans.project_id = (SELECT id FROM projects WHERE key = ${projectKey})
 	`;
 	await sql`
 		INSERT INTO plan_items (
@@ -94,7 +94,7 @@ export async function seedPhase3CatalogMigration(sql: SQL): Promise<void> {
 		FROM plan_versions version
 		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
 		JOIN features feature ON feature.project_id = version.project_id AND feature.key = 'licensed_seats'
-		WHERE plan.key = 'migration-plan'
+		WHERE plan.key = 'migration-plan' AND plan.project_id = (SELECT id FROM projects WHERE key = ${projectKey})
 	`;
 	await sql`
 		INSERT INTO price_components (
@@ -106,14 +106,14 @@ export async function seedPhase3CatalogMigration(sql: SQL): Promise<void> {
 			'USD', version.base_amount_minor, 1, 'month', 1, 1
 		FROM plan_versions version
 		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
-		WHERE plan.key = 'migration-plan'
+		WHERE plan.key = 'migration-plan' AND plan.project_id = (SELECT id FROM projects WHERE key = ${projectKey})
 		UNION ALL
 		SELECT version.project_id, version.id, item.id, 'seats', 'licensed', 'in_advance',
 			'USD', CASE version.version WHEN 1 THEN 100 ELSE 150 END, 1, 'month', 1, 100
 		FROM plan_versions version
 		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
 		JOIN plan_items item ON item.project_id = version.project_id AND item.plan_version_id = version.id
-		WHERE plan.key = 'migration-plan'
+		WHERE plan.key = 'migration-plan' AND plan.project_id = (SELECT id FROM projects WHERE key = ${projectKey})
 	`;
 	await sql`
 		INSERT INTO store_products (
@@ -128,7 +128,7 @@ export async function seedPhase3CatalogMigration(sql: SQL): Promise<void> {
 		JOIN products product ON product.project_id = project.id AND product.key = 'premium_monthly'
 		CROSS JOIN (VALUES (1), (2)) AS version(number)
 		CROSS JOIN (VALUES ('base', 1000), ('seats', 100)) AS component(kind, amount)
-		WHERE project.key = 'voysee'
+		WHERE project.key = ${projectKey}
 	`;
 	await sql`
 		INSERT INTO provider_price_bindings (
@@ -140,14 +140,14 @@ export async function seedPhase3CatalogMigration(sql: SQL): Promise<void> {
 		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
 		JOIN store_products store ON store.project_id = price.project_id
 			AND store.external_price_id = concat('price_migrate_v', version.version, '_', price.key)
-		WHERE plan.key = 'migration-plan'
+		WHERE plan.key = 'migration-plan' AND plan.project_id = (SELECT id FROM projects WHERE key = ${projectKey})
 	`;
 	await sql`
 		INSERT INTO customers (project_id, billing_account_id)
 		SELECT project.id, account.id
 		FROM projects project
 		CROSS JOIN (VALUES ('migration-stripe'), ('migration-apple')) AS account(id)
-		WHERE project.key = 'voysee'
+		WHERE project.key = ${projectKey}
 	`;
 	await sql`
 		INSERT INTO subscriptions (
@@ -184,7 +184,7 @@ export async function seedPhase3CatalogMigration(sql: SQL): Promise<void> {
 		) AS account(provider, channel, external_subscription_id, billing_account_id)
 		JOIN customers customer ON customer.project_id = project.id
 			AND customer.billing_account_id = account.billing_account_id
-		WHERE project.key = 'voysee'
+		WHERE project.key = ${projectKey}
 	`;
 	await sql`
 		INSERT INTO subscription_items (
@@ -198,7 +198,7 @@ export async function seedPhase3CatalogMigration(sql: SQL): Promise<void> {
 		FROM subscriptions subscription
 		JOIN price_components price ON price.project_id = subscription.project_id
 			AND price.plan_version_id = subscription.plan_version_id
-		WHERE subscription.external_subscription_id = 'sub_migrate_stripe'
+		WHERE subscription.external_subscription_id = 'sub_migrate_stripe' AND subscription.project_id = (SELECT id FROM projects WHERE key = ${projectKey})
 	`;
 }
 

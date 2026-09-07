@@ -30,7 +30,7 @@ export interface WorkerConsumeUsageResult {
 }
 
 export interface ReserveUsageInput extends MeteringMutationInput {
-	expiresInSeconds: number;
+	expiresInSeconds?: number;
 }
 
 export interface ConfirmReservationInput {

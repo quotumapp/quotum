@@ -1,4 +1,4 @@
-# Voysee Billing
+# Quotum Billing API
 
 API-only billing service for Voysee and other product apps. Billing owns the billing database and
 service state: customers, products, purchases, subscriptions, entitlements, provider events, and
@@ -9,6 +9,13 @@ models.
 
 Detailed API documentation is maintained in [../quotum-docs/api](../quotum-docs/api/), with the
 shared catalog at [../quotum-docs](../quotum-docs/).
+
+The existing thin `BillingClient` and Bun catalog CLI are implemented prerequisites. The accepted
+public `@quotum/sdk`, separate `@quotum/cli`, replacement usage wire contract, and GA policy in
+[ADR-0009](../quotum-docs/adr/0009-define-the-public-usage-api-and-javascript-typescript-sdk.md)
+remain **Foundation only** in the
+[implementation tracker](../quotum-docs/adr/implementation-status.md#adr-0009); they are not yet
+published or production compatibility promises.
 
 ## Current Status
 
@@ -83,6 +90,57 @@ Billing. Apple Pay and Google Pay wallet buttons are web/payment-wallet flows, u
 through Stripe rather than through the native mobile in-app purchase paths.
 
 ## Setup
+
+### Merchant platform (disabled by default)
+
+`004_merchant.sql` adds `platform_auth_*` and merchant `platform_*` tables. It extends
+the existing organizations and reuses `platform_projects`, `projects.id`, and canonical `qpk_v1`
+credential verifiers; it does not create a second instance directory. Better Auth is pinned to `1.7.2`. Use Bun `1.4.2` in CI and
+the supported runtime range `>=1.4.0 <1.5.0`.
+
+The existing staff console and API-key integrations keep their current authentication. The
+separate merchant Worker proxies only allowlisted `/api/auth`, `/api/platform`, and scoped
+`/api/billing` operations using a database-backed service principal. Browsers never receive its
+service token, billing runtime keys, or provider credentials. Global reconciliation is intentionally
+not exposed to merchants because the legacy operation is not project-scoped.
+
+Configuration is validated by `src/platform/config.ts`:
+
+- `MERCHANT_AUTH_ENABLED=true` enables the API; absent/false leaves all merchant routes disabled.
+- `MERCHANT_SIGNUP_ENABLED=true` separately allows new accounts. Keep false for rollout.
+- `MERCHANT_ORIGIN=https://app.quotum.dev` and `MERCHANT_PUBLIC_URL=https://quotum.dev` identify the
+  same-origin application and public legal pages.
+- `MERCHANT_AUTH_SECRET` is a separate secret of at least 32 characters, used for session/token
+  HMAC digests and Better Auth cryptography. Do not reuse billing or Worker credentials.
+- `MERCHANT_TERMS_VERSION` and `MERCHANT_PRIVACY_VERSION` must match approved published versions.
+  Production sign-up refuses draft versions.
+- `MERCHANT_GOOGLE_CLIENT_ID` and `MERCHANT_GOOGLE_CLIENT_SECRET` enable Google redirect OAuth;
+  register exactly `https://app.quotum.dev/api/auth/callback/google`.
+- `MERCHANT_EMAIL_ACCOUNT_ID`, `MERCHANT_EMAIL_API_TOKEN`, and `MERCHANT_EMAIL_FROM` configure
+  Cloudflare Email Service. Configure and verify sender SPF/DKIM/DMARC before enabling sign-up.
+
+After migrations, an authorized administrator can run
+`bun run scripts/merchant-service-principal.ts <worker-name>` to create the Worker's service token.
+The command prints the token exactly once; place it directly in the Worker's secret store, never
+in source control or a browser environment variable. It refuses an existing name.
+
+Password authentication requires verified email followed by a fresh email OTP. Google requires
+a verified, signed nonce-bound issuer/subject and never implicitly links by email. A completed
+authentication is exchanged for a hashed Quotum-owned session with 30-minute idle and 12-hour
+absolute expiration. Role/membership changes are evaluated from the database and revoke sessions.
+Sensitive merchant actions require one-use, exact-request-bound step-up grants.
+
+Run `bun run test:merchant:integration` for mandatory disposable PostgreSQL security and concurrency
+tests. Run `bun run test:merchant:integration` from **quotum-autotests** for the complete local
+Worker/API/browser lane with fake Google, captured email, local projections, and isolated dev vars.
+The fake entrypoint refuses non-test mode and external provider traffic. Never set
+`MERCHANT_TEST_MODE` in a deployed service. No test skips or real email/identity credentials are
+needed for these lanes.
+
+See [ADR-0010](../quotum-docs/adr/0010-self-host-merchant-authentication-with-better-auth.md) and the
+merchant rollout checklist before enabling the hidden Worker, then authentication/sign-up, and
+finally landing links. The marker is not provider or production readiness. DNS, approved legal copy, email/OAuth configuration, and real support and
+monitoring destinations remain deployment prerequisites.
 
 Install dependencies:
 
@@ -765,7 +823,8 @@ fails the boundary check because its table ownership cannot be proven.
 Platform-owned tables use the `platform_` prefix. Static platform SQL may reference only those
 tables, while billing source and billing migrations may not reference them. The sole cross-domain
 SQL exception is the path-exact `src/composition/project-instance-persistence.ts` adapter. Migration
-`001_platform.sql` owns the platform schema and may mutate `platform_*` plus `projects`. Every other migration is rejected if it touches a `platform_*` table. Dynamic SQL is
+`001_platform.sql` and `004_merchant.sql` own the platform schema and may mutate `platform_*`
+plus `projects`. Every other migration is rejected if it touches a `platform_*` table. Dynamic SQL is
 denied in migrations except for the reviewed usage partition block in
 `003_metering_and_pricing.sql`.
 Future platform-to-billing operations continue to use platform-owned typed ports with adapters wired
@@ -830,8 +889,12 @@ Release `0.6.0` delivers the next ADR-0007 increment: persisted organizations, l
 environment-specific project instances, database-issued credentials, database-authoritative
 `ProjectInstanceContext`, exact runtime-directory readiness, and platform table ownership checks.
 Release `0.7.0` integrates usage-operation recovery onto that context and migration history. It does
-not include the unmerged merchant schema or identity implementation. The next increment integrates
-merchant authority/provisioning through the released directory and consumer-owned module ports.
+not include merchant identity. The local `0.8.0` stabilization candidate integrates merchant
+authority/provisioning through that directory and consumer-owned application ports. Composition
+owns the database/Better Auth adapters and dispatches authorized commands to billing services.
+New merchant instances have an explicit database-owned unconfigured runtime marker; missing runtime
+configuration on existing bootstrapped instances still fails readiness. Production stays inactive
+until a future readiness-gated activation workflow is delivered.
 ADR-0007 remains partial. Follow integration with the schema-wide tenant-isolation audit: verify every
 tenant table, composite foreign key, uniqueness constraint, project-first index/query, raw SQL path,
 worker claim/completion path, provider event, and adversarial cross-project/environment case. The
@@ -839,3 +902,16 @@ broader shared-capacity, tenant-recovery, and future service-extraction gates re
 The accepted responsibility, versioned retention, durable privacy-operation, tenant-export, legal-
 hold, and restore-replay boundary is defined by
 [ADR-0008](../quotum-docs/adr/0008-define-versioned-data-retention-privacy-operations-and-tenant-export.md).
+
+### Reservation and rate safeguards in the 0.8.0 candidate
+
+Confirmation rejects raw quantity above the reserved authorization with
+`RESERVATION_QUANTITY_EXCEEDED` (409), retaining the active hold and writing no usage event.
+Repeated finalized outcomes do not reverse consumption; changed confirmed quantities return
+`RESERVATION_ALREADY_CONFIRMED`. Expired holds are excluded from reads and reclaimed transactionally
+before new subject usage, independently of maintenance. Omitted `expiresInSeconds` defaults to 300
+and has the same retry fingerprint as an explicit 300.
+
+A subscribed account cannot use a newly published additive meter absent from its purchased catalog:
+check, consume and reserve return `METER_RATE_NOT_ACTIVATED` (409) before writes. This guard prevents
+implicit repricing; durable rate activation/rebinding and its UI remain backlog work.

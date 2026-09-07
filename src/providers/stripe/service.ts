@@ -506,15 +506,15 @@ export class StripeBillingService {
 		const normalized = normalizeCommercialIntent(intent);
 		const intentHash = sha256Hex(stableJson(normalized));
 		if (normalized.kind === "subscription_change") {
-			const previewSubscriptionChange = this.dependencies.repository.previewSubscriptionChange;
-			if (previewSubscriptionChange === undefined) {
+			const repository = this.dependencies.repository;
+			if (repository.previewSubscriptionChange === undefined) {
 				throw new BillingError(
 					"Commercial previews are not configured",
 					"STRIPE_NOT_CONFIGURED",
 					503,
 				);
 			}
-			const change = await previewSubscriptionChange({
+			const change = await repository.previewSubscriptionChange({
 				billingAccountId,
 				externalSubscriptionId: normalized.externalSubscriptionId,
 				targetPlanKey: normalized.targetPlanKey,

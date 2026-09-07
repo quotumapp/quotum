@@ -26,6 +26,201 @@ localDescribe("authoritative metering flows", () => {
 		await context.sql.close();
 	});
 
+	it("enforces the raw reservation ceiling even when the wallet has spare credits", async () => {
+		const project = integrationProjectContext();
+		const billingAccountId = "ceiling";
+		await context.repository.grantAllocation(project, {
+			billingAccountId,
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "ceiling",
+		});
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const reserved = await context.repository.reserveUsage(project, {
+			billingAccountId,
+			featureKey: "model_tokens",
+			quantity: "100",
+			idempotencyKey: "reserve",
+		});
+		const path = `/v1/billing-accounts/${billingAccountId}/usage/reservations/${reserved.reservationId}/confirm`;
+		const rejected = await app.request(path, {
+			method: "POST",
+			headers: jsonHeaders(authHeaders(), "confirm-over"),
+			body: JSON.stringify({ quantity: "200" }),
+		});
+		expect(rejected.status).toBe(409);
+		expect((await rejected.json()).error.code).toBe("RESERVATION_QUANTITY_EXCEEDED");
+		expect(
+			await context.repository.getMeteringBalance(project, billingAccountId, "ai_credits"),
+		).toMatchObject({ held: "0.5", consumed: "0", available: "9.5" });
+		expect(await countRows(context.sql, "usage_events")).toBe(0);
+		expect((await context.sql`SELECT status FROM reservations`)[0].status).toBe("active");
+		const confirmed = await context.repository.confirmUsageReservation(project, {
+			billingAccountId,
+			reservationId: reserved.reservationId ?? "",
+			quantity: "100",
+			idempotencyKey: "confirm-exact",
+		});
+		expect(confirmed).toMatchObject({
+			status: "confirmed",
+			balance: { held: "0", consumed: "0.5" },
+		});
+		expect(
+			await context.repository.releaseUsageReservation(project, {
+				billingAccountId,
+				reservationId: reserved.reservationId ?? "",
+				idempotencyKey: "release-after-confirm",
+			}),
+		).toMatchObject({ status: "confirmed", usageEventId: confirmed.usageEventId });
+		expect(await countRows(context.sql, "usage_events")).toBe(1);
+	});
+
+	it("enforces the same ceiling for capped meters", async () => {
+		await seedMeterLimitSubscription(context.sql, "cap-ceiling", "workspace_1");
+		const project = integrationProjectContext();
+		const reserved = await context.repository.reserveUsage(project, {
+			billingAccountId: "cap-ceiling",
+			featureKey: "api_requests",
+			entityId: "workspace_1",
+			quantity: "25",
+			idempotencyKey: "reserve",
+		});
+		expect(reserved.allowed).toBe(true);
+		await expect(
+			context.repository.confirmUsageReservation(project, {
+				billingAccountId: "cap-ceiling",
+				reservationId: reserved.reservationId ?? "",
+				quantity: "26",
+				idempotencyKey: "confirm",
+			}),
+		).rejects.toMatchObject({ code: "RESERVATION_QUANTITY_EXCEEDED" });
+		expect(await countRows(context.sql, "usage_events")).toBe(0);
+		expect((await context.sql`SELECT status FROM reservations`)[0].status).toBe("active");
+	});
+
+	it("reuses logically expired capacity before maintenance and returns stable expiry outcomes", async () => {
+		const project = integrationProjectContext();
+		const billingAccountId = "logical-expiry";
+		const subject = { billingAccountId, featureKey: "model_tokens", quantity: "200" };
+		await context.repository.grantAllocation(project, {
+			billingAccountId,
+			featureKey: "ai_credits",
+			quantity: "1",
+			sourceKind: "operator",
+			sourceKey: "expiry",
+		});
+		await context.repository.controlsEnterprise.upsertControl(project, {
+			billingAccountId,
+			controlKind: "usage_limit",
+			featureKey: "model_tokens",
+			currency: null,
+			limitValue: "200",
+			interval: "month",
+			actor: "test",
+		});
+		const reserved = await context.repository.reserveUsage(project, {
+			...subject,
+			idempotencyKey: "reserve",
+		});
+		expect(reserved).toMatchObject({ allowed: true, balance: { held: "1", available: "0" } });
+		await context.sql`UPDATE reservations SET effective_at=clock_timestamp()-interval '10 minutes',created_at=clock_timestamp()-interval '10 minutes',expires_at=clock_timestamp()-interval '1 second' WHERE id=${reserved.reservationId}`;
+		const check = await context.repository.checkUsage(project, subject);
+		expect(check).toMatchObject({ allowed: true, balance: { held: "0", available: "1" } });
+		expect((await context.sql`SELECT status FROM reservations`)[0].status).toBe("active");
+		const consumed = await context.repository.consumeUsage(project, {
+			...subject,
+			idempotencyKey: "reuse",
+		});
+		expect(consumed).toMatchObject({
+			allowed: true,
+			balance: { consumed: "1", held: "0", available: "0" },
+		});
+		for (const key of ["expired-once", "expired-again"]) {
+			expect(
+				await context.repository.confirmUsageReservation(project, {
+					billingAccountId,
+					reservationId: reserved.reservationId ?? "",
+					quantity: "200",
+					idempotencyKey: key,
+				}),
+			).toMatchObject({
+				allowed: false,
+				reason: "reservation_expired",
+				status: "expired",
+				usageEventId: null,
+			});
+		}
+		expect(await countRows(context.sql, "usage_events")).toBe(1);
+		expect(
+			(await context.sql`SELECT finalized_at=expires_at AS logical FROM reservations`)[0].logical,
+		).toBe(true);
+	});
+
+	it("normalizes the default reservation TTL for retry identity", async () => {
+		const project = integrationProjectContext();
+		const billingAccountId = "default-ttl";
+		await context.repository.grantAllocation(project, {
+			billingAccountId,
+			featureKey: "ai_credits",
+			quantity: "1",
+			sourceKind: "operator",
+			sourceKey: "ttl",
+		});
+		const input = {
+			billingAccountId,
+			featureKey: "model_tokens",
+			quantity: "100",
+			idempotencyKey: "same-generation",
+		};
+		const start = Date.now();
+		const reserved = await context.repository.reserveUsage(project, input);
+		expect(new Date(reserved.expiresAt ?? "").getTime() - start).toBeGreaterThanOrEqual(300_000);
+		expect(
+			await context.repository.reserveUsage(project, { ...input, expiresInSeconds: 300 }),
+		).toEqual(reserved);
+		await expect(
+			context.repository.reserveUsage(project, { ...input, expiresInSeconds: 301 }),
+		).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+	});
+
+	it("requires explicit rate activation when a published meter was absent from purchased terms", async () => {
+		const project = integrationProjectContext();
+		await seedMeterLimitSubscription(context.sql, "new-meter", "workspace_1");
+		await context.sql`
+          WITH revision AS (
+            INSERT INTO catalog_revisions(project_id,revision,status,intent_hash,created_by,published_at)
+            VALUES(${project.projectInstanceId},2,'published',repeat('b',64),'test',now()) RETURNING id,project_id
+          ), meter AS (
+            INSERT INTO features(project_id,key,name,kind,meter_kind,unit,credit_scale)
+            VALUES(${project.projectInstanceId},'new_meter','New meter','metered','consumable','unit',0) RETURNING id
+          ), rate AS (
+            INSERT INTO rate_card_entries(project_id,catalog_revision_id,meter_feature_id,wallet_feature_id,rate_per_unit)
+            SELECT revision.project_id,revision.id,meter.id,wallet.id,1 FROM revision,meter,features wallet WHERE wallet.project_id=revision.project_id AND wallet.key='ai_credits'
+          ) UPDATE projects SET published_catalog_revision_id=revision.id FROM revision WHERE projects.id=revision.project_id
+        `;
+		const subject = {
+			billingAccountId: "new-meter",
+			featureKey: "new_meter",
+			quantity: "1",
+			idempotencyKey: "new-meter",
+		};
+		await expect(context.repository.checkUsage(project, subject)).rejects.toMatchObject({
+			code: "METER_RATE_NOT_ACTIVATED",
+		});
+		await expect(context.repository.consumeUsage(project, subject)).rejects.toMatchObject({
+			code: "METER_RATE_NOT_ACTIVATED",
+		});
+		await expect(context.repository.reserveUsage(project, subject)).rejects.toMatchObject({
+			code: "METER_RATE_NOT_ACTIVATED",
+		});
+		expect(await countRows(context.sql, "usage_events")).toBe(0);
+		expect(await countRows(context.sql, "reservations")).toBe(0);
+		expect(await countRows(context.sql, "client_idempotency_claims")).toBe(0);
+	});
 	it("converts raw usage exactly, records an inline deduction receipt, and replays duplicate keys", async () => {
 		await context.repository.grantAllocation(integrationProjectContext(), {
 			billingAccountId: "account_1",

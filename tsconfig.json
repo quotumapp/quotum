@@ -6,5 +6,5 @@
 		"jsxImportSource": "hono/jsx",
 		"types": ["bun"]
 	},
-	"exclude": ["node_modules"]
+	"exclude": ["node_modules", "local-sandbox"]
 }

@@ -1,7 +1,5 @@
-import {
-	BunPlatformUnitOfWork,
-	PostgresProjectInstanceContextResolver,
-} from "../../src/composition/project-instance-persistence";
+import type { SQL } from "bun";
+import { BunPlatformUnitOfWork } from "../../src/composition/project-instance-persistence";
 import { createBillingDatabaseConnection } from "../../src/db/client";
 import type { PlatformBootstrapManifest } from "../../src/platform/bootstrap/manifest";
 import { PlatformBootstrapService } from "../../src/platform/bootstrap/service";
@@ -114,20 +112,20 @@ function testProjectName(projectInstanceKey: string): string {
 }
 
 async function resolveTestPlatformContextsWithConnection(
-	client: ConstructorParameters<typeof PostgresProjectInstanceContextResolver>[0],
+	client: SQL,
 	manifest: PlatformBootstrapManifest,
 ): Promise<readonly ProjectInstanceContext[]> {
 	const projectInstanceKeys = manifest.organizations.flatMap((organization) =>
 		organization.projects.flatMap((project) => project.instances.map((instance) => instance.key)),
 	);
-	const resolver = new PostgresProjectInstanceContextResolver(client);
 	const contexts: ProjectInstanceContext[] = [];
 	for (const projectInstanceKey of projectInstanceKeys) {
-		const resolution = await resolver.resolveInstanceKey(projectInstanceKey);
-		if (resolution.kind !== "resolved") {
-			throw new Error(`Test project instance ${projectInstanceKey} was not resolved`);
-		}
-		contexts.push(resolution.context);
+		const [context] = await client<ProjectInstanceContext[]>`
+            SELECT o.id AS "organizationId",o.slug AS "organizationSlug",p.id AS "logicalProjectId",p.key AS "logicalProjectKey",i.id AS "projectInstanceId",i.key AS "projectInstanceKey",i.environment,i.lifecycle_status AS "lifecycleStatus",i.internal_project AS "internalProject"
+            FROM projects i JOIN platform_projects p ON p.id=i.platform_project_id JOIN platform_organizations o ON o.id=p.organization_id WHERE i.key=${projectInstanceKey}
+        `;
+		if (!context) throw new Error(`Test project instance ${projectInstanceKey} was not resolved`);
+		contexts.push(context);
 	}
 	return contexts;
 }

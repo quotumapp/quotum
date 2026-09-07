@@ -10,9 +10,9 @@ RUN mkdir -p /temp/dev /temp/prod
 COPY package.json bun.lock /temp/dev/
 COPY package.json bun.lock /temp/prod/
 WORKDIR /temp/dev
-RUN bun install
+RUN bun install --frozen-lockfile
 WORKDIR /temp/prod
-RUN bun install --production
+RUN bun install --production --frozen-lockfile
 
 # copy node_modules from temp directory
 # then copy all (non-ignored) project files into the image
