@@ -42,3 +42,5 @@ local-sandbox
 .DS_Store
 
 .playwright-cli
+# Generated CI compatibility reports
+contract-reports/

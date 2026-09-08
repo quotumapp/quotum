@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
 import { decodeAdminCursor } from "../../src/admin/query";
-import { createApp } from "../../src/app";
+import { createApp as createBillingApp } from "../../src/app";
 import { AdminBillingRepository } from "../../src/db/admin-repository";
 import { createBillingDatabaseConnection } from "../../src/db/client";
 import type { BillingLogger } from "../../src/observability/logger";
@@ -9,6 +9,7 @@ import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import { BillingAdminOperations } from "../../src/operations/admin";
 import type { StoreEventReplayProviders } from "../../src/workers/store-event-replay";
 import { StoreEventReplayWorker } from "../../src/workers/store-event-replay";
+import { withOpenApiAssertions } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import { expectCustomer } from "./helpers/db-assertions";
@@ -568,6 +569,7 @@ localDescribe("Admin flows integration", () => {
 			async runSubscriptionReconciliation() {
 				calls.push("reconcile");
 				return {
+					outcome: "succeeded",
 					expiredSubscriptions: 0,
 					affectedCustomers: 0,
 					providerClaimed: 0,
@@ -599,6 +601,7 @@ localDescribe("Admin flows integration", () => {
 		expect(await reconciliation.json()).toEqual({
 			success: true,
 			data: {
+				outcome: "succeeded",
 				expiredSubscriptions: 0,
 				affectedCustomers: 0,
 				providerClaimed: 0,
@@ -1156,4 +1159,8 @@ async function makeProviderCustomerSearchMatchesDuplicate(
 // so the integration suite exercises the real serialization instead of patching Date.
 async function withIsoDateSqlParameters<T>(callback: () => T | Promise<T>): Promise<T> {
 	return await callback();
+}
+
+function createApp(dependencies: Parameters<typeof createBillingApp>[0]) {
+	return withOpenApiAssertions(createBillingApp(dependencies));
 }

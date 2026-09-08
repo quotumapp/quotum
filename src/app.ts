@@ -19,6 +19,7 @@ import { AdminBillingRepository } from "./db/admin-repository";
 import { checkPostgresHealth } from "./db/client";
 import { BillingRepository } from "./db/repository";
 import { requireApiKey } from "./http/api-key";
+import { operationalContracts } from "./http/operational-contracts";
 import {
 	createFixedWindowRateLimiter,
 	rateLimitMiddleware,
@@ -31,6 +32,7 @@ import {
 	safelyIncrementBillingMetric,
 } from "./observability/metrics";
 import { isTenantTrafficEligible, type ProjectInstanceContextResolver } from "./projects/context";
+import { registerRoute } from "./shared/http-contract";
 
 const privateApiMaxBodyBytes = 256 * 1024;
 
@@ -188,16 +190,16 @@ export function createApp({
 		app.use("*", requestObservabilityMiddleware);
 	}
 
-	app.get("/health", (c) => c.json({ status: "ok" }));
-	app.get("/livez", (c) => c.json({ status: "ok" }));
-	app.get("/ready", async (c) => {
+	registerRoute(app, operationalContracts.health, (c) => c.json({ status: "ok" }));
+	registerRoute(app, operationalContracts.livez, (c) => c.json({ status: "ok" }));
+	registerRoute(app, operationalContracts.ready, async (c) => {
 		if (await checkReady()) {
 			return c.json({ status: "ok" });
 		}
 
 		return c.json({ status: "unavailable" }, 503);
 	});
-	app.get("/metrics", (c) => {
+	registerRoute(app, operationalContracts.metrics, (c) => {
 		c.header("content-type", "text/plain; version=0.0.4");
 		return c.body(billingMetrics.renderPrometheus());
 	});

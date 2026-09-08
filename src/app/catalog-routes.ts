@@ -3,7 +3,9 @@ import { z } from "zod";
 import { BillingError, InvalidRequestError } from "../billing/errors";
 import type { CatalogControlPlaneLike } from "../catalog/types";
 import type { ProjectInstanceContext } from "../projects/context";
+import { defineContract, registerRoute } from "../shared/http-contract";
 import { requireOperatorApiKey } from "./admin-routes";
+import * as responses from "./contracts/catalog-responses";
 import type { BillingContext, BillingHonoEnv } from "./types";
 
 export interface CatalogRoutesDependencies {
@@ -184,7 +186,7 @@ export function registerCatalogRoutes({
 	app.use("/v1/admin/catalog/*", requireOperatorApiKey(operatorApiKey));
 	app.use("/v1/admin/catalog", requireOperatorApiKey(operatorApiKey));
 
-	app.get("/v1/admin/catalog", async (c) => {
+	registerRoute(app, catalogContracts.getV1AdminCatalog, async (c) => {
 		if (catalogControlPlane.getPublished === undefined) {
 			throw new BillingError("Published catalog reads are not configured", "NOT_CONFIGURED", 503);
 		}
@@ -192,7 +194,7 @@ export function registerCatalogRoutes({
 		return c.json({ success: true, data: result });
 	});
 
-	app.post("/v1/admin/catalog/preview", async (c) => {
+	registerRoute(app, catalogContracts.postV1AdminCatalogPreview, async (c) => {
 		const body = parseSchema(
 			previewSchema,
 			await parsePrivateJson(c.req.raw),
@@ -205,7 +207,7 @@ export function registerCatalogRoutes({
 		return c.json({ success: true, data: result });
 	});
 
-	app.post("/v1/admin/catalog/publish", async (c) => {
+	registerRoute(app, catalogContracts.postV1AdminCatalogPublish, async (c) => {
 		const body = parseSchema(
 			publishSchema,
 			await parsePrivateJson(c.req.raw),
@@ -242,3 +244,23 @@ function privateProject(c: BillingContext): ProjectInstanceContext {
 	}
 	return project;
 }
+
+export const catalogContracts = {
+	getV1AdminCatalog: defineContract("get", "/v1/admin/catalog", {
+		operationId: "getV1AdminCatalog",
+		tags: ["catalog"],
+		responses: { "200": responses.getV1AdminCatalogResponse200Schema },
+	}),
+	postV1AdminCatalogPreview: defineContract("post", "/v1/admin/catalog/preview", {
+		operationId: "postV1AdminCatalogPreview",
+		tags: ["catalog"],
+		body: previewSchema,
+		responses: { "200": responses.postV1AdminCatalogPreviewResponse200Schema },
+	}),
+	postV1AdminCatalogPublish: defineContract("post", "/v1/admin/catalog/publish", {
+		operationId: "postV1AdminCatalogPublish",
+		tags: ["catalog"],
+		body: publishSchema,
+		responses: { "200": responses.postV1AdminCatalogPublishResponse200Schema },
+	}),
+} as const;

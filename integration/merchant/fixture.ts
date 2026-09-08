@@ -13,6 +13,7 @@ import type { MerchantEmail, MerchantMailer } from "../../src/platform/email";
 import { MerchantOnboarding } from "../../src/platform/onboarding";
 import { CSRF_COOKIE } from "../../src/platform/security";
 import { MerchantStore } from "../../src/platform/store";
+import { assertOpenApiResponse } from "../../tests/helpers/openapi";
 import { createIntegrationBillingEnv } from "../../tests/integration/helpers/local-postgres";
 
 export const password = "Merchant test password 123!";
@@ -146,6 +147,7 @@ export class MerchantBrowser {
 				body: body === undefined ? undefined : JSON.stringify(body),
 			}),
 		);
+		await assertOpenApiResponse(method, path, response);
 		for (const cookie of response.headers.getSetCookie()) {
 			const first = cookie.split(";")[0] ?? "";
 			const separator = first.indexOf("=");

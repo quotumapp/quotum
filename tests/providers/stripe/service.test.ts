@@ -59,6 +59,7 @@ function serviceFixture(
 		};
 		webhookEvent?: unknown;
 		constructWebhookError?: unknown;
+		expireRace?: boolean;
 		retrievedSubscription?: Record<string, unknown>;
 		recordingResult?: "processed" | "skipped" | "ignored";
 		customerId?: string;
@@ -137,6 +138,16 @@ function serviceFixture(
 			},
 			retrieveCheckoutSession(sessionId) {
 				calls.push({ method: "retrieveCheckoutSession", sessionId });
+				return Promise.resolve(statusSession);
+			},
+			expireCheckoutSession(sessionId) {
+				calls.push({ method: "expireCheckoutSession", sessionId });
+				if (overrides.expireRace) {
+					statusSession.status = "complete";
+					statusSession.payment_status = "paid";
+					throw new Error("Already completed");
+				}
+				statusSession.status = "expired";
 				return Promise.resolve(statusSession);
 			},
 			constructWebhookEvent(rawBody, signature) {
@@ -1694,5 +1705,54 @@ describe("StripeBillingService", () => {
 				reconciliationSubscription({ provider: "google", channel: "android" }),
 			),
 		).rejects.toMatchObject({ code: "INVALID_REQUEST", status: 400 });
+	});
+});
+
+describe("checkout expiration", () => {
+	it("expires only an open session owned by this account", async () => {
+		const { service, calls } = serviceFixture({
+			statusSession: { status: "open", payment_status: "unpaid" },
+		});
+		expect(
+			await service.expireCheckoutSession({ billingAccountId: "user_1", sessionId: "cs_123" }),
+		).toMatchObject({ status: "expired", paymentStatus: "unpaid" });
+		expect(
+			calls.filter((call) => (call as { method: string }).method === "expireCheckoutSession"),
+		).toHaveLength(1);
+	});
+	it("does not expire another account's session", async () => {
+		const { service, calls } = serviceFixture({
+			statusSession: {
+				status: "open",
+				client_reference_id: "other",
+				metadata: { billingAccountId: "other" },
+			},
+		});
+		await expect(
+			service.expireCheckoutSession({ billingAccountId: "user_1", sessionId: "cs_123" }),
+		).rejects.toBeDefined();
+		expect(
+			calls.filter((call) => (call as { method: string }).method === "expireCheckoutSession"),
+		).toHaveLength(0);
+	});
+	it("returns paid when completion wins the expiration race", async () => {
+		const { service } = serviceFixture({
+			statusSession: { status: "open", payment_status: "unpaid" },
+			expireRace: true,
+		});
+		expect(
+			await service.expireCheckoutSession({ billingAccountId: "user_1", sessionId: "cs_123" }),
+		).toMatchObject({ status: "complete", paymentStatus: "paid" });
+	});
+	it("passes the fixed expiration deadline to Stripe", async () => {
+		const { service, calls } = serviceFixture();
+		await service.createCheckoutSession({
+			billingAccountId: "user_1",
+			productKey: "premium_monthly",
+			expiresAt: 1900000000,
+		});
+		expect(
+			calls.find((call) => (call as { method: string }).method === "createCheckoutSession"),
+		).toMatchObject({ params: { expires_at: 1900000000 } });
 	});
 });

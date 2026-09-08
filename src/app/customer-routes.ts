@@ -6,6 +6,8 @@ import { type RateLimitResult, rateLimitMiddleware } from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
 import type { ProjectInstanceContext } from "../projects/context";
+import { defineContract, registerRoute } from "../shared/http-contract";
+import * as responses from "./contracts/customer-responses";
 import {
 	requireAppleStoreKitService,
 	requireGooglePlayBillingService,
@@ -39,6 +41,7 @@ const stripeCheckoutSessionBodySchema = z
 		email: z.string().trim().min(1).nullable().optional(),
 		successUrl: z.string().trim().url().nullable().optional(),
 		cancelUrl: z.string().trim().url().nullable().optional(),
+		expiresAt: z.number().int().positive().safe().optional(),
 	})
 	.strict()
 	.refine((value) => (value.productKey === undefined) !== (value.planKey === undefined));
@@ -86,6 +89,7 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 			email: z.string().trim().min(1).nullable().optional(),
 			successUrl: z.string().trim().url().nullable().optional(),
 			cancelUrl: z.string().trim().url().nullable().optional(),
+			expiresAt: z.number().int().positive().safe().optional(),
 		})
 		.strict(),
 	z
@@ -95,6 +99,7 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 			email: z.string().trim().min(1).nullable().optional(),
 			successUrl: z.string().trim().url().nullable().optional(),
 			cancelUrl: z.string().trim().url().nullable().optional(),
+			expiresAt: z.number().int().positive().safe().optional(),
 		})
 		.strict(),
 	z
@@ -162,15 +167,19 @@ export function registerCustomerRoutes({
 		rateLimitMiddleware({ limiter: verifyLimiter, key: rateLimitKey }),
 	);
 
-	app.get("/v1/billing-accounts/:billingAccountId/entitlements", async (c) => {
-		const snapshot = await entitlementService.getSnapshot(
-			privateProject(c),
-			c.req.param("billingAccountId"),
-		);
-		return c.json({ success: true, data: snapshot });
-	});
+	registerRoute(
+		app,
+		customerContracts.getV1BillingAccountsByBillingAccountIdEntitlements,
+		async (c) => {
+			const snapshot = await entitlementService.getSnapshot(
+				privateProject(c),
+				c.req.param("billingAccountId"),
+			);
+			return c.json({ success: true, data: snapshot });
+		},
+	);
 
-	app.get("/v1/catalog", async (c) => {
+	registerRoute(app, customerContracts.getV1Catalog, async (c) => {
 		const parsed = stripeCatalogQuerySchema.safeParse(c.req.query());
 		if (!parsed.success) {
 			throw new BillingError("Invalid billing catalog query", "INVALID_REQUEST", 400);
@@ -185,78 +194,107 @@ export function registerCustomerRoutes({
 		return c.json({ success: true, data: catalog });
 	});
 
-	app.get("/v1/billing-accounts/:billingAccountId/billing-account", async (c) => {
-		const params = parseStripeCustomerRouteParams(c.req.param());
-		const stripe = requireStripeBillingService(
-			providerServices.stripeBillingService(privateProject(c)),
-		);
-		if (stripe.getBillingAccount === undefined) {
-			throw new BillingError(
-				"Stripe billing account is not available",
-				"STRIPE_NOT_CONFIGURED",
-				503,
+	registerRoute(
+		app,
+		customerContracts.getV1BillingAccountsByBillingAccountIdBillingAccount,
+		async (c) => {
+			const params = parseStripeCustomerRouteParams(c.req.param());
+			const stripe = requireStripeBillingService(
+				providerServices.stripeBillingService(privateProject(c)),
 			);
-		}
-		const account = await stripe.getBillingAccount(params.billingAccountId);
-		return c.json({ success: true, data: account });
-	});
+			if (stripe.getBillingAccount === undefined) {
+				throw new BillingError(
+					"Stripe billing account is not available",
+					"STRIPE_NOT_CONFIGURED",
+					503,
+				);
+			}
+			const account = await stripe.getBillingAccount(params.billingAccountId);
+			return c.json({ success: true, data: account });
+		},
+	);
 
-	app.post("/v1/billing-accounts/:billingAccountId/commercial-actions/preview", async (c) => {
-		const params = parseStripeCustomerRouteParams(c.req.param());
-		const body = commercialActionPreviewBodySchema.safeParse(await parsePrivateJson(c.req.raw));
-		if (!body.success) {
-			throw new BillingError("Invalid commercial action preview", "INVALID_REQUEST", 400);
-		}
-		const stripe = requireStripeBillingService(
-			providerServices.stripeBillingService(privateProject(c)),
-		);
-		if (stripe.previewCommercialAction === undefined) {
-			throw new BillingError("Commercial previews are not available", "STRIPE_NOT_CONFIGURED", 503);
-		}
-		const preview = await stripe.previewCommercialAction({
-			billingAccountId: params.billingAccountId,
-			intent: body.data.intent,
-		});
-		return c.json({ success: true, data: preview });
-	});
+	registerRoute(
+		app,
+		customerContracts.postV1BillingAccountsByBillingAccountIdCommercialActionsPreview,
+		async (c) => {
+			const params = parseStripeCustomerRouteParams(c.req.param());
+			const body = commercialActionPreviewBodySchema.safeParse(await parsePrivateJson(c.req.raw));
+			if (!body.success) {
+				throw new BillingError("Invalid commercial action preview", "INVALID_REQUEST", 400);
+			}
+			const stripe = requireStripeBillingService(
+				providerServices.stripeBillingService(privateProject(c)),
+			);
+			if (stripe.previewCommercialAction === undefined) {
+				throw new BillingError(
+					"Commercial previews are not available",
+					"STRIPE_NOT_CONFIGURED",
+					503,
+				);
+			}
+			const preview = await stripe.previewCommercialAction({
+				billingAccountId: params.billingAccountId,
+				intent: body.data.intent,
+			});
+			return c.json({ success: true, data: preview });
+		},
+	);
 
-	app.post("/v1/billing-accounts/:billingAccountId/commercial-actions", async (c) => {
-		const params = parseStripeCustomerRouteParams(c.req.param());
-		const body = commercialActionExecuteBodySchema.safeParse(await parsePrivateJson(c.req.raw));
-		const idempotencyKey = c.req.header("idempotency-key")?.trim();
-		if (!body.success || idempotencyKey === undefined || idempotencyKey === "") {
-			throw new BillingError("Invalid commercial action execution", "INVALID_REQUEST", 400);
-		}
-		const stripe = requireStripeBillingService(
-			providerServices.stripeBillingService(privateProject(c)),
-		);
-		if (stripe.executeCommercialAction === undefined) {
-			throw new BillingError("Commercial actions are not available", "STRIPE_NOT_CONFIGURED", 503);
-		}
-		const result = await stripe.executeCommercialAction({
-			billingAccountId: params.billingAccountId,
-			previewToken: body.data.previewToken,
-			idempotencyKey,
-		});
-		return c.json({ success: true, data: result }, result.kind === "checkout" ? 200 : 202);
-	});
+	registerRoute(
+		app,
+		customerContracts.postV1BillingAccountsByBillingAccountIdCommercialActions,
+		async (c) => {
+			const params = parseStripeCustomerRouteParams(c.req.param());
+			const body = commercialActionExecuteBodySchema.safeParse(await parsePrivateJson(c.req.raw));
+			const idempotencyKey = c.req.header("idempotency-key")?.trim();
+			if (!body.success || idempotencyKey === undefined || idempotencyKey === "") {
+				throw new BillingError("Invalid commercial action execution", "INVALID_REQUEST", 400);
+			}
+			const stripe = requireStripeBillingService(
+				providerServices.stripeBillingService(privateProject(c)),
+			);
+			if (stripe.executeCommercialAction === undefined) {
+				throw new BillingError(
+					"Commercial actions are not available",
+					"STRIPE_NOT_CONFIGURED",
+					503,
+				);
+			}
+			const result = await stripe.executeCommercialAction({
+				billingAccountId: params.billingAccountId,
+				previewToken: body.data.previewToken,
+				idempotencyKey,
+			});
+			return c.json({ success: true, data: result }, result.kind === "checkout" ? 200 : 202);
+		},
+	);
 
-	app.get("/v1/billing-accounts/:billingAccountId/providers/apple/account-token", async (c) => {
-		const appAccountToken = await requireAppleStoreKitService(
-			providerServices.appleStoreKitService(privateProject(c)),
-		).getOrCreateAppAccountToken(c.req.param("billingAccountId"));
-		return c.json({ success: true, data: { appAccountToken } });
-	});
+	registerRoute(
+		app,
+		customerContracts.getV1BillingAccountsByBillingAccountIdProvidersAppleAccountToken,
+		async (c) => {
+			const appAccountToken = await requireAppleStoreKitService(
+				providerServices.appleStoreKitService(privateProject(c)),
+			).getOrCreateAppAccountToken(c.req.param("billingAccountId"));
+			return c.json({ success: true, data: { appAccountToken } });
+		},
+	);
 
-	app.get("/v1/billing-accounts/:billingAccountId/providers/google/account-link", async (c) => {
-		const accountLink = await requireGooglePlayBillingService(
-			providerServices.googlePlayBillingService(privateProject(c)),
-		).getAccountLink(c.req.param("billingAccountId"));
-		return c.json({ success: true, data: accountLink });
-	});
+	registerRoute(
+		app,
+		customerContracts.getV1BillingAccountsByBillingAccountIdProvidersGoogleAccountLink,
+		async (c) => {
+			const accountLink = await requireGooglePlayBillingService(
+				providerServices.googlePlayBillingService(privateProject(c)),
+			).getAccountLink(c.req.param("billingAccountId"));
+			return c.json({ success: true, data: accountLink });
+		},
+	);
 
-	app.post(
-		"/v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions",
+	registerRoute(
+		app,
+		customerContracts.postV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessions,
 		async (c) => {
 			const params = parseStripeCustomerRouteParams(c.req.param());
 			const body = await parsePrivateJson(c.req.raw);
@@ -272,6 +310,7 @@ export function registerCustomerRoutes({
 			const sessionInput = {
 				billingAccountId: params.billingAccountId,
 				email: parsed.data.email,
+				expiresAt: parsed.data.expiresAt,
 			};
 			const idempotencyKey = c.req.header("idempotency-key");
 			let session: Awaited<ReturnType<StripeBillingServiceLike["createCheckoutSession"]>>;
@@ -300,24 +339,29 @@ export function registerCustomerRoutes({
 		},
 	);
 
-	app.post("/v1/billing-accounts/:billingAccountId/providers/stripe/portal-sessions", async (c) => {
-		const params = parseStripeCustomerRouteParams(c.req.param());
-		const body = await optionalPrivateJson(c.req.raw, parsePrivateJson);
-		const parsed = stripePortalSessionBodySchema.safeParse(body);
-		if (!parsed.success) {
-			throw new BillingError("Invalid Stripe portal session body", "INVALID_REQUEST", 400);
-		}
-		const session = await requireStripeBillingService(
-			providerServices.stripeBillingService(privateProject(c)),
-		).createPortalSession({
-			billingAccountId: params.billingAccountId,
-			returnUrl: parsed.data.returnUrl,
-		});
-		return c.json({ success: true, data: session });
-	});
+	registerRoute(
+		app,
+		customerContracts.postV1BillingAccountsByBillingAccountIdProvidersStripePortalSessions,
+		async (c) => {
+			const params = parseStripeCustomerRouteParams(c.req.param());
+			const body = await optionalPrivateJson(c.req.raw, parsePrivateJson);
+			const parsed = stripePortalSessionBodySchema.safeParse(body);
+			if (!parsed.success) {
+				throw new BillingError("Invalid Stripe portal session body", "INVALID_REQUEST", 400);
+			}
+			const session = await requireStripeBillingService(
+				providerServices.stripeBillingService(privateProject(c)),
+			).createPortalSession({
+				billingAccountId: params.billingAccountId,
+				returnUrl: parsed.data.returnUrl,
+			});
+			return c.json({ success: true, data: session });
+		},
+	);
 
-	app.post(
-		"/v1/billing-accounts/:billingAccountId/subscriptions/:subscriptionId/changes",
+	registerRoute(
+		app,
+		customerContracts.postV1BillingAccountsByBillingAccountIdSubscriptionsBySubscriptionIdChanges,
 		async (c) => {
 			const params = stripeSubscriptionChangeParamsSchema.safeParse(c.req.param());
 			const body = stripeSubscriptionChangeBodySchema.safeParse(await parsePrivateJson(c.req.raw));
@@ -357,8 +401,9 @@ export function registerCustomerRoutes({
 		},
 	);
 
-	app.get(
-		"/v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions/:sessionId",
+	registerRoute(
+		app,
+		customerContracts.getV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessionsBySessionId,
 		async (c) => {
 			const params = parseStripeCheckoutSessionRouteParams(c.req.param());
 			const session = await requireStripeBillingService(
@@ -371,7 +416,17 @@ export function registerCustomerRoutes({
 		},
 	);
 
-	app.post("/v1/purchases/verify", async (c) => {
+	registerRoute(app, customerContracts.expireStripeCheckoutSession, async (c) => {
+		const params = parseStripeCheckoutSessionRouteParams(c.req.param());
+		const stripe = requireStripeBillingService(
+			providerServices.stripeBillingService(privateProject(c)),
+		);
+		if (!stripe.expireCheckoutSession)
+			throw new BillingError("Checkout expiration is unavailable", "STRIPE_NOT_CONFIGURED", 503);
+		return c.json({ success: true, data: await stripe.expireCheckoutSession(params) });
+	});
+
+	registerRoute(app, customerContracts.postV1PurchasesVerify, async (c) => {
 		const project = privateProject(c);
 		let provider = "unknown";
 
@@ -507,3 +562,165 @@ function providerFromRequestBody(body: unknown): string {
 
 	return "unknown";
 }
+
+export const customerContracts = {
+	getV1BillingAccountsByBillingAccountIdEntitlements: defineContract(
+		"get",
+		"/v1/billing-accounts/:billingAccountId/entitlements",
+		{
+			operationId: "getV1BillingAccountsByBillingAccountIdEntitlements",
+			tags: ["customer"],
+			params: z.object({ billingAccountId: z.string().min(1) }),
+			responses: {
+				"200": responses.getV1BillingAccountsByBillingAccountIdEntitlementsResponse200Schema,
+			},
+		},
+	),
+	getV1Catalog: defineContract("get", "/v1/catalog", {
+		operationId: "getV1Catalog",
+		tags: ["customer"],
+		query: stripeCatalogQuerySchema,
+		responses: { "200": responses.getV1CatalogResponse200Schema },
+	}),
+	getV1BillingAccountsByBillingAccountIdBillingAccount: defineContract(
+		"get",
+		"/v1/billing-accounts/:billingAccountId/billing-account",
+		{
+			operationId: "getV1BillingAccountsByBillingAccountIdBillingAccount",
+			tags: ["customer"],
+			params: z.object({ billingAccountId: z.string().min(1) }),
+			responses: {
+				"200": responses.getV1BillingAccountsByBillingAccountIdBillingAccountResponse200Schema,
+			},
+		},
+	),
+	postV1BillingAccountsByBillingAccountIdCommercialActionsPreview: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/commercial-actions/preview",
+		{
+			operationId: "postV1BillingAccountsByBillingAccountIdCommercialActionsPreview",
+			tags: ["customer"],
+			body: commercialActionPreviewBodySchema,
+			params: z.object({ billingAccountId: z.string().min(1) }),
+			responses: {
+				"200":
+					responses.postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResponse200Schema,
+			},
+		},
+	),
+	postV1BillingAccountsByBillingAccountIdCommercialActions: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/commercial-actions",
+		{
+			operationId: "postV1BillingAccountsByBillingAccountIdCommercialActions",
+			tags: ["customer"],
+			body: commercialActionExecuteBodySchema,
+			params: z.object({ billingAccountId: z.string().min(1) }),
+			responses: {
+				"200": responses.postV1BillingAccountsByBillingAccountIdCommercialActionsResponse200Schema,
+				"202": responses.postV1BillingAccountsByBillingAccountIdCommercialActionsResponse202Schema,
+			},
+		},
+	),
+	getV1BillingAccountsByBillingAccountIdProvidersAppleAccountToken: defineContract(
+		"get",
+		"/v1/billing-accounts/:billingAccountId/providers/apple/account-token",
+		{
+			operationId: "getV1BillingAccountsByBillingAccountIdProvidersAppleAccountToken",
+			tags: ["customer"],
+			params: z.object({ billingAccountId: z.string().min(1) }),
+			responses: {
+				"200":
+					responses.getV1BillingAccountsByBillingAccountIdProvidersAppleAccountTokenResponse200Schema,
+			},
+		},
+	),
+	getV1BillingAccountsByBillingAccountIdProvidersGoogleAccountLink: defineContract(
+		"get",
+		"/v1/billing-accounts/:billingAccountId/providers/google/account-link",
+		{
+			operationId: "getV1BillingAccountsByBillingAccountIdProvidersGoogleAccountLink",
+			tags: ["customer"],
+			params: z.object({ billingAccountId: z.string().min(1) }),
+			responses: {
+				"200":
+					responses.getV1BillingAccountsByBillingAccountIdProvidersGoogleAccountLinkResponse200Schema,
+			},
+		},
+	),
+	postV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessions: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions",
+		{
+			operationId: "postV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessions",
+			tags: ["customer"],
+			body: stripeCheckoutSessionBodySchema,
+			params: z.object({ billingAccountId: z.string().min(1) }),
+			responses: {
+				"200":
+					responses.postV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessionsResponse200Schema,
+			},
+		},
+	),
+	postV1BillingAccountsByBillingAccountIdProvidersStripePortalSessions: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/providers/stripe/portal-sessions",
+		{
+			operationId: "postV1BillingAccountsByBillingAccountIdProvidersStripePortalSessions",
+			tags: ["customer"],
+			body: stripePortalSessionBodySchema,
+			params: z.object({ billingAccountId: z.string().min(1) }),
+			responses: {
+				"200":
+					responses.postV1BillingAccountsByBillingAccountIdProvidersStripePortalSessionsResponse200Schema,
+			},
+		},
+	),
+	postV1BillingAccountsByBillingAccountIdSubscriptionsBySubscriptionIdChanges: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/subscriptions/:subscriptionId/changes",
+		{
+			operationId: "postV1BillingAccountsByBillingAccountIdSubscriptionsBySubscriptionIdChanges",
+			tags: ["customer"],
+			params: stripeSubscriptionChangeParamsSchema,
+			body: stripeSubscriptionChangeBodySchema,
+			responses: {
+				"202":
+					responses.postV1BillingAccountsByBillingAccountIdSubscriptionsBySubscriptionIdChangesResponse202Schema,
+			},
+		},
+	),
+	getV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessionsBySessionId: defineContract(
+		"get",
+		"/v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions/:sessionId",
+		{
+			operationId:
+				"getV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessionsBySessionId",
+			tags: ["customer"],
+			params: z.object({ billingAccountId: z.string().min(1), sessionId: z.string().min(1) }),
+			responses: {
+				"200":
+					responses.getV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessionsBySessionIdResponse200Schema,
+			},
+		},
+	),
+	expireStripeCheckoutSession: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions/:sessionId/expire",
+		{
+			operationId: "expireStripeCheckoutSession",
+			tags: ["customer"],
+			params: stripeCheckoutSessionRouteParamsSchema,
+			responses: {
+				"200":
+					responses.getV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessionsBySessionIdResponse200Schema,
+			},
+		},
+	),
+	postV1PurchasesVerify: defineContract("post", "/v1/purchases/verify", {
+		operationId: "postV1PurchasesVerify",
+		tags: ["customer"],
+		body: purchaseVerificationSchema,
+		responses: { "200": responses.postV1PurchasesVerifyResponse200Schema },
+	}),
+} as const;

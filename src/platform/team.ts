@@ -2,7 +2,9 @@ import type { InvitationView, MerchantRole, TeamView } from "./contracts";
 import type { MerchantSql } from "./database";
 import type { MerchantMailer } from "./email";
 import { escapeHtml, linkMessage } from "./email";
+import { MerchantRoleSchema } from "./schemas";
 import {
+	capabilitiesFor,
 	INVITATION_MS,
 	MerchantError,
 	maskEmail,
@@ -154,6 +156,10 @@ export class MerchantTeam {
 		>`SELECT i.*,o.name,o.slug FROM platform_invitations i JOIN platform_organizations o ON o.id=i.organization_id WHERE i.organization_id=${member.organization_id} ORDER BY i.created_at DESC,i.id LIMIT 100`;
 		return {
 			organizationSlug: slug,
+			roleDefinitions: MerchantRoleSchema.options.map((role) => ({
+				role,
+				capabilities: capabilitiesFor(role),
+			})),
 			canManage: member.role === "Owner" || member.role === "Admin",
 			members: [...members],
 			invitations: await Promise.all(rows.map((r) => this.view(r, identity, this.store.sql, true))),

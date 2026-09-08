@@ -68,7 +68,7 @@ const cursorDateSchema = z
 		}
 		return value;
 	});
-const paginationSchema = z.object({
+export const paginationSchema = z.object({
 	limit: z.coerce.number().int().positive().max(100).default(25),
 	cursor: z.string().trim().min(1).nullable().optional(),
 });
@@ -154,18 +154,9 @@ export function decodeAdminCursor(value: string): AdminCursor {
 }
 
 export function parseCustomerSearchQuery(params: URLSearchParams): AdminCustomerSearchInput {
-	const parsed = paginationSchema
-		.extend({
-			q: z
-				.string()
-				.trim()
-				.min(1)
-				.max(
-					customerSearchQueryMaxLength,
-					`Customer search query must be ${customerSearchQueryMaxLength} characters or less`,
-				),
-		})
-		.safeParse(parseSearchParams(params, "Customer search query is required"));
+	const parsed = parseCustomerSearchQuerySchema.safeParse(
+		parseSearchParams(params, "Customer search query is required"),
+	);
 	if (!parsed.success) {
 		throw invalidRequest(
 			parsed.error.issues.some((issue) => issue.code === "too_big")
@@ -181,14 +172,9 @@ export function parseCustomerSearchQuery(params: URLSearchParams): AdminCustomer
 }
 
 export function parsePurchaseListQuery(params: URLSearchParams): AdminPurchaseListInput {
-	const parsed = commonListSchema
-		.extend({
-			purchaseKind: z.enum(productTypes).optional(),
-			status: z.enum(purchaseStatuses).optional(),
-			transactionId: z.string().trim().min(1).optional(),
-			orderId: z.string().trim().min(1).optional(),
-		})
-		.safeParse(parseSearchParams(params, "Invalid purchase filters"));
+	const parsed = parsePurchaseListQuerySchema.safeParse(
+		parseSearchParams(params, "Invalid purchase filters"),
+	);
 	if (!parsed.success) {
 		throw invalidRequest("Invalid purchase filters");
 	}
@@ -221,12 +207,9 @@ export function parseSubscriptionListQuery(
 	params: URLSearchParams,
 	staleBefore: string = new Date().toISOString(),
 ): AdminSubscriptionListInput {
-	const parsed = commonListSchema
-		.extend({
-			status: z.enum(subscriptionStatuses).optional(),
-			needsAttention: z.enum(["true", "false"]).optional(),
-		})
-		.safeParse(parseSearchParams(params, "Invalid subscription filters"));
+	const parsed = parseSubscriptionListQuerySchema.safeParse(
+		parseSearchParams(params, "Invalid subscription filters"),
+	);
 	if (!parsed.success) {
 		throw invalidRequest("Invalid subscription filters");
 	}
@@ -251,13 +234,9 @@ export function parseCustomerSubscriptionListQuery(
 }
 
 export function parseStoreEventListQuery(params: URLSearchParams): AdminStoreEventListInput {
-	const parsed = commonListSchema
-		.extend({
-			processingStatus: z.enum(storeEventProcessingStatuses).optional(),
-			eventType: z.string().trim().min(1).optional(),
-			externalEventId: z.string().trim().min(1).optional(),
-		})
-		.safeParse(parseSearchParams(params, "Invalid store event filters"));
+	const parsed = parseStoreEventListQuerySchema.safeParse(
+		parseSearchParams(params, "Invalid store event filters"),
+	);
 	if (!parsed.success) {
 		throw invalidRequest("Invalid store event filters");
 	}
@@ -286,9 +265,9 @@ export function parseCustomerStoreEventListQuery(
 export function parseStoreEventDetailQuery(params: URLSearchParams): {
 	includeRawPayload: boolean;
 } {
-	const parsed = z
-		.object({ includeRawPayload: z.enum(["true", "false"]).optional() })
-		.safeParse(parseSearchParams(params, "Invalid store event detail query"));
+	const parsed = parseStoreEventDetailQuerySchema.safeParse(
+		parseSearchParams(params, "Invalid store event detail query"),
+	);
 	if (!parsed.success) {
 		throw invalidRequest("Invalid store event detail query");
 	}
@@ -296,12 +275,9 @@ export function parseStoreEventDetailQuery(params: URLSearchParams): {
 }
 
 export function parseProjectionJobListQuery(params: URLSearchParams): AdminProjectionJobListInput {
-	const parsed = commonListSchema
-		.extend({
-			status: z.enum(projectionSyncStatuses).optional(),
-			reason: z.enum(projectionSyncReasons).optional(),
-		})
-		.safeParse(parseSearchParams(params, "Invalid projection job filters"));
+	const parsed = parseProjectionJobListQuerySchema.safeParse(
+		parseSearchParams(params, "Invalid projection job filters"),
+	);
 	if (!parsed.success) {
 		throw invalidRequest("Invalid projection job filters");
 	}
@@ -331,14 +307,9 @@ export function parseCatalogProductListQuery(
 }
 
 export function parseStatsSummaryQuery(params: URLSearchParams): AdminStatsSummaryInput {
-	const parsed = z
-		.object({
-			provider: z.enum(billingProviders).optional(),
-			channel: z.enum(billingChannels).optional(),
-			from: dateSchema.optional(),
-			to: dateSchema.optional(),
-		})
-		.safeParse(parseSearchParams(params, "Invalid stats summary filters"));
+	const parsed = parseStatsSummaryQuerySchema.safeParse(
+		parseSearchParams(params, "Invalid stats summary filters"),
+	);
 	if (!parsed.success) {
 		throw invalidRequest("Invalid stats summary filters");
 	}
@@ -362,13 +333,9 @@ export function parseStatsSummaryQuery(params: URLSearchParams): AdminStatsSumma
 export function parseCatalogStoreProductListQuery(
 	params: URLSearchParams,
 ): AdminCatalogStoreProductListInput {
-	const parsed = paginationSchema
-		.extend({
-			provider: z.enum(billingProviders).optional(),
-			channel: z.enum(billingChannels).optional(),
-			productKey: z.string().trim().min(1).optional(),
-		})
-		.safeParse(parseSearchParams(params, "Invalid store product filters"));
+	const parsed = parseCatalogStoreProductListQuerySchema.safeParse(
+		parseSearchParams(params, "Invalid store product filters"),
+	);
 	if (!parsed.success) {
 		throw invalidRequest("Invalid store product filters");
 	}
@@ -445,3 +412,47 @@ function commonListInput(value: ParsedCommonListInput): AdminCommonListInput {
 	}
 	return input;
 }
+
+export const parseCustomerSearchQuerySchema = paginationSchema.extend({
+	q: z
+		.string()
+		.trim()
+		.min(1)
+		.max(
+			customerSearchQueryMaxLength,
+			`Customer search query must be ${customerSearchQueryMaxLength} characters or less`,
+		),
+});
+export const parsePurchaseListQuerySchema = commonListSchema.extend({
+	purchaseKind: z.enum(productTypes).optional(),
+	status: z.enum(purchaseStatuses).optional(),
+	transactionId: z.string().trim().min(1).optional(),
+	orderId: z.string().trim().min(1).optional(),
+});
+export const parseSubscriptionListQuerySchema = commonListSchema.extend({
+	status: z.enum(subscriptionStatuses).optional(),
+	needsAttention: z.enum(["true", "false"]).optional(),
+});
+export const parseStoreEventListQuerySchema = commonListSchema.extend({
+	processingStatus: z.enum(storeEventProcessingStatuses).optional(),
+	eventType: z.string().trim().min(1).optional(),
+	externalEventId: z.string().trim().min(1).optional(),
+});
+export const parseStoreEventDetailQuerySchema = z.object({
+	includeRawPayload: z.enum(["true", "false"]).optional(),
+});
+export const parseProjectionJobListQuerySchema = commonListSchema.extend({
+	status: z.enum(projectionSyncStatuses).optional(),
+	reason: z.enum(projectionSyncReasons).optional(),
+});
+export const parseStatsSummaryQuerySchema = z.object({
+	provider: z.enum(billingProviders).optional(),
+	channel: z.enum(billingChannels).optional(),
+	from: dateSchema.optional(),
+	to: dateSchema.optional(),
+});
+export const parseCatalogStoreProductListQuerySchema = paginationSchema.extend({
+	provider: z.enum(billingProviders).optional(),
+	channel: z.enum(billingChannels).optional(),
+	productKey: z.string().trim().min(1).optional(),
+});

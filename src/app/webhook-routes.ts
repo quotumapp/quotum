@@ -5,6 +5,12 @@ import { type RateLimitResult, rateLimitMiddleware } from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
+import { defineContract, registerRoute } from "../shared/http-contract";
+import {
+	AppleWebhookResultSchema,
+	EntitlementSnapshotSchema,
+	GoogleWebhookResultSchema,
+} from "./contracts/provider-responses";
 import {
 	requireAppleStoreKitService,
 	requireGooglePlayBillingService,
@@ -159,15 +165,15 @@ export function registerWebhookRoutes({
 		rateLimitMiddleware({ limiter: webhookLimiter, key: rateLimitKey }),
 	);
 
-	app.post("/v1/projects/:projectKey/webhooks/apple", async (c) =>
+	registerRoute(app, webhookContracts.postV1ProjectsByProjectKeyWebhooksApple, async (c) =>
 		handleAppleWebhook(c, await webhookProject(c.req.param("projectKey"))),
 	);
 
-	app.post("/v1/projects/:projectKey/webhooks/google", async (c) =>
+	registerRoute(app, webhookContracts.postV1ProjectsByProjectKeyWebhooksGoogle, async (c) =>
 		handleGoogleWebhook(c, await webhookProject(c.req.param("projectKey"))),
 	);
 
-	app.post("/v1/projects/:projectKey/webhooks/stripe", async (c) =>
+	registerRoute(app, webhookContracts.postV1ProjectsByProjectKeyWebhooksStripe, async (c) =>
 		handleStripeWebhook(c, await webhookProject(c.req.param("projectKey"))),
 	);
 }
@@ -198,3 +204,70 @@ function billingErrorCode(error: unknown): string {
 function hasBearerToken(authorizationHeader: string | null): boolean {
 	return /^Bearer\s+\S+$/i.test(authorizationHeader ?? "");
 }
+
+export const webhookContracts = {
+	postV1ProjectsByProjectKeyWebhooksApple: defineContract(
+		"post",
+		"/v1/projects/:projectKey/webhooks/apple",
+		{
+			operationId: "postV1ProjectsByProjectKeyWebhooksApple",
+			body: appleWebhookSchema,
+			security: [],
+			tags: ["webhook"],
+			params: z.object({ projectKey: z.string().min(1) }),
+			responses: {
+				200: z.object({
+					success: z.literal(true),
+					data: AppleWebhookResultSchema,
+				}),
+			},
+		},
+	),
+	postV1ProjectsByProjectKeyWebhooksGoogle: defineContract(
+		"post",
+		"/v1/projects/:projectKey/webhooks/google",
+		{
+			operationId: "postV1ProjectsByProjectKeyWebhooksGoogle",
+			body: googleWebhookSchema,
+			security: [{ googleOidc: [] }],
+			tags: ["webhook"],
+			params: z.object({ projectKey: z.string().min(1) }),
+			responses: {
+				200: z.object({
+					success: z.literal(true),
+					data: GoogleWebhookResultSchema,
+				}),
+			},
+		},
+	),
+	postV1ProjectsByProjectKeyWebhooksStripe: defineContract(
+		"post",
+		"/v1/projects/:projectKey/webhooks/stripe",
+		{
+			operationId: "postV1ProjectsByProjectKeyWebhooksStripe",
+			body: z
+				.object({
+					id: z.string(),
+					type: z.string(),
+					data: z.object({ object: z.record(z.string(), z.unknown()) }).loose(),
+				})
+				.loose(),
+			requestContentType: "application/json",
+			description:
+				"Raw JSON bytes are verified with Stripe-Signature before parsing; send the original provider payload.",
+			security: [{ stripeSignature: [] }],
+			tags: ["webhook"],
+			params: z.object({ projectKey: z.string().min(1) }),
+			responses: {
+				200: z.object({
+					success: z.literal(true),
+					data: z.object({
+						status: z.enum(["processed", "skipped", "ignored"]),
+						eventType: z.string(),
+						entitlements: z.union([EntitlementSnapshotSchema, z.null()]),
+					}),
+				}),
+			},
+		},
+	),
+} as const;

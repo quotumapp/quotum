@@ -25,6 +25,7 @@ interface StripeClientLike {
 				params: Stripe.Checkout.SessionCreateParams,
 				options?: Stripe.RequestOptions,
 			): Promise<Stripe.Checkout.Session>;
+			expire?(sessionId: string): Promise<Stripe.Checkout.Session>;
 			retrieve(
 				sessionId: string,
 				params: Stripe.Checkout.SessionRetrieveParams,
@@ -132,6 +133,12 @@ export class StripeBillingClient {
 		return this.stripe.billingPortal.sessions.create(params, {
 			idempotencyKey: stripeOperationIdempotencyKey("portal-sessions:create"),
 		});
+	}
+
+	expireCheckoutSession(sessionId: string) {
+		if (!this.stripe.checkout.sessions.expire)
+			throw new Error("Checkout expiration is unavailable");
+		return this.stripe.checkout.sessions.expire(sessionId);
 	}
 
 	retrieveCheckoutSession(sessionId: string) {

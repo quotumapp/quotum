@@ -11,6 +11,7 @@ import { AppleStoreKitService } from "../../../src/providers/apple/service";
 import { createGoogleObfuscatedAccountId } from "../../../src/providers/google/account-link";
 import { GooglePlayBillingService } from "../../../src/providers/google/service";
 import { StripeBillingService } from "../../../src/providers/stripe/service";
+import { withOpenApiAssertions } from "../../helpers/openapi";
 import {
 	createFakeAppleStoreKitClient,
 	createFakeGooglePlayClient,
@@ -163,26 +164,28 @@ export function createIntegrationApp({
 		};
 	}
 
-	const app = createApp({
-		env,
-		entitlementService: new EntitlementService(repository),
-		meteringService: new MeteringService(repository),
-		controlsEnterpriseService: repository.controlsEnterprise,
-		billingInsightsService: {
-			listUsageEvents: (...args) => repository.listUsageEvents(...args),
-			getUsageSeries: (...args) => repository.getUsageSeries(...args),
-			getCustomerBillingSummary: (...args) => repository.getCustomerBillingSummary(...args),
-		},
-		catalogControlPlane: {
-			getPublished: (...args) => repository.getPublishedCatalog(...args),
-			preview: (...args) => repository.previewCatalog(...args),
-			publish: (...args) => repository.publishCatalog(...args),
-		},
-		projectProviderServices,
-		adminOperations,
-		logger,
-		metrics,
-	});
+	const app = withOpenApiAssertions(
+		createApp({
+			env,
+			entitlementService: new EntitlementService(repository),
+			meteringService: new MeteringService(repository),
+			controlsEnterpriseService: repository.controlsEnterprise,
+			billingInsightsService: {
+				listUsageEvents: (...args) => repository.listUsageEvents(...args),
+				getUsageSeries: (...args) => repository.getUsageSeries(...args),
+				getCustomerBillingSummary: (...args) => repository.getCustomerBillingSummary(...args),
+			},
+			catalogControlPlane: {
+				getPublished: (...args) => repository.getPublishedCatalog(...args),
+				preview: (...args) => repository.previewCatalog(...args),
+				publish: (...args) => repository.publishCatalog(...args),
+			},
+			projectProviderServices,
+			adminOperations,
+			logger,
+			metrics,
+		}),
+	);
 
 	return {
 		app,

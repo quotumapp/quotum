@@ -10,6 +10,8 @@ import {
 	safelyObserveBillingMetric,
 } from "../observability/metrics";
 import type { ProjectInstanceContext } from "../projects/context";
+import { defineContract, registerRoute } from "../shared/http-contract";
+import * as responses from "./contracts/metering-responses";
 import type { BillingContext, BillingHonoEnv } from "./types";
 
 type RateLimiter = { check(key: string): RateLimitResult };
@@ -119,23 +121,28 @@ export function registerMeteringRoutes({
 		rateLimitMiddleware({ limiter: meteringLimiter, key: rateLimitKey }),
 	);
 
-	app.get("/v1/billing-accounts/:billingAccountId/balances/:featureKey", async (c) => {
-		const params = parseSchema(
-			balanceParamsSchema,
-			c.req.param(),
-			"Invalid balance route parameters",
-		);
-		const balance = await meteringService.getBalance(
-			privateProject(c),
-			params.billingAccountId,
-			params.featureKey,
-			new URL(c.req.url).searchParams.get("entityId"),
-		);
-		return c.json({ success: true, data: balance });
-	});
+	registerRoute(
+		app,
+		meteringContracts.getV1BillingAccountsByBillingAccountIdBalancesByFeatureKey,
+		async (c) => {
+			const params = parseSchema(
+				balanceParamsSchema,
+				c.req.param(),
+				"Invalid balance route parameters",
+			);
+			const balance = await meteringService.getBalance(
+				privateProject(c),
+				params.billingAccountId,
+				params.featureKey,
+				new URL(c.req.url).searchParams.get("entityId"),
+			);
+			return c.json({ success: true, data: balance });
+		},
+	);
 
-	app.get(
-		"/v1/billing-accounts/:billingAccountId/usage/operations/:operation/:operationId",
+	registerRoute(
+		app,
+		meteringContracts.getV1BillingAccountsByBillingAccountIdUsageOperationsByOperationByOperationId,
 		async (c) => {
 			const params = parseSchema(
 				operationParamsSchema,
@@ -147,65 +154,78 @@ export function registerMeteringRoutes({
 		},
 	);
 
-	app.post("/v1/billing-accounts/:billingAccountId/usage/check", async (c) => {
-		const params = parseSchema(
-			subjectParamsSchema,
-			c.req.param(),
-			"Invalid usage route parameters",
-		);
-		const body = parseSchema(
-			usageBodySchema,
-			await parsePrivateJson(c.req.raw),
-			"Invalid usage check body",
-		);
-		const result = await meteringService.check(privateProject(c), {
-			billingAccountId: params.billingAccountId,
-			...usageInput(body),
-		});
-		return c.json({ success: true, data: result });
-	});
+	registerRoute(
+		app,
+		meteringContracts.postV1BillingAccountsByBillingAccountIdUsageCheck,
+		async (c) => {
+			const params = parseSchema(
+				subjectParamsSchema,
+				c.req.param(),
+				"Invalid usage route parameters",
+			);
+			const body = parseSchema(
+				usageBodySchema,
+				await parsePrivateJson(c.req.raw),
+				"Invalid usage check body",
+			);
+			const result = await meteringService.check(privateProject(c), {
+				billingAccountId: params.billingAccountId,
+				...usageInput(body),
+			});
+			return c.json({ success: true, data: result });
+		},
+	);
 
-	app.post("/v1/billing-accounts/:billingAccountId/usage/consume", async (c) => {
-		const params = parseSchema(
-			subjectParamsSchema,
-			c.req.param(),
-			"Invalid usage route parameters",
-		);
-		const body = parseSchema(
-			usageBodySchema,
-			await parsePrivateJson(c.req.raw),
-			"Invalid usage consume body",
-		);
-		const result = await meteringService.consume(privateProject(c), {
-			billingAccountId: params.billingAccountId,
-			idempotencyKey: requireIdempotencyKey(c.req.header("idempotency-key")),
-			...usageInput(body),
-		});
-		return c.json({ success: true, data: result });
-	});
+	registerRoute(
+		app,
+		meteringContracts.postV1BillingAccountsByBillingAccountIdUsageConsume,
+		async (c) => {
+			const params = parseSchema(
+				subjectParamsSchema,
+				c.req.param(),
+				"Invalid usage route parameters",
+			);
+			const body = parseSchema(
+				usageBodySchema,
+				await parsePrivateJson(c.req.raw),
+				"Invalid usage consume body",
+			);
+			const result = await meteringService.consume(privateProject(c), {
+				billingAccountId: params.billingAccountId,
+				idempotencyKey: requireIdempotencyKey(c.req.header("idempotency-key")),
+				...usageInput(body),
+			});
+			return c.json({ success: true, data: result });
+		},
+	);
 
-	app.post("/v1/billing-accounts/:billingAccountId/usage/reservations", async (c) => {
-		const params = parseSchema(
-			subjectParamsSchema,
-			c.req.param(),
-			"Invalid usage route parameters",
-		);
-		const body = parseSchema(
-			reserveBodySchema,
-			await parsePrivateJson(c.req.raw),
-			"Invalid usage reservation body",
-		);
-		const result = await meteringService.reserve(privateProject(c), {
-			billingAccountId: params.billingAccountId,
-			idempotencyKey: requireIdempotencyKey(c.req.header("idempotency-key")),
-			expiresInSeconds: body.expiresInSeconds,
-			...usageInput(body),
-		});
-		return c.json({ success: true, data: result });
-	});
+	registerRoute(
+		app,
+		meteringContracts.postV1BillingAccountsByBillingAccountIdUsageReservations,
+		async (c) => {
+			const params = parseSchema(
+				subjectParamsSchema,
+				c.req.param(),
+				"Invalid usage route parameters",
+			);
+			const body = parseSchema(
+				reserveBodySchema,
+				await parsePrivateJson(c.req.raw),
+				"Invalid usage reservation body",
+			);
+			const result = await meteringService.reserve(privateProject(c), {
+				billingAccountId: params.billingAccountId,
+				idempotencyKey: requireIdempotencyKey(c.req.header("idempotency-key")),
+				expiresInSeconds: body.expiresInSeconds,
+				...usageInput(body),
+			});
+			return c.json({ success: true, data: result });
+		},
+	);
 
-	app.post(
-		"/v1/billing-accounts/:billingAccountId/usage/reservations/:reservationId/confirm",
+	registerRoute(
+		app,
+		meteringContracts.postV1BillingAccountsByBillingAccountIdUsageReservationsByReservationIdConfirm,
 		async (c) => {
 			const params = parseSchema(
 				reservationParamsSchema,
@@ -229,8 +249,9 @@ export function registerMeteringRoutes({
 		},
 	);
 
-	app.post(
-		"/v1/billing-accounts/:billingAccountId/usage/reservations/:reservationId/release",
+	registerRoute(
+		app,
+		meteringContracts.postV1BillingAccountsByBillingAccountIdUsageReservationsByReservationIdRelease,
 		async (c) => {
 			const params = parseSchema(
 				reservationParamsSchema,
@@ -251,8 +272,9 @@ export function registerMeteringRoutes({
 		},
 	);
 
-	app.post(
-		"/v1/billing-accounts/:billingAccountId/usage/events/:usageEventId/corrections",
+	registerRoute(
+		app,
+		meteringContracts.postV1BillingAccountsByBillingAccountIdUsageEventsByUsageEventIdCorrections,
 		async (c) => {
 			const params = parseSchema(
 				usageEventParamsSchema,
@@ -348,3 +370,113 @@ function privateProject(c: BillingContext): ProjectInstanceContext {
 	}
 	return project;
 }
+
+export const meteringContracts = {
+	getV1BillingAccountsByBillingAccountIdBalancesByFeatureKey: defineContract(
+		"get",
+		"/v1/billing-accounts/:billingAccountId/balances/:featureKey",
+		{
+			operationId: "getV1BillingAccountsByBillingAccountIdBalancesByFeatureKey",
+			tags: ["metering"],
+			params: balanceParamsSchema,
+			responses: {
+				"200":
+					responses.getV1BillingAccountsByBillingAccountIdBalancesByFeatureKeyResponse200Schema,
+			},
+		},
+	),
+	getV1BillingAccountsByBillingAccountIdUsageOperationsByOperationByOperationId: defineContract(
+		"get",
+		"/v1/billing-accounts/:billingAccountId/usage/operations/:operation/:operationId",
+		{
+			operationId: "getV1BillingAccountsByBillingAccountIdUsageOperationsByOperationByOperationId",
+			tags: ["metering"],
+			params: operationParamsSchema,
+			responses: {
+				"200":
+					responses.getV1BillingAccountsByBillingAccountIdUsageOperationsByOperationByOperationIdResponse200Schema,
+			},
+		},
+	),
+	postV1BillingAccountsByBillingAccountIdUsageCheck: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/usage/check",
+		{
+			operationId: "postV1BillingAccountsByBillingAccountIdUsageCheck",
+			tags: ["metering"],
+			params: subjectParamsSchema,
+			body: usageBodySchema,
+			responses: {
+				"200": responses.postV1BillingAccountsByBillingAccountIdUsageCheckResponse200Schema,
+			},
+		},
+	),
+	postV1BillingAccountsByBillingAccountIdUsageConsume: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/usage/consume",
+		{
+			operationId: "postV1BillingAccountsByBillingAccountIdUsageConsume",
+			tags: ["metering"],
+			params: subjectParamsSchema,
+			body: usageBodySchema,
+			responses: {
+				"200": responses.postV1BillingAccountsByBillingAccountIdUsageConsumeResponse200Schema,
+			},
+		},
+	),
+	postV1BillingAccountsByBillingAccountIdUsageReservations: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/usage/reservations",
+		{
+			operationId: "postV1BillingAccountsByBillingAccountIdUsageReservations",
+			tags: ["metering"],
+			params: subjectParamsSchema,
+			body: reserveBodySchema,
+			responses: {
+				"200": responses.postV1BillingAccountsByBillingAccountIdUsageReservationsResponse200Schema,
+			},
+		},
+	),
+	postV1BillingAccountsByBillingAccountIdUsageReservationsByReservationIdConfirm: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/usage/reservations/:reservationId/confirm",
+		{
+			operationId: "postV1BillingAccountsByBillingAccountIdUsageReservationsByReservationIdConfirm",
+			tags: ["metering"],
+			params: reservationParamsSchema,
+			body: confirmBodySchema,
+			responses: {
+				"200":
+					responses.postV1BillingAccountsByBillingAccountIdUsageReservationsByReservationIdConfirmResponse200Schema,
+			},
+		},
+	),
+	postV1BillingAccountsByBillingAccountIdUsageReservationsByReservationIdRelease: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/usage/reservations/:reservationId/release",
+		{
+			operationId: "postV1BillingAccountsByBillingAccountIdUsageReservationsByReservationIdRelease",
+			tags: ["metering"],
+			params: reservationParamsSchema,
+			body: emptyBodySchema,
+			responses: {
+				"200":
+					responses.postV1BillingAccountsByBillingAccountIdUsageReservationsByReservationIdReleaseResponse200Schema,
+			},
+		},
+	),
+	postV1BillingAccountsByBillingAccountIdUsageEventsByUsageEventIdCorrections: defineContract(
+		"post",
+		"/v1/billing-accounts/:billingAccountId/usage/events/:usageEventId/corrections",
+		{
+			operationId: "postV1BillingAccountsByBillingAccountIdUsageEventsByUsageEventIdCorrections",
+			tags: ["metering"],
+			params: usageEventParamsSchema,
+			body: correctionBodySchema,
+			responses: {
+				"200":
+					responses.postV1BillingAccountsByBillingAccountIdUsageEventsByUsageEventIdCorrectionsResponse200Schema,
+			},
+		},
+	),
+} as const;

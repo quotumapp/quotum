@@ -1,6 +1,6 @@
 {
 	"name": "quotum-api",
-	"version": "0.8.0",
+	"version": "0.8.1",
 	"exports": {
 		"./sdk": "./src/sdk/index.ts"
 	},
@@ -8,6 +8,8 @@
 		"billing-catalog": "./scripts/billing-catalog.ts"
 	},
 	"scripts": {
+		"openapi:generate": "bun scripts/openapi.ts",
+		"openapi:check": "bun scripts/openapi.ts --check",
 		"dev": "bun run --hot src/index.ts",
 		"migrate": "bun run src/migrate.ts",
 		"migrate:status": "bun run src/migrate.ts status",
@@ -26,23 +28,29 @@
 		"format:check": "biome format .",
 		"quality": "bun run check:boundaries && bun run typecheck && bun run lint && bun run format:check",
 		"quality:fix": "bun run lint:fix && bun run format",
-		"test:merchant:integration": "bun run scripts/test-integration.ts integration/merchant"
+		"test:merchant:integration": "bun run scripts/test-integration.ts integration/merchant",
+		"openapi:lint": "redocly lint contracts/v1/openapi.json"
 	},
 	"dependencies": {
 		"@apple/app-store-server-library": "3.1.0",
 		"@googleapis/androidpublisher": "37.0.0",
+		"@hono/zod-openapi": "^1.6.3",
 		"@sentry/bun": "^10.70.0",
+		"better-auth": "1.7.2",
 		"drizzle-orm": "^0.45.2",
 		"google-auth-library": "11.0.2",
 		"hono": "^4.13.2",
+		"openapi3-ts": "^4.6.1",
 		"stripe": "22.5.0",
-		"zod": "^4.4.3",
-		"better-auth": "1.7.2"
+		"zod": "^4.4.3"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.8",
+		"@redocly/cli": "^2.51.2",
 		"@testcontainers/postgresql": "^12.1.0",
 		"@types/bun": "latest",
+		"ajv": "^8.20.0",
+		"ajv-formats": "^3.0.1",
 		"typescript": "^7.0.2"
 	},
 	"overrides": {

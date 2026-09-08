@@ -10,6 +10,16 @@ Before 1.0 the schema ships as baseline files under `migrations/` that evolve in
 checksum-verified; recreate a database from them rather than migrating it. Incremental migrations
 start at 1.0.
 
+## [0.8.1] - 2026-09-08
+
+### Added
+
+- Generated OpenAPI contract (`contracts/v1/openapi.json`) and runtime error inventory
+  (`contracts/v1/errors.json`) covering every implemented route, produced by
+  `bun run openapi:generate` from module-owned Zod schemas.
+- `bun run openapi:check` and `bun run openapi:lint`, plus a CI diff report against the base
+  revision.
+
 ## [0.8.0] - 2026-09-07
 
 ### Added

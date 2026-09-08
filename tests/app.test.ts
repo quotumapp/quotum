@@ -18,6 +18,7 @@ import type { BillingEnv } from "../src/env";
 import type { BillingLogger } from "../src/observability/logger";
 import { type BillingMetrics, createInMemoryBillingMetrics } from "../src/observability/metrics";
 import { BillingAdminOperations } from "../src/operations/admin";
+import { withOpenApiAssertions } from "./helpers/openapi";
 import { projectContextResolver, projectInstanceContext } from "./helpers/project-context";
 
 const env: BillingEnv = {
@@ -96,20 +97,22 @@ function createApp(dependencies: AppDependencies) {
 	const contexts = dependencies.env.projectRuntime.map((project) =>
 		projectInstanceContext(project.projectInstanceKey),
 	);
-	return createBillingApp({
-		...dependencies,
-		projectContextResolver:
-			dependencies.projectContextResolver ??
-			projectContextResolver({
-				contexts,
-				credentials: {
-					secret: "voysee",
-					"voysee-service-key-123456": "voysee",
-					"wiseley-service-key-123456": "wiseley",
-					"inactive-project-key-123456": "inactive",
-				},
-			}),
-	});
+	return withOpenApiAssertions(
+		createBillingApp({
+			...dependencies,
+			projectContextResolver:
+				dependencies.projectContextResolver ??
+				projectContextResolver({
+					contexts,
+					credentials: {
+						secret: "voysee",
+						"voysee-service-key-123456": "voysee",
+						"wiseley-service-key-123456": "wiseley",
+						"inactive-project-key-123456": "inactive",
+					},
+				}),
+		}),
+	);
 }
 
 function createRecordingLogger() {
@@ -1989,7 +1992,11 @@ describe("billing app", () => {
 						...stripeBillingService,
 						handleWebhook() {
 							calls.push("voysee");
-							return Promise.resolve({ status: "processed", entitlements: null });
+							return Promise.resolve({
+								status: "processed",
+								eventType: "checkout.session.completed",
+								entitlements: null,
+							});
 						},
 					},
 				},
@@ -2005,7 +2012,11 @@ describe("billing app", () => {
 								);
 							}
 							calls.push("wiseley");
-							return Promise.resolve({ status: "processed", entitlements: null });
+							return Promise.resolve({
+								status: "processed",
+								eventType: "checkout.session.completed",
+								entitlements: null,
+							});
 						},
 					},
 				},

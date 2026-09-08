@@ -1,0 +1,821 @@
+{
+  "codes": [
+    {
+      "code": "ACCESS_REMOVED",
+      "sources": [
+        "src/platform/store.ts"
+      ]
+    },
+    {
+      "code": "ACTION_MISMATCH",
+      "sources": [
+        "src/platform/step-up.ts"
+      ]
+    },
+    {
+      "code": "ACTION_REJECTED",
+      "sources": [
+        "src/platform/app.ts",
+        "src/platform/step-up.ts"
+      ]
+    },
+    {
+      "code": "ADDON_REQUIRES_BASE_PLAN",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "ALLOCATION_IDENTITY_CONFLICT",
+      "sources": [
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "ALREADY_MEMBER",
+      "sources": [
+        "src/platform/team.ts"
+      ]
+    },
+    {
+      "code": "AUTHENTICATION_INCOMPLETE",
+      "sources": [
+        "src/platform/app.ts",
+        "src/platform/store.ts"
+      ]
+    },
+    {
+      "code": "AUTO_TOPUP_POLICY_NOT_FOUND",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "BILLING_ACCOUNT_NOT_FOUND",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts",
+        "src/db/repository/insights.ts",
+        "src/db/repository/metering.ts",
+        "src/db/repository/usage-operations.ts"
+      ]
+    },
+    {
+      "code": "BILLING_ADMIN_NOT_CONFIGURED",
+      "sources": [
+        "src/app/admin-routes.ts",
+        "src/composition/merchant-billing.ts",
+        "src/operations/admin.ts"
+      ]
+    },
+    {
+      "code": "BILLING_OPERATOR_NOT_CONFIGURED",
+      "sources": [
+        "src/app/admin-routes.ts"
+      ]
+    },
+    {
+      "code": "BILLING_PLAN_NOT_FOUND",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts",
+        "src/db/repository/stripe.ts"
+      ]
+    },
+    {
+      "code": "BILLING_PRODUCT_NOT_FOUND",
+      "sources": [
+        "src/db/repository/apple.ts",
+        "src/db/repository/google.ts",
+        "src/db/repository/identities.ts",
+        "src/db/repository/stripe.ts"
+      ]
+    },
+    {
+      "code": "BILLING_PROJECT_CONTEXT_UNAVAILABLE",
+      "sources": [
+        "src/app.ts",
+        "src/app/webhook-routes.ts",
+        "src/http/api-key.ts"
+      ]
+    },
+    {
+      "code": "BILLING_PROJECT_NOT_CONFIGURED",
+      "sources": [
+        "src/app.ts",
+        "src/app/provider-services.ts",
+        "src/app/webhook-routes.ts"
+      ]
+    },
+    {
+      "code": "BILLING_PROJECT_REQUIRED",
+      "sources": [
+        "src/app.ts",
+        "src/app/admin-routes.ts",
+        "src/app/catalog-routes.ts",
+        "src/app/controls-routes.ts",
+        "src/app/customer-routes.ts",
+        "src/app/insights-routes.ts",
+        "src/app/metering-routes.ts"
+      ]
+    },
+    {
+      "code": "BILLING_PROVIDER_NOT_CONFIGURED",
+      "sources": [
+        "src/app/provider-services.ts",
+        "src/billing/errors.ts"
+      ]
+    },
+    {
+      "code": "BILLING_PROVIDER_UNAVAILABLE",
+      "sources": [
+        "src/billing/errors.ts"
+      ]
+    },
+    {
+      "code": "BILLING_UNAVAILABLE",
+      "sources": [
+        "src/platform/app.ts"
+      ]
+    },
+    {
+      "code": "CATALOG_PREVIEW_EXPIRED",
+      "sources": [
+        "src/catalog/control-plane.ts"
+      ]
+    },
+    {
+      "code": "CATALOG_PREVIEW_MISMATCH",
+      "sources": [
+        "src/catalog/control-plane.ts"
+      ]
+    },
+    {
+      "code": "CATALOG_PREVIEW_NOT_FOUND",
+      "sources": [
+        "src/catalog/control-plane.ts"
+      ]
+    },
+    {
+      "code": "CATALOG_PREVIEW_STALE",
+      "sources": [
+        "src/catalog/control-plane.ts"
+      ]
+    },
+    {
+      "code": "CATALOG_REVISION_CONFLICT",
+      "sources": [
+        "src/catalog/control-plane.ts"
+      ]
+    },
+    {
+      "code": "COMMERCIAL_EXECUTION_CONFLICT",
+      "sources": [
+        "src/db/repository/commercial-actions.ts"
+      ]
+    },
+    {
+      "code": "COMMERCIAL_PREVIEW_EXPIRED",
+      "sources": [
+        "src/db/repository/commercial-actions.ts"
+      ]
+    },
+    {
+      "code": "COMMERCIAL_PREVIEW_MISMATCH",
+      "sources": [
+        "src/db/repository/commercial-actions.ts"
+      ]
+    },
+    {
+      "code": "COMMERCIAL_PREVIEW_NOT_FOUND",
+      "sources": [
+        "src/db/repository/commercial-actions.ts"
+      ]
+    },
+    {
+      "code": "COMMERCIAL_PREVIEW_STALE",
+      "sources": [
+        "src/db/repository/commercial-actions.ts",
+        "src/db/repository/recurring-pricing.ts",
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "CONTEXT_REQUIRED",
+      "sources": [
+        "src/platform/billing.ts"
+      ]
+    },
+    {
+      "code": "CONTEXT_UNAVAILABLE",
+      "sources": [
+        "src/composition/merchant-billing.ts",
+        "src/platform/billing.ts",
+        "src/platform/step-up.ts"
+      ]
+    },
+    {
+      "code": "CONTRACT_PREVIEW_EXPIRED",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "CONTRACT_PREVIEW_MISMATCH",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "CONTRACT_PREVIEW_NOT_FOUND",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "CORRECTION_EXCEEDS_USAGE",
+      "sources": [
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "CSRF_REJECTED",
+      "sources": [
+        "src/platform/security.ts",
+        "src/platform/store.ts"
+      ]
+    },
+    {
+      "code": "DRAFT_CHANGED",
+      "sources": [
+        "src/platform/onboarding.ts"
+      ]
+    },
+    {
+      "code": "EMAIL_DELIVERY_FAILED",
+      "sources": [
+        "src/platform/auth.ts",
+        "src/platform/email.ts",
+        "src/platform/team.ts"
+      ]
+    },
+    {
+      "code": "EMAIL_NOT_VERIFIED",
+      "sources": [
+        "src/platform/auth.ts"
+      ]
+    },
+    {
+      "code": "ENTERPRISE_CONTRACT_NOT_FOUND",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "ENTERPRISE_CONTRACT_VERSION_EXISTS",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "ENTITY_NOT_FOUND",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts",
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "FEATURE_IDENTITY_CONFLICT",
+      "sources": [
+        "src/catalog/control-plane.ts"
+      ]
+    },
+    {
+      "code": "FEATURE_NOT_FOUND",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts",
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "FORBIDDEN",
+      "sources": [
+        "src/platform/security.ts",
+        "src/platform/store.ts"
+      ]
+    },
+    {
+      "code": "GOOGLE_PLAY_ACCOUNT_ID_MISMATCH",
+      "sources": [
+        "src/providers/google/service.ts"
+      ]
+    },
+    {
+      "code": "GOOGLE_PLAY_API_UNAVAILABLE",
+      "sources": [
+        "src/providers/google/client.ts"
+      ]
+    },
+    {
+      "code": "GOOGLE_PLAY_MUTATION_FAILED",
+      "sources": [
+        "src/providers/google/client.ts"
+      ]
+    },
+    {
+      "code": "GOOGLE_PLAY_PURCHASE_NOT_FOUND",
+      "sources": [
+        "src/providers/google/client.ts"
+      ]
+    },
+    {
+      "code": "GOOGLE_PLAY_PURCHASE_PENDING",
+      "sources": [
+        "src/providers/google/service.ts"
+      ]
+    },
+    {
+      "code": "GOOGLE_PLAY_RECORDING_SKIPPED",
+      "sources": [
+        "src/providers/google/service.ts"
+      ]
+    },
+    {
+      "code": "GOOGLE_PLAY_RTDN_INVALID_MESSAGE",
+      "sources": [
+        "src/providers/google/pubsub.ts"
+      ]
+    },
+    {
+      "code": "GOOGLE_PLAY_RTDN_UNAUTHORIZED",
+      "sources": [
+        "src/app/webhook-routes.ts",
+        "src/providers/google/pubsub.ts"
+      ]
+    },
+    {
+      "code": "IDEMPOTENCY_CONFLICT",
+      "sources": [
+        "src/db/repository/commercial-actions.ts",
+        "src/db/repository/recurring-pricing.ts",
+        "src/db/repository/stripe.ts",
+        "src/db/repository/usage-operations.ts",
+        "src/platform/store.ts",
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "IDEMPOTENCY_KEY_REQUIRED",
+      "sources": [
+        "src/platform/security.ts"
+      ]
+    },
+    {
+      "code": "IDENTITY_CONFLICT",
+      "sources": [
+        "src/platform/store.ts"
+      ]
+    },
+    {
+      "code": "IDENTITY_MISSING",
+      "sources": [
+        "src/platform/auth.ts"
+      ]
+    },
+    {
+      "code": "INSUFFICIENT_BALANCE",
+      "sources": [
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "INTERNAL_ERROR",
+      "sources": [
+        "src/billing/errors.ts"
+      ]
+    },
+    {
+      "code": "INVALID_BILLING_ACCOUNT_ID",
+      "sources": [
+        "src/billing/entitlements.ts"
+      ]
+    },
+    {
+      "code": "INVALID_IDEMPOTENCY_KEY",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "INVALID_QUANTITY",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "INVALID_REQUEST",
+      "sources": [
+        "src/admin/query.ts",
+        "src/app.ts",
+        "src/app/customer-routes.ts",
+        "src/app/insights-routes.ts",
+        "src/app/webhook-routes.ts",
+        "src/billing/errors.ts",
+        "src/operations/admin.ts",
+        "src/platform/app.ts",
+        "src/providers/apple/service.ts",
+        "src/providers/google/pubsub.ts",
+        "src/providers/google/service.ts",
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "INVALID_TWO_FACTOR_COOKIE",
+      "sources": [
+        "src/platform/auth.ts"
+      ]
+    },
+    {
+      "code": "INVITATION_EXISTS",
+      "sources": [
+        "src/platform/team.ts"
+      ]
+    },
+    {
+      "code": "INVITATION_NOT_FOUND",
+      "sources": [
+        "src/platform/app.ts",
+        "src/platform/team.ts"
+      ]
+    },
+    {
+      "code": "LICENSE_ALREADY_ASSIGNED",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "LICENSE_ASSIGNMENT_NOT_FOUND",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "LICENSE_POOL_EXHAUSTED",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "LICENSE_POOL_NOT_FOUND",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "LINK_EXPIRED",
+      "sources": [
+        "src/platform/app.ts",
+        "src/platform/store.ts"
+      ]
+    },
+    {
+      "code": "METER_RATE_NOT_ACTIVATED",
+      "sources": [
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "METERING_CONFIGURATION_ERROR",
+      "sources": [
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "MIGRATION_PREVIEW_EXPIRED",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "MIGRATION_PREVIEW_MISMATCH",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "MIGRATION_PREVIEW_NOT_FOUND",
+      "sources": [
+        "src/db/repository/controls-enterprise.ts"
+      ]
+    },
+    {
+      "code": "NOT_CONFIGURED",
+      "sources": [
+        "src/app/catalog-routes.ts"
+      ]
+    },
+    {
+      "code": "NOT_FOUND",
+      "sources": [
+        "src/app.ts",
+        "src/billing/errors.ts",
+        "src/platform/app.ts",
+        "src/platform/billing.ts",
+        "src/platform/onboarding.ts",
+        "src/platform/team.ts"
+      ]
+    },
+    {
+      "code": "OPERATION_IN_PROGRESS",
+      "sources": [
+        "src/db/repository/usage-operations.ts"
+      ]
+    },
+    {
+      "code": "OPERATION_NOT_FOUND",
+      "sources": [
+        "src/db/repository/usage-operations.ts"
+      ]
+    },
+    {
+      "code": "OPERATION_OUTCOME_TOO_LARGE",
+      "sources": [
+        "src/db/repository/usage-operations.ts"
+      ]
+    },
+    {
+      "code": "OPERATION_RESULT_EXPIRED",
+      "sources": [
+        "src/db/repository/usage-operations.ts"
+      ]
+    },
+    {
+      "code": "ORGANIZATION_REQUIRED",
+      "sources": [
+        "src/platform/onboarding.ts"
+      ]
+    },
+    {
+      "code": "ORIGIN_REJECTED",
+      "sources": [
+        "src/platform/security.ts"
+      ]
+    },
+    {
+      "code": "OWNER_PROTECTED",
+      "sources": [
+        "src/platform/team.ts"
+      ]
+    },
+    {
+      "code": "PERSISTENCE_CONFLICT",
+      "sources": [
+        "src/billing/errors.ts"
+      ]
+    },
+    {
+      "code": "PLAN_VERSION_CONFLICT",
+      "sources": [
+        "src/catalog/control-plane.ts"
+      ]
+    },
+    {
+      "code": "POLICY_ACCEPTANCE_REQUIRED",
+      "sources": [
+        "src/platform/app.ts",
+        "src/platform/auth.ts"
+      ]
+    },
+    {
+      "code": "PROJECT_REQUIRED",
+      "sources": [
+        "src/platform/onboarding.ts"
+      ]
+    },
+    {
+      "code": "PROJECTION_JOB_NOT_FAILED",
+      "sources": [
+        "src/db/repository/projection-jobs.ts"
+      ]
+    },
+    {
+      "code": "PROVIDER_BINDING_NOT_READY",
+      "sources": [
+        "src/catalog/control-plane.ts"
+      ]
+    },
+    {
+      "code": "PROVIDER_REJECTED",
+      "sources": [
+        "src/platform/auth.ts"
+      ]
+    },
+    {
+      "code": "QUANTITY_REQUIRED",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "RATE_LIMITED",
+      "sources": [
+        "src/http/rate-limit.ts",
+        "src/platform/store.ts"
+      ]
+    },
+    {
+      "code": "REQUEST_BODY_TOO_LARGE",
+      "sources": [
+        "src/app.ts"
+      ]
+    },
+    {
+      "code": "REQUEST_TOO_LARGE",
+      "sources": [
+        "src/platform/app.ts"
+      ]
+    },
+    {
+      "code": "RESERVATION_ALREADY_CONFIRMED",
+      "sources": [
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "RESERVATION_NOT_FOUND",
+      "sources": [
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "RESERVATION_QUANTITY_EXCEEDED",
+      "sources": [
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "RESERVATION_RELEASED",
+      "sources": [
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "RETURN_URL_NOT_ALLOWED",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "RETURN_URL_REJECTED",
+      "sources": [
+        "src/platform/app.ts"
+      ]
+    },
+    {
+      "code": "SANDBOX_NOT_READY",
+      "sources": [
+        "src/platform/onboarding.ts"
+      ]
+    },
+    {
+      "code": "SEAT_LIMIT",
+      "sources": [
+        "src/platform/team.ts"
+      ]
+    },
+    {
+      "code": "SERVICE_UNAUTHORIZED",
+      "sources": [
+        "src/platform/app.ts"
+      ]
+    },
+    {
+      "code": "SERVICE_UNAVAILABLE",
+      "sources": [
+        "src/platform/app.ts"
+      ]
+    },
+    {
+      "code": "SESSION_EXPIRED",
+      "sources": [
+        "src/platform/step-up.ts",
+        "src/platform/store.ts"
+      ]
+    },
+    {
+      "code": "SESSION_REQUIRED",
+      "sources": [
+        "src/platform/store.ts"
+      ]
+    },
+    {
+      "code": "SIGNUP_DISABLED",
+      "sources": [
+        "src/platform/app.ts",
+        "src/platform/auth.ts"
+      ]
+    },
+    {
+      "code": "SLUG_UNAVAILABLE",
+      "sources": [
+        "src/platform/onboarding.ts"
+      ]
+    },
+    {
+      "code": "STEP_UP_EXPIRED",
+      "sources": [
+        "src/platform/step-up.ts"
+      ]
+    },
+    {
+      "code": "STEP_UP_IDENTITY_MISMATCH",
+      "sources": [
+        "src/platform/step-up.ts"
+      ]
+    },
+    {
+      "code": "STEP_UP_REQUIRED",
+      "sources": [
+        "src/platform/step-up.ts"
+      ]
+    },
+    {
+      "code": "STEP_UP_USED",
+      "sources": [
+        "src/platform/step-up.ts"
+      ]
+    },
+    {
+      "code": "STOREKIT_ACCOUNT_TOKEN_MISMATCH",
+      "sources": [
+        "src/providers/apple/service.ts"
+      ]
+    },
+    {
+      "code": "STOREKIT_RECORDING_SKIPPED",
+      "sources": [
+        "src/providers/apple/service.ts"
+      ]
+    },
+    {
+      "code": "STRIPE_CHECKOUT_URL_MISSING",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "STRIPE_NOT_CONFIGURED",
+      "sources": [
+        "src/app/customer-routes.ts",
+        "src/composition/merchant-billing.ts",
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "STRIPE_WEBHOOK_SIGNATURE_INVALID",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "SUBSCRIPTION_CHANGE_PENDING",
+      "sources": [
+        "src/db/repository/recurring-pricing.ts"
+      ]
+    },
+    {
+      "code": "SUBSCRIPTION_CHANGE_TARGET_NOT_FOUND",
+      "sources": [
+        "src/db/repository/recurring-pricing.ts"
+      ]
+    },
+    {
+      "code": "SUBSCRIPTION_PERIOD_MISSING",
+      "sources": [
+        "src/db/repository/recurring-pricing.ts"
+      ]
+    },
+    {
+      "code": "TRUST_DEVICE_DISABLED",
+      "sources": [
+        "src/platform/auth.ts"
+      ]
+    },
+    {
+      "code": "UNAUTHORIZED",
+      "sources": [
+        "src/app/admin-routes.ts",
+        "src/billing/errors.ts",
+        "src/http/api-key.ts"
+      ]
+    },
+    {
+      "code": "USAGE_EVENT_NOT_FOUND",
+      "sources": [
+        "src/db/repository/metering.ts"
+      ]
+    }
+  ],
+  "description": "Literal Quotum wire error codes. Native Better Auth/provider codes may also pass through; consumers must handle unknown codes. HTTP status and retry headers on the response remain authoritative.",
+  "extensible": true,
+  "schemaVersion": 1
+}

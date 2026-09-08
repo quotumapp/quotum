@@ -25,6 +25,7 @@ import type {
 	ProjectProviderServiceOverrides,
 	ProjectProviderServices,
 } from "../projects/providers";
+import type { StripeCheckoutSessionStatus } from "../providers/stripe/service";
 import type { StripeCatalog } from "../providers/stripe/types";
 
 export type BillingHonoEnv = { Variables: { project: ProjectInstanceContext; requestId: string } };
@@ -51,6 +52,10 @@ export interface GooglePlayBillingServiceLike {
 }
 
 export interface StripeBillingServiceLike {
+	expireCheckoutSession?(input: {
+		billingAccountId: string;
+		sessionId: string;
+	}): Promise<StripeCheckoutSessionStatus>;
 	getCatalog?(): Promise<StripeCatalog>;
 	getBillingAccount?(billingAccountId: string): Promise<{
 		schemaVersion: 1;
@@ -65,6 +70,7 @@ export interface StripeBillingServiceLike {
 		idempotencyKey?: string | null;
 		successUrl?: string | null;
 		cancelUrl?: string | null;
+		expiresAt?: number;
 	}): Promise<{
 		sessionId: string;
 		url: string;
@@ -78,6 +84,7 @@ export interface StripeBillingServiceLike {
 		idempotencyKey?: string | null;
 		successUrl?: string | null;
 		cancelUrl?: string | null;
+		expiresAt?: number;
 	}): Promise<{ sessionId: string; url: string; duplicate?: boolean }>;
 	requestSubscriptionChange?(input: {
 		billingAccountId: string;

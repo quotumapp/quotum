@@ -10,8 +10,9 @@ import type {
 	OnboardingDraftView,
 	ProvisioningOperationView,
 	StepUpChallengeView,
+	TeamView,
 } from "../../src/platform/contracts";
-import { SESSION_COOKIE } from "../../src/platform/security";
+import { capabilitiesFor, SESSION_COOKIE } from "../../src/platform/security";
 import { mutationTarget } from "../../src/platform/step-up";
 import { createIntegrationBillingEnv } from "../../tests/integration/helpers/local-postgres";
 import { MerchantBrowser, merchantFixture, password } from "./fixture";
@@ -41,6 +42,16 @@ describe("merchant platform transactions", () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();
 		const { operation } = await onboard(browser);
+		const team = await browser.json<TeamView>("/api/platform/team?organization=acme");
+		expect(team.roleDefinitions.map((definition) => definition.role)).toEqual([
+			"Owner",
+			"Admin",
+			"Developer",
+			"Operator",
+			"Viewer",
+		]);
+		for (const definition of team.roleDefinitions)
+			expect(definition.capabilities).toEqual(capabilitiesFor(definition.role));
 		const issued = await browser.json<{ credential: string }>(
 			`/api/platform/provisioning/${operation.id}/credential`,
 			{},

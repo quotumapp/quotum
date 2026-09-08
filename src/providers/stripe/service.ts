@@ -70,6 +70,7 @@ export interface StripeBillingClientDependency {
 		params: Stripe.Checkout.SessionCreateParams,
 		idempotencyKey?: string,
 	): Promise<{ id: string; url: string | null }>;
+	expireCheckoutSession?(sessionId: string): Promise<unknown>;
 	createPortalSession(params: Stripe.BillingPortal.SessionCreateParams): Promise<{ url: string }>;
 	retrieveCheckoutSession(sessionId: string): Promise<{
 		id: string;
@@ -182,6 +183,7 @@ export interface CreateStripeCheckoutSessionInput {
 	successUrl?: string | null;
 	cancelUrl?: string | null;
 	expectedTargetId?: string;
+	expiresAt?: number;
 }
 
 export interface StripeCheckoutSessionResult {
@@ -282,6 +284,12 @@ export class StripeBillingService {
 		const quantities = normalizedLicensedQuantities(input.quantities ?? {});
 		const mode: StripeCheckoutMode = product === null ? "subscription" : checkoutModeFor(product);
 		const email = input.email ?? null;
+		if (
+			input.expiresAt !== undefined &&
+			(!Number.isSafeInteger(input.expiresAt) || input.expiresAt <= 0)
+		) {
+			throw new BillingError("Invalid Checkout expiration", "INVALID_REQUEST", 400);
+		}
 		const idempotencyKey = parseOptionalIdempotencyKey(input.idempotencyKey);
 		const successUrl = this.returnUrl(
 			input.successUrl,
@@ -300,6 +308,7 @@ export class StripeBillingService {
 			email,
 			successUrl,
 			cancelUrl,
+			...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
 		});
 		if (idempotencyKey !== null) {
 			const receipt = await this.dependencies.repository.prepareStripeCheckoutRequest({
@@ -332,6 +341,7 @@ export class StripeBillingService {
 		}
 		const params: Stripe.Checkout.SessionCreateParams = {
 			customer: stripeCustomerId,
+			...(input.expiresAt === undefined ? {} : { expires_at: input.expiresAt }),
 			mode,
 			line_items: lineItems,
 			success_url: successUrl,
@@ -867,6 +877,24 @@ export class StripeBillingService {
 		});
 
 		return { url: session.url };
+	}
+
+	async expireCheckoutSession(input: {
+		billingAccountId: string;
+		sessionId: string;
+	}): Promise<StripeCheckoutSessionStatus> {
+		const current = await this.getCheckoutSessionStatus(input);
+		if (current.status !== "open") return current;
+		if (!this.dependencies.client.expireCheckoutSession)
+			throw new BillingError("Checkout expiration is unavailable", "STRIPE_NOT_CONFIGURED", 503);
+		try {
+			await this.dependencies.client.expireCheckoutSession(input.sessionId);
+		} catch (error) {
+			const latest = await this.getCheckoutSessionStatus(input);
+			if (latest.status !== "open") return latest;
+			throw error;
+		}
+		return this.getCheckoutSessionStatus(input);
 	}
 
 	async getCheckoutSessionStatus(input: {
@@ -1735,6 +1763,7 @@ function checkoutRequestHash(value: {
 	email: string | null;
 	successUrl: string;
 	cancelUrl: string;
+	expiresAt?: number;
 }): string {
 	return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }

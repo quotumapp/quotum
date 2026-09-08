@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
+import { defineContract, registerRoute } from "../shared/http-contract";
 import type { MerchantAuth } from "./auth";
 import { SIGNUP_COOKIE } from "./auth";
 import { merchantBillingRoute } from "./billing";
 import type { MerchantMailer } from "./email";
 import { MerchantOnboarding } from "./onboarding";
+import * as responses from "./platform-responses";
 import {
 	assertCsrf,
 	CSRF_COOKIE,
@@ -26,6 +28,10 @@ const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/);
 const projectKey = z.string().regex(/^[a-z0-9][a-z0-9_-]{1,62}$/);
 const name = z.string().trim().min(2).max(100);
 const token = z.string().min(16).max(4096);
+export const resetPasswordBodySchema = z.object({
+	token,
+	newPassword: z.string().min(12).max(128),
+});
 const inviteRole = z.enum(["Admin", "Developer", "Operator", "Viewer"]);
 const organization = z.object({ organizationSlug: slug });
 const scopeSchema = z.strictObject({
@@ -150,7 +156,7 @@ export function createMerchantApp({
 		}
 		await next();
 	});
-	app.get("/api/platform/config", (c) => {
+	registerRoute(app, platformContracts.getApiPlatformConfig, (c) => {
 		const existing = cookieValue(c.req.raw.headers, CSRF_COOKIE);
 		const csrf = existing && /^[A-Za-z0-9_-]{43}$/.test(existing) ? existing : randomToken();
 		c.header("set-cookie", csrfCookie(csrf), { append: true });
@@ -166,7 +172,7 @@ export function createMerchantApp({
 			},
 		});
 	});
-	app.get("/api/platform/session", async (c) => {
+	registerRoute(app, platformContracts.getApiPlatformSession, async (c) => {
 		const identity = await current(c.req.raw);
 		const csrf = cookieValue(c.req.raw.headers, CSRF_COOKIE) ?? "";
 		const parsed = scopeSchema.safeParse({
@@ -185,7 +191,7 @@ export function createMerchantApp({
 			},
 		});
 	});
-	app.post("/api/platform/signup-intent", async (c) => {
+	registerRoute(app, platformContracts.postApiPlatformSignupIntent, async (c) => {
 		if (!store.config.signupEnabled)
 			throw new MerchantError("SIGNUP_DISABLED", "Registration is not available yet.", 403);
 		const input = z
@@ -209,7 +215,7 @@ export function createMerchantApp({
 		);
 		return c.json({ success: true, data: { status: "accepted" } });
 	});
-	app.post("/api/platform/session/exchange", async (c) => {
+	registerRoute(app, platformContracts.postApiPlatformSessionExchange, async (c) => {
 		const result = await store.exchange(
 			await transient(c.req.raw),
 			cookieValue(c.req.raw.headers, SESSION_COOKIE),
@@ -219,15 +225,15 @@ export function createMerchantApp({
 		clearTransientCookies(c);
 		return c.json({ success: true, data: { status: "authenticated" } });
 	});
-	app.post("/api/platform/logout", async (c) => {
+	registerRoute(app, platformContracts.postApiPlatformLogout, async (c) => {
 		const identity = await current(c.req.raw);
 		await store.logout(identity);
 		c.header("set-cookie", sessionCookie("", 0), { append: true });
 		clearTransientCookies(c);
 		return c.json({ success: true, data: { status: "signed_out" } });
 	});
-	app.post("/api/platform/verify-email", async (c) => {
-		const input = z.strictObject({ token }).parse(await merchantJson(c.req.raw));
+	registerRoute(app, platformContracts.postApiPlatformVerifyEmail, async (c) => {
+		const input = postApiPlatformVerifyEmailBodySchema.parse(await merchantJson(c.req.raw));
 		await store.consumeLink(input.token, "verification");
 		try {
 			await auth.api.verifyEmail({ query: { token: input.token } });
@@ -269,7 +275,7 @@ export function createMerchantApp({
 			await store.rateLimit(`${path}:email:${input.email}`, 3, 60 * 60_000);
 		}
 		if (path === "/reset-password") {
-			const reset = z.object({ token, newPassword: z.string().min(12).max(128) }).parse(input);
+			const reset = resetPasswordBodySchema.parse(input);
 			await store.consumeLink(reset.token, "reset");
 		}
 		if (path === "/sign-in/social") {
@@ -334,58 +340,52 @@ export function createMerchantApp({
 			headers,
 		});
 	});
-	app.get("/api/platform/onboarding", async (c) =>
+	registerRoute(app, platformContracts.getApiPlatformOnboarding, async (c) =>
 		c.json({ success: true, data: await store.draft((await current(c.req.raw)).principalId) }),
 	);
-	app.post("/api/platform/onboarding/organization", async (c) =>
+	registerRoute(app, platformContracts.postApiPlatformOnboardingOrganization, async (c) =>
 		c.json({
 			success: true,
 			data: await onboarding.organization(
 				await current(c.req.raw),
 				idempotencyKey(c.req.raw),
-				z
-					.strictObject({ name, slug, revision: z.number().int().positive().optional() })
-					.parse(await merchantJson(c.req.raw)),
+				postApiPlatformOnboardingOrganizationBodySchema.parse(await merchantJson(c.req.raw)),
 			),
 		}),
 	);
-	app.post("/api/platform/onboarding/project", async (c) =>
+	registerRoute(app, platformContracts.postApiPlatformOnboardingProject, async (c) =>
 		c.json({
 			success: true,
 			data: await onboarding.project(
 				await current(c.req.raw),
 				idempotencyKey(c.req.raw),
-				z
-					.strictObject({ name, key: projectKey, revision: z.number().int().positive() })
-					.parse(await merchantJson(c.req.raw)),
+				postApiPlatformOnboardingProjectBodySchema.parse(await merchantJson(c.req.raw)),
 			),
 		}),
 	);
-	app.post("/api/platform/onboarding/provision", async (c) =>
+	registerRoute(app, platformContracts.postApiPlatformOnboardingProvision, async (c) =>
 		c.json({
 			success: true,
 			data: await onboarding.start(
 				await current(c.req.raw),
 				idempotencyKey(c.req.raw),
-				z
-					.strictObject({ revision: z.number().int().positive() })
-					.parse(await merchantJson(c.req.raw)).revision,
+				postApiPlatformOnboardingProvisionBodySchema.parse(await merchantJson(c.req.raw)).revision,
 			),
 		}),
 	);
-	app.get("/api/platform/provisioning/:id", async (c) =>
+	registerRoute(app, platformContracts.getApiPlatformProvisioningById, async (c) =>
 		c.json({
 			success: true,
 			data: await onboarding.view(await current(c.req.raw), z.uuid().parse(c.req.param("id"))),
 		}),
 	);
-	app.post("/api/platform/provisioning/:id/retry", async (c) =>
+	registerRoute(app, platformContracts.postApiPlatformProvisioningByIdRetry, async (c) =>
 		c.json({
 			success: true,
 			data: await onboarding.resume(await current(c.req.raw), z.uuid().parse(c.req.param("id"))),
 		}),
 	);
-	app.post("/api/platform/provisioning/:id/credential", async (c) =>
+	registerRoute(app, platformContracts.postApiPlatformProvisioningByIdCredential, async (c) =>
 		c.json({
 			success: true,
 			data: await onboarding.credential(
@@ -396,7 +396,7 @@ export function createMerchantApp({
 			),
 		}),
 	);
-	app.post("/api/platform/provisioning/:id/rotate", async (c) =>
+	registerRoute(app, platformContracts.postApiPlatformProvisioningByIdRotate, async (c) =>
 		c.json({
 			success: true,
 			data: await onboarding.credential(
@@ -407,8 +407,8 @@ export function createMerchantApp({
 			),
 		}),
 	);
-	app.post("/api/platform/invitations/preview", async (c) => {
-		const input = z.strictObject({ token: token.optional() }).parse(await merchantJson(c.req.raw));
+	registerRoute(app, platformContracts.postApiPlatformInvitationsPreview, async (c) => {
+		const input = postApiPlatformInvitationsPreviewBodySchema.parse(await merchantJson(c.req.raw));
 		let identity: MerchantIdentity | null = null;
 		if (cookieValue(c.req.raw.headers, SESSION_COOKIE)) {
 			try {
@@ -430,8 +430,8 @@ export function createMerchantApp({
 		}
 		return c.json({ success: true, data: result });
 	});
-	app.post("/api/platform/invitations/accept", async (c) => {
-		const input = z.strictObject({ token: token.optional() }).parse(await merchantJson(c.req.raw));
+	registerRoute(app, platformContracts.postApiPlatformInvitationsAccept, async (c) => {
+		const input = postApiPlatformInvitationsAcceptBodySchema.parse(await merchantJson(c.req.raw));
 		const result = await team.accept(
 			await current(c.req.raw),
 			idempotencyKey(c.req.raw),
@@ -443,19 +443,19 @@ export function createMerchantApp({
 		});
 		return c.json({ success: true, data: result });
 	});
-	app.post("/api/platform/invitations/request", async (c) =>
+	registerRoute(app, platformContracts.postApiPlatformInvitationsRequest, async (c) =>
 		c.json({
 			success: true,
 			data: await team.requestReplacement(
 				await invitationHash(
 					c.req.raw,
-					z.strictObject({ token: token.optional() }).parse(await merchantJson(c.req.raw)).token,
+					postApiPlatformInvitationsRequestBodySchema.parse(await merchantJson(c.req.raw)).token,
 				),
 				true,
 			),
 		}),
 	);
-	app.get("/api/platform/team", async (c) =>
+	registerRoute(app, platformContracts.getApiPlatformTeam, async (c) =>
 		c.json({
 			success: true,
 			data: await team.list(
@@ -464,24 +464,20 @@ export function createMerchantApp({
 			),
 		}),
 	);
-	app.post("/api/platform/team/invitations", async (c) =>
+	registerRoute(app, platformContracts.postApiPlatformTeamInvitations, async (c) =>
 		c.json({
 			success: true,
 			data: await team.invite(
 				await current(c.req.raw),
 				idempotencyKey(c.req.raw),
-				organization
-					.extend({ email: z.email().transform(normalizeEmail), role: inviteRole })
-					.strict()
-					.parse(await merchantJson(c.req.raw)),
+				postApiPlatformTeamInvitationsBodySchema.parse(await merchantJson(c.req.raw)),
 			),
 		}),
 	);
-	app.post("/api/platform/team/invitations/:id/resend", async (c) => {
-		const input = organization
-			.extend({ role: inviteRole.optional() })
-			.strict()
-			.parse(await merchantJson(c.req.raw));
+	registerRoute(app, platformContracts.postApiPlatformTeamInvitationsByIdResend, async (c) => {
+		const input = postApiPlatformTeamInvitationsByIdResendBodySchema.parse(
+			await merchantJson(c.req.raw),
+		);
 		return c.json({
 			success: true,
 			data: await team.resend(
@@ -493,55 +489,31 @@ export function createMerchantApp({
 			),
 		});
 	});
-	app.post("/api/platform/team/invitations/:id/revoke", async (c) =>
+	registerRoute(app, platformContracts.postApiPlatformTeamInvitationsByIdRevoke, async (c) =>
 		c.json({
 			success: true,
 			data: await team.revoke(
 				await current(c.req.raw),
 				idempotencyKey(c.req.raw),
 				z.uuid().parse(c.req.param("id")),
-				organization.strict().parse(await merchantJson(c.req.raw)).organizationSlug,
+				postApiPlatformTeamInvitationsByIdRevokeBodySchema.parse(await merchantJson(c.req.raw))
+					.organizationSlug,
 			),
 		}),
 	);
-	app.post("/api/platform/team/members/:id", async (c) =>
+	registerRoute(app, platformContracts.postApiPlatformTeamMembersById, async (c) =>
 		c.json({
 			success: true,
 			data: await team.updateMember(
 				await current(c.req.raw),
 				idempotencyKey(c.req.raw),
 				z.uuid().parse(c.req.param("id")),
-				organization
-					.extend({
-						role: inviteRole.optional(),
-						status: z.enum(["active", "suspended", "removed"]).optional(),
-					})
-					.strict()
-					.refine((value) => value.role !== undefined || value.status !== undefined)
-					.parse(await merchantJson(c.req.raw)),
+				postApiPlatformTeamMembersByIdBodySchema.parse(await merchantJson(c.req.raw)),
 			),
 		}),
 	);
-	app.post("/api/platform/step-up", async (c) => {
-		const input = z
-			.strictObject({
-				scope: scopeSchema,
-				action: z.enum(["catalog.publish", "operations.recover", "operations.write"]),
-				target: z
-					.string()
-					.max(1024)
-					.regex(/^(POST|PUT|DELETE) \/api\/billing\/[^ ]+ [a-f0-9]{64}$/),
-				returnTo: z.string().max(2048),
-				request: z
-					.strictObject({
-						method: z.enum(["POST", "PUT", "DELETE"]),
-						path: z.string().max(512),
-						body: z.unknown(),
-						idempotencyKey: z.string().regex(/^[A-Za-z0-9._:-]{8,128}$/),
-					})
-					.optional(),
-			})
-			.parse(await merchantJson(c.req.raw));
+	registerRoute(app, platformContracts.postApiPlatformStepUp, async (c) => {
+		const input = postApiPlatformStepUpBodySchema.parse(await merchantJson(c.req.raw));
 		if (input.request) {
 			const route = merchantBillingRoute(
 				input.request.method,
@@ -559,13 +531,13 @@ export function createMerchantApp({
 			data: await stepUp.create(await current(c.req.raw), idempotencyKey(c.req.raw), input),
 		});
 	});
-	app.get("/api/platform/step-up/:id", async (c) =>
+	registerRoute(app, platformContracts.getApiPlatformStepUpById, async (c) =>
 		c.json({
 			success: true,
 			data: await stepUp.view(await current(c.req.raw), z.uuid().parse(c.req.param("id"))),
 		}),
 	);
-	app.post("/api/platform/step-up/:id/complete", async (c) => {
+	registerRoute(app, platformContracts.postApiPlatformStepUpByIdComplete, async (c) => {
 		const result = await stepUp.complete(
 			await current(c.req.raw),
 			z.uuid().parse(c.req.param("id")),
@@ -619,3 +591,362 @@ function clearTransientCookies(c: {
 			append: true,
 		});
 }
+
+const postApiPlatformSignupIntentBodySchema = z.strictObject({
+	accepted: z.literal(true),
+	termsVersion: z.string(),
+	privacyVersion: z.string(),
+});
+const postApiPlatformVerifyEmailBodySchema = z.strictObject({ token });
+const postApiPlatformOnboardingOrganizationBodySchema = z.strictObject({
+	name,
+	slug,
+	revision: z.number().int().positive().optional(),
+});
+const postApiPlatformOnboardingProjectBodySchema = z.strictObject({
+	name,
+	key: projectKey,
+	revision: z.number().int().positive(),
+});
+const postApiPlatformOnboardingProvisionBodySchema = z.strictObject({
+	revision: z.number().int().positive(),
+});
+const postApiPlatformInvitationsPreviewBodySchema = z.strictObject({ token: token.optional() });
+const postApiPlatformInvitationsAcceptBodySchema = z.strictObject({ token: token.optional() });
+const postApiPlatformInvitationsRequestBodySchema = z.strictObject({ token: token.optional() });
+const postApiPlatformTeamInvitationsBodySchema = organization
+	.extend({ email: z.email().transform(normalizeEmail), role: inviteRole })
+	.strict();
+const postApiPlatformTeamInvitationsByIdResendBodySchema = organization
+	.extend({ role: inviteRole.optional() })
+	.strict();
+const postApiPlatformTeamInvitationsByIdRevokeBodySchema = organization.strict();
+const postApiPlatformTeamMembersByIdBodySchema = organization
+	.extend({
+		role: inviteRole.optional(),
+		status: z.enum(["active", "suspended", "removed"]).optional(),
+	})
+	.strict()
+	.refine((value) => value.role !== undefined || value.status !== undefined);
+const postApiPlatformStepUpBodySchema = z.strictObject({
+	scope: scopeSchema,
+	action: z.enum(["catalog.publish", "operations.recover", "operations.write"]),
+	target: z
+		.string()
+		.max(1024)
+		.regex(/^(POST|PUT|DELETE) \/api\/billing\/[^ ]+ [a-f0-9]{64}$/),
+	returnTo: z.string().max(2048),
+	request: z
+		.strictObject({
+			method: z.enum(["POST", "PUT", "DELETE"]),
+			path: z.string().max(512),
+			body: z.unknown(),
+			idempotencyKey: z.string().regex(/^[A-Za-z0-9._:-]{8,128}$/),
+		})
+		.optional(),
+});
+export const platformContracts = {
+	getApiPlatformConfig: defineContract("get", "/api/platform/config", {
+		operationId: "getApiPlatformConfig",
+		tags: ["platform"],
+		responses: { "200": responses.getApiPlatformConfigResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string().optional(),
+			"Idempotency-Key": z.string().optional(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	getApiPlatformSession: defineContract("get", "/api/platform/session", {
+		operationId: "getApiPlatformSession",
+		tags: ["platform"],
+		responses: { "200": responses.getApiPlatformSessionResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string().optional(),
+			"Idempotency-Key": z.string().optional(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformSignupIntent: defineContract("post", "/api/platform/signup-intent", {
+		operationId: "postApiPlatformSignupIntent",
+		tags: ["platform"],
+		body: postApiPlatformSignupIntentBodySchema,
+		responses: { "200": responses.postApiPlatformSignupIntentResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformSessionExchange: defineContract("post", "/api/platform/session/exchange", {
+		operationId: "postApiPlatformSessionExchange",
+		tags: ["platform"],
+		body: z.object({}).loose(),
+		responses: { "200": responses.postApiPlatformSessionExchangeResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformLogout: defineContract("post", "/api/platform/logout", {
+		operationId: "postApiPlatformLogout",
+		tags: ["platform"],
+		body: z.object({}).loose(),
+		responses: { "200": responses.postApiPlatformLogoutResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformVerifyEmail: defineContract("post", "/api/platform/verify-email", {
+		operationId: "postApiPlatformVerifyEmail",
+		tags: ["platform"],
+		body: postApiPlatformVerifyEmailBodySchema,
+		responses: { "200": responses.postApiPlatformVerifyEmailResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	getApiPlatformOnboarding: defineContract("get", "/api/platform/onboarding", {
+		operationId: "getApiPlatformOnboarding",
+		tags: ["platform"],
+		responses: { "200": responses.getApiPlatformOnboardingResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string().optional(),
+			"Idempotency-Key": z.string().optional(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformOnboardingOrganization: defineContract(
+		"post",
+		"/api/platform/onboarding/organization",
+		{
+			operationId: "postApiPlatformOnboardingOrganization",
+			tags: ["platform"],
+			body: postApiPlatformOnboardingOrganizationBodySchema,
+			responses: { "200": responses.postApiPlatformOnboardingOrganizationResponse200Schema },
+			headers: z.object({
+				"X-CSRF-Token": z.string(),
+				"Idempotency-Key": z.string(),
+				"X-Quotum-Step-Up-Grant": z.string().optional(),
+			}),
+		},
+	),
+	postApiPlatformOnboardingProject: defineContract("post", "/api/platform/onboarding/project", {
+		operationId: "postApiPlatformOnboardingProject",
+		tags: ["platform"],
+		body: postApiPlatformOnboardingProjectBodySchema,
+		responses: { "200": responses.postApiPlatformOnboardingProjectResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformOnboardingProvision: defineContract("post", "/api/platform/onboarding/provision", {
+		operationId: "postApiPlatformOnboardingProvision",
+		tags: ["platform"],
+		body: postApiPlatformOnboardingProvisionBodySchema,
+		responses: { "200": responses.postApiPlatformOnboardingProvisionResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	getApiPlatformProvisioningById: defineContract("get", "/api/platform/provisioning/:id", {
+		operationId: "getApiPlatformProvisioningById",
+		tags: ["platform"],
+		params: z.object({ id: z.uuid() }),
+		responses: { "200": responses.getApiPlatformProvisioningByIdResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string().optional(),
+			"Idempotency-Key": z.string().optional(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformProvisioningByIdRetry: defineContract(
+		"post",
+		"/api/platform/provisioning/:id/retry",
+		{
+			operationId: "postApiPlatformProvisioningByIdRetry",
+			tags: ["platform"],
+			params: z.object({ id: z.uuid() }),
+			body: z.object({}).loose(),
+			responses: { "200": responses.postApiPlatformProvisioningByIdRetryResponse200Schema },
+			headers: z.object({
+				"X-CSRF-Token": z.string(),
+				"Idempotency-Key": z.string(),
+				"X-Quotum-Step-Up-Grant": z.string().optional(),
+			}),
+		},
+	),
+	postApiPlatformProvisioningByIdCredential: defineContract(
+		"post",
+		"/api/platform/provisioning/:id/credential",
+		{
+			operationId: "postApiPlatformProvisioningByIdCredential",
+			tags: ["platform"],
+			params: z.object({ id: z.uuid() }),
+			body: z.object({}).loose(),
+			responses: { "200": responses.postApiPlatformProvisioningByIdCredentialResponse200Schema },
+			headers: z.object({
+				"X-CSRF-Token": z.string(),
+				"Idempotency-Key": z.string(),
+				"X-Quotum-Step-Up-Grant": z.string().optional(),
+			}),
+		},
+	),
+	postApiPlatformProvisioningByIdRotate: defineContract(
+		"post",
+		"/api/platform/provisioning/:id/rotate",
+		{
+			operationId: "postApiPlatformProvisioningByIdRotate",
+			tags: ["platform"],
+			params: z.object({ id: z.uuid() }),
+			body: z.object({}).loose(),
+			responses: { "200": responses.postApiPlatformProvisioningByIdRotateResponse200Schema },
+			headers: z.object({
+				"X-CSRF-Token": z.string(),
+				"Idempotency-Key": z.string(),
+				"X-Quotum-Step-Up-Grant": z.string().optional(),
+			}),
+		},
+	),
+	postApiPlatformInvitationsPreview: defineContract("post", "/api/platform/invitations/preview", {
+		operationId: "postApiPlatformInvitationsPreview",
+		tags: ["platform"],
+		body: postApiPlatformInvitationsPreviewBodySchema,
+		responses: { "200": responses.postApiPlatformInvitationsPreviewResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformInvitationsAccept: defineContract("post", "/api/platform/invitations/accept", {
+		operationId: "postApiPlatformInvitationsAccept",
+		tags: ["platform"],
+		body: postApiPlatformInvitationsAcceptBodySchema,
+		responses: { "200": responses.postApiPlatformInvitationsAcceptResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformInvitationsRequest: defineContract("post", "/api/platform/invitations/request", {
+		operationId: "postApiPlatformInvitationsRequest",
+		tags: ["platform"],
+		body: postApiPlatformInvitationsRequestBodySchema,
+		responses: { "200": responses.postApiPlatformInvitationsRequestResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	getApiPlatformTeam: defineContract("get", "/api/platform/team", {
+		operationId: "getApiPlatformTeam",
+		tags: ["platform"],
+		query: z.object({ organization: slug }),
+		responses: { "200": responses.getApiPlatformTeamResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string().optional(),
+			"Idempotency-Key": z.string().optional(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformTeamInvitations: defineContract("post", "/api/platform/team/invitations", {
+		operationId: "postApiPlatformTeamInvitations",
+		tags: ["platform"],
+		body: postApiPlatformTeamInvitationsBodySchema,
+		responses: { "200": responses.postApiPlatformTeamInvitationsResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformTeamInvitationsByIdResend: defineContract(
+		"post",
+		"/api/platform/team/invitations/:id/resend",
+		{
+			operationId: "postApiPlatformTeamInvitationsByIdResend",
+			tags: ["platform"],
+			body: postApiPlatformTeamInvitationsByIdResendBodySchema,
+			params: z.object({ id: z.uuid() }),
+			responses: { "200": responses.postApiPlatformTeamInvitationsByIdResendResponse200Schema },
+			headers: z.object({
+				"X-CSRF-Token": z.string(),
+				"Idempotency-Key": z.string(),
+				"X-Quotum-Step-Up-Grant": z.string().optional(),
+			}),
+		},
+	),
+	postApiPlatformTeamInvitationsByIdRevoke: defineContract(
+		"post",
+		"/api/platform/team/invitations/:id/revoke",
+		{
+			operationId: "postApiPlatformTeamInvitationsByIdRevoke",
+			tags: ["platform"],
+			body: postApiPlatformTeamInvitationsByIdRevokeBodySchema,
+			params: z.object({ id: z.uuid() }),
+			responses: { "200": responses.postApiPlatformTeamInvitationsByIdRevokeResponse200Schema },
+			headers: z.object({
+				"X-CSRF-Token": z.string(),
+				"Idempotency-Key": z.string(),
+				"X-Quotum-Step-Up-Grant": z.string().optional(),
+			}),
+		},
+	),
+	postApiPlatformTeamMembersById: defineContract("post", "/api/platform/team/members/:id", {
+		operationId: "postApiPlatformTeamMembersById",
+		tags: ["platform"],
+		body: postApiPlatformTeamMembersByIdBodySchema,
+		params: z.object({ id: z.uuid() }),
+		responses: { "200": responses.postApiPlatformTeamMembersByIdResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformStepUp: defineContract("post", "/api/platform/step-up", {
+		operationId: "postApiPlatformStepUp",
+		tags: ["platform"],
+		body: postApiPlatformStepUpBodySchema,
+		responses: { "200": responses.postApiPlatformStepUpResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	getApiPlatformStepUpById: defineContract("get", "/api/platform/step-up/:id", {
+		operationId: "getApiPlatformStepUpById",
+		tags: ["platform"],
+		params: z.object({ id: z.uuid() }),
+		responses: { "200": responses.getApiPlatformStepUpByIdResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string().optional(),
+			"Idempotency-Key": z.string().optional(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+	postApiPlatformStepUpByIdComplete: defineContract("post", "/api/platform/step-up/:id/complete", {
+		operationId: "postApiPlatformStepUpByIdComplete",
+		tags: ["platform"],
+		params: z.object({ id: z.uuid() }),
+		body: z.object({}).loose(),
+		responses: { "200": responses.postApiPlatformStepUpByIdCompleteResponse200Schema },
+		headers: z.object({
+			"X-CSRF-Token": z.string(),
+			"Idempotency-Key": z.string(),
+			"X-Quotum-Step-Up-Grant": z.string().optional(),
+		}),
+	}),
+} as const;

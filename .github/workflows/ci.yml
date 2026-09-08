@@ -33,6 +33,37 @@ jobs:
       - uses: ./.github/actions/setup-bun
       - run: bun run test
 
+  contracts:
+    name: OpenAPI contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-bun
+      - name: Generated contract is current
+        run: bun run openapi:check
+      - name: Lint contract
+        run: bun run openapi:lint
+      - name: Response conformance
+        run: bun test tests/http/openapi.test.ts
+      - name: Breaking-change report against the base revision
+        # Pre-GA policy: the report is for review; generation and conformance above are the gates.
+        env:
+          OPENAPI_DIFF_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          # Audited oasdiff build 76d2b54; immutable multi-platform image digest.
+          OASDIFF: docker run --rm -v ${{ github.workspace }}:/work -w /work tufin/oasdiff@sha256:a81649b9261295ab05edf9c47a542c5f58e4768fd392e0a0a729db0d714a7ac5
+        run: sh ci/openapi-diff.sh
+      - name: Upload contract artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: openapi-contract
+          path: |
+            contracts/v1/
+            contract-reports/
+          retention-days: 30
+
   integration:
     name: Integration tests (Postgres)
     runs-on: ubuntu-latest

@@ -915,3 +915,48 @@ and has the same retry fingerprint as an explicit 300.
 A subscribed account cannot use a newly published additive meter absent from its purchased catalog:
 check, consume and reserve return `METER_RATE_NOT_ACTIVATED` (409) before writes. This guard prevents
 implicit repricing; durable rate activation/rebinding and its UI remain backlog work.
+
+
+## Generated HTTP contract
+
+`bun run openapi:generate` exports every implemented HTTP surface to
+[`contracts/v1/openapi.json`](contracts/v1/openapi.json) and the known runtime error inventory to
+[`contracts/v1/errors.json`](contracts/v1/errors.json). Generation uses module-owned Zod schemas
+and `@hono/zod-openapi` route definitions; it requires no database, provider calls, or credentials.
+Better Auth contributes its configured schema only during export, filtered and amended for
+Quotum's actual wrapper. No live docs or schema route is exposed.
+
+Handlers and descriptors register through `registerRoute`. The helper deliberately retains the
+existing body readers and error handling instead of parsing requests twice. Reuse the handler's
+input validator in its descriptor, update the authored response schema, and regenerate when
+changing an operation. Response conformance checks exercise actual unit and Postgres HTTP
+journeys, including merchant authentication and delegated billing. Arbitrary metadata/payload
+fields remain open; error codes are extensible, so callers must handle unknown codes.
+
+Run `bun run openapi:check` and `bun run openapi:lint` with `bun run quality` and the appropriate
+unit/integration tests. CI publishes the exact artifacts and an `oasdiff` report against the MR
+base. Under the current pre-GA policy the diff is a review report, while generation, validation,
+and runtime/browser tests are hard gates; a compatible patch must not introduce breaking changes.
+The initial migration establishes a baseline when the base revision has no spec.
+
+The UI pins a committed artifact by API revision and digest and generates its own types. Its
+ordinary builds do not clone this repository. Its explicit `api:update <full-api-sha>` command
+adopts a new contract; the API's mirrored browser pipeline still tests candidate runtime behavior.
+`GET /api/platform/team` supplies `roleDefinitions` from the same policy used for authorization.
+
+This exports the current implemented API; it does not declare the remaining public-usage roadmap
+or `@quotum/sdk` GA work complete. See the
+[owning contract and compatibility policy](../quotum-docs/architecture/billing/usage-api-sdk.md#openapi-generation-and-first-party-consumers--2026-09-08).
+
+
+### Scoped Stripe checkout expiration
+
+Trusted backends can set an optional positive integer `expiresAt` (Unix seconds) when creating
+`POST /v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions`. Stripe enforces its
+30-minute to 24-hour window. The fixed deadline participates in the request fingerprint; preserve it
+with the idempotency key when recovering uncertain provider responses.
+
+`POST /v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions/:sessionId/expire`
+verifies session ownership, expires only open sessions, and returns the same checkout-status DTO as
+GET. If completion wins the race, it returns the authoritative completed/paid state. It never changes
+which billing identity owns a session. Example bodyless request uses the ordinary project Bearer key.

@@ -76,6 +76,8 @@ export interface AnalyzeModuleBoundaryOptions {
 }
 
 const compositionPaths = new Set([
+	"scripts/openapi.ts",
+	"scripts/openapi-errors.ts",
 	"scripts/provision-catalog.ts",
 	"scripts/merchant-service-principal.ts",
 	"src/app.ts",

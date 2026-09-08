@@ -43,6 +43,21 @@ they finish.
 - Call out every schema change and every environment variable change in the pull request description,
   including upgrade order when workers must be drained first.
 
+## HTTP contract
+
+Every route is described by an authored Zod response schema and registered through
+`registerRoute`. When you add or change an operation, update its schema and regenerate the
+committed OpenAPI artifacts:
+
+```sh
+bun run openapi:generate
+bun run openapi:check
+bun run openapi:lint
+```
+
+CI diffs `contracts/v1/openapi.json` against the base branch; a compatible patch release must not
+introduce breaking changes.
+
 ## Coding conventions
 
 - Strict TypeScript, small purpose-specific modules, kebab-case file names.
