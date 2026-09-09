@@ -87,6 +87,11 @@ localDescribe("platform project identity persistence", () => {
 			"platform_auth_two_factors",
 			"platform_auth_users",
 			"platform_auth_verifications",
+			"platform_connection_oauth_states",
+			"platform_connection_operations",
+			"platform_connection_secrets",
+			"platform_connection_versions",
+			"platform_connections",
 			"platform_external_identities",
 			"platform_idempotency",
 			"platform_invitations",
@@ -97,13 +102,13 @@ localDescribe("platform project identity persistence", () => {
 			"platform_policy_acceptances",
 			"platform_principals",
 			"platform_project_api_credentials",
-			"platform_project_runtime_modes",
 			"platform_projects",
 			"platform_provisioning_operations",
 			"platform_provisioning_steps",
 			"platform_rate_limits",
 			"platform_service_principals",
 			"platform_step_up_grants",
+			"platform_stripe_app_events",
 		]);
 
 		const constraints = await context.sql<Array<{ table_name: string; constraint_name: string }>>`

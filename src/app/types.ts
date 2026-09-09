@@ -20,6 +20,7 @@ import type { BillingEnv } from "../env";
 import type { BillingLogger } from "../observability/logger";
 import type { BillingMetrics } from "../observability/metrics";
 import type { BillingAdminOperations } from "../operations/admin";
+import type { RuntimeConnectionResolver } from "../projects/connections";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
 import type {
 	ProjectProviderServiceOverrides,
@@ -134,6 +135,7 @@ export interface BillingInsightsServiceLike {
 }
 
 export interface AppDependencies {
+	connections?: RuntimeConnectionResolver;
 	env: BillingEnv;
 	/** Internal in-process adapters may supply already-authorized project context. */
 	projectAuthentication?: MiddlewareHandler<BillingHonoEnv>;
@@ -160,9 +162,18 @@ export interface AppDependencies {
 }
 
 export interface ProjectProviderServiceResolver {
-	appleStoreKitService(project: ProjectInstanceContext): AppleStoreKitServiceLike | null;
-	googlePlayBillingService(project: ProjectInstanceContext): GooglePlayBillingServiceLike | null;
-	stripeBillingService(project: ProjectInstanceContext): StripeBillingServiceLike | null;
+	appleStoreKitService(
+		project: ProjectInstanceContext,
+		purpose?: "new" | "recovery",
+	): Promise<AppleStoreKitServiceLike | null>;
+	googlePlayBillingService(
+		project: ProjectInstanceContext,
+		purpose?: "new" | "recovery",
+	): Promise<GooglePlayBillingServiceLike | null>;
+	stripeBillingService(
+		project: ProjectInstanceContext,
+		purpose?: "new" | "recovery",
+	): Promise<StripeBillingServiceLike | null>;
 }
 
 export type ProjectProviderServiceSet = ProjectProviderServices<

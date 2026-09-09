@@ -13,7 +13,7 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 	};
 	const sql = Object.assign(unavailable, {
 		begin: unavailable,
-		instances: { forProject: unavailable, create: unavailable },
+		instances: { forProject: unavailable, create: unavailable, activateProduction: unavailable },
 	});
 	const store = new MerchantStore(sql, {
 		enabled: true,

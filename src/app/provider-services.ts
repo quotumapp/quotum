@@ -1,6 +1,7 @@
-import { BillingError, NotConfiguredError } from "../billing/errors";
+import { NotConfiguredError } from "../billing/errors";
 import type { BillingRepository } from "../db/repository";
-import type { AppleBillingEnv, BillingEnv, GooglePlayBillingEnv, StripeBillingEnv } from "../env";
+import type { AppleBillingEnv, GooglePlayBillingEnv, StripeBillingEnv } from "../env";
+import { noRuntimeConnections, type RuntimeConnectionResolver } from "../projects/connections";
 import type { ProjectInstanceContext } from "../projects/context";
 import { AppleStoreKitClient, buildAppleStoreKitConfig } from "../providers/apple/client";
 import { AppleStoreKitService } from "../providers/apple/service";
@@ -18,12 +19,12 @@ import type {
 } from "./types";
 
 export function createProjectProviderServiceResolver({
-	env,
+	connections = noRuntimeConnections,
 	getRepository,
 	projectProviderServices,
 	legacyServices,
 }: {
-	env: BillingEnv;
+	connections?: RuntimeConnectionResolver;
 	getRepository: () => BillingRepository;
 	projectProviderServices: Partial<Record<string, Partial<ProjectProviderServiceSet>>> | undefined;
 	legacyServices: {
@@ -32,81 +33,49 @@ export function createProjectProviderServiceResolver({
 		stripeBillingService: StripeBillingServiceLike | null | undefined;
 	};
 }): ProjectProviderServiceResolver {
-	const cache = new Map<string, ProjectProviderServiceSet>();
-
-	const servicesForProject = (project: ProjectInstanceContext) => {
-		const cached = cache.get(project.projectInstanceKey);
-		if (cached !== undefined) {
-			return cached;
-		}
-
-		const overrides = projectProviderServices?.[project.projectInstanceKey];
-		const projectConfig = env.projectRuntime.find(
-			(candidate) => candidate.projectInstanceKey === project.projectInstanceKey,
-		);
-		if (projectConfig === undefined && project.runtimeUnconfigured)
-			return {
-				appleStoreKitService: null,
-				googlePlayBillingService: null,
-				stripeBillingService: null,
-			};
-		if (projectConfig === undefined) {
-			throw new BillingError(
-				"Billing project is not configured",
-				"BILLING_PROJECT_NOT_CONFIGURED",
-				404,
-			);
-		}
-
-		const appleOverride = serviceOverride(overrides, "appleStoreKitService");
-		const googleOverride = serviceOverride(overrides, "googlePlayBillingService");
-		const stripeOverride = serviceOverride(overrides, "stripeBillingService");
-		const services = {
-			appleStoreKitService:
-				appleOverride !== undefined
-					? appleOverride
-					: legacyService(legacyServices.appleStoreKitService, () =>
-							createAppleStoreKitServiceFromConfig(
-								project,
-								projectConfig.apple ?? null,
-								getRepository,
-							),
-						),
-			googlePlayBillingService:
-				googleOverride !== undefined
-					? googleOverride
-					: legacyService(legacyServices.googlePlayBillingService, () =>
-							createGooglePlayBillingServiceFromConfig(
-								project,
-								projectConfig.googlePlay ?? null,
-								getRepository,
-							),
-						),
-			stripeBillingService:
-				stripeOverride !== undefined
-					? stripeOverride
-					: legacyService(legacyServices.stripeBillingService, () =>
-							createStripeBillingServiceFromConfig(
-								project,
-								projectConfig.stripe ?? null,
-								projectConfig.projectionContract ?? "billing_state_v1",
-								getRepository,
-							),
-						),
-		};
-		cache.set(project.projectInstanceKey, services);
-		return services;
-	};
-
 	return {
-		appleStoreKitService(project) {
-			return servicesForProject(project).appleStoreKitService;
+		async appleStoreKitService(project, purpose = "new") {
+			const override = serviceOverride(
+				projectProviderServices?.[project.projectInstanceKey],
+				"appleStoreKitService",
+			);
+			if (override !== undefined) return override;
+			if (legacyServices.appleStoreKitService !== undefined)
+				return legacyServices.appleStoreKitService;
+			return createAppleStoreKitServiceFromConfig(
+				project,
+				await connections.resolve(project, "apple", purpose),
+				getRepository,
+			);
 		},
-		googlePlayBillingService(project) {
-			return servicesForProject(project).googlePlayBillingService;
+		async googlePlayBillingService(project, purpose = "new") {
+			const override = serviceOverride(
+				projectProviderServices?.[project.projectInstanceKey],
+				"googlePlayBillingService",
+			);
+			if (override !== undefined) return override;
+			if (legacyServices.googlePlayBillingService !== undefined)
+				return legacyServices.googlePlayBillingService;
+			return createGooglePlayBillingServiceFromConfig(
+				project,
+				await connections.resolve(project, "google", purpose),
+				getRepository,
+			);
 		},
-		stripeBillingService(project) {
-			return servicesForProject(project).stripeBillingService;
+		async stripeBillingService(project, purpose = "new") {
+			const override = serviceOverride(
+				projectProviderServices?.[project.projectInstanceKey],
+				"stripeBillingService",
+			);
+			if (override !== undefined) return override;
+			if (legacyServices.stripeBillingService !== undefined)
+				return legacyServices.stripeBillingService;
+			return createStripeBillingServiceFromConfig(
+				project,
+				await connections.resolve(project, "stripe", purpose),
+				"billing_state_v1",
+				getRepository,
+			);
 		},
 	};
 }
@@ -120,13 +89,6 @@ function serviceOverride<Key extends keyof ProjectProviderServiceSet>(
 	}
 
 	return undefined;
-}
-
-function legacyService<Service>(
-	legacy: Service | null | undefined,
-	createDefault: () => Service | null,
-): Service | null {
-	return legacy === undefined ? createDefault() : legacy;
 }
 
 function createAppleStoreKitServiceFromConfig(

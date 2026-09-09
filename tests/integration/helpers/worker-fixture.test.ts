@@ -9,7 +9,7 @@ describe("worker fixture helpers", () => {
 		const env = createIntegrationBillingEnv(
 			"postgresql://postgres:postgres@127.0.0.1:5432/postgres",
 			{
-				projectRuntime: [
+				connectionFixtures: [
 					{
 						projectInstanceKey: "voysee",
 						projectionUrl: "https://projection.test",

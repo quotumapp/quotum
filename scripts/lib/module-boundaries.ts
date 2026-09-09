@@ -80,6 +80,7 @@ const compositionPaths = new Set([
 	"scripts/openapi-errors.ts",
 	"scripts/provision-catalog.ts",
 	"scripts/merchant-service-principal.ts",
+	"scripts/rotate-connection-secrets.ts",
 	"src/app.ts",
 	"src/index.ts",
 	"src/migrate.ts",
@@ -441,7 +442,7 @@ export function analyzeMigrationTableOwnership(
 			}
 		}
 		for (const reference of collectSqlTableReferences(file.source)) {
-			if (path === "migrations/004_merchant.sql") {
+			if (["migrations/004_merchant.sql"].includes(path)) {
 				if (
 					reference.table.startsWith(platformTablePrefix) ||
 					(reference.table === "projects" && reference.access === "reference")

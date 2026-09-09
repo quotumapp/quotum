@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { createApp } from "../../src/app";
 import { syncConfiguredCatalog } from "../../src/catalog/provision";
-import { checkProjectRuntimeConfiguration } from "../../src/composition/project-instance-persistence";
+import { createBillingReadinessCheck } from "../../src/composition/runtime-readiness";
 import { checkPostgresHealth } from "../../src/db/client";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
@@ -56,28 +56,8 @@ localDescribe("local Postgres billing integration", () => {
 		expect(checks).toBe(2);
 	});
 
-	it("requires an exact runtime directory for readiness", async () => {
-		const firstRuntime = context.env.projectRuntime[0];
-		if (firstRuntime === undefined) throw new Error("Expected a configured project runtime");
-
-		await expect(
-			checkProjectRuntimeConfiguration(context.env.projectRuntime, context.sql),
-		).resolves.toBe(true);
-		await expect(
-			checkProjectRuntimeConfiguration(context.env.projectRuntime.slice(0, 1), context.sql),
-		).resolves.toBe(false);
-		await expect(
-			checkProjectRuntimeConfiguration(
-				[
-					...context.env.projectRuntime,
-					{
-						...firstRuntime,
-						projectInstanceKey: "unknown",
-					},
-				],
-				context.sql,
-			),
-		).resolves.toBe(false);
+	it("is ready with no configured customer connections", async () => {
+		await expect(createBillingReadinessCheck(context.sql)()).resolves.toBe(true);
 	});
 
 	it("seeds public projects and catalog rows", async () => {

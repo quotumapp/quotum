@@ -9,10 +9,18 @@ import { createMerchantApp } from "../../src/platform/app";
 import { createMerchantAuth } from "../../src/platform/auth";
 import { createMerchantBilling } from "../../src/platform/billing";
 import type { MerchantConfig } from "../../src/platform/config";
+import { ConnectionCipher } from "../../src/platform/connections/cipher";
+import type {
+	ConnectionValidationPort,
+	EnvironmentBillingPort,
+} from "../../src/platform/connections/ports";
+import { ConnectionRepository } from "../../src/platform/connections/repository";
+import { MerchantConnections } from "../../src/platform/connections/service";
 import type { MerchantEmail, MerchantMailer } from "../../src/platform/email";
 import { MerchantOnboarding } from "../../src/platform/onboarding";
 import { CSRF_COOKIE } from "../../src/platform/security";
 import { MerchantStore } from "../../src/platform/store";
+import { fixtureConnections } from "../../src/testing/connection-fixtures";
 import { assertOpenApiResponse } from "../../tests/helpers/openapi";
 import { createIntegrationBillingEnv } from "../../tests/integration/helpers/local-postgres";
 
@@ -52,7 +60,11 @@ export class CaptureMailer implements MerchantMailer {
 	}
 }
 export function merchantFixture(
-	options: { google?: { clientId: string; clientSecret: string } } = {},
+	options: {
+		google?: { clientId: string; clientSecret: string };
+		connectionValidation?: ConnectionValidationPort;
+		environmentBilling?: EnvironmentBillingPort;
+	} = {},
 ) {
 	if (process.env.RUN_POSTGRES_INTEGRATION_TESTS !== "1" || !process.env.POSTGRES_URI)
 		throw new Error(
@@ -84,7 +96,7 @@ export function merchantFixture(
 			}),
 			resolver,
 			providers: createProjectProviderServiceResolver({
-				env,
+				connections: fixtureConnections(env.connectionFixtures),
 				getRepository: () => repository,
 				projectProviderServices: undefined,
 				legacyServices: {
@@ -95,9 +107,24 @@ export function merchantFixture(
 			}),
 		}),
 	);
-	const app = createMerchantApp({ store, mailer, auth, onboarding, billing });
+	const connectionRepository = new ConnectionRepository(
+		sql,
+		new ConnectionCipher("test", new Map([["test", Buffer.alloc(32, 7)]])),
+	);
+	const connections =
+		options.connectionValidation && options.environmentBilling
+			? new MerchantConnections(
+					store,
+					connectionRepository,
+					options.connectionValidation,
+					options.environmentBilling,
+				)
+			: undefined;
+	const app = createMerchantApp({ store, mailer, auth, onboarding, billing, connections });
 	return {
 		client,
+		connectionRepository,
+		connections,
 		sql,
 		store,
 		auth,
@@ -115,7 +142,7 @@ export function merchantFixture(
 			failEnvironment = null;
 			mailer.messages = [];
 			mailer.fail = false;
-			await sql`TRUNCATE platform_idempotency,platform_audit_events,platform_policy_acceptances,platform_service_principals,platform_step_up_grants,platform_project_api_credentials,platform_provisioning_steps,platform_provisioning_operations,platform_project_runtime_modes,platform_projects,platform_onboarding_drafts,platform_invitations,platform_memberships,platform_organizations,platform_merchant_sessions,platform_external_identities,platform_principals,platform_auth_users,platform_auth_verifications,platform_auth_rate_limits,platform_rate_limits,platform_auth_links,projects CASCADE`;
+			await sql`TRUNCATE platform_idempotency,platform_audit_events,platform_policy_acceptances,platform_service_principals,platform_step_up_grants,platform_project_api_credentials,platform_provisioning_steps,platform_provisioning_operations,platform_projects,platform_onboarding_drafts,platform_invitations,platform_memberships,platform_organizations,platform_merchant_sessions,platform_external_identities,platform_principals,platform_auth_users,platform_auth_verifications,platform_auth_rate_limits,platform_rate_limits,platform_auth_links,projects CASCADE`;
 			await sql`INSERT INTO platform_service_principals(name,token_hash) VALUES('merchant-integration',${store.hash(serviceToken)})`;
 		},
 	};

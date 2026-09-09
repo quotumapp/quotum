@@ -14,10 +14,11 @@ import { createApp as createBillingApp } from "../src/app";
 import type { AppDependencies } from "../src/app/types";
 import { EntitlementService } from "../src/billing/entitlements";
 import { BillingError, InternalBillingError } from "../src/billing/errors";
-import type { BillingEnv } from "../src/env";
 import type { BillingLogger } from "../src/observability/logger";
 import { type BillingMetrics, createInMemoryBillingMetrics } from "../src/observability/metrics";
 import { BillingAdminOperations } from "../src/operations/admin";
+import type { FixtureBillingEnv as BillingEnv } from "../src/testing/connection-fixtures";
+import { fixtureConnections } from "../src/testing/connection-fixtures";
 import { withOpenApiAssertions } from "./helpers/openapi";
 import { projectContextResolver, projectInstanceContext } from "./helpers/project-context";
 
@@ -25,7 +26,7 @@ const env: BillingEnv = {
 	postgresUri: "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
 	authMode: "api_key",
 	operatorApiKey: "operator-secret-key",
-	projectRuntime: [
+	connectionFixtures: [
 		{
 			projectInstanceKey: "voysee",
 			projectionUrl: "https://voysee.example.com",
@@ -86,20 +87,21 @@ function withAuthMode(authMode: BillingEnv["authMode"]): BillingEnv {
 	};
 }
 
-function withProjects(projectRuntime: BillingEnv["projectRuntime"]): BillingEnv {
+function withProjects(connectionFixtures: BillingEnv["connectionFixtures"]): BillingEnv {
 	return {
 		...env,
-		projectRuntime,
+		connectionFixtures,
 	};
 }
 
-function createApp(dependencies: AppDependencies) {
-	const contexts = dependencies.env.projectRuntime.map((project) =>
+function createApp(dependencies: Omit<AppDependencies, "env"> & { env: BillingEnv }) {
+	const contexts = dependencies.env.connectionFixtures.map((project) =>
 		projectInstanceContext(project.projectInstanceKey),
 	);
 	return withOpenApiAssertions(
 		createBillingApp({
 			...dependencies,
+			connections: fixtureConnections(dependencies.env.connectionFixtures),
 			projectContextResolver:
 				dependencies.projectContextResolver ??
 				projectContextResolver({
@@ -895,7 +897,7 @@ describe("billing app", () => {
 		expect(replay.status).toBe(200);
 	});
 
-	it("rejects inactive project credentials while allowing provider webhooks to drain", async () => {
+	it("rejects credentials and billing webhooks before activation", async () => {
 		const entitlementCalls: string[] = [];
 		const webhookCalls: string[] = [];
 		const inactiveEnv = withProjects([
@@ -945,9 +947,9 @@ describe("billing app", () => {
 			success: false,
 			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
 		});
-		expect(webhook.status).toBe(200);
+		expect(webhook.status).toBe(403);
 		expect(entitlementCalls).toEqual([]);
-		expect(webhookCalls).toEqual(["apple"]);
+		expect(webhookCalls).toEqual([]);
 	});
 
 	it("fails gateway and webhook project resolution closed when persistence is unavailable", async () => {
@@ -1369,7 +1371,7 @@ describe("billing app", () => {
 		const app = createApp({
 			env: {
 				...env,
-				projectRuntime: [
+				connectionFixtures: [
 					{
 						projectInstanceKey: "voysee",
 						projectionUrl: "https://voysee.example.com",
@@ -1904,7 +1906,7 @@ describe("billing app", () => {
 		const app = createApp({
 			env: {
 				...env,
-				projectRuntime: [
+				connectionFixtures: [
 					{
 						projectInstanceKey: "voysee",
 						projectionUrl: "https://voysee.example.com",
@@ -1973,7 +1975,7 @@ describe("billing app", () => {
 		const app = createApp({
 			env: {
 				...env,
-				projectRuntime: [
+				connectionFixtures: [
 					{
 						projectInstanceKey: "voysee",
 						projectionUrl: "https://voysee.example.com",
@@ -2051,7 +2053,7 @@ describe("billing app", () => {
 		const app = createApp({
 			env: {
 				...env,
-				projectRuntime: [
+				connectionFixtures: [
 					{
 						projectInstanceKey: "voysee",
 						projectionUrl: "https://voysee.example.com",

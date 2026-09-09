@@ -1,7 +1,7 @@
-import type { BillingEnv } from "../../../src/env";
 import type { BillingMetrics } from "../../../src/observability/metrics";
-import { ProjectionHttpClient } from "../../../src/projections/http-client";
 import type { ApiProjectProjectionFetch } from "../../../src/projections/http-types";
+import type { FixtureBillingEnv as BillingEnv } from "../../../src/testing/connection-fixtures";
+import { FixtureProjectionHttpClient as ProjectionHttpClient } from "../../../src/testing/connection-fixtures";
 import {
 	type ProjectionSyncRepository,
 	ProjectionSyncWorker,
@@ -74,7 +74,7 @@ export async function runProjectionWorkerOnce({
 		maxAttempts,
 		batchSize,
 		repository,
-		delivery: new ProjectionHttpClient({ projects: env.projectRuntime, fetch }),
+		delivery: new ProjectionHttpClient({ projects: env.connectionFixtures, fetch }),
 		projectContextResolver: integrationProjectContextResolver(),
 		now,
 		jitterMs: () => 0,

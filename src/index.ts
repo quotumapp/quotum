@@ -11,7 +11,7 @@ await initializePostgresHealth();
 
 const app = createBillingRuntimeApp(env, {
 	sentry: Sentry,
-	readinessCheck: createBillingReadinessCheck(env.projectRuntime),
+	readinessCheck: createBillingReadinessCheck(),
 });
 
 export default app;

@@ -1,8 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import {
-	checkProjectRuntimeConfiguration,
-	PostgresProjectInstanceContextResolver,
-} from "../../src/composition/project-instance-persistence";
+import { PostgresProjectInstanceContextResolver } from "../../src/composition/project-instance-persistence";
 import { generateProjectApiCredential } from "../../src/platform/credentials/project-api-token";
 import { isTenantTrafficEligible } from "../../src/projects/context";
 
@@ -151,25 +148,5 @@ describe("Postgres project instance composition adapter", () => {
 				internalProject: true,
 			}),
 		).toBe(false);
-	});
-
-	it("requires runtime configuration to match every database instance exactly", async () => {
-		const client = {
-			async unsafe() {
-				return [{ key: "voysee" }, { key: "wiseley" }];
-			},
-		};
-		const runtime = (projectInstanceKey: string) => ({
-			projectInstanceKey,
-			projectionUrl: `https://${projectInstanceKey}.example.test`,
-			projectionSecret: `${projectInstanceKey}-secret`,
-		});
-
-		await expect(
-			checkProjectRuntimeConfiguration([runtime("wiseley"), runtime("voysee")], client as never),
-		).resolves.toBe(true);
-		await expect(
-			checkProjectRuntimeConfiguration([runtime("voysee")], client as never),
-		).resolves.toBe(false);
 	});
 });

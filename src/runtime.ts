@@ -2,6 +2,10 @@ import { createApp } from "./app";
 import { createProjectProviderServiceResolver } from "./app/provider-services";
 import type { AppDependencies } from "./app/types";
 import { EntitlementService } from "./billing/entitlements";
+import {
+	createConnectionRepository,
+	createRuntimeConnectionResolver,
+} from "./composition/connections";
 import { createMerchantBillingPort } from "./composition/merchant-billing";
 import { attachMerchantRuntime, type MerchantRuntimeOptions } from "./composition/merchant-runtime";
 import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
@@ -22,8 +26,10 @@ import {
 	type SentryClientLike,
 } from "./observability/sentry";
 import { BillingAdminOperations } from "./operations/admin";
+import { loadMerchantConfig } from "./platform/config";
 import { ProjectionHttpClient } from "./projections/http-client";
-import type { ProjectRuntimeConfig } from "./projects/config";
+import type { ApiProjectProjectionFetch } from "./projections/http-types";
+import type { RuntimeConnectionResolver } from "./projects/connections";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "./projects/context";
 import { AppleStoreKitClient, buildAppleStoreKitConfig } from "./providers/apple/client";
 import { AppleStoreKitService } from "./providers/apple/service";
@@ -64,6 +70,8 @@ type WorkerProjectProviders = {
 };
 
 export interface BillingRuntimeDependencies {
+	projectionFetch?: ApiProjectProjectionFetch;
+	connections?: RuntimeConnectionResolver;
 	merchant?: MerchantRuntimeOptions;
 	projectProviderServices?: AppDependencies["projectProviderServices"];
 	sentry?: SentryClientLike;
@@ -79,6 +87,8 @@ export function createBillingRuntimeApp(
 	env: BillingEnv,
 	dependencies: BillingRuntimeDependencies = {},
 ) {
+	const merchantConfig = dependencies.merchant?.config ?? loadMerchantConfig();
+	const merchantRuntimes: Array<{ stop(): Promise<void> }> = [];
 	const billingRepository = new BillingRepository();
 	const baseLogger = createConsoleBillingLogger();
 	const logger =
@@ -92,8 +102,16 @@ export function createBillingRuntimeApp(
 	const metrics = createInMemoryBillingMetrics();
 	const projectContextResolver =
 		dependencies.projectContextResolver ?? new PostgresProjectInstanceContextResolver();
+	const connectionRepository = createConnectionRepository();
+	const connections =
+		dependencies.connections ?? createRuntimeConnectionResolver(connectionRepository);
 	const projectionDelivery = new ProjectionHttpClient({
-		projects: env.projectRuntime,
+		fetch: dependencies.projectionFetch,
+		async resolveProject(key) {
+			const lookup = await projectContextResolver.resolveInstanceKey(key);
+			if (lookup.kind !== "resolved") return null;
+			return connections.resolve(lookup.context, "projection", "recovery");
+		},
 		metrics,
 	});
 	const projectionSyncRepository = new ProjectionSyncJobRepository(billingRepository);
@@ -101,103 +119,47 @@ export function createBillingRuntimeApp(
 	const subscriptionReconciliationRepository = new ProviderSubscriptionReconciliationRepository(
 		billingRepository,
 	);
-	const projectRuntimeConfig = (project: ProjectInstanceContext): ProjectRuntimeConfig => {
-		const config = env.projectRuntime.find(
-			(candidate) => candidate.projectInstanceKey === project.projectInstanceKey,
-		);
-		if (config === undefined) {
-			throw new Error(`Billing project instance is not configured: ${project.projectInstanceKey}`);
-		}
-		return config;
-	};
-	const stripeServiceCache = new Map<string, StripeBillingService>();
-	const stripeServiceForProject = (
+	const projectProviderServices = dependencies.projectProviderServices;
+	const providersForProject = async (
 		project: ProjectInstanceContext,
-	): StripeBillingService | null => {
-		const runtimeConfig = projectRuntimeConfig(project);
-		if (runtimeConfig.stripe === null || runtimeConfig.stripe === undefined) {
-			return null;
-		}
-		const cached = stripeServiceCache.get(project.projectInstanceId);
-		if (cached !== undefined) {
-			return cached;
-		}
-
-		const config = buildStripeConfig(runtimeConfig.stripe);
-		const service = new StripeBillingService({
-			config: {
-				...config,
-				projectKey: project.projectInstanceKey,
-				projectionContract: runtimeConfig.projectionContract ?? "billing_state_v1",
-			},
-			client:
-				dependencies.stripeClientFactory?.(config, project.projectInstanceKey) ??
-				new StripeBillingClient(config),
-			repository: billingRepository.forProject(project),
-		});
-		stripeServiceCache.set(project.projectInstanceId, service);
-		return service;
-	};
-	const projectProviderServices =
-		dependencies.projectProviderServices ??
-		(dependencies.stripeClientFactory === undefined
-			? undefined
-			: Object.fromEntries(
-					env.projectRuntime.map((config) => [
-						config.projectInstanceKey,
-						{
-							stripeBillingService:
-								config.stripe === null || config.stripe === undefined
-									? null
-									: createDeferredStripeBillingService(
-											config.projectInstanceKey,
-											projectContextResolver,
-											stripeServiceForProject,
-										),
+		kind: "apple" | "google" | "stripe",
+	): Promise<WorkerProjectProviders> => {
+		const [apple, googlePlay, stripe] = await Promise.all([
+			kind === "apple" ? connections.resolve(project, "apple", "recovery") : null,
+			kind === "google" ? connections.resolve(project, "google", "recovery") : null,
+			kind === "stripe" ? connections.resolve(project, "stripe", "recovery") : null,
+		]);
+		const stripeConfig = stripe ? buildStripeConfig(stripe) : null;
+		return {
+			apple: apple
+				? new AppleStoreKitService({
+						bundleId: apple.bundleId,
+						environment: apple.environment,
+						client: new AppleStoreKitClient(buildAppleStoreKitConfig(apple)),
+						repository: billingRepository.forProject(project),
+					})
+				: null,
+			google: googlePlay
+				? new GooglePlayBillingService({
+						config: buildGooglePlayConfig(googlePlay),
+						client: new GooglePlayDeveloperClient(buildGooglePlayConfig(googlePlay)),
+						repository: billingRepository.forProject(project),
+					})
+				: null,
+			stripe: stripeConfig
+				? new StripeBillingService({
+						config: {
+							...stripeConfig,
+							projectKey: project.projectInstanceKey,
+							projectionContract: "billing_state_v1",
 						},
-					]),
-				));
-	const workerProviderCache = new Map<string, WorkerProjectProviders>();
-	const providersForProject = (project: ProjectInstanceContext): WorkerProjectProviders => {
-		const cached = workerProviderCache.get(project.projectInstanceId);
-		if (cached !== undefined) {
-			return cached;
-		}
-
-		if (
-			project.runtimeUnconfigured &&
-			!env.projectRuntime.some((config) => config.projectInstanceKey === project.projectInstanceKey)
-		)
-			return { apple: null, google: null, stripe: null };
-		const runtimeConfig = projectRuntimeConfig(project);
-		const apple = runtimeConfig.apple ?? null;
-		const googlePlay = runtimeConfig.googlePlay ?? null;
-		const stripe = runtimeConfig.stripe ?? null;
-		const providers = {
-			apple:
-				apple === null
-					? null
-					: new AppleStoreKitService({
-							bundleId: apple.bundleId,
-							environment: apple.environment,
-							client: new AppleStoreKitClient(buildAppleStoreKitConfig(apple)),
-							repository: billingRepository.forProject(project),
-						}),
-			google:
-				googlePlay === null
-					? null
-					: (() => {
-							const config = buildGooglePlayConfig(googlePlay);
-							return new GooglePlayBillingService({
-								config,
-								client: new GooglePlayDeveloperClient(config),
-								repository: billingRepository.forProject(project),
-							});
-						})(),
-			stripe: stripe === null ? null : stripeServiceForProject(project),
+						client:
+							dependencies.stripeClientFactory?.(stripeConfig, project.projectInstanceKey) ??
+							new StripeBillingClient(stripeConfig),
+						repository: billingRepository.forProject(project),
+					})
+				: null,
 		};
-		workerProviderCache.set(project.projectInstanceId, providers);
-		return providers;
 	};
 	const projectionSyncWorker = new ProjectionSyncWorker({
 		workerId: env.workerId,
@@ -240,8 +202,8 @@ export function createBillingRuntimeApp(
 		workerId: env.workerId,
 		repository: billingRepository,
 		projectContextResolver,
-		providerForProject(project) {
-			const stripe = providersForProject(project).stripe;
+		async providerForProject(project) {
+			const stripe = (await providersForProject(project, "stripe")).stripe;
 			if (stripe === null) {
 				throw new Error(`Stripe is not configured for ${project.projectInstanceKey}`);
 			}
@@ -254,8 +216,8 @@ export function createBillingRuntimeApp(
 		workerId: env.workerId,
 		repository: billingRepository,
 		projectContextResolver,
-		providerForProject(project) {
-			const stripe = providersForProject(project).stripe;
+		async providerForProject(project) {
+			const stripe = (await providersForProject(project, "stripe")).stripe;
 			if (stripe === null) {
 				throw new Error(`Stripe is not configured for ${project.projectInstanceKey}`);
 			}
@@ -318,6 +280,9 @@ export function createBillingRuntimeApp(
 			autoTopupRuntime,
 		],
 		cleanup: [
+			async () => {
+				await Promise.all(merchantRuntimes.map((runtime) => runtime.stop()));
+			},
 			() => closePool(),
 			async () => {
 				await dependencies.sentry?.flush?.(2_000);
@@ -327,6 +292,7 @@ export function createBillingRuntimeApp(
 
 	const staff = createApp({
 		env,
+		connections,
 		entitlementService: new EntitlementService(billingRepository),
 		projectContextResolver,
 		projectProviderServices,
@@ -346,7 +312,7 @@ export function createBillingRuntimeApp(
 		}),
 		resolver: projectContextResolver,
 		providers: createProjectProviderServiceResolver({
-			env,
+			connections,
 			getRepository: () => billingRepository,
 			projectProviderServices,
 			legacyServices: {
@@ -357,34 +323,18 @@ export function createBillingRuntimeApp(
 		}),
 		operations: adminOperations,
 	});
-	return attachMerchantRuntime(staff, merchantBilling, dependencies.merchant);
-}
-
-function createDeferredStripeBillingService(
-	projectInstanceKey: string,
-	projectContextResolver: ProjectInstanceContextResolver,
-	serviceForProject: (project: ProjectInstanceContext) => StripeBillingService | null,
-): StripeBillingService {
-	return new Proxy({} as StripeBillingService, {
-		get(_target, property) {
-			if (property === "then") return undefined;
-			return async (...args: unknown[]) => {
-				const result = await projectContextResolver.resolveInstanceKey(projectInstanceKey);
-				if (result.kind !== "resolved") {
-					throw new Error(
-						`Billing project instance could not be resolved for Stripe: ${result.kind}`,
-					);
-				}
-				const service = serviceForProject(result.context);
-				if (service === null) {
-					throw new Error(`Stripe is not configured for ${projectInstanceKey}`);
-				}
-				const method = Reflect.get(service, property);
-				if (typeof method !== "function") {
-					throw new Error(`Stripe billing service method is unavailable: ${String(property)}`);
-				}
-				return await Reflect.apply(method, service, args);
-			};
+	return attachMerchantRuntime(staff, merchantBilling, {
+		...dependencies.merchant,
+		config: merchantConfig ?? undefined,
+		registerBackground: (worker) => {
+			merchantRuntimes.push(
+				startPollingRuntime({
+					name: "stripe_app_events",
+					worker,
+					pollIntervalMs: env.storeEventReplayPollIntervalMs,
+					logger,
+				}),
+			);
 		},
 	});
 }

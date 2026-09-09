@@ -117,8 +117,12 @@ describe("merchant security boundaries", () => {
 			)?.path,
 		).toBe("/v1/billing-accounts/customer/controls");
 	});
-	it("keeps rollout disabled and rejects draft production signup policies", () => {
-		expect(loadMerchantConfig({})).toBeNull();
+	it("requires production merchant configuration and rejects draft signup policies", () => {
+		expect(() => loadMerchantConfig({})).toThrow();
+		expect(loadMerchantConfig({ BILLING_ENV: "test" })).toBeNull();
+		expect(() =>
+			loadMerchantConfig({ BILLING_ENV: "production", MERCHANT_AUTH_ENABLED: "false" }),
+		).toThrow("required in production");
 		expect(() =>
 			loadMerchantConfig({
 				MERCHANT_AUTH_ENABLED: "true",

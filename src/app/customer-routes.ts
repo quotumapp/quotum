@@ -185,7 +185,7 @@ export function registerCustomerRoutes({
 			throw new BillingError("Invalid billing catalog query", "INVALID_REQUEST", 400);
 		}
 		const stripe = requireStripeBillingService(
-			providerServices.stripeBillingService(privateProject(c)),
+			await providerServices.stripeBillingService(privateProject(c)),
 		);
 		if (stripe.getCatalog === undefined) {
 			throw new BillingError("Stripe catalog is not available", "STRIPE_NOT_CONFIGURED", 503);
@@ -200,7 +200,7 @@ export function registerCustomerRoutes({
 		async (c) => {
 			const params = parseStripeCustomerRouteParams(c.req.param());
 			const stripe = requireStripeBillingService(
-				providerServices.stripeBillingService(privateProject(c)),
+				await providerServices.stripeBillingService(privateProject(c)),
 			);
 			if (stripe.getBillingAccount === undefined) {
 				throw new BillingError(
@@ -224,7 +224,7 @@ export function registerCustomerRoutes({
 				throw new BillingError("Invalid commercial action preview", "INVALID_REQUEST", 400);
 			}
 			const stripe = requireStripeBillingService(
-				providerServices.stripeBillingService(privateProject(c)),
+				await providerServices.stripeBillingService(privateProject(c)),
 			);
 			if (stripe.previewCommercialAction === undefined) {
 				throw new BillingError(
@@ -252,7 +252,7 @@ export function registerCustomerRoutes({
 				throw new BillingError("Invalid commercial action execution", "INVALID_REQUEST", 400);
 			}
 			const stripe = requireStripeBillingService(
-				providerServices.stripeBillingService(privateProject(c)),
+				await providerServices.stripeBillingService(privateProject(c)),
 			);
 			if (stripe.executeCommercialAction === undefined) {
 				throw new BillingError(
@@ -275,7 +275,7 @@ export function registerCustomerRoutes({
 		customerContracts.getV1BillingAccountsByBillingAccountIdProvidersAppleAccountToken,
 		async (c) => {
 			const appAccountToken = await requireAppleStoreKitService(
-				providerServices.appleStoreKitService(privateProject(c)),
+				await providerServices.appleStoreKitService(privateProject(c)),
 			).getOrCreateAppAccountToken(c.req.param("billingAccountId"));
 			return c.json({ success: true, data: { appAccountToken } });
 		},
@@ -286,7 +286,7 @@ export function registerCustomerRoutes({
 		customerContracts.getV1BillingAccountsByBillingAccountIdProvidersGoogleAccountLink,
 		async (c) => {
 			const accountLink = await requireGooglePlayBillingService(
-				providerServices.googlePlayBillingService(privateProject(c)),
+				await providerServices.googlePlayBillingService(privateProject(c)),
 			).getAccountLink(c.req.param("billingAccountId"));
 			return c.json({ success: true, data: accountLink });
 		},
@@ -305,7 +305,7 @@ export function registerCustomerRoutes({
 			}
 
 			const stripe = requireStripeBillingService(
-				providerServices.stripeBillingService(privateProject(c)),
+				await providerServices.stripeBillingService(privateProject(c)),
 			);
 			const sessionInput = {
 				billingAccountId: params.billingAccountId,
@@ -350,7 +350,7 @@ export function registerCustomerRoutes({
 				throw new BillingError("Invalid Stripe portal session body", "INVALID_REQUEST", 400);
 			}
 			const session = await requireStripeBillingService(
-				providerServices.stripeBillingService(privateProject(c)),
+				await providerServices.stripeBillingService(privateProject(c)),
 			).createPortalSession({
 				billingAccountId: params.billingAccountId,
 				returnUrl: parsed.data.returnUrl,
@@ -379,7 +379,7 @@ export function registerCustomerRoutes({
 				);
 			}
 			const stripe = requireStripeBillingService(
-				providerServices.stripeBillingService(privateProject(c)),
+				await providerServices.stripeBillingService(privateProject(c)),
 			);
 			if (stripe.requestSubscriptionChange === undefined) {
 				throw new BillingError(
@@ -407,7 +407,7 @@ export function registerCustomerRoutes({
 		async (c) => {
 			const params = parseStripeCheckoutSessionRouteParams(c.req.param());
 			const session = await requireStripeBillingService(
-				providerServices.stripeBillingService(privateProject(c)),
+				await providerServices.stripeBillingService(privateProject(c)),
 			).getCheckoutSessionStatus({
 				billingAccountId: params.billingAccountId,
 				sessionId: params.sessionId,
@@ -419,7 +419,7 @@ export function registerCustomerRoutes({
 	registerRoute(app, customerContracts.expireStripeCheckoutSession, async (c) => {
 		const params = parseStripeCheckoutSessionRouteParams(c.req.param());
 		const stripe = requireStripeBillingService(
-			providerServices.stripeBillingService(privateProject(c)),
+			await providerServices.stripeBillingService(privateProject(c)),
 		);
 		if (!stripe.expireCheckoutSession)
 			throw new BillingError("Checkout expiration is unavailable", "STRIPE_NOT_CONFIGURED", 503);
@@ -441,13 +441,13 @@ export function registerCustomerRoutes({
 			provider = parsed.data.provider;
 			return parsed.data.provider === "apple"
 				? await requireAppleStoreKitService(
-						providerServices.appleStoreKitService(project),
+						await providerServices.appleStoreKitService(project),
 					).verifyPurchase({
 						billingAccountId: parsed.data.billingAccountId,
 						transactionId: parsed.data.transactionId,
 					})
 				: await requireGooglePlayBillingService(
-						providerServices.googlePlayBillingService(project),
+						await providerServices.googlePlayBillingService(project),
 					).verifyPurchase({
 						billingAccountId: parsed.data.billingAccountId,
 						purchaseKind: parsed.data.purchaseKind,

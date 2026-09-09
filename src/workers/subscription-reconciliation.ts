@@ -32,7 +32,8 @@ export interface SubscriptionReconciliationProviders {
 
 export type SubscriptionReconciliationProviderSelector = (
 	project: ProjectInstanceContext,
-) => SubscriptionReconciliationProviders;
+	provider: "apple" | "google" | "stripe",
+) => SubscriptionReconciliationProviders | Promise<SubscriptionReconciliationProviders>;
 
 export interface SubscriptionReconciliationRepository {
 	reconcileExpiredSubscriptions(limit: number): Promise<ExpiredSubscriptionReconciliationResult>;
@@ -241,7 +242,7 @@ export class SubscriptionReconciliationWorker {
 				projectInstanceId: subscription.project_id,
 				projectInstanceKey: subscription.project_key,
 			});
-			const provider = this.providerFor(subscription, project);
+			const provider = await this.providerFor(subscription, project);
 			result = await provider.reconcileSubscription(subscription);
 		} catch (error) {
 			await this.markFailedSafely(subscription, error);
@@ -262,12 +263,12 @@ export class SubscriptionReconciliationWorker {
 		return result.status;
 	}
 
-	private providerFor(
+	private async providerFor(
 		subscription: ProviderSubscriptionReconciliationRow,
 		project: ProjectInstanceContext,
-	): SubscriptionReconciliationProvider {
+	): Promise<SubscriptionReconciliationProvider> {
 		const provider = subscription.provider;
-		const reconciliationProvider = this.providersFor(project)[provider];
+		const reconciliationProvider = (await this.providersFor(project, provider))[provider];
 		if (reconciliationProvider === null) {
 			throw new Error(`Subscription reconciliation provider is not configured: ${provider}`);
 		}
@@ -275,8 +276,13 @@ export class SubscriptionReconciliationWorker {
 		return reconciliationProvider;
 	}
 
-	private providersFor(project: ProjectInstanceContext): SubscriptionReconciliationProviders {
-		return typeof this.providers === "function" ? this.providers(project) : this.providers;
+	private async providersFor(
+		project: ProjectInstanceContext,
+		provider: "apple" | "google" | "stripe",
+	): Promise<SubscriptionReconciliationProviders> {
+		return typeof this.providers === "function"
+			? this.providers(project, provider)
+			: this.providers;
 	}
 
 	private async markFailed(

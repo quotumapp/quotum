@@ -61,7 +61,9 @@ export class RecurringBillingWorker {
 			batchSize?: number;
 			repository: RecurringBillingWorkerRepository;
 			projectContextResolver: ProjectInstanceContextResolver;
-			providerForProject(project: ProjectInstanceContext): RecurringBillingWorkerProvider;
+			providerForProject(
+				project: ProjectInstanceContext,
+			): RecurringBillingWorkerProvider | Promise<RecurringBillingWorkerProvider>;
 			logger: RecurringBillingWorkerLogger;
 			metrics?: BillingMetrics;
 		},
@@ -86,9 +88,9 @@ export class RecurringBillingWorker {
 						projectInstanceKey: change.projectKey,
 					},
 				);
-				const providerRequestId = await this.dependencies
-					.providerForProject(project)
-					.applySubscriptionChange(change);
+				const providerRequestId = await (
+					await this.dependencies.providerForProject(project)
+				).applySubscriptionChange(change);
 				await this.dependencies.repository.markSubscriptionChangeApplied(
 					change.projectInstanceId,
 					change.changeId,
@@ -126,9 +128,9 @@ export class RecurringBillingWorker {
 						projectInstanceKey: job.projectKey,
 					},
 				);
-				const externalInvoiceId = await this.dependencies
-					.providerForProject(project)
-					.createUsageInvoice(job);
+				const externalInvoiceId = await (
+					await this.dependencies.providerForProject(project)
+				).createUsageInvoice(job);
 				await this.dependencies.repository.markUsageInvoiceSucceeded(
 					job.projectInstanceId,
 					job.jobKind,

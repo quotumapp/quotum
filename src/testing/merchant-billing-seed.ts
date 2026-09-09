@@ -5,10 +5,10 @@ import { seedPhase3CatalogMigration } from "../../tests/integration/helpers/phas
 import type { AppDependencies } from "../app/types";
 import { PostgresProjectInstanceContextResolver } from "../composition/project-instance-persistence";
 import { BillingRepository } from "../db/repository";
-import type { BillingEnv } from "../env";
 import { buildStripeConfig } from "../providers/stripe/client";
 import { StripeBillingService } from "../providers/stripe/service";
 import { FakeStripeBillingClient } from "../providers/stripe/testing/fake-client";
+import type { FixtureBillingEnv as BillingEnv } from "./connection-fixtures";
 
 /** Only imported by the guarded, loopback-only merchant integration entrypoint. */
 export async function seedMerchantBilling(
@@ -26,7 +26,7 @@ export async function seedMerchantBilling(
 	);
 	if (resolved.kind !== "resolved") throw new Error("Synthetic project context missing");
 	const context = resolved.context;
-	const template = env.projectRuntime.find((project) => project.stripe);
+	const template = env.connectionFixtures.find((project) => project.stripe);
 	if (!template?.stripe) throw new Error("Synthetic Stripe template is missing");
 	const billingAccountId = "merchant-synthetic-account";
 	const repository = new BillingRepository();
@@ -65,8 +65,8 @@ export async function seedMerchantBilling(
 		await database`INSERT INTO store_events(project_id,provider,channel,external_event_id,event_type,processing_status,processing_error,raw_payload) VALUES(${instance.id},'stripe','web','evt_merchant_synthetic','customer.created','failed','Synthetic processing failure',${JSON.stringify(payload)}::text::jsonb)`;
 	}
 	// Reuse only the runner's fake Stripe/loopback projection configuration. No provider secrets leave this process.
-	if (!env.projectRuntime.some((project) => project.projectInstanceKey === instance.key)) {
-		env.projectRuntime.push({
+	if (!env.connectionFixtures.some((project) => project.projectInstanceKey === instance.key)) {
+		env.connectionFixtures.push({
 			...template,
 			projectInstanceKey: instance.key,
 		});

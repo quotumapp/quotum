@@ -27,6 +27,9 @@ export const MerchantCapabilitySchema = z
 		"operations.recover",
 		"operations.write",
 		"production.manage",
+		"production.connections.manage",
+		"production.activate",
+		"production.credentials.rotate",
 	])
 	.openapi("MerchantCapability");
 

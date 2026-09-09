@@ -38,7 +38,12 @@ e2eDescribe("E2E lifecycle", () => {
 
 	it("reports unavailable when Postgres is lost and recovers dynamically", async () => {
 		proxy = await createPostgresProxy();
-		service = await startBillingService(e2eServiceEnv({ postgresUri: proxiedPostgresUri(proxy) }));
+		service = await startBillingService(
+			e2eServiceEnv({
+				postgresUri: proxiedPostgresUri(proxy),
+				overrides: { BILLING_TEST_CONNECTIONS_JSON: "[]" },
+			}),
+		);
 
 		await expectStatus("/ready", 200);
 		await expectAuthenticatedProjectStatus(200);
@@ -54,7 +59,12 @@ e2eDescribe("E2E lifecycle", () => {
 	it("recovers readiness after a startup-time Postgres outage", async () => {
 		proxy = await createPostgresProxy();
 		await proxy.stop();
-		service = await startBillingService(e2eServiceEnv({ postgresUri: proxiedPostgresUri(proxy) }));
+		service = await startBillingService(
+			e2eServiceEnv({
+				postgresUri: proxiedPostgresUri(proxy),
+				overrides: { BILLING_TEST_CONNECTIONS_JSON: "[]" },
+			}),
+		);
 
 		await expectStatus("/livez", 200);
 		await expectStatus("/ready", 503);

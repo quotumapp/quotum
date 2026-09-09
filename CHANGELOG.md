@@ -10,6 +10,27 @@ Before 1.0 the schema ships as baseline files under `migrations/` that evolve in
 checksum-verified; recreate a database from them rather than migrating it. Incremental migrations
 start at 1.0.
 
+## [0.9.0] - 2026-09-09
+
+### Added
+
+- Self-service provider connections: merchants connect Stripe through OAuth and store encrypted
+  provider and projection credentials per environment (platform connection tables in `001_platform.sql`).
+- Connection secret rotation (`bun run connections:rotate-secrets`), Stripe App event intake,
+  and production activation from the merchant platform.
+- Scoped Stripe Checkout expiration: optional `expiresAt` on session creation and
+  `POST .../providers/stripe/checkout-sessions/:sessionId/expire`.
+
+### Changed
+
+- The service starts and reports ready before any customer is onboarded; customer readiness is
+  tracked per connection.
+
+### Removed
+
+- `BILLING_PROJECT_RUNTIME_JSON`. Supplying it is rejected at startup; configure integrations
+  through the merchant platform instead. Existing identities and billing data are unaffected.
+
 ## [0.8.1] - 2026-09-08
 
 ### Added

@@ -32,7 +32,8 @@ export interface StoreEventReplayProviders {
 
 export type StoreEventReplayProviderSelector = (
 	project: ProjectInstanceContext,
-) => StoreEventReplayProviders;
+	provider: "apple" | "google" | "stripe",
+) => StoreEventReplayProviders | Promise<StoreEventReplayProviders>;
 
 export interface StoreEventReplayRunResult {
 	claimed: number;
@@ -223,7 +224,7 @@ export class StoreEventReplayWorker {
 					projectInstanceKey: event.project_key,
 				}));
 			assertClaimedProjectIdentity(project, event.project_id, event.project_key);
-			const provider = this.providerFor(event, project);
+			const provider = await this.providerFor(event, project);
 			result = await provider.replayStoreEvent(event);
 		} catch (error) {
 			await this.markFailedSafely(event, error);
@@ -272,16 +273,16 @@ export class StoreEventReplayWorker {
 		}
 	}
 
-	private providerFor(
+	private async providerFor(
 		event: StoreEventReplayJobRow,
 		project: ProjectInstanceContext,
-	): StoreEventReplayProvider {
+	): Promise<StoreEventReplayProvider> {
 		const provider = event.provider;
 		if (provider !== "apple" && provider !== "google" && provider !== "stripe") {
 			throw new Error(`Unsupported store event replay provider: ${provider}`);
 		}
 
-		const replayProvider = this.providersFor(project)[provider];
+		const replayProvider = (await this.providersFor(project, provider))[provider];
 		if (replayProvider === null) {
 			throw new Error(`Store event replay provider is not configured: ${provider}`);
 		}
@@ -289,8 +290,13 @@ export class StoreEventReplayWorker {
 		return replayProvider;
 	}
 
-	private providersFor(project: ProjectInstanceContext): StoreEventReplayProviders {
-		return typeof this.providers === "function" ? this.providers(project) : this.providers;
+	private async providersFor(
+		project: ProjectInstanceContext,
+		provider: "apple" | "google" | "stripe",
+	): Promise<StoreEventReplayProviders> {
+		return typeof this.providers === "function"
+			? this.providers(project, provider)
+			: this.providers;
 	}
 
 	private async markFailed(event: StoreEventReplayJobRow, error: unknown): Promise<void> {

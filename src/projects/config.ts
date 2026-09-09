@@ -1,18 +1,6 @@
 import { z } from "zod";
-import type { ProjectionContract } from "../billing/types";
-import type { AppleBillingEnv, GooglePlayBillingEnv, StripeBillingEnv } from "../env";
 
-export interface ProjectRuntimeConfig {
-	projectInstanceKey: string;
-	projectionUrl: string;
-	projectionSecret: string;
-	projectionContract?: ProjectionContract;
-	apple?: AppleBillingEnv | null;
-	googlePlay?: GooglePlayBillingEnv | null;
-	stripe?: StripeBillingEnv | null;
-}
-
-const appleProjectConfigSchema = z
+export const appleProjectConfigSchema = z
 	.object({
 		bundleId: z.string().trim().min(1),
 		appAppleId: z.number().int().positive().nullable(),
@@ -39,7 +27,7 @@ const appleProjectConfigSchema = z
 		}
 	});
 
-const googlePlayProjectConfigSchema = z
+export const googlePlayProjectConfigSchema = z
 	.object({
 		packageName: z.string().trim().min(1),
 		serviceAccountJson: z.string().trim().min(1).nullable(),
@@ -76,7 +64,7 @@ const googlePlayProjectConfigSchema = z
 		}
 	});
 
-const stripeProjectConfigSchema = z
+export const stripeProjectConfigSchema = z
 	.object({
 		secretKey: z.string().trim().min(1),
 		webhookSecret: z.string().trim().min(1),
@@ -121,71 +109,3 @@ const stripeProjectConfigSchema = z
 			});
 		}
 	});
-
-const projectRuntimeConfigSchema = z
-	.object({
-		projectInstanceKey: z
-			.string()
-			.trim()
-			.min(1)
-			.max(80)
-			.regex(/^[a-z0-9][a-z0-9_-]*$/, "project key must be a lowercase slug"),
-		projectionUrl: z.string().trim().url(),
-		projectionSecret: z.string().trim().min(1),
-		projectionContract: z.enum(["billing_state_v1"]).default("billing_state_v1"),
-		apple: appleProjectConfigSchema.nullable().optional(),
-		googlePlay: googlePlayProjectConfigSchema.nullable().optional(),
-		stripe: stripeProjectConfigSchema.nullable().optional(),
-	})
-	.strict();
-
-const projectRuntimeConfigsSchema = z.array(projectRuntimeConfigSchema).min(1);
-
-export function parseProjectRuntimeConfigs(value: string): ProjectRuntimeConfig[] {
-	let parsedJson: unknown;
-	try {
-		parsedJson = JSON.parse(value);
-	} catch {
-		throw new Error("BILLING_PROJECT_RUNTIME_JSON must be valid JSON");
-	}
-
-	const parsed = projectRuntimeConfigsSchema.safeParse(parsedJson);
-	if (!parsed.success) {
-		throw new Error("BILLING_PROJECT_RUNTIME_JSON is invalid");
-	}
-
-	const seenKeys = new Set<string>();
-	for (const project of parsed.data) {
-		if (seenKeys.has(project.projectInstanceKey)) {
-			throw new Error("BILLING_PROJECT_RUNTIME_JSON contains duplicate project instance keys");
-		}
-		seenKeys.add(project.projectInstanceKey);
-	}
-
-	return parsed.data.map((project) =>
-		project.stripe === null || project.stripe === undefined
-			? project
-			: {
-					...project,
-					stripe: {
-						...project.stripe,
-						allowedReturnOrigins:
-							project.stripe.allowedReturnOrigins ?? defaultStripeOrigins(project.stripe),
-					},
-				},
-	);
-}
-
-function defaultStripeOrigins(config: {
-	checkoutSuccessUrl: string;
-	checkoutCancelUrl: string;
-	portalReturnUrl: string;
-}): string[] {
-	return [
-		...new Set(
-			[config.checkoutSuccessUrl, config.checkoutCancelUrl, config.portalReturnUrl].map(
-				(value) => new URL(value).origin,
-			),
-		),
-	];
-}

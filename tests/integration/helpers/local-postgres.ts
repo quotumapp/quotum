@@ -2,8 +2,8 @@ import type { SQL } from "bun";
 import { PostgresProjectInstanceContextResolver } from "../../../src/composition/project-instance-persistence";
 import { type BillingDatabase, createBillingDatabaseConnection } from "../../../src/db/client";
 import { BillingRepository } from "../../../src/db/repository";
-import type { BillingEnv } from "../../../src/env";
 import type { ProjectInstanceContextResolver } from "../../../src/projects/context";
+import type { FixtureBillingEnv as BillingEnv } from "../../../src/testing/connection-fixtures";
 import { integrationProjects } from "./catalog-fixtures";
 import { integrationProjectContexts } from "./platform-fixture";
 
@@ -61,7 +61,7 @@ export function createIntegrationBillingEnv(
 		authMode: "api_key",
 		operatorApiKey: "billing-integration-operator-key",
 		trustGatewayProjectHeader: false,
-		projectRuntime: integrationProjectContexts().map((context) => {
+		connectionFixtures: integrationProjectContexts().map((context) => {
 			const configured = integrationProjects.find(
 				(project) => project.projectInstanceKey === context.projectInstanceKey,
 			);

@@ -1,7 +1,5 @@
 import { isIP } from "node:net";
 import { z } from "zod";
-import type { ProjectRuntimeConfig } from "./projects/config";
-import { parseProjectRuntimeConfigs } from "./projects/config";
 
 export type AppleEnvironmentName = "sandbox" | "production";
 export type BillingRuntimeEnvironment = "development" | "test" | "production";
@@ -48,6 +46,8 @@ export interface GooglePlayBillingEnv {
 }
 
 export interface StripeBillingEnv {
+	connectedAccountId?: string;
+	connectedAccountLivemode?: boolean;
 	secretKey: string;
 	webhookSecret: string;
 	checkoutSuccessUrl: string;
@@ -63,7 +63,6 @@ export interface BillingEnv {
 	authMode: BillingAuthMode;
 	operatorApiKey: string | null;
 	trustGatewayProjectHeader: boolean;
-	projectRuntime: ProjectRuntimeConfig[];
 	runtimeEnvironment: BillingRuntimeEnvironment;
 	workerId: string;
 	workerPollIntervalMs: number;
@@ -81,7 +80,6 @@ export interface BillingEnv {
 const envSchema = z.object({
 	POSTGRES_URI: requiredString("POSTGRES_URI"),
 	BILLING_OPERATOR_API_KEY: optionalString(),
-	BILLING_PROJECT_RUNTIME_JSON: requiredString("BILLING_PROJECT_RUNTIME_JSON"),
 	BILLING_AUTH_MODE: z.enum(["api_key", "gateway"]).default("api_key"),
 	BILLING_TRUST_GATEWAY_PROJECT_HEADER: z.enum(["true", "false"]).default("false"),
 	BILLING_ENV: z.enum(["development", "test", "production"]).default("production"),
@@ -134,9 +132,14 @@ const envSchema = z.object({
 });
 
 export function loadEnv(source: Record<string, string | undefined> = process.env): BillingEnv {
+	if (source.BILLING_PROJECT_RUNTIME_JSON !== undefined) {
+		throw new Error(
+			"BILLING_PROJECT_RUNTIME_JSON has been removed; configure integrations through the web",
+		);
+	}
 	if (source.BILLING_PROJECTS_JSON !== undefined) {
 		throw new Error(
-			"BILLING_PROJECTS_JSON has been removed; use database bootstrap and BILLING_PROJECT_RUNTIME_JSON",
+			"BILLING_PROJECTS_JSON has been removed; use web onboarding and database-owned connections",
 		);
 	}
 	if (source.BILLING_PROJECTION_ADAPTER !== undefined) {
@@ -155,12 +158,9 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 			"BILLING_TRUST_GATEWAY_PROJECT_HEADER must be true when BILLING_AUTH_MODE is gateway",
 		);
 	}
-	const projectRuntime = parseProjectRuntimeConfigs(parsed.BILLING_PROJECT_RUNTIME_JSON);
 	const operatorApiKey = parseOperatorApiKey(parsed.BILLING_OPERATOR_API_KEY);
 	if (parsed.BILLING_ENV === "production") {
 		assertProductionOperatorApiKey(operatorApiKey);
-		assertProductionProjectionProjects(projectRuntime);
-		assertProductionStripeProjects(projectRuntime);
 	}
 
 	return {
@@ -168,7 +168,6 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 		authMode,
 		operatorApiKey,
 		trustGatewayProjectHeader,
-		projectRuntime,
 		runtimeEnvironment: parsed.BILLING_ENV,
 		workerId: parsed.BILLING_WORKER_ID ?? `billing-worker-${crypto.randomUUID()}`,
 		workerPollIntervalMs: Number.parseInt(parsed.BILLING_WORKER_POLL_INTERVAL_MS, 10),
@@ -215,38 +214,7 @@ function assertProductionOperatorApiKey(operatorApiKey: string | null): void {
 	}
 }
 
-function assertProductionProjectionProjects(projects: readonly ProjectRuntimeConfig[]): void {
-	for (const project of projects) {
-		if (!isProductionProjectionUrlSafe(project.projectionUrl)) {
-			throw new Error("Production billing project projectionUrl must be an HTTPS public URL");
-		}
-	}
-}
-
-function assertProductionStripeProjects(projects: readonly ProjectRuntimeConfig[]): void {
-	for (const project of projects) {
-		const stripe = project.stripe;
-		if (stripe === null || stripe === undefined) {
-			continue;
-		}
-		const urls = [
-			stripe.checkoutSuccessUrl,
-			stripe.checkoutCancelUrl,
-			stripe.portalReturnUrl,
-			...(stripe.allowedReturnOrigins ?? []),
-		];
-		if (urls.some((value) => !isHttpsUrl(value))) {
-			throw new Error("Production Stripe redirect URLs and allowed origins must use HTTPS");
-		}
-	}
-}
-
-function isHttpsUrl(value: string): boolean {
-	const url = new URL(value);
-	return url.protocol === "https:" && url.username === "" && url.password === "";
-}
-
-function isProductionProjectionUrlSafe(value: string): boolean {
+export function isProductionProjectionUrlSafe(value: string): boolean {
 	let url: URL;
 	try {
 		url = new URL(value);

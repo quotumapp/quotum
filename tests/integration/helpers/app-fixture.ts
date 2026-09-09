@@ -2,7 +2,6 @@ import { createApp } from "../../../src/app";
 import { EntitlementService } from "../../../src/billing/entitlements";
 import { MeteringService } from "../../../src/billing/metering";
 import type { BillingRepository } from "../../../src/db/repository";
-import type { BillingEnv } from "../../../src/env";
 import type { BillingLogger } from "../../../src/observability/logger";
 import { createInMemoryBillingMetrics } from "../../../src/observability/metrics";
 import type { BillingAdminOperations } from "../../../src/operations/admin";
@@ -11,6 +10,7 @@ import { AppleStoreKitService } from "../../../src/providers/apple/service";
 import { createGoogleObfuscatedAccountId } from "../../../src/providers/google/account-link";
 import { GooglePlayBillingService } from "../../../src/providers/google/service";
 import { StripeBillingService } from "../../../src/providers/stripe/service";
+import type { FixtureBillingEnv as BillingEnv } from "../../../src/testing/connection-fixtures";
 import { withOpenApiAssertions } from "../../helpers/openapi";
 import {
 	createFakeAppleStoreKitClient,
@@ -77,7 +77,7 @@ export function createIntegrationApp({
 		StripeBillingService
 	> = {};
 
-	for (const project of env.projectRuntime) {
+	for (const project of env.connectionFixtures) {
 		const projectContext = integrationProjectContext(project.projectInstanceKey);
 		const projectRepository = repository.forProject(projectContext);
 
@@ -194,7 +194,7 @@ export function createIntegrationApp({
 		google,
 		stripe,
 		authHeaders(projectKey = "voysee"): HeadersInit {
-			const project = env.projectRuntime.find(
+			const project = env.connectionFixtures.find(
 				(candidate) => candidate.projectInstanceKey === projectKey,
 			);
 			if (project === undefined) {

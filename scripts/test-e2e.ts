@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { run, startPostgresContainer } from "./lib/postgres-container";
-import { createSanitizedProcessEnv } from "./lib/sanitized-env";
+import { createContainerTestEnv, createSanitizedProcessEnv } from "./lib/sanitized-env";
 import {
 	createTestPlatformManifest,
 	resolveTestPlatformContexts,
@@ -51,6 +51,7 @@ async function runE2eTests(): Promise<void> {
 		const contexts = await resolveTestPlatformContexts(container.getConnectionUri(), manifest);
 		run("bun", ["run", "platform:bootstrap", "--", "--check"], { env: bootstrapEnv });
 		const env = {
+			...createContainerTestEnv(),
 			...migrationEnv,
 			BILLING_TEST_PROJECT_CONTEXTS_JSON: JSON.stringify(contexts),
 			BILLING_TEST_PROJECT_CREDENTIALS_JSON: JSON.stringify(credentials),

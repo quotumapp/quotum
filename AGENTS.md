@@ -65,7 +65,8 @@ Never commit `POSTGRES_URI`, project API keys, projection secrets, provider cred
 production database URLs. Project identity and credential verifiers are database-owned; plaintext
 credentials are issued once by `platform:bootstrap`; move its `0600` output into a backend secret
 store and remove the local file. Billing never writes product app databases directly. Configure
-projection and provider adapters through `BILLING_PROJECT_RUNTIME_JSON`; use
+projection and provider adapters through the merchant Integrations workflow; encrypted connection
+records are platform-owned. `BILLING_PROJECT_RUNTIME_JSON` is removed and rejected. Use
 `BILLING_CATALOG_IMPORT_JSON` only for the explicit development import command.
 `BILLING_PROJECTS_JSON` is rejected. Only canonical project-instance webhooks under
 `/v1/projects/:projectKey/webhooks/:provider` exist; unscoped `/v1/webhooks/*` aliases are removed.

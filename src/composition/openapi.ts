@@ -8,11 +8,16 @@ import { meteringContracts } from "../app/metering-routes";
 import { webhookContracts } from "../app/webhook-routes";
 import { operationalContracts } from "../http/operational-contracts";
 import { platformContracts } from "../platform/app";
+import { connectionContracts } from "../platform/connections/routes";
 import * as platformSchemas from "../platform/schemas";
 import { generateAuthOpenApi } from "./auth-openapi";
+import { connectionEventContract } from "./connection-events";
 import { merchantBillingContracts } from "./merchant-openapi";
+import { stripeAppEventContract } from "./stripe-app-events";
 
 export const httpContracts = [
+	connectionEventContract,
+	stripeAppEventContract,
 	...Object.values(adminContracts),
 	...Object.values(catalogContracts),
 	...Object.values(controlsContracts),
@@ -22,6 +27,7 @@ export const httpContracts = [
 	...Object.values(webhookContracts),
 	...Object.values(operationalContracts),
 	...Object.values(platformContracts),
+	...Object.values(connectionContracts),
 ];
 
 export async function generateOpenApi(version: string) {

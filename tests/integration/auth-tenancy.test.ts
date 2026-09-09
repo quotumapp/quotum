@@ -173,8 +173,9 @@ localDescribe("billing auth and tenancy integration", () => {
 				});
 
 				expect(privateResponse.status).toBe(401);
-				expect(webhookResponse.status).toBe(200);
-				expect(apple.calls.length).toBeGreaterThan(callsBeforeWebhook);
+				expect(webhookResponse.status).toBe(lifecycleStatus === "inactive" ? 403 : 200);
+				if (lifecycleStatus === "inactive") expect(apple.calls.length).toBe(callsBeforeWebhook);
+				else expect(apple.calls.length).toBeGreaterThan(callsBeforeWebhook);
 			}
 		} finally {
 			await context.sql`UPDATE projects SET lifecycle_status = 'active' WHERE key = 'wiseley'`;

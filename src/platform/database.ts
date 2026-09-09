@@ -13,6 +13,11 @@ export interface MerchantSql {
 	begin<Result>(work: (transaction: MerchantSql) => Promise<Result>): Promise<Result>;
 	instances: {
 		forProject(platformProjectId: string): Promise<readonly PlatformProjectInstanceRecord[]>;
+		activateProduction(
+			instanceId: string,
+			organizationId: string,
+			catalogRevisionId: string,
+		): Promise<boolean>;
 		create(input: CreatePlatformProjectInstanceInput): Promise<PlatformProjectInstanceRecord>;
 	};
 }

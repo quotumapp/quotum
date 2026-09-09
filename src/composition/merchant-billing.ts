@@ -33,7 +33,21 @@ export function createMerchantBillingPort(input: {
 	const meter = new MeteringService(repo);
 	const run = async (command: MerchantBillingCommand) => {
 		const resolved = await resolver.resolveInstanceId(command.projectInstanceId);
-		if (resolved.kind !== "resolved" || !isTenantTrafficEligible(resolved.context))
+		if (
+			resolved.kind !== "resolved" ||
+			(!isTenantTrafficEligible(resolved.context) &&
+				!(
+					resolved.context.lifecycleStatus === "inactive" &&
+					!resolved.context.internalProject &&
+					[
+						"catalog",
+						"catalog.products",
+						"catalog.store-products",
+						"catalog.preview",
+						"catalog.publish",
+					].includes(command.operation)
+				))
+		)
 			throw new BillingError("The selected environment is unavailable", "CONTEXT_UNAVAILABLE", 404);
 		const project = resolved.context;
 		const [id = "", event = ""] = command.parameters;
@@ -54,7 +68,8 @@ export function createMerchantBillingPort(input: {
 				);
 			return input.operations;
 		};
-		const stripe = () => requireStripeBillingService(providers.stripeBillingService(project));
+		const stripe = async () =>
+			requireStripeBillingService(await providers.stripeBillingService(project));
 		switch (command.operation) {
 			case "stats":
 				return ok(await reader.getStatsSummary(project, queries.parseStatsSummaryQuery(query)));
@@ -132,7 +147,7 @@ export function createMerchantBillingPort(input: {
 			case "account.summary":
 				return ok(await repo.getCustomerBillingSummary(project, account()));
 			case "account.billing": {
-				const service = stripe();
+				const service = await stripe();
 				if (!service.getBillingAccount)
 					throw new BillingError("Billing account is unavailable", "STRIPE_NOT_CONFIGURED", 503);
 				return ok(await service.getBillingAccount(account()));
@@ -272,7 +287,7 @@ export function createMerchantBillingPort(input: {
 				);
 			case "commercial.preview": {
 				const body = parse(commercialActionPreviewBodySchema, command.body);
-				const service = stripe();
+				const service = await stripe();
 				if (!service.previewCommercialAction)
 					throw new BillingError(
 						"Commercial previews are unavailable",
@@ -288,7 +303,7 @@ export function createMerchantBillingPort(input: {
 			}
 			case "commercial.execute": {
 				const body = parse(commercialActionExecuteBodySchema, command.body);
-				const service = stripe();
+				const service = await stripe();
 				if (!service.executeCommercialAction)
 					throw new BillingError(
 						"Commercial actions are unavailable",

@@ -14,7 +14,6 @@ import type {
 	PlatformQueryExecutor,
 	PlatformQueryValue,
 } from "../platform/persistence/query-executor";
-import type { ProjectRuntimeConfig } from "../projects/config";
 import type {
 	ProjectEnvironment,
 	ProjectInstanceContext,
@@ -38,7 +37,6 @@ interface ProjectContextRow {
 	environment: string;
 	lifecycle_status: string;
 	internal_project: boolean;
-	runtime_unconfigured?: boolean;
 }
 
 interface CredentialContextRow extends ProjectContextRow {
@@ -197,8 +195,7 @@ export class PostgresProjectInstanceContextResolver implements ProjectInstanceCo
 						instances.key AS project_instance_key,
 						instances.environment,
 						instances.lifecycle_status,
-						instances.internal_project,
-                            EXISTS(SELECT 1 FROM platform_project_runtime_modes modes WHERE modes.project_instance_id=instances.id) AS runtime_unconfigured
+						instances.internal_project
 					FROM platform_project_api_credentials credentials
 					JOIN projects instances ON instances.id = credentials.project_instance_id
 					JOIN platform_projects logical_projects
@@ -255,8 +252,7 @@ export class PostgresProjectInstanceContextResolver implements ProjectInstanceCo
 							instances.key AS project_instance_key,
 							instances.environment,
 							instances.lifecycle_status,
-							instances.internal_project,
-                            EXISTS(SELECT 1 FROM platform_project_runtime_modes modes WHERE modes.project_instance_id=instances.id) AS runtime_unconfigured
+							instances.internal_project
 						FROM projects instances
 						JOIN platform_projects logical_projects
 							ON logical_projects.id = instances.platform_project_id
@@ -275,8 +271,7 @@ export class PostgresProjectInstanceContextResolver implements ProjectInstanceCo
 							instances.key AS project_instance_key,
 							instances.environment,
 							instances.lifecycle_status,
-							instances.internal_project,
-                            EXISTS(SELECT 1 FROM platform_project_runtime_modes modes WHERE modes.project_instance_id=instances.id) AS runtime_unconfigured
+							instances.internal_project
 						FROM projects instances
 						JOIN platform_projects logical_projects
 							ON logical_projects.id = instances.platform_project_id
@@ -293,27 +288,6 @@ export class PostgresProjectInstanceContextResolver implements ProjectInstanceCo
 		} catch {
 			return { kind: "unavailable" };
 		}
-	}
-}
-
-export async function checkProjectRuntimeConfiguration(
-	projectRuntime: readonly ProjectRuntimeConfig[],
-	client: SQL = defaultSql,
-): Promise<boolean> {
-	try {
-		const executor = new BunPlatformQueryExecutor(client as unknown as SqlClient);
-		const rows = await executor.query<{ key: string; unconfigured?: boolean }>({
-			text: "SELECT key, EXISTS(SELECT 1 FROM platform_project_runtime_modes modes WHERE modes.project_instance_id=projects.id) AS unconfigured FROM projects ORDER BY key",
-			values: [],
-		});
-		const databaseKeys = rows.map((row) => row.key).sort();
-		const runtimeKeys = projectRuntime.map((project) => project.projectInstanceKey).sort();
-		return (
-			rows.every((row) => row.unconfigured || runtimeKeys.includes(row.key)) &&
-			runtimeKeys.every((key) => databaseKeys.includes(key))
-		);
-	} catch {
-		return false;
 	}
 }
 
@@ -354,7 +328,6 @@ function mapProjectContextRow(row: ProjectContextRow): ProjectInstanceContext {
 		environment: row.environment as ProjectEnvironment,
 		lifecycleStatus: row.lifecycle_status as ProjectLifecycleStatus,
 		internalProject: row.internal_project,
-		...(row.runtime_unconfigured ? { runtimeUnconfigured: true } : {}),
 		...(row.organization_status && row.organization_status !== "active"
 			? { organizationStatus: row.organization_status }
 			: {}),
@@ -367,4 +340,15 @@ function verifierMatches(actual: Uint8Array, expected: Uint8Array): boolean {
 	return (
 		actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer)
 	);
+}
+
+export async function activateProjectProduction(
+	client: import("bun").SQL,
+	instanceId: string,
+	organizationId: string,
+	catalogRevisionId: string,
+): Promise<boolean> {
+	const rows =
+		await client`UPDATE projects SET lifecycle_status='active' WHERE id=${instanceId} AND environment='production' AND lifecycle_status='inactive' AND published_catalog_revision_id=${catalogRevisionId}::bigint AND platform_project_id IN (SELECT id FROM platform_projects WHERE organization_id=${organizationId}) AND (SELECT count(*) FROM projects i JOIN platform_projects p ON p.id=i.platform_project_id WHERE p.organization_id=${organizationId} AND i.environment='production' AND i.lifecycle_status='active') < (SELECT production_limit FROM platform_organizations WHERE id=${organizationId}) RETURNING id`;
+	return rows.length === 1;
 }

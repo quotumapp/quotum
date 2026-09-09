@@ -20,7 +20,6 @@ export interface ProjectInstanceContext {
 	readonly environment: ProjectEnvironment;
 	readonly lifecycleStatus: ProjectLifecycleStatus;
 	readonly internalProject: boolean;
-	readonly runtimeUnconfigured?: boolean;
 	readonly organizationStatus?: "active" | "suspended" | "removed";
 }
 

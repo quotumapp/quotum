@@ -77,6 +77,12 @@ export function registerWebhookRoutes({
 			);
 		}
 
+		if (resolution.context.lifecycleStatus === "inactive")
+			throw new BillingError(
+				"This environment does not accept billing events",
+				"ENVIRONMENT_INACTIVE",
+				403,
+			);
 		return resolution.context;
 	};
 	const withWebhookFailureRecording = async <T>(
@@ -108,7 +114,7 @@ export function registerWebhookRoutes({
 			}
 
 			const result = await requireAppleStoreKitService(
-				providerServices.appleStoreKitService(project),
+				await providerServices.appleStoreKitService(project, "recovery"),
 			).handleNotification(parsed.data);
 			return c.json({ success: true, data: result });
 		});
@@ -124,7 +130,7 @@ export function registerWebhookRoutes({
 			}
 
 			const service = requireGooglePlayBillingService(
-				providerServices.googlePlayBillingService(project),
+				await providerServices.googlePlayBillingService(project, "recovery"),
 			);
 			await service.verifyRtdnAuthorization?.(authorizationHeader);
 
@@ -144,7 +150,7 @@ export function registerWebhookRoutes({
 		withWebhookFailureRecording("stripe", "Stripe webhook failed", project, async () => {
 			const rawBody = await readRequestText(c.req.raw, publicWebhookMaxBodyBytes);
 			const result = await requireStripeBillingService(
-				providerServices.stripeBillingService(project),
+				await providerServices.stripeBillingService(project, "recovery"),
 			).handleWebhook({
 				rawBody,
 				signatureHeader: c.req.header("stripe-signature") ?? null,

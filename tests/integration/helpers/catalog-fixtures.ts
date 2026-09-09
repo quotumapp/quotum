@@ -1,6 +1,6 @@
 import type { SQL } from "bun";
 import type { BillingChannel, BillingProvider, ProductType } from "../../../src/billing/types";
-import type { ProjectRuntimeConfig } from "../../../src/projects/config";
+import type { ProjectConnectionFixture as ProjectRuntimeConfig } from "../../../src/testing/connection-fixtures";
 
 export interface IntegrationProjectFixture extends ProjectRuntimeConfig {
 	name: string;

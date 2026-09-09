@@ -26,6 +26,13 @@ export function mutationTarget(method: string, pathname: string, body: unknown):
 	return `${method} ${pathname} ${digest(canonicalJson(body))}`;
 }
 export function actionCapability(action: string, environment: MerchantScope["environment"]) {
+	if (action === "connections.manage")
+		return environment === "production" ? "production.connections.manage" : "sandbox.configure";
+	if (action === "environment.activate") return "production.activate";
+	if (action === "credentials.rotate")
+		return environment === "production"
+			? "production.credentials.rotate"
+			: "sandbox.credentials.rotate";
 	if (action === "catalog.publish")
 		return environment === "production" ? "catalog.publish.production" : "catalog.publish.sandbox";
 	if (action === "operations.recover") return "operations.recover";
@@ -61,6 +68,24 @@ export class MerchantStepUp {
 			request?: StepUpChallengeView["request"];
 		},
 	): Promise<StepUpChallengeView> {
+		const setupTarget =
+			input.action === "connections.manage"
+				? /^(?:[0-9a-f-]{36}|disable:(?:stripe|apple|google|projection):[0-9]+)$/
+				: input.action === "environment.activate"
+					? /^[a-f0-9]{64}$/
+					: input.action === "credentials.rotate"
+						? /^[A-Za-z0-9._:-]{8,128}$/
+						: /^(POST|PUT|DELETE) \/api\/billing\/[^ ]+ [a-f0-9]{64}$/;
+		if (!setupTarget.test(input.target))
+			throw new MerchantError("ACTION_REJECTED", "Confirm a saved operation identifier.");
+		if (
+			input.request &&
+			["connections.manage", "environment.activate", "credentials.rotate"].includes(input.action)
+		)
+			throw new MerchantError(
+				"REQUEST_REJECTED",
+				"Confirm the saved setup operation without including credentials.",
+			);
 		if (
 			input.request &&
 			mutationTarget(input.request.method, input.request.path, input.request.body) !== input.target
@@ -85,7 +110,11 @@ export class MerchantStepUp {
 				? (await tx.instances.forProject(logicalProject.id)).filter(
 						(i) =>
 							i.environment === input.scope.environment &&
-							i.lifecycleStatus === "active" &&
+							(i.lifecycleStatus === "active" ||
+								(i.lifecycleStatus === "inactive" &&
+									["connections.manage", "environment.activate", "catalog.publish"].includes(
+										input.action,
+									))) &&
 							!i.internalProject,
 					)
 				: [];

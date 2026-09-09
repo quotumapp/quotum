@@ -1,3 +1,4 @@
+import { seedProcessConnections } from "./seed-connections";
 export interface BillingServiceProcess {
 	baseUrl: string;
 	request(path: string, init?: RequestInit): Promise<Response>;
@@ -11,10 +12,11 @@ export async function startBillingService(
 	env: NodeJS.ProcessEnv,
 	options: { entrypoint?: string } = {},
 ): Promise<BillingServiceProcess> {
+	await seedProcessConnections(env);
 	const port = env.PORT === undefined ? getFreePort() : Number(env.PORT);
 	const logs: string[] = [];
-	const proc = Bun.spawn(["bun", options.entrypoint ?? "src/index.ts"], {
-		env: { ...env, PORT: String(port) },
+	const proc = Bun.spawn(["bun", options.entrypoint ?? "src/testing/test-runtime-entrypoint.ts"], {
+		env: { ...env, BILLING_TEST_LOOPBACK_PROJECTIONS: "true", PORT: String(port) },
 		stdout: "pipe",
 		stderr: "pipe",
 	});

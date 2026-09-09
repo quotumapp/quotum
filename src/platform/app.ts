@@ -5,6 +5,9 @@ import { defineContract, registerRoute } from "../shared/http-contract";
 import type { MerchantAuth } from "./auth";
 import { SIGNUP_COOKIE } from "./auth";
 import { merchantBillingRoute } from "./billing";
+import type { MerchantStripeOAuth } from "./connections/oauth";
+import { registerConnectionRoutes } from "./connections/routes";
+import type { MerchantConnections } from "./connections/service";
 import type { MerchantMailer } from "./email";
 import { MerchantOnboarding } from "./onboarding";
 import * as responses from "./platform-responses";
@@ -53,6 +56,8 @@ export const MERCHANT_AUTH_POST_PATHS = new Set([
 ]);
 export interface MerchantAppDependencies {
 	store: MerchantStore;
+	connections?: MerchantConnections;
+	stripeOAuth?: MerchantStripeOAuth;
 	mailer: MerchantMailer;
 	auth: MerchantAuth;
 	onboarding?: MerchantOnboarding;
@@ -87,6 +92,8 @@ export function createMerchantApp({
 	mailer,
 	auth,
 	onboarding = new MerchantOnboarding(store),
+	connections,
+	stripeOAuth,
 	billing,
 }: MerchantAppDependencies) {
 	const app = new Hono<{ Variables: { requestId: string } }>();
@@ -556,6 +563,7 @@ export function createMerchantApp({
 	app.notFound((c) =>
 		c.json({ success: false, error: { code: "NOT_FOUND", message: "Route not found." } }, 404),
 	);
+	if (connections) registerConnectionRoutes(app, store, connections, merchantJson, stripeOAuth);
 	return app;
 }
 
@@ -630,11 +638,15 @@ const postApiPlatformTeamMembersByIdBodySchema = organization
 	.refine((value) => value.role !== undefined || value.status !== undefined);
 const postApiPlatformStepUpBodySchema = z.strictObject({
 	scope: scopeSchema,
-	action: z.enum(["catalog.publish", "operations.recover", "operations.write"]),
-	target: z
-		.string()
-		.max(1024)
-		.regex(/^(POST|PUT|DELETE) \/api\/billing\/[^ ]+ [a-f0-9]{64}$/),
+	action: z.enum([
+		"catalog.publish",
+		"operations.recover",
+		"operations.write",
+		"connections.manage",
+		"environment.activate",
+		"credentials.rotate",
+	]),
+	target: z.string().max(1024).min(1),
 	returnTo: z.string().max(2048),
 	request: z
 		.strictObject({

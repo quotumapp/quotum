@@ -4,7 +4,11 @@ import { drizzle } from "drizzle-orm/bun-sql";
 import type { MerchantSql } from "../platform/database";
 import * as authSchema from "../platform/persistence/auth-schema";
 import type { PlatformQueryValue } from "../platform/persistence/query-executor";
-import { BunPlatformQueryExecutor, BunProjectInstanceStore } from "./project-instance-persistence";
+import {
+	activateProjectProduction,
+	BunPlatformQueryExecutor,
+	BunProjectInstanceStore,
+} from "./project-instance-persistence";
 
 /** Every instance operation uses the same connection/transaction as merchant persistence. */
 export function merchantSql(client: SQL): MerchantSql {
@@ -23,6 +27,8 @@ export function merchantSql(client: SQL): MerchantSql {
 		instances: {
 			forProject: (id: string) => instances.forProject(id),
 			create: instances.create.bind(instances),
+			activateProduction: (instanceId: string, organizationId: string, catalogRevisionId: string) =>
+				activateProjectProduction(client, instanceId, organizationId, catalogRevisionId),
 		},
 	});
 }

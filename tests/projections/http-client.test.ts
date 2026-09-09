@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
-import { ProjectionHttpClient } from "../../src/projections/http-client";
 import { verifyProjectionSignature } from "../../src/projections/http-types";
-import type { ProjectRuntimeConfig } from "../../src/projects/config";
+import type { ProjectConnectionFixture as ProjectRuntimeConfig } from "../../src/testing/connection-fixtures";
+import { FixtureProjectionHttpClient as ProjectionHttpClient } from "../../src/testing/connection-fixtures";
 
 const projects: ProjectRuntimeConfig[] = [
 	{

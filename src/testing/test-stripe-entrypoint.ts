@@ -1,11 +1,11 @@
 import { createBillingReadinessCheck } from "../composition/runtime-readiness";
 import { initializePostgresHealth } from "../db/client";
-import { loadEnv } from "../env";
 import {
 	FakeStripeBillingClient,
 	type FakeStripeBillingClientOptions,
 } from "../providers/stripe/testing/fake-client";
 import { createBillingRuntimeApp } from "../runtime";
+import { fixtureConnections, loadFixtureEnv } from "./connection-fixtures";
 
 if (process.env.BILLING_ENV !== "test" || process.env.BILLING_TEST_FAKE_STRIPE !== "true") {
 	throw new Error(
@@ -13,12 +13,14 @@ if (process.env.BILLING_ENV !== "test" || process.env.BILLING_TEST_FAKE_STRIPE !
 	);
 }
 
-const env = loadEnv();
+const env = loadFixtureEnv();
 await initializePostgresHealth();
 
 const app = createBillingRuntimeApp(env, {
+	connections: fixtureConnections(env.connectionFixtures),
+	projectionFetch: globalThis.fetch,
 	stripeClientFactory: (config) => new FakeStripeBillingClient(config, fakeStripeOptions()),
-	readinessCheck: createBillingReadinessCheck(env.projectRuntime),
+	readinessCheck: createBillingReadinessCheck(),
 });
 
 export default app;

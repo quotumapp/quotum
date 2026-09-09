@@ -1,6 +1,6 @@
 {
 	"name": "quotum-api",
-	"version": "0.8.1",
+	"version": "0.9.0",
 	"exports": {
 		"./sdk": "./src/sdk/index.ts"
 	},
@@ -13,6 +13,7 @@
 		"dev": "bun run --hot src/index.ts",
 		"migrate": "bun run src/migrate.ts",
 		"migrate:status": "bun run src/migrate.ts status",
+		"connections:rotate-secrets": "bun scripts/rotate-connection-secrets.ts",
 		"platform:bootstrap": "bun run src/platform-bootstrap.ts",
 		"catalog:provision": "bun run scripts/provision-catalog.ts",
 		"catalog": "bun run scripts/billing-catalog.ts",

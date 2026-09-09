@@ -110,7 +110,8 @@ export function createMerchantBilling(store: MerchantStore, billing: MerchantBil
 			? (await store.sql.instances.forProject(logicalProject.id)).find(
 					(i) =>
 						i.environment === scope.environment &&
-						i.lifecycleStatus === "active" &&
+						(i.lifecycleStatus === "active" ||
+							(i.lifecycleStatus === "inactive" && route.path.startsWith("/v1/admin/catalog"))) &&
 						!i.internalProject,
 				)
 			: undefined;

@@ -20,6 +20,12 @@
       ]
     },
     {
+      "code": "ACTIVATION_CONFLICT",
+      "sources": [
+        "src/platform/connections/service.ts"
+      ]
+    },
+    {
       "code": "ADDON_REQUIRES_BASE_PLAN",
       "sources": [
         "src/providers/stripe/service.ts"
@@ -101,7 +107,6 @@
       "code": "BILLING_PROJECT_NOT_CONFIGURED",
       "sources": [
         "src/app.ts",
-        "src/app/provider-services.ts",
         "src/app/webhook-routes.ts"
       ]
     },
@@ -161,6 +166,12 @@
       ]
     },
     {
+      "code": "CATALOG_REQUIRED",
+      "sources": [
+        "src/composition/environment-billing.ts"
+      ]
+    },
+    {
       "code": "CATALOG_REVISION_CONFLICT",
       "sources": [
         "src/catalog/control-plane.ts"
@@ -199,6 +210,62 @@
       ]
     },
     {
+      "code": "CONNECTION_CHANGED",
+      "sources": [
+        "src/platform/connections/oauth.ts",
+        "src/platform/connections/service.ts"
+      ]
+    },
+    {
+      "code": "CONNECTION_DRAFT_EXPIRED",
+      "sources": [
+        "src/platform/connections/service.ts"
+      ]
+    },
+    {
+      "code": "CONNECTION_INVALID",
+      "sources": [
+        "src/composition/connection-validation.ts"
+      ]
+    },
+    {
+      "code": "CONNECTION_NOT_FOUND",
+      "sources": [
+        "src/platform/connections/repository.ts",
+        "src/platform/connections/service.ts"
+      ]
+    },
+    {
+      "code": "CONNECTION_SECRET_UNAVAILABLE",
+      "sources": [
+        "src/platform/connections/repository.ts"
+      ]
+    },
+    {
+      "code": "CONNECTION_UNAVAILABLE",
+      "sources": [
+        "src/composition/connections.ts"
+      ]
+    },
+    {
+      "code": "CONNECTION_VALIDATION_FAILED",
+      "sources": [
+        "src/platform/connections/service.ts"
+      ]
+    },
+    {
+      "code": "CONNECTION_VALIDATION_REQUIRED",
+      "sources": [
+        "src/platform/connections/service.ts"
+      ]
+    },
+    {
+      "code": "CONTEXT_CHANGED",
+      "sources": [
+        "src/platform/connections/oauth.ts"
+      ]
+    },
+    {
       "code": "CONTEXT_REQUIRED",
       "sources": [
         "src/platform/billing.ts"
@@ -207,8 +274,10 @@
     {
       "code": "CONTEXT_UNAVAILABLE",
       "sources": [
+        "src/composition/environment-billing.ts",
         "src/composition/merchant-billing.ts",
         "src/platform/billing.ts",
+        "src/platform/connections/service.ts",
         "src/platform/step-up.ts"
       ]
     },
@@ -280,6 +349,19 @@
       "sources": [
         "src/db/repository/controls-enterprise.ts",
         "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "ENVIRONMENT_INACTIVE",
+      "sources": [
+        "src/app/webhook-routes.ts",
+        "src/platform/connections/service.ts"
+      ]
+    },
+    {
+      "code": "ENVIRONMENT_NOT_READY",
+      "sources": [
+        "src/platform/connections/service.ts"
       ]
     },
     {
@@ -358,6 +440,7 @@
         "src/db/repository/recurring-pricing.ts",
         "src/db/repository/stripe.ts",
         "src/db/repository/usage-operations.ts",
+        "src/platform/connections/service.ts",
         "src/platform/store.ts",
         "src/providers/stripe/service.ts"
       ]
@@ -399,9 +482,22 @@
       ]
     },
     {
+      "code": "INVALID_CONNECTION",
+      "sources": [
+        "src/composition/connection-validation.ts"
+      ]
+    },
+    {
       "code": "INVALID_IDEMPOTENCY_KEY",
       "sources": [
         "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "INVALID_PROMOTION",
+      "sources": [
+        "src/composition/environment-billing.ts",
+        "src/platform/connections/service.ts"
       ]
     },
     {
@@ -421,6 +517,7 @@
         "src/billing/errors.ts",
         "src/operations/admin.ts",
         "src/platform/app.ts",
+        "src/platform/connections/service.ts",
         "src/providers/apple/service.ts",
         "src/providers/google/pubsub.ts",
         "src/providers/google/service.ts",
@@ -525,6 +622,24 @@
       ]
     },
     {
+      "code": "OAUTH_ACCOUNT_INVALID",
+      "sources": [
+        "src/platform/connections/oauth.ts"
+      ]
+    },
+    {
+      "code": "OAUTH_STATE_EXPIRED",
+      "sources": [
+        "src/platform/connections/oauth.ts"
+      ]
+    },
+    {
+      "code": "OAUTH_UNAVAILABLE",
+      "sources": [
+        "src/platform/connections/routes.ts"
+      ]
+    },
+    {
       "code": "OPERATION_IN_PROGRESS",
       "sources": [
         "src/db/repository/usage-operations.ts"
@@ -592,15 +707,39 @@
       ]
     },
     {
+      "code": "PROJECTION_DELIVERY",
+      "sources": [
+        "src/composition/connection-validation.ts"
+      ]
+    },
+    {
       "code": "PROJECTION_JOB_NOT_FAILED",
       "sources": [
         "src/db/repository/projection-jobs.ts"
       ]
     },
     {
+      "code": "PROJECTION_VERIFICATION_FAILED",
+      "sources": [
+        "src/composition/connection-validation.ts"
+      ]
+    },
+    {
       "code": "PROVIDER_BINDING_NOT_READY",
       "sources": [
         "src/catalog/control-plane.ts"
+      ]
+    },
+    {
+      "code": "PROVIDER_CONNECTION_INVALID",
+      "sources": [
+        "src/composition/connection-validation.ts"
+      ]
+    },
+    {
+      "code": "PROVIDER_EVENT_REQUIRED",
+      "sources": [
+        "src/platform/connections/service.ts"
       ]
     },
     {
@@ -626,6 +765,12 @@
       "code": "REQUEST_BODY_TOO_LARGE",
       "sources": [
         "src/app.ts"
+      ]
+    },
+    {
+      "code": "REQUEST_REJECTED",
+      "sources": [
+        "src/platform/step-up.ts"
       ]
     },
     {
@@ -757,9 +902,39 @@
       ]
     },
     {
+      "code": "STRIPE_ACCOUNT",
+      "sources": [
+        "src/composition/connection-validation.ts"
+      ]
+    },
+    {
+      "code": "STRIPE_ACCOUNT_CONFLICT",
+      "sources": [
+        "src/platform/connections/service.ts"
+      ]
+    },
+    {
+      "code": "STRIPE_ACCOUNT_MISMATCH",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "STRIPE_CATALOG_ACCESS",
+      "sources": [
+        "src/composition/connection-validation.ts"
+      ]
+    },
+    {
       "code": "STRIPE_CHECKOUT_URL_MISSING",
       "sources": [
         "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "STRIPE_CONNECTION_INVALID",
+      "sources": [
+        "src/composition/connection-validation.ts"
       ]
     },
     {

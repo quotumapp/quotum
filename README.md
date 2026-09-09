@@ -91,7 +91,7 @@ through Stripe rather than through the native mobile in-app purchase paths.
 
 ## Setup
 
-### Merchant platform (disabled by default)
+### Merchant platform
 
 `004_merchant.sql` adds `platform_auth_*` and merchant `platform_*` tables. It extends
 the existing organizations and reuses `platform_projects`, `projects.id`, and canonical `qpk_v1`
@@ -106,8 +106,8 @@ not exposed to merchants because the legacy operation is not project-scoped.
 
 Configuration is validated by `src/platform/config.ts`:
 
-- `MERCHANT_AUTH_ENABLED=true` enables the API; absent/false leaves all merchant routes disabled.
-- `MERCHANT_SIGNUP_ENABLED=true` separately allows new accounts. Keep false for rollout.
+- Merchant authentication is required in production; explicit `MERCHANT_AUTH_ENABLED=false` is rejected. Test/development processes may opt in with `MERCHANT_AUTH_ENABLED=true`.
+- Signup defaults on. Set `MERCHANT_SIGNUP_ENABLED=false` explicitly to close registration.
 - `MERCHANT_ORIGIN=https://app.quotum.dev` and `MERCHANT_PUBLIC_URL=https://quotum.dev` identify the
   same-origin application and public legal pages.
 - `MERCHANT_AUTH_SECRET` is a separate secret of at least 32 characters, used for session/token
@@ -155,8 +155,9 @@ POSTGRES_URI="postgres://postgres:postgres@127.0.0.1:5432/voysee_billing" bun ru
 ```
 
 Before 1.0 the schema files under `migrations/` evolve in place; recreate development databases
-instead of migrating them. After it is applied, create the initial platform topology and
-credentials from an explicit manifest:
+instead of migrating them. A fresh SaaS deployment needs no customer bootstrap after migrations:
+start the service with the merchant configuration above and let customers onboard through the web.
+The following manifest is an optional operator/development fixture, not a signup prerequisite:
 
 ```sh
 export POSTGRES_URI="postgres://postgres:postgres@127.0.0.1:5432/voysee_billing"
@@ -217,81 +218,22 @@ Database requirements:
 Required:
 
 - `POSTGRES_URI`
-- `BILLING_PROJECT_RUNTIME_JSON`
-  Defines only runtime delivery and provider adapters for every database project instance. Its
-  `projectInstanceKey` values must exactly match the `projects` rows or `/ready` returns `503`.
-  Identity, lifecycle, environment, credentials, and catalog declarations are deliberately not
-  accepted here. Projection delivery is an HTTP `POST` to
-  `<projectionUrl>/internal/billing/projections`; production URLs must be public HTTPS URLs.
+- `QUOTUM_SECRETS_KEY_ID` and `QUOTUM_SECRETS_KEY_BASE64`: a key identifier and an externally
+  stored, base64-encoded 32-byte AES key. Keep the key outside Postgres and its backups.
+- Production merchant authentication, approved legal versions, email transport, and a BFF service
+  principal as described above. No customer project or provider account is needed to start.
 
-  ```json
-  [
-    {
-      "projectInstanceKey": "voysee-production",
-      "projectionUrl": "https://voysee.example.com",
-      "projectionSecret": "voysee-projection-secret",
-      "projectionContract": "billing_state_v1",
-      "apple": {
-        "bundleId": "com.voysee.app",
-        "appAppleId": 1234567890,
-        "issuerId": "app-store-connect-issuer-id",
-        "keyId": "in-app-purchase-key-id",
-        "privateKey": "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----",
-        "environment": "production",
-        "enableOnlineChecks": true,
-        "rootCertificatesDir": null
-      },
-      "googlePlay": {
-        "packageName": "com.voysee.app",
-        "serviceAccountJson": "{\"type\":\"service_account\"}",
-        "serviceAccountKeyFile": null,
-        "obfuscatedAccountIdSecret": "account-link-secret",
-        "previousObfuscatedAccountIdSecrets": [],
-        "rtdnAudience": "https://billing.example.com/v1/projects/voysee-production/webhooks/google",
-        "rtdnServiceAccountEmail": "pubsub-push@example.iam.gserviceaccount.com",
-        "rtdnAuthorizedParty": "pubsub-push-client-id",
-        "enablePublisherMutations": true
-      },
-      "stripe": {
-        "secretKey": "sk_live_...",
-        "webhookSecret": "whsec_...",
-        "checkoutSuccessUrl": "https://voysee.example.com/billing/success?session_id={CHECKOUT_SESSION_ID}",
-        "checkoutCancelUrl": "https://voysee.example.com/billing",
-        "portalReturnUrl": "https://voysee.example.com/account/billing",
-        "allowedReturnOrigins": ["https://voysee.example.com"],
-        "taxMode": "registered",
-        "integrationIdentifier": "qfmxzjpa"
-      }
-    }
-  ]
-  ```
+`BILLING_PROJECT_RUNTIME_JSON` and `BILLING_PROJECTS_JSON` are removed and rejected when supplied.
+The platform baseline creates versioned, encrypted customer connections; it does
+not import deployment JSON. Existing identities and billing data stay intact. Reconnect demo and
+customer integrations through the web. Remove the old variable before starting the new runtime.
 
-  Provider configuration is strictly project-scoped. Omitting `apple`, `googlePlay`, or `stripe`
-  (or setting it to `null`) disables that provider for the project.
-  `projectionContract` accepts only `billing_state_v1` and defaults to it. The schema is strict:
-  legacy `key`, `apiKey`, `active`, and `catalog` fields fail startup instead of being ignored.
-  Project credentials use the versioned `qpk_v1.<credential-id>.<secret>` format; only their
-  SHA-256 verifiers are stored in `platform_project_api_credentials`. Revocation, expiration, and
-  project lifecycle changes take effect on the next request, and a database outage fails auth
-  closed with `503`—there is no JSON fallback.
-
-Catalog import is a separate, explicit development command for already-bootstrapped instances:
-
-```sh
-POSTGRES_URI=... \
-BILLING_CATALOG_IMPORT_JSON='[{"projectInstanceKey":"voysee-production","catalog":[...]}]' \
-bun run catalog:provision
-```
-
-After a versioned catalog revision is published, the import leaves that project's catalog
-untouched. Production catalog changes should use the preview/publish contract.
-
-Required in production:
-
-- `BILLING_OPERATOR_API_KEY`
-  Separate operator key required for store-event replay, subscription reconciliation, projection
-  retry, and process-wide metrics. Keep this distinct from per-project API keys and send it as
-  `X-Billing-Operator-Key` only from trusted operational tooling.
+In **Integrations**, configure each environment independently. Save a draft, verify provider access
+or the signed projection challenge, then commit. Production commits require fresh step-up.
+Missing/disabled connections block that integration's new work; retained secrets support recovery.
+Changes take effect without restarting the service. A single customer's setup never controls global
+readiness. See [self-service setup](../quotum-docs/api/customer-connections.md) for webhook evidence,
+Stripe Apps OAuth, restricted keys, activation, one-time credentials, and encryption-key rotation.
 
 Optional:
 
@@ -758,22 +700,22 @@ http://localhost:3000/livez
 http://localhost:3000/ready
 ```
 
-`/livez` is a static liveness check. `/ready` queries current Postgres health and requires the
-runtime configuration's project-instance keys to exactly equal the database instance set. It
-becomes unavailable during database loss and recovers without restarting the process. `/health`
-remains a public liveness alias for compatibility.
+`/livez` is a static liveness check. `/ready` checks current database reachability and the required
+platform connection schema. Startup validates service encryption and production merchant settings.
+Customer readiness is separate: no projects or connections are needed for an empty migrated service.
+`/health` remains a public liveness alias.
 
 The release image includes a guarded, network-free Stripe boundary for cross-service tests:
 
 ```sh
 BILLING_ENV=test BILLING_TEST_FAKE_STRIPE=true \
 POSTGRES_URI="postgres://postgres:postgres@127.0.0.1:5432/billing_test" \
-BILLING_PROJECT_RUNTIME_JSON='[...]' bun run test:stripe-entrypoint
+QUOTUM_SECRETS_KEY_ID=test QUOTUM_SECRETS_KEY_BASE64='<base64-32-byte-test-key>' \
+BILLING_TEST_CONNECTIONS_JSON='[...]' bun run test:stripe-entrypoint
 ```
 
 The database must already be migrated and bootstrapped, with the catalog imported or published.
-The runtime JSON needs the project-instance key, projection delivery, and Stripe fields shown
-above, using an `sk_test_*` key and webhook secret. Fake Checkout returns `cs_fake_*` at
+The guarded test fixture JSON supplies project-instance keys, projection delivery, and Stripe fields, using an `sk_test_*` key and webhook secret. Fake Checkout returns `cs_fake_*` at
 `https://checkout.stripe.test`, polling returns `complete`/`paid`, and Portal returns
 `https://billing.stripe.test`. Send normal signed events to
 `POST /v1/projects/:projectKey/webhooks/stripe`; compute the Stripe `v1` signature as HMAC-SHA256
@@ -887,14 +829,15 @@ and tenant-recovery boundary is defined by
 [ADR-0007](../quotum-docs/adr/0007-adopt-a-modular-monolith-with-project-scoped-postgres-isolation.md).
 Release `0.6.0` delivers the next ADR-0007 increment: persisted organizations, logical projects,
 environment-specific project instances, database-issued credentials, database-authoritative
-`ProjectInstanceContext`, exact runtime-directory readiness, and platform table ownership checks.
+`ProjectInstanceContext`, database-aware runtime-adapter readiness, and platform table ownership checks.
 Release `0.7.0` integrates usage-operation recovery onto that context and migration history. It does
 not include merchant identity. The local `0.8.0` stabilization candidate integrates merchant
 authority/provisioning through that directory and consumer-owned application ports. Composition
 owns the database/Better Auth adapters and dispatches authorized commands to billing services.
-New merchant instances have an explicit database-owned unconfigured runtime marker; missing runtime
-configuration on existing bootstrapped instances still fails readiness. Production stays inactive
-until a future readiness-gated activation workflow is delivered.
+Release `0.9.0` removes the runtime marker and deployment customer list.
+Encrypted connection drafts, provider/projection verification, scoped step-up, production activation,
+and credential rotation are platform-owned. Organization production limits remain the activation
+capacity gate; paid platform-plan enforcement is separate follow-up work.
 ADR-0007 remains partial. Follow integration with the schema-wide tenant-isolation audit: verify every
 tenant table, composite foreign key, uniqueness constraint, project-first index/query, raw SQL path,
 worker claim/completion path, provider event, and adversarial cross-project/environment case. The

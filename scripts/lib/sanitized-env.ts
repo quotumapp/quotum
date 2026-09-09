@@ -34,3 +34,14 @@ export function createSanitizedProcessEnv(
 	}
 	return env;
 }
+
+/** Container-owning test processes need the caller's Docker connection settings. */
+export function createContainerTestEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	const env = createSanitizedProcessEnv(source);
+	for (const [key, value] of Object.entries(source)) {
+		if (value !== undefined && (key.startsWith("DOCKER_") || key.startsWith("TESTCONTAINERS_"))) {
+			env[key] = value;
+		}
+	}
+	return env;
+}

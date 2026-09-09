@@ -48,6 +48,7 @@ export interface AppleDecodedRenewalInfoPayload {
 }
 
 export interface AppleDecodedNotificationPayload {
+	signedDate?: number;
 	notificationType: string;
 	subtype?: string;
 	notificationUUID: string;

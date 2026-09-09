@@ -4,7 +4,11 @@ import {
 	createNoopBillingMetrics,
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
-import type { ProjectRuntimeConfig } from "../projects/config";
+import type { RuntimeConnectionConfigs } from "../projects/connections";
+import { publicHttpsPost } from "../shared/safe-http";
+
+type ProjectionConfig = RuntimeConnectionConfigs["projection"];
+
 import type { BillingProjectionInput, ProjectionDelivery } from "./delivery";
 import {
 	type ApiProjectProjectionFetch,
@@ -13,7 +17,7 @@ import {
 } from "./http-types";
 
 export interface ProjectionHttpClientOptions {
-	projects: readonly ProjectRuntimeConfig[];
+	resolveProject: (projectKey: string) => Promise<ProjectionConfig | null>;
 	fetch?: ApiProjectProjectionFetch;
 	now?: () => Date;
 	timeoutMs?: number;
@@ -26,7 +30,7 @@ const defaultMaxProjectionResponseBytes = 4096;
 const projectionResponseSchema = z.object({ success: z.literal(true) }).strict();
 
 export class ProjectionHttpClient implements ProjectionDelivery {
-	private readonly projects: readonly ProjectRuntimeConfig[];
+	private readonly resolveProject: (projectKey: string) => Promise<ProjectionConfig | null>;
 	private readonly fetch: ApiProjectProjectionFetch;
 	private readonly now: () => Date;
 	private readonly timeoutMs: number;
@@ -34,14 +38,21 @@ export class ProjectionHttpClient implements ProjectionDelivery {
 	private readonly metrics: BillingMetrics;
 
 	constructor({
-		projects,
-		fetch = globalThis.fetch,
+		resolveProject,
+		fetch = async (url, init) => {
+			const result = await publicHttpsPost(
+				String(url),
+				String(init?.body ?? ""),
+				Object.fromEntries(new Headers(init?.headers).entries()),
+			);
+			return new Response(result.body, { status: result.status });
+		},
 		now = () => new Date(),
 		timeoutMs = defaultProjectionTimeoutMs,
 		maxResponseBytes = defaultMaxProjectionResponseBytes,
 		metrics = createNoopBillingMetrics(),
 	}: ProjectionHttpClientOptions) {
-		this.projects = projects;
+		this.resolveProject = resolveProject;
 		this.fetch = fetch;
 		this.now = now;
 		this.timeoutMs = timeoutMs;
@@ -50,7 +61,7 @@ export class ProjectionHttpClient implements ProjectionDelivery {
 	}
 
 	async deliver(input: BillingProjectionInput): Promise<void> {
-		const project = this.projectFor(input.projectKey);
+		const project = await this.projectFor(input.projectKey);
 		const url = projectionUrl(project);
 		const body = JSON.stringify(input);
 
@@ -94,9 +105,9 @@ export class ProjectionHttpClient implements ProjectionDelivery {
 		this.recordDeliveryMetric(input.projectKey, "succeeded", "OK");
 	}
 
-	private projectFor(projectKey: string): ProjectRuntimeConfig {
-		const project = this.projects.find((candidate) => candidate.projectInstanceKey === projectKey);
-		if (project === undefined) {
+	private async projectFor(projectKey: string): Promise<ProjectionConfig> {
+		const project = await this.resolveProject(projectKey);
+		if (project === null) {
 			throw new Error(`Billing project ${projectKey} is not configured`);
 		}
 		return project;
@@ -115,7 +126,7 @@ export class ProjectionHttpClient implements ProjectionDelivery {
 	}
 }
 
-function projectionUrl(project: ProjectRuntimeConfig): string {
+function projectionUrl(project: ProjectionConfig): string {
 	const url = new URL(project.projectionUrl);
 	const basePath = url.pathname.replace(/\/+$/, "");
 	url.pathname = `${basePath}/internal/billing/projections`;

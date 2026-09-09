@@ -7,14 +7,17 @@ import { PostgresProjectInstanceContextResolver } from "../composition/project-i
 import { initializePostgresHealth } from "../db/client";
 import { BillingRepository } from "../db/repository";
 import { ProjectionSyncJobRepository } from "../db/repository-domains";
-import { loadEnv } from "../env";
 import { createMerchantAuth } from "../platform/auth";
 import { loadMerchantConfig } from "../platform/config";
 import { secureEqual, tokenHash } from "../platform/security";
-import { ProjectionHttpClient } from "../projections/http-client";
 import { FakeStripeBillingClient } from "../providers/stripe/testing/fake-client";
 import { createBillingRuntimeApp } from "../runtime";
 import { ProjectionSyncWorker } from "../workers/projection-sync";
+import {
+	fixtureConnections,
+	loadFixtureEnv,
+	FixtureProjectionHttpClient as ProjectionHttpClient,
+} from "./connection-fixtures";
 import { seedMerchantBilling } from "./merchant-billing-seed";
 import { FakeMerchantGoogle, MerchantCaptureMailer } from "./merchant-fakes";
 
@@ -26,7 +29,7 @@ if (
 	throw new Error(
 		"Merchant test entrypoint requires explicitly enabled test mode and fake providers",
 	);
-const env = loadEnv();
+const env = loadFixtureEnv();
 const projectServices: NonNullable<AppDependencies["projectProviderServices"]> = {};
 const config = loadMerchantConfig();
 if (
@@ -52,16 +55,16 @@ const control = Bun.serve({
 		if (!secureEqual(bearer, controlToken)) return new Response("Unauthorized", { status: 401 });
 		try {
 			if (request.method === "POST" && url.pathname === "/reset") {
-				env.projectRuntime.splice(
+				env.connectionFixtures.splice(
 					0,
-					env.projectRuntime.length,
-					...env.projectRuntime.filter(
+					env.connectionFixtures.length,
+					...env.connectionFixtures.filter(
 						(project) => !project.projectInstanceKey.startsWith("merchant_"),
 					),
 				);
 				for (const key of Object.keys(projectServices))
 					if (key.startsWith("merchant_")) delete projectServices[key];
-				await database`TRUNCATE platform_idempotency,platform_audit_events,platform_policy_acceptances,platform_service_principals,platform_step_up_grants,platform_project_api_credentials,platform_provisioning_steps,platform_provisioning_operations,platform_project_runtime_modes,platform_projects,platform_onboarding_drafts,platform_invitations,platform_memberships,platform_organizations,platform_merchant_sessions,platform_external_identities,platform_principals,platform_auth_users,platform_auth_verifications,platform_auth_rate_limits,platform_rate_limits,platform_auth_links CASCADE`;
+				await database`TRUNCATE platform_idempotency,platform_audit_events,platform_policy_acceptances,platform_service_principals,platform_step_up_grants,platform_project_api_credentials,platform_provisioning_steps,platform_provisioning_operations,platform_projects,platform_onboarding_drafts,platform_invitations,platform_memberships,platform_organizations,platform_merchant_sessions,platform_external_identities,platform_principals,platform_auth_users,platform_auth_verifications,platform_auth_rate_limits,platform_rate_limits,platform_auth_links CASCADE`;
 				await bootstrapTestPlatform(env.postgresUri, ["voysee", "wiseley"]);
 				await resetAndSeedIntegrationData(database);
 				await database`INSERT INTO platform_service_principals(name,token_hash) VALUES('merchant-e2e',${tokenHash(serviceToken, config.secret)})`;
@@ -107,7 +110,10 @@ const control = Bun.serve({
 					maxAttempts: 5,
 					batchSize: 25,
 					repository: new ProjectionSyncJobRepository(new BillingRepository()),
-					delivery: new ProjectionHttpClient({ projects: env.projectRuntime }),
+					delivery: new ProjectionHttpClient({
+						projects: env.connectionFixtures,
+						fetch: globalThis.fetch,
+					}),
 				});
 				return Response.json(await worker.runOnce());
 			}
@@ -143,11 +149,11 @@ const control = Bun.serve({
 			}
 			if (request.method === "GET" && url.pathname === "/state") {
 				const counts =
-					await database`SELECT (SELECT count(*)::int FROM platform_principals) AS principals,(SELECT count(*)::int FROM platform_organizations WHERE slug NOT LIKE '%-test-organization') AS organizations,(SELECT count(*)::int FROM platform_memberships WHERE status='active') AS members,(SELECT count(*)::int FROM platform_project_runtime_modes) AS instances,(SELECT count(*)::int FROM platform_auth_sessions) AS transient_sessions,(SELECT bool_and(length(token_hash)=64) FROM platform_merchant_sessions) AS sessions_hashed`;
+					await database`SELECT (SELECT count(*)::int FROM platform_principals) AS principals,(SELECT count(*)::int FROM platform_organizations WHERE slug NOT LIKE '%-test-organization') AS organizations,(SELECT count(*)::int FROM platform_memberships WHERE status='active') AS members,(SELECT count(*)::int FROM projects WHERE key LIKE 'merchant_%') AS instances,(SELECT count(*)::int FROM platform_auth_sessions) AS transient_sessions,(SELECT bool_and(length(token_hash)=64) FROM platform_merchant_sessions) AS sessions_hashed`;
 				const audit =
 					await database`SELECT action,metadata FROM platform_audit_events ORDER BY created_at`;
 				const credentials =
-					await database`SELECT revoked_at IS NOT NULL AS revoked,octet_length(secret_verifier)=32 AS hashed FROM platform_project_api_credentials WHERE project_instance_id IN (SELECT project_instance_id FROM platform_project_runtime_modes)`;
+					await database`SELECT revoked_at IS NOT NULL AS revoked,octet_length(secret_verifier)=32 AS hashed FROM platform_project_api_credentials WHERE project_instance_id IN (SELECT id FROM projects WHERE key LIKE 'merchant_%')`;
 				const usageEvents =
 					await database`SELECT id,operation,quantity::text,metadata->>'actor' AS actor FROM usage_events`;
 				const events = await database`SELECT id,processing_status AS status FROM store_events`;
@@ -174,6 +180,8 @@ const control = Bun.serve({
 
 await initializePostgresHealth();
 const app = createBillingRuntimeApp(env, {
+	connections: fixtureConnections(env.connectionFixtures),
+	projectionFetch: globalThis.fetch,
 	projectProviderServices: projectServices,
 	stripeClientFactory: (stripeConfig) => new FakeStripeBillingClient(stripeConfig),
 	merchant: {

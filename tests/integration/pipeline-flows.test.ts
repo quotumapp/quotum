@@ -259,7 +259,7 @@ function withProjectionUrls(
 ): LocalPostgresContext["env"] {
 	return {
 		...env,
-		projectRuntime: env.projectRuntime.map((project) => {
+		connectionFixtures: env.connectionFixtures.map((project) => {
 			const projectionUrl = urls[project.projectInstanceKey as "voysee" | "wiseley"];
 			return projectionUrl === undefined ? project : { ...project, projectionUrl };
 		}),

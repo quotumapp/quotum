@@ -1,9 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import { createApp } from "../../src/app";
-import {
-	checkProjectRuntimeConfiguration,
-	PostgresProjectInstanceContextResolver,
-} from "../../src/composition/project-instance-persistence";
+import { PostgresProjectInstanceContextResolver } from "../../src/composition/project-instance-persistence";
+import { createBillingReadinessCheck } from "../../src/composition/runtime-readiness";
 import type {
 	InvitationView,
 	MerchantSessionView,
@@ -38,7 +36,7 @@ async function onboard(browser: MerchantBrowser, orgSlug = "acme") {
 	return { org, draft, operation };
 }
 describe("merchant platform transactions", () => {
-	it("uses canonical sandbox credentials and retains strict runtime readiness", async () => {
+	it("uses canonical sandbox credentials without deployment customer configuration", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();
 		const { operation } = await onboard(browser);
@@ -64,7 +62,6 @@ describe("merchant platform transactions", () => {
 			organizationSlug: "acme",
 			logicalProjectKey: "example",
 			environment: "sandbox",
-			runtimeUnconfigured: true,
 		});
 		const env = createIntegrationBillingEnv(process.env.POSTGRES_URI ?? "");
 		const billing = createApp({ env, projectContextResolver: resolver });
@@ -75,9 +72,7 @@ describe("merchant platform transactions", () => {
 				})
 			).status,
 		).toBe(200);
-		expect(await checkProjectRuntimeConfiguration([], f.client)).toBe(true);
-		await f.sql`DELETE FROM platform_project_runtime_modes WHERE project_instance_id=${resolved.context.projectInstanceId}`;
-		expect(await checkProjectRuntimeConfiguration([], f.client)).toBe(false);
+		expect(await createBillingReadinessCheck(f.client)()).toBe(true);
 		await f.sql`UPDATE platform_organizations SET status='suspended' WHERE slug='acme'`;
 		expect(
 			(

@@ -51,6 +51,7 @@ const rejectCallerProjectSelectors: MiddlewareHandler = async (c, next) => {
 
 export function createApp({
 	env,
+	connections,
 	entitlementService,
 	meteringService,
 	controlsEnterpriseService,
@@ -95,7 +96,7 @@ export function createApp({
 	};
 	const controlsService = controlsEnterpriseService ?? getRepository().controlsEnterprise;
 	const providerServices = createProjectProviderServiceResolver({
-		env,
+		connections,
 		getRepository,
 		projectProviderServices,
 		legacyServices: {
@@ -143,9 +144,6 @@ export function createApp({
 	});
 	const rateLimitKeyOptions = {
 		trustProxyHeaders: env.rateLimit.trustProxyHeaders,
-		knownProjectKeys: new Set(
-			env.projectRuntime.map(({ projectInstanceKey }) => projectInstanceKey),
-		),
 	};
 	const rateLimitKey = (c: Context): string => requestProjectIpAndPath(c, rateLimitKeyOptions);
 	app.onError((error, c) => {

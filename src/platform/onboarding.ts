@@ -182,7 +182,7 @@ export class MerchantOnboarding {
 					>`SELECT status FROM platform_provisioning_steps WHERE operation_id=${id} AND environment=${environment}`;
 					if (step?.status === "succeeded") return;
 					const runtimeKey = `merchant_${op.logical_project_id.replaceAll("-", "")}_${environment}`;
-					const instance = await tx.instances.create({
+					await tx.instances.create({
 						platformProjectId: op.logical_project_id,
 						key: runtimeKey,
 						name: op.project_name,
@@ -190,7 +190,6 @@ export class MerchantOnboarding {
 						lifecycleStatus: environment === "sandbox" ? "active" : "inactive",
 						internalProject: false,
 					});
-					await tx`INSERT INTO platform_project_runtime_modes(project_instance_id,mode) VALUES(${instance.id},'unconfigured')`;
 					await tx`UPDATE platform_provisioning_steps SET status='succeeded' WHERE operation_id=${id} AND environment=${environment}`;
 					await tx`UPDATE platform_provisioning_operations SET status='provisioning',error_code=NULL,updated_at=${this.store.now()} WHERE id=${id}`;
 					await this.store.audit(

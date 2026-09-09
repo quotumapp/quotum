@@ -52,7 +52,9 @@ export class AutoTopupWorker {
 			staleAfterMs?: number;
 			repository: AutoTopupWorkerRepository;
 			projectContextResolver: ProjectInstanceContextResolver;
-			providerForProject(project: ProjectInstanceContext): AutoTopupWorkerProvider;
+			providerForProject(
+				project: ProjectInstanceContext,
+			): AutoTopupWorkerProvider | Promise<AutoTopupWorkerProvider>;
 			logger: AutoTopupWorkerLogger;
 			metrics?: BillingMetrics;
 		},
@@ -82,9 +84,9 @@ export class AutoTopupWorker {
 						projectInstanceKey: job.projectKey,
 					},
 				);
-				const charge = await this.dependencies
-					.providerForProject(project)
-					.createAutoTopupCharge(job);
+				const charge = await (
+					await this.dependencies.providerForProject(project)
+				).createAutoTopupCharge(job);
 				if (charge.status === "succeeded") {
 					const completion = await this.dependencies.repository.markAutoTopupSucceeded(
 						job.projectId,

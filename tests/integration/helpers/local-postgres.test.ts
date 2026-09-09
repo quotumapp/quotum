@@ -27,8 +27,8 @@ describe("local Postgres integration helper", () => {
 			"postgresql://postgres:postgres@127.0.0.1:5432/postgres",
 		);
 
-		expect(env.projectRuntime).toHaveLength(integrationProjectContexts().length);
-		expect(env.projectRuntime).toEqual(
+		expect(env.connectionFixtures).toHaveLength(integrationProjectContexts().length);
+		expect(env.connectionFixtures).toEqual(
 			expect.arrayContaining([
 				{
 					projectInstanceKey: "voysee",
@@ -56,7 +56,7 @@ describe("local Postgres integration helper", () => {
 					meteringLimit: 4,
 					trustProxyHeaders: true,
 				},
-				projectRuntime: [
+				connectionFixtures: [
 					{
 						projectInstanceKey: "voysee",
 						projectionUrl: "http://localhost:1234",
@@ -68,7 +68,7 @@ describe("local Postgres integration helper", () => {
 
 		expect(env.rateLimit.verifyLimit).toBe(2);
 		expect(env.rateLimit.trustProxyHeaders).toBe(true);
-		expect(env.projectRuntime).toEqual([
+		expect(env.connectionFixtures).toEqual([
 			{
 				projectInstanceKey: "voysee",
 				projectionUrl: "http://localhost:1234",

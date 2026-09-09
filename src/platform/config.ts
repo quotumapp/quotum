@@ -16,7 +16,10 @@ export interface MerchantConfig {
 export function loadMerchantConfig(
 	env: Record<string, string | undefined> = process.env,
 ): MerchantConfig | null {
-	if (!enabled(env.MERCHANT_AUTH_ENABLED)) return null;
+	const production = (env.BILLING_ENV ?? "production") === "production";
+	if (production && env.MERCHANT_AUTH_ENABLED === "false")
+		throw new Error("Merchant authentication is required in production");
+	if (!production && !enabled(env.MERCHANT_AUTH_ENABLED)) return null;
 	const testMode = env.BILLING_ENV === "test";
 	const origin = z.url().parse(env.MERCHANT_ORIGIN ?? "https://app.quotum.dev");
 	const originUrl = new URL(origin);
@@ -25,7 +28,8 @@ export function loadMerchantConfig(
 	const secret = z.string().min(32).parse(env.MERCHANT_AUTH_SECRET);
 	const termsVersion = z.string().min(1).parse(env.MERCHANT_TERMS_VERSION);
 	const privacyVersion = z.string().min(1).parse(env.MERCHANT_PRIVACY_VERSION);
-	const signupEnabled = enabled(env.MERCHANT_SIGNUP_ENABLED);
+	const signupEnabled =
+		env.MERCHANT_SIGNUP_ENABLED === undefined ? true : enabled(env.MERCHANT_SIGNUP_ENABLED);
 	if (
 		signupEnabled &&
 		!testMode &&

@@ -31,7 +31,7 @@ async function runIntegrationTests(): Promise<void> {
 		const platform = await bootstrapTestPlatform(container.getConnectionUri(), projectInstanceKeys);
 		const env = {
 			...migrationEnv,
-			BILLING_PROJECT_RUNTIME_JSON: JSON.stringify(
+			BILLING_TEST_CONNECTIONS_JSON: JSON.stringify(
 				platform.contexts.map((project) => ({
 					projectInstanceKey: project.projectInstanceKey,
 					projectionUrl: `https://${project.projectInstanceKey}.projection.integration.test`,

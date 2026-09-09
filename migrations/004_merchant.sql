@@ -182,3 +182,24 @@ CREATE TABLE platform_idempotency (
  key text NOT NULL, request_hash text NOT NULL, result jsonb, created_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(principal_id,key)
 );
+
+CREATE TABLE platform_connection_oauth_states (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ state_hash text NOT NULL UNIQUE,
+ project_instance_id uuid NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+ principal_id uuid NOT NULL REFERENCES platform_principals(id) ON DELETE RESTRICT,
+ session_id uuid NOT NULL REFERENCES platform_merchant_sessions(id) ON DELETE RESTRICT,
+ expected_revision integer NOT NULL CHECK(expected_revision >= 0),
+ settings jsonb NOT NULL CHECK(jsonb_typeof(settings)='object'),
+ expires_at timestamptz NOT NULL,
+ consumed_at timestamptz,
+ created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX platform_connection_oauth_instance_idx ON platform_connection_oauth_states(project_instance_id);
+
+CREATE INDEX platform_connection_oauth_principal_idx ON platform_connection_oauth_states(principal_id);
+
+CREATE INDEX platform_connection_oauth_session_idx ON platform_connection_oauth_states(session_id);
+
+CREATE INDEX platform_connection_oauth_expiry_idx ON platform_connection_oauth_states(expires_at) WHERE consumed_at IS NULL;

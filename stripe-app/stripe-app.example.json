@@ -1,0 +1,55 @@
+{
+	"id": "com.quotum.billing",
+	"version": "0.9.0",
+	"name": "Quotum",
+	"distribution_type": "public",
+	"stripe_api_access_type": "oauth",
+	"sandbox_install_compatible": true,
+	"allowed_redirect_uris": ["https://merchant.example.com/auth/stripe/callback"],
+	"permissions": [
+		{
+			"permission": "connected_account_read",
+			"purpose": "Verify the authorized merchant account."
+		},
+		{
+			"permission": "event_read",
+			"purpose": "Verify provider events and recover billing state."
+		},
+		{
+			"permission": "customer_write",
+			"purpose": "Create customer records for merchant billing accounts."
+		},
+		{
+			"permission": "checkout_session_write",
+			"purpose": "Create merchant Checkout sessions."
+		},
+		{
+			"permission": "customer_portal_write",
+			"purpose": "Open the merchant customer billing portal."
+		},
+		{
+			"permission": "subscription_write",
+			"purpose": "Apply reviewed subscription changes."
+		},
+		{
+			"permission": "invoice_write",
+			"purpose": "Create and collect usage invoices and automatic top-ups."
+		},
+		{
+			"permission": "plan_read",
+			"purpose": "Validate merchant prices."
+		},
+		{
+			"permission": "product_read",
+			"purpose": "Resolve merchant products."
+		},
+		{
+			"permission": "charge_read",
+			"purpose": "Process refund and charge events."
+		},
+		{
+			"permission": "payment_intent_read",
+			"purpose": "Resolve invoice payment state."
+		}
+	]
+}

@@ -51,6 +51,8 @@ import type {
 } from "./types";
 
 export interface StripeBillingServiceConfig {
+	connectedAccountId?: string;
+	connectedAccountLivemode?: boolean;
 	projectKey?: string;
 	checkoutSuccessUrl: string;
 	checkoutCancelUrl: string;
@@ -985,6 +987,25 @@ export class StripeBillingService {
 			);
 		}
 
+		return this.handleVerifiedAppEvent(event);
+	}
+	/** Only composition's signature-verified, account-mapped app event inbox may call this entrypoint. */
+	async handleVerifiedAppEvent(event: unknown): Promise<StripeWebhookResult> {
+		const expected = this.dependencies.config.connectedAccountId;
+		if (
+			expected &&
+			(!event ||
+				typeof event !== "object" ||
+				!("account" in event) ||
+				event.account !== expected ||
+				!("livemode" in event) ||
+				event.livemode !== this.dependencies.config.connectedAccountLivemode)
+		)
+			throw new BillingError(
+				"Stripe account or mode does not match this connection",
+				"STRIPE_ACCOUNT_MISMATCH",
+				400,
+			);
 		return this.processEvent(event);
 	}
 

@@ -1,5 +1,5 @@
 -- Baseline schema. Before 1.0 these files evolve in place; recreate databases instead of migrating.
--- Platform: organizations, logical projects, project instances, and credentials.
+-- Platform: organizations, logical projects, project instances, credentials, and customer connections.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
@@ -121,10 +121,85 @@ CREATE INDEX idx_platform_project_api_credentials_active_instance
 	ON platform_project_api_credentials (project_instance_id, created_at DESC)
 	WHERE revoked_at IS NULL;
 
--- New merchant instances can operate before provider/projection configuration exists.
--- Existing bootstrapped instances remain subject to exact external runtime configuration.
-CREATE TABLE platform_project_runtime_modes (
- project_instance_id uuid PRIMARY KEY REFERENCES projects(id) ON DELETE RESTRICT,
- mode text NOT NULL CHECK(mode = 'unconfigured'),
- created_at timestamptz NOT NULL DEFAULT now()
+CREATE TABLE platform_connections (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ project_instance_id uuid NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+ kind text NOT NULL CHECK (kind IN ('stripe','apple','google','projection')),
+ revision integer NOT NULL DEFAULT 0 CHECK (revision >= 0),
+ enabled boolean NOT NULL DEFAULT false,
+ active_version_id uuid,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ updated_at timestamptz NOT NULL DEFAULT now(),
+ stripe_account_id text,
+ stripe_livemode boolean,
+ UNIQUE(project_instance_id,kind), UNIQUE(id,project_instance_id),
+ CONSTRAINT platform_connections_stripe_identity_check CHECK ((stripe_account_id IS NULL AND stripe_livemode IS NULL) OR (kind='stripe' AND stripe_account_id IS NOT NULL AND stripe_livemode IS NOT NULL))
 );
+
+CREATE INDEX platform_connections_active_version_idx ON platform_connections(id,active_version_id) WHERE active_version_id IS NOT NULL;
+
+CREATE UNIQUE INDEX platform_connections_stripe_account_mode_idx ON platform_connections(stripe_account_id,stripe_livemode) WHERE stripe_account_id IS NOT NULL;
+
+CREATE TABLE platform_connection_versions (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ connection_id uuid NOT NULL,
+ project_instance_id uuid NOT NULL,
+ expected_revision integer NOT NULL CHECK(expected_revision >= 0),
+ settings jsonb NOT NULL CHECK(jsonb_typeof(settings)='object'),
+ status text NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','validated','active','retired','expired')),
+ validation jsonb,
+ validated_at timestamptz,
+ event_verified_at timestamptz,
+ external_identity text,
+ request_key text NOT NULL CHECK(length(request_key) BETWEEN 8 AND 128),
+ request_fingerprint text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ expires_at timestamptz NOT NULL DEFAULT now()+interval '24 hours',
+ refresh_lease_id uuid,
+ refresh_lease_until timestamptz,
+ FOREIGN KEY(connection_id,project_instance_id) REFERENCES platform_connections(id,project_instance_id) ON DELETE RESTRICT,
+ UNIQUE(connection_id,id), UNIQUE(connection_id,request_key)
+);
+
+CREATE INDEX platform_connection_versions_instance_idx ON platform_connection_versions(project_instance_id);
+
+CREATE INDEX platform_connection_versions_expiry_idx ON platform_connection_versions(expires_at) WHERE status IN ('draft','validated');
+
+CREATE TABLE platform_connection_secrets (
+ connection_id uuid NOT NULL,
+ version_id uuid NOT NULL,
+ purpose text NOT NULL CHECK(length(purpose) BETWEEN 1 AND 80),
+ envelope jsonb NOT NULL CHECK(jsonb_typeof(envelope)='object'),
+ PRIMARY KEY(connection_id,version_id,purpose),
+ FOREIGN KEY(connection_id,version_id) REFERENCES platform_connection_versions(connection_id,id) ON DELETE RESTRICT
+);
+
+CREATE TABLE platform_connection_operations (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ project_instance_id uuid NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+ request_key text NOT NULL CHECK(length(request_key) BETWEEN 8 AND 128),
+ action text NOT NULL,
+ request_fingerprint text NOT NULL,
+ result jsonb NOT NULL CHECK(jsonb_typeof(result)='object'),
+ created_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(project_instance_id,request_key)
+);
+
+CREATE TABLE platform_stripe_app_events (
+ event_id text PRIMARY KEY,
+ account_id text NOT NULL,
+ livemode boolean NOT NULL,
+ payload jsonb NOT NULL,
+ processed_at timestamptz,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ next_attempt_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX platform_stripe_app_events_pending_idx ON platform_stripe_app_events(account_id,livemode,created_at) WHERE processed_at IS NULL;
+
+CREATE INDEX platform_stripe_app_events_retry_idx ON platform_stripe_app_events(next_attempt_at,created_at) WHERE processed_at IS NULL;
+
+-- Constraints on tables defined in earlier files that reference this file's tables.
+ALTER TABLE platform_connections
+	ADD CONSTRAINT platform_connections_active_version_fk
+ FOREIGN KEY(id,active_version_id) REFERENCES platform_connection_versions(connection_id,id) DEFERRABLE INITIALLY DEFERRED;
