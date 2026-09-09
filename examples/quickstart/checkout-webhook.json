@@ -1,0 +1,32 @@
+{
+	"id": "evt_quickstart_checkout_1",
+	"type": "checkout.session.completed",
+	"data": {
+		"object": {
+			"id": "cs_quickstart_1",
+			"object": "checkout.session",
+			"mode": "payment",
+			"status": "complete",
+			"payment_status": "paid",
+			"amount_total": 499,
+			"currency": "usd",
+			"customer": "cus_quickstart_user_1",
+			"client_reference_id": "user_1",
+			"charge": "ch_quickstart_1",
+			"latest_charge": "ch_quickstart_1",
+			"created": 1780000000,
+			"metadata": {
+				"billingAccountId": "user_1",
+				"productKey": "credits_10",
+				"purchaseKind": "consumable",
+				"externalProductId": "prod_quickstart_credits_10",
+				"externalPriceId": "price_quickstart_credits_10"
+			},
+			"payment_intent": {
+				"id": "pi_quickstart_1",
+				"latest_charge": "ch_quickstart_1",
+				"metadata": { "billingAccountId": "user_1" }
+			}
+		}
+	}
+}

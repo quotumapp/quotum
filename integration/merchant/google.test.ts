@@ -47,10 +47,13 @@ describe("Google OAuth using signed local provider tokens", () => {
 		expect(result.headers.get("location")).toBe(`${testConfig.origin}/auth/callback`);
 		await browser.json("/api/platform/session/exchange", {});
 		expect((await browser.json("/api/platform/session")).authMethod).toBe("google");
+		expect((await f.sql`SELECT issuer FROM platform_external_identities`)[0].issuer).toBe(
+			"https://accounts.google.com",
+		);
 		expect(f.mailer.messages.filter((message) => message.kind === "otp")).toHaveLength(0);
 		const [account] =
-			await f.sql`SELECT issuer,account_id,access_token,id_token FROM platform_auth_accounts`;
-		expect(account.issuer).toBe("https://accounts.google.com");
+			await f.sql`SELECT provider_id,account_id,access_token,id_token FROM platform_auth_accounts`;
+		expect(account.provider_id).toBe("google");
 		expect(account.account_id).toBe("synthetic-google-subject");
 		expect(account.access_token).toBeNull();
 		expect(account.id_token).toBeNull();

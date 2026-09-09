@@ -114,12 +114,7 @@
       "code": "BILLING_PROJECT_REQUIRED",
       "sources": [
         "src/app.ts",
-        "src/app/admin-routes.ts",
-        "src/app/catalog-routes.ts",
-        "src/app/controls-routes.ts",
-        "src/app/customer-routes.ts",
-        "src/app/insights-routes.ts",
-        "src/app/metering-routes.ts"
+        "src/app/request-context.ts"
       ]
     },
     {
@@ -521,7 +516,8 @@
         "src/providers/apple/service.ts",
         "src/providers/google/pubsub.ts",
         "src/providers/google/service.ts",
-        "src/providers/stripe/service.ts"
+        "src/providers/stripe/service.ts",
+        "src/providers/validation.ts"
       ]
     },
     {

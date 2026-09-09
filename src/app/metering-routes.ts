@@ -1,6 +1,6 @@
 import type { Context, Hono } from "hono";
 import { z } from "zod";
-import { BillingError, InvalidRequestError } from "../billing/errors";
+import { InvalidRequestError } from "../billing/errors";
 import type { MeteringServiceLike } from "../billing/metering";
 import { usageOperationKinds } from "../billing/usage-operations";
 import { type RateLimitResult, rateLimitMiddleware } from "../http/rate-limit";
@@ -9,10 +9,10 @@ import {
 	safelyIncrementBillingMetric,
 	safelyObserveBillingMetric,
 } from "../observability/metrics";
-import type { ProjectInstanceContext } from "../projects/context";
 import { defineContract, registerRoute } from "../shared/http-contract";
 import * as responses from "./contracts/metering-responses";
-import type { BillingContext, BillingHonoEnv } from "./types";
+import { privateProject, requireActor } from "./request-context";
+import type { BillingHonoEnv } from "./types";
 
 type RateLimiter = { check(key: string): RateLimitResult };
 
@@ -292,7 +292,7 @@ export function registerMeteringRoutes({
 				originalRecordedAt: new Date(body.originalRecordedAt),
 				quantity: body.quantity,
 				idempotencyKey: requireIdempotencyKey(c.req.header("idempotency-key")),
-				actor: requireActor(c.req.header("x-billing-actor")),
+				actor: requireActor(c),
 				reason: body.reason,
 				occurredAt: body.occurredAt === undefined ? undefined : dateOrNull(body.occurredAt),
 				metadata: body.metadata,
@@ -338,16 +338,6 @@ function requireIdempotencyKey(value: string | undefined): string {
 	return key;
 }
 
-function requireActor(value: string | undefined): string {
-	const actor = value?.trim();
-	if (actor === undefined || actor === "" || actor.length > 200) {
-		throw new InvalidRequestError(
-			"X-Billing-Actor header must contain between 1 and 200 characters",
-		);
-	}
-	return actor;
-}
-
 function parseSchema<T>(schema: z.ZodType<T>, value: unknown, message: string): T {
 	const parsed = schema.safeParse(value);
 	if (!parsed.success) {
@@ -361,14 +351,6 @@ async function optionalPrivateJson(
 	parsePrivateJson: (request: Request) => Promise<unknown>,
 ): Promise<unknown> {
 	return request.body === null ? {} : await parsePrivateJson(request);
-}
-
-function privateProject(c: BillingContext): ProjectInstanceContext {
-	const project = c.get("project");
-	if (project === undefined) {
-		throw new BillingError("Billing project context is required", "BILLING_PROJECT_REQUIRED", 401);
-	}
-	return project;
 }
 
 export const meteringContracts = {

@@ -9,6 +9,8 @@
  *   worker computes them, including the replay window.
  * - Prints every accepted and rejected delivery to stdout; pass `--log=<file>` to also persist
  *   deliveries as JSON across restarts.
+ * - Tracks the per-account `sequence` and flags a snapshot older than one already applied as
+ *   stale while still acknowledging it, which is what a real receiver should do.
  * - Optionally fails the first responses to exercise retry and backoff behavior.
  *
  * Usage:
@@ -49,11 +51,12 @@ let acceptedCount = 0;
 let rejectedCount = 0;
 let lastPayload: unknown = null;
 let lastHeaders: Record<string, string> = {};
+let lastSequenceByAccount: Record<string, number> = {};
 let deliveries: Array<{
 	at: string;
 	reason: string;
 	billingAccountId: string;
-	status: "accepted" | "rejected" | "deliberate-failed";
+	status: "accepted" | "stale" | "rejected" | "deliberate-failed";
 	payload: unknown;
 	headers: Record<string, string>;
 }> = [];
@@ -73,12 +76,21 @@ async function ensureFile(): Promise<void> {
 			if ("lastPayload" in parsed) lastPayload = parsed.lastPayload;
 			if (parsed.lastHeaders && typeof parsed.lastHeaders === "object")
 				lastHeaders = parsed.lastHeaders;
+			if (parsed.lastSequenceByAccount && typeof parsed.lastSequenceByAccount === "object")
+				lastSequenceByAccount = parsed.lastSequenceByAccount;
 		}
 	} catch {
 		await writeFile(
 			args.log,
 			JSON.stringify(
-				{ deliveries: [], acceptedCount: 0, rejectedCount: 0, lastPayload: null, lastHeaders: {} },
+				{
+					deliveries: [],
+					acceptedCount: 0,
+					rejectedCount: 0,
+					lastPayload: null,
+					lastHeaders: {},
+					lastSequenceByAccount: {},
+				},
 				null,
 				2,
 			),
@@ -90,7 +102,11 @@ async function persist(): Promise<void> {
 	if (args.log === "") return;
 	await writeFile(
 		args.log,
-		JSON.stringify({ deliveries, acceptedCount, rejectedCount, lastPayload, lastHeaders }, null, 2),
+		JSON.stringify(
+			{ deliveries, acceptedCount, rejectedCount, lastPayload, lastHeaders, lastSequenceByAccount },
+			null,
+			2,
+		),
 	);
 }
 
@@ -136,15 +152,18 @@ function verifyRequest(
 function summarize(value: unknown): {
 	reason: string;
 	billingAccountId: string;
+	sequence: number | null;
 	purchase?: string;
 	reversal?: string;
 } {
 	if (typeof value !== "object" || value === null) {
-		return { reason: "n/a", billingAccountId: "n/a" };
+		return { reason: "n/a", billingAccountId: "n/a", sequence: null };
 	}
 	const obj = value as Record<string, unknown>;
 	const reason = typeof obj.reason === "string" ? obj.reason : "n/a";
 	const billingAccountId = typeof obj.billingAccountId === "string" ? obj.billingAccountId : "n/a";
+	const sequence =
+		typeof obj.sequence === "number" && Number.isSafeInteger(obj.sequence) ? obj.sequence : null;
 	const purchase =
 		typeof obj.purchase === "object" && obj.purchase !== null
 			? JSON.stringify(obj.purchase)
@@ -153,7 +172,7 @@ function summarize(value: unknown): {
 		typeof obj.reversal === "object" && obj.reversal !== null
 			? JSON.stringify(obj.reversal)
 			: undefined;
-	return { reason, billingAccountId, purchase, reversal };
+	return { reason, billingAccountId, sequence, purchase, reversal };
 }
 
 const server = Bun.serve({
@@ -169,6 +188,7 @@ const server = Bun.serve({
 				failModeRemaining: args.fail,
 				lastPayload,
 				lastHeaders,
+				lastSequenceByAccount,
 				deliveries,
 			});
 		}
@@ -177,6 +197,7 @@ const server = Bun.serve({
 			rejectedCount = 0;
 			lastPayload = null;
 			lastHeaders = {};
+			lastSequenceByAccount = {};
 			deliveries = [];
 			await persist();
 			return new Response("ok");
@@ -243,14 +264,21 @@ const server = Bun.serve({
 		lastHeaders = headerMap;
 		acceptedCount += 1;
 		const summary = summarize(parsed);
+		// A lower sequence than one already applied for the account is an older snapshot: a real
+		// receiver keeps its newer state, records any purchase or reversal facts, and still acks.
+		const applied = lastSequenceByAccount[summary.billingAccountId];
+		const stale = summary.sequence !== null && applied !== undefined && summary.sequence < applied;
+		if (summary.sequence !== null && !stale) {
+			lastSequenceByAccount[summary.billingAccountId] = summary.sequence;
+		}
 		console.log(
-			`[receiver ${stamp}] ACCEPT #${acceptedCount} reason=${summary.reason} billingAccountId=${summary.billingAccountId} purchase=${summary.purchase ?? "-"} reversal=${summary.reversal ?? "-"}`,
+			`[receiver ${stamp}] ${stale ? "STALE" : "ACCEPT"} #${acceptedCount} reason=${summary.reason} billingAccountId=${summary.billingAccountId} sequence=${summary.sequence ?? "-"} purchase=${summary.purchase ?? "-"} reversal=${summary.reversal ?? "-"}`,
 		);
 		deliveries.push({
 			at: stamp,
 			reason: summary.reason,
 			billingAccountId: summary.billingAccountId,
-			status: "accepted",
+			status: stale ? "stale" : "accepted",
 			payload: parsed,
 			headers: headerMap,
 		});

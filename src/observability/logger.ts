@@ -1,3 +1,4 @@
+import { stringifyUnknown } from "./stringify-unknown";
 export interface BillingLogger {
 	info(message: string, context?: Record<string, unknown>): void;
 	warn(message: string, context?: Record<string, unknown>): void;
@@ -107,22 +108,6 @@ function normalizeLoggerError(error: unknown): { name: string; message: string; 
 	}
 
 	return { name: "Error", message: stringifyUnknown(error) };
-}
-
-function stringifyUnknown(value: unknown): string {
-	if (typeof value === "string") {
-		return value;
-	}
-
-	if (value === null || value === undefined) {
-		return String(value);
-	}
-
-	try {
-		return JSON.stringify(value);
-	} catch {
-		return String(value);
-	}
 }
 
 function safeTimestamp(now: () => Date): string {

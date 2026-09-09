@@ -60,6 +60,7 @@ export interface StripeBillingEnv {
 
 export interface BillingEnv {
 	postgresUri: string;
+	postgresPreparedStatements: boolean;
 	authMode: BillingAuthMode;
 	operatorApiKey: string | null;
 	trustGatewayProjectHeader: boolean;
@@ -79,6 +80,7 @@ export interface BillingEnv {
 
 const envSchema = z.object({
 	POSTGRES_URI: requiredString("POSTGRES_URI"),
+	BILLING_POSTGRES_PREPARED_STATEMENTS: z.enum(["true", "false"]).default("true"),
 	BILLING_OPERATOR_API_KEY: optionalString(),
 	BILLING_AUTH_MODE: z.enum(["api_key", "gateway"]).default("api_key"),
 	BILLING_TRUST_GATEWAY_PROJECT_HEADER: z.enum(["true", "false"]).default("false"),
@@ -165,6 +167,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 
 	return {
 		postgresUri: parsed.POSTGRES_URI,
+		postgresPreparedStatements: parsed.BILLING_POSTGRES_PREPARED_STATEMENTS !== "false",
 		authMode,
 		operatorApiKey,
 		trustGatewayProjectHeader,

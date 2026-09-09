@@ -28,7 +28,34 @@ export async function getEntitlementSnapshot(
 	if (customer === null) {
 		return { billingAccountId, generatedAt: new Date().toISOString(), entitlements: [] };
 	}
+	return await readEntitlementSnapshotByCustomer(
+		executor,
+		projectId,
+		customer.id,
+		billingAccountId,
+	);
+}
 
+/** Snapshot for an already-resolved customer; issues exactly one statement. */
+export async function readEntitlementSnapshotByCustomer(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string,
+	billingAccountId: string,
+): Promise<EntitlementSnapshot> {
+	return {
+		billingAccountId,
+		generatedAt: new Date().toISOString(),
+		entitlements: await readEntitlementRows(executor, projectId, customerId),
+	};
+}
+
+/** The customer's entitlement entries as they stand; one statement. */
+export async function readEntitlementRows(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string,
+): Promise<EntitlementSnapshot["entitlements"]> {
 	const rows = await executeRows<{
 		key: string;
 		active: boolean;
@@ -51,21 +78,107 @@ export async function getEntitlementSnapshot(
 			e.metadata
 		FROM entitlements e
 		WHERE e.project_id = ${projectId}
-			AND e.customer_id = ${customer.id}
+			AND e.customer_id = ${customerId}
 		ORDER BY e.entitlement_key
 	`,
 	);
+	return rows.map((row) => ({
+		key: row.key,
+		active: row.active,
+		expiresAt: toIsoStringOrNull(row.expires_at),
+		metadata: row.metadata,
+	}));
+}
 
-	return {
-		billingAccountId,
-		generatedAt: new Date().toISOString(),
-		entitlements: rows.map((row) => ({
-			key: row.key,
-			active: row.active,
-			expiresAt: toIsoStringOrNull(row.expires_at),
-			metadata: row.metadata,
-		})),
-	};
+/** Advances the customer's projection sequence; a higher value carries fresher state. */
+export async function nextProjectionSequence(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string,
+): Promise<{ sequence: number; billingAccountId: string }> {
+	const row = await executeOne<{
+		projection_sequence: string | number | bigint;
+		billing_account_id: string;
+	}>(
+		executor,
+		drizzleSql`
+		UPDATE customers
+		SET projection_sequence = projection_sequence + 1, updated_at = now()
+		WHERE project_id = ${projectId} AND id = ${customerId}
+		RETURNING projection_sequence, billing_account_id
+	`,
+	);
+	if (row === null) {
+		throw new Error(`projection sequence customer ${customerId} was not found`);
+	}
+	return { sequence: Number(row.projection_sequence), billingAccountId: row.billing_account_id };
+}
+
+export function usageProjectionKey(customerId: string): string {
+	return `usage:${customerId}`;
+}
+
+/**
+ * Coalesces usage-driven projections: one job per customer, without a stored payload, delivered
+ * after the project's debounce with the state current at delivery. A pending job keeps its earlier
+ * due time (or its backoff when retrying); a processing job is flagged for one follow-up delivery.
+ */
+export async function enqueueUsageProjection(
+	executor: QueryExecutor,
+	input: { projectId: string; customerId: string },
+): Promise<void> {
+	await executeOne(
+		executor,
+		drizzleSql`
+		INSERT INTO projection_sync_jobs (
+			project_id, customer_id, idempotency_key, reason, payload, status, next_attempt_at
+		)
+		VALUES (
+			${input.projectId},
+			${input.customerId},
+			${usageProjectionKey(input.customerId)},
+			'usage_changed',
+			NULL,
+			'pending',
+			now() + make_interval(secs => COALESCE(
+				(SELECT projection_usage_debounce_ms FROM metering_settings WHERE project_id = ${input.projectId}),
+				1000
+			) / 1000.0)
+		)
+		ON CONFLICT (project_id, idempotency_key) DO UPDATE SET
+			status = CASE
+				WHEN projection_sync_jobs.status = 'processing' THEN 'processing'
+				ELSE 'pending'
+			END,
+			reprojection_requested = projection_sync_jobs.status = 'processing',
+			attempts = CASE
+				WHEN projection_sync_jobs.status = 'pending' THEN projection_sync_jobs.attempts
+				ELSE 0
+			END,
+			last_error = CASE
+				WHEN projection_sync_jobs.status = 'pending' THEN projection_sync_jobs.last_error
+				ELSE NULL
+			END,
+			next_attempt_at = CASE
+				WHEN projection_sync_jobs.status = 'processing' THEN projection_sync_jobs.next_attempt_at
+				WHEN projection_sync_jobs.status = 'pending' AND projection_sync_jobs.attempts > 0
+					THEN projection_sync_jobs.next_attempt_at
+				WHEN projection_sync_jobs.status = 'pending'
+					THEN LEAST(projection_sync_jobs.next_attempt_at, EXCLUDED.next_attempt_at)
+				ELSE EXCLUDED.next_attempt_at
+			END,
+			locked_at = CASE
+				WHEN projection_sync_jobs.status = 'processing' THEN projection_sync_jobs.locked_at
+				ELSE NULL
+			END,
+			locked_by = CASE
+				WHEN projection_sync_jobs.status = 'processing' THEN projection_sync_jobs.locked_by
+				ELSE NULL
+			END,
+			updated_at = now()
+		RETURNING id
+	`,
+	);
 }
 
 export async function recomputeCustomerEntitlements(
@@ -247,12 +360,38 @@ export async function enqueueProjectionSyncJob(
 	if (customer === null) {
 		throw new Error(`projection sync job customer ${input.customerId} was not found`);
 	}
+	const [{ sequence }, balances] = await Promise.all([
+		nextProjectionSequence(executor, customer.project_id, input.customerId),
+		readProjectionBalances(executor, customer.project_id, input.customerId),
+	]);
 	const payload: ProjectionJobPayload = {
 		...input.payload,
 		generatedAt: input.payload.entitlements.generatedAt,
-		balances: await getProjectionBalances(executor, customer.project_id, input.customerId),
+		balances,
+		sequence,
 	};
+	return await insertProjectionSyncJob(executor, {
+		projectId: customer.project_id,
+		customerId: input.customerId,
+		idempotencyKey: input.idempotencyKey,
+		reason: input.reason,
+		payload,
+	});
+}
 
+/** Inserts or refreshes the per-key projection job for a payload the caller already built. */
+export async function insertProjectionSyncJob(
+	executor: QueryExecutor,
+	input: {
+		projectId: string;
+		customerId: string;
+		idempotencyKey: string;
+		reason: ProjectionSyncReason;
+		payload: ProjectionJobPayload;
+	},
+): Promise<boolean> {
+	const { payload } = input;
+	const customer = { project_id: input.projectId };
 	const row = await executeOne<{ id: string }>(
 		executor,
 		drizzleSql`
@@ -315,7 +454,7 @@ export async function enqueueProjectionSyncJob(
 	return false;
 }
 
-async function getProjectionBalances(
+export async function readProjectionBalances(
 	executor: QueryExecutor,
 	projectId: string,
 	customerId: string,

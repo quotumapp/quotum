@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { constantTimeEquals } from "../shared/constant-time-equals";
 
 export type ApiProjectProjectionFetch = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -64,15 +64,4 @@ function createProjectionSignature(secret: string, timestamp: string, body: stri
 		.update(`${timestamp}.${body}`)
 		.digest("hex");
 	return `sha256=${digest}`;
-}
-
-function constantTimeEquals(actual: string, expected: string): boolean {
-	const actualBuffer = Buffer.from(actual, "utf8");
-	const expectedBuffer = Buffer.from(expected, "utf8");
-
-	if (actualBuffer.byteLength !== expectedBuffer.byteLength) {
-		return false;
-	}
-
-	return timingSafeEqual(actualBuffer, expectedBuffer);
 }

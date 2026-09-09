@@ -21,15 +21,15 @@ import {
 } from "../admin/query";
 import type { AdminBillingReader, AdminListResult } from "../admin/types";
 import { BillingError } from "../billing/errors";
-import { constantTimeEquals } from "../http/api-key";
 import { type RateLimitResult, rateLimitMiddleware } from "../http/rate-limit";
 import { type BillingLogger, safelyLogInfo } from "../observability/logger";
 import type { BillingMetrics } from "../observability/metrics";
 import type { BillingAdminOperations } from "../operations/admin";
-import type { ProjectInstanceContext } from "../projects/context";
+import { constantTimeEquals } from "../shared/constant-time-equals";
 import { defineContract, registerRoute } from "../shared/http-contract";
 import * as responses from "./contracts/admin-responses";
-import type { BillingContext, BillingHonoEnv } from "./types";
+import { privateProject } from "./request-context";
+import type { BillingHonoEnv } from "./types";
 
 type RateLimiter = { check(key: string): RateLimitResult };
 
@@ -279,14 +279,6 @@ export function requireOperatorApiKey(operatorApiKey: string | null): Middleware
 
 		await next();
 	};
-}
-
-function privateProject(c: BillingContext): ProjectInstanceContext {
-	const project = c.get("project");
-	if (project === undefined) {
-		throw new BillingError("Billing project context is required", "BILLING_PROJECT_REQUIRED", 401);
-	}
-	return project;
 }
 
 function queryParams(c: { req: { url: string } }): URLSearchParams {

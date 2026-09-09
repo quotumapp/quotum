@@ -16,7 +16,6 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 		instances: { forProject: unavailable, create: unavailable, activateProduction: unavailable },
 	});
 	const store = new MerchantStore(sql, {
-		enabled: true,
 		signupEnabled: true,
 		origin: "https://app.quotum.invalid",
 		publicUrl: "https://quotum.invalid",

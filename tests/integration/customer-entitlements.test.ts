@@ -287,7 +287,7 @@ async function seedSubscriptionExpiryFixtures(sql: SQL): Promise<void> {
 				now() - INTERVAL '7 days',
 				NULL,
 				true,
-				${JSON.stringify({ fixture: "active_null_expiry" })}::jsonb
+				${JSON.stringify({ fixture: "active_null_expiry" })}::text::jsonb
 			),
 			(
 				${catalog.project_id},
@@ -303,7 +303,7 @@ async function seedSubscriptionExpiryFixtures(sql: SQL): Promise<void> {
 				now() - INTERVAL '14 days',
 				now() - INTERVAL '1 hour',
 				true,
-				${JSON.stringify({ fixture: "active_expired" })}::jsonb
+				${JSON.stringify({ fixture: "active_expired" })}::text::jsonb
 			),
 			(
 				${catalog.project_id},
@@ -319,7 +319,7 @@ async function seedSubscriptionExpiryFixtures(sql: SQL): Promise<void> {
 				now() - INTERVAL '7 days',
 				now() + INTERVAL '14 days',
 				false,
-				${JSON.stringify({ fixture: "cancelled_pending_expiry" })}::jsonb
+				${JSON.stringify({ fixture: "cancelled_pending_expiry" })}::text::jsonb
 			)
 	`;
 	const legacySubscriptions = await sql<{ id: string }[]>`
@@ -353,7 +353,7 @@ async function seedSubscriptionExpiryFixtures(sql: SQL): Promise<void> {
 			now() - INTERVAL '7 days',
 			NULL,
 			true,
-			${JSON.stringify({ fixture: "legacy_null_expiry" })}::jsonb
+			${JSON.stringify({ fixture: "legacy_null_expiry" })}::text::jsonb
 		)
 		RETURNING id
 	`;
@@ -380,7 +380,7 @@ async function seedSubscriptionExpiryFixtures(sql: SQL): Promise<void> {
 				status: "active",
 				provider: "google",
 				channel: "android",
-			})}::jsonb
+			})}::text::jsonb
 		)
 	`;
 }

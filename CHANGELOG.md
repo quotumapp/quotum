@@ -10,6 +10,88 @@ Before 1.0 the schema ships as baseline files under `migrations/` that evolve in
 checksum-verified; recreate a database from them rather than migrating it. Incremental migrations
 start at 1.0.
 
+## [Unreleased]
+
+### Added
+
+- `bun run test:load`, a load lane that boots the real service against a disposable Postgres and
+  measures the metering hot path (hot account, spread accounts, reserve and confirm, check, workers
+  idle) with client and server latency, Postgres statistics, statements per request, projection
+  fan-out and CPU. `--profile [consume|check]` lists every statement one request executes and
+  `--pg-config` passes Postgres settings to the container, and `--recreate-schema` lets a reused
+  external database be started over. See the operations guide.
+- `BILLING_POSTGRES_PREPARED_STATEMENTS` (default `true`) to disable named prepared statements
+  behind a transaction-mode pooler that cannot hold them.
+- `usageDelivery` on projection connections (`coalesced` by default, or `off`) and the per-project
+  `metering_settings.projection_usage_debounce_ms` tunable (default 1000).
+- A per-account `sequence` on every projection payload so receivers can discard a stale snapshot.
+- The reference projection receiver tracks each account's `sequence` and flags an older snapshot
+  as stale while still acknowledging it.
+- Self-contained quickstart under `examples/quickstart/` that runs the service against a local
+  Postgres with the guarded fake Stripe boundary, publishes a catalog, records a synthetic
+  purchase, and meters usage without provider accounts.
+- `.env.example` documenting every production environment variable.
+- In-repository guides under `docs/` for deployment and configuration, provider integrations, the
+  API, operations (backup, restore, upgrade, rollback), and architecture.
+
+### Changed
+
+- Format the platform and merchant baseline SQL with one column or table constraint per line.
+  The schema is unchanged, but the file checksums change; recreate disposable development/test
+  databases under the pre-1.0 baseline policy.
+- Production now requires explicit, nonblank `MERCHANT_ORIGIN` and `MERCHANT_PUBLIC_URL`,
+  including when `BILLING_ENV` is unset. Set both deployment URLs before upgrading; startup
+  no longer falls back to Quotum domains in production.
+- The consume path issues statements that depend only on known identifiers together, so the
+  driver pipelines them in one round trip, and no longer reads the customer twice, the feature
+  twice, or the customer three more times for the projection payload. One consume went from 33
+  statements in 31 round trips to 26 statements in about 14, and its post-write balance is now
+  computed from the rows it locked. On the load lane's laptop container one hot account went from
+  about 80 to about 220 consumes per second and spread traffic from about 670 to about 1,200.
+- Named prepared statements are on by default; pipelining depends on them.
+- Every JSON parameter is bound as text and cast on the server (`::text::jsonb`), including the
+  `jsonb()` helper, the catalog provisioner and the integration fixtures. A driver that infers
+  parameter types from a prepared statement would otherwise encode the serialized string a second
+  time and store a JSON string scalar.
+- Effective control resolution runs as one statement with the active contract resolved inline.
+- Usage-driven projections are coalesced: one job per billing account with no stored payload,
+  delivered after the project's debounce with the entitlements and balances read at delivery
+  time. A consume no longer reads or serializes the projection payload. Purchase, provider-webhook
+  and reconciliation projections keep their per-event identity. Receivers get fewer deliveries
+  than consumes and must apply each one idempotently; the payload schema is unchanged apart from
+  the added `sequence`.
+- The projection claim ranks fairness inside a candidate set bounded by the batch size and read
+  through the partial indexes on due and stale jobs, so its cost no longer grows with the backlog.
+- Admin projection job listings return `payload: null` for pending usage-driven jobs; the OpenAPI
+  contract is regenerated.
+- Usage operations pipeline the claim read and the caller's non-blocking reads behind the advisory
+  lock, run the customer upsert and the expired-reservation sweep together once the lock is held,
+  and send the claim insert ahead of the mutation's first batch: about 10 round trips per consume
+  instead of 14 with the same statements. Only reads that cannot wait on a row lock precede the
+  lock check, so a competing operation with the same identity still learns it is in progress
+  without blocking. Laptop throughput stayed within run variance; the saving grows with database
+  round-trip time.
+- The reserve and confirm paths use the same pipelined shape as consume: shared subject
+  resolution, hold and confirmation writes issued together with the snapshot reads behind them,
+  prefetched alerts and top-up policy, and a control-hold confirmation that pipelines its lock and
+  reads. A reserve-and-confirm pair went from 72 to 58 statements and from 23 to 17 ms on the
+  profile; the load lane measured 359 to 582 pairs per second at concurrency 64.
+
+### Fixed
+
+- Projection job claims could hand one job to two workers: the due predicate lived only in the
+  ranking CTE, so when one worker committed its claim while another was selecting, the newer row
+  version passed the join-only recheck. The locking select and the update now repeat the predicate.
+- The pinned Stripe API version follows stripe 22.6.2.
+- Usage calls no longer rewrite and lock the customer row: the customer lookup reads first and
+  inserts only a missing customer. The per-call upsert held the row lock for the rest of the
+  transaction, so the projection worker's sequence update and the next call on the same account
+  queued behind each other; against a database 87 ms away one hot account took four seconds per
+  consume.
+- Confirming a reservation updated the consumed quantity on every reservation holding the same
+  allocation, not only its own, which understated the held quantity those other reservations later
+  released. The update is now scoped to the confirming reservation.
+
 ## [0.9.0] - 2026-09-09
 
 ### Added

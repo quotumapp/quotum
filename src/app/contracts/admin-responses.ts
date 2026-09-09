@@ -164,66 +164,70 @@ export const getV1AdminCustomersByBillingAccountByBillingAccountIdResponse200Sch
 					nextAttemptAt: z.union([z.null(), z.string()]),
 					lockedAt: z.union([z.null(), z.string()]),
 					lockedBy: z.union([z.null(), z.string()]),
-					payload: z.object({
-						billingAccountId: z.string(),
-						generatedAt: z.string(),
-						entitlements: z.object({
+					payload: z.union([
+						z.null(),
+						z.object({
 							billingAccountId: z.string(),
-							entitlements: z.array(
+							generatedAt: z.string(),
+							entitlements: z.object({
+								billingAccountId: z.string(),
+								entitlements: z.array(
+									z.object({
+										key: z.string(),
+										active: z.boolean(),
+										expiresAt: z.union([z.null(), z.string()]),
+										metadata: z.record(z.string(), z.unknown()),
+									}),
+								),
+								generatedAt: z.string(),
+							}),
+							balances: z.array(
 								z.object({
-									key: z.string(),
-									active: z.boolean(),
-									expiresAt: z.union([z.null(), z.string()]),
-									metadata: z.record(z.string(), z.unknown()),
+									featureKey: z.string(),
+									unit: z.string(),
+									available: z.string(),
+									held: z.string(),
+									periodEndsAt: z.union([z.null(), z.string()]),
 								}),
 							),
-							generatedAt: z.string(),
+							reason: z.enum([
+								"purchase_verified",
+								"provider_webhook",
+								"expiry_reconciliation",
+								"provider_reconciliation",
+								"usage_changed",
+							]),
+							sequence: z.number().optional(),
+							purchase: z
+								.object({
+									provider: z.enum(["google", "apple", "stripe"]),
+									channel: z.enum(["ios", "android", "web"]),
+									purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
+									transactionId: z.string(),
+									productKey: z.string(),
+									creditAmount: z.number(),
+									totalCreditAmount: z.number().optional(),
+									quantity: z.number().optional(),
+									refundableQuantity: z.number().optional(),
+									purchasedAt: z.string(),
+								})
+								.optional(),
+							reversal: z
+								.object({
+									provider: z.enum(["google", "apple", "stripe"]),
+									channel: z.enum(["ios", "android", "web"]),
+									reason: z.enum(["refund", "dispute"]),
+									transactionId: z.string(),
+									originalTransactionId: z.string(),
+									productKey: z.string(),
+									creditAmount: z.number(),
+									totalCreditAmount: z.number().optional(),
+									quantity: z.number().optional(),
+									reversedAt: z.string(),
+								})
+								.optional(),
 						}),
-						balances: z.array(
-							z.object({
-								featureKey: z.string(),
-								unit: z.string(),
-								available: z.string(),
-								held: z.string(),
-								periodEndsAt: z.union([z.null(), z.string()]),
-							}),
-						),
-						reason: z.enum([
-							"purchase_verified",
-							"provider_webhook",
-							"expiry_reconciliation",
-							"provider_reconciliation",
-							"usage_changed",
-						]),
-						purchase: z
-							.object({
-								provider: z.enum(["google", "apple", "stripe"]),
-								channel: z.enum(["ios", "android", "web"]),
-								purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
-								transactionId: z.string(),
-								productKey: z.string(),
-								creditAmount: z.number(),
-								totalCreditAmount: z.number().optional(),
-								quantity: z.number().optional(),
-								refundableQuantity: z.number().optional(),
-								purchasedAt: z.string(),
-							})
-							.optional(),
-						reversal: z
-							.object({
-								provider: z.enum(["google", "apple", "stripe"]),
-								channel: z.enum(["ios", "android", "web"]),
-								reason: z.enum(["refund", "dispute"]),
-								transactionId: z.string(),
-								originalTransactionId: z.string(),
-								productKey: z.string(),
-								creditAmount: z.number(),
-								totalCreditAmount: z.number().optional(),
-								quantity: z.number().optional(),
-								reversedAt: z.string(),
-							})
-							.optional(),
-					}),
+					]),
 					createdAt: z.string(),
 					updatedAt: z.string(),
 				}),
@@ -357,66 +361,70 @@ export const getV1AdminCustomersByCustomerIdProjectionJobsResponse200Schema = z
 				nextAttemptAt: z.union([z.null(), z.string()]),
 				lockedAt: z.union([z.null(), z.string()]),
 				lockedBy: z.union([z.null(), z.string()]),
-				payload: z.object({
-					billingAccountId: z.string(),
-					generatedAt: z.string(),
-					entitlements: z.object({
+				payload: z.union([
+					z.null(),
+					z.object({
 						billingAccountId: z.string(),
-						entitlements: z.array(
+						generatedAt: z.string(),
+						entitlements: z.object({
+							billingAccountId: z.string(),
+							entitlements: z.array(
+								z.object({
+									key: z.string(),
+									active: z.boolean(),
+									expiresAt: z.union([z.null(), z.string()]),
+									metadata: z.record(z.string(), z.unknown()),
+								}),
+							),
+							generatedAt: z.string(),
+						}),
+						balances: z.array(
 							z.object({
-								key: z.string(),
-								active: z.boolean(),
-								expiresAt: z.union([z.null(), z.string()]),
-								metadata: z.record(z.string(), z.unknown()),
+								featureKey: z.string(),
+								unit: z.string(),
+								available: z.string(),
+								held: z.string(),
+								periodEndsAt: z.union([z.null(), z.string()]),
 							}),
 						),
-						generatedAt: z.string(),
+						reason: z.enum([
+							"purchase_verified",
+							"provider_webhook",
+							"expiry_reconciliation",
+							"provider_reconciliation",
+							"usage_changed",
+						]),
+						sequence: z.number().optional(),
+						purchase: z
+							.object({
+								provider: z.enum(["google", "apple", "stripe"]),
+								channel: z.enum(["ios", "android", "web"]),
+								purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
+								transactionId: z.string(),
+								productKey: z.string(),
+								creditAmount: z.number(),
+								totalCreditAmount: z.number().optional(),
+								quantity: z.number().optional(),
+								refundableQuantity: z.number().optional(),
+								purchasedAt: z.string(),
+							})
+							.optional(),
+						reversal: z
+							.object({
+								provider: z.enum(["google", "apple", "stripe"]),
+								channel: z.enum(["ios", "android", "web"]),
+								reason: z.enum(["refund", "dispute"]),
+								transactionId: z.string(),
+								originalTransactionId: z.string(),
+								productKey: z.string(),
+								creditAmount: z.number(),
+								totalCreditAmount: z.number().optional(),
+								quantity: z.number().optional(),
+								reversedAt: z.string(),
+							})
+							.optional(),
 					}),
-					balances: z.array(
-						z.object({
-							featureKey: z.string(),
-							unit: z.string(),
-							available: z.string(),
-							held: z.string(),
-							periodEndsAt: z.union([z.null(), z.string()]),
-						}),
-					),
-					reason: z.enum([
-						"purchase_verified",
-						"provider_webhook",
-						"expiry_reconciliation",
-						"provider_reconciliation",
-						"usage_changed",
-					]),
-					purchase: z
-						.object({
-							provider: z.enum(["google", "apple", "stripe"]),
-							channel: z.enum(["ios", "android", "web"]),
-							purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
-							transactionId: z.string(),
-							productKey: z.string(),
-							creditAmount: z.number(),
-							totalCreditAmount: z.number().optional(),
-							quantity: z.number().optional(),
-							refundableQuantity: z.number().optional(),
-							purchasedAt: z.string(),
-						})
-						.optional(),
-					reversal: z
-						.object({
-							provider: z.enum(["google", "apple", "stripe"]),
-							channel: z.enum(["ios", "android", "web"]),
-							reason: z.enum(["refund", "dispute"]),
-							transactionId: z.string(),
-							originalTransactionId: z.string(),
-							productKey: z.string(),
-							creditAmount: z.number(),
-							totalCreditAmount: z.number().optional(),
-							quantity: z.number().optional(),
-							reversedAt: z.string(),
-						})
-						.optional(),
-				}),
+				]),
 				createdAt: z.string(),
 				updatedAt: z.string(),
 			}),
@@ -558,66 +566,70 @@ export const getV1AdminCustomersByCustomerIdResponse200Schema = z
 					nextAttemptAt: z.union([z.null(), z.string()]),
 					lockedAt: z.union([z.null(), z.string()]),
 					lockedBy: z.union([z.null(), z.string()]),
-					payload: z.object({
-						billingAccountId: z.string(),
-						generatedAt: z.string(),
-						entitlements: z.object({
+					payload: z.union([
+						z.null(),
+						z.object({
 							billingAccountId: z.string(),
-							entitlements: z.array(
+							generatedAt: z.string(),
+							entitlements: z.object({
+								billingAccountId: z.string(),
+								entitlements: z.array(
+									z.object({
+										key: z.string(),
+										active: z.boolean(),
+										expiresAt: z.union([z.null(), z.string()]),
+										metadata: z.record(z.string(), z.unknown()),
+									}),
+								),
+								generatedAt: z.string(),
+							}),
+							balances: z.array(
 								z.object({
-									key: z.string(),
-									active: z.boolean(),
-									expiresAt: z.union([z.null(), z.string()]),
-									metadata: z.record(z.string(), z.unknown()),
+									featureKey: z.string(),
+									unit: z.string(),
+									available: z.string(),
+									held: z.string(),
+									periodEndsAt: z.union([z.null(), z.string()]),
 								}),
 							),
-							generatedAt: z.string(),
+							reason: z.enum([
+								"purchase_verified",
+								"provider_webhook",
+								"expiry_reconciliation",
+								"provider_reconciliation",
+								"usage_changed",
+							]),
+							sequence: z.number().optional(),
+							purchase: z
+								.object({
+									provider: z.enum(["google", "apple", "stripe"]),
+									channel: z.enum(["ios", "android", "web"]),
+									purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
+									transactionId: z.string(),
+									productKey: z.string(),
+									creditAmount: z.number(),
+									totalCreditAmount: z.number().optional(),
+									quantity: z.number().optional(),
+									refundableQuantity: z.number().optional(),
+									purchasedAt: z.string(),
+								})
+								.optional(),
+							reversal: z
+								.object({
+									provider: z.enum(["google", "apple", "stripe"]),
+									channel: z.enum(["ios", "android", "web"]),
+									reason: z.enum(["refund", "dispute"]),
+									transactionId: z.string(),
+									originalTransactionId: z.string(),
+									productKey: z.string(),
+									creditAmount: z.number(),
+									totalCreditAmount: z.number().optional(),
+									quantity: z.number().optional(),
+									reversedAt: z.string(),
+								})
+								.optional(),
 						}),
-						balances: z.array(
-							z.object({
-								featureKey: z.string(),
-								unit: z.string(),
-								available: z.string(),
-								held: z.string(),
-								periodEndsAt: z.union([z.null(), z.string()]),
-							}),
-						),
-						reason: z.enum([
-							"purchase_verified",
-							"provider_webhook",
-							"expiry_reconciliation",
-							"provider_reconciliation",
-							"usage_changed",
-						]),
-						purchase: z
-							.object({
-								provider: z.enum(["google", "apple", "stripe"]),
-								channel: z.enum(["ios", "android", "web"]),
-								purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
-								transactionId: z.string(),
-								productKey: z.string(),
-								creditAmount: z.number(),
-								totalCreditAmount: z.number().optional(),
-								quantity: z.number().optional(),
-								refundableQuantity: z.number().optional(),
-								purchasedAt: z.string(),
-							})
-							.optional(),
-						reversal: z
-							.object({
-								provider: z.enum(["google", "apple", "stripe"]),
-								channel: z.enum(["ios", "android", "web"]),
-								reason: z.enum(["refund", "dispute"]),
-								transactionId: z.string(),
-								originalTransactionId: z.string(),
-								productKey: z.string(),
-								creditAmount: z.number(),
-								totalCreditAmount: z.number().optional(),
-								quantity: z.number().optional(),
-								reversedAt: z.string(),
-							})
-							.optional(),
-					}),
+					]),
 					createdAt: z.string(),
 					updatedAt: z.string(),
 				}),
@@ -782,66 +794,70 @@ export const getV1AdminProjectionJobsResponse200Schema = z
 				nextAttemptAt: z.union([z.null(), z.string()]),
 				lockedAt: z.union([z.null(), z.string()]),
 				lockedBy: z.union([z.null(), z.string()]),
-				payload: z.object({
-					billingAccountId: z.string(),
-					generatedAt: z.string(),
-					entitlements: z.object({
+				payload: z.union([
+					z.null(),
+					z.object({
 						billingAccountId: z.string(),
-						entitlements: z.array(
+						generatedAt: z.string(),
+						entitlements: z.object({
+							billingAccountId: z.string(),
+							entitlements: z.array(
+								z.object({
+									key: z.string(),
+									active: z.boolean(),
+									expiresAt: z.union([z.null(), z.string()]),
+									metadata: z.record(z.string(), z.unknown()),
+								}),
+							),
+							generatedAt: z.string(),
+						}),
+						balances: z.array(
 							z.object({
-								key: z.string(),
-								active: z.boolean(),
-								expiresAt: z.union([z.null(), z.string()]),
-								metadata: z.record(z.string(), z.unknown()),
+								featureKey: z.string(),
+								unit: z.string(),
+								available: z.string(),
+								held: z.string(),
+								periodEndsAt: z.union([z.null(), z.string()]),
 							}),
 						),
-						generatedAt: z.string(),
+						reason: z.enum([
+							"purchase_verified",
+							"provider_webhook",
+							"expiry_reconciliation",
+							"provider_reconciliation",
+							"usage_changed",
+						]),
+						sequence: z.number().optional(),
+						purchase: z
+							.object({
+								provider: z.enum(["google", "apple", "stripe"]),
+								channel: z.enum(["ios", "android", "web"]),
+								purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
+								transactionId: z.string(),
+								productKey: z.string(),
+								creditAmount: z.number(),
+								totalCreditAmount: z.number().optional(),
+								quantity: z.number().optional(),
+								refundableQuantity: z.number().optional(),
+								purchasedAt: z.string(),
+							})
+							.optional(),
+						reversal: z
+							.object({
+								provider: z.enum(["google", "apple", "stripe"]),
+								channel: z.enum(["ios", "android", "web"]),
+								reason: z.enum(["refund", "dispute"]),
+								transactionId: z.string(),
+								originalTransactionId: z.string(),
+								productKey: z.string(),
+								creditAmount: z.number(),
+								totalCreditAmount: z.number().optional(),
+								quantity: z.number().optional(),
+								reversedAt: z.string(),
+							})
+							.optional(),
 					}),
-					balances: z.array(
-						z.object({
-							featureKey: z.string(),
-							unit: z.string(),
-							available: z.string(),
-							held: z.string(),
-							periodEndsAt: z.union([z.null(), z.string()]),
-						}),
-					),
-					reason: z.enum([
-						"purchase_verified",
-						"provider_webhook",
-						"expiry_reconciliation",
-						"provider_reconciliation",
-						"usage_changed",
-					]),
-					purchase: z
-						.object({
-							provider: z.enum(["google", "apple", "stripe"]),
-							channel: z.enum(["ios", "android", "web"]),
-							purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
-							transactionId: z.string(),
-							productKey: z.string(),
-							creditAmount: z.number(),
-							totalCreditAmount: z.number().optional(),
-							quantity: z.number().optional(),
-							refundableQuantity: z.number().optional(),
-							purchasedAt: z.string(),
-						})
-						.optional(),
-					reversal: z
-						.object({
-							provider: z.enum(["google", "apple", "stripe"]),
-							channel: z.enum(["ios", "android", "web"]),
-							reason: z.enum(["refund", "dispute"]),
-							transactionId: z.string(),
-							originalTransactionId: z.string(),
-							productKey: z.string(),
-							creditAmount: z.number(),
-							totalCreditAmount: z.number().optional(),
-							quantity: z.number().optional(),
-							reversedAt: z.string(),
-						})
-						.optional(),
-				}),
+				]),
 				createdAt: z.string(),
 				updatedAt: z.string(),
 			}),

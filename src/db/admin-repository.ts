@@ -1030,7 +1030,7 @@ function shouldRedactRawPayloadKey(key: string): boolean {
 function normalizeProjectionJob(row: AdminProjectionJob & AdminRowIdentity): AdminProjectionJob {
 	return {
 		...withoutCursorTimestamp(row),
-		payload: row.payload as ProjectionPayload,
+		payload: row.payload as ProjectionPayload | null,
 		nextAttemptAt: nullableIso(row.nextAttemptAt),
 		lockedAt: nullableIso(row.lockedAt),
 		createdAt: iso(row.createdAt),

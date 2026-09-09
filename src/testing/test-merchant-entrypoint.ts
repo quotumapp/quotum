@@ -33,7 +33,7 @@ const env = loadFixtureEnv();
 const projectServices: NonNullable<AppDependencies["projectProviderServices"]> = {};
 const config = loadMerchantConfig();
 if (
-	!config?.testMode ||
+	!config.testMode ||
 	!["127.0.0.1", "localhost", "[::1]"].includes(new URL(config.origin).hostname)
 )
 	throw new Error("Merchant integration origin must be loopback");

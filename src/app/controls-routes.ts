@@ -1,11 +1,11 @@
 import type { Hono } from "hono";
 import { z } from "zod";
 import type { ControlsEnterpriseRepositoryLike } from "../billing/controls";
-import { BillingError, InvalidRequestError } from "../billing/errors";
-import type { ProjectInstanceContext } from "../projects/context";
+import { InvalidRequestError } from "../billing/errors";
 import { defineContract, registerRoute } from "../shared/http-contract";
 import { requireOperatorApiKey } from "./admin-routes";
 import * as responses from "./contracts/controls-responses";
+import { privateProject, requireActor } from "./request-context";
 import type { BillingContext, BillingHonoEnv } from "./types";
 
 export interface ControlsRoutesDependencies {
@@ -479,28 +479,10 @@ function contractInput(body: z.infer<typeof contractBody>, c: BillingContext) {
 	};
 }
 
-function requireActor(c: BillingContext): string {
-	const actor = c.req.header("x-billing-actor")?.trim();
-	if (actor === undefined || actor === "" || actor.length > 200) {
-		throw new InvalidRequestError(
-			"X-Billing-Actor header must contain between 1 and 200 characters",
-		);
-	}
-	return actor;
-}
-
 function parse<T>(schema: z.ZodType<T>, value: unknown, message: string): T {
 	const parsed = schema.safeParse(value);
 	if (!parsed.success) throw new InvalidRequestError(message);
 	return parsed.data;
-}
-
-function privateProject(c: BillingContext): ProjectInstanceContext {
-	const project = c.get("project");
-	if (project === undefined) {
-		throw new BillingError("Billing project context is required", "BILLING_PROJECT_REQUIRED", 401);
-	}
-	return project;
 }
 
 const postV1AdminContractsPublishBodySchema = contractBody

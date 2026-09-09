@@ -8,6 +8,7 @@ import type {
 	StoreEventReplayJobRow,
 } from "../../db/repository";
 import type { StoreEventReplayProviderResult } from "../../workers/store-event-replay";
+import { requireNonBlank } from "../validation";
 import { createGoogleObfuscatedAccountId } from "./account-link";
 import type { GooglePlayConfig } from "./config";
 import {
@@ -656,15 +657,6 @@ function requireStringValue(value: unknown, name: string): string {
 	}
 
 	return value;
-}
-
-function requireNonBlank(value: string, name: string): string {
-	const trimmed = value.trim();
-	if (trimmed === "") {
-		throw new BillingError(`${name} must not be blank`, "INVALID_REQUEST", 400);
-	}
-
-	return trimmed;
 }
 
 function dateFromMillis(value: string, name: string): Date {

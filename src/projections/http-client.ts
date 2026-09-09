@@ -9,7 +9,7 @@ import { publicHttpsPost } from "../shared/safe-http";
 
 type ProjectionConfig = RuntimeConnectionConfigs["projection"];
 
-import type { BillingProjectionInput, ProjectionDelivery } from "./delivery";
+import type { BillingProjectionInput, ProjectionDelivery, UsageDeliveryMode } from "./delivery";
 import {
 	type ApiProjectProjectionFetch,
 	type ApiProjectProjectionResponse,
@@ -103,6 +103,11 @@ export class ProjectionHttpClient implements ProjectionDelivery {
 			throw error;
 		}
 		this.recordDeliveryMetric(input.projectKey, "succeeded", "OK");
+	}
+
+	async usageDeliveryMode(projectKey: string): Promise<UsageDeliveryMode> {
+		const project = await this.projectFor(projectKey);
+		return project.usageDelivery ?? "coalesced";
 	}
 
 	private async projectFor(projectKey: string): Promise<ProjectionConfig> {

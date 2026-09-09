@@ -9,6 +9,13 @@ import { cookieValue, MerchantError, normalizeEmail } from "./security";
 import type { MerchantStore } from "./store";
 
 export const SIGNUP_COOKIE = "__Host-quotum_signup";
+const GOOGLE_ISSUER = "https://accounts.google.com";
+/**
+ * Issuers bound to merchant sessions and external identities. Better Auth 1.7.3 identifies
+ * accounts by provider and account id again and no longer stores an issuer, so it is derived
+ * from the provider here; the values match what Better Auth 1.7.0-1.7.2 wrote for existing rows.
+ */
+const ACCOUNT_ISSUERS = { credential: "local:credential", google: GOOGLE_ISSUER } as const;
 export function createMerchantAuth(
 	store: MerchantStore,
 	mailer: MerchantMailer,
@@ -64,7 +71,7 @@ export function createMerchantAuth(
 								});
 								if (
 									claims?.email_verified !== true ||
-									claims.iss !== "https://accounts.google.com" ||
+									claims.iss !== GOOGLE_ISSUER ||
 									typeof claims.sub !== "string"
 								)
 									return null;
@@ -304,14 +311,14 @@ export function createMerchantAuth(
 				}
 				const provider = method === "password" ? "credential" : "google";
 				const [account] = await store.sql<
-					{ issuer: string; account_id: string }[]
-				>`SELECT issuer,account_id FROM platform_auth_accounts WHERE user_id=${data.user.id} AND provider_id=${provider}`;
+					{ account_id: string }[]
+				>`SELECT account_id FROM platform_auth_accounts WHERE user_id=${data.user.id} AND provider_id=${provider}`;
 				if (!account)
 					throw new APIError("UNAUTHORIZED", {
 						code: "IDENTITY_MISSING",
 						message: "Sign in again to continue.",
 					});
-				await store.sql`UPDATE platform_auth_sessions SET auth_method=${method},auth_issuer=${account.issuer},auth_subject=${account.account_id},proof_at=${store.now()} WHERE id=${data.session.id}`;
+				await store.sql`UPDATE platform_auth_sessions SET auth_method=${method},auth_issuer=${ACCOUNT_ISSUERS[provider]},auth_subject=${account.account_id},proof_at=${store.now()} WHERE id=${data.session.id}`;
 			}),
 		},
 	});

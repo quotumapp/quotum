@@ -829,7 +829,7 @@ async function seedReplayEvent(
 		)
 		SELECT projects.id, ${input.provider}, ${input.channel}, ${input.externalEventId},
 			${input.eventType}, ${input.status}, 'integration replay seed',
-			${JSON.stringify({ projectKey: input.projectKey, provider: input.provider })}::jsonb,
+			${JSON.stringify({ projectKey: input.projectKey, provider: input.provider })}::text::jsonb,
 			now() - INTERVAL '1 second'
 		FROM projects
 		WHERE projects.key = ${input.projectKey}

@@ -4,6 +4,7 @@ import {
 	decimalToUnits,
 	positiveDecimal,
 	sha256Hex,
+	signedDecimalToUnits,
 	stableJson,
 	unitsToDecimal,
 } from "../../billing/decimal";
@@ -47,20 +48,23 @@ import type {
 	UsageOperationResult,
 } from "../../billing/usage-operations";
 import type { ProjectInstanceContext } from "../../projects/context";
+import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
-import type { ControlDenial } from "./controls-runtime";
+import type { ControlDenial, UsageAlertRow } from "./controls-runtime";
 import {
 	checkControls,
 	confirmControlHolds,
 	consumeControls,
 	correctControlConsumption,
 	holdControls,
+	queryAutoTopupPolicy,
+	queryUsageAlerts,
 	recordUsageAlertDelta,
 	recordUsageControlEntries,
 	releaseControlHolds,
 	scheduleAutoTopupIfNeeded,
 } from "./controls-runtime";
-import { enqueueProjectionSyncJob, getEntitlementSnapshot } from "./entitlements";
+import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -219,22 +223,45 @@ export interface GrantAllocationInput {
 }
 
 export class MeteringBillingRepository extends RepositoryModule {
-	private async operationTransaction<I extends UsageOperationInput, T extends UsageOperationResult>(
+	/**
+	 * Runs a usage operation. The prefetch holds non-blocking reads pipelined with the operation
+	 * lock and claim read; the expired-reservation sweep runs with the customer row once the lock
+	 * is held, so holds are released before the callback locks balances.
+	 */
+	private async operationTransaction<
+		I extends UsageOperationInput,
+		T extends UsageOperationResult,
+		P,
+	>(
 		project: ProjectInstanceContext,
 		operation: UsageOperationKind,
 		input: I,
-		callback: (tx: QueryExecutor, input: I) => Promise<T>,
+		prefetch: (tx: QueryExecutor, input: I) => Promise<P>,
+		callback: (
+			tx: QueryExecutor,
+			input: I,
+			customer: { id: string; billingAccountId: string },
+			prefetched: P,
+		) => Promise<T>,
 	): Promise<T> {
 		const normalizedInput = { ...input, billingAccountId: input.billingAccountId.trim() };
 		return await this.transaction((tx) =>
-			runUsageOperation(tx, project, operation, normalizedInput, async () => {
-				await expireSubjectReservations(
-					tx,
-					project.projectInstanceId,
-					normalizedInput.billingAccountId,
-				);
-				return callback(tx, normalizedInput);
-			}),
+			runUsageOperation<T, P>(
+				tx,
+				project,
+				operation,
+				normalizedInput,
+				(customer, prefetched) => callback(tx, normalizedInput, customer, prefetched),
+				{
+					prefetch: (executor) => prefetch(executor, normalizedInput),
+					prepare: (executor) =>
+						expireSubjectReservations(
+							executor,
+							project.projectInstanceId,
+							normalizedInput.billingAccountId,
+						),
+				},
+			),
 		);
 	}
 
@@ -362,173 +389,24 @@ export class MeteringBillingRepository extends RepositoryModule {
 		project: ProjectInstanceContext,
 		input: MeteringMutationInput,
 	): Promise<ConsumeUsageResult> {
-		return await this.operationTransaction(project, "consume", input, async (tx, input) => {
-			const projectId = project.projectInstanceId;
-			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
-			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
-			const entityId = await resolveEntityId(tx, projectId, customer.id, input.entityId);
-			const feature = await requireMeteredFeature(tx, projectId, input.featureKey);
-			validateFilters(feature, input.filters);
-			const requestedQuantity = positiveDecimal(input.quantity, "quantity", feature.credit_scale);
-			const meterLimit = await resolveMeterLimit(tx, projectId, customer.id, feature);
-			if (meterLimit !== null) {
-				const preflight = await checkMeterLimit(
-					tx,
-					projectId,
-					customer.id,
-					entityId,
-					canonicalFilterKey(input.filters),
-					meterLimit,
-					requestedQuantity,
-				);
-				if (!preflight.allowed) {
-					return { ...preflight, usageEventId: null, recordedAt: null, deductions: [] };
-				}
-				const spend = meterLimitSpendDelta(meterLimit, preflight.balance, requestedQuantity);
-				const controls = await consumeControls(tx, {
-					projectId,
-					customerId: customer.id,
-					entityId,
-					featureId: featureId(feature),
-					featureKey: feature.key,
-					usageDelta: requestedQuantity,
-					...spend,
-				});
-				if (controls.denial !== null) {
-					return {
-						...controlDeniedDecision(preflight, controls.denial),
-						usageEventId: null,
-						recordedAt: null,
-						deductions: [],
-					};
-				}
-				const result = await consumeMeterLimit(tx, {
-					projectId,
-					customerId: customer.id,
-					entityId,
-					filterKey: canonicalFilterKey(input.filters),
-					meterLimit,
-					quantity: requestedQuantity,
+		const projectId = project.projectInstanceId;
+		return await this.operationTransaction(
+			project,
+			"consume",
+			input,
+			(tx, input) => prefetchMeteringSubject(tx, projectId, input),
+			(tx, input, customer, prefetched) =>
+				consumeWithinTransaction(tx, projectId, customer, {
+					featureKey: input.featureKey,
+					quantity: input.quantity,
+					entityId: input.entityId,
+					filters: input.filters,
 					occurredAt: input.occurredAt ?? null,
 					metadata: input.metadata ?? {},
 					projectionKey: `usage:consume:${customer.id}:${input.idempotencyKey}`,
-				});
-				if (result.allowed && result.usageEventId !== null) {
-					await recordUsageControlEntries(tx, {
-						projectId,
-						usageEventId: result.usageEventId,
-						usageEventRecordedAt: result.recordedAt ?? new Date(),
-						entries: controls.entries,
-					});
-					await recordUsageAlertDelta(tx, {
-						projectId,
-						customerId: customer.id,
-						entityId,
-						featureId: featureId(feature),
-						delta: requestedQuantity,
-					});
-				}
-				return result;
-			}
-			const rate = await resolveRateDecision(tx, projectId, customer.id, input.featureKey);
-			validateFilters(rate.meter, input.filters);
-			const walletQuantity = await calculateWalletQuantity(tx, rate, requestedQuantity);
-			const rows = await lockAllocations(tx, projectId, customer.id, rate.wallet, entityId);
-			const currentBalance = balanceFromRows(rate.wallet, rows);
-			const decision = await buildDecision(
-				tx,
-				projectId,
-				rate,
-				requestedQuantity,
-				walletQuantity,
-				currentBalance,
-			);
-			if (!decision.allowed) {
-				return { ...decision, usageEventId: null, recordedAt: null, deductions: [] };
-			}
-			const controls = await consumeControls(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId,
-				featureId: featureId(rate.meter),
-				featureKey: rate.meter.key,
-				usageDelta: requestedQuantity,
-			});
-			if (controls.denial !== null) {
-				return {
-					...controlDeniedDecision(decision, controls.denial),
-					usageEventId: null,
-					recordedAt: null,
-					deductions: [],
-				};
-			}
-
-			const deductions = await consumeAllocations(
-				tx,
-				rows,
-				rate.wallet.credit_scale,
-				walletQuantity,
-				"consumed_quantity",
-			);
-			const event = await insertUsageEvent(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId,
-				rate,
-				operation: "consume",
-				quantity: requestedQuantity,
-				walletQuantity,
-				occurredAt: input.occurredAt ?? null,
-				reservationId: null,
-				filterKey: canonicalFilterKey(input.filters),
-				deductions,
-				metadata: input.metadata ?? {},
-			});
-			await recordUsageControlEntries(tx, {
-				projectId,
-				usageEventId: event.id,
-				usageEventRecordedAt: event.recorded_at,
-				entries: controls.entries,
-			});
-			await incrementRollup(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId,
-				meterFeatureId: featureId(rate.meter),
-				quantity: requestedQuantity,
-				walletQuantity,
-				recordedAt: event.recorded_at,
-			});
-			await recordUsageAlertDelta(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId,
-				featureId: featureId(rate.meter),
-				delta: requestedQuantity,
-			});
-			await enqueueMeteringProjection(
-				tx,
-				projectId,
-				customer.id,
-				`usage:consume:${customer.id}:${input.idempotencyKey}`,
-			);
-			const balance = await readBalance(tx, projectId, customer.id, rate.wallet, entityId);
-			await scheduleAutoTopupIfNeeded(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId,
-				featureId: featureId(rate.wallet),
-				availableQuantity: balance.available,
-				triggerKey: `usage:${event.id}`,
-			});
-			return {
-				...decision,
-				balance,
-				usageEventId: event.id,
-				recordedAt: toIso(event.recorded_at),
-				deductions,
-			};
-		});
+					feature: prefetched.feature,
+				}),
+		);
 	}
 
 	async consumeWorkerDelivery(
@@ -537,7 +415,6 @@ export class MeteringBillingRepository extends RepositoryModule {
 	): Promise<WorkerConsumeUsageResult> {
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
-			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
 			const claimed = await claimWorkerDelivery(
 				tx,
 				projectId,
@@ -546,57 +423,16 @@ export class MeteringBillingRepository extends RepositoryModule {
 			);
 			if (!claimed) return { applied: false, result: null };
 			await expireSubjectReservations(tx, projectId, input.billingAccountId);
-
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
-			const entityId = await resolveEntityId(tx, projectId, customer.id, input.entityId);
-			const feature = await requireMeteredFeature(tx, projectId, input.featureKey);
-			validateFilters(feature, input.filters);
-			const requestedQuantity = positiveDecimal(input.quantity, "quantity", feature.credit_scale);
-			const meterLimit = await resolveMeterLimit(tx, projectId, customer.id, feature);
-			if (meterLimit !== null) {
-				const preflight = await checkMeterLimit(
-					tx,
-					projectId,
-					customer.id,
-					entityId,
-					canonicalFilterKey(input.filters),
-					meterLimit,
-					requestedQuantity,
-				);
-				if (!preflight.allowed) {
-					return {
-						applied: true,
-						result: { ...preflight, usageEventId: null, recordedAt: null, deductions: [] },
-					};
-				}
-				const spend = meterLimitSpendDelta(meterLimit, preflight.balance, requestedQuantity);
-				const controls = await consumeControls(tx, {
-					projectId,
-					customerId: customer.id,
-					entityId,
-					featureId: featureId(feature),
-					featureKey: feature.key,
-					usageDelta: requestedQuantity,
-					...spend,
-				});
-				if (controls.denial !== null) {
-					return {
-						applied: true,
-						result: {
-							...controlDeniedDecision(preflight, controls.denial),
-							usageEventId: null,
-							recordedAt: null,
-							deductions: [],
-						},
-					};
-				}
-				const result = await consumeMeterLimit(tx, {
-					projectId,
-					customerId: customer.id,
-					entityId,
-					filterKey: canonicalFilterKey(input.filters),
-					meterLimit,
-					quantity: requestedQuantity,
+			const result = await consumeWithinTransaction(
+				tx,
+				projectId,
+				{ id: customer.id, billingAccountId: customer.billing_account_id },
+				{
+					featureKey: input.featureKey,
+					quantity: input.quantity,
+					entityId: input.entityId,
+					filters: input.filters,
 					occurredAt: input.occurredAt ?? null,
 					metadata: {
 						...(input.metadata ?? {}),
@@ -604,135 +440,9 @@ export class MeteringBillingRepository extends RepositoryModule {
 						requestContextId: input.requestContextId.trim(),
 					},
 					projectionKey: `usage:worker:${customer.id}:${input.deliveryId}`,
-				});
-				if (result.allowed && result.usageEventId !== null) {
-					await recordUsageControlEntries(tx, {
-						projectId,
-						usageEventId: result.usageEventId,
-						usageEventRecordedAt: result.recordedAt ?? new Date(),
-						entries: controls.entries,
-					});
-					await recordUsageAlertDelta(tx, {
-						projectId,
-						customerId: customer.id,
-						entityId,
-						featureId: featureId(feature),
-						delta: requestedQuantity,
-					});
-				}
-				return { applied: true, result };
-			}
-			const rate = await resolveRateDecision(tx, projectId, customer.id, input.featureKey);
-			validateFilters(rate.meter, input.filters);
-			const walletQuantity = await calculateWalletQuantity(tx, rate, requestedQuantity);
-			const rows = await lockAllocations(tx, projectId, customer.id, rate.wallet, entityId);
-			const currentBalance = balanceFromRows(rate.wallet, rows);
-			const decision = await buildDecision(
-				tx,
-				projectId,
-				rate,
-				requestedQuantity,
-				walletQuantity,
-				currentBalance,
-			);
-			if (!decision.allowed) {
-				return {
-					applied: true,
-					result: { ...decision, usageEventId: null, recordedAt: null, deductions: [] },
-				};
-			}
-			const controls = await consumeControls(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId,
-				featureId: featureId(rate.meter),
-				featureKey: rate.meter.key,
-				usageDelta: requestedQuantity,
-			});
-			if (controls.denial !== null) {
-				return {
-					applied: true,
-					result: {
-						...controlDeniedDecision(decision, controls.denial),
-						usageEventId: null,
-						recordedAt: null,
-						deductions: [],
-					},
-				};
-			}
-
-			const deductions = await consumeAllocations(
-				tx,
-				rows,
-				rate.wallet.credit_scale,
-				walletQuantity,
-				"consumed_quantity",
-			);
-			const event = await insertUsageEvent(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId,
-				rate,
-				operation: "consume",
-				quantity: requestedQuantity,
-				walletQuantity,
-				occurredAt: input.occurredAt ?? null,
-				reservationId: null,
-				filterKey: canonicalFilterKey(input.filters),
-				deductions,
-				metadata: {
-					...(input.metadata ?? {}),
-					workerDeliveryId: input.deliveryId.trim(),
-					requestContextId: input.requestContextId.trim(),
 				},
-			});
-			await recordUsageControlEntries(tx, {
-				projectId,
-				usageEventId: event.id,
-				usageEventRecordedAt: event.recorded_at,
-				entries: controls.entries,
-			});
-			await incrementRollup(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId,
-				meterFeatureId: featureId(rate.meter),
-				quantity: requestedQuantity,
-				walletQuantity,
-				recordedAt: event.recorded_at,
-			});
-			await recordUsageAlertDelta(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId,
-				featureId: featureId(rate.meter),
-				delta: requestedQuantity,
-			});
-			await enqueueMeteringProjection(
-				tx,
-				projectId,
-				customer.id,
-				`usage:worker:${customer.id}:${input.deliveryId}`,
 			);
-			const balance = await readBalance(tx, projectId, customer.id, rate.wallet, entityId);
-			await scheduleAutoTopupIfNeeded(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId,
-				featureId: featureId(rate.wallet),
-				availableQuantity: balance.available,
-				triggerKey: `usage:${event.id}`,
-			});
-			return {
-				applied: true,
-				result: {
-					...decision,
-					balance,
-					usageEventId: event.id,
-					recordedAt: toIso(event.recorded_at),
-					deductions,
-				},
-			};
+			return { applied: true, result };
 		});
 	}
 
@@ -749,407 +459,81 @@ export class MeteringBillingRepository extends RepositoryModule {
 			throw new InvalidRequestError("expiresInSeconds must be an integer between 1 and 86400");
 		}
 
-		return await this.operationTransaction(project, "reserve", normalized, async (tx, input) => {
-			const projectId = project.projectInstanceId;
-			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
-			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
-			const entityId = await resolveEntityId(tx, projectId, customer.id, input.entityId);
-			const feature = await requireMeteredFeature(tx, projectId, input.featureKey);
-			validateFilters(feature, input.filters);
-			const requestedQuantity = positiveDecimal(input.quantity, "quantity", feature.credit_scale);
-			const meterLimit = await resolveMeterLimit(tx, projectId, customer.id, feature);
-			if (meterLimit !== null) {
-				return await reserveMeterLimit(tx, {
-					projectId,
-					customerId: customer.id,
-					entityId,
-					filterKey: canonicalFilterKey(input.filters),
-					meterLimit,
-					quantity: requestedQuantity,
+		const projectId = project.projectInstanceId;
+		return await this.operationTransaction(
+			project,
+			"reserve",
+			normalized,
+			(tx, input) => prefetchMeteringSubject(tx, projectId, input),
+			(tx, input, customer, prefetched) =>
+				reserveWithinTransaction(tx, projectId, customer, {
+					featureKey: input.featureKey,
+					quantity: input.quantity,
+					entityId: input.entityId,
+					filters: input.filters,
+					occurredAt: input.occurredAt ?? null,
 					expiresInSeconds: input.expiresInSeconds,
 					projectionKey: `usage:reserve:${customer.id}:${input.idempotencyKey}`,
-				});
-			}
-			const rate = await resolveRateDecision(tx, projectId, customer.id, input.featureKey);
-			validateFilters(rate.meter, input.filters);
-			const walletQuantity = await calculateWalletQuantity(tx, rate, requestedQuantity);
-			const rows = await lockAllocations(tx, projectId, customer.id, rate.wallet, entityId);
-			const currentBalance = balanceFromRows(rate.wallet, rows);
-			const decision = await buildDecision(
-				tx,
-				projectId,
-				rate,
-				requestedQuantity,
-				walletQuantity,
-				currentBalance,
-			);
-			if (!decision.allowed) {
-				return {
-					...decision,
-					reservationId: null,
-					status: null,
-					expiresAt: null,
-					deductions: [],
-				};
-			}
-
-			const effectiveAt = new Date();
-			const expiresAt = new Date(effectiveAt.getTime() + input.expiresInSeconds * 1000);
-			const reservation = await executeOne<{ id: string }>(
-				tx,
-				drizzleSql`
-					INSERT INTO reservations (
-						project_id,
-						customer_id,
-						entity_id,
-						meter_feature_id,
-						wallet_feature_id,
-						rate_card_entry_id,
-						rate_card_revision_id,
-						rate_card_path,
-						requested_quantity,
-						held_quantity,
-						effective_at,
-						expires_at
-					)
-					VALUES (
-						${projectId},
-						${customer.id},
-						${entityId},
-						${featureId(rate.meter)},
-						${featureId(rate.wallet)},
-						${rate.entryId},
-						${rate.revisionId},
-						${rate.path},
-						${requestedQuantity}::numeric,
-						${walletQuantity}::numeric,
-						${effectiveAt.toISOString()},
-						${expiresAt.toISOString()}
-					)
-					RETURNING id
-				`,
-			);
-			if (reservation === null) {
-				throw new Error("Reservation could not be persisted");
-			}
-			const controlDenial = await holdControls(
-				tx,
-				{
-					projectId,
-					customerId: customer.id,
-					entityId,
-					featureId: featureId(rate.meter),
-					featureKey: rate.meter.key,
-					usageDelta: requestedQuantity,
-				},
-				reservation.id,
-			);
-			if (controlDenial !== null) {
-				await executeOne(
-					tx,
-					drizzleSql`
-						DELETE FROM reservations
-						WHERE project_id = ${projectId} AND id = ${reservation.id}
-						RETURNING id
-					`,
-				);
-				return {
-					...controlDeniedDecision(decision, controlDenial),
-					reservationId: null,
-					status: null,
-					expiresAt: null,
-					deductions: [],
-				};
-			}
-
-			const deductions = await holdAllocations(
-				tx,
-				projectId,
-				reservation.id,
-				rows,
-				rate.wallet.credit_scale,
-				walletQuantity,
-			);
-			await enqueueMeteringProjection(
-				tx,
-				projectId,
-				customer.id,
-				`usage:reserve:${customer.id}:${input.idempotencyKey}`,
-			);
-			return {
-				...decision,
-				balance: await readBalance(tx, projectId, customer.id, rate.wallet, entityId),
-				reservationId: reservation.id,
-				status: "active",
-				expiresAt: expiresAt.toISOString(),
-				deductions,
-			};
-		});
+					feature: prefetched.feature,
+				}),
+		);
 	}
 
 	async confirm(
 		project: ProjectInstanceContext,
 		input: ConfirmReservationInput,
 	): Promise<FinalizeReservationResult> {
-		return await this.operationTransaction(project, "confirm", input, async (tx, input) => {
-			const projectId = project.projectInstanceId;
-			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
-			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
-			const reservation = await lockReservation(tx, projectId, customer.id, input.reservationId);
-			const quantity = positiveDecimal(input.quantity, "quantity", reservation.meter_scale);
-
-			if (reservation.status === "confirmed") {
-				if (databaseDecimal(reservation.confirmed_quantity, "confirmed quantity") !== quantity) {
-					throw new PersistenceConflictError(
-						"Reservation was confirmed with different usage facts",
-						"RESERVATION_ALREADY_CONFIRMED",
-					);
-				}
-				return await finalizedReservationResult(tx, reservation);
-			}
-			if (reservation.status === "expired")
-				return await finalizedReservationResult(tx, reservation);
-			if (reservation.status === "released")
-				throw new PersistenceConflictError("Reservation has been released", "RESERVATION_RELEASED");
-			if (new Date(reservation.expires_at).getTime() <= Date.now()) {
-				await releaseReservationHolds(tx, reservation, "expired");
-				return await finalizedReservationResult(
-					tx,
-					await lockReservation(tx, projectId, customer.id, input.reservationId),
-				);
-			}
-			if (
-				decimalToUnits(quantity, reservation.meter_scale) >
-				decimalToUnits(
-					databaseDecimal(
-						reservation.requested_quantity,
-						"reserved quantity",
-						reservation.meter_scale,
-					),
-					reservation.meter_scale,
-				)
-			) {
-				throw new PersistenceConflictError(
-					"Confirmed quantity exceeds the reserved authorization",
-					"RESERVATION_QUANTITY_EXCEEDED",
-				);
-			}
-			if (reservation.usage_window_id !== null) {
-				const result = await confirmMeterLimitReservation(tx, reservation, quantity, {
+		const projectId = project.projectInstanceId;
+		return await this.operationTransaction(
+			project,
+			"confirm",
+			input,
+			(tx, input) => validateOccurredAt(tx, projectId, input.occurredAt ?? null),
+			(tx, input, customer) =>
+				confirmWithinTransaction(tx, projectId, customer, {
+					reservationId: input.reservationId,
+					quantity: input.quantity,
 					occurredAt: input.occurredAt ?? null,
 					metadata: input.metadata ?? {},
-				});
-				if (result.allowed) {
-					await recordUsageAlertDelta(tx, {
-						projectId,
-						customerId: customer.id,
-						entityId: reservation.entity_id === null ? null : String(reservation.entity_id),
-						featureId: String(reservation.meter_feature_id),
-						delta: quantity,
-					});
-					await enqueueMeteringProjection(
-						tx,
-						projectId,
-						customer.id,
-						`usage:confirm:${customer.id}:${input.idempotencyKey}`,
-					);
-				}
-				return result;
-			}
-
-			const rate = await rateFromReservation(tx, reservation);
-			const walletQuantity = await calculateWalletQuantity(tx, rate, quantity);
-			const rows = await lockAllAllocationRows(
-				tx,
-				projectId,
-				customer.id,
-				rate.wallet,
-				reservation.entity_id === null ? null : String(reservation.entity_id),
-			);
-			const reservationRows = await lockReservationAllocations(tx, projectId, reservation.id);
-			let deductions: AllocationDeduction[];
-			let confirmedControlEntries: Array<{ controlWindowId: string; value: string }> = [];
-			try {
-				await confirmAgainstAllocations(
-					tx,
-					rows,
-					reservationRows,
-					rate.wallet.credit_scale,
-					walletQuantity,
-					false,
-				);
-				const controls = await confirmControlHolds(tx, {
-					projectId,
-					customerId: customer.id,
-					entityId: reservation.entity_id === null ? null : String(reservation.entity_id),
-					featureId: featureId(rate.meter),
-					featureKey: rate.meter.key,
-					usageDelta: quantity,
-					spendMinorDelta: "0",
-					currency: null,
-					reservationId: reservation.id,
-				});
-				if (controls.denial !== null) {
-					return {
-						allowed: false,
-						reason: "control_limit_exceeded",
-						reservationId: reservation.id,
-						status: "active",
-						usageEventId: null,
-						recordedAt: null,
-						balance: await readBalance(
-							tx,
-							projectId,
-							customer.id,
-							rate.wallet,
-							reservation.entity_id === null ? null : String(reservation.entity_id),
-						),
-						deductions: [],
-						control: controls.denial,
-					};
-				}
-				confirmedControlEntries = controls.entries;
-				deductions = await confirmAgainstAllocations(
-					tx,
-					rows,
-					reservationRows,
-					rate.wallet.credit_scale,
-					walletQuantity,
-				);
-			} catch (error) {
-				if (error instanceof BillingError && error.code === "INSUFFICIENT_BALANCE") {
-					return {
-						allowed: false,
-						reason: "insufficient_balance",
-						reservationId: reservation.id,
-						status: "active",
-						usageEventId: null,
-						recordedAt: null,
-						balance: await readBalance(
-							tx,
-							projectId,
-							customer.id,
-							rate.wallet,
-							reservation.entity_id === null ? null : String(reservation.entity_id),
-						),
-						deductions: [],
-					};
-				}
-				throw error;
-			}
-			const event = await insertUsageEvent(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId: reservation.entity_id === null ? null : String(reservation.entity_id),
-				rate,
-				operation: "confirm",
-				quantity,
-				walletQuantity,
-				occurredAt: input.occurredAt ?? null,
-				reservationId: reservation.id,
-				filterKey: null,
-				deductions,
-				metadata: input.metadata ?? {},
-			});
-			await recordUsageControlEntries(tx, {
-				projectId,
-				usageEventId: event.id,
-				usageEventRecordedAt: event.recorded_at,
-				entries: confirmedControlEntries,
-			});
-			await executeOne(
-				tx,
-				drizzleSql`
-					UPDATE reservations
-					SET
-						status = 'confirmed',
-						confirmed_quantity = ${quantity}::numeric,
-						finalized_at = now(),
-						updated_at = now()
-					WHERE project_id = ${projectId}
-						AND id = ${reservation.id}
-					RETURNING id
-				`,
-			);
-			await incrementRollup(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId: reservation.entity_id === null ? null : String(reservation.entity_id),
-				meterFeatureId: featureId(rate.meter),
-				quantity,
-				walletQuantity,
-				recordedAt: event.recorded_at,
-			});
-			await recordUsageAlertDelta(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId: reservation.entity_id === null ? null : String(reservation.entity_id),
-				featureId: featureId(rate.meter),
-				delta: quantity,
-			});
-			await enqueueMeteringProjection(
-				tx,
-				projectId,
-				customer.id,
-				`usage:confirm:${customer.id}:${input.idempotencyKey}`,
-			);
-			const balance = await readBalance(
-				tx,
-				projectId,
-				customer.id,
-				rate.wallet,
-				reservation.entity_id === null ? null : String(reservation.entity_id),
-			);
-			await scheduleAutoTopupIfNeeded(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId: reservation.entity_id === null ? null : String(reservation.entity_id),
-				featureId: featureId(rate.wallet),
-				availableQuantity: balance.available,
-				triggerKey: `usage:${event.id}`,
-			});
-			return {
-				allowed: true,
-				reason: "allowed",
-				reservationId: reservation.id,
-				status: "confirmed",
-				usageEventId: event.id,
-				recordedAt: toIso(event.recorded_at),
-				balance,
-				deductions,
-			};
-		});
+					projectionKey: `usage:confirm:${customer.id}:${input.idempotencyKey}`,
+				}),
+		);
 	}
 
 	async release(
 		project: ProjectInstanceContext,
 		input: ReleaseReservationInput,
 	): Promise<FinalizeReservationResult> {
-		return await this.operationTransaction(project, "release", input, async (tx, input) => {
-			const projectId = project.projectInstanceId;
-			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
-			const reservation = await lockReservation(tx, projectId, customer.id, input.reservationId);
+		return await this.operationTransaction(
+			project,
+			"release",
+			input,
+			async () => undefined,
+			async (tx, input, customer) => {
+				const projectId = project.projectInstanceId;
+				const reservation = await lockReservation(tx, projectId, customer.id, input.reservationId);
 
-			if (reservation.status === "confirmed")
-				return await finalizedReservationResult(tx, reservation);
-			if (reservation.status === "active") {
-				await releaseReservationHolds(
-					tx,
-					reservation,
-					new Date(reservation.expires_at).getTime() <= Date.now() ? "expired" : "released",
-				);
-			}
-			const current = await lockReservation(tx, projectId, customer.id, input.reservationId);
-			if (reservation.status === "active") {
-				await enqueueMeteringProjection(
-					tx,
-					projectId,
-					customer.id,
-					`usage:release:${customer.id}:${input.idempotencyKey}`,
-				);
-			}
-			return await finalizedReservationResult(tx, current);
-		});
+				if (reservation.status === "confirmed")
+					return await finalizedReservationResult(tx, reservation);
+				if (reservation.status === "active") {
+					await releaseReservationHolds(
+						tx,
+						reservation,
+						new Date(reservation.expires_at).getTime() <= Date.now() ? "expired" : "released",
+					);
+				}
+				const current = await lockReservation(tx, projectId, customer.id, input.reservationId);
+				if (reservation.status === "active") {
+					await enqueueMeteringProjection(
+						tx,
+						projectId,
+						customer.id,
+						`usage:release:${customer.id}:${input.idempotencyKey}`,
+					);
+				}
+				return await finalizedReservationResult(tx, current);
+			},
+		);
 	}
 
 	async correct(
@@ -1163,136 +547,140 @@ export class MeteringBillingRepository extends RepositoryModule {
 		const reason = requiredAuditText(input.reason, "reason", 500);
 		const correctionQuantity = positiveDecimal(input.quantity, "quantity");
 
-		return await this.operationTransaction(project, "correct", input, async (tx, input) => {
-			const projectId = project.projectInstanceId;
-			await validateOccurredAt(tx, projectId, input.occurredAt ?? null);
-			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
-			const original = await lockOriginalUsageEvent(
-				tx,
-				projectId,
-				customer.id,
-				input.originalUsageEventId,
-				input.originalRecordedAt,
-			);
-			const originalQuantity = databaseDecimal(original.quantity, "original quantity");
-			const originalWalletQuantity = databaseDecimal(
-				original.wallet_quantity,
-				"original wallet quantity",
-				original.wallet_scale,
-			);
-			const corrected = await readCorrectedQuantity(tx, projectId, original);
-			const remainingQuantity =
-				decimalToUnits(originalQuantity, 9) - decimalToUnits(corrected.quantity, 9);
-			const requestedUnits = decimalToUnits(correctionQuantity, 9);
-			if (requestedUnits > remainingQuantity) {
-				throw new PersistenceConflictError(
-					"Usage correction exceeds the original unreversed quantity",
-					"CORRECTION_EXCEEDS_USAGE",
+		return await this.operationTransaction(
+			project,
+			"correct",
+			input,
+			(tx, input) => validateOccurredAt(tx, project.projectInstanceId, input.occurredAt ?? null),
+			async (tx, input, customer) => {
+				const projectId = project.projectInstanceId;
+				const original = await lockOriginalUsageEvent(
+					tx,
+					projectId,
+					customer.id,
+					input.originalUsageEventId,
+					input.originalRecordedAt,
 				);
-			}
-			const remainingWallet =
-				decimalToUnits(originalWalletQuantity, original.wallet_scale) -
-				decimalToUnits(corrected.walletQuantity, original.wallet_scale);
-			const walletQuantity =
-				requestedUnits === remainingQuantity
-					? unitsToDecimal(remainingWallet, original.wallet_scale)
-					: await proportionalCorrectionQuantity(
+				const originalQuantity = databaseDecimal(original.quantity, "original quantity");
+				const originalWalletQuantity = databaseDecimal(
+					original.wallet_quantity,
+					"original wallet quantity",
+					original.wallet_scale,
+				);
+				const corrected = await readCorrectedQuantity(tx, projectId, original);
+				const remainingQuantity =
+					decimalToUnits(originalQuantity, 9) - decimalToUnits(corrected.quantity, 9);
+				const requestedUnits = decimalToUnits(correctionQuantity, 9);
+				if (requestedUnits > remainingQuantity) {
+					throw new PersistenceConflictError(
+						"Usage correction exceeds the original unreversed quantity",
+						"CORRECTION_EXCEEDS_USAGE",
+					);
+				}
+				const remainingWallet =
+					decimalToUnits(originalWalletQuantity, original.wallet_scale) -
+					decimalToUnits(corrected.walletQuantity, original.wallet_scale);
+				const walletQuantity =
+					requestedUnits === remainingQuantity
+						? unitsToDecimal(remainingWallet, original.wallet_scale)
+						: await proportionalCorrectionQuantity(
+								tx,
+								originalQuantity,
+								originalWalletQuantity,
+								correctionQuantity,
+								remainingWallet,
+								original.wallet_scale,
+							);
+				const deductions = await reverseOriginalDeductions(tx, projectId, original, walletQuantity);
+				const meterLimitBalanceAfterCorrection = await reverseMeterLimitUsageIfEligible(
+					tx,
+					projectId,
+					customer.id,
+					original,
+					walletQuantity,
+				);
+				const event = await insertCorrectionEvent(tx, {
+					projectId,
+					customerId: customer.id,
+					original,
+					quantity: correctionQuantity,
+					walletQuantity,
+					occurredAt: input.occurredAt ?? null,
+					deductions,
+					metadata: { ...(input.metadata ?? {}), actor, reason },
+				});
+				const closedPeriodCorrection = await recordClosedUsageInvoiceAdjustment(tx, {
+					projectId,
+					original,
+					correctionEventId: event.id,
+					correctionRecordedAtExact: event.recorded_at_exact,
+					quantity: walletQuantity,
+				});
+				await incrementRollup(tx, {
+					projectId,
+					customerId: customer.id,
+					entityId: original.entity_id === null ? null : String(original.entity_id),
+					meterFeatureId: String(original.meter_feature_id),
+					quantity: negativeDecimal(correctionQuantity),
+					walletQuantity: negativeDecimal(walletQuantity),
+					recordedAt: event.recorded_at,
+				});
+				await correctControlConsumption(tx, {
+					projectId,
+					originalUsageEventId: original.id,
+					originalUsageEventRecordedAt: original.recorded_at,
+					correctionUsageEventId: event.id,
+					correctionUsageEventRecordedAt: event.recorded_at,
+					usageReduction: correctionQuantity,
+					spendMinorReduction:
+						meterLimitBalanceAfterCorrection?.spendMinorReduction ??
+						closedPeriodCorrection?.spendMinorReduction ??
+						"0",
+					currency:
+						meterLimitBalanceAfterCorrection?.currency ?? closedPeriodCorrection?.currency ?? null,
+				});
+				await recordUsageAlertDelta(tx, {
+					projectId,
+					customerId: customer.id,
+					entityId: original.entity_id === null ? null : String(original.entity_id),
+					featureId: String(original.meter_feature_id),
+					delta: negativeDecimal(correctionQuantity),
+				});
+				await enqueueMeteringProjection(
+					tx,
+					projectId,
+					customer.id,
+					`usage:correct:${customer.id}:${input.idempotencyKey}`,
+				);
+				const wallet: FeatureRow = {
+					id: original.wallet_feature_id,
+					key: original.wallet_feature_key,
+					unit: original.wallet_unit,
+					credit_scale: original.wallet_scale,
+					kind: "metered",
+					meter_kind: "consumable",
+					filter_dimensions: [],
+				};
+				return {
+					usageEventId: event.id,
+					recordedAt: toIso(event.recorded_at),
+					originalUsageEventId: original.id,
+					originalRecordedAt: toIso(original.recorded_at),
+					quantity: negativeDecimal(correctionQuantity),
+					walletQuantity: negativeDecimal(walletQuantity),
+					balance:
+						meterLimitBalanceAfterCorrection?.balance ??
+						(await readBalance(
 							tx,
-							originalQuantity,
-							originalWalletQuantity,
-							correctionQuantity,
-							remainingWallet,
-							original.wallet_scale,
-						);
-			const deductions = await reverseOriginalDeductions(tx, projectId, original, walletQuantity);
-			const meterLimitBalanceAfterCorrection = await reverseMeterLimitUsageIfEligible(
-				tx,
-				projectId,
-				customer.id,
-				original,
-				walletQuantity,
-			);
-			const event = await insertCorrectionEvent(tx, {
-				projectId,
-				customerId: customer.id,
-				original,
-				quantity: correctionQuantity,
-				walletQuantity,
-				occurredAt: input.occurredAt ?? null,
-				deductions,
-				metadata: { ...(input.metadata ?? {}), actor, reason },
-			});
-			const closedPeriodCorrection = await recordClosedUsageInvoiceAdjustment(tx, {
-				projectId,
-				original,
-				correctionEventId: event.id,
-				correctionRecordedAtExact: event.recorded_at_exact,
-				quantity: walletQuantity,
-			});
-			await incrementRollup(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId: original.entity_id === null ? null : String(original.entity_id),
-				meterFeatureId: String(original.meter_feature_id),
-				quantity: negativeDecimal(correctionQuantity),
-				walletQuantity: negativeDecimal(walletQuantity),
-				recordedAt: event.recorded_at,
-			});
-			await correctControlConsumption(tx, {
-				projectId,
-				originalUsageEventId: original.id,
-				originalUsageEventRecordedAt: original.recorded_at,
-				correctionUsageEventId: event.id,
-				correctionUsageEventRecordedAt: event.recorded_at,
-				usageReduction: correctionQuantity,
-				spendMinorReduction:
-					meterLimitBalanceAfterCorrection?.spendMinorReduction ??
-					closedPeriodCorrection?.spendMinorReduction ??
-					"0",
-				currency:
-					meterLimitBalanceAfterCorrection?.currency ?? closedPeriodCorrection?.currency ?? null,
-			});
-			await recordUsageAlertDelta(tx, {
-				projectId,
-				customerId: customer.id,
-				entityId: original.entity_id === null ? null : String(original.entity_id),
-				featureId: String(original.meter_feature_id),
-				delta: negativeDecimal(correctionQuantity),
-			});
-			await enqueueMeteringProjection(
-				tx,
-				projectId,
-				customer.id,
-				`usage:correct:${customer.id}:${input.idempotencyKey}`,
-			);
-			const wallet: FeatureRow = {
-				id: original.wallet_feature_id,
-				key: original.wallet_feature_key,
-				unit: original.wallet_unit,
-				credit_scale: original.wallet_scale,
-				kind: "metered",
-				meter_kind: "consumable",
-				filter_dimensions: [],
-			};
-			return {
-				usageEventId: event.id,
-				recordedAt: toIso(event.recorded_at),
-				originalUsageEventId: original.id,
-				originalRecordedAt: toIso(original.recorded_at),
-				quantity: negativeDecimal(correctionQuantity),
-				walletQuantity: negativeDecimal(walletQuantity),
-				balance:
-					meterLimitBalanceAfterCorrection?.balance ??
-					(await readBalance(
-						tx,
-						projectId,
-						customer.id,
-						wallet,
-						original.entity_id === null ? null : String(original.entity_id),
-					)),
-				deductions,
-			};
-		});
+							projectId,
+							customer.id,
+							wallet,
+							original.entity_id === null ? null : String(original.entity_id),
+						)),
+					deductions,
+				};
+			},
+		);
 	}
 
 	async grantAllocation(
@@ -2273,12 +1661,6 @@ async function calculatePersistedPriceCharge(
 	});
 }
 
-function signedDecimalToUnits(value: string, scale: number): bigint {
-	return value.startsWith("-")
-		? -decimalToUnits(value.slice(1), scale)
-		: decimalToUnits(value, scale);
-}
-
 function negativeDecimal(value: string): string {
 	return decimalToUnits(value, 9) === 0n ? "0" : `-${value}`;
 }
@@ -2289,6 +1671,695 @@ function requiredAuditText(value: string, field: string, maxLength: number): str
 		throw new InvalidRequestError(`${field} must contain between 1 and ${maxLength} characters`);
 	}
 	return normalized;
+}
+
+interface ConsumeWithinTransactionInput extends MeteringSubjectInputFields {
+	metadata: Record<string, unknown>;
+	projectionKey: string;
+}
+
+/**
+ * The metering hot path. Statements that depend only on identifiers already in hand are issued
+ * together so the driver pipelines them in one round trip. Issue order is execution order on the
+ * transaction's connection, so the writes in a batch precede the reads that must observe them.
+ */
+async function consumeWithinTransaction(
+	tx: QueryExecutor,
+	projectId: string,
+	customer: { id: string; billingAccountId: string },
+	input: ConsumeWithinTransactionInput,
+): Promise<ConsumeUsageResult> {
+	const subject = await resolveMeteringSubject(tx, projectId, customer.id, input, { alerts: true });
+	const { feature, entityId, requestedQuantity, filterKey, alerts } = subject;
+	if (subject.meterLimit !== null) {
+		const meterLimit = subject.meterLimit;
+		const preflight = await checkMeterLimit(
+			tx,
+			projectId,
+			customer.id,
+			entityId,
+			filterKey,
+			meterLimit,
+			requestedQuantity,
+		);
+		if (!preflight.allowed) {
+			return { ...preflight, usageEventId: null, recordedAt: null, deductions: [] };
+		}
+		const spend = meterLimitSpendDelta(meterLimit, preflight.balance, requestedQuantity);
+		const controls = await consumeControls(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			featureId: featureId(feature),
+			featureKey: feature.key,
+			usageDelta: requestedQuantity,
+			...spend,
+		});
+		if (controls.denial !== null) {
+			return {
+				...controlDeniedDecision(preflight, controls.denial),
+				usageEventId: null,
+				recordedAt: null,
+				deductions: [],
+			};
+		}
+		const result = await consumeMeterLimit(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			filterKey,
+			meterLimit,
+			quantity: requestedQuantity,
+			occurredAt: input.occurredAt,
+			metadata: input.metadata,
+			projectionKey: input.projectionKey,
+		});
+		if (result.allowed && result.usageEventId !== null) {
+			await recordUsageControlEntries(tx, {
+				projectId,
+				usageEventId: result.usageEventId,
+				usageEventRecordedAt: result.recordedAt ?? new Date(),
+				entries: controls.entries,
+			});
+			await recordUsageAlertDelta(tx, {
+				projectId,
+				customerId: customer.id,
+				entityId,
+				featureId: featureId(feature),
+				delta: requestedQuantity,
+				alerts,
+			});
+		}
+		return result;
+	}
+	const rate = await subject.rate();
+	validateFilters(rate.meter, input.filters);
+	const walletQuantity = await calculateWalletQuantity(tx, rate, requestedQuantity);
+	const rows = await lockAllocations(tx, projectId, customer.id, rate.wallet, entityId);
+	const decision = await buildDecision(
+		tx,
+		projectId,
+		rate,
+		requestedQuantity,
+		walletQuantity,
+		balanceFromRows(rate.wallet, rows),
+	);
+	if (!decision.allowed) {
+		return { ...decision, usageEventId: null, recordedAt: null, deductions: [] };
+	}
+	const controls = await consumeControls(tx, {
+		projectId,
+		customerId: customer.id,
+		entityId,
+		featureId: featureId(rate.meter),
+		featureKey: rate.meter.key,
+		usageDelta: requestedQuantity,
+	});
+	if (controls.denial !== null) {
+		return {
+			...controlDeniedDecision(decision, controls.denial),
+			usageEventId: null,
+			recordedAt: null,
+			deductions: [],
+		};
+	}
+	const scale = rate.wallet.credit_scale;
+	const deductions = planDeductions(rows, scale, walletQuantity);
+	const recordedAt = new Date();
+	// Deductions are issued first; the reads behind them observe the deduction.
+	const [, event, , topupPolicy] = await Promise.all([
+		applyDeductions(tx, deductions, "consumed_quantity"),
+		insertUsageEvent(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			rate,
+			operation: "consume",
+			quantity: requestedQuantity,
+			walletQuantity,
+			occurredAt: input.occurredAt,
+			reservationId: null,
+			filterKey,
+			deductions,
+			metadata: input.metadata,
+			recordedAt,
+		}),
+		incrementRollup(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			meterFeatureId: featureId(rate.meter),
+			quantity: requestedQuantity,
+			walletQuantity,
+			recordedAt,
+		}),
+		queryAutoTopupPolicy(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			featureId: featureId(rate.wallet),
+		}),
+	]);
+	if (controls.entries.length > 0) {
+		await recordUsageControlEntries(tx, {
+			projectId,
+			usageEventId: event.id,
+			usageEventRecordedAt: event.recorded_at,
+			entries: controls.entries,
+		});
+	}
+	if (alerts.length > 0) {
+		await recordUsageAlertDelta(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			featureId: featureId(rate.meter),
+			delta: requestedQuantity,
+			alerts,
+		});
+	}
+	const balance = balanceFromRows(
+		rate.wallet,
+		deductedRows(rows, deductions, scale, "consumed_quantity"),
+	);
+	await Promise.all([
+		enqueueUsageProjection(tx, { projectId, customerId: customer.id }),
+		scheduleAutoTopupIfNeeded(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			featureId: featureId(rate.wallet),
+			availableQuantity: balance.available,
+			triggerKey: `usage:${event.id}`,
+			policy: topupPolicy,
+		}),
+	]);
+	return {
+		...decision,
+		balance,
+		usageEventId: event.id,
+		recordedAt: toIso(event.recorded_at),
+		deductions,
+	};
+}
+
+interface MeteringSubjectInputFields {
+	featureKey: string;
+	quantity: string;
+	entityId?: string | null;
+	filters?: Record<string, string | number | boolean>;
+	occurredAt: Date | null;
+	/** Feature already read, with `occurredAt` already validated, by the operation prefetch. */
+	feature?: FeatureRow;
+}
+
+/** Non-blocking reads pipelined with the operation's lock: timestamp check and feature read. */
+async function prefetchMeteringSubject(
+	tx: QueryExecutor,
+	projectId: string,
+	input: { featureKey: string; occurredAt?: Date | null },
+): Promise<{ feature: FeatureRow }> {
+	const [, feature] = await Promise.all([
+		validateOccurredAt(tx, projectId, input.occurredAt ?? null),
+		requireMeteredFeature(tx, projectId, input.featureKey),
+	]);
+	return { feature };
+}
+
+interface MeteringSubject {
+	feature: FeatureRow;
+	entityId: string | null;
+	requestedQuantity: string;
+	filterKey: string | null;
+	meterLimit: MeterLimitDecision | null;
+	alerts: UsageAlertRow[];
+	rate(): Promise<RateDecision>;
+}
+
+/**
+ * Resolves what a usage mutation needs before it locks balances: the feature, the entity, the
+ * meter-limit or rate-card decision and, when asked, the alert list. Reads that depend only on
+ * the customer and feature identifiers are issued together.
+ */
+async function resolveMeteringSubject(
+	tx: QueryExecutor,
+	projectId: string,
+	customerId: string,
+	input: MeteringSubjectInputFields,
+	options: { alerts: boolean },
+): Promise<MeteringSubject> {
+	const feature =
+		input.feature ??
+		(
+			await Promise.all([
+				validateOccurredAt(tx, projectId, input.occurredAt),
+				requireMeteredFeature(tx, projectId, input.featureKey),
+			])
+		)[1];
+	const entityId = await resolveEntityId(tx, projectId, customerId, input.entityId);
+	validateFilters(feature, input.filters);
+	const requestedQuantity = positiveDecimal(input.quantity, "quantity", feature.credit_scale);
+	const [
+		meterLimitRows,
+		meterLimitConfigured,
+		pinnedRates,
+		additiveRate,
+		purchasedRevision,
+		alerts,
+	] = await Promise.all([
+		queryMeterLimitRows(tx, projectId, customerId, feature),
+		queryMeterLimitConfigured(tx, projectId, feature),
+		queryPinnedRateCards(tx, projectId, customerId, feature),
+		queryAdditiveRateCard(tx, projectId, feature),
+		queryPurchasedRevision(tx, projectId, customerId),
+		options.alerts
+			? queryUsageAlerts(tx, { projectId, customerId, entityId, featureId: featureId(feature) })
+			: Promise.resolve<UsageAlertRow[]>([]),
+	]);
+	const meterLimit = await meterLimitDecision(
+		tx,
+		projectId,
+		feature,
+		meterLimitRows,
+		meterLimitConfigured,
+	);
+	return {
+		feature,
+		entityId,
+		requestedQuantity,
+		filterKey: canonicalFilterKey(input.filters),
+		meterLimit,
+		alerts,
+		rate: () =>
+			rateDecision(tx, projectId, feature, {
+				pinned: pinnedRates,
+				additive: additiveRate,
+				purchased: purchasedRevision,
+			}),
+	};
+}
+
+interface ReserveWithinTransactionInput extends MeteringSubjectInputFields {
+	expiresInSeconds: number;
+	projectionKey: string;
+}
+
+async function reserveWithinTransaction(
+	tx: QueryExecutor,
+	projectId: string,
+	customer: { id: string; billingAccountId: string },
+	input: ReserveWithinTransactionInput,
+): Promise<ReservationResult> {
+	const subject = await resolveMeteringSubject(tx, projectId, customer.id, input, {
+		alerts: false,
+	});
+	const { entityId, requestedQuantity, filterKey } = subject;
+	if (subject.meterLimit !== null) {
+		return await reserveMeterLimit(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			filterKey,
+			meterLimit: subject.meterLimit,
+			quantity: requestedQuantity,
+			expiresInSeconds: input.expiresInSeconds,
+			projectionKey: input.projectionKey,
+		});
+	}
+	const rate = await subject.rate();
+	validateFilters(rate.meter, input.filters);
+	const walletQuantity = await calculateWalletQuantity(tx, rate, requestedQuantity);
+	const rows = await lockAllocations(tx, projectId, customer.id, rate.wallet, entityId);
+	const decision = await buildDecision(
+		tx,
+		projectId,
+		rate,
+		requestedQuantity,
+		walletQuantity,
+		balanceFromRows(rate.wallet, rows),
+	);
+	if (!decision.allowed) {
+		return { ...decision, reservationId: null, status: null, expiresAt: null, deductions: [] };
+	}
+
+	const effectiveAt = new Date();
+	const expiresAt = new Date(effectiveAt.getTime() + input.expiresInSeconds * 1000);
+	const reservation = await executeOne<{ id: string }>(
+		tx,
+		drizzleSql`
+			INSERT INTO reservations (
+				project_id,
+				customer_id,
+				entity_id,
+				meter_feature_id,
+				wallet_feature_id,
+				rate_card_entry_id,
+				rate_card_revision_id,
+				rate_card_path,
+				requested_quantity,
+				held_quantity,
+				effective_at,
+				expires_at
+			)
+			VALUES (
+				${projectId},
+				${customer.id},
+				${entityId},
+				${featureId(rate.meter)},
+				${featureId(rate.wallet)},
+				${rate.entryId},
+				${rate.revisionId},
+				${rate.path},
+				${requestedQuantity}::numeric,
+				${walletQuantity}::numeric,
+				${effectiveAt.toISOString()},
+				${expiresAt.toISOString()}
+			)
+			RETURNING id
+		`,
+	);
+	if (reservation === null) {
+		throw new Error("Reservation could not be persisted");
+	}
+	const controlDenial = await holdControls(
+		tx,
+		{
+			projectId,
+			customerId: customer.id,
+			entityId,
+			featureId: featureId(rate.meter),
+			featureKey: rate.meter.key,
+			usageDelta: requestedQuantity,
+		},
+		reservation.id,
+	);
+	if (controlDenial !== null) {
+		await executeOne(
+			tx,
+			drizzleSql`
+				DELETE FROM reservations
+				WHERE project_id = ${projectId} AND id = ${reservation.id}
+				RETURNING id
+			`,
+		);
+		return {
+			...controlDeniedDecision(decision, controlDenial),
+			reservationId: null,
+			status: null,
+			expiresAt: null,
+			deductions: [],
+		};
+	}
+	const scale = rate.wallet.credit_scale;
+	const deductions = planDeductions(rows, scale, walletQuantity);
+	// The holds and the reservation's hold rows are written together.
+	await Promise.all([
+		applyDeductions(tx, deductions, "held_quantity"),
+		insertReservationAllocations(tx, projectId, reservation.id, deductions),
+	]);
+	await enqueueUsageProjection(tx, { projectId, customerId: customer.id });
+	return {
+		...decision,
+		balance: balanceFromRows(rate.wallet, deductedRows(rows, deductions, scale, "held_quantity")),
+		reservationId: reservation.id,
+		status: "active",
+		expiresAt: expiresAt.toISOString(),
+		deductions,
+	};
+}
+
+interface ConfirmWithinTransactionInput {
+	reservationId: string;
+	quantity: string;
+	occurredAt: Date | null;
+	metadata: Record<string, unknown>;
+	projectionKey: string;
+}
+
+async function confirmWithinTransaction(
+	tx: QueryExecutor,
+	projectId: string,
+	customer: { id: string; billingAccountId: string },
+	input: ConfirmWithinTransactionInput,
+): Promise<FinalizeReservationResult> {
+	const reservation = await lockReservation(tx, projectId, customer.id, input.reservationId);
+	const quantity = positiveDecimal(input.quantity, "quantity", reservation.meter_scale);
+
+	if (reservation.status === "confirmed") {
+		if (databaseDecimal(reservation.confirmed_quantity, "confirmed quantity") !== quantity) {
+			throw new PersistenceConflictError(
+				"Reservation was confirmed with different usage facts",
+				"RESERVATION_ALREADY_CONFIRMED",
+			);
+		}
+		return await finalizedReservationResult(tx, reservation);
+	}
+	if (reservation.status === "expired") return await finalizedReservationResult(tx, reservation);
+	if (reservation.status === "released")
+		throw new PersistenceConflictError("Reservation has been released", "RESERVATION_RELEASED");
+	if (new Date(reservation.expires_at).getTime() <= Date.now()) {
+		await releaseReservationHolds(tx, reservation, "expired");
+		return await finalizedReservationResult(
+			tx,
+			await lockReservation(tx, projectId, customer.id, input.reservationId),
+		);
+	}
+	if (
+		decimalToUnits(quantity, reservation.meter_scale) >
+		decimalToUnits(
+			databaseDecimal(reservation.requested_quantity, "reserved quantity", reservation.meter_scale),
+			reservation.meter_scale,
+		)
+	) {
+		throw new PersistenceConflictError(
+			"Confirmed quantity exceeds the reserved authorization",
+			"RESERVATION_QUANTITY_EXCEEDED",
+		);
+	}
+	const entityId = reservation.entity_id === null ? null : String(reservation.entity_id);
+	if (reservation.usage_window_id !== null) {
+		const result = await confirmMeterLimitReservation(tx, reservation, quantity, {
+			occurredAt: input.occurredAt,
+			metadata: input.metadata,
+		});
+		if (result.allowed) {
+			await recordUsageAlertDelta(tx, {
+				projectId,
+				customerId: customer.id,
+				entityId,
+				featureId: String(reservation.meter_feature_id),
+				delta: quantity,
+			});
+			await enqueueMeteringProjection(tx, projectId, customer.id, input.projectionKey);
+		}
+		return result;
+	}
+
+	const rate = await rateFromReservation(tx, reservation);
+	const walletQuantity = await calculateWalletQuantity(tx, rate, quantity);
+	const scale = rate.wallet.credit_scale;
+	// Allocation rows are locked first, then the reservation's holds; the config reads follow.
+	const [rows, reservationRows, alerts, topupPolicy] = await Promise.all([
+		lockAllAllocationRows(tx, projectId, customer.id, rate.wallet, entityId),
+		lockReservationAllocations(tx, projectId, reservation.id),
+		queryUsageAlerts(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			featureId: featureId(rate.meter),
+		}),
+		queryAutoTopupPolicy(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			featureId: featureId(rate.wallet),
+		}),
+	]);
+	const denied = async (
+		reason: "insufficient_balance" | "control_limit_exceeded",
+		control: ControlDenial | null,
+	): Promise<FinalizeReservationResult> => ({
+		allowed: false,
+		reason,
+		reservationId: reservation.id,
+		status: "active",
+		usageEventId: null,
+		recordedAt: null,
+		balance: await readBalance(tx, projectId, customer.id, rate.wallet, entityId),
+		deductions: [],
+		...(control === null ? {} : { control }),
+	});
+	let plan: ConfirmationPlan;
+	try {
+		plan = planConfirmation(rows, reservationRows, scale, walletQuantity);
+	} catch (error) {
+		if (error instanceof BillingError && error.code === "INSUFFICIENT_BALANCE") {
+			return await denied("insufficient_balance", null);
+		}
+		throw error;
+	}
+	const controls = await confirmControlHolds(tx, {
+		projectId,
+		customerId: customer.id,
+		entityId,
+		featureId: featureId(rate.meter),
+		featureKey: rate.meter.key,
+		usageDelta: quantity,
+		spendMinorDelta: "0",
+		currency: null,
+		now: new Date(),
+		reservationId: reservation.id,
+	});
+	if (controls.denial !== null) {
+		return await denied("control_limit_exceeded", controls.denial);
+	}
+	const recordedAt = new Date();
+	// Allocation and reservation writes are issued first; the reads behind them observe them.
+	const [, , event] = await Promise.all([
+		applyConfirmation(tx, projectId, reservation.id, plan, scale),
+		executeOne(
+			tx,
+			drizzleSql`
+				UPDATE reservations
+				SET
+					status = 'confirmed',
+					confirmed_quantity = ${quantity}::numeric,
+					finalized_at = now(),
+					updated_at = now()
+				WHERE project_id = ${projectId}
+					AND id = ${reservation.id}
+				RETURNING id
+			`,
+		),
+		insertUsageEvent(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			rate,
+			operation: "confirm",
+			quantity,
+			walletQuantity,
+			occurredAt: input.occurredAt,
+			reservationId: reservation.id,
+			filterKey: null,
+			deductions: plan.deductions,
+			metadata: input.metadata,
+			recordedAt,
+		}),
+		incrementRollup(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			meterFeatureId: featureId(rate.meter),
+			quantity,
+			walletQuantity,
+			recordedAt,
+		}),
+	]);
+	if (controls.entries.length > 0) {
+		await recordUsageControlEntries(tx, {
+			projectId,
+			usageEventId: event.id,
+			usageEventRecordedAt: event.recorded_at,
+			entries: controls.entries,
+		});
+	}
+	if (alerts.length > 0) {
+		await recordUsageAlertDelta(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			featureId: featureId(rate.meter),
+			delta: quantity,
+			alerts,
+		});
+	}
+	const balance = balanceFromRows(rate.wallet, confirmedRows(rows, plan, scale));
+	await Promise.all([
+		enqueueUsageProjection(tx, { projectId, customerId: customer.id }),
+		scheduleAutoTopupIfNeeded(tx, {
+			projectId,
+			customerId: customer.id,
+			entityId,
+			featureId: featureId(rate.wallet),
+			availableQuantity: balance.available,
+			triggerKey: `usage:${event.id}`,
+			policy: topupPolicy,
+		}),
+	]);
+	return {
+		allowed: true,
+		reason: "allowed",
+		reservationId: reservation.id,
+		status: "confirmed",
+		usageEventId: event.id,
+		recordedAt: toIso(event.recorded_at),
+		balance,
+		deductions: plan.deductions,
+	};
+}
+
+/** The reservation's hold rows; the reservation row is already locked, so these are issued together. */
+async function insertReservationAllocations(
+	executor: QueryExecutor,
+	projectId: string,
+	reservationId: string,
+	deductions: readonly AllocationDeduction[],
+): Promise<void> {
+	await Promise.all(
+		deductions.map((deduction) =>
+			executeOne(
+				executor,
+				drizzleSql`
+				INSERT INTO reservation_allocations (
+					project_id,
+					reservation_id,
+					allocation_id,
+					held_quantity
+				)
+				VALUES (
+					${projectId},
+					${reservationId},
+					${deduction.allocationId}::bigint,
+					${deduction.quantity}::numeric
+				)
+				RETURNING allocation_id
+			`,
+			),
+		),
+	);
+}
+
+/** Live allocation rows as they stand after a confirmation, for an exact post-write balance. */
+function confirmedRows(
+	rows: readonly AllocationRow[],
+	plan: ConfirmationPlan,
+	scale: number,
+): AllocationRow[] {
+	const now = Date.now();
+	const changes = new Map(plan.changes.map((change) => [change.allocationId, change]));
+	const live = rows.filter(
+		(row) =>
+			row.reversed_at === null &&
+			(row.expires_at === null || new Date(row.expires_at).getTime() > now),
+	);
+	return live.map((row) => {
+		const change = changes.get(String(row.id));
+		if (change === undefined) return row;
+		const consumed = decimalToUnits(
+			databaseDecimal(row.consumed_quantity, "allocation consumed", scale),
+			scale,
+		);
+		const held = decimalToUnits(
+			databaseDecimal(row.held_quantity, "allocation held", scale),
+			scale,
+		);
+		return {
+			...row,
+			consumed_quantity: unitsToDecimal(consumed + change.consume, scale),
+			held_quantity: unitsToDecimal(held - change.release, scale),
+		};
+	});
 }
 
 async function requireMeteredFeature(
@@ -2320,48 +2391,91 @@ async function requireMeteredFeature(
 	return row;
 }
 
+interface MeterLimitRow {
+	plan_item_id: string | number | bigint;
+	subscription_id: string;
+	quantity: unknown;
+	overage_policy: "blocked" | "allowed";
+	reset_interval: "month" | "year";
+	period_start_at: Date | string;
+	period_end_at: Date | string | null;
+}
+
+function queryMeterLimitRows(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string | null,
+	feature: FeatureRow,
+): Promise<MeterLimitRow[]> {
+	if (customerId === null) return Promise.resolve([]);
+	return executeRows<MeterLimitRow>(
+		executor,
+		drizzleSql`
+			SELECT
+				pi.id AS plan_item_id,
+				s.id AS subscription_id,
+				pi.quantity,
+				pi.overage_policy,
+				pi.reset_interval,
+				COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
+				COALESCE(s.current_period_end, s.expires_at) AS period_end_at
+			FROM subscriptions s
+			JOIN plan_items pi
+				ON pi.project_id = s.project_id
+				AND pi.plan_version_id = s.plan_version_id
+			WHERE s.project_id = ${projectId}
+				AND s.customer_id = ${customerId}
+				AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+				AND (s.expires_at IS NULL OR s.expires_at > now())
+				AND pi.feature_id = ${featureId(feature)}
+				AND pi.item_kind = 'meter_limit'
+			ORDER BY s.created_at, s.id
+			LIMIT 2
+		`,
+	);
+}
+
+function queryMeterLimitConfigured(
+	executor: QueryExecutor,
+	projectId: string,
+	feature: FeatureRow,
+): Promise<boolean> {
+	return executeOne<{ configured: boolean }>(
+		executor,
+		drizzleSql`
+			SELECT EXISTS (
+				SELECT 1
+				FROM plan_items pi
+				JOIN plan_versions pv
+					ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
+				WHERE pi.project_id = ${projectId}
+					AND pi.feature_id = ${featureId(feature)}
+					AND pi.item_kind = 'meter_limit'
+					AND pv.status = 'published'
+			) AS configured
+		`,
+	).then((row) => row?.configured === true);
+}
+
 async function resolveMeterLimit(
 	executor: QueryExecutor,
 	projectId: string,
 	customerId: string | null,
 	feature: FeatureRow,
 ): Promise<MeterLimitDecision | null> {
-	const rows =
-		customerId === null
-			? []
-			: await executeRows<{
-					plan_item_id: string | number | bigint;
-					subscription_id: string;
-					quantity: unknown;
-					overage_policy: "blocked" | "allowed";
-					reset_interval: "month" | "year";
-					period_start_at: Date | string;
-					period_end_at: Date | string | null;
-				}>(
-					executor,
-					drizzleSql`
-						SELECT
-							pi.id AS plan_item_id,
-							s.id AS subscription_id,
-							pi.quantity,
-							pi.overage_policy,
-							pi.reset_interval,
-							COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
-							COALESCE(s.current_period_end, s.expires_at) AS period_end_at
-						FROM subscriptions s
-						JOIN plan_items pi
-							ON pi.project_id = s.project_id
-							AND pi.plan_version_id = s.plan_version_id
-						WHERE s.project_id = ${projectId}
-							AND s.customer_id = ${customerId}
-							AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-							AND (s.expires_at IS NULL OR s.expires_at > now())
-							AND pi.feature_id = ${featureId(feature)}
-							AND pi.item_kind = 'meter_limit'
-						ORDER BY s.created_at, s.id
-						LIMIT 2
-					`,
-				);
+	const rows = await queryMeterLimitRows(executor, projectId, customerId, feature);
+	return await meterLimitDecision(executor, projectId, feature, rows, () =>
+		queryMeterLimitConfigured(executor, projectId, feature),
+	);
+}
+
+async function meterLimitDecision(
+	executor: QueryExecutor,
+	projectId: string,
+	feature: FeatureRow,
+	rows: readonly MeterLimitRow[],
+	configured: boolean | (() => Promise<boolean>),
+): Promise<MeterLimitDecision | null> {
 	if (rows.length > 1) {
 		throw new BillingError(
 			`Multiple active meter limits apply to feature ${feature.key}`,
@@ -2394,22 +2508,8 @@ async function resolveMeterLimit(
 		};
 	}
 
-	const configured = await executeOne<{ configured: boolean }>(
-		executor,
-		drizzleSql`
-			SELECT EXISTS (
-				SELECT 1
-				FROM plan_items pi
-				JOIN plan_versions pv
-					ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
-				WHERE pi.project_id = ${projectId}
-					AND pi.feature_id = ${featureId(feature)}
-					AND pi.item_kind = 'meter_limit'
-					AND pv.status = 'published'
-			) AS configured
-		`,
-	);
-	if (configured?.configured !== true) return null;
+	const isConfigured = typeof configured === "function" ? await configured() : configured;
+	if (!isConfigured) return null;
 	const start = startOfUtcMonth(new Date());
 	return {
 		feature,
@@ -2984,81 +3084,65 @@ function startOfUtcMonth(value: Date): Date {
 	return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
 }
 
-async function resolveRateDecision(
+interface RateCardRow {
+	entry_id: string | number | bigint;
+	revision_id: string | number | bigint;
+	revision: number;
+	pricing_model: "flat" | "graduated";
+	rate_per_unit: unknown;
+	wallet_id: string | number | bigint;
+	wallet_key: string;
+	wallet_unit: string;
+	wallet_scale: number;
+}
+
+function queryPinnedRateCards(
 	executor: QueryExecutor,
 	projectId: string,
 	customerId: string | null,
-	featureKey: string,
-): Promise<RateDecision> {
-	const meter = await requireMeteredFeature(executor, projectId, featureKey);
-	const pinned =
-		customerId === null
-			? []
-			: await executeRows<{
-					entry_id: string | number | bigint;
-					revision_id: string | number | bigint;
-					revision: number;
-					pricing_model: "flat" | "graduated";
-					rate_per_unit: unknown;
-					wallet_id: string | number | bigint;
-					wallet_key: string;
-					wallet_unit: string;
-					wallet_scale: number;
-				}>(
-					executor,
-					drizzleSql`
-					SELECT DISTINCT
-						rce.id AS entry_id,
-						cr.id AS revision_id,
-						cr.revision,
-						rce.pricing_model,
-						rce.rate_per_unit,
-						wallet.id AS wallet_id,
-						wallet.key AS wallet_key,
-						wallet.unit AS wallet_unit,
-						wallet.credit_scale AS wallet_scale
-					FROM subscriptions s
-					JOIN catalog_revisions cr
-						ON cr.project_id = s.project_id
-						AND cr.id = s.catalog_revision_id
-					JOIN rate_card_entries rce
-						ON rce.project_id = s.project_id
-						AND rce.catalog_revision_id = s.catalog_revision_id
-						AND rce.meter_feature_id = ${featureId(meter)}
-					JOIN features wallet
-						ON wallet.project_id = rce.project_id
-						AND wallet.id = rce.wallet_feature_id
-					WHERE s.project_id = ${projectId}
-						AND s.customer_id = ${customerId}
-						AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-						AND (s.expires_at IS NULL OR s.expires_at > now())
-					ORDER BY cr.revision DESC
-					LIMIT 2
-				`,
-				);
-	if (pinned.length > 1) {
-		throw new BillingError(
-			`Multiple pinned rate cards price feature ${meter.key}`,
-			"METERING_CONFIGURATION_ERROR",
-			409,
-			{ classification: "persistence_conflict" },
-		);
-	}
-	if (pinned[0] !== undefined) {
-		return await rateDecisionFromRow(executor, projectId, meter, pinned[0], "pinned");
-	}
+	meter: FeatureRow,
+): Promise<RateCardRow[]> {
+	if (customerId === null) return Promise.resolve([]);
+	return executeRows<RateCardRow>(
+		executor,
+		drizzleSql`
+			SELECT DISTINCT
+				rce.id AS entry_id,
+				cr.id AS revision_id,
+				cr.revision,
+				rce.pricing_model,
+				rce.rate_per_unit,
+				wallet.id AS wallet_id,
+				wallet.key AS wallet_key,
+				wallet.unit AS wallet_unit,
+				wallet.credit_scale AS wallet_scale
+			FROM subscriptions s
+			JOIN catalog_revisions cr
+				ON cr.project_id = s.project_id
+				AND cr.id = s.catalog_revision_id
+			JOIN rate_card_entries rce
+				ON rce.project_id = s.project_id
+				AND rce.catalog_revision_id = s.catalog_revision_id
+				AND rce.meter_feature_id = ${featureId(meter)}
+			JOIN features wallet
+				ON wallet.project_id = rce.project_id
+				AND wallet.id = rce.wallet_feature_id
+			WHERE s.project_id = ${projectId}
+				AND s.customer_id = ${customerId}
+				AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+				AND (s.expires_at IS NULL OR s.expires_at > now())
+			ORDER BY cr.revision DESC
+			LIMIT 2
+		`,
+	);
+}
 
-	const additive = await executeOne<{
-		entry_id: string | number | bigint;
-		revision_id: string | number | bigint;
-		revision: number;
-		pricing_model: "flat" | "graduated";
-		rate_per_unit: unknown;
-		wallet_id: string | number | bigint;
-		wallet_key: string;
-		wallet_unit: string;
-		wallet_scale: number;
-	}>(
+function queryAdditiveRateCard(
+	executor: QueryExecutor,
+	projectId: string,
+	meter: FeatureRow,
+): Promise<RateCardRow | null> {
+	return executeOne<RateCardRow>(
 		executor,
 		drizzleSql`
 			SELECT
@@ -3086,28 +3170,30 @@ async function resolveRateDecision(
 			LIMIT 1
 		`,
 	);
-	if (additive !== null) {
-		const purchased =
-			customerId === null
-				? null
-				: await executeOne<{ id: string }>(
-						executor,
-						drizzleSql`
+}
+
+function queryPurchasedRevision(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string | null,
+): Promise<boolean> {
+	if (customerId === null) return Promise.resolve(false);
+	return executeOne<{ id: string }>(
+		executor,
+		drizzleSql`
             SELECT id FROM subscriptions WHERE project_id=${projectId} AND customer_id=${customerId}
             AND catalog_revision_id IS NOT NULL AND status IN ('active','grace_period','billing_retry','cancelled')
             AND (expires_at IS NULL OR expires_at>clock_timestamp()) LIMIT 1
         `,
-					);
-		if (purchased)
-			throw new BillingError(
-				"The purchased revision does not price this meter; activate a fixed rate revision before use",
-				"METER_RATE_NOT_ACTIVATED",
-				409,
-			);
-		return await rateDecisionFromRow(executor, projectId, meter, additive, "additive");
-	}
+	).then((row) => row !== null);
+}
 
-	const direct = await executeOne<{ direct: boolean }>(
+function queryDirectPricing(
+	executor: QueryExecutor,
+	projectId: string,
+	meter: FeatureRow,
+): Promise<boolean> {
+	return executeOne<{ direct: boolean }>(
 		executor,
 		drizzleSql`
 			SELECT EXISTS (
@@ -3123,8 +3209,63 @@ async function resolveRateDecision(
 					AND rce.wallet_feature_id = ${featureId(meter)}
 			) AS direct
 		`,
-	);
-	if (direct?.direct !== true) {
+	).then((row) => row?.direct === true);
+}
+
+async function resolveRateDecision(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string | null,
+	featureKey: string,
+	meter?: FeatureRow,
+): Promise<RateDecision> {
+	const feature = meter ?? (await requireMeteredFeature(executor, projectId, featureKey));
+	return await rateDecision(executor, projectId, feature, {
+		pinned: await queryPinnedRateCards(executor, projectId, customerId, feature),
+		additive: () => queryAdditiveRateCard(executor, projectId, feature),
+		purchased: () => queryPurchasedRevision(executor, projectId, customerId),
+	});
+}
+
+/** Rate resolution from prefetched rows; lazy members are read only when the path needs them. */
+async function rateDecision(
+	executor: QueryExecutor,
+	projectId: string,
+	meter: FeatureRow,
+	prefetched: {
+		pinned: readonly RateCardRow[];
+		additive: RateCardRow | null | (() => Promise<RateCardRow | null>);
+		purchased: boolean | (() => Promise<boolean>);
+	},
+): Promise<RateDecision> {
+	if (prefetched.pinned.length > 1) {
+		throw new BillingError(
+			`Multiple pinned rate cards price feature ${meter.key}`,
+			"METERING_CONFIGURATION_ERROR",
+			409,
+			{ classification: "persistence_conflict" },
+		);
+	}
+	const pinned = prefetched.pinned[0];
+	if (pinned !== undefined) {
+		return await rateDecisionFromRow(executor, projectId, meter, pinned, "pinned");
+	}
+	const additive =
+		typeof prefetched.additive === "function" ? await prefetched.additive() : prefetched.additive;
+	if (additive !== null) {
+		const purchased =
+			typeof prefetched.purchased === "function"
+				? await prefetched.purchased()
+				: prefetched.purchased;
+		if (purchased)
+			throw new BillingError(
+				"The purchased revision does not price this meter; activate a fixed rate revision before use",
+				"METER_RATE_NOT_ACTIVATED",
+				409,
+			);
+		return await rateDecisionFromRow(executor, projectId, meter, additive, "additive");
+	}
+	if (!(await queryDirectPricing(executor, projectId, meter))) {
 		throw new BillingError(
 			`No published rate card or wallet allocation prices feature ${meter.key}`,
 			"METERING_CONFIGURATION_ERROR",
@@ -3304,32 +3445,9 @@ async function enqueueMeteringProjection(
 	executor: QueryExecutor,
 	projectId: string,
 	customerId: string,
-	idempotencyKey: string,
+	_projectionKey: string,
 ): Promise<void> {
-	const customer = await executeOne<{ billing_account_id: string }>(
-		executor,
-		drizzleSql`
-			SELECT billing_account_id
-			FROM customers
-			WHERE project_id = ${projectId} AND id = ${customerId}
-		`,
-	);
-	if (customer === null) throw new Error("Metering projection billing account was not found");
-	const entitlements = await getEntitlementSnapshot(
-		executor,
-		projectId,
-		customer.billing_account_id,
-	);
-	await enqueueProjectionSyncJob(executor, {
-		customerId,
-		idempotencyKey,
-		reason: "usage_changed",
-		payload: {
-			billingAccountId: customer.billing_account_id,
-			reason: "usage_changed",
-			entitlements,
-		},
-	});
+	await enqueueUsageProjection(executor, { projectId, customerId });
 }
 
 async function validateOccurredAt(
@@ -3357,21 +3475,6 @@ async function validateOccurredAt(
 			`occurredAt exceeds the configured ${row?.max_skew_seconds ?? 300} second clock skew`,
 		);
 	}
-}
-
-async function requireCustomer(
-	executor: QueryExecutor,
-	projectId: string,
-	billingAccountId: string,
-): Promise<{ id: string }> {
-	const customer = await findCustomer(executor, projectId, billingAccountId);
-	if (customer === null) {
-		throw new NotFoundBillingError(
-			`Billing account ${billingAccountId} was not found`,
-			"BILLING_ACCOUNT_NOT_FOUND",
-		);
-	}
-	return customer;
 }
 
 async function readBalance(
@@ -3565,13 +3668,12 @@ function balanceFromRows(feature: FeatureRow, rows: AllocationRow[]): MeteringBa
 	};
 }
 
-async function consumeAllocations(
-	executor: QueryExecutor,
-	rows: AllocationRow[],
+/** Chooses which allocations cover the quantity, oldest expiry first, without writing. */
+function planDeductions(
+	rows: readonly AllocationRow[],
 	scale: number,
 	quantity: string,
-	column: "consumed_quantity" | "held_quantity",
-): Promise<AllocationDeduction[]> {
+): AllocationDeduction[] {
 	let remaining = decimalToUnits(quantity, scale);
 	const deductions: AllocationDeduction[] = [];
 	for (const row of rows) {
@@ -3583,19 +3685,7 @@ async function consumeAllocations(
 			decimalToUnits(databaseDecimal(row.held_quantity, "allocation held", scale), scale);
 		const taken = available < remaining ? available : remaining;
 		if (taken <= 0n) continue;
-		const rendered = unitsToDecimal(taken, scale);
-		await executeOne(
-			executor,
-			drizzleSql`
-				UPDATE balance_allocations
-				SET
-					${drizzleSql.raw(column)} = ${drizzleSql.raw(column)} + ${rendered}::numeric,
-					updated_at = now()
-				WHERE id = ${String(row.id)}::bigint
-				RETURNING id
-			`,
-		);
-		deductions.push(allocationDeduction(row, rendered));
+		deductions.push(allocationDeduction(row, unitsToDecimal(taken, scale)));
 		remaining -= taken;
 	}
 	if (remaining !== 0n) {
@@ -3604,36 +3694,48 @@ async function consumeAllocations(
 	return deductions;
 }
 
-async function holdAllocations(
+/** Applies planned deductions; the rows are distinct, so the updates are issued together. */
+async function applyDeductions(
 	executor: QueryExecutor,
-	projectId: string,
-	reservationId: string,
-	rows: AllocationRow[],
-	scale: number,
-	quantity: string,
-): Promise<AllocationDeduction[]> {
-	const deductions = await consumeAllocations(executor, rows, scale, quantity, "held_quantity");
-	for (const deduction of deductions) {
-		await executeOne(
-			executor,
-			drizzleSql`
-				INSERT INTO reservation_allocations (
-					project_id,
-					reservation_id,
-					allocation_id,
-					held_quantity
-				)
-				VALUES (
-					${projectId},
-					${reservationId},
-					${deduction.allocationId}::bigint,
-					${deduction.quantity}::numeric
-				)
-				RETURNING allocation_id
+	deductions: readonly AllocationDeduction[],
+	column: "consumed_quantity" | "held_quantity",
+): Promise<void> {
+	await Promise.all(
+		deductions.map((deduction) =>
+			executeOne(
+				executor,
+				drizzleSql`
+				UPDATE balance_allocations
+				SET
+					${drizzleSql.raw(column)} = ${drizzleSql.raw(column)} + ${deduction.quantity}::numeric,
+					updated_at = now()
+				WHERE id = ${deduction.allocationId}::bigint
+				RETURNING id
 			`,
+			),
+		),
+	);
+}
+
+/** The locked rows as they stand after the deductions, for an exact post-write balance. */
+function deductedRows(
+	rows: readonly AllocationRow[],
+	deductions: readonly AllocationDeduction[],
+	scale: number,
+	column: "consumed_quantity" | "held_quantity",
+): AllocationRow[] {
+	const taken = new Map(
+		deductions.map((deduction) => [deduction.allocationId, deduction.quantity]),
+	);
+	return rows.map((row) => {
+		const quantity = taken.get(String(row.id));
+		if (quantity === undefined) return row;
+		const current = decimalToUnits(
+			databaseDecimal(row[column], `allocation ${column}`, scale),
+			scale,
 		);
-	}
-	return deductions;
+		return { ...row, [column]: unitsToDecimal(current + decimalToUnits(quantity, scale), scale) };
+	});
 }
 
 function allocationDeduction(row: AllocationRow, quantity: string): AllocationDeduction {
@@ -3785,9 +3887,10 @@ async function insertUsageEvent(
 		filterKey: string | null;
 		deductions: AllocationDeduction[];
 		metadata: Record<string, unknown>;
+		recordedAt?: Date;
 	},
 ): Promise<{ id: string; recorded_at: Date | string }> {
-	const recordedAt = new Date();
+	const recordedAt = input.recordedAt ?? new Date();
 	const row = await executeOne<{ id: string; recorded_at: Date | string }>(
 		executor,
 		drizzleSql`
@@ -4026,14 +4129,23 @@ async function lockReservationAllocations(
 	);
 }
 
-async function confirmAgainstAllocations(
-	executor: QueryExecutor,
-	allocations: AllocationRow[],
-	reservationAllocations: ReservationAllocationRow[],
+interface ConfirmationPlan {
+	changes: Array<{
+		allocationId: string;
+		consume: bigint;
+		release: bigint;
+		hasHold: boolean;
+	}>;
+	deductions: AllocationDeduction[];
+}
+
+/** Decides how a confirmation settles against held and free allocation quantity, without writing. */
+function planConfirmation(
+	allocations: readonly AllocationRow[],
+	reservationAllocations: readonly ReservationAllocationRow[],
 	scale: number,
 	walletQuantity: string,
-	apply = true,
-): Promise<AllocationDeduction[]> {
+): ConfirmationPlan {
 	const holds = new Map(
 		reservationAllocations.map((row) => [
 			String(row.allocation_id),
@@ -4087,41 +4199,59 @@ async function confirmAgainstAllocations(
 		);
 	}
 
-	const deductions: AllocationDeduction[] = [];
-	for (const { consume, release, row } of changes.values()) {
+	const plan: ConfirmationPlan = { changes: [], deductions: [] };
+	for (const [allocationId, { consume, release, row }] of changes) {
 		if (consume === 0n && release === 0n) continue;
-		const consumed = unitsToDecimal(consume, scale);
-		const released = unitsToDecimal(release, scale);
-		if (!apply) {
-			if (consume > 0n) deductions.push(allocationDeduction(row, consumed));
-			continue;
-		}
-		await executeOne(
-			executor,
-			drizzleSql`
+		plan.changes.push({ allocationId, consume, release, hasHold: holds.has(allocationId) });
+		if (consume > 0n)
+			plan.deductions.push(allocationDeduction(row, unitsToDecimal(consume, scale)));
+	}
+	return plan;
+}
+
+/** Writes a confirmation plan; rows are distinct, so the updates are issued together. */
+async function applyConfirmation(
+	executor: QueryExecutor,
+	projectId: string,
+	reservationId: string,
+	plan: ConfirmationPlan,
+	scale: number,
+): Promise<void> {
+	await Promise.all(
+		plan.changes.flatMap(({ allocationId, consume, release, hasHold }) => {
+			const statements = [
+				executeOne(
+					executor,
+					drizzleSql`
 				UPDATE balance_allocations
 				SET
-					consumed_quantity = consumed_quantity + ${consumed}::numeric,
-					held_quantity = held_quantity - ${released}::numeric,
+					consumed_quantity = consumed_quantity + ${unitsToDecimal(consume, scale)}::numeric,
+					held_quantity = held_quantity - ${unitsToDecimal(release, scale)}::numeric,
 					updated_at = now()
-				WHERE id = ${String(row.id)}::bigint
+				WHERE id = ${allocationId}::bigint
 				RETURNING id
 			`,
-		);
-		if (holds.has(String(row.id))) {
-			await executeOne(
-				executor,
-				drizzleSql`
+				),
+			];
+			if (hasHold) {
+				// Scoped to this reservation: other reservations may hold the same allocation.
+				statements.push(
+					executeOne(
+						executor,
+						drizzleSql`
 					UPDATE reservation_allocations
 					SET consumed_quantity = ${unitsToDecimal(consume > release ? release : consume, scale)}::numeric
-					WHERE allocation_id = ${String(row.id)}::bigint
+					WHERE project_id = ${projectId}
+						AND reservation_id = ${reservationId}
+						AND allocation_id = ${allocationId}::bigint
 					RETURNING allocation_id
 				`,
-			);
-		}
-		if (consume > 0n) deductions.push(allocationDeduction(row, consumed));
-	}
-	return deductions;
+					),
+				);
+			}
+			return statements;
+		}),
+	);
 }
 
 async function confirmMeterLimitReservation(
@@ -4517,10 +4647,6 @@ async function finalizedReservationResult(
 
 function featureId(feature: FeatureRow): string {
 	return String(feature.id);
-}
-
-function toIso(value: Date | string): string {
-	return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
 function toTimestamp(value: Date | string | null): number | undefined {

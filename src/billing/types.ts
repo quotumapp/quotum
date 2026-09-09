@@ -91,6 +91,8 @@ export interface ProjectionPayload {
 		purchasedAt: string;
 	};
 	reversal?: ProjectionReversalPayload;
+	/** Per-account order of state snapshots; receivers may ignore a lower value. */
+	sequence?: number;
 }
 export type ProjectionJobPayload = ProjectionPayload;
 
@@ -152,6 +154,7 @@ export const projectionPayloadSchema = z
 			})
 			.optional(),
 		reversal: projectionReversalPayloadSchema.optional(),
+		sequence: z.number().int().nonnegative().optional(),
 	})
 	.superRefine((payload, context) => {
 		if (payload.billingAccountId !== payload.entitlements.billingAccountId) {

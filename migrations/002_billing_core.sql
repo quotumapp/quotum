@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS customers (
 	billing_account_id TEXT NOT NULL,
 	email TEXT,
 	metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+	projection_sequence BIGINT NOT NULL DEFAULT 0 CHECK (projection_sequence >= 0),
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	CONSTRAINT customers_project_id_id_unique UNIQUE (project_id, id)
@@ -202,7 +203,8 @@ CREATE TABLE IF NOT EXISTS projection_sync_jobs (
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	idempotency_key TEXT NOT NULL,
 	reason TEXT NOT NULL,
-	payload JSONB NOT NULL,
+	-- Usage-driven jobs carry no stored payload; the worker builds it when it delivers.
+	payload JSONB,
 	status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'succeeded', 'failed')) DEFAULT 'pending',
 	attempts INTEGER NOT NULL DEFAULT 0,
 	last_error TEXT,
@@ -218,6 +220,8 @@ CREATE TABLE IF NOT EXISTS projection_sync_jobs (
 		reason IN ('purchase_verified', 'provider_webhook', 'expiry_reconciliation', 'provider_reconciliation', 'usage_changed')
 	),
 	CONSTRAINT projection_sync_jobs_payload_check CHECK (
+		(payload IS NULL AND reason = 'usage_changed')
+		OR (
 		COALESCE(jsonb_typeof(payload) = 'object', false)
 		AND COALESCE(jsonb_typeof(payload->'billingAccountId') = 'string', false)
 		AND COALESCE(jsonb_typeof(payload->'generatedAt') = 'string', false)
@@ -230,6 +234,7 @@ CREATE TABLE IF NOT EXISTS projection_sync_jobs (
 		AND COALESCE(jsonb_typeof(payload->'balances') = 'array', false)
 		AND NOT (payload ? 'operation')
 		AND NOT (payload ? 'purchase' AND payload ? 'reversal')
+		)
 	)
 );
 

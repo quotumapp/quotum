@@ -3,6 +3,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { BillingError, isBillingError } from "../billing/errors";
 import type { SentryEnv } from "../env";
 import type { BillingLogger } from "./logger";
+import { stringifyUnknown } from "./stringify-unknown";
 
 type SentryLogLevel = "info" | "warn" | "error";
 type SentryBreadcrumbLevel = "info" | "warning" | "error";
@@ -457,20 +458,6 @@ function isSensitiveKey(key: string): boolean {
 
 function sanitizeString(value: string): string {
 	return value.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [Filtered]");
-}
-
-function stringifyUnknown(value: unknown): string {
-	if (typeof value === "string") {
-		return value;
-	}
-	if (value === null || value === undefined) {
-		return String(value);
-	}
-	try {
-		return JSON.stringify(value);
-	} catch {
-		return String(value);
-	}
 }
 
 function stripUndefined<T extends Record<string, unknown>>(record: T): T {

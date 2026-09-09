@@ -73,3 +73,9 @@ export function stableJson(value: unknown): string {
 		.map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
 		.join(",")}}`;
 }
+
+export function signedDecimalToUnits(value: string, scale: number): bigint {
+	return value.startsWith("-")
+		? -decimalToUnits(value.slice(1), scale)
+		: decimalToUnits(value, scale);
+}

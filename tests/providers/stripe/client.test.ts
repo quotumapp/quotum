@@ -82,7 +82,7 @@ describe("StripeBillingClient", () => {
 
 		expect(config.secretKey).toBe("sk_test_123");
 		expect(config.webhookSecret).toBe("whsec_123");
-		expect(config).toMatchObject({ apiVersion: "2026-07-29.dahlia" });
+		expect(config).toMatchObject({ apiVersion: "2026-08-26.dahlia" });
 	});
 
 	it("creates customers with billing account metadata without requiring an email", async () => {

@@ -147,6 +147,7 @@ describe("BillingRepository Stripe", () => {
 			[{ id: "customer-id" }],
 			[],
 			[{ id: "customer-id" }],
+			[{ projection_sequence: 1, billing_account_id: "user-1" }],
 			[],
 			[{ project_id: "project-id" }],
 			[{ id: "projection-job-id" }],
@@ -217,6 +218,7 @@ describe("BillingRepository Stripe", () => {
 				},
 			],
 			[{ project_id: "project-id" }],
+			[{ projection_sequence: 1, billing_account_id: "user-1" }],
 			[],
 			[{ id: "projection-job-id" }],
 		]);
@@ -260,6 +262,7 @@ describe("BillingRepository Stripe", () => {
 			[{ id: "customer-id" }],
 			[],
 			[{ project_id: "project-id" }],
+			[{ projection_sequence: 1, billing_account_id: "user-1" }],
 			[],
 			[{ id: "projection-job-id" }],
 		]);

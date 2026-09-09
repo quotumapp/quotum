@@ -1,16 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { Hono } from "hono";
-import { constantTimeEquals, requireApiKey } from "../../src/http/api-key";
+import { requireApiKey } from "../../src/http/api-key";
 import type { ProjectInstanceContext } from "../../src/projects/context";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 describe("requireApiKey", () => {
-	it("compares bearer tokens exactly without throwing on length mismatches", () => {
-		expect(constantTimeEquals("Bearer secret", "Bearer secret")).toBe(true);
-		expect(constantTimeEquals("Bearer secret", "Bearer wrong")).toBe(false);
-		expect(constantTimeEquals("Bearer secret", "Bearer much-longer-wrong-token")).toBe(false);
-	});
-
 	it("allows requests with the configured bearer token", async () => {
 		const app = new Hono();
 		app.use("*", requireApiKey(projectContextResolver({ credentials: { secret: "voysee" } })));

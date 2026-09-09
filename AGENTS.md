@@ -1,73 +1,77 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+Guidance for contributors and coding agents working in this repository. The longer form lives in
+[CONTRIBUTING.md](CONTRIBUTING.md) and the guides under [docs/](docs/).
 
-This is a Bun/TypeScript modular billing service. Runtime code lives in `src/`: `app.ts` and `app/`
-build the Hono API; `index.ts`, `runtime.ts`, and `composition/` wire the service; `env.ts` validates
-configuration; `platform/` owns organizations, logical projects, instances, and credentials behind
-consumer-owned ports; `billing/` contains billing domain logic; `catalog/` owns versioned
-publication; `db/` contains billing-owned Drizzle/Postgres repositories; `workers/` contains
-projection, provider-replay, reconciliation, metering-maintenance, recurring-billing, and automatic
-top-up workers; and `projections/` contains HTTP projection delivery. Tests mirror the source
-areas, with real-Postgres journeys under `tests/integration/` and process-level journeys under
-`tests/e2e/`. Database schema changes belong in ordered files under `migrations/`.
+## Project structure
 
-## Build, Test, and Development Commands
+Bun/TypeScript/Hono billing service backed by one Postgres database. Runtime code lives in `src/`:
+`app.ts` and `app/` build the trusted-backend HTTP API; `platform/` owns organizations, identity,
+onboarding, connections, and audit behind consumer-owned ports; `billing/`, `catalog/`, and `db/`
+hold the billing domain, versioned catalog, and Drizzle repositories; `providers/` integrates Apple,
+Google, and Stripe; `workers/` and `projections/` run durable background work and signed HTTP
+projection delivery; `composition/` wires modules together. Ordered SQL migrations live in
+`migrations/`, generated contracts in `contracts/v1/`, and tests mirror the source layout under
+`tests/`, `integration/merchant/`, and `src/testing/`. Module and table ownership is enforced by
+`bun run check:boundaries`; see [docs/architecture.md](docs/architecture.md).
 
-- `bun install`: install dependencies from `bun.lock`.
-- `bun run dev`: run `src/index.ts` with Bun hot reload.
-- `POSTGRES_URI=... bun run migrate`: apply pending SQL migrations from `migrations/`.
-- `POSTGRES_URI=... bun run migrate:status`: inspect migration status and checksums.
-- Before 1.0 the schema files under `migrations/` evolve in place; recreate development databases
-  instead of migrating them.
-- `POSTGRES_URI=... BILLING_PLATFORM_BOOTSTRAP_JSON=... bun run platform:bootstrap -- --check`:
-  verify the exact platform topology and declared credentials; it exits nonzero until both exist.
-- `bun run platform:bootstrap -- --apply --credentials-out ./platform-credentials.json` with
-  `POSTGRES_URI` and `BILLING_PLATFORM_BOOTSTRAP_JSON`: apply the exact topology and create a new,
-  exclusive-mode `0600` file containing one-time plaintext project credentials.
-- `POSTGRES_URI=... BILLING_CATALOG_IMPORT_JSON=... bun run catalog:provision`: explicitly import a
-  development catalog for database-bootstrapped project instances.
-- `bun run check:boundaries`: enforce source ownership, dependency, SQL, and migration boundaries.
-- `bun run test`: run the Bun test suite under `tests/`.
-- `bun run test:integration`: run Docker-backed Postgres integration tests under `tests/integration/`.
-- `bun run test:e2e`: run black-box E2E tests that boot the real service process.
-- `bun run typecheck`: run TypeScript with `tsc --noEmit`.
-- `bun run lint`: run Biome checks.
-- `bun run format:check`: verify Biome formatting.
-- `bun run quality`: run boundary, typecheck, lint, and format checks together.
+## Commands
 
-Apply the current schema with `POSTGRES_URI=... bun run migrate`. Do not add external database API,
-RLS, role-grant, or stored-procedure assumptions back into this service.
+- `bun install --frozen-lockfile`, then `bun run dev` for a hot-reloading server.
+- `POSTGRES_URI=... bun run migrate` and `bun run migrate:status` for schema changes.
+- `bun run quality` runs boundaries, types, lint, and formatting; `bun run quality:fix` applies
+  lint and format fixes.
+- `bun run test` for unit tests; `bun run test:integration`, `bun run test:e2e`, and
+  `bun run test:merchant:integration` for the Docker-backed lanes.
+- `bun run openapi:generate`, `openapi:check`, and `openapi:lint` after changing any route.
+- `bun run platform:bootstrap`, `catalog:provision`, and `catalog` for operator workflows; see
+  [docs/quickstart.md](docs/quickstart.md).
 
-## Coding Style & Naming Conventions
+## Coding style
 
-Use strict TypeScript and keep modules small and purpose-specific. Biome is the formatter and linter: tabs for indentation, 100-character line width, double quotes in JavaScript/TypeScript, and organized imports. Use `camelCase` for variables and functions, `PascalCase` for classes and types, and uppercase snake case for environment variables. Existing filenames use kebab case, such as `projection-sync.ts` and `api-key.ts`; follow that pattern for new files.
+Strict TypeScript, small purpose-specific modules, kebab-case file names. Biome formats and lints:
+tabs, 100-character lines, double quotes, organized imports. `camelCase` for values and functions,
+`PascalCase` for types and classes, upper snake case for environment variables.
 
-## Testing Guidelines
+## Testing
 
-Tests use `bun:test` with `describe`, `it`, and `expect`. Name test files `*.test.ts` and place them
-in the matching `tests/` subdirectory. Add focused unit tests for domain logic, repository
-transaction contracts, workers, middleware, and environment parsing. Run
-`bun run test:integration` for real-Postgres catalog, metering, provider, controls, concurrency,
-worker, idempotency, and projection journeys; those Docker-backed tests remain skipped under plain
-`bun run test` unless `RUN_POSTGRES_INTEGRATION_TESTS=1` is set. Run `bun run test:e2e` for
-black-box service-process coverage under `tests/e2e`; the runner starts Docker Postgres, applies
-migrations, boots `src/index.ts`, and gates those tests with `RUN_BILLING_E2E_TESTS=1`. Run
-`bun run test` for behavior changes and `bun run quality` before handing off.
+Tests use `bun:test`. Add focused unit tests for domain logic, repository contracts, workers,
+middleware, and environment parsing. Docker-backed integration and end-to-end cases stay skipped
+under plain `bun run test` unless `RUN_POSTGRES_INTEGRATION_TESTS=1` or `RUN_BILLING_E2E_TESTS=1`
+is set; run the dedicated commands instead. Run `bun run quality` and the relevant test lane before
+handing off.
 
-## Commit & Pull Request Guidelines
+## Commits and pull requests
 
-The current history is minimal and uses a concise imperative subject, for example `Initial billing service`. Keep future commit subjects short and action-oriented. Pull requests should describe the change, list verification commands run, call out migration or environment variable changes, and link related issues or tasks. Include request/response examples when changing HTTP behavior.
+Use Conventional Commits with a subject under 72 characters. Pull requests describe the change,
+list the verification commands run, call out migration and environment variable changes with their
+upgrade order, and include request and response examples when HTTP behavior changes.
 
-## Security & Configuration Tips
+## Releases and container publishing
 
-Never commit `POSTGRES_URI`, project API keys, projection secrets, provider credentials, or
-production database URLs. Project identity and credential verifiers are database-owned; plaintext
-credentials are issued once by `platform:bootstrap`; move its `0600` output into a backend secret
-store and remove the local file. Billing never writes product app databases directly. Configure
-projection and provider adapters through the merchant Integrations workflow; encrypted connection
-records are platform-owned. `BILLING_PROJECT_RUNTIME_JSON` is removed and rejected. Use
-`BILLING_CATALOG_IMPORT_JSON` only for the explicit development import command.
-`BILLING_PROJECTS_JSON` is rejected. Only canonical project-instance webhooks under
-`/v1/projects/:projectKey/webhooks/:provider` exist; unscoped `/v1/webhooks/*` aliases are removed.
-Treat SQL migrations, bootstrap output, and provider webhook handling as security-sensitive code.
+For release work, follow the [publishing checklist](docs/operations.md#publish-a-container-release).
+Update `package.json` and `CHANGELOG.md`, verify the release commit, then push its matching
+`vX.Y.Z` tag to the GitHub repository `quotumapp/quotum`. Confirm the tag's `Publish image` run
+succeeds and GHCR contains `X.Y.Z`, `X.Y`, and `latest`; record the image digest. A package version
+bump or push to `main` alone does not publish a versioned image. Check the remote explicitly:
+`origin` may point to GitLab. Publishing runs independently of CI, so passing release checks is
+required before tagging. Report a release as published only after verifying the versioned image.
+
+## Security and configuration
+
+Never commit `POSTGRES_URI`, project credentials, projection secrets, provider credentials, or the
+`QUOTUM_SECRETS_KEY_BASE64` key. Schema files are checksum-verified; before 1.0 they evolve in place and databases are recreated. Project
+credentials are issued once by `platform:bootstrap` into an owner-only file; move them to a secret
+store and delete the file. Provider and projection settings are encrypted, database-owned
+connections managed through the merchant application; `BILLING_PROJECT_RUNTIME_JSON` and
+`BILLING_PROJECTS_JSON` are rejected. Treat migrations, bootstrap output, credential handling, and
+provider webhook verification as security-sensitive code.
+
+## Documentation with implementation changes
+
+Review the owning current documentation when changing source, configuration, schemas or commands.
+Keep accepted targets distinguishable from implemented behavior. In the multi-repository Quotum
+workspace, use the sibling documentation repository's `documentation-context.md` workflow to route
+changed paths and check review freshness. Standalone contributions still review their local docs;
+they do not require a private sibling checkout. Read original sources before trusting a graph or
+an unchanged review checkpoint.

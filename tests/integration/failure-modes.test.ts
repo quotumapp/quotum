@@ -313,7 +313,7 @@ async function seedProjectionJobs(
 				next_attempt_at
 			)
 			SELECT customer_row.project_id, customer_row.id, ${idempotencyKey},
-				'provider_webhook', ${JSON.stringify(payload)}::jsonb, 'pending', now() - INTERVAL '1 second'
+				'provider_webhook', ${JSON.stringify(payload)}::text::jsonb, 'pending', now() - INTERVAL '1 second'
 			FROM customer_row
 			RETURNING id, idempotency_key
 		`;

@@ -6,7 +6,7 @@ import { createMerchantApp } from "../platform/app";
 import type { MerchantBillingPort } from "../platform/application/billing-port";
 import { createMerchantAuth, type MerchantAuth } from "../platform/auth";
 import { createMerchantBilling } from "../platform/billing";
-import { loadMerchantConfig, type MerchantConfig } from "../platform/config";
+import type { MerchantConfig } from "../platform/config";
 import { MerchantStripeOAuth } from "../platform/connections/oauth";
 import { MerchantConnections } from "../platform/connections/service";
 import { CloudflareMerchantMailer, type MerchantMailer } from "../platform/email";
@@ -32,10 +32,9 @@ export interface MerchantRuntimeOptions {
 export function attachMerchantRuntime(
 	staff: Hono<BillingHonoEnv>,
 	billing: MerchantBillingPort,
-	options: MerchantRuntimeOptions = {},
+	options: MerchantRuntimeOptions & { config: MerchantConfig },
 ): Hono {
-	const config = options.config ?? loadMerchantConfig();
-	if (!config) return new Hono().all("*", (c) => staff.fetch(c.req.raw));
+	const { config } = options;
 	const store = new MerchantStore(merchantSql(sql), config);
 	const mailer =
 		options.mailer ?? (config.email ? new CloudflareMerchantMailer(config.email) : null);

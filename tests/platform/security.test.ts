@@ -117,15 +117,31 @@ describe("merchant security boundaries", () => {
 			)?.path,
 		).toBe("/v1/billing-accounts/customer/controls");
 	});
-	it("requires production merchant configuration and rejects draft signup policies", () => {
+	it("requires merchant configuration everywhere and rejects draft signup policies", () => {
 		expect(() => loadMerchantConfig({})).toThrow();
-		expect(loadMerchantConfig({ BILLING_ENV: "test" })).toBeNull();
-		expect(() =>
-			loadMerchantConfig({ BILLING_ENV: "production", MERCHANT_AUTH_ENABLED: "false" }),
-		).toThrow("required in production");
+		expect(() => loadMerchantConfig({ BILLING_ENV: "test" })).toThrow();
+		expect(() => loadMerchantConfig({ BILLING_ENV: "development" })).toThrow();
+		expect(
+			loadMerchantConfig({
+				BILLING_ENV: "test",
+				MERCHANT_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
+				MERCHANT_TERMS_VERSION: "test-2026-09-10",
+				MERCHANT_PRIVACY_VERSION: "test-2026-09-10",
+			}),
+		).toMatchObject({ signupEnabled: true, testMode: true, email: null });
 		expect(() =>
 			loadMerchantConfig({
-				MERCHANT_AUTH_ENABLED: "true",
+				MERCHANT_ORIGIN: "https://app.example.com",
+				MERCHANT_PUBLIC_URL: "https://example.com",
+				MERCHANT_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
+				MERCHANT_TERMS_VERSION: "2026-09-01",
+				MERCHANT_PRIVACY_VERSION: "2026-09-01",
+			}),
+		).toThrow("email configuration is required");
+		expect(() =>
+			loadMerchantConfig({
+				MERCHANT_ORIGIN: "https://app.example.com",
+				MERCHANT_PUBLIC_URL: "https://example.com",
 				MERCHANT_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
 				MERCHANT_SIGNUP_ENABLED: "true",
 				MERCHANT_TERMS_VERSION: "draft-2026-09-05",

@@ -5,6 +5,7 @@ export const e2eApiKey = testCredential("voysee") ?? "voysee-unit-test-placehold
 export const e2eOperatorKey = "voysee-e2e-operator-key";
 export const e2eProjectionSecret = "voysee-e2e-projection-secret";
 export const e2eStripeWebhookSecret = "whsec_voysee_e2e";
+export const e2eMerchantAuthSecret = "voysee-e2e-merchant-auth-secret-at-least-32";
 
 export function e2eProjectRuntimeJson(receiverUrl = "http://127.0.0.1:9"): string {
 	return JSON.stringify(
@@ -61,6 +62,14 @@ export function e2eServiceEnv({
 		QUOTUM_SECRETS_KEY_ID: "e2e",
 		QUOTUM_SECRETS_KEY_BASE64: Buffer.alloc(32, 11).toString("base64"),
 		BILLING_OPERATOR_API_KEY: e2eOperatorKey,
+		// Merchant authentication is always on. Test mode keeps mail in memory: the test
+		// entrypoints inject a capture mailer, and no e2e scenario triggers merchant mail.
+		MERCHANT_AUTH_SECRET: e2eMerchantAuthSecret,
+		MERCHANT_TERMS_VERSION: "e2e-2026-09-10",
+		MERCHANT_PRIVACY_VERSION: "e2e-2026-09-10",
+		MERCHANT_EMAIL_ACCOUNT_ID: "e2e-account",
+		MERCHANT_EMAIL_API_TOKEN: "e2e-email-token",
+		MERCHANT_EMAIL_FROM: "no-reply@e2e.test",
 		BILLING_TEST_CONNECTIONS_JSON: e2eProjectRuntimeJson(receiverUrl),
 		BILLING_TRUST_GATEWAY_PROJECT_HEADER: "false",
 		BILLING_WORKER_POLL_INTERVAL_MS: "250",

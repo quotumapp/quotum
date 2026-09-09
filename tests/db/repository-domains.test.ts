@@ -16,6 +16,9 @@ describe("repository domain adapters", () => {
 		const calls: unknown[] = [];
 		const rows: ProjectionSyncJobRow[] = [];
 		const adapter = new ProjectionSyncJobRepository({
+			async buildUsageProjection(): Promise<never> {
+				throw new Error("usage projections are not expected here");
+			},
 			claimProjectionSyncJobs(workerId, limit) {
 				calls.push({ method: "claimProjectionSyncJobs", workerId, limit });
 				return Promise.resolve(rows);

@@ -1,8 +1,13 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError, PersistenceConflictError } from "../../billing/errors";
-import type { ProjectionSyncStatus } from "../../billing/types";
+import type { ProjectionJobPayload, ProjectionSyncStatus } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
+import {
+	nextProjectionSequence,
+	readEntitlementRows,
+	readProjectionBalances,
+} from "./entitlements";
 import { parseProjectionSyncJobRow } from "./parsers";
 import { assertUpdated, executeOne, executeRows } from "./query";
 import type { ProjectionSyncJobRow } from "./types";
@@ -12,19 +17,47 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 	async claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]> {
 		requireNonBlank(workerId, "p_worker_id");
 		const cappedLimit = requirePositiveLimit(limit);
+		// Fairness is ranked inside a candidate set bounded by the batch size, read through the
+		// partial indexes on due and stale jobs, so claim cost follows the batch, not the backlog.
+		const candidateLimit = cappedLimit * 10;
 		const rows = await executeRows(
 			this.database,
 			drizzleSql`
-			WITH ranked_jobs AS (
+			-- The due predicate is repeated on the locking select and the update: a predicate that
+			-- lives only in the ranking CTE is not rechecked when a competing worker commits first,
+			-- and the row would be claimed twice.
+			WITH candidates AS (
+				(
+					SELECT jobs.id, jobs.project_id, jobs.next_attempt_at AS due_at, jobs.created_at
+					FROM projection_sync_jobs jobs
+					WHERE jobs.status = 'pending' AND jobs.next_attempt_at <= now()
+					ORDER BY jobs.next_attempt_at ASC, jobs.created_at ASC
+					LIMIT ${candidateLimit}
+				)
+				UNION ALL
+				(
+					SELECT jobs.id, jobs.project_id, jobs.locked_at AS due_at, jobs.created_at
+					FROM projection_sync_jobs jobs
+					WHERE jobs.status = 'processing' AND jobs.locked_at <= now() - INTERVAL '5 minutes'
+					ORDER BY jobs.locked_at ASC, jobs.created_at ASC
+					LIMIT ${candidateLimit}
+				)
+			),
+			ranked_jobs AS (
 				SELECT
-					jobs.id,
+					candidates.id,
 					ROW_NUMBER() OVER (
-						PARTITION BY jobs.project_id
-						ORDER BY COALESCE(jobs.next_attempt_at, jobs.locked_at) ASC, jobs.created_at ASC
+						PARTITION BY candidates.project_id
+						ORDER BY candidates.due_at ASC, candidates.created_at ASC
 					) AS project_rank,
-					COALESCE(jobs.next_attempt_at, jobs.locked_at) AS due_at,
-					jobs.created_at
+					candidates.due_at,
+					candidates.created_at
+				FROM candidates
+			),
+			due_jobs AS (
+				SELECT jobs.id
 				FROM projection_sync_jobs jobs
+				JOIN ranked_jobs ranked ON ranked.id = jobs.id
 				WHERE (
 						jobs.status = 'pending'
 						AND jobs.next_attempt_at <= now()
@@ -33,11 +66,6 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 						jobs.status = 'processing'
 						AND jobs.locked_at <= now() - INTERVAL '5 minutes'
 					)
-			),
-			due_jobs AS (
-				SELECT jobs.id
-				FROM projection_sync_jobs jobs
-				JOIN ranked_jobs ranked ON ranked.id = jobs.id
 				ORDER BY ranked.project_rank ASC, ranked.due_at ASC, ranked.created_at ASC
 				LIMIT ${cappedLimit}
 				FOR UPDATE OF jobs SKIP LOCKED
@@ -50,12 +78,37 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 				updated_at = now()
 			FROM due_jobs
 			WHERE jobs.id = due_jobs.id
+				AND (
+					(jobs.status = 'pending' AND jobs.next_attempt_at <= now())
+					OR (jobs.status = 'processing' AND jobs.locked_at <= now() - INTERVAL '5 minutes')
+				)
 			RETURNING
 				jobs.*,
 				(SELECT projects.key FROM projects projects WHERE projects.id = jobs.project_id) AS project_key
 		`,
 		);
 		return rows.map(parseProjectionSyncJobRow);
+	}
+
+	/** Builds a usage-driven projection at delivery time and advances the customer's sequence. */
+	async buildUsageProjection(projectId: string, customerId: string): Promise<ProjectionJobPayload> {
+		return await this.transaction(async (tx) => {
+			// The sequence advance is issued first; the reads behind it are pipelined in order.
+			const [customer, entitlements, balances] = await Promise.all([
+				nextProjectionSequence(tx, projectId, customerId),
+				readEntitlementRows(tx, projectId, customerId),
+				readProjectionBalances(tx, projectId, customerId),
+			]);
+			const generatedAt = new Date().toISOString();
+			return {
+				billingAccountId: customer.billingAccountId,
+				generatedAt,
+				entitlements: { billingAccountId: customer.billingAccountId, generatedAt, entitlements },
+				balances,
+				reason: "usage_changed",
+				sequence: customer.sequence,
+			};
+		});
 	}
 
 	async markProjectionSyncJobSucceeded(

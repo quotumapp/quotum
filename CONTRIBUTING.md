@@ -65,6 +65,13 @@ introduce breaking changes.
 - Tests use `bun:test` and live under `tests/` mirroring the source layout. Name files `*.test.ts`.
 - Treat migrations, bootstrap output, credential handling, and provider webhook verification as
   security-sensitive code and add focused tests for them.
+- Bind JSON parameters as text and cast on the server: use the `jsonb()` helper or
+  `${JSON.stringify(value)}::text::jsonb`. A bare `::jsonb` cast on a string parameter is encoded
+  twice under prepared statements, and a raw object parameter fails without them.
+- Inside a transaction, statements that depend only on values already in hand may be issued
+  together with `Promise.all`; they execute in issue order on the connection, so put writes before
+  the reads that must observe them, and never feed one statement's result into another in the
+  same batch.
 
 ## Commit messages
 
@@ -78,6 +85,13 @@ body when it is not obvious.
 - Include request and response examples when HTTP behavior changes.
 - Link related issues.
 - Keep pull requests focused; unrelated refactors belong in their own change.
+
+## Publishing a release
+
+Follow the [container release checklist](docs/operations.md#publish-a-container-release) for version
+and changelog updates, verification, the GitHub tag push, and confirmation of the GHCR image.
+The release tag must match `package.json`. Pushing `main` publishes only the rolling `main` image;
+changing the package version alone does not create a versioned image.
 
 ## License of contributions
 

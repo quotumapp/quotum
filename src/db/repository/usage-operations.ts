@@ -16,7 +16,7 @@ import {
 	usageOperationKinds,
 } from "../../billing/usage-operations";
 import type { ProjectInstanceContext } from "../../projects/context";
-import { ensureCustomer } from "./identities";
+import { resolveUsageCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -136,12 +136,18 @@ function retainedResult(claim: Claim): UsageOperationResult {
 	return claim.outcome;
 }
 
-export async function runUsageOperation<T extends UsageOperationResult>(
+export async function runUsageOperation<T extends UsageOperationResult, P = undefined>(
 	executor: QueryExecutor,
 	project: ProjectInstanceContext,
 	operation: UsageOperationKind,
 	input: UsageOperationInput,
-	mutation: () => Promise<T>,
+	mutation: (customer: { id: string; billingAccountId: string }, prefetched: P) => Promise<T>,
+	options: {
+		/** Non-blocking reads pipelined with the operation lock and claim read. */
+		prefetch?: (executor: QueryExecutor) => Promise<P>;
+		/** Work that may take row locks; pipelined with the customer row once the lock is held. */
+		prepare?: (executor: QueryExecutor) => Promise<void>;
+	} = {},
 ): Promise<T> {
 	const scope = normalizeScope({
 		billingAccountId: input.billingAccountId,
@@ -150,13 +156,20 @@ export async function runUsageOperation<T extends UsageOperationResult>(
 	});
 	const fingerprint = operationFingerprint(operation, input);
 	const projectId = project.projectInstanceId;
-	if (!(await tryLock(executor, projectId, scope))) {
+	// The advisory lock is issued first; the claim read and the caller's non-blocking reads are
+	// pipelined behind it. Nothing here may wait on a row lock: a competing operation with the
+	// same identity must learn that it is in progress without blocking.
+	const [locked, existing, prefetched] = await Promise.all([
+		tryLock(executor, projectId, scope),
+		readClaim(executor, projectId, scope),
+		options.prefetch === undefined ? Promise.resolve(undefined as P) : options.prefetch(executor),
+	]);
+	if (!locked) {
 		throw new PersistenceConflictError(
 			"Usage operation is in progress; recover by operation lookup",
 			"OPERATION_IN_PROGRESS",
 		);
 	}
-	const existing = await readClaim(executor, projectId, scope);
 	if (existing !== null && !existing.identity_expired) {
 		// Legacy fingerprints did not bind all semantics, and cannot safely reconstruct an outcome.
 		if (existing.recovery_version === 1 && existing.request_fingerprint !== fingerprint) {
@@ -173,20 +186,24 @@ export async function runUsageOperation<T extends UsageOperationResult>(
 			sql`DELETE FROM client_idempotency_claims WHERE id = ${existing.id} AND completed_at IS NOT NULL`,
 		);
 	}
-	const customer =
+	const [customer] = await Promise.all([
 		operation === "consume" || operation === "reserve"
-			? await ensureCustomer(executor, projectId, scope.billingAccountId)
-			: await executeOne<{ id: string }>(
+			? resolveUsageCustomer(executor, projectId, scope.billingAccountId)
+			: executeOne<{ id: string }>(
 					executor,
 					sql`SELECT id FROM customers WHERE project_id = ${projectId} AND billing_account_id = ${scope.billingAccountId}`,
-				);
+				),
+		options.prepare === undefined ? Promise.resolve() : options.prepare(executor),
+	]);
 	if (customer === null) {
 		throw new NotFoundBillingError(
 			`Billing account ${scope.billingAccountId} was not found`,
 			"BILLING_ACCOUNT_NOT_FOUND",
 		);
 	}
-	const claim = await executeOne<{ id: string }>(
+	// The claim insert is issued ahead of the mutation's first statements and shares their round
+	// trip; a failed insert aborts the transaction before any of them can take effect.
+	const claimInsert = executeOne<{ id: string }>(
 		executor,
 		sql`
   INSERT INTO client_idempotency_claims
@@ -196,10 +213,13 @@ export async function runUsageOperation<T extends UsageOperationResult>(
   RETURNING id::text
  `,
 	);
-	if (claim === null) throw new Error("Usage operation claim was not persisted");
 	// Every accounting write, projection intent and terminal domain result share this transaction.
 	// No catch-and-delete: an uncertain commit is recovered from this same identity on a new connection.
-	const result = await mutation();
+	const [claim, result] = await Promise.all([
+		claimInsert,
+		mutation({ id: customer.id, billingAccountId: scope.billingAccountId }, prefetched),
+	]);
+	if (claim === null) throw new Error("Usage operation claim was not persisted");
 	const completed = await executeOne<{ id: string }>(
 		executor,
 		sql`

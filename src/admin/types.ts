@@ -147,7 +147,7 @@ export interface AdminProjectionJob {
 	nextAttemptAt: string | null;
 	lockedAt: string | null;
 	lockedBy: string | null;
-	payload: ProjectionPayload;
+	payload: ProjectionPayload | null;
 	createdAt: string;
 	updatedAt: string;
 }

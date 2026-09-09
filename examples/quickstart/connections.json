@@ -1,0 +1,14 @@
+[
+	{
+		"projectInstanceKey": "acme",
+		"projectionUrl": "http://127.0.0.1:9",
+		"projectionSecret": "quickstart-projection-secret",
+		"stripe": {
+			"secretKey": "sk_test_quickstart_placeholder",
+			"webhookSecret": "whsec_quickstart_placeholder",
+			"checkoutSuccessUrl": "https://app.example.com/billing/success?session_id={CHECKOUT_SESSION_ID}",
+			"checkoutCancelUrl": "https://app.example.com/billing",
+			"portalReturnUrl": "https://app.example.com/account/billing"
+		}
+	}
+]

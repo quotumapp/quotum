@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import Stripe from "stripe";
 import type { StripeBillingEnv } from "../../env";
+import { canonicalJson } from "../../shared/canonical-json";
 
-export const STRIPE_API_VERSION = "2026-07-29.dahlia" as const;
+export const STRIPE_API_VERSION = "2026-08-26.dahlia" as const;
 
 export interface StripeBillingConfig extends StripeBillingEnv {
 	apiVersion: typeof STRIPE_API_VERSION;
@@ -213,26 +214,4 @@ function stripeOperationIdempotencyKey(scope: string): string {
 
 function stripeIdempotencyKey(scope: string, params: unknown): string {
 	return `quotum-api:${scope}:${createHash("sha256").update(canonicalJson(params)).digest("hex")}`;
-}
-
-function canonicalJson(value: unknown): string {
-	if (value === undefined) {
-		return "null";
-	}
-	if (value === null || typeof value !== "object") {
-		return JSON.stringify(value);
-	}
-	if (value instanceof Date) {
-		return JSON.stringify(value.toISOString());
-	}
-	if (Array.isArray(value)) {
-		return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-	}
-
-	const record = value as Record<string, unknown>;
-	return `{${Object.keys(record)
-		.filter((key) => record[key] !== undefined)
-		.sort()
-		.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-		.join(",")}}`;
 }

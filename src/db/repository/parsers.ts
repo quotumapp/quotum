@@ -21,9 +21,9 @@ export function parseProjectionSyncJobRow(row: unknown): ProjectionSyncJobRow {
 	const raw = row as ProjectionSyncJobRow;
 	const reason = parseProjectionSyncReason(String(raw.reason));
 	const status = parseProjectionSyncStatus(String(raw.status));
-	const payload = parseProjectionJobPayload(raw.payload);
+	const payload = raw.payload === null ? null : parseProjectionJobPayload(raw.payload);
 
-	if (payload.reason !== reason) {
+	if (payload === null ? reason !== "usage_changed" : payload.reason !== reason) {
 		throw new Error("Invalid projection payload");
 	}
 

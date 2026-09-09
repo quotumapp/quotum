@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
 import {
 	isTenantTrafficEligible,
@@ -48,15 +47,4 @@ export function requireApiKey(
 function parseBearerToken(authorization: string | undefined): string | null {
 	const match = /^Bearer\s+(.+)$/i.exec(authorization ?? "");
 	return match?.[1] ?? null;
-}
-
-export function constantTimeEquals(actual: string, expected: string): boolean {
-	const actualBuffer = Buffer.from(actual, "utf8");
-	const expectedBuffer = Buffer.from(expected, "utf8");
-
-	if (actualBuffer.byteLength !== expectedBuffer.byteLength) {
-		return false;
-	}
-
-	return timingSafeEqual(actualBuffer, expectedBuffer);
 }

@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS metering_settings (
 	consume_p99_target_ms INTEGER NOT NULL DEFAULT 50 CHECK (
 		consume_p99_target_ms BETWEEN 1 AND 10000
 	),
+	projection_usage_debounce_ms INTEGER NOT NULL DEFAULT 1000 CHECK (
+		projection_usage_debounce_ms BETWEEN 0 AND 30000
+	),
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

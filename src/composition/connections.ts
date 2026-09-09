@@ -71,6 +71,7 @@ export function createRuntimeConnectionResolver(
 						projectionUrl: value.projectionUrl,
 						projectionSecret: value.projectionSecret,
 						projectionContract: "billing_state_v1",
+						usageDelivery: value.usageDelivery === "off" ? "off" : "coalesced",
 					};
 				return parsed as RuntimeConnectionConfigs[K];
 			} catch {

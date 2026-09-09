@@ -154,7 +154,6 @@ export function createMerchantApp({
 		c.header("cache-control", "no-store");
 		c.header("referrer-policy", "no-referrer");
 		c.header("x-content-type-options", "nosniff");
-		if (!store.config.enabled) throw new MerchantError("NOT_FOUND", "Route not found.", 404);
 		if (!(await store.serviceAuthorized(c.req.header("x-quotum-service-token") ?? null)))
 			throw new MerchantError("SERVICE_UNAUTHORIZED", "Request origin is not authorized.", 401);
 		if (c.req.method !== "GET" && c.req.method !== "HEAD") {

@@ -1,6 +1,7 @@
 import { seedProcessConnections } from "./seed-connections";
 export interface BillingServiceProcess {
 	baseUrl: string;
+	pid: number;
 	request(path: string, init?: RequestInit): Promise<Response>;
 	sendSignal(signal: NodeJS.Signals): void;
 	exited: Promise<number>;
@@ -28,6 +29,7 @@ export async function startBillingService(
 
 	return {
 		baseUrl,
+		pid: proc.pid,
 		request(path, init) {
 			return fetch(`${baseUrl}${path}`, init);
 		},

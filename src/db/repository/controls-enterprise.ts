@@ -33,6 +33,7 @@ import {
 	PersistenceConflictError,
 } from "../../billing/errors";
 import type { ProjectInstanceContext } from "../../projects/context";
+import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
 import { ensureCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
@@ -47,6 +48,7 @@ interface EffectiveControlRow {
 	limit_value: unknown;
 	interval: ControlInterval;
 	revision: number;
+	contract_replaces_defaults: boolean | null;
 }
 
 export class ControlsEnterpriseRepository
@@ -1138,24 +1140,20 @@ export async function resolveEffectiveControls(
 		if (clock === null) throw new Error("Database clock could not be read");
 		now = clock.current_time instanceof Date ? clock.current_time : new Date(clock.current_time);
 	}
-	const activeContract = await executeOne<{
-		id: string | number | bigint;
-		replaces_commercial_defaults: boolean;
-	}>(
-		executor,
-		drizzleSql`
-		SELECT id, replaces_commercial_defaults FROM enterprise_contracts
-		WHERE project_id = ${input.projectId} AND customer_id = ${input.customerId}
-			AND status = 'published' AND effective_at <= ${now.toISOString()}
-			AND (expires_at IS NULL OR expires_at > ${now.toISOString()})
-		ORDER BY effective_at DESC, version DESC, id DESC LIMIT 1
-	`,
-	);
+	// One statement: the active contract is resolved inline so this read can be pipelined.
 	const rows = await executeRows<EffectiveControlRow>(
 		executor,
 		drizzleSql`
+		WITH active_contract AS (
+			SELECT id, replaces_commercial_defaults FROM enterprise_contracts
+			WHERE project_id = ${input.projectId} AND customer_id = ${input.customerId}
+				AND status = 'published' AND effective_at <= ${now.toISOString()}
+				AND (expires_at IS NULL OR expires_at > ${now.toISOString()})
+			ORDER BY effective_at DESC, version DESC, id DESC LIMIT 1
+		)
 		SELECT DISTINCT policy.id, policy.source_type, policy.control_kind, feature.key AS feature_key,
-			policy.currency, policy.limit_value::text AS limit_value, policy.interval, policy.revision
+			policy.currency, policy.limit_value::text AS limit_value, policy.interval, policy.revision,
+			(SELECT replaces_commercial_defaults FROM active_contract) AS contract_replaces_defaults
 		FROM control_policies policy
 		LEFT JOIN features feature ON feature.project_id = policy.project_id AND feature.id = policy.feature_id
 		WHERE policy.project_id = ${input.projectId} AND policy.active = true
@@ -1171,7 +1169,7 @@ export async function resolveEffectiveControls(
 						AND (subscription.expires_at IS NULL OR subscription.expires_at > ${now.toISOString()})
 						AND (subscription.entity_id IS NULL OR subscription.entity_id = ${input.entityId}::bigint)
 				))
-				OR (policy.source_type = 'contract' AND policy.contract_id = ${activeContract?.id === undefined ? null : String(activeContract.id)}::bigint)
+				OR (policy.source_type = 'contract' AND policy.contract_id = (SELECT id FROM active_contract))
 				OR (policy.source_type = 'account' AND policy.customer_id = ${input.customerId})
 				OR (policy.source_type = 'entity' AND policy.customer_id = ${input.customerId}
 					AND policy.entity_id = ${input.entityId}::bigint)
@@ -1181,7 +1179,7 @@ export async function resolveEffectiveControls(
 	const controlIdentity = (row: EffectiveControlRow) =>
 		[row.control_kind, row.feature_key ?? "", row.currency ?? "", row.interval].join(":");
 	const replacedPlanDefaults = new Set(
-		activeContract?.replaces_commercial_defaults === true
+		rows[0]?.contract_replaces_defaults === true
 			? rows.filter((row) => row.source_type === "contract").map((row) => controlIdentity(row))
 			: [],
 	);
@@ -1195,17 +1193,23 @@ export async function resolveEffectiveControls(
 		if (current === undefined || compareControlRows(row, current) < 0) winners.set(identity, row);
 	}
 	const result: EffectiveControl[] = [];
-	for (const row of winners.values()) {
-		const bounds = controlWindowBounds(row.interval, now);
-		const window = await executeOne<{ consumed_value: unknown; held_value: unknown }>(
-			executor,
-			drizzleSql`
+	const winnerRows = [...winners.values()];
+	const windows = await Promise.all(
+		winnerRows.map((row) => {
+			const bounds = controlWindowBounds(row.interval, now);
+			return executeOne<{ consumed_value: unknown; held_value: unknown }>(
+				executor,
+				drizzleSql`
 			SELECT consumed_value::text AS consumed_value, held_value::text AS held_value
 			FROM control_windows WHERE project_id = ${input.projectId}
 				AND control_policy_id = ${String(row.id)}::bigint AND customer_id = ${input.customerId}
 				AND window_start_at = ${bounds.start.toISOString()} LIMIT 1
 		`,
-		);
+			);
+		}),
+	);
+	for (const [index, row] of winnerRows.entries()) {
+		const window = windows[index] ?? null;
 		const limit = canonicalDecimal(String(row.limit_value), "control limit", 9);
 		const consumed = canonicalDecimal(String(window?.consumed_value ?? "0"), "control consumed", 9);
 		const held = canonicalDecimal(String(window?.held_value ?? "0"), "control held", 9);
@@ -1633,7 +1637,4 @@ function validDate(value: Date, field: string): Date {
 	if (!(value instanceof Date) || Number.isNaN(value.getTime()))
 		throw new InvalidRequestError(`${field} must be a valid timestamp`);
 	return value;
-}
-function toIso(value: Date | string): string {
-	return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }

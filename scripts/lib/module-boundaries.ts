@@ -114,6 +114,7 @@ const testSupportPaths = new Set([
 	"scripts/projection-receiver.ts",
 	"scripts/test-e2e.ts",
 	"scripts/test-integration.ts",
+	"scripts/test-load.ts",
 	"scripts/test-migration-integrity.ts",
 ]);
 

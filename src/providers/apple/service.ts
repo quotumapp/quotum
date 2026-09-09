@@ -7,6 +7,7 @@ import type {
 	StoreKitRecordingResult,
 } from "../../db/repository";
 import type { StoreEventReplayProviderResult } from "../../workers/store-event-replay";
+import { requireNonBlank } from "../validation";
 import {
 	normalizeStoredStoreKitEvent,
 	normalizeStoreKitNotification,
@@ -225,13 +226,4 @@ function requireProcessedEntitlements(result: StoreKitRecordingResult): Entitlem
 	}
 
 	return result.entitlements;
-}
-
-function requireNonBlank(value: string, name: string): string {
-	const trimmed = value.trim();
-	if (trimmed === "") {
-		throw new BillingError(`${name} must not be blank`, "INVALID_REQUEST", 400);
-	}
-
-	return trimmed;
 }

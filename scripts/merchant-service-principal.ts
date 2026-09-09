@@ -8,7 +8,6 @@ const name = process.argv[2];
 if (!name || !/^[a-z0-9-]{3,64}$/.test(name))
 	throw new Error("Usage: bun scripts/merchant-service-principal.ts <service-name>");
 const config = loadMerchantConfig();
-if (!config) throw new Error("Merchant authentication must be configured first");
 const connection = createBillingDatabaseConnection(loadEnv());
 try {
 	const token = await new MerchantStore(merchantSql(connection.sql), config).createServicePrincipal(

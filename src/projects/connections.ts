@@ -9,6 +9,8 @@ export interface RuntimeConnectionConfigs {
 		projectionUrl: string;
 		projectionSecret: string;
 		projectionContract: "billing_state_v1";
+		/** Usage-driven snapshot delivery; absent means coalesced. */
+		usageDelivery?: "coalesced" | "off";
 	};
 }
 export type RuntimeConnectionKind = keyof RuntimeConnectionConfigs;

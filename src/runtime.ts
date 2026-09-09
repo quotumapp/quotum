@@ -325,7 +325,7 @@ export function createBillingRuntimeApp(
 	});
 	return attachMerchantRuntime(staff, merchantBilling, {
 		...dependencies.merchant,
-		config: merchantConfig ?? undefined,
+		config: merchantConfig,
 		registerBackground: (worker) => {
 			merchantRuntimes.push(
 				startPollingRuntime({

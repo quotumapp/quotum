@@ -1,0 +1,39 @@
+{
+	"features": [
+		{
+			"key": "ai_credits",
+			"name": "AI credits",
+			"kind": "metered",
+			"meterKind": "consumable",
+			"unit": "credit",
+			"creditScale": 0,
+			"filterDimensions": []
+		},
+		{
+			"key": "api_calls",
+			"name": "API calls",
+			"kind": "metered",
+			"meterKind": "consumable",
+			"unit": "call",
+			"creditScale": 0,
+			"filterDimensions": []
+		}
+	],
+	"plans": [],
+	"topups": [
+		{
+			"key": "credits_10",
+			"featureKey": "ai_credits",
+			"quantity": "10",
+			"expiresAfterSeconds": null,
+			"providerBindings": [{ "productKey": "credits_10", "provider": "stripe", "channel": "web" }]
+		}
+	],
+	"rateCards": [
+		{
+			"meterFeatureKey": "api_calls",
+			"walletFeatureKey": "ai_credits",
+			"ratePerUnit": "1"
+		}
+	]
+}

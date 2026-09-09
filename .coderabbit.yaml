@@ -1,0 +1,141 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit review configuration. The bot runs as a GitHub App on pull requests;
+# nothing in .github/workflows invokes it, so fork PRs are reviewed without secrets.
+# Reference: https://docs.coderabbit.ai/reference/configuration
+
+language: en-US
+
+tone_instructions: >-
+  Be concise and concrete. Report only actionable defects, security issues, contract or
+  boundary violations, and missing tests. Skip praise, restatements of the diff, and
+  style nits that Biome already enforces.
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+  path_filters:
+    - "!contracts/v1/**"
+    - "!contract-reports/**"
+    - "!bun.lock"
+
+  path_instructions:
+    - path: "migrations/**"
+      instructions: >-
+        SQL is authoritative and src/db/schema.ts must mirror it. Migrations are checksummed
+        once applied; before 1.0 the domain baselines evolve in place, after 1.0 changes must be
+        new incremental files. CREATE INDEX CONCURRENTLY belongs in its own file because it runs
+        outside a transaction. Only 001_platform.sql and 004_merchant.sql may touch platform_*
+        tables. Flag unsafe operations on populated databases (blocking locks, non-concurrent
+        indexes, NOT NULL without defaults, destructive rewrites).
+    - path: "src/db/schema.ts"
+      instructions: >-
+        Every column, index, and constraint here must match the SQL under migrations/. Flag any
+        drift between the two.
+    - path: "src/platform/**"
+      instructions: >-
+        Platform code never imports billing modules (src/app, src/billing, src/catalog, src/db,
+        src/providers, src/workers, src/projections, src/projects, src/http, src/admin,
+        src/operations, src/sdk, src/env.ts), Drizzle, or Bun SQL. Repositories receive a
+        PlatformQueryExecutor and call executor.query({ text, values }) with static inline SQL;
+        concatenated SQL is a defect. Platform tables are platform_*.
+    - path: "src/{app,billing,catalog,db,providers,workers,projections,projects,http,admin,operations,sdk}/**"
+      instructions: >-
+        Billing code never imports src/platform, src/composition, or src/testing. Billing SQL may
+        not reference platform_* tables. Every repository call takes the ProjectInstanceContext
+        first; flag any query path that could skip tenancy scoping.
+    - path: "src/shared/**"
+      instructions: >-
+        src/shared depends on nothing domain-specific. Flag imports from any other src/ module.
+    - path: "src/composition/**"
+      instructions: >-
+        This is the only production code allowed to import both billing and platform. Flag
+        cross-domain logic leaking out of here into either side.
+    - path: "src/app/**/*-routes.ts"
+      instructions: >-
+        Routes are declared with defineContract and mounted with registerRoute. Any change to a
+        path, method, status code, header, or Zod schema requires regenerating
+        contracts/v1/openapi.json and contracts/v1/errors.json in the same PR; flag route changes
+        without the regenerated contract. Check that new error responses are declared so the
+        OpenAPI conformance tests do not fail.
+    - path: "src/workers/**"
+      instructions: >-
+        Workers lease job rows by worker_id (locked_by columns) and must only touch rows they
+        hold. Check lease refresh, backoff on retry, and idempotency of runOnce under concurrent
+        workers.
+    - path: "src/testing/**"
+      instructions: >-
+        Test entrypoints must keep throwing unless BILLING_ENV=test and the matching
+        BILLING_TEST_* or MERCHANT_TEST_MODE flags are set. Flag any loosening of those guards.
+    - path: "src/{migrate.ts,providers/**,env.ts,projects/**}"
+      instructions: >-
+        Security-sensitive: migration integrity checks, credential handling, bootstrap credential
+        output, and provider webhook signature verification. Changes here need focused tests, and
+        migration checksum verification must never be bypassed.
+    - path: "tests/**"
+      instructions: >-
+        Tests mirror src/ under tests/ with kebab-case *.test.ts names. Postgres-backed files must
+        be wrapped in describeLocalPostgres or describeE2e so they skip under plain bun test.
+        tests/db asserts rendered SQL without a database; real behavior belongs in
+        tests/integration.
+    - path: "package.json"
+      instructions: >-
+        Bun is pinned to >=1.4.0 <1.5.0. tests/package-scripts.test.ts pins the exact text of
+        several scripts; flag script edits that do not update that test. A change that ships
+        should bump the version.
+    - path: ".github/workflows/**"
+      instructions: >-
+        Public pull requests run with a read-only token and no repository secrets. Flag steps
+        that assume secrets, request write permissions on pull_request, or use unpinned
+        third-party actions.
+
+  tools:
+    biome:
+      enabled: true
+    eslint:
+      enabled: false
+    oxc:
+      enabled: false
+    sqlfluff:
+      enabled: false
+    squawk:
+      enabled: true
+    hadolint:
+      enabled: true
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    gitleaks:
+      enabled: true
+    shellcheck:
+      enabled: true
+    yamllint:
+      enabled: true
+    semgrep:
+      enabled: true
+    osvScanner:
+      enabled: true
+    github-checks:
+      enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  code_guidelines:
+    filePatterns:
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "CONTRIBUTING.md"
+      - "docs/architecture.md"

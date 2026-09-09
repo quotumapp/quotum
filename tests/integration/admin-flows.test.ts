@@ -838,7 +838,7 @@ async function seedAdminReplayEvent(
 		)
 		SELECT projects.id, ${input.provider}, ${input.channel}, ${input.externalEventId},
 			${input.eventType}, 'skipped', 'integration admin replay seed',
-			${JSON.stringify({ projectKey: input.projectKey, provider: input.provider })}::jsonb,
+			${JSON.stringify({ projectKey: input.projectKey, provider: input.provider })}::text::jsonb,
 			now() - INTERVAL '1 second'
 		FROM projects
 		WHERE projects.key = ${input.projectKey}
@@ -923,7 +923,7 @@ async function setStoreEventRawPayload(
 ): Promise<void> {
 	await sql`
 		UPDATE store_events
-		SET raw_payload = ${JSON.stringify(rawPayload)}::jsonb
+		SET raw_payload = ${JSON.stringify(rawPayload)}::text::jsonb
 		WHERE id = ${eventId}
 	`;
 }

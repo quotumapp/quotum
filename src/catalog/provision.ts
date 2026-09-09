@@ -75,7 +75,7 @@ async function syncCatalogDeclaration(
 				schemaVersion: 1,
 				catalogKind: declaration.kind,
 				plan: declaration.plan,
-			})}::jsonb
+			})}::text::jsonb
 		)
 		ON CONFLICT (project_id, key) DO UPDATE SET
 			entitlement_key = EXCLUDED.entitlement_key,
@@ -129,7 +129,7 @@ async function syncCatalogDeclaration(
 			${declaration.currency.toLowerCase()},
 			${declaration.amountCents},
 			${declaration.active},
-			${JSON.stringify({ schemaVersion: 1, catalogKey: declaration.key })}::jsonb
+			${JSON.stringify({ schemaVersion: 1, catalogKey: declaration.key })}::text::jsonb
 		)
 		ON CONFLICT (project_id, provider, external_product_id, external_price_id)
 			WHERE external_price_id IS NOT NULL

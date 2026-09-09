@@ -1,0 +1,21 @@
+[
+	{
+		"projectInstanceKey": "acme",
+		"catalog": [
+			{
+				"key": "credits_10",
+				"name": "10 credits",
+				"kind": "topup",
+				"plan": null,
+				"currency": "USD",
+				"amountCents": 499,
+				"credits": 10,
+				"interval": null,
+				"entitlementKey": "credits",
+				"externalProductId": "prod_quickstart_credits_10",
+				"externalPriceId": "price_quickstart_credits_10",
+				"active": true
+			}
+		]
+	}
+]

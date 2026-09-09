@@ -30,6 +30,7 @@ describe("loadEnv", () => {
 
 		expect(env).toEqual({
 			postgresUri,
+			postgresPreparedStatements: true,
 			authMode: "api_key",
 			operatorApiKey: null,
 			runtimeEnvironment: "development",

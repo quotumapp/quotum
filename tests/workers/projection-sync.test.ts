@@ -65,6 +65,9 @@ describe("ProjectionSyncWorker", () => {
 			batchSize: 5,
 			concurrency: 1,
 			repository: {
+				buildUsageProjection: async (): Promise<never> => {
+					throw new Error("usage projections are not expected here");
+				},
 				claimProjectionSyncJobs: async () => [job],
 				markProjectionSyncJobSucceeded: async (projectId, jobId, workerId) => {
 					calls.push(`succeeded:${projectId}:${jobId}:${workerId}`);
@@ -119,6 +122,9 @@ describe("ProjectionSyncWorker", () => {
 			batchSize: 3,
 			concurrency: 2,
 			repository: {
+				buildUsageProjection: async (): Promise<never> => {
+					throw new Error("usage projections are not expected here");
+				},
 				claimProjectionSyncJobs: async () => jobs,
 				markProjectionSyncJobSucceeded: async (_projectId, jobId) => {
 					succeeded.push(jobId);
@@ -167,6 +173,9 @@ describe("ProjectionSyncWorker", () => {
 			batchSize: 5,
 			concurrency: 1,
 			repository: {
+				buildUsageProjection: async (): Promise<never> => {
+					throw new Error("usage projections are not expected here");
+				},
 				claimProjectionSyncJobs: async () => [
 					{
 						...job,
@@ -235,6 +244,9 @@ describe("ProjectionSyncWorker", () => {
 			maxAttempts: 10,
 			batchSize: 5,
 			repository: {
+				buildUsageProjection: async (): Promise<never> => {
+					throw new Error("usage projections are not expected here");
+				},
 				claimProjectionSyncJobs: async () => [
 					{
 						...job,
@@ -307,6 +319,9 @@ describe("ProjectionSyncWorker", () => {
 			maxAttempts: 10,
 			batchSize: 5,
 			repository: {
+				buildUsageProjection: async (): Promise<never> => {
+					throw new Error("usage projections are not expected here");
+				},
 				claimProjectionSyncJobs: async () => [job],
 				markProjectionSyncJobSucceeded: async () => {
 					throw new Error("should not succeed");
@@ -382,6 +397,9 @@ describe("ProjectionSyncWorker", () => {
 			batchSize: 5,
 			concurrency: 1,
 			repository: {
+				buildUsageProjection: async (): Promise<never> => {
+					throw new Error("usage projections are not expected here");
+				},
 				claimProjectionSyncJobs: async () => [failedJob, laterJob],
 				markProjectionSyncJobSucceeded: async (projectId, jobId) => {
 					calls.push(`succeeded:${projectId}:${jobId}`);
@@ -432,6 +450,9 @@ describe("ProjectionSyncWorker", () => {
 			maxAttempts: 10,
 			batchSize: 5,
 			repository: {
+				buildUsageProjection: async (): Promise<never> => {
+					throw new Error("usage projections are not expected here");
+				},
 				claimProjectionSyncJobs: async () => {
 					throw new Error("database unavailable");
 				},
@@ -452,6 +473,99 @@ describe("ProjectionSyncWorker", () => {
 		expect(errors).toHaveLength(1);
 		expect(errors[0]?.message).toBe("Projection sync run failed");
 		expect(errors[0]?.context).toEqual({ workerId: "worker-a", result: "failed" });
+	});
+
+	it("builds usage-driven jobs at delivery time and forwards the sequence", async () => {
+		const delivered: Array<Record<string, unknown>> = [];
+		const built: string[] = [];
+		const usageJob = { ...job, id: "job_usage", reason: "usage_changed", payload: null } as const;
+		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
+			workerId: "worker-a",
+			maxAttempts: 10,
+			batchSize: 5,
+			concurrency: 1,
+			repository: {
+				buildUsageProjection: async (projectId, customerId) => {
+					built.push(`${projectId}:${customerId}`);
+					return {
+						billingAccountId: "user_1",
+						generatedAt: "2026-06-01T00:00:00.000Z",
+						reason: "usage_changed",
+						entitlements: {
+							billingAccountId: "user_1",
+							generatedAt: "2026-06-01T00:00:00.000Z",
+							entitlements: [],
+						},
+						balances: [
+							{
+								featureKey: "ai_credits",
+								unit: "credit",
+								available: "9.5",
+								held: "0",
+								periodEndsAt: null,
+							},
+						],
+						sequence: 7,
+					};
+				},
+				claimProjectionSyncJobs: async () => [usageJob],
+				markProjectionSyncJobSucceeded: async () => {},
+				markProjectionSyncJobFailed: async () => {
+					throw new Error("unexpected failure");
+				},
+			},
+			delivery: {
+				deliver: async (input) => {
+					delivered.push(input as unknown as Record<string, unknown>);
+				},
+				usageDeliveryMode: async () => "coalesced",
+			},
+		});
+
+		await expect(worker.runOnce()).resolves.toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		expect(built).toEqual(["project_1:customer_1"]);
+		expect(delivered).toHaveLength(1);
+		expect(delivered[0]).toMatchObject({
+			jobId: "job_usage",
+			idempotencyKey: job.idempotency_key,
+			reason: "usage_changed",
+			sequence: 7,
+			balances: [{ featureKey: "ai_credits", available: "9.5" }],
+		});
+	});
+
+	it("marks usage-driven jobs succeeded without delivering when the receiver turned them off", async () => {
+		const calls: string[] = [];
+		const usageJob = { ...job, id: "job_usage", reason: "usage_changed", payload: null } as const;
+		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
+			workerId: "worker-a",
+			maxAttempts: 10,
+			batchSize: 5,
+			concurrency: 1,
+			repository: {
+				buildUsageProjection: async (): Promise<never> => {
+					throw new Error("must not build a payload when delivery is off");
+				},
+				claimProjectionSyncJobs: async () => [usageJob],
+				markProjectionSyncJobSucceeded: async (_projectId, jobId) => {
+					calls.push(`succeeded:${jobId}`);
+				},
+				markProjectionSyncJobFailed: async () => {
+					throw new Error("unexpected failure");
+				},
+			},
+			delivery: {
+				deliver: async () => {
+					throw new Error("must not deliver when usage delivery is off");
+				},
+				usageDeliveryMode: async () => "off",
+			},
+		});
+
+		await expect(worker.runOnce()).resolves.toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		expect(calls).toEqual(["succeeded:job_usage"]);
 	});
 });
 

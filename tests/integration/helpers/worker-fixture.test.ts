@@ -29,6 +29,9 @@ describe("worker fixture helpers", () => {
 			const result = await runProjectionWorkerOnce({
 				env,
 				repository: {
+					async buildUsageProjection(): Promise<never> {
+						throw new Error("usage projections are not expected here");
+					},
 					async claimProjectionSyncJobs(workerId, limit) {
 						calls.push(`claim:${workerId}:${limit}`);
 						return [projectionJob()];

@@ -1,3 +1,4 @@
+import type { ProjectionJobPayload } from "../billing/types";
 import type { ProjectInstanceContext } from "../projects/context";
 import type {
 	ExpiredSubscriptionReconciliationResult,
@@ -8,6 +9,7 @@ import type {
 
 export interface ProjectionSyncJobRepositorySource {
 	claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]>;
+	buildUsageProjection(projectId: string, customerId: string): Promise<ProjectionJobPayload>;
 	markProjectionSyncJobSucceeded(projectId: string, jobId: string, workerId: string): Promise<void>;
 	markProjectionSyncJobFailed(
 		projectId: string,
@@ -23,6 +25,10 @@ export class ProjectionSyncJobRepository implements ProjectionSyncJobRepositoryS
 
 	async claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]> {
 		return await this.source.claimProjectionSyncJobs(workerId, limit);
+	}
+
+	async buildUsageProjection(projectId: string, customerId: string): Promise<ProjectionJobPayload> {
+		return await this.source.buildUsageProjection(projectId, customerId);
 	}
 
 	async markProjectionSyncJobSucceeded(

@@ -6,6 +6,7 @@ import {
 } from "../providers/stripe/testing/fake-client";
 import { createBillingRuntimeApp } from "../runtime";
 import { fixtureConnections, loadFixtureEnv } from "./connection-fixtures";
+import { MerchantCaptureMailer } from "./merchant-fakes";
 
 if (process.env.BILLING_ENV !== "test" || process.env.BILLING_TEST_FAKE_STRIPE !== "true") {
 	throw new Error(
@@ -21,6 +22,7 @@ const app = createBillingRuntimeApp(env, {
 	projectionFetch: globalThis.fetch,
 	stripeClientFactory: (config) => new FakeStripeBillingClient(config, fakeStripeOptions()),
 	readinessCheck: createBillingReadinessCheck(),
+	merchant: { mailer: new MerchantCaptureMailer() },
 });
 
 export default app;

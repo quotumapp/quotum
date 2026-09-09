@@ -2,7 +2,6 @@ import { z } from "zod";
 
 const enabled = (value: string | undefined) => value === "true";
 export interface MerchantConfig {
-	enabled: boolean;
 	signupEnabled: boolean;
 	origin: string;
 	publicUrl: string;
@@ -15,11 +14,13 @@ export interface MerchantConfig {
 }
 export function loadMerchantConfig(
 	env: Record<string, string | undefined> = process.env,
-): MerchantConfig | null {
+): MerchantConfig {
 	const production = (env.BILLING_ENV ?? "production") === "production";
-	if (production && env.MERCHANT_AUTH_ENABLED === "false")
-		throw new Error("Merchant authentication is required in production");
-	if (!production && !enabled(env.MERCHANT_AUTH_ENABLED)) return null;
+	if (production) {
+		for (const name of ["MERCHANT_ORIGIN", "MERCHANT_PUBLIC_URL"] as const) {
+			if (!env[name]?.trim()) throw new Error(`${name} is required in production`);
+		}
+	}
 	const testMode = env.BILLING_ENV === "test";
 	const origin = z.url().parse(env.MERCHANT_ORIGIN ?? "https://app.quotum.dev");
 	const originUrl = new URL(origin);
@@ -51,7 +52,6 @@ export function loadMerchantConfig(
 	if (!testMode && email === null)
 		throw new Error("Cloudflare merchant email configuration is required");
 	return {
-		enabled: true,
 		signupEnabled,
 		origin,
 		publicUrl: env.MERCHANT_PUBLIC_URL ?? "https://quotum.dev",

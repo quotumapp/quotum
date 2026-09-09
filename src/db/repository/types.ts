@@ -20,7 +20,7 @@ export interface ProjectionSyncJobRow {
 	customer_id: string;
 	idempotency_key: string;
 	reason: ProjectionSyncReason;
-	payload: ProjectionJobPayload;
+	payload: ProjectionJobPayload | null;
 	status: ProjectionSyncStatus;
 	attempts: number;
 	last_error: string | null;

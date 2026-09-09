@@ -1,3 +1,4 @@
+import type { ProjectionJobPayload } from "../billing/types";
 import type { ProjectionSyncJobRow } from "../db/repository";
 import {
 	type BillingLogger,
@@ -17,6 +18,7 @@ import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface ProjectionSyncRepository {
 	claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]>;
+	buildUsageProjection(projectId: string, customerId: string): Promise<ProjectionJobPayload>;
 	markProjectionSyncJobSucceeded(projectId: string, jobId: string, workerId: string): Promise<void>;
 	markProjectionSyncJobFailed(
 		projectId: string,
@@ -109,9 +111,29 @@ export class ProjectionSyncWorker {
 		}
 	}
 
-	private async syncJob(job: ProjectionSyncJobRow, project: ProjectInstanceContext): Promise<void> {
-		const { billingAccountId, generatedAt, entitlements, balances, reason, purchase, reversal } =
-			job.payload;
+	private async syncJob(
+		job: ProjectionSyncJobRow,
+		project: ProjectInstanceContext,
+	): Promise<"delivered" | "skipped"> {
+		let payload: ProjectionJobPayload | null = job.payload;
+		if (payload === null) {
+			// Usage-driven jobs carry no stored payload: the receiver may have turned them off, and
+			// otherwise the state is read at delivery so one delivery covers every usage since the last.
+			const mode =
+				(await this.delivery.usageDeliveryMode?.(project.projectInstanceKey)) ?? "coalesced";
+			if (mode === "off") return "skipped";
+			payload = await this.repository.buildUsageProjection(job.project_id, job.customer_id);
+		}
+		const {
+			billingAccountId,
+			generatedAt,
+			entitlements,
+			balances,
+			reason,
+			purchase,
+			reversal,
+			sequence,
+		} = payload;
 		await this.delivery.deliver({
 			schemaVersion: 1,
 			projectKey: project.projectInstanceKey,
@@ -124,7 +146,9 @@ export class ProjectionSyncWorker {
 			reason,
 			...(purchase ? { purchase } : {}),
 			...(reversal ? { reversal } : {}),
+			...(sequence === undefined ? {} : { sequence }),
 		});
+		return "delivered";
 	}
 
 	private async syncClaimedJobs(

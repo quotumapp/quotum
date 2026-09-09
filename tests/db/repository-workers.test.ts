@@ -63,7 +63,7 @@ describe("BillingRepository workers", () => {
 		expect(database.queries[0]).toContain("FOR UPDATE OF jobs SKIP LOCKED");
 		expect(database.queries[0]).toContain("status = 'processing'");
 		expect(database.queries[0]).toContain("ROW_NUMBER() OVER");
-		expect(database.queries[0]).toContain("PARTITION BY jobs.project_id");
+		expect(database.queries[0]).toContain("PARTITION BY candidates.project_id");
 	});
 
 	it("records projection resync requests with durable boolean state", async () => {
@@ -83,6 +83,7 @@ describe("BillingRepository workers", () => {
 			[{ id: "customer-id" }],
 			[],
 			[{ id: "customer-id" }],
+			[{ projection_sequence: 1, billing_account_id: "user-1" }],
 			[],
 			[{ project_id: "project-id" }],
 			[{ id: "projection-job-id" }],

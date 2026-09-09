@@ -21,12 +21,17 @@ export interface PostgresHealthSnapshot {
 const postgresStatementTimeoutMs = 30_000;
 const postgresIdleInTransactionSessionTimeoutMs = 30_000;
 
-export function createBillingDatabaseConnection(env: Pick<BillingEnv, "postgresUri">) {
+export function createBillingDatabaseConnection(
+	env: Pick<BillingEnv, "postgresUri"> & Partial<Pick<BillingEnv, "postgresPreparedStatements">>,
+) {
 	const sql = new SQL(env.postgresUri, {
 		max: 20,
 		idleTimeout: 60,
 		maxLifetime: 0,
-		prepare: false,
+		// Named prepared statements let the driver pipeline the independent statements the
+		// metering path issues together. Disable only behind a transaction-mode pooler that
+		// cannot hold them.
+		prepare: env.postgresPreparedStatements ?? true,
 		connection: {
 			statement_timeout: postgresStatementTimeoutMs,
 			idle_in_transaction_session_timeout: postgresIdleInTransactionSessionTimeoutMs,

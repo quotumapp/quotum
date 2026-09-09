@@ -5,7 +5,6 @@ import { BillingError, isBillingError } from "../billing/errors";
 import { type RateLimitResult, rateLimitMiddleware } from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
-import type { ProjectInstanceContext } from "../projects/context";
 import { defineContract, registerRoute } from "../shared/http-contract";
 import * as responses from "./contracts/customer-responses";
 import {
@@ -13,8 +12,8 @@ import {
 	requireGooglePlayBillingService,
 	requireStripeBillingService,
 } from "./provider-services";
+import { privateProject } from "./request-context";
 import type {
-	BillingContext,
 	BillingHonoEnv,
 	ProjectProviderServiceResolver,
 	StripeBillingServiceLike,
@@ -489,14 +488,6 @@ async function optionalPrivateJson(
 		return {};
 	}
 	return await parsePrivateJson(request);
-}
-
-function privateProject(c: BillingContext): ProjectInstanceContext {
-	const project = c.get("project");
-	if (project === undefined) {
-		throw new BillingError("Billing project context is required", "BILLING_PROJECT_REQUIRED", 401);
-	}
-	return project;
 }
 
 function parseStripeCustomerRouteParams(params: Record<string, string>): {

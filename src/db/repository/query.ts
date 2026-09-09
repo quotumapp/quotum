@@ -27,6 +27,10 @@ export async function assertUpdated(
 	}
 }
 
+/**
+ * The parameter is bound as text and cast on the server. Binding it as jsonb would make a driver
+ * that infers parameter types from the statement JSON-encode the serialized string a second time.
+ */
 export function jsonb(value: unknown): DrizzleSQL {
-	return drizzleSql`${JSON.stringify(value)}::jsonb`;
+	return drizzleSql`${JSON.stringify(value)}::text::jsonb`;
 }

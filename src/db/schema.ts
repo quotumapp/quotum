@@ -71,6 +71,7 @@ export const customers = pgTable(
 		billingAccountId: text("billing_account_id").notNull(),
 		email: text("email"),
 		metadata: metadataColumn(),
+		projectionSequence: bigint("projection_sequence", { mode: "number" }).notNull().default(0),
 		...timestampColumns(),
 	},
 	(table) => [
@@ -751,7 +752,7 @@ export const projectionSyncJobs = pgTable(
 			.references(() => customers.id, { onDelete: "cascade" }),
 		idempotencyKey: text("idempotency_key").notNull(),
 		reason: text("reason").$type<ProjectionSyncReason>().notNull(),
-		payload: jsonb("payload").$type<ProjectionJobPayload>().notNull(),
+		payload: jsonb("payload").$type<ProjectionJobPayload | null>(),
 		status: text("status").$type<ProjectionSyncStatus>().notNull().default("pending"),
 		attempts: integer("attempts").notNull().default(0),
 		lastError: text("last_error"),
@@ -803,6 +804,7 @@ export const meteringSettings = pgTable("metering_settings", {
 	occurredAtMaxSkewSeconds: integer("occurred_at_max_skew_seconds").notNull().default(300),
 	rawUsageRetentionDays: integer("raw_usage_retention_days").notNull().default(400),
 	consumeP99TargetMs: integer("consume_p99_target_ms").notNull().default(50),
+	projectionUsageDebounceMs: integer("projection_usage_debounce_ms").notNull().default(1000),
 	...timestampColumns(),
 });
 

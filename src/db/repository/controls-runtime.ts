@@ -1,6 +1,11 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type { EffectiveControl } from "../../billing/controls";
-import { canonicalDecimal, decimalToUnits, unitsToDecimal } from "../../billing/decimal";
+import {
+	canonicalDecimal,
+	decimalToUnits,
+	signedDecimalToUnits,
+	unitsToDecimal,
+} from "../../billing/decimal";
 import { controlWindowBounds, resolveEffectiveControls } from "./controls-enterprise";
 import { executeOne, executeRows } from "./query";
 import type { QueryExecutor } from "./types";
@@ -67,17 +72,19 @@ async function evaluateControls(
 	reservationId: string | null,
 ): Promise<ControlConsumptionResult> {
 	const now = input.now ?? new Date();
-	if (mode !== "check") {
-		await lockCustomerControls(executor, input.projectId, input.customerId);
-	}
-	const controls = (
-		await resolveEffectiveControls(executor, {
+	// The customer lock is issued first, so it executes before the pipelined control read.
+	const [, effectiveControls] = await Promise.all([
+		mode === "check"
+			? Promise.resolve()
+			: lockCustomerControls(executor, input.projectId, input.customerId),
+		resolveEffectiveControls(executor, {
 			projectId: input.projectId,
 			customerId: input.customerId,
 			entityId: input.entityId,
 			now,
-		})
-	)
+		}),
+	]);
+	const controls = effectiveControls
 		.filter(
 			(control) =>
 				(control.controlKind === "usage_limit" && control.featureKey === input.featureKey) ||
@@ -216,21 +223,23 @@ export async function confirmControlHolds(
 	executor: QueryExecutor,
 	input: ControlDeltaInput & { reservationId: string },
 ): Promise<ControlConsumptionResult> {
-	await lockCustomerControls(executor, input.projectId, input.customerId);
-	const existingHolds = await executeRows<{
-		control_window_id: string | number | bigint;
-		control_policy_id: string | number | bigint;
-		held_value: unknown;
-		consumed_value: unknown;
-		window_held_value: unknown;
-		control_kind: "spend_limit" | "usage_limit";
-		currency: string | null;
-		limit_value: unknown;
-		source_type: EffectiveControl["source"];
-		revision: number;
-	}>(
-		executor,
-		drizzleSql`
+	// The customer lock is issued first; the hold and control reads behind it are pipelined.
+	const [, existingHolds, resolvedControls] = await Promise.all([
+		lockCustomerControls(executor, input.projectId, input.customerId),
+		executeRows<{
+			control_window_id: string | number | bigint;
+			control_policy_id: string | number | bigint;
+			held_value: unknown;
+			consumed_value: unknown;
+			window_held_value: unknown;
+			control_kind: "spend_limit" | "usage_limit";
+			currency: string | null;
+			limit_value: unknown;
+			source_type: EffectiveControl["source"];
+			revision: number;
+		}>(
+			executor,
+			drizzleSql`
 		SELECT hold.control_window_id, control_window.control_policy_id,
 			hold.held_value::text AS held_value, hold.consumed_value::text AS consumed_value,
 			control_window.held_value::text AS window_held_value, policy.control_kind, policy.currency,
@@ -243,15 +252,15 @@ export async function confirmControlHolds(
 		WHERE hold.project_id = ${input.projectId} AND hold.reservation_id = ${input.reservationId}
 		ORDER BY hold.control_window_id FOR UPDATE OF control_window, hold
 	`,
-	);
-	const activeControls = (
-		await resolveEffectiveControls(executor, {
+		),
+		resolveEffectiveControls(executor, {
 			projectId: input.projectId,
 			customerId: input.customerId,
 			entityId: input.entityId,
-			now: input.now,
-		})
-	).filter(
+			now: input.now ?? new Date(),
+		}),
+	]);
+	const activeControls = resolvedControls.filter(
 		(control) =>
 			(control.controlKind === "usage_limit" && control.featureKey === input.featureKey) ||
 			(control.controlKind === "spend_limit" &&
@@ -508,7 +517,7 @@ export async function correctControlConsumption(
 			entry.control_kind === "usage_limit"
 				? decimalToUnits(input.usageReduction, 9)
 				: entry.currency === input.currency
-					? signedUnits(input.spendMinorReduction, 9)
+					? signedDecimalToUnits(input.spendMinorReduction, 9)
 					: 0n;
 		if (reductionUnits === 0n) continue;
 		const currentUnits = decimalToUnits(String(entry.consumed_value), 9);
@@ -543,28 +552,21 @@ export async function correctControlConsumption(
 	}
 }
 
-export async function recordUsageAlertDelta(
+export interface UsageAlertRow {
+	id: string | number | bigint;
+	entity_id: string | number | bigint | null;
+	interval: "month" | "year" | "lifetime";
+	threshold_type: "absolute" | "percentage";
+	threshold_value: unknown;
+	feature_key: string;
+}
+
+/** Active alerts for one customer and feature; callers may prefetch this in a pipelined batch. */
+export function queryUsageAlerts(
 	executor: QueryExecutor,
-	input: {
-		projectId: string;
-		customerId: string;
-		entityId: string | null;
-		featureId: string;
-		delta: string;
-		now?: Date;
-	},
-): Promise<void> {
-	const deltaUnits = signedUnits(input.delta, 9);
-	if (deltaUnits === 0n) return;
-	const now = input.now ?? new Date();
-	const alerts = await executeRows<{
-		id: string | number | bigint;
-		entity_id: string | number | bigint | null;
-		interval: "month" | "year" | "lifetime";
-		threshold_type: "absolute" | "percentage";
-		threshold_value: unknown;
-		feature_key: string;
-	}>(
+	input: { projectId: string; customerId: string; entityId: string | null; featureId: string },
+): Promise<UsageAlertRow[]> {
+	return executeRows<UsageAlertRow>(
 		executor,
 		drizzleSql`
 		SELECT alert.id, alert.entity_id, alert.interval, alert.threshold_type,
@@ -577,6 +579,24 @@ export async function recordUsageAlertDelta(
 		ORDER BY alert.id
 	`,
 	);
+}
+
+export async function recordUsageAlertDelta(
+	executor: QueryExecutor,
+	input: {
+		projectId: string;
+		customerId: string;
+		entityId: string | null;
+		featureId: string;
+		delta: string;
+		now?: Date;
+		alerts?: readonly UsageAlertRow[];
+	},
+): Promise<void> {
+	const deltaUnits = signedDecimalToUnits(input.delta, 9);
+	if (deltaUnits === 0n) return;
+	const now = input.now ?? new Date();
+	const alerts = input.alerts ?? (await queryUsageAlerts(executor, input));
 	for (const alert of alerts) {
 		const bounds = controlWindowBounds(alert.interval, now);
 		let threshold = canonicalDecimal(String(alert.threshold_value), "alert threshold", 9);
@@ -626,7 +646,7 @@ export async function recordUsageAlertDelta(
 		);
 		if (state === null) continue;
 		const sameWindow = new Date(state.window_start_at).getTime() === bounds.start.getTime();
-		const currentUnits = sameWindow ? signedUnits(String(state.current_value), 9) : 0n;
+		const currentUnits = sameWindow ? signedDecimalToUnits(String(state.current_value), 9) : 0n;
 		const nextUnits = currentUnits + deltaUnits > 0n ? currentUnits + deltaUnits : 0n;
 		const thresholdUnits = decimalToUnits(threshold, 9);
 		const nextCrossed = nextUnits >= thresholdUnits;
@@ -668,29 +688,25 @@ export async function recordUsageAlertDelta(
 	}
 }
 
-export async function scheduleAutoTopupIfNeeded(
+export interface AutoTopupPolicyRow {
+	id: string | number | bigint;
+	provider: "apple" | "google" | "stripe";
+	threshold_quantity: unknown;
+	cooldown_seconds: number;
+	limit_interval_seconds: number;
+	max_purchases_per_interval: number;
+	max_spend_minor: number | string | null;
+	amount_minor: number | string | null;
+	currency: string | null;
+	store_product_id: string;
+}
+
+/** The active automatic top-up policy for one wallet feature, if any; safe to prefetch. */
+export function queryAutoTopupPolicy(
 	executor: QueryExecutor,
-	input: {
-		projectId: string;
-		customerId: string;
-		entityId: string | null;
-		featureId: string;
-		availableQuantity: string;
-		triggerKey: string;
-	},
-): Promise<void> {
-	const policy = await executeOne<{
-		id: string | number | bigint;
-		provider: "apple" | "google" | "stripe";
-		threshold_quantity: unknown;
-		cooldown_seconds: number;
-		limit_interval_seconds: number;
-		max_purchases_per_interval: number;
-		max_spend_minor: number | string | null;
-		amount_minor: number | string | null;
-		currency: string | null;
-		store_product_id: string;
-	}>(
+	input: { projectId: string; customerId: string; entityId: string | null; featureId: string },
+): Promise<AutoTopupPolicyRow | null> {
+	return executeOne<AutoTopupPolicyRow>(
 		executor,
 		drizzleSql`
 		SELECT policy.id, policy.provider, policy.threshold_quantity::text AS threshold_quantity,
@@ -708,6 +724,22 @@ export async function scheduleAutoTopupIfNeeded(
 		LIMIT 1
 	`,
 	);
+}
+
+export async function scheduleAutoTopupIfNeeded(
+	executor: QueryExecutor,
+	input: {
+		projectId: string;
+		customerId: string;
+		entityId: string | null;
+		featureId: string;
+		availableQuantity: string;
+		triggerKey: string;
+		policy?: AutoTopupPolicyRow | null;
+	},
+): Promise<void> {
+	const policy =
+		input.policy === undefined ? await queryAutoTopupPolicy(executor, input) : input.policy;
 	if (policy === null) return;
 	if (
 		decimalToUnits(input.availableQuantity, 9) >
@@ -792,12 +824,6 @@ export async function scheduleAutoTopupIfNeeded(
 		WHERE project_id = ${input.projectId} AND policy_id = ${String(policy.id)}::bigint RETURNING policy_id
 	`,
 	);
-}
-
-function signedUnits(value: string, scale: number): bigint {
-	return value.startsWith("-")
-		? -decimalToUnits(value.slice(1), scale)
-		: decimalToUnits(value, scale);
 }
 
 async function lockCustomerControls(

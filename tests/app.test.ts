@@ -24,6 +24,7 @@ import { projectContextResolver, projectInstanceContext } from "./helpers/projec
 
 const env: BillingEnv = {
 	postgresUri: "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+	postgresPreparedStatements: true,
 	authMode: "api_key",
 	operatorApiKey: "operator-secret-key",
 	connectionFixtures: [

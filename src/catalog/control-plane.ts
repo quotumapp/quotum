@@ -11,6 +11,7 @@ import { RepositoryModule } from "../db/repository/base";
 import { executeOne, executeRows, jsonb } from "../db/repository/query";
 import type { QueryExecutor } from "../db/repository/types";
 import type { ProjectInstanceContext } from "../projects/context";
+import { toIso } from "../shared/date";
 import type {
 	CatalogControlIntent,
 	CatalogControlPlaneLike,
@@ -1733,8 +1734,4 @@ function requireMap(map: Map<string, string>, key: string): string {
 	const value = map.get(key);
 	if (value === undefined) throw new Error(`Catalog reference ${key} was not resolved`);
 	return value;
-}
-
-function toIso(value: Date | string): string {
-	return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }

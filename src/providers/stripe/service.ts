@@ -35,6 +35,7 @@ import type {
 	StripeWebStoreProductRow,
 } from "../../db/repository";
 import type { StoreEventReplayProviderResult } from "../../workers/store-event-replay";
+import { requireNonBlank } from "../validation";
 import {
 	normalizeStripeCheckoutSession,
 	normalizeStripeDispute,
@@ -1549,15 +1550,6 @@ function requireActiveBasePlanRepository(
 		throw new BillingError("Recurring pricing is not configured", "STRIPE_NOT_CONFIGURED", 503);
 	}
 	return repository.hasActiveBasePlan.bind(repository);
-}
-
-function requireNonBlank(value: string, name: string): string {
-	const trimmed = value.trim();
-	if (trimmed === "") {
-		throw new BillingError(`${name} must not be blank`, "INVALID_REQUEST", 400);
-	}
-
-	return trimmed;
 }
 
 function parseStripeEvent(event: unknown): ParsedStripeEvent {

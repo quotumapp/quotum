@@ -38,7 +38,7 @@ import type {
 	SubscriptionChangePreview,
 	UsageInvoiceJob,
 } from "../billing/recurring";
-import type { BillingProvider, EntitlementSnapshot } from "../billing/types";
+import type { BillingProvider, EntitlementSnapshot, ProjectionJobPayload } from "../billing/types";
 import type {
 	UsageOperationLookupInput,
 	UsageOperationLookupResult,
@@ -210,6 +210,10 @@ export class BillingRepository {
 
 	async claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]> {
 		return await this.projectionJobs.claimProjectionSyncJobs(workerId, limit);
+	}
+
+	async buildUsageProjection(projectId: string, customerId: string): Promise<ProjectionJobPayload> {
+		return await this.projectionJobs.buildUsageProjection(projectId, customerId);
 	}
 
 	async markProjectionSyncJobSucceeded(

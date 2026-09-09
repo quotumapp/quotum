@@ -58,6 +58,7 @@ export function createIntegrationBillingEnv(
 ): BillingEnv {
 	return {
 		postgresUri,
+		postgresPreparedStatements: true,
 		authMode: "api_key",
 		operatorApiKey: "billing-integration-operator-key",
 		trustGatewayProjectHeader: false,

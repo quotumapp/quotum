@@ -1,0 +1,23 @@
+{
+	"version": 1,
+	"organizations": [
+		{
+			"slug": "acme",
+			"name": "Acme",
+			"projects": [
+				{
+					"key": "acme",
+					"name": "Acme App",
+					"instances": [
+						{
+							"key": "acme",
+							"environment": "sandbox",
+							"lifecycleStatus": "active",
+							"issueCredential": true
+						}
+					]
+				}
+			]
+		}
+	]
+}

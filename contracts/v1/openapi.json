@@ -19,9 +19,6 @@
             "readOnly": true,
             "type": "string"
           },
-          "issuer": {
-            "type": "string"
-          },
           "providerId": {
             "type": "string"
           },
@@ -42,7 +39,6 @@
         },
         "required": [
           "id",
-          "issuer",
           "accountId",
           "providerId",
           "userId",
@@ -1968,59 +1964,25 @@
                       ]
                     },
                     "payload": {
-                      "properties": {
-                        "balances": {
-                          "items": {
-                            "properties": {
-                              "available": {
-                                "type": "string"
-                              },
-                              "featureKey": {
-                                "type": "string"
-                              },
-                              "held": {
-                                "type": "string"
-                              },
-                              "periodEndsAt": {
-                                "anyOf": [
-                                  {
-                                    "type": "null"
-                                  },
-                                  {
-                                    "type": "string"
-                                  }
-                                ]
-                              },
-                              "unit": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "featureKey",
-                              "unit",
-                              "available",
-                              "held",
-                              "periodEndsAt"
-                            ],
-                            "type": "object"
-                          },
-                          "type": "array"
+                      "anyOf": [
+                        {
+                          "type": "null"
                         },
-                        "billingAccountId": {
-                          "type": "string"
-                        },
-                        "entitlements": {
+                        {
                           "properties": {
-                            "billingAccountId": {
-                              "type": "string"
-                            },
-                            "entitlements": {
+                            "balances": {
                               "items": {
                                 "properties": {
-                                  "active": {
-                                    "type": "boolean"
+                                  "available": {
+                                    "type": "string"
                                   },
-                                  "expiresAt": {
+                                  "featureKey": {
+                                    "type": "string"
+                                  },
+                                  "held": {
+                                    "type": "string"
+                                  },
+                                  "periodEndsAt": {
                                     "anyOf": [
                                       {
                                         "type": "null"
@@ -2030,175 +1992,219 @@
                                       }
                                     ]
                                   },
-                                  "key": {
+                                  "unit": {
                                     "type": "string"
-                                  },
-                                  "metadata": {
-                                    "additionalProperties": {},
-                                    "type": "object"
                                   }
                                 },
                                 "required": [
-                                  "key",
-                                  "active",
-                                  "expiresAt",
-                                  "metadata"
+                                  "featureKey",
+                                  "unit",
+                                  "available",
+                                  "held",
+                                  "periodEndsAt"
                                 ],
                                 "type": "object"
                               },
                               "type": "array"
                             },
+                            "billingAccountId": {
+                              "type": "string"
+                            },
+                            "entitlements": {
+                              "properties": {
+                                "billingAccountId": {
+                                  "type": "string"
+                                },
+                                "entitlements": {
+                                  "items": {
+                                    "properties": {
+                                      "active": {
+                                        "type": "boolean"
+                                      },
+                                      "expiresAt": {
+                                        "anyOf": [
+                                          {
+                                            "type": "null"
+                                          },
+                                          {
+                                            "type": "string"
+                                          }
+                                        ]
+                                      },
+                                      "key": {
+                                        "type": "string"
+                                      },
+                                      "metadata": {
+                                        "additionalProperties": {},
+                                        "type": "object"
+                                      }
+                                    },
+                                    "required": [
+                                      "key",
+                                      "active",
+                                      "expiresAt",
+                                      "metadata"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "generatedAt": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "billingAccountId",
+                                "entitlements",
+                                "generatedAt"
+                              ],
+                              "type": "object"
+                            },
                             "generatedAt": {
                               "type": "string"
+                            },
+                            "purchase": {
+                              "properties": {
+                                "channel": {
+                                  "enum": [
+                                    "ios",
+                                    "android",
+                                    "web"
+                                  ],
+                                  "type": "string"
+                                },
+                                "creditAmount": {
+                                  "type": "number"
+                                },
+                                "productKey": {
+                                  "type": "string"
+                                },
+                                "provider": {
+                                  "enum": [
+                                    "google",
+                                    "apple",
+                                    "stripe"
+                                  ],
+                                  "type": "string"
+                                },
+                                "purchasedAt": {
+                                  "type": "string"
+                                },
+                                "purchaseKind": {
+                                  "enum": [
+                                    "subscription",
+                                    "consumable",
+                                    "non_consumable"
+                                  ],
+                                  "type": "string"
+                                },
+                                "quantity": {
+                                  "type": "number"
+                                },
+                                "refundableQuantity": {
+                                  "type": "number"
+                                },
+                                "totalCreditAmount": {
+                                  "type": "number"
+                                },
+                                "transactionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "provider",
+                                "channel",
+                                "purchaseKind",
+                                "transactionId",
+                                "productKey",
+                                "creditAmount",
+                                "purchasedAt"
+                              ],
+                              "type": "object"
+                            },
+                            "reason": {
+                              "enum": [
+                                "purchase_verified",
+                                "provider_webhook",
+                                "expiry_reconciliation",
+                                "provider_reconciliation",
+                                "usage_changed"
+                              ],
+                              "type": "string"
+                            },
+                            "reversal": {
+                              "properties": {
+                                "channel": {
+                                  "enum": [
+                                    "ios",
+                                    "android",
+                                    "web"
+                                  ],
+                                  "type": "string"
+                                },
+                                "creditAmount": {
+                                  "type": "number"
+                                },
+                                "originalTransactionId": {
+                                  "type": "string"
+                                },
+                                "productKey": {
+                                  "type": "string"
+                                },
+                                "provider": {
+                                  "enum": [
+                                    "google",
+                                    "apple",
+                                    "stripe"
+                                  ],
+                                  "type": "string"
+                                },
+                                "quantity": {
+                                  "type": "number"
+                                },
+                                "reason": {
+                                  "enum": [
+                                    "refund",
+                                    "dispute"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reversedAt": {
+                                  "type": "string"
+                                },
+                                "totalCreditAmount": {
+                                  "type": "number"
+                                },
+                                "transactionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "provider",
+                                "channel",
+                                "reason",
+                                "transactionId",
+                                "originalTransactionId",
+                                "productKey",
+                                "creditAmount",
+                                "reversedAt"
+                              ],
+                              "type": "object"
+                            },
+                            "sequence": {
+                              "type": "number"
                             }
                           },
                           "required": [
                             "billingAccountId",
+                            "generatedAt",
                             "entitlements",
-                            "generatedAt"
-                          ],
-                          "type": "object"
-                        },
-                        "generatedAt": {
-                          "type": "string"
-                        },
-                        "purchase": {
-                          "properties": {
-                            "channel": {
-                              "enum": [
-                                "ios",
-                                "android",
-                                "web"
-                              ],
-                              "type": "string"
-                            },
-                            "creditAmount": {
-                              "type": "number"
-                            },
-                            "productKey": {
-                              "type": "string"
-                            },
-                            "provider": {
-                              "enum": [
-                                "google",
-                                "apple",
-                                "stripe"
-                              ],
-                              "type": "string"
-                            },
-                            "purchasedAt": {
-                              "type": "string"
-                            },
-                            "purchaseKind": {
-                              "enum": [
-                                "subscription",
-                                "consumable",
-                                "non_consumable"
-                              ],
-                              "type": "string"
-                            },
-                            "quantity": {
-                              "type": "number"
-                            },
-                            "refundableQuantity": {
-                              "type": "number"
-                            },
-                            "totalCreditAmount": {
-                              "type": "number"
-                            },
-                            "transactionId": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "channel",
-                            "purchaseKind",
-                            "transactionId",
-                            "productKey",
-                            "creditAmount",
-                            "purchasedAt"
-                          ],
-                          "type": "object"
-                        },
-                        "reason": {
-                          "enum": [
-                            "purchase_verified",
-                            "provider_webhook",
-                            "expiry_reconciliation",
-                            "provider_reconciliation",
-                            "usage_changed"
-                          ],
-                          "type": "string"
-                        },
-                        "reversal": {
-                          "properties": {
-                            "channel": {
-                              "enum": [
-                                "ios",
-                                "android",
-                                "web"
-                              ],
-                              "type": "string"
-                            },
-                            "creditAmount": {
-                              "type": "number"
-                            },
-                            "originalTransactionId": {
-                              "type": "string"
-                            },
-                            "productKey": {
-                              "type": "string"
-                            },
-                            "provider": {
-                              "enum": [
-                                "google",
-                                "apple",
-                                "stripe"
-                              ],
-                              "type": "string"
-                            },
-                            "quantity": {
-                              "type": "number"
-                            },
-                            "reason": {
-                              "enum": [
-                                "refund",
-                                "dispute"
-                              ],
-                              "type": "string"
-                            },
-                            "reversedAt": {
-                              "type": "string"
-                            },
-                            "totalCreditAmount": {
-                              "type": "number"
-                            },
-                            "transactionId": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "channel",
-                            "reason",
-                            "transactionId",
-                            "originalTransactionId",
-                            "productKey",
-                            "creditAmount",
-                            "reversedAt"
+                            "balances",
+                            "reason"
                           ],
                           "type": "object"
                         }
-                      },
-                      "required": [
-                        "billingAccountId",
-                        "generatedAt",
-                        "entitlements",
-                        "balances",
-                        "reason"
-                      ],
-                      "type": "object"
+                      ]
                     },
                     "reason": {
                       "enum": [
@@ -2636,59 +2642,25 @@
                   ]
                 },
                 "payload": {
-                  "properties": {
-                    "balances": {
-                      "items": {
-                        "properties": {
-                          "available": {
-                            "type": "string"
-                          },
-                          "featureKey": {
-                            "type": "string"
-                          },
-                          "held": {
-                            "type": "string"
-                          },
-                          "periodEndsAt": {
-                            "anyOf": [
-                              {
-                                "type": "null"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ]
-                          },
-                          "unit": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "featureKey",
-                          "unit",
-                          "available",
-                          "held",
-                          "periodEndsAt"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
+                  "anyOf": [
+                    {
+                      "type": "null"
                     },
-                    "billingAccountId": {
-                      "type": "string"
-                    },
-                    "entitlements": {
+                    {
                       "properties": {
-                        "billingAccountId": {
-                          "type": "string"
-                        },
-                        "entitlements": {
+                        "balances": {
                           "items": {
                             "properties": {
-                              "active": {
-                                "type": "boolean"
+                              "available": {
+                                "type": "string"
                               },
-                              "expiresAt": {
+                              "featureKey": {
+                                "type": "string"
+                              },
+                              "held": {
+                                "type": "string"
+                              },
+                              "periodEndsAt": {
                                 "anyOf": [
                                   {
                                     "type": "null"
@@ -2698,175 +2670,219 @@
                                   }
                                 ]
                               },
-                              "key": {
+                              "unit": {
                                 "type": "string"
-                              },
-                              "metadata": {
-                                "additionalProperties": {},
-                                "type": "object"
                               }
                             },
                             "required": [
-                              "key",
-                              "active",
-                              "expiresAt",
-                              "metadata"
+                              "featureKey",
+                              "unit",
+                              "available",
+                              "held",
+                              "periodEndsAt"
                             ],
                             "type": "object"
                           },
                           "type": "array"
                         },
+                        "billingAccountId": {
+                          "type": "string"
+                        },
+                        "entitlements": {
+                          "properties": {
+                            "billingAccountId": {
+                              "type": "string"
+                            },
+                            "entitlements": {
+                              "items": {
+                                "properties": {
+                                  "active": {
+                                    "type": "boolean"
+                                  },
+                                  "expiresAt": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "string"
+                                      }
+                                    ]
+                                  },
+                                  "key": {
+                                    "type": "string"
+                                  },
+                                  "metadata": {
+                                    "additionalProperties": {},
+                                    "type": "object"
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "active",
+                                  "expiresAt",
+                                  "metadata"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "generatedAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "billingAccountId",
+                            "entitlements",
+                            "generatedAt"
+                          ],
+                          "type": "object"
+                        },
                         "generatedAt": {
                           "type": "string"
+                        },
+                        "purchase": {
+                          "properties": {
+                            "channel": {
+                              "enum": [
+                                "ios",
+                                "android",
+                                "web"
+                              ],
+                              "type": "string"
+                            },
+                            "creditAmount": {
+                              "type": "number"
+                            },
+                            "productKey": {
+                              "type": "string"
+                            },
+                            "provider": {
+                              "enum": [
+                                "google",
+                                "apple",
+                                "stripe"
+                              ],
+                              "type": "string"
+                            },
+                            "purchasedAt": {
+                              "type": "string"
+                            },
+                            "purchaseKind": {
+                              "enum": [
+                                "subscription",
+                                "consumable",
+                                "non_consumable"
+                              ],
+                              "type": "string"
+                            },
+                            "quantity": {
+                              "type": "number"
+                            },
+                            "refundableQuantity": {
+                              "type": "number"
+                            },
+                            "totalCreditAmount": {
+                              "type": "number"
+                            },
+                            "transactionId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "channel",
+                            "purchaseKind",
+                            "transactionId",
+                            "productKey",
+                            "creditAmount",
+                            "purchasedAt"
+                          ],
+                          "type": "object"
+                        },
+                        "reason": {
+                          "enum": [
+                            "purchase_verified",
+                            "provider_webhook",
+                            "expiry_reconciliation",
+                            "provider_reconciliation",
+                            "usage_changed"
+                          ],
+                          "type": "string"
+                        },
+                        "reversal": {
+                          "properties": {
+                            "channel": {
+                              "enum": [
+                                "ios",
+                                "android",
+                                "web"
+                              ],
+                              "type": "string"
+                            },
+                            "creditAmount": {
+                              "type": "number"
+                            },
+                            "originalTransactionId": {
+                              "type": "string"
+                            },
+                            "productKey": {
+                              "type": "string"
+                            },
+                            "provider": {
+                              "enum": [
+                                "google",
+                                "apple",
+                                "stripe"
+                              ],
+                              "type": "string"
+                            },
+                            "quantity": {
+                              "type": "number"
+                            },
+                            "reason": {
+                              "enum": [
+                                "refund",
+                                "dispute"
+                              ],
+                              "type": "string"
+                            },
+                            "reversedAt": {
+                              "type": "string"
+                            },
+                            "totalCreditAmount": {
+                              "type": "number"
+                            },
+                            "transactionId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "channel",
+                            "reason",
+                            "transactionId",
+                            "originalTransactionId",
+                            "productKey",
+                            "creditAmount",
+                            "reversedAt"
+                          ],
+                          "type": "object"
+                        },
+                        "sequence": {
+                          "type": "number"
                         }
                       },
                       "required": [
                         "billingAccountId",
+                        "generatedAt",
                         "entitlements",
-                        "generatedAt"
-                      ],
-                      "type": "object"
-                    },
-                    "generatedAt": {
-                      "type": "string"
-                    },
-                    "purchase": {
-                      "properties": {
-                        "channel": {
-                          "enum": [
-                            "ios",
-                            "android",
-                            "web"
-                          ],
-                          "type": "string"
-                        },
-                        "creditAmount": {
-                          "type": "number"
-                        },
-                        "productKey": {
-                          "type": "string"
-                        },
-                        "provider": {
-                          "enum": [
-                            "google",
-                            "apple",
-                            "stripe"
-                          ],
-                          "type": "string"
-                        },
-                        "purchasedAt": {
-                          "type": "string"
-                        },
-                        "purchaseKind": {
-                          "enum": [
-                            "subscription",
-                            "consumable",
-                            "non_consumable"
-                          ],
-                          "type": "string"
-                        },
-                        "quantity": {
-                          "type": "number"
-                        },
-                        "refundableQuantity": {
-                          "type": "number"
-                        },
-                        "totalCreditAmount": {
-                          "type": "number"
-                        },
-                        "transactionId": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "provider",
-                        "channel",
-                        "purchaseKind",
-                        "transactionId",
-                        "productKey",
-                        "creditAmount",
-                        "purchasedAt"
-                      ],
-                      "type": "object"
-                    },
-                    "reason": {
-                      "enum": [
-                        "purchase_verified",
-                        "provider_webhook",
-                        "expiry_reconciliation",
-                        "provider_reconciliation",
-                        "usage_changed"
-                      ],
-                      "type": "string"
-                    },
-                    "reversal": {
-                      "properties": {
-                        "channel": {
-                          "enum": [
-                            "ios",
-                            "android",
-                            "web"
-                          ],
-                          "type": "string"
-                        },
-                        "creditAmount": {
-                          "type": "number"
-                        },
-                        "originalTransactionId": {
-                          "type": "string"
-                        },
-                        "productKey": {
-                          "type": "string"
-                        },
-                        "provider": {
-                          "enum": [
-                            "google",
-                            "apple",
-                            "stripe"
-                          ],
-                          "type": "string"
-                        },
-                        "quantity": {
-                          "type": "number"
-                        },
-                        "reason": {
-                          "enum": [
-                            "refund",
-                            "dispute"
-                          ],
-                          "type": "string"
-                        },
-                        "reversedAt": {
-                          "type": "string"
-                        },
-                        "totalCreditAmount": {
-                          "type": "number"
-                        },
-                        "transactionId": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "provider",
-                        "channel",
-                        "reason",
-                        "transactionId",
-                        "originalTransactionId",
-                        "productKey",
-                        "creditAmount",
-                        "reversedAt"
+                        "balances",
+                        "reason"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "billingAccountId",
-                    "generatedAt",
-                    "entitlements",
-                    "balances",
-                    "reason"
-                  ],
-                  "type": "object"
+                  ]
                 },
                 "reason": {
                   "enum": [
@@ -3449,59 +3465,25 @@
                       ]
                     },
                     "payload": {
-                      "properties": {
-                        "balances": {
-                          "items": {
-                            "properties": {
-                              "available": {
-                                "type": "string"
-                              },
-                              "featureKey": {
-                                "type": "string"
-                              },
-                              "held": {
-                                "type": "string"
-                              },
-                              "periodEndsAt": {
-                                "anyOf": [
-                                  {
-                                    "type": "null"
-                                  },
-                                  {
-                                    "type": "string"
-                                  }
-                                ]
-                              },
-                              "unit": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "featureKey",
-                              "unit",
-                              "available",
-                              "held",
-                              "periodEndsAt"
-                            ],
-                            "type": "object"
-                          },
-                          "type": "array"
+                      "anyOf": [
+                        {
+                          "type": "null"
                         },
-                        "billingAccountId": {
-                          "type": "string"
-                        },
-                        "entitlements": {
+                        {
                           "properties": {
-                            "billingAccountId": {
-                              "type": "string"
-                            },
-                            "entitlements": {
+                            "balances": {
                               "items": {
                                 "properties": {
-                                  "active": {
-                                    "type": "boolean"
+                                  "available": {
+                                    "type": "string"
                                   },
-                                  "expiresAt": {
+                                  "featureKey": {
+                                    "type": "string"
+                                  },
+                                  "held": {
+                                    "type": "string"
+                                  },
+                                  "periodEndsAt": {
                                     "anyOf": [
                                       {
                                         "type": "null"
@@ -3511,175 +3493,219 @@
                                       }
                                     ]
                                   },
-                                  "key": {
+                                  "unit": {
                                     "type": "string"
-                                  },
-                                  "metadata": {
-                                    "additionalProperties": {},
-                                    "type": "object"
                                   }
                                 },
                                 "required": [
-                                  "key",
-                                  "active",
-                                  "expiresAt",
-                                  "metadata"
+                                  "featureKey",
+                                  "unit",
+                                  "available",
+                                  "held",
+                                  "periodEndsAt"
                                 ],
                                 "type": "object"
                               },
                               "type": "array"
                             },
+                            "billingAccountId": {
+                              "type": "string"
+                            },
+                            "entitlements": {
+                              "properties": {
+                                "billingAccountId": {
+                                  "type": "string"
+                                },
+                                "entitlements": {
+                                  "items": {
+                                    "properties": {
+                                      "active": {
+                                        "type": "boolean"
+                                      },
+                                      "expiresAt": {
+                                        "anyOf": [
+                                          {
+                                            "type": "null"
+                                          },
+                                          {
+                                            "type": "string"
+                                          }
+                                        ]
+                                      },
+                                      "key": {
+                                        "type": "string"
+                                      },
+                                      "metadata": {
+                                        "additionalProperties": {},
+                                        "type": "object"
+                                      }
+                                    },
+                                    "required": [
+                                      "key",
+                                      "active",
+                                      "expiresAt",
+                                      "metadata"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "generatedAt": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "billingAccountId",
+                                "entitlements",
+                                "generatedAt"
+                              ],
+                              "type": "object"
+                            },
                             "generatedAt": {
                               "type": "string"
+                            },
+                            "purchase": {
+                              "properties": {
+                                "channel": {
+                                  "enum": [
+                                    "ios",
+                                    "android",
+                                    "web"
+                                  ],
+                                  "type": "string"
+                                },
+                                "creditAmount": {
+                                  "type": "number"
+                                },
+                                "productKey": {
+                                  "type": "string"
+                                },
+                                "provider": {
+                                  "enum": [
+                                    "google",
+                                    "apple",
+                                    "stripe"
+                                  ],
+                                  "type": "string"
+                                },
+                                "purchasedAt": {
+                                  "type": "string"
+                                },
+                                "purchaseKind": {
+                                  "enum": [
+                                    "subscription",
+                                    "consumable",
+                                    "non_consumable"
+                                  ],
+                                  "type": "string"
+                                },
+                                "quantity": {
+                                  "type": "number"
+                                },
+                                "refundableQuantity": {
+                                  "type": "number"
+                                },
+                                "totalCreditAmount": {
+                                  "type": "number"
+                                },
+                                "transactionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "provider",
+                                "channel",
+                                "purchaseKind",
+                                "transactionId",
+                                "productKey",
+                                "creditAmount",
+                                "purchasedAt"
+                              ],
+                              "type": "object"
+                            },
+                            "reason": {
+                              "enum": [
+                                "purchase_verified",
+                                "provider_webhook",
+                                "expiry_reconciliation",
+                                "provider_reconciliation",
+                                "usage_changed"
+                              ],
+                              "type": "string"
+                            },
+                            "reversal": {
+                              "properties": {
+                                "channel": {
+                                  "enum": [
+                                    "ios",
+                                    "android",
+                                    "web"
+                                  ],
+                                  "type": "string"
+                                },
+                                "creditAmount": {
+                                  "type": "number"
+                                },
+                                "originalTransactionId": {
+                                  "type": "string"
+                                },
+                                "productKey": {
+                                  "type": "string"
+                                },
+                                "provider": {
+                                  "enum": [
+                                    "google",
+                                    "apple",
+                                    "stripe"
+                                  ],
+                                  "type": "string"
+                                },
+                                "quantity": {
+                                  "type": "number"
+                                },
+                                "reason": {
+                                  "enum": [
+                                    "refund",
+                                    "dispute"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reversedAt": {
+                                  "type": "string"
+                                },
+                                "totalCreditAmount": {
+                                  "type": "number"
+                                },
+                                "transactionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "provider",
+                                "channel",
+                                "reason",
+                                "transactionId",
+                                "originalTransactionId",
+                                "productKey",
+                                "creditAmount",
+                                "reversedAt"
+                              ],
+                              "type": "object"
+                            },
+                            "sequence": {
+                              "type": "number"
                             }
                           },
                           "required": [
                             "billingAccountId",
+                            "generatedAt",
                             "entitlements",
-                            "generatedAt"
-                          ],
-                          "type": "object"
-                        },
-                        "generatedAt": {
-                          "type": "string"
-                        },
-                        "purchase": {
-                          "properties": {
-                            "channel": {
-                              "enum": [
-                                "ios",
-                                "android",
-                                "web"
-                              ],
-                              "type": "string"
-                            },
-                            "creditAmount": {
-                              "type": "number"
-                            },
-                            "productKey": {
-                              "type": "string"
-                            },
-                            "provider": {
-                              "enum": [
-                                "google",
-                                "apple",
-                                "stripe"
-                              ],
-                              "type": "string"
-                            },
-                            "purchasedAt": {
-                              "type": "string"
-                            },
-                            "purchaseKind": {
-                              "enum": [
-                                "subscription",
-                                "consumable",
-                                "non_consumable"
-                              ],
-                              "type": "string"
-                            },
-                            "quantity": {
-                              "type": "number"
-                            },
-                            "refundableQuantity": {
-                              "type": "number"
-                            },
-                            "totalCreditAmount": {
-                              "type": "number"
-                            },
-                            "transactionId": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "channel",
-                            "purchaseKind",
-                            "transactionId",
-                            "productKey",
-                            "creditAmount",
-                            "purchasedAt"
-                          ],
-                          "type": "object"
-                        },
-                        "reason": {
-                          "enum": [
-                            "purchase_verified",
-                            "provider_webhook",
-                            "expiry_reconciliation",
-                            "provider_reconciliation",
-                            "usage_changed"
-                          ],
-                          "type": "string"
-                        },
-                        "reversal": {
-                          "properties": {
-                            "channel": {
-                              "enum": [
-                                "ios",
-                                "android",
-                                "web"
-                              ],
-                              "type": "string"
-                            },
-                            "creditAmount": {
-                              "type": "number"
-                            },
-                            "originalTransactionId": {
-                              "type": "string"
-                            },
-                            "productKey": {
-                              "type": "string"
-                            },
-                            "provider": {
-                              "enum": [
-                                "google",
-                                "apple",
-                                "stripe"
-                              ],
-                              "type": "string"
-                            },
-                            "quantity": {
-                              "type": "number"
-                            },
-                            "reason": {
-                              "enum": [
-                                "refund",
-                                "dispute"
-                              ],
-                              "type": "string"
-                            },
-                            "reversedAt": {
-                              "type": "string"
-                            },
-                            "totalCreditAmount": {
-                              "type": "number"
-                            },
-                            "transactionId": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "channel",
-                            "reason",
-                            "transactionId",
-                            "originalTransactionId",
-                            "productKey",
-                            "creditAmount",
-                            "reversedAt"
+                            "balances",
+                            "reason"
                           ],
                           "type": "object"
                         }
-                      },
-                      "required": [
-                        "billingAccountId",
-                        "generatedAt",
-                        "entitlements",
-                        "balances",
-                        "reason"
-                      ],
-                      "type": "object"
+                      ]
                     },
                     "reason": {
                       "enum": [
@@ -4626,59 +4652,25 @@
                   ]
                 },
                 "payload": {
-                  "properties": {
-                    "balances": {
-                      "items": {
-                        "properties": {
-                          "available": {
-                            "type": "string"
-                          },
-                          "featureKey": {
-                            "type": "string"
-                          },
-                          "held": {
-                            "type": "string"
-                          },
-                          "periodEndsAt": {
-                            "anyOf": [
-                              {
-                                "type": "null"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ]
-                          },
-                          "unit": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "featureKey",
-                          "unit",
-                          "available",
-                          "held",
-                          "periodEndsAt"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
+                  "anyOf": [
+                    {
+                      "type": "null"
                     },
-                    "billingAccountId": {
-                      "type": "string"
-                    },
-                    "entitlements": {
+                    {
                       "properties": {
-                        "billingAccountId": {
-                          "type": "string"
-                        },
-                        "entitlements": {
+                        "balances": {
                           "items": {
                             "properties": {
-                              "active": {
-                                "type": "boolean"
+                              "available": {
+                                "type": "string"
                               },
-                              "expiresAt": {
+                              "featureKey": {
+                                "type": "string"
+                              },
+                              "held": {
+                                "type": "string"
+                              },
+                              "periodEndsAt": {
                                 "anyOf": [
                                   {
                                     "type": "null"
@@ -4688,175 +4680,219 @@
                                   }
                                 ]
                               },
-                              "key": {
+                              "unit": {
                                 "type": "string"
-                              },
-                              "metadata": {
-                                "additionalProperties": {},
-                                "type": "object"
                               }
                             },
                             "required": [
-                              "key",
-                              "active",
-                              "expiresAt",
-                              "metadata"
+                              "featureKey",
+                              "unit",
+                              "available",
+                              "held",
+                              "periodEndsAt"
                             ],
                             "type": "object"
                           },
                           "type": "array"
                         },
+                        "billingAccountId": {
+                          "type": "string"
+                        },
+                        "entitlements": {
+                          "properties": {
+                            "billingAccountId": {
+                              "type": "string"
+                            },
+                            "entitlements": {
+                              "items": {
+                                "properties": {
+                                  "active": {
+                                    "type": "boolean"
+                                  },
+                                  "expiresAt": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "string"
+                                      }
+                                    ]
+                                  },
+                                  "key": {
+                                    "type": "string"
+                                  },
+                                  "metadata": {
+                                    "additionalProperties": {},
+                                    "type": "object"
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "active",
+                                  "expiresAt",
+                                  "metadata"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "generatedAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "billingAccountId",
+                            "entitlements",
+                            "generatedAt"
+                          ],
+                          "type": "object"
+                        },
                         "generatedAt": {
                           "type": "string"
+                        },
+                        "purchase": {
+                          "properties": {
+                            "channel": {
+                              "enum": [
+                                "ios",
+                                "android",
+                                "web"
+                              ],
+                              "type": "string"
+                            },
+                            "creditAmount": {
+                              "type": "number"
+                            },
+                            "productKey": {
+                              "type": "string"
+                            },
+                            "provider": {
+                              "enum": [
+                                "google",
+                                "apple",
+                                "stripe"
+                              ],
+                              "type": "string"
+                            },
+                            "purchasedAt": {
+                              "type": "string"
+                            },
+                            "purchaseKind": {
+                              "enum": [
+                                "subscription",
+                                "consumable",
+                                "non_consumable"
+                              ],
+                              "type": "string"
+                            },
+                            "quantity": {
+                              "type": "number"
+                            },
+                            "refundableQuantity": {
+                              "type": "number"
+                            },
+                            "totalCreditAmount": {
+                              "type": "number"
+                            },
+                            "transactionId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "channel",
+                            "purchaseKind",
+                            "transactionId",
+                            "productKey",
+                            "creditAmount",
+                            "purchasedAt"
+                          ],
+                          "type": "object"
+                        },
+                        "reason": {
+                          "enum": [
+                            "purchase_verified",
+                            "provider_webhook",
+                            "expiry_reconciliation",
+                            "provider_reconciliation",
+                            "usage_changed"
+                          ],
+                          "type": "string"
+                        },
+                        "reversal": {
+                          "properties": {
+                            "channel": {
+                              "enum": [
+                                "ios",
+                                "android",
+                                "web"
+                              ],
+                              "type": "string"
+                            },
+                            "creditAmount": {
+                              "type": "number"
+                            },
+                            "originalTransactionId": {
+                              "type": "string"
+                            },
+                            "productKey": {
+                              "type": "string"
+                            },
+                            "provider": {
+                              "enum": [
+                                "google",
+                                "apple",
+                                "stripe"
+                              ],
+                              "type": "string"
+                            },
+                            "quantity": {
+                              "type": "number"
+                            },
+                            "reason": {
+                              "enum": [
+                                "refund",
+                                "dispute"
+                              ],
+                              "type": "string"
+                            },
+                            "reversedAt": {
+                              "type": "string"
+                            },
+                            "totalCreditAmount": {
+                              "type": "number"
+                            },
+                            "transactionId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "channel",
+                            "reason",
+                            "transactionId",
+                            "originalTransactionId",
+                            "productKey",
+                            "creditAmount",
+                            "reversedAt"
+                          ],
+                          "type": "object"
+                        },
+                        "sequence": {
+                          "type": "number"
                         }
                       },
                       "required": [
                         "billingAccountId",
+                        "generatedAt",
                         "entitlements",
-                        "generatedAt"
-                      ],
-                      "type": "object"
-                    },
-                    "generatedAt": {
-                      "type": "string"
-                    },
-                    "purchase": {
-                      "properties": {
-                        "channel": {
-                          "enum": [
-                            "ios",
-                            "android",
-                            "web"
-                          ],
-                          "type": "string"
-                        },
-                        "creditAmount": {
-                          "type": "number"
-                        },
-                        "productKey": {
-                          "type": "string"
-                        },
-                        "provider": {
-                          "enum": [
-                            "google",
-                            "apple",
-                            "stripe"
-                          ],
-                          "type": "string"
-                        },
-                        "purchasedAt": {
-                          "type": "string"
-                        },
-                        "purchaseKind": {
-                          "enum": [
-                            "subscription",
-                            "consumable",
-                            "non_consumable"
-                          ],
-                          "type": "string"
-                        },
-                        "quantity": {
-                          "type": "number"
-                        },
-                        "refundableQuantity": {
-                          "type": "number"
-                        },
-                        "totalCreditAmount": {
-                          "type": "number"
-                        },
-                        "transactionId": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "provider",
-                        "channel",
-                        "purchaseKind",
-                        "transactionId",
-                        "productKey",
-                        "creditAmount",
-                        "purchasedAt"
-                      ],
-                      "type": "object"
-                    },
-                    "reason": {
-                      "enum": [
-                        "purchase_verified",
-                        "provider_webhook",
-                        "expiry_reconciliation",
-                        "provider_reconciliation",
-                        "usage_changed"
-                      ],
-                      "type": "string"
-                    },
-                    "reversal": {
-                      "properties": {
-                        "channel": {
-                          "enum": [
-                            "ios",
-                            "android",
-                            "web"
-                          ],
-                          "type": "string"
-                        },
-                        "creditAmount": {
-                          "type": "number"
-                        },
-                        "originalTransactionId": {
-                          "type": "string"
-                        },
-                        "productKey": {
-                          "type": "string"
-                        },
-                        "provider": {
-                          "enum": [
-                            "google",
-                            "apple",
-                            "stripe"
-                          ],
-                          "type": "string"
-                        },
-                        "quantity": {
-                          "type": "number"
-                        },
-                        "reason": {
-                          "enum": [
-                            "refund",
-                            "dispute"
-                          ],
-                          "type": "string"
-                        },
-                        "reversedAt": {
-                          "type": "string"
-                        },
-                        "totalCreditAmount": {
-                          "type": "number"
-                        },
-                        "transactionId": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "provider",
-                        "channel",
-                        "reason",
-                        "transactionId",
-                        "originalTransactionId",
-                        "productKey",
-                        "creditAmount",
-                        "reversedAt"
+                        "balances",
+                        "reason"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "billingAccountId",
-                    "generatedAt",
-                    "entitlements",
-                    "balances",
-                    "reason"
-                  ],
-                  "type": "object"
+                  ]
                 },
                 "reason": {
                   "enum": [
@@ -13114,7 +13150,7 @@
   "info": {
     "description": "Complete implemented HTTP contract. Pre-GA; no stable v1 guarantee is implied.",
     "title": "Quotum API",
-    "version": "0.9.0"
+    "version": "0.9.1"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -14443,6 +14479,7 @@
                         "enum": [
                           "apple",
                           "atlassian",
+                          "cloudflare",
                           "cognito",
                           "discord",
                           "facebook",

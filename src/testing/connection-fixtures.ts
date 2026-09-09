@@ -13,6 +13,7 @@ export interface ProjectConnectionFixture {
 	projectionUrl: string;
 	projectionSecret: string;
 	projectionContract?: ProjectionContract;
+	usageDelivery?: "coalesced" | "off";
 	apple?: AppleBillingEnv | null;
 	googlePlay?: GooglePlayBillingEnv | null;
 	stripe?: StripeBillingEnv | null;
@@ -34,6 +35,7 @@ export function fixtureConnections(
 							projectionUrl: fixture.projectionUrl,
 							projectionSecret: fixture.projectionSecret,
 							projectionContract: fixture.projectionContract ?? "billing_state_v1",
+							usageDelivery: fixture.usageDelivery ?? "coalesced",
 						}
 					: kind === "google"
 						? fixture.googlePlay

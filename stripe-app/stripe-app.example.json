@@ -1,6 +1,6 @@
 {
 	"id": "com.quotum.billing",
-	"version": "0.9.0",
+	"version": "0.9.1",
 	"name": "Quotum",
 	"distribution_type": "public",
 	"stripe_api_access_type": "oauth",

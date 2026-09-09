@@ -29,6 +29,31 @@ export async function ensureCustomer(
 	return row;
 }
 
+/**
+ * Customer identity for the usage path. It reads first and inserts only a missing customer: the
+ * upsert in `ensureCustomer` locks the row for the rest of the transaction, which provider
+ * mutations rely on as a per-customer mutex, but a usage call already serializes on its operation
+ * lock and ordered allocation locks, and holding the customer row would queue the projection
+ * worker's sequence update behind every call.
+ */
+export async function resolveUsageCustomer(
+	executor: QueryExecutor,
+	projectId: string,
+	billingAccountId: string,
+): Promise<CustomerIdentityRow> {
+	requireNonBlank(billingAccountId, "p_billing_account_id");
+	const existing = await executeOne<CustomerIdentityRow>(
+		executor,
+		drizzleSql`
+		SELECT id, billing_account_id
+		FROM customers
+		WHERE project_id = ${projectId} AND billing_account_id = ${billingAccountId}
+	`,
+	);
+	if (existing !== null) return existing;
+	return await ensureCustomer(executor, projectId, billingAccountId);
+}
+
 export async function findCustomerByProviderCustomer(
 	executor: QueryExecutor,
 	projectId: string,

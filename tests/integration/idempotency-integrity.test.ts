@@ -1181,7 +1181,7 @@ async function seedProcessingStripeStoreEvent(
 			next_attempt_at
 		)
 		SELECT projects.id, 'stripe', 'web', ${input.externalEventId}, ${input.eventType},
-			'processing', 'integration processing seed', ${JSON.stringify({ seeded: true })}::jsonb,
+			'processing', 'integration processing seed', ${JSON.stringify({ seeded: true })}::text::jsonb,
 			now(), 'integration-worker', now() - INTERVAL '1 second'
 		FROM projects
 		WHERE projects.key = 'voysee'

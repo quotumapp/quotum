@@ -22,7 +22,11 @@ const secretFields: Record<ConnectionKind, string[]> = {
 	projection: ["projectionSecret"],
 };
 const projectionSchema = z
-	.object({ projectionUrl: z.url(), projectionSecret: z.string().optional() })
+	.object({
+		projectionUrl: z.url(),
+		projectionSecret: z.string().optional(),
+		usageDelivery: z.enum(["coalesced", "off"]).optional(),
+	})
 	.strict();
 export function createConnectionValidation(): ConnectionValidationPort {
 	return {

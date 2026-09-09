@@ -2,10 +2,10 @@ import type { Context, Hono } from "hono";
 import { z } from "zod";
 import { BillingError } from "../billing/errors";
 import { decodeUsageCursor, encodeUsageCursor } from "../billing/insights";
-import type { ProjectInstanceContext } from "../projects/context";
 import { defineContract, registerRoute } from "../shared/http-contract";
 import * as responses from "./contracts/insights-responses";
-import type { BillingContext, BillingHonoEnv, BillingInsightsServiceLike } from "./types";
+import { privateProject } from "./request-context";
+import type { BillingHonoEnv, BillingInsightsServiceLike } from "./types";
 
 const accountParamsSchema = z.object({ billingAccountId: z.string().trim().min(1) });
 export const usageEventsQuerySchema = z
@@ -122,14 +122,6 @@ function accountId(c: Context): string {
 	const parsed = accountParamsSchema.safeParse(c.req.param());
 	if (!parsed.success) throw invalidInsightsRequest("Invalid billing account route parameters");
 	return parsed.data.billingAccountId;
-}
-
-function privateProject(c: BillingContext): ProjectInstanceContext {
-	const project = c.get("project");
-	if (project === undefined) {
-		throw new BillingError("Billing project context is required", "BILLING_PROJECT_REQUIRED", 401);
-	}
-	return project;
 }
 
 function invalidInsightsRequest(message: string): BillingError {
