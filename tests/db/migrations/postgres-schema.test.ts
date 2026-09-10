@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const migrationsDir = join(process.cwd(), "migrations");
@@ -7,17 +7,20 @@ const files = readdirSync(migrationsDir)
 	.filter((file) => file.endsWith(".sql"))
 	.sort();
 const read = (file: string) => readFileSync(join(migrationsDir, file), "utf8");
-const has = (file: string) => existsSync(join(migrationsDir, file));
 
 const platform = read("001_platform.sql");
 const billingCore = read("002_billing_core.sql");
 const metering = read("003_metering_and_pricing.sql");
+const merchant = read("004_merchant.sql");
 
 describe("baseline schema files", () => {
 	it("uses one ordered baseline file per domain", () => {
-		const expected = ["001_platform.sql", "002_billing_core.sql", "003_metering_and_pricing.sql"];
-		if (has("004_merchant.sql")) expected.push("004_merchant.sql");
-		expect(files).toEqual(expected);
+		expect(files).toEqual([
+			"001_platform.sql",
+			"002_billing_core.sql",
+			"003_metering_and_pricing.sql",
+			"004_merchant.sql",
+		]);
 		for (const file of files) expect(file).toMatch(/^\d{3}_[a-z_]+\.sql$/);
 		for (const file of files)
 			expect(read(file)).not.toMatch(/^\s*ALTER TABLE \w+\s+(ADD|DROP) COLUMN/m);
@@ -117,7 +120,6 @@ describe("baseline schema files", () => {
 	});
 
 	it("keeps platform identity and merchant tables in platform-owned files", () => {
-		if (!platform.includes("platform_organizations")) return;
 		expect(platform).toContain("CREATE TABLE platform_organizations");
 		expect(platform).toContain("CREATE TABLE platform_projects");
 		expect(platform).toContain("CREATE TABLE platform_project_api_credentials");
@@ -127,8 +129,6 @@ describe("baseline schema files", () => {
 		expect(platform).toContain("lifecycle_status TEXT NOT NULL");
 		expect(platform).not.toContain("resolve_project_id");
 		expect(platform).not.toMatch(/secret[^\n]*TEXT/iu);
-		if (!has("004_merchant.sql")) return;
-		const merchant = read("004_merchant.sql");
 		for (const table of [
 			"platform_auth_users",
 			"platform_principals",

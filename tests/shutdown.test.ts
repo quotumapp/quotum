@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { registerBillingRuntimeShutdown, registerProjectionRuntimeShutdown } from "../src/shutdown";
+import type { TimeoutHandle } from "../src/workers/runtime";
 
 const createDeferred = <T = void>() => {
 	let resolve!: (value: T | PromiseLike<T>) => void;
@@ -199,6 +200,8 @@ describe("projection runtime shutdown", () => {
 		const handlers = new Map<string, () => void | Promise<void>>();
 		const exitCodes: number[] = [];
 		const loggedErrors: unknown[] = [];
+		const scheduled: Array<{ callback: () => void; ms: number; handle: TimeoutHandle }> = [];
+		const cleared: TimeoutHandle[] = [];
 
 		const processLike = {
 			on(signal: string, handler: () => void | Promise<void>) {
@@ -220,24 +223,82 @@ describe("projection runtime shutdown", () => {
 					},
 				},
 			],
-			shutdownTimeoutMs: 1,
+			shutdownTimeoutMs: 1000,
 			logger: {
 				error(message, error) {
 					loggedErrors.push({ message, error });
 				},
 			},
+			timers: {
+				setTimeout(callback, ms) {
+					const handle = { id: scheduled.length + 1 };
+					scheduled.push({ callback, ms, handle });
+					return handle;
+				},
+				clearTimeout(handle) {
+					cleared.push(handle);
+				},
+			},
 		});
 
-		const result = await Promise.race([
-			Promise.resolve(handlers.get("SIGTERM")?.()).catch((error) => error),
-			sleep(25).then(() => "timed-out"),
-		]);
-
-		expect(result).toEqual(new Error("process exited"));
+		const pending = Promise.resolve(handlers.get("SIGTERM")?.()).catch((error) => error);
+		await Promise.resolve();
+		expect(scheduled).toHaveLength(1);
+		expect(scheduled[0]?.ms).toBe(1000);
+		expect(exitCodes).toEqual([]);
+		scheduled[0]?.callback();
+		expect(await pending).toEqual(new Error("process exited"));
 		expect(loggedErrors).toEqual([
 			{ message: "Billing runtime shutdown timed out", error: new Error("shutdown timed out") },
 		]);
 		expect(exitCodes).toEqual([1]);
+		expect(cleared).toEqual([scheduled[0]?.handle]);
+	});
+
+	it("clears the shutdown timer when runtimes stop immediately", async () => {
+		const handlers = new Map<string, () => void | Promise<void>>();
+		const exitCodes: number[] = [];
+		const scheduled: Array<{ callback: () => void; handle: TimeoutHandle }> = [];
+		const cleared: TimeoutHandle[] = [];
+
+		const processLike = {
+			on(signal: string, handler: () => void | Promise<void>) {
+				handlers.set(signal, handler);
+				return processLike;
+			},
+			exit(code?: number) {
+				exitCodes.push(code ?? 0);
+				throw new Error("process exited");
+			},
+		};
+
+		registerBillingRuntimeShutdown({
+			process: processLike,
+			runtimes: [
+				{
+					stop() {
+						return Promise.resolve();
+					},
+				},
+			],
+			shutdownTimeoutMs: 1000,
+			timers: {
+				setTimeout(callback) {
+					const handle = { id: scheduled.length + 1 };
+					scheduled.push({ callback, handle });
+					return handle;
+				},
+				clearTimeout(handle) {
+					cleared.push(handle);
+				},
+			},
+		});
+
+		await expect(async () => handlers.get("SIGTERM")?.()).toThrow("process exited");
+		expect(exitCodes).toEqual([0]);
+		expect(cleared).toEqual([scheduled[0]?.handle]);
+		scheduled[0]?.callback();
+		expect(exitCodes).toEqual([0]);
 	});
 
 	it("logs fatal process errors, stops runtimes, and exits nonzero", async () => {
@@ -319,7 +380,3 @@ describe("projection runtime shutdown", () => {
 		expect(exitCodes).toEqual([0, 0]);
 	});
 });
-
-function sleep(milliseconds: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}

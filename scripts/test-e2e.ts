@@ -2,25 +2,29 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { trapInterrupts } from "./lib/interrupts";
 import { run, startPostgresContainer } from "./lib/postgres-container";
 import { createContainerTestEnv, createSanitizedProcessEnv } from "./lib/sanitized-env";
 import {
 	createTestPlatformManifest,
 	resolveTestPlatformContexts,
 } from "./lib/test-platform-bootstrap";
+import { assertLaneReport, junitReporterArgs, readJunitSummary } from "./lib/test-report";
 
 const postgresDatabase = "voysee_billing_e2e";
 
+const interrupts = trapInterrupts();
 try {
 	await runE2eTests();
 } catch (error) {
 	console.error(error instanceof Error ? error.message : String(error));
-	process.exitCode = 1;
+	process.exitCode = interrupts.exitCode() ?? 1;
 }
 
 async function runE2eTests(): Promise<void> {
 	let container: StartedPostgreSqlContainer | undefined;
 	let credentialDirectory: string | undefined;
+	let reportDirectory: string | undefined;
 	try {
 		container = await startPostgresContainer({ postgresDatabase });
 
@@ -29,8 +33,11 @@ async function runE2eTests(): Promise<void> {
 			NODE_ENV: "test",
 			POSTGRES_URI: container.getConnectionUri(),
 			RUN_BILLING_E2E_TESTS: "1",
+			BILLING_ENV: "test",
+			BILLING_TEST_LANE: "e2e",
 		};
 
+		run("bun", ["run", "scripts/test-migration-integrity.ts"], { env: migrationEnv });
 		run("bun", ["run", "migrate"], { env: migrationEnv });
 		const manifest = createTestPlatformManifest(["voysee", "wiseley"]);
 		credentialDirectory = await mkdtemp(join(tmpdir(), "quotum-e2e-platform-"));
@@ -56,7 +63,10 @@ async function runE2eTests(): Promise<void> {
 			BILLING_TEST_PROJECT_CONTEXTS_JSON: JSON.stringify(contexts),
 			BILLING_TEST_PROJECT_CREDENTIALS_JSON: JSON.stringify(credentials),
 		};
-		run("bun", ["test", "--timeout=20000", "tests/e2e"], { env });
+		reportDirectory = await mkdtemp(join(tmpdir(), "quotum-e2e-report-"));
+		const reportPath = join(reportDirectory, "junit.xml");
+		run("bun", ["test", "--timeout=20000", ...junitReporterArgs(reportPath), "tests/e2e"], { env });
+		assertLaneReport(readJunitSummary(await readFile(reportPath, "utf8")), "e2e");
 	} finally {
 		if (container !== undefined) {
 			try {
@@ -67,6 +77,9 @@ async function runE2eTests(): Promise<void> {
 		}
 		if (credentialDirectory !== undefined) {
 			await rm(credentialDirectory, { recursive: true, force: true });
+		}
+		if (reportDirectory !== undefined) {
+			await rm(reportDirectory, { recursive: true, force: true });
 		}
 	}
 }

@@ -531,6 +531,24 @@ localDescribe("Apple route flows integration", () => {
 			projection_sync_jobs: 0,
 		});
 	});
+
+	it("returns 500 and writes no purchase when StoreKit verify throws", async () => {
+		const { app, apple, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		apple.failNext("verifyTransaction", Object.assign(new Error("StoreKit 503"), { status: 503 }));
+		const response = await verifyAppleSubscription(app, authHeaders);
+		expect(response.status).toBe(500);
+		expect(apple.calls).toEqual([]);
+		await expectTableCounts(context.sql, {
+			purchases: 0,
+			subscriptions: 0,
+			entitlements: 0,
+			store_events: 0,
+			projection_sync_jobs: 0,
+		});
+	});
 });
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

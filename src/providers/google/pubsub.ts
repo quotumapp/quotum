@@ -139,10 +139,18 @@ async function verifyOidc(
 	}
 }
 
+export function createGoogleOidcVerifier(fetchImplementation?: typeof fetch): GoogleOidcVerifier {
+	const client = new OAuth2Client({
+		transporterOptions: fetchImplementation ? { fetchImplementation } : undefined,
+	});
+	return async (idToken, audience) => {
+		const ticket = await client.verifyIdToken({ idToken, audience });
+		return ticket.getPayload() ?? {};
+	};
+}
+
 async function verifyGoogleOidcToken(idToken: string, audience: string): Promise<GoogleOidcClaims> {
-	const client = new OAuth2Client();
-	const ticket = await client.verifyIdToken({ idToken, audience });
-	return ticket.getPayload() ?? {};
+	return await createGoogleOidcVerifier()(idToken, audience);
 }
 
 function requireRtdnConfig(value: string | null, name: string): string {

@@ -110,6 +110,7 @@ const billingPrefixes = [
 ] as const;
 
 const testSupportPaths = new Set([
+	"scripts/check-coverage.ts",
 	"scripts/check-module-boundaries.ts",
 	"scripts/projection-receiver.ts",
 	"scripts/test-e2e.ts",

@@ -6,6 +6,7 @@ import type {
 import type { BillingLogger } from "../../src/observability/logger";
 import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import { SubscriptionReconciliationWorker } from "../../src/workers/subscription-reconciliation";
+import { createDeferred } from "../helpers/deferred";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const workerProjectResolver = projectContextResolver({
@@ -509,6 +510,7 @@ describe("SubscriptionReconciliationWorker", () => {
 		const rows = [subscription()];
 		const { repository } = createRepository({ subscriptions: rows });
 		const renewed: string[] = [];
+		const renewedLease = createDeferred<void>();
 		const worker = new SubscriptionReconciliationWorker({
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
@@ -523,12 +525,13 @@ describe("SubscriptionReconciliationWorker", () => {
 					workerId,
 				) => {
 					renewed.push(`${projectId}:${subscriptionId}:${workerId}`);
+					renewedLease.resolve();
 				},
 			},
 			providers: {
 				apple: {
 					reconcileSubscription: async () => {
-						await Bun.sleep(20);
+						await renewedLease.promise;
 						return { status: "processed" };
 					},
 				},
@@ -540,7 +543,7 @@ describe("SubscriptionReconciliationWorker", () => {
 
 		await worker.runOnce();
 
-		expect(renewed).toContain("project_1:subscription_1:worker-a");
+		expect(renewed[0]).toBe("project_1:subscription_1:worker-a");
 	});
 
 	it("records run failures when local reconciliation throws", async () => {

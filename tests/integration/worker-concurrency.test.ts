@@ -124,7 +124,6 @@ localDescribe("Worker concurrency integration", () => {
 			repository: context.repository,
 			fetch: failingProjection.fetch,
 			workerId: "worker-a",
-			now: () => new Date(),
 		});
 
 		expect(failed).toEqual({ claimed: 1, succeeded: 0, failed: 1 });

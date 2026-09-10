@@ -37,7 +37,9 @@ describe("BillingRepository Stripe", () => {
 		const queries = database.queries.join("\n");
 		expect(queries).not.toContain("FROM projects");
 		expect(queries).toContain("sp.project_id = $1");
-		expect(queries).toContain(JSON.stringify(projectInstanceContext("wiseley").projectInstanceId));
+		expect(database.boundParameter("sp.project_id")).toBe(
+			projectInstanceContext("wiseley").projectInstanceId,
+		);
 	});
 
 	it("skips Stripe reversals when BIGINT amount comparison would be unsafe", async () => {
@@ -123,35 +125,37 @@ describe("BillingRepository Stripe", () => {
 	});
 
 	it("processes partial Stripe refunds with tracked reversed money and credit amounts", async () => {
-		const database = new FakeDatabase([
-			[{ purchase_id: "purchase-id", customer_id: "customer-id" }],
-			[{ id: "customer-id" }],
+		const database = new FakeDatabase(
 			[
-				{
-					purchase_id: "purchase-id",
-					customer_id: "customer-id",
-					billing_account_id: "user-1",
-					store_product_id: "store-product-id",
-					product_key: "echo_credits_10",
-					purchase_kind: "consumable",
-					credit_amount: 10,
-					price_amount: 499,
-					currency: "usd",
-					reversed_amount: 0,
-					reversed_credit_amount: 0,
-				},
+				[{ purchase_id: "purchase-id", customer_id: "customer-id" }],
+				[{ id: "customer-id" }],
+				[
+					{
+						purchase_id: "purchase-id",
+						customer_id: "customer-id",
+						billing_account_id: "user-1",
+						store_product_id: "store-product-id",
+						product_key: "echo_credits_10",
+						purchase_kind: "consumable",
+						credit_amount: 10,
+						price_amount: 499,
+						currency: "usd",
+						reversed_amount: 0,
+						reversed_credit_amount: 0,
+					},
+				],
+				[],
+				[{ id: "store-event-id" }],
+				[],
+				[{ id: "customer-id" }],
+				[],
+				[{ id: "customer-id" }],
+				[{ projection_sequence: 1, billing_account_id: "user-1" }],
+				[],
+				[{ project_id: "project-id" }],
 			],
-			[],
-			[{ id: "store-event-id" }],
-			[],
-			[{ id: "customer-id" }],
-			[],
-			[{ id: "customer-id" }],
-			[{ projection_sequence: 1, billing_account_id: "user-1" }],
-			[],
-			[{ project_id: "project-id" }],
-			[{ id: "projection-job-id" }],
-		]);
+			{ strict: true },
+		);
 		const repository = new BillingRepository(database as never);
 
 		await expect(
@@ -186,42 +190,47 @@ describe("BillingRepository Stripe", () => {
 		);
 		expect(customerLockIndex).toBeGreaterThan(-1);
 		expect(purchaseLockIndex).toBeGreaterThan(customerLockIndex);
+		database.assertConsumed();
+		expect(database.queries).toHaveLength(12);
 	});
 
 	it("records Stripe subscription events without synthetic purchase rows", async () => {
-		const database = new FakeDatabase([
-			[{ id: "customer-id", billing_account_id: "user-1" }],
-			[{ id: "provider-customer-id" }],
+		const database = new FakeDatabase(
 			[
-				{
-					id: "store-product-id",
-					product_id: "product-id",
-					product_key: "premium_monthly",
-					product_type: "subscription",
-					credit_amount: 0,
-				},
+				[{ id: "customer-id", billing_account_id: "user-1" }],
+				[{ id: "provider-customer-id" }],
+				[
+					{
+						id: "store-product-id",
+						product_id: "product-id",
+						product_key: "premium_monthly",
+						product_type: "subscription",
+						credit_amount: 0,
+					},
+				],
+				[],
+				[{ id: "store-event-id" }],
+				[{ id: "subscription-id" }],
+				[],
+				[],
+				[{ id: "customer-id" }],
+				[],
+				[{ id: "customer-id" }],
+				[
+					{
+						key: "premium",
+						active: true,
+						expires_at: new Date("2026-07-01T00:00:00.000Z"),
+						metadata: { source: "subscription" },
+					},
+				],
+				[{ project_id: "project-id" }],
+				[{ projection_sequence: 1, billing_account_id: "user-1" }],
+				[],
+				[{ id: "projection-job-id" }],
 			],
-			[],
-			[{ id: "store-event-id" }],
-			[{ id: "subscription-id" }],
-			[],
-			[],
-			[{ id: "customer-id" }],
-			[],
-			[{ id: "customer-id" }],
-			[
-				{
-					key: "premium",
-					active: true,
-					expires_at: new Date("2026-07-01T00:00:00.000Z"),
-					metadata: { source: "subscription" },
-				},
-			],
-			[{ project_id: "project-id" }],
-			[{ projection_sequence: 1, billing_account_id: "user-1" }],
-			[],
-			[{ id: "projection-job-id" }],
-		]);
+			{ strict: true },
+		);
 		const repository = new BillingRepository(database as never);
 
 		await expect(
@@ -234,6 +243,8 @@ describe("BillingRepository Stripe", () => {
 			billingAccountId: "user-1",
 		});
 
+		database.assertConsumed();
+		expect(database.queries).toHaveLength(16);
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("INSERT INTO subscriptions");
 		expect(queries).not.toContain("INSERT INTO purchases");

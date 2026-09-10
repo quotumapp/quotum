@@ -45,6 +45,9 @@ function stripeProduct(
 
 function serviceFixture(
 	overrides: {
+		config?: Partial<
+			typeof config & { connectedAccountId?: string; connectedAccountLivemode?: boolean }
+		>;
 		products?: Record<string, StripeWebStoreProductRow>;
 		checkoutSession?: Partial<Stripe.Checkout.Session>;
 		portalSession?: Partial<Stripe.BillingPortal.Session>;
@@ -122,7 +125,7 @@ function serviceFixture(
 					};
 
 	const service = new StripeBillingService({
-		config,
+		config: { ...config, ...overrides.config },
 		client: {
 			createCustomer(input) {
 				calls.push({ method: "createCustomer", input });
@@ -1495,6 +1498,56 @@ describe("StripeBillingService", () => {
 			status: 400,
 		});
 		expect(calls).toEqual([]);
+	});
+
+	it("rejects connected-account and livemode mismatches before repository work", async () => {
+		const session = stripeEvent("checkout.session.completed", checkoutSessionObject());
+		for (const webhookEvent of [
+			{ ...session, account: "acct_other", livemode: false },
+			{ ...session, livemode: false },
+			{ ...session, account: "acct_expected", livemode: true },
+		]) {
+			const { calls, repositoryInputs, service } = serviceFixture({
+				config: { connectedAccountId: "acct_expected", connectedAccountLivemode: false },
+				webhookEvent,
+			});
+			await expect(
+				service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" }),
+			).rejects.toMatchObject({
+				code: "STRIPE_ACCOUNT_MISMATCH",
+				status: 400,
+			});
+			expect(calls).toEqual([{ method: "constructWebhookEvent", rawBody: "{}", signature: "sig" }]);
+			expect(repositoryInputs).toEqual([]);
+		}
+	});
+
+	it("accepts a matching connected account and livemode", async () => {
+		const { service } = serviceFixture({
+			config: { connectedAccountId: "acct_expected", connectedAccountLivemode: false },
+			webhookEvent: {
+				...stripeEvent("checkout.session.completed", checkoutSessionObject()),
+				account: "acct_expected",
+				livemode: false,
+			},
+		});
+		await expect(
+			service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" }),
+		).resolves.toMatchObject({ status: "processed" });
+	});
+
+	it("rejects non-object verified app events for a connected account", async () => {
+		const { service } = serviceFixture({
+			config: { connectedAccountId: "acct_expected", connectedAccountLivemode: false },
+		});
+		await expect(service.handleVerifiedAppEvent(null)).rejects.toMatchObject({
+			code: "STRIPE_ACCOUNT_MISMATCH",
+			status: 400,
+		});
+		await expect(service.handleVerifiedAppEvent("evt")).rejects.toMatchObject({
+			code: "STRIPE_ACCOUNT_MISMATCH",
+			status: 400,
+		});
 	});
 
 	it("maps plain Stripe signature verifier errors to invalid signature billing errors", async () => {

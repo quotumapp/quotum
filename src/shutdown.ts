@@ -1,3 +1,5 @@
+import type { PollingRuntimeTimers, TimeoutHandle } from "./workers/runtime";
+
 type ShutdownSignal = "SIGINT" | "SIGTERM";
 type FatalProcessEvent = "unhandledRejection" | "uncaughtException";
 type ProcessEvent = ShutdownSignal | FatalProcessEvent;
@@ -21,6 +23,14 @@ const defaultLogger: ShutdownLogger = {
 	error: (message, error) => console.error(message, error),
 };
 const defaultShutdownTimeoutMs = 10_000;
+const defaultShutdownTimers: PollingRuntimeTimers = {
+	setTimeout(callback, ms) {
+		return setTimeout(callback, ms);
+	},
+	clearTimeout(handle) {
+		clearTimeout(handle as ReturnType<typeof setTimeout>);
+	},
+};
 
 export const registerProjectionRuntimeShutdown = ({
 	process,
@@ -38,17 +48,20 @@ export const registerBillingRuntimeShutdown = ({
 	cleanup = [],
 	shutdownTimeoutMs = defaultShutdownTimeoutMs,
 	logger = defaultLogger,
+	timers,
 }: {
 	process: ProcessLike;
 	runtimes: RuntimeLike[];
 	cleanup?: CleanupHook[];
 	shutdownTimeoutMs?: number;
 	logger?: ShutdownLogger;
+	timers?: PollingRuntimeTimers;
 }) => {
 	const shutdown = async (exitCode: number) => {
 		const result = await withShutdownDeadline(
 			runShutdown({ runtimes, cleanup, logger, exitCode }),
 			shutdownTimeoutMs,
+			timers,
 		);
 		if (result === "timed_out") {
 			logger.error("Billing runtime shutdown timed out", new Error("shutdown timed out"));
@@ -116,22 +129,23 @@ async function runShutdown({
 async function withShutdownDeadline(
 	shutdown: Promise<number>,
 	shutdownTimeoutMs: number,
+	timers: PollingRuntimeTimers = defaultShutdownTimers,
 ): Promise<number | "timed_out"> {
 	if (!Number.isFinite(shutdownTimeoutMs) || shutdownTimeoutMs <= 0) {
 		return await shutdown;
 	}
 
-	let timeout: Timer | null = null;
+	let timeout: TimeoutHandle | null = null;
 	try {
 		return await Promise.race([
 			shutdown,
 			new Promise<"timed_out">((resolve) => {
-				timeout = setTimeout(() => resolve("timed_out"), shutdownTimeoutMs);
+				timeout = timers.setTimeout(() => resolve("timed_out"), shutdownTimeoutMs);
 			}),
 		]);
 	} finally {
 		if (timeout !== null) {
-			clearTimeout(timeout);
+			timers.clearTimeout(timeout);
 		}
 	}
 }

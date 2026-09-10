@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
+import { StripeBillingService } from "../../src/providers/stripe/service";
+import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
@@ -7,6 +9,7 @@ import {
 	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
+import { runAutoTopupWorkerOnce } from "./helpers/worker-fixture";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 const project = integrationProjectContext();
@@ -206,6 +209,78 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			invoices: 1,
 			projections: 1,
 		});
+	});
+
+	it("retries a Stripe 429 auto top-up through the worker and then charges once", async () => {
+		await prepareAutoTopupAccount("topup-account");
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "topup-account",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "fixture:topup-account",
+		});
+		await context.repository.controlsEnterprise.upsertAutoTopupPolicy(project, {
+			billingAccountId: "topup-account",
+			featureKey: "ai_credits",
+			topupKey: "credits_10",
+			provider: "stripe",
+			thresholdQuantity: "5",
+			cooldownSeconds: 30,
+			limitIntervalSeconds: 86_400,
+			maxPurchasesPerInterval: 2,
+			maxSpendMinor: 1_000,
+			maxConsecutiveFailures: 3,
+			actor: "integration-test",
+		});
+		await consume("topup-account", "6", "topup:trigger");
+		const fixture = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const stripeService = new StripeBillingService({
+			config: {
+				projectKey: "voysee",
+				checkoutSuccessUrl: "https://app.integration.test/billing/success",
+				checkoutCancelUrl: "https://app.integration.test/billing",
+				portalReturnUrl: "https://app.integration.test/account/billing",
+			},
+			client: fixture.stripe.client,
+			repository: context.repository.forProject(project),
+		});
+		fixture.stripe.failNext(
+			"payInvoice",
+			Object.assign(new Error("Rate limited"), { statusCode: 429 }),
+		);
+		const failed = await runAutoTopupWorkerOnce({
+			repository: context.repository,
+			provider: stripeService,
+			workerId: "auto-worker",
+		});
+		expect(failed).toMatchObject({ claimed: 1, succeeded: 0, retryScheduled: 1 });
+		const [retrying] = await context.sql<
+			Array<{ status: string; reserved: boolean; purchases: number }>
+		>`
+			SELECT job.status, job.budget_reserved_at IS NOT NULL AS reserved,
+				state.purchases_in_interval AS purchases
+			FROM auto_topup_jobs job
+			JOIN auto_topup_states state
+				ON state.project_id = job.project_id AND state.policy_id = job.policy_id
+		`;
+		expect(retrying).toEqual({ status: "pending", reserved: false, purchases: 0 });
+		await context.sql`
+			UPDATE auto_topup_jobs SET next_attempt_at = now() - INTERVAL '1 second'
+		`;
+		const succeeded = await runAutoTopupWorkerOnce({
+			repository: context.repository,
+			provider: stripeService,
+			workerId: "auto-worker",
+		});
+		expect(succeeded).toMatchObject({ claimed: 1, succeeded: 1 });
+		const [invoices] = await context.sql<Array<{ count: number }>>`
+			SELECT count(*)::integer AS count FROM billing_invoices
+		`;
+		expect(invoices.count).toBe(1);
 	});
 
 	it("releases reserved budget on failure and suspends after provider action is required", async () => {

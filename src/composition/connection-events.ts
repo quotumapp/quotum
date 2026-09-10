@@ -10,7 +10,7 @@ import type { ConnectionRepository } from "../platform/connections/repository";
 import { appleProjectConfigSchema, googlePlayProjectConfigSchema } from "../projects/config";
 import { AppleStoreKitClient, buildAppleStoreKitConfig } from "../providers/apple/client";
 import { buildGooglePlayConfig } from "../providers/google/config";
-import { verifyGooglePubSubPush } from "../providers/google/pubsub";
+import { type GoogleOidcVerifier, verifyGooglePubSubPush } from "../providers/google/pubsub";
 import { defineContract, registerRoute } from "../shared/http-contract";
 import { PostgresProjectInstanceContextResolver } from "./project-instance-persistence";
 
@@ -36,7 +36,13 @@ export const connectionEventContract = defineContract(
 	},
 );
 /** Setup-only ingress: verifies a single saved version, never executes billing or activates an instance. */
-export function createConnectionEventApp(repository: ConnectionRepository) {
+export function createConnectionEventApp(
+	repository: ConnectionRepository,
+	options: {
+		stripeHttpClient?: NonNullable<Stripe.StripeConfig["httpClient"]>;
+		googleOidcVerifier?: GoogleOidcVerifier;
+	} = {},
+) {
 	const app = new Hono();
 	app.use(
 		"/v1/projects/:projectKey/connections/:versionId/webhooks/:provider",
@@ -86,7 +92,10 @@ export function createConnectionEventApp(repository: ConnectionRepository) {
 			const secrets = await repository.secrets(version);
 			let identity: string, occurred: number;
 			if (provider.data === "stripe") {
-				const stripe = new Stripe(secrets.secretKey ?? "");
+				const stripe = new Stripe(
+					secrets.secretKey ?? "",
+					options.stripeHttpClient ? { httpClient: options.stripeHttpClient } : undefined,
+				);
 				const event = await stripe.webhooks.constructEventAsync(
 					body,
 					c.req.header("stripe-signature") ?? "",
@@ -116,10 +125,22 @@ export function createConnectionEventApp(repository: ConnectionRepository) {
 				const config = buildGooglePlayConfig(
 					googlePlayProjectConfigSchema.parse({ ...version.settings, ...secrets }),
 				);
-				const result = await verifyGooglePubSubPush(
-					{ authorizationHeader: c.req.header("authorization") ?? null, body: JSON.parse(body) },
-					config,
-				);
+				const result = options.googleOidcVerifier
+					? await verifyGooglePubSubPush(
+							{
+								authorizationHeader: c.req.header("authorization") ?? null,
+								body: JSON.parse(body),
+							},
+							config,
+							options.googleOidcVerifier,
+						)
+					: await verifyGooglePubSubPush(
+							{
+								authorizationHeader: c.req.header("authorization") ?? null,
+								body: JSON.parse(body),
+							},
+							config,
+						);
 				identity = config.packageName;
 				occurred = Number(result.notification.eventTimeMillis);
 			}

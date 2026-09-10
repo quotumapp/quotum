@@ -6,6 +6,33 @@ import type {
 } from "../../../src/providers/apple/types";
 
 type JsonRecord = Record<string, unknown>;
+
+function attachFailNext<T extends { client: object }>(value: T) {
+	const pending = new Map<string, Error>();
+	const client = new Proxy(value.client, {
+		get(target, prop, receiver) {
+			const orig = Reflect.get(target, prop, receiver);
+			if (typeof orig !== "function") {
+				return orig;
+			}
+			return (...args: unknown[]) => {
+				const error = pending.get(String(prop));
+				if (error !== undefined) {
+					pending.delete(String(prop));
+					throw error;
+				}
+				return orig.apply(target, args);
+			};
+		},
+	});
+	return {
+		...value,
+		client,
+		failNext(method: string, error: Error) {
+			pending.set(method, error);
+		},
+	};
+}
 type AppleDateInput = Date | number | string;
 const farFutureSubscriptionExpiry = "2099-06-30T00:00:00.000Z";
 const farFutureSubscriptionPeriodEnd = 4_086_460_800;
@@ -33,6 +60,7 @@ interface FakeStripeBillingClientOptions {
 	constructWebhookError?: Error;
 	createCustomerId?: (input: { billingAccountId: string; email: string | null }) => string;
 	createCheckoutSessionFailures?: number;
+	checkoutSession?: JsonRecord;
 }
 
 export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOptions) {
@@ -69,7 +97,7 @@ export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOp
 		notificationUUID: "00000000-0000-0000-0000-000000000001",
 	});
 
-	return {
+	return attachFailNext({
 		calls,
 		client: {
 			async getLatestSubscriptionStatus(originalTransactionId: string) {
@@ -113,7 +141,7 @@ export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOp
 		setTransactionAppAccountToken(token: string | undefined) {
 			transactionAppAccountToken = token;
 		},
-	};
+	});
 }
 
 export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions) {
@@ -125,7 +153,7 @@ export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions)
 	let refundableQuantity = options.refundableQuantity ?? quantity;
 	let productPurchaseState = "PURCHASED";
 
-	return {
+	return attachFailNext({
 		calls,
 		client: {
 			async acknowledgeProductPurchase(productId: string, token: string) {
@@ -198,18 +226,29 @@ export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions)
 		setRefundableQuantity(value: number) {
 			refundableQuantity = value;
 		},
-	};
+	});
 }
 
 export function createFakeStripeBillingClient(options: FakeStripeBillingClientOptions = {}) {
 	const calls: string[] = [];
 	const checkoutSessionParams: Stripe.Checkout.SessionCreateParams[] = [];
 	const portalSessionParams: Stripe.BillingPortal.SessionCreateParams[] = [];
+	const expiredSessions = new Set<string>();
+	const invoices = new Map<
+		string,
+		{
+			id: string;
+			total: number;
+			status: "draft" | "open" | "paid" | "void";
+			currency: string;
+			paymentIntentId: string;
+		}
+	>();
 	let checkoutSessionFailuresRemaining = options.createCheckoutSessionFailures ?? 0;
 	const event =
 		options.event ?? stripeEvent("customer.subscription.updated", stripeSubscriptionObject());
 
-	return {
+	return attachFailNext({
 		calls,
 		checkoutSessionParams,
 		client: {
@@ -253,17 +292,73 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			},
 			async retrieveCheckoutSession(sessionId: string) {
 				calls.push(`retrieveCheckoutSession:${sessionId}`);
-
-				return stripeCheckoutSessionObject({ id: sessionId });
+				const expired = expiredSessions.has(sessionId);
+				return stripeCheckoutSessionObject({
+					id: sessionId,
+					...(options.checkoutSession ?? {}),
+					...(expired ? { status: "expired", payment_status: "unpaid" } : {}),
+				});
+			},
+			async expireCheckoutSession(sessionId: string) {
+				calls.push(`expireCheckoutSession:${sessionId}`);
+				expiredSessions.add(sessionId);
 			},
 			async retrieveSubscription(subscriptionId: string) {
 				calls.push(`retrieveSubscription:${subscriptionId}`);
 
 				return stripeSubscriptionObject({ id: subscriptionId });
 			},
+			async retrieveDefaultPaymentMethod(customerId: string) {
+				calls.push(`retrieveDefaultPaymentMethod:${customerId}`);
+				return "pm_integration";
+			},
+			async createInvoice(params: Stripe.InvoiceCreateParams, idempotencyKey: string) {
+				calls.push(`createInvoice:${idempotencyKey}`);
+				const id = `in_integration_${idempotencyKey}`;
+				invoices.set(id, {
+					id,
+					total: 0,
+					status: "draft",
+					currency: params.currency ?? "usd",
+					paymentIntentId: `pi_integration_${idempotencyKey}`,
+				});
+				return { id };
+			},
+			async addInvoiceLines(
+				invoiceId: string,
+				_params: Stripe.InvoiceAddLinesParams,
+				idempotencyKey: string,
+			) {
+				calls.push(`addInvoiceLines:${idempotencyKey}`);
+				const invoice = invoices.get(invoiceId);
+				if (invoice === undefined) throw new Error(`Unknown fake Stripe invoice: ${invoiceId}`);
+				invoice.total = seededStripeEchoCreditsAmount;
+				return stripeInvoiceReceipt(invoice);
+			},
+			async finalizeInvoice(invoiceId: string, idempotencyKey: string) {
+				calls.push(`finalizeInvoice:${idempotencyKey}`);
+				const invoice = invoices.get(invoiceId);
+				if (invoice === undefined) throw new Error(`Unknown fake Stripe invoice: ${invoiceId}`);
+				if (invoice.status === "draft") invoice.status = "open";
+				return stripeInvoiceReceipt(invoice);
+			},
+			async payInvoice(invoiceId: string, idempotencyKey: string) {
+				calls.push(`payInvoice:${idempotencyKey}`);
+				const invoice = invoices.get(invoiceId);
+				if (invoice === undefined) throw new Error(`Unknown fake Stripe invoice: ${invoiceId}`);
+				invoice.status = "paid";
+				return stripeInvoiceReceipt(invoice);
+			},
+			async voidInvoice(invoiceId: string, idempotencyKey: string) {
+				calls.push(`voidInvoice:${idempotencyKey}`);
+				const invoice = invoices.get(invoiceId);
+				if (invoice === undefined) throw new Error(`Unknown fake Stripe invoice: ${invoiceId}`);
+				invoice.status = "void";
+				return stripeInvoiceReceipt(invoice);
+			},
 		},
 		portalSessionParams,
-	};
+	});
 }
 
 function stripeCustomerIdForBillingAccount(billingAccountId: string): string {
@@ -314,6 +409,35 @@ export function stripeSubscriptionObject(overrides: JsonRecord = {}) {
 		object: "subscription",
 		status: "active",
 		...overrides,
+	};
+}
+
+function stripeInvoiceReceipt(invoice: {
+	id: string;
+	total: number;
+	status: "draft" | "open" | "paid" | "void";
+	currency: string;
+	paymentIntentId: string;
+}) {
+	return {
+		id: invoice.id,
+		status: invoice.status,
+		total: invoice.total,
+		amount_paid: invoice.status === "paid" ? invoice.total : 0,
+		currency: invoice.currency,
+		payments: {
+			data:
+				invoice.status === "paid"
+					? [
+							{
+								payment: {
+									type: "payment_intent",
+									payment_intent: invoice.paymentIntentId,
+								},
+							},
+						]
+					: [],
+		},
 	};
 }
 

@@ -591,7 +591,7 @@ localDescribe("Stripe route flows integration", () => {
 		expect(body.data.eventType).toBe("checkout.session.completed");
 		expectEmptySnapshot(body.data.entitlements, "integration_user");
 		expect(fixture.stripe.calls).toEqual([
-			`constructWebhookEvent:${JSON.stringify({ id: "evt_checkout" })}:sig_test`,
+			`constructWebhookEvent:${JSON.stringify({ type: "checkout.session.completed", data: { object: {} }, id: "evt_checkout" })}:sig_test`,
 		]);
 		await expectTableCounts(context.sql, {
 			customers: 1,
@@ -1232,7 +1232,7 @@ localDescribe("Stripe route flows integration", () => {
 			},
 		});
 		expect(fixture.stripe.calls).toEqual([
-			`constructWebhookEvent:${JSON.stringify({ id: "evt_bad_sig" })}:sig_test`,
+			`constructWebhookEvent:${JSON.stringify({ type: "checkout.session.completed", data: { object: {} }, id: "evt_bad_sig" })}:sig_test`,
 		]);
 		await expectNoDurableRows(context.sql);
 	});
@@ -1260,7 +1260,7 @@ localDescribe("Stripe route flows integration", () => {
 			},
 		});
 		expect(fixture.stripe.calls).toEqual([
-			`constructWebhookEvent:${JSON.stringify({ id: "evt_unsupported" })}:sig_test`,
+			`constructWebhookEvent:${JSON.stringify({ type: "checkout.session.completed", data: { object: {} }, id: "evt_unsupported" })}:sig_test`,
 		]);
 		await expectNoDurableRows(context.sql);
 	});
@@ -1286,8 +1286,8 @@ localDescribe("Stripe route flows integration", () => {
 		expect(first.status).toBe(200);
 		expect(second.status).toBe(200);
 		expect(fixture.stripe.calls).toEqual([
-			`constructWebhookEvent:${JSON.stringify({ id: "evt_checkout" })}:sig_test`,
-			`constructWebhookEvent:${JSON.stringify({ id: "evt_checkout" })}:sig_test`,
+			`constructWebhookEvent:${JSON.stringify({ type: "checkout.session.completed", data: { object: {} }, id: "evt_checkout" })}:sig_test`,
+			`constructWebhookEvent:${JSON.stringify({ type: "checkout.session.completed", data: { object: {} }, id: "evt_checkout" })}:sig_test`,
 		]);
 		await expectTableCounts(context.sql, {
 			customers: 1,
@@ -1320,7 +1320,11 @@ async function postStripeWebhook(
 	return await fixture.app.request("/v1/projects/voysee/webhooks/stripe", {
 		method: "POST",
 		headers,
-		body: JSON.stringify(body),
+		body: JSON.stringify({
+			type: "checkout.session.completed",
+			data: { object: {} },
+			...body,
+		}),
 	});
 }
 

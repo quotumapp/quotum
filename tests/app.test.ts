@@ -794,13 +794,27 @@ describe("billing app", () => {
 			"/v1/admin/reconciliation/subscriptions/run",
 			`/v1/admin/projection-jobs/${validProjectionJobId}/retry`,
 		]) {
-			const response = await app.request(path, {
+			const missing = await app.request(path, {
 				method: "POST",
 				headers: { authorization: "Bearer secret" },
 			});
-
-			expect(response.status).toBe(401);
-			expect(await response.json()).toEqual({
+			expect(missing.status).toBe(401);
+			expect(await missing.json()).toEqual({
+				success: false,
+				error: {
+					code: "UNAUTHORIZED",
+					message: "Invalid billing operator key",
+				},
+			});
+			const sameLengthWrong = await app.request(path, {
+				method: "POST",
+				headers: {
+					authorization: "Bearer secret",
+					"x-billing-operator-key": "operator-secret-kez",
+				},
+			});
+			expect(sameLengthWrong.status).toBe(401);
+			expect(await sameLengthWrong.json()).toEqual({
 				success: false,
 				error: {
 					code: "UNAUTHORIZED",
@@ -1053,7 +1067,11 @@ describe("billing app", () => {
 		const stripe = await app.request("/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: { "stripe-signature": "t=123,v1=abc" },
-			body: "{}",
+			body: JSON.stringify({
+				id: "evt_test",
+				type: "checkout.session.completed",
+				data: { object: {} },
+			}),
 		});
 
 		expect(apple.status).toBe(200);
@@ -1286,7 +1304,10 @@ describe("billing app", () => {
 	it("returns search and global admin list responses with pagination", async () => {
 		const calls: Array<{ method: string; input: unknown }> = [];
 		const app = createApp({ env, adminBillingReader: createFakeAdminBillingReader(calls) });
-		const headers = { authorization: "Bearer secret" };
+		const headers = {
+			authorization: "Bearer secret",
+			"x-billing-operator-key": "operator-secret-key",
+		};
 
 		for (const path of [
 			"/v1/admin/customers/search?q=%20user_1%20&limit=2",
@@ -2029,12 +2050,20 @@ describe("billing app", () => {
 		const accepted = await app.request("/v1/projects/wiseley/webhooks/stripe", {
 			method: "POST",
 			headers: { "stripe-signature": "wiseley-signature" },
-			body: "{}",
+			body: JSON.stringify({
+				id: "evt_test",
+				type: "checkout.session.completed",
+				data: { object: {} },
+			}),
 		});
 		const rejected = await app.request("/v1/projects/wiseley/webhooks/stripe", {
 			method: "POST",
 			headers: { "stripe-signature": "voysee-signature" },
-			body: "{}",
+			body: JSON.stringify({
+				id: "evt_test",
+				type: "checkout.session.completed",
+				data: { object: {} },
+			}),
 		});
 
 		expect(accepted.status).toBe(200);
@@ -2172,7 +2201,8 @@ describe("billing app", () => {
 
 	it("passes exact raw Stripe webhook bodies and signatures through a public route", async () => {
 		const calls: Array<{ rawBody: string; signatureHeader: string | null }> = [];
-		const rawBody = '{\n  "id": "evt_123",\n  "data": {"object": {"id": "cs_123"}}\n}';
+		const rawBody =
+			'{\n  "id": "evt_123",\n  "type": "checkout.session.completed",\n  "data": {"object": {"id": "cs_123"}}\n}';
 		const app = createApp({
 			env,
 			stripeBillingService: {
@@ -2231,7 +2261,11 @@ describe("billing app", () => {
 		const response = await app.request("/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: { "stripe-signature": "t=123,v1=abc" },
-			body: "{}",
+			body: JSON.stringify({
+				id: "evt_test",
+				type: "checkout.session.completed",
+				data: { object: {} },
+			}),
 		});
 
 		expect(response.status).toBe(400);
@@ -2263,7 +2297,11 @@ describe("billing app", () => {
 		for (const request of [
 			new Request("http://localhost/v1/projects/voysee/webhooks/stripe", {
 				method: "POST",
-				body: "{}",
+				body: JSON.stringify({
+					id: "evt_test",
+					type: "checkout.session.completed",
+					data: { object: {} },
+				}),
 			}),
 			new Request(
 				"http://localhost/v1/billing-accounts/user_1/providers/stripe/checkout-sessions",
@@ -3086,7 +3124,11 @@ describe("billing app", () => {
 		const stripeAllowed = await app.request("/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: stripeHeaders,
-			body: "{}",
+			body: JSON.stringify({
+				id: "evt_test",
+				type: "checkout.session.completed",
+				data: { object: {} },
+			}),
 		});
 		const appleLimited = await app.request("/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
@@ -3096,7 +3138,11 @@ describe("billing app", () => {
 		const stripeLimited = await app.request("/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: stripeHeaders,
-			body: "{}",
+			body: JSON.stringify({
+				id: "evt_test",
+				type: "checkout.session.completed",
+				data: { object: {} },
+			}),
 		});
 
 		expect(appleAllowed.status).toBe(200);

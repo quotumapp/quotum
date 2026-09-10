@@ -11,6 +11,7 @@ import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
 	type LocalPostgresContext,
+	withProjectionUrl,
 } from "./helpers/local-postgres";
 import { createRecordingProjectionFetch, runProjectionWorkerOnce } from "./helpers/worker-fixture";
 
@@ -147,7 +148,6 @@ localDescribe("Failure modes integration", () => {
 			env: context.env,
 			repository: context.repository,
 			fetch,
-			now: () => new Date(),
 		});
 
 		expect(result).toEqual({ claimed: 3, succeeded: 2, failed: 1 });
@@ -184,7 +184,6 @@ localDescribe("Failure modes integration", () => {
 			fetch: createRecordingProjectionFetch(
 				new Response(JSON.stringify({ success: false }), { status: 503 }),
 			).fetch,
-			now: () => new Date(),
 		});
 		expect(first).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
 		await makeProjectionJobDue(context.sql, job.id);
@@ -192,7 +191,6 @@ localDescribe("Failure modes integration", () => {
 			env,
 			repository: context.repository,
 			fetch: createRecordingProjectionFetch(new Error("receiver unavailable")).fetch,
-			now: () => new Date(),
 		});
 
 		expect(second).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
@@ -203,18 +201,6 @@ localDescribe("Failure modes integration", () => {
 		});
 	});
 });
-
-function withProjectionUrl(
-	env: LocalPostgresContext["env"],
-	projectionUrl: string,
-): LocalPostgresContext["env"] {
-	return {
-		...env,
-		connectionFixtures: env.connectionFixtures.map((project) =>
-			project.projectInstanceKey === "voysee" ? { ...project, projectionUrl } : project,
-		),
-	};
-}
 
 async function ingestStripeCheckout(
 	env: LocalPostgresContext["env"],
@@ -238,7 +224,11 @@ async function postStripeWebhook(
 			"content-type": "application/json",
 			"stripe-signature": "sig_test",
 		},
-		body: JSON.stringify(body),
+		body: JSON.stringify({
+			type: "checkout.session.completed",
+			data: { object: {} },
+			...body,
+		}),
 	});
 }
 

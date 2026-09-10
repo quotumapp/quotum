@@ -46,11 +46,23 @@ export function isPublicAddress(address: string): boolean {
 	);
 }
 
+export interface PublicHttpsPostDependencies {
+	lookup?: (
+		hostname: string,
+		options: { all: true },
+	) => Promise<Array<{ address: string; family: number }>>;
+	request?: typeof request;
+}
+
 /** Resolve before connecting and pin the verified address while keeping hostname TLS verification. */
 export async function publicHttpsPost(
 	urlString: string,
 	body: string,
 	headers: Record<string, string>,
+	{
+		lookup: resolveAddresses = lookup,
+		request: sendRequest = request,
+	}: PublicHttpsPostDependencies = {},
 ): Promise<{ status: number; body: string }> {
 	const url = new URL(urlString);
 	if (url.protocol !== "https:" || url.username || url.password || url.hash)
@@ -58,7 +70,7 @@ export async function publicHttpsPost(
 	const hostname = url.hostname.replace(/^\[|\]$/g, "");
 	let timeout: ReturnType<typeof setTimeout> | undefined;
 	const addresses = await Promise.race([
-		lookup(hostname, { all: true }),
+		resolveAddresses(hostname, { all: true }),
 		new Promise<never>((_, reject) => {
 			timeout = setTimeout(() => reject(new Error("Destination lookup timed out")), 5000);
 		}),
@@ -70,7 +82,7 @@ export async function publicHttpsPost(
 	const target = addresses[0];
 	if (!target) throw new Error("Destination unavailable");
 	return new Promise((resolve, reject) => {
-		const req = request(
+		const req = sendRequest(
 			url,
 			{
 				method: "POST",

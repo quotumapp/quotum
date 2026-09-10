@@ -233,4 +233,31 @@ describe("fake provider clients", () => {
 		expect(fake.checkoutSessionParams).toEqual([checkoutParams]);
 		expect(fake.portalSessionParams).toEqual([portalParams]);
 	});
+
+	it("fails the next Apple, Google, and Stripe client call once", async () => {
+		const apple = createFakeAppleStoreKitClient({
+			transactionId: "txn_1",
+			originalTransactionId: "orig_1",
+		});
+		const google = createFakeGooglePlayClient({ obfuscatedAccountId: "acct" });
+		const stripe = createFakeStripeBillingClient();
+		const invoice = await stripe.client.createInvoice({ currency: "usd" }, "create");
+		apple.failNext("verifyTransaction", new Error("StoreKit 503"));
+		google.failNext("getProductPurchase", new Error("Play API down"));
+		stripe.failNext("payInvoice", new Error("Rate limited"));
+		await expect((async () => apple.client.verifyTransaction("txn_1"))()).rejects.toThrow(
+			"StoreKit 503",
+		);
+		await expect((async () => google.client.getProductPurchase("token"))()).rejects.toThrow(
+			"Play API down",
+		);
+		await expect((async () => stripe.client.payInvoice(invoice.id, "pay"))()).rejects.toThrow(
+			"Rate limited",
+		);
+		await expect(apple.client.verifyTransaction("txn_1")).resolves.toBeDefined();
+		await expect(google.client.getProductPurchase("token")).resolves.toBeDefined();
+		await expect(stripe.client.payInvoice(invoice.id, "pay")).resolves.toMatchObject({
+			status: "paid",
+		});
+	});
 });

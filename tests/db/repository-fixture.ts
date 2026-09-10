@@ -5,19 +5,53 @@ import type {
 } from "../../src/db/repository";
 import { renderDrizzleSql, renderDrizzleSqlParams } from "../helpers/drizzle-sql";
 
+export interface FakeDatabaseOptions {
+	strict?: boolean;
+}
+
 export class FakeDatabase {
 	queries: string[] = [];
 	params: unknown[][] = [];
-	constructor(private readonly responses: Array<Record<string, unknown>[]>) {}
+	constructor(
+		private readonly responses: Array<Record<string, unknown>[]>,
+		private readonly options: FakeDatabaseOptions = {},
+	) {}
 
 	async execute(query: { toQuery?: () => { sql: string } } | unknown) {
 		this.queries.push(renderDrizzleSql(query));
 		this.params.push(renderDrizzleSqlParams(query));
+		if (this.options.strict && this.responses.length === 0) {
+			throw new Error(`Unscripted query #${this.queries.length}: ${this.queries.at(-1)}`);
+		}
 		return this.responses.shift() ?? [];
 	}
 
 	async transaction<T>(callback: (tx: FakeDatabase) => Promise<T>): Promise<T> {
 		return await callback(this);
+	}
+
+	assertConsumed(): void {
+		if (this.responses.length > 0) {
+			throw new Error(`${this.responses.length} scripted responses were not consumed`);
+		}
+	}
+
+	boundParameter(column: string, queryIndex?: number): unknown {
+		const escaped = column.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const pattern = new RegExp(String.raw`\b${escaped}\s*=\s*\$(\d+)`);
+		const indexes = queryIndex === undefined ? this.queries.map((_, index) => index) : [queryIndex];
+		for (const index of indexes) {
+			const query = this.queries[index];
+			if (query === undefined) {
+				continue;
+			}
+			const match = query.match(pattern);
+			if (match === null) {
+				continue;
+			}
+			return this.params[index]?.[Number(match[1]) - 1];
+		}
+		throw new Error(`bound parameter for ${column} was not found`);
 	}
 }
 

@@ -10,6 +10,7 @@ import { createGoogleObfuscatedAccountId } from "../../src/providers/google/acco
 import { GooglePlayBillingService } from "../../src/providers/google/service";
 import type { StoreEventReplayProviders } from "../../src/workers/store-event-replay";
 import type { SubscriptionReconciliationProviders } from "../../src/workers/subscription-reconciliation";
+import { createLocalProjectionReceiver } from "../helpers/projection-receiver";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import { expectProjectionJob, expectStoreEvent, expectTableCounts } from "./helpers/db-assertions";
@@ -18,6 +19,7 @@ import {
 	describeLocalPostgres,
 	integrationProjectContext,
 	type LocalPostgresContext,
+	withProjectionUrl,
 } from "./helpers/local-postgres";
 import {
 	createRecordingProjectionFetch,
@@ -120,6 +122,40 @@ localDescribe("Worker flows integration", () => {
 		expect(succeededJob.last_error).toBeNull();
 		expect(succeededJob.locked_at).toBeNull();
 		expect(succeededJob.locked_by).toBeNull();
+	});
+
+	it("times out a held projection delivery, releases the lock, and records exactly one request", async () => {
+		const receiver = createLocalProjectionReceiver({ secret: "voysee-projection-secret" });
+		try {
+			const env = withProjectionUrl(context.env, receiver.url);
+			const fixture = createIntegrationApp({
+				env,
+				repository: context.repository,
+			});
+			expect((await verifyGoogleConsumable(fixture)).status).toBe(200);
+			const hold = receiver.holdNextResponse();
+			const result = await runProjectionWorkerOnce({
+				env,
+				repository: context.repository,
+				fetch: globalThis.fetch,
+				timeoutMs: 200,
+			});
+			expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+			const failedJob = await expectProjectionJob(context.sql, {
+				billingAccountId: "integration_user",
+				reason: "purchase_verified",
+				status: "pending",
+			});
+			expect(failedJob.attempts).toBe(1);
+			expect(failedJob.locked_by).toBeNull();
+			expect(failedJob.last_error).toMatch(
+				/^Projection delivery failed for project voysee: .*(timed out|TimeoutError|abort)/i,
+			);
+			expect(receiver.requests).toHaveLength(1);
+			hold.release();
+		} finally {
+			receiver.stop();
+		}
 	});
 
 	it("marks projection delivery failures retryable", async () => {
@@ -600,6 +636,65 @@ localDescribe("Worker flows integration", () => {
 			providerFailed: 1,
 		});
 		await expectSubscriptionReconciliationFailure(context.sql);
+	});
+
+	it("keeps Google 404 subscription reconciliation retryable", async () => {
+		const fixture = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		await verifyGoogleSubscription(fixture, {
+			projectKey: "wiseley",
+			purchaseToken: "purchase_token_stale",
+		});
+		await makeSubscriptionStale(context.sql, "wiseley", "purchase_token_stale");
+		fixture.google.failNext(
+			"getSubscriptionPurchase",
+			Object.assign(new Error("Google Play 404"), { status: 404 }),
+		);
+		const google = new GooglePlayBillingService({
+			config: {
+				packageName: "com.voysee.app",
+				obfuscatedAccountIdSecret: "google-account-link-secret",
+				previousObfuscatedAccountIdSecrets: [],
+				rtdnAudience: null,
+				rtdnServiceAccountEmail: null,
+				rtdnAuthorizedParty: null,
+				enablePublisherMutations: true,
+			},
+			client: fixture.google.client,
+			repository: context.repository.forProject(integrationProjectContext("wiseley")),
+		});
+		const result = await runSubscriptionReconciliationWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: { apple: null, google, stripe: null },
+		});
+		expect(result).toMatchObject({
+			providerClaimed: 1,
+			providerProcessed: 0,
+			providerFailed: 1,
+		});
+		const [row] = await context.sql<
+			{
+				provider_reconciliation_attempts: number;
+				provider_reconciliation_error: string | null;
+				provider_reconciliation_next_attempt_at: string | null;
+				provider_reconciliation_locked_by: string | null;
+			}[]
+		>`
+			SELECT provider_reconciliation_attempts, provider_reconciliation_error,
+				provider_reconciliation_next_attempt_at::text AS provider_reconciliation_next_attempt_at,
+				provider_reconciliation_locked_by
+			FROM subscriptions
+			JOIN projects ON projects.id = subscriptions.project_id
+			WHERE projects.key = 'wiseley'
+				AND subscriptions.external_subscription_id = 'purchase_token_stale'
+		`;
+		expect(row.provider_reconciliation_attempts).toBe(1);
+		expect(row.provider_reconciliation_error).toMatch(/404/);
+		expect(row.provider_reconciliation_next_attempt_at).toEqual(expect.any(String));
+		expect(row.provider_reconciliation_locked_by).toBeNull();
 	});
 });
 

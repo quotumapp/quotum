@@ -237,6 +237,12 @@ export async function resetPublicBillingTables(sql: SQL): Promise<void> {
 	// `projects.published_catalog_revision_id` references catalog revisions. Truncating
 	// that parent with CASCADE would also erase the platform-owned project instances.
 	await sql`DELETE FROM catalog_revisions`;
+	await sql`DELETE FROM metering_settings`;
+	await sql`
+		INSERT INTO metering_settings (project_id)
+		SELECT id FROM projects
+		ON CONFLICT (project_id) DO NOTHING
+	`;
 }
 
 export async function seedIntegrationProjectsAndCatalog(

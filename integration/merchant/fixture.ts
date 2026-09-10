@@ -10,12 +10,19 @@ import { createMerchantAuth } from "../../src/platform/auth";
 import { createMerchantBilling } from "../../src/platform/billing";
 import type { MerchantConfig } from "../../src/platform/config";
 import { ConnectionCipher } from "../../src/platform/connections/cipher";
+import { MerchantStripeOAuth } from "../../src/platform/connections/oauth";
+import type { StripeOAuthPort } from "../../src/platform/connections/oauth-port";
 import type {
 	ConnectionValidationPort,
 	EnvironmentBillingPort,
 } from "../../src/platform/connections/ports";
 import { ConnectionRepository } from "../../src/platform/connections/repository";
 import { MerchantConnections } from "../../src/platform/connections/service";
+import type {
+	MerchantScope,
+	OnboardingDraftView,
+	ProvisioningOperationView,
+} from "../../src/platform/contracts";
 import type { MerchantEmail, MerchantMailer } from "../../src/platform/email";
 import { MerchantOnboarding } from "../../src/platform/onboarding";
 import { CSRF_COOKIE } from "../../src/platform/security";
@@ -173,7 +180,10 @@ export class MerchantBrowser {
 				body: body === undefined ? undefined : JSON.stringify(body),
 			}),
 		);
-		await assertOpenApiResponse(method, path, response);
+		await assertOpenApiResponse(method, path, response, {
+			requestBody: body,
+			requestContentType: body === undefined ? null : "application/json",
+		});
 		for (const cookie of response.headers.getSetCookie()) {
 			const first = cookie.split(";")[0] ?? "";
 			const separator = first.indexOf("=");
@@ -221,4 +231,146 @@ export class MerchantBrowser {
 		await this.json("/api/platform/session/exchange", {});
 		return email;
 	}
+}
+
+export const merchantTestScope: MerchantScope = {
+	kind: "merchant",
+	organizationSlug: "acme",
+	projectKey: "example",
+	environment: "sandbox",
+};
+
+export const stripeCheckoutSettings = {
+	checkoutSuccessUrl: "https://shop.example/success?session_id={CHECKOUT_SESSION_ID}",
+	checkoutCancelUrl: "https://shop.example/cancel",
+	portalReturnUrl: "https://shop.example/billing",
+};
+
+export function stubConnectionValidation(): ConnectionValidationPort {
+	return {
+		normalize: (_kind, _environment, input) => input,
+		async validate(kind) {
+			return {
+				identity: kind === "stripe" ? "acct_isolated" : kind,
+				eventVerified: true,
+				checks: [{ code: "TEST_VERIFIED", passed: true }],
+			};
+		},
+	};
+}
+
+export function stubEnvironmentBilling(sql: () => MerchantFixture["sql"]): EnvironmentBillingPort {
+	return {
+		async catalogReadiness(id) {
+			const [row] = await sql()<{ revision: string | null }[]>`
+				SELECT published_catalog_revision_id::text AS revision FROM projects WHERE id=${id}
+			`;
+			return {
+				revisionId: row?.revision ?? null,
+				providers: row?.revision ? ["stripe"] : [],
+				ready: !!row?.revision,
+			};
+		},
+		async promote() {
+			throw new Error("Unused");
+		},
+	};
+}
+
+export async function onboard(browser: MerchantBrowser): Promise<void> {
+	await browser.signup();
+	const org = await browser.json<OnboardingDraftView>("/api/platform/onboarding/organization", {
+		name: "Acme Company",
+		slug: "acme",
+	});
+	const draft = await browser.json<OnboardingDraftView>("/api/platform/onboarding/project", {
+		name: "Example Project",
+		key: "example",
+		revision: org.revision,
+	});
+	await browser.json<ProvisioningOperationView>("/api/platform/onboarding/provision", {
+		revision: draft.revision,
+	});
+}
+
+export async function grant(
+	fixture: MerchantFixture,
+	browser: MerchantBrowser,
+	target: string,
+	action: string,
+): Promise<string> {
+	const prod = { ...merchantTestScope, environment: "production" as const };
+	const challenge = await browser.json<{ id: string }>("/api/platform/step-up", {
+		scope: prod,
+		action,
+		target,
+		returnTo: "/",
+	});
+	await fixture.sql`DELETE FROM platform_rate_limits`;
+	await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
+	await browser.json("/api/auth/two-factor/send-otp", {});
+	await browser.json("/api/auth/two-factor/verify-otp", {
+		code: fixture.mailer.otp("owner@example.com"),
+		trustDevice: false,
+	});
+	return (
+		await browser.json<{ grant: string }>(`/api/platform/step-up/${challenge.id}/complete`, {})
+	).grant;
+}
+
+export function isolatedStripeOAuthPort(): StripeOAuthPort {
+	return {
+		authorize: (_environment, state) =>
+			`https://marketplace.stripe.com/oauth/v2/authorize?state=${state}`,
+		exchange: async () => ({
+			accessToken: "initial-synthetic-access",
+			refreshToken: "initial-synthetic-refresh",
+			expiresAt: Date.now() - 1000,
+			accountId: "acct_isolated",
+			livemode: false,
+		}),
+		refresh: async () => ({
+			accessToken: "rotated-synthetic-access",
+			refreshToken: "rotated-synthetic-refresh",
+			expiresAt: Date.now() + 3_600_000,
+			accountId: "acct_isolated",
+			livemode: false,
+		}),
+		webhookSecret: () => "whsec_app_synthetic",
+	};
+}
+
+export async function authorizeStripeApp(
+	fixture: MerchantFixture,
+	browser: MerchantBrowser,
+	provider: StripeOAuthPort,
+	validator: ConnectionValidationPort,
+): Promise<{ draftId: string }> {
+	if (!fixture.connections) throw new Error("Connection test service unavailable");
+	const identity = await fixture.store.authenticate(
+		new Request("https://quotum.example/api/platform/session", {
+			headers: { cookie: [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; ") },
+		}),
+	);
+	const oauth = new MerchantStripeOAuth(
+		fixture.store,
+		fixture.connections,
+		fixture.connectionRepository,
+		provider,
+		validator,
+	);
+	const start = await oauth.start(identity, merchantTestScope, stripeCheckoutSettings, 0);
+	const state = new URL(start.authorizeUrl).searchParams.get("state");
+	if (!state) throw new Error("Missing OAuth state");
+	const draft = await oauth.complete(identity, state, "code");
+	await fixture.connections.validate(identity, merchantTestScope, "stripe", draft.draftId);
+	await fixture.connections.commit(
+		identity,
+		merchantTestScope,
+		"stripe",
+		draft.draftId,
+		"oauth-commit",
+		null,
+	);
+	return draft;
 }

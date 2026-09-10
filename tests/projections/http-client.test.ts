@@ -106,6 +106,72 @@ describe("ProjectionHttpClient", () => {
 				now: () => new Date("2026-06-07T12:00:00.000Z"),
 			}),
 		).toBe(false);
+		expect(
+			verifyProjectionSignature({
+				secret: "wrong-projection-secret",
+				body,
+				timestamp,
+				signature,
+				now: () => new Date("2026-06-07T12:00:00.000Z"),
+			}),
+		).toBe(false);
+		const flipped = `${signature.slice(0, -1)}${signature.endsWith("0") ? "1" : "0"}`;
+		expect(
+			verifyProjectionSignature({
+				secret: "wiseley-projection-secret",
+				body,
+				timestamp,
+				signature: flipped,
+				now: () => new Date("2026-06-07T12:00:00.000Z"),
+			}),
+		).toBe(false);
+		expect(
+			verifyProjectionSignature({
+				secret: "wiseley-projection-secret",
+				body,
+				timestamp,
+				signature: signature.replace("sha256=", ""),
+				now: () => new Date("2026-06-07T12:00:00.000Z"),
+			}),
+		).toBe(false);
+		for (const malformed of [
+			"",
+			"abc",
+			"1780833600.5",
+			"01780833600",
+			" 1780833600",
+			"1e9",
+			"-1",
+		]) {
+			expect(
+				verifyProjectionSignature({
+					secret: "wiseley-projection-secret",
+					body,
+					timestamp: malformed,
+					signature,
+					now: () => new Date("2026-06-07T12:00:00.000Z"),
+				}),
+			).toBe(false);
+		}
+		const now = () => new Date(1_780_833_600_000);
+		expect(
+			verifyProjectionSignature({
+				secret: "wiseley-projection-secret",
+				body,
+				timestamp,
+				signature,
+				now: () => new Date(now().getTime() - 301_000),
+			}),
+		).toBe(false);
+		expect(
+			verifyProjectionSignature({
+				secret: "wiseley-projection-secret",
+				body,
+				timestamp,
+				signature,
+				now: () => new Date(now().getTime() - 299_000),
+			}),
+		).toBe(true);
 	});
 
 	it("treats non-2xx responses as retryable projection failures", async () => {

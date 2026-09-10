@@ -37,7 +37,9 @@ describe("BillingRepository core", () => {
 		expect(queries).toContain("FROM entitlements");
 		expect(queries).not.toContain("FROM billing.entitlements");
 		expect(queries).toContain("e.project_id = $1");
-		expect(queries).toContain(JSON.stringify(projectInstanceContext("wiseley").projectInstanceId));
+		expect(database.boundParameter("e.project_id")).toBe(
+			projectInstanceContext("wiseley").projectInstanceId,
+		);
 	});
 
 	it("reads null-expiry subscription entitlements as inactive while preserving purchase entitlements", async () => {
@@ -86,7 +88,9 @@ describe("BillingRepository core", () => {
 		const queries = database.queries.join("\n");
 		expect(queries).not.toContain("FROM projects");
 		expect(queries).toContain("pc.project_id = $1");
-		expect(queries).toContain(JSON.stringify(projectInstanceContext("wiseley").projectInstanceId));
+		expect(database.boundParameter("pc.project_id")).toBe(
+			projectInstanceContext("wiseley").projectInstanceId,
+		);
 	});
 
 	it("retries rolled-back billing transactions after PostgreSQL deadlocks", async () => {
@@ -105,5 +109,37 @@ describe("BillingRepository core", () => {
 		await repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1");
 
 		expect(attempts).toBe(3);
+	});
+
+	it("exhausts deadlock retries then rethrows", async () => {
+		const database = new FakeDatabase([]);
+		let attempts = 0;
+		database.transaction = async () => {
+			attempts += 1;
+			throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+		};
+		const repository = new BillingRepository(database as never);
+
+		await expect(
+			repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1"),
+		).rejects.toMatchObject({ code: "40P01" });
+		expect(attempts).toBe(3);
+	});
+
+	it("rethrows serialization and unique-violation errors immediately", async () => {
+		for (const code of ["40001", "23505"]) {
+			const database = new FakeDatabase([]);
+			let attempts = 0;
+			database.transaction = async () => {
+				attempts += 1;
+				throw Object.assign(new Error(code), { code });
+			};
+			const repository = new BillingRepository(database as never);
+
+			await expect(
+				repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1"),
+			).rejects.toMatchObject({ code });
+			expect(attempts).toBe(1);
+		}
 	});
 });

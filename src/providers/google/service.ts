@@ -75,6 +75,7 @@ export interface GooglePlayBillingServiceDependencies {
 		body: unknown;
 	}) => Promise<VerifiedGoogleRtdn>;
 	verifyRtdnAuthorization?: (authorizationHeader: string | null) => Promise<void>;
+	verifyOidcToken?: import("./pubsub").GoogleOidcVerifier;
 }
 
 export class GooglePlayBillingService {
@@ -309,6 +310,7 @@ export class GooglePlayBillingService {
 		return verifyGooglePubSubAuthorization(
 			{ authorizationHeader },
 			this.dependencies.config as GooglePlayConfig,
+			this.dependencies.verifyOidcToken,
 		);
 	}
 
@@ -451,7 +453,11 @@ export class GooglePlayBillingService {
 			return this.dependencies.verifyRtdn(input);
 		}
 
-		return verifyGooglePubSubPush(input, this.dependencies.config as GooglePlayConfig);
+		return verifyGooglePubSubPush(
+			input,
+			this.dependencies.config as GooglePlayConfig,
+			this.dependencies.verifyOidcToken,
+		);
 	}
 
 	private async applyPublisherMutations(command: NormalizedGooglePurchase): Promise<void> {

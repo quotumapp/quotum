@@ -160,7 +160,9 @@ describe("BillingRepository workers", () => {
 		const queries = database.queries.join("\n");
 		expect(queries).not.toContain("SELECT p.id FROM projects p");
 		expect(queries).toContain("events.project_id = $3");
-		expect(queries).toContain(JSON.stringify(projectInstanceContext("wiseley").projectInstanceId));
+		expect(database.boundParameter("events.project_id")).toBe(
+			projectInstanceContext("wiseley").projectInstanceId,
+		);
 	});
 
 	it("marks projection failures with retry or terminal state", async () => {
@@ -199,7 +201,9 @@ describe("BillingRepository workers", () => {
 		expect(queries).toContain("attempts = 0");
 		expect(queries).toContain("last_error = NULL");
 		expect(queries).toContain("next_attempt_at = now()");
-		expect(queries).toContain(JSON.stringify(projectInstanceContext("wiseley").projectInstanceId));
+		expect(database.boundParameter("jobs.project_id")).toBe(
+			projectInstanceContext("wiseley").projectInstanceId,
+		);
 	});
 
 	it("binds null for terminal projection failures", async () => {
@@ -342,5 +346,12 @@ describe("BillingRepository workers", () => {
 			expect(params).toContain("project-id");
 			expect(params).toContain("worker-a");
 		}
+		// The catalog_migration_jobs row is keyed by subscription_change_id whose owner
+		// row was lease-fenced by the preceding UPDATE in the same transaction.
+		expect(database.queries[1]).toContain("UPDATE catalog_migration_jobs");
+		expect(database.queries[1]).toContain("project_id =");
+		expect(database.params[1]).toContain("project-id");
+		expect(database.params[1]).toContain("change-id");
+		expect(database.params[1]).not.toContain("worker-a");
 	});
 });

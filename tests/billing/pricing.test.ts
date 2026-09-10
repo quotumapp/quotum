@@ -73,7 +73,7 @@ describe("recurring pricing", () => {
 		).toMatchObject({ billableQuantity: "250", amountMinor: 340n });
 	});
 
-	it("rejects tier gaps and non-final unbounded tiers", () => {
+	it("rejects malformed tier tables", () => {
 		expect(() =>
 			calculateTieredUsageCharge({
 				usageQuantity: "1",
@@ -82,7 +82,108 @@ describe("recurring pricing", () => {
 				pricingModel: "graduated",
 				tiers: [{ upToQuantity: "10", unitAmountMinor: 1n }],
 			}),
-		).toThrow("final pricing tier must be unbounded");
+		).toThrow("The final pricing tier must be unbounded");
+		expect(() =>
+			calculateTieredUsageCharge({
+				usageQuantity: "1",
+				includedQuantity: "0",
+				billingUnits: "1",
+				pricingModel: "graduated",
+				tiers: [
+					{ upToQuantity: null, unitAmountMinor: 1n },
+					{ upToQuantity: "10", unitAmountMinor: 1n },
+				],
+			}),
+		).toThrow("Only the final pricing tier can be unbounded");
+		for (const upToQuantities of [
+			["100", "100", null],
+			["200", "100", null],
+			["0", null],
+		] as const) {
+			expect(() =>
+				calculateTieredUsageCharge({
+					usageQuantity: "1",
+					includedQuantity: "0",
+					billingUnits: "1",
+					pricingModel: "graduated",
+					tiers: upToQuantities.map((upToQuantity) => ({
+						upToQuantity,
+						unitAmountMinor: 1n,
+					})),
+				}),
+			).toThrow("Pricing tier boundaries must be strictly increasing");
+		}
+		expect(() =>
+			calculateTieredUsageCharge({
+				usageQuantity: "1",
+				includedQuantity: "0",
+				billingUnits: "1",
+				pricingModel: "graduated",
+				tiers: [],
+			}),
+		).toThrow("Tiered pricing requires at least one tier");
+		expect(() =>
+			calculateTieredUsageCharge({
+				usageQuantity: "1",
+				includedQuantity: "0",
+				billingUnits: "1",
+				pricingModel: "graduated",
+				tiers: [{ upToQuantity: null, unitAmountMinor: -1n }],
+			}),
+		).toThrow("Tier amounts must be nonnegative");
+		expect(() =>
+			calculateUsageCharge({
+				usageQuantity: "1",
+				includedQuantity: "0",
+				billingUnits: "0",
+				unitAmountMinor: 1n,
+			}),
+		).toThrow("billingUnits must be greater than zero");
+		expect(() =>
+			calculateTieredUsageCharge({
+				usageQuantity: "1",
+				includedQuantity: "0",
+				billingUnits: "0",
+				pricingModel: "graduated",
+				tiers: [{ upToQuantity: null, unitAmountMinor: 1n }],
+			}),
+		).toThrow("billingUnits must be greater than zero");
+		expect(() =>
+			calculateTieredUsageCharge({
+				usageQuantity: "-1",
+				includedQuantity: "0",
+				billingUnits: "1",
+				pricingModel: "graduated",
+				tiers: [{ upToQuantity: null, unitAmountMinor: 1n }],
+			}),
+		).toThrow("usageQuantity must be a non-negative decimal string");
+	});
+
+	it("rounds usage charges half-up to integer minor units", () => {
+		expect(
+			calculateUsageCharge({
+				usageQuantity: "1",
+				includedQuantity: "0",
+				billingUnits: "2",
+				unitAmountMinor: 1n,
+			}).amountMinor,
+		).toBe(1n);
+		expect(
+			calculateUsageCharge({
+				usageQuantity: "1",
+				includedQuantity: "0",
+				billingUnits: "4",
+				unitAmountMinor: 1n,
+			}).amountMinor,
+		).toBe(0n);
+		expect(
+			calculateUsageCharge({
+				usageQuantity: "3",
+				includedQuantity: "0",
+				billingUnits: "2",
+				unitAmountMinor: 1n,
+			}).amountMinor,
+		).toBe(2n);
 	});
 
 	it("converts graduated rate cards marginally and rounds once", () => {

@@ -12,6 +12,8 @@ import {
 import { resetAndSeedIntegrationData } from "../tests/integration/helpers/catalog-fixtures";
 import { publishAiCreditsCatalog } from "../tests/integration/helpers/metering-catalog";
 import { integrationProjectContext } from "../tests/integration/helpers/platform-fixture";
+import { trapInterrupts } from "./lib/interrupts";
+import { evaluateLoadGates } from "./lib/load-gates";
 import {
 	applyTestcontainersDefaults,
 	createPostgresContainer,
@@ -39,6 +41,8 @@ interface Options {
 	pgConfig: readonly string[];
 	profile: "consume" | "check" | "reserve" | null;
 	recreateSchema: boolean;
+	minRps: number | null;
+	maxP99Ms: number | null;
 }
 
 interface DbSnapshot {
@@ -90,11 +94,12 @@ const defaultScenarios: readonly ScenarioKind[] = [
 const hotAccount = "load-hot";
 const postgresDatabase = "quotum_billing_load";
 
+const interrupts = trapInterrupts();
 try {
 	await main(parseOptions(process.argv.slice(2)));
 } catch (error) {
 	console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
-	process.exitCode = 1;
+	process.exitCode = interrupts.exitCode() ?? 1;
 }
 
 async function main(options: Options): Promise<void> {
@@ -197,6 +202,13 @@ async function main(options: Options): Promise<void> {
 			}
 		}
 		printTable(results);
+		const gateFailures = evaluateLoadGates(results, {
+			minRps: options.minRps ?? undefined,
+			maxP99Ms: options.maxP99Ms ?? undefined,
+		});
+		if (gateFailures.length > 0) {
+			throw new Error(`Load lane gates failed:\n${gateFailures.join("\n")}`);
+		}
 		if (options.out !== null) {
 			await writeFile(
 				options.out,
@@ -757,6 +769,8 @@ function parseOptions(argv: readonly string[]): Options {
 		pgConfig: [],
 		profile: null,
 		recreateSchema: false,
+		minRps: null,
+		maxP99Ms: null,
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const flag = argv[index];
@@ -801,6 +815,12 @@ function parseOptions(argv: readonly string[]): Options {
 				break;
 			case "--recreate-schema":
 				options.recreateSchema = true;
+				break;
+			case "--min-rps":
+				options.minRps = Number(requireValue());
+				break;
+			case "--max-p99-ms":
+				options.maxP99Ms = Number(requireValue());
 				break;
 			case "--profile": {
 				const next = argv[index + 1];
