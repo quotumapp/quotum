@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import type { SQL } from "bun";
 import type { EntitlementSnapshot, ProjectionPayload } from "../../src/billing/types";
 import { createGoogleObfuscatedAccountId } from "../../src/providers/google/account-link";
-import { signGoogleOidcToken } from "../helpers/google-oidc";
+import { signGoogleOidcToken, tamperGoogleOidcSignature } from "../helpers/google-oidc";
 import {
 	createIntegrationApp,
 	integrationGoogleOidcKeys,
@@ -703,7 +703,7 @@ async function postSignedGoogleRtdn(
 		integrationGoogleOidcKeys.kid,
 	);
 	if (tamper === true) {
-		token = `${token.slice(0, -2)}aa`;
+		token = tamperGoogleOidcSignature(token);
 	}
 	const notification = {
 		version: "1.0",

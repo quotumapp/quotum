@@ -39,6 +39,13 @@ export function googleOidcCertFetch(kid: string, pem: string): typeof fetch {
 	);
 }
 
+export function tamperGoogleOidcSignature(token: string): string {
+	const signatureStart = token.lastIndexOf(".") + 1;
+	// Change a full Base64 digit, avoiding unused trailing bits in the signature encoding.
+	const replacement = token[signatureStart] === "A" ? "B" : "A";
+	return `${token.slice(0, signatureStart)}${replacement}${token.slice(signatureStart + 1)}`;
+}
+
 export function createTestGoogleOidcVerifier(kid: string, pem: string) {
 	return createGoogleOidcVerifier(googleOidcCertFetch(kid, pem));
 }
