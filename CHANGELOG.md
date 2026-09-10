@@ -12,6 +12,8 @@ start at 1.0.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-09-10
+
 ### Platform email configuration (breaking)
 
 - Added explicit `QUOTUM_EMAIL_PROVIDER=cloudflare|resend` selection and a Resend REST adapter.
