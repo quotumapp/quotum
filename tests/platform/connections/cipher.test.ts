@@ -44,6 +44,36 @@ describe("connection encryption", () => {
 		expect(current.keyId).toBe("b");
 		expect(() => cipher.decrypt(current, scope)).toThrow();
 	});
+	it("rejects flipped tag, nonce, or ciphertext bits and a different key under the same keyId", () => {
+		const envelope = cipher.encrypt("private", scope);
+		expect(() => cipher.decrypt({ ...envelope, tag: flipBit(envelope.tag) }, scope)).toThrow(
+			"Connection secret is unavailable",
+		);
+		expect(() => cipher.decrypt({ ...envelope, nonce: flipBit(envelope.nonce) }, scope)).toThrow(
+			"Connection secret is unavailable",
+		);
+		expect(() =>
+			cipher.decrypt({ ...envelope, ciphertext: flipBit(envelope.ciphertext) }, scope),
+		).toThrow("Connection secret is unavailable");
+		const other = new ConnectionCipher("a", new Map([["a", Buffer.alloc(32, 9)]]));
+		expect(() => other.decrypt(envelope, scope)).toThrow("Connection secret is unavailable");
+	});
+
+	it("round-trips empty and unicode secrets and rejects 31/33-byte keys and 11-byte nonces", () => {
+		expect(cipher.decrypt(cipher.encrypt("", scope), scope)).toBe("");
+		expect(cipher.decrypt(cipher.encrypt("€ snowman ☃", scope), scope)).toBe("€ snowman ☃");
+		expect(() => new ConnectionCipher("a", new Map([["a", Buffer.alloc(31, 1)]]))).toThrow(
+			"Connection encryption requires a 32-byte active key",
+		);
+		expect(() => new ConnectionCipher("a", new Map([["a", Buffer.alloc(33, 1)]]))).toThrow(
+			"Connection encryption requires a 32-byte active key",
+		);
+		const envelope = cipher.encrypt("private", scope);
+		expect(() =>
+			cipher.decrypt({ ...envelope, nonce: Buffer.alloc(11, 1).toString("base64") }, scope),
+		).toThrow("Connection secret is unavailable");
+	});
+
 	it("requires an external key and rejects incomplete or duplicated key configuration", () => {
 		expect(() => loadConnectionCipher({})).toThrow();
 		expect(() =>
@@ -59,3 +89,9 @@ describe("connection encryption", () => {
 		).toThrow();
 	});
 });
+
+function flipBit(value: string): string {
+	const bytes = Buffer.from(value, "base64");
+	bytes[0] = (bytes[0] ?? 0) ^ 1;
+	return bytes.toString("base64");
+}

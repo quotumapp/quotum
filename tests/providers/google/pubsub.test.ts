@@ -38,13 +38,15 @@ const envelope = (data: string) => ({
 });
 
 const encode = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8").toString("base64");
+const validExp = 4_000_000_000;
+const expiredExp = 1;
 const validClaims = (overrides: Record<string, unknown> = {}) => ({
 	aud: "https://billing.example.com/v1/webhooks/google",
 	email: "pubsub-push@example.iam.gserviceaccount.com",
 	email_verified: true,
 	iss: "https://accounts.google.com",
 	azp: "pubsub-push-client-id",
-	exp: Math.floor(Date.now() / 1000) + 300,
+	exp: validExp,
 	...overrides,
 });
 
@@ -98,7 +100,7 @@ describe("Google Pub/Sub RTDN push verification", () => {
 		for (const [claims, message] of [
 			[validClaims({ iss: "https://example.invalid" }), "issuer mismatch"],
 			[validClaims({ azp: "wrong-client-id" }), "authorized party mismatch"],
-			[validClaims({ exp: Math.floor(Date.now() / 1000) - 1 }), "expired"],
+			[validClaims({ exp: expiredExp }), "expired"],
 		] as const) {
 			await expect(
 				verifyGooglePubSubPush(
@@ -184,5 +186,114 @@ describe("Google Pub/Sub RTDN push verification", () => {
 				validClaims(),
 			),
 		).rejects.toBeInstanceOf(BillingError);
+	});
+
+	it("rejects unverified email, missing exp, and unconfigured RTDN audience", async () => {
+		let verifierCalls = 0;
+		const countingVerifier = async () => {
+			verifierCalls += 1;
+			return validClaims({ email_verified: false });
+		};
+		await expect(
+			verifyGooglePubSubPush(
+				{ authorizationHeader: "Bearer token", body: envelope(encode(notification)) },
+				config,
+				countingVerifier,
+			),
+		).rejects.toThrow("Google Pub/Sub push token email mismatch");
+		expect(verifierCalls).toBe(1);
+
+		await expect(
+			verifyGooglePubSubPush(
+				{ authorizationHeader: "Bearer token", body: envelope(encode(notification)) },
+				config,
+				async () => validClaims({ exp: "later" }),
+			),
+		).rejects.toThrow("Google Pub/Sub push token expired");
+		await expect(
+			verifyGooglePubSubPush(
+				{ authorizationHeader: "Bearer token", body: envelope(encode(notification)) },
+				{ ...config, rtdnAudience: null },
+				async () => {
+					throw new Error("verifier should not run");
+				},
+			),
+		).rejects.toMatchObject({ code: "INVALID_REQUEST", status: 500 });
+	});
+
+	it("accepts lowercase bearer and rejects other schemes", async () => {
+		await expect(
+			verifyGooglePubSubPush(
+				{ authorizationHeader: "bearer token", body: envelope(encode(notification)) },
+				config,
+				async () => validClaims(),
+			),
+		).resolves.toMatchObject({ messageId: "message_1" });
+		await expect(
+			verifyGooglePubSubPush(
+				{ authorizationHeader: "Basic token", body: envelope(encode(notification)) },
+				config,
+				async () => validClaims(),
+			),
+		).rejects.toMatchObject({ code: "GOOGLE_PLAY_RTDN_UNAUTHORIZED" });
+	});
+
+	it("rejects envelopes with the wrong number of notification keys or a blank message id", async () => {
+		await expect(
+			verifyGooglePubSubPush(
+				{
+					authorizationHeader: "Bearer token",
+					body: envelope(encode({ ...notification, testNotification: { version: "1.0" } })),
+				},
+				config,
+				async () => validClaims(),
+			),
+		).rejects.toMatchObject({ code: "GOOGLE_PLAY_RTDN_INVALID_MESSAGE" });
+		await expect(
+			verifyGooglePubSubPush(
+				{
+					authorizationHeader: "Bearer token",
+					body: envelope(
+						encode({
+							version: "1.0",
+							packageName: "com.voysee.app",
+							eventTimeMillis: "1",
+						}),
+					),
+				},
+				config,
+				async () => validClaims(),
+			),
+		).rejects.toMatchObject({ code: "GOOGLE_PLAY_RTDN_INVALID_MESSAGE" });
+		await expect(
+			verifyGooglePubSubPush(
+				{
+					authorizationHeader: "Bearer token",
+					body: {
+						message: { data: encode(notification), messageId: "   " },
+						subscription: "projects/test/subscriptions/google-rtdn",
+					},
+				},
+				config,
+				async () => validClaims(),
+			),
+		).rejects.toMatchObject({ code: "GOOGLE_PLAY_RTDN_INVALID_MESSAGE" });
+	});
+
+	it("accepts the short issuer form and rejects non-object notification data", async () => {
+		await expect(
+			verifyGooglePubSubPush(
+				{ authorizationHeader: "Bearer token", body: envelope(encode(notification)) },
+				config,
+				async () => validClaims({ iss: "accounts.google.com" }),
+			),
+		).resolves.toMatchObject({ messageId: "message_1" });
+		await expect(
+			verifyGooglePubSubPush(
+				{ authorizationHeader: "Bearer token", body: envelope(encode([])) },
+				config,
+				async () => validClaims(),
+			),
+		).rejects.toMatchObject({ code: "GOOGLE_PLAY_RTDN_INVALID_MESSAGE" });
 	});
 });

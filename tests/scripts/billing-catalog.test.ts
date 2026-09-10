@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { createSanitizedProcessEnv } from "../../scripts/lib/sanitized-env";
 
 interface RecordedCall {
 	method: string;
@@ -83,9 +84,36 @@ export const catalog = { features: [], plans: [], topups: [], rateCards: [] };
 			catalog: { features: [], plans: [], topups: [], rateCards: [] },
 		});
 	});
+
+	it("stops at a preview revision conflict without publishing or leaking credentials", async () => {
+		const fixture = catalogServer({ previewConflict: true });
+		const directory = await mkdtemp(join(tmpdir(), "billing-catalog-test-"));
+		temporaryDirectories.push(directory);
+		const catalogPath = join(directory, "catalog.ts");
+		await writeFile(
+			catalogPath,
+			`export const expectedRevision = 7;
+export const catalog = { features: [], plans: [], topups: [], rateCards: [] };
+`,
+			"utf8",
+		);
+		const push = await runCli(["push", catalogPath], fixture.baseUrl);
+		expect(push.exitCode).not.toBe(0);
+		expect(push.stderr).toContain("Catalog revision 7 is stale");
+		expect(push.stderr).not.toContain("project-secret");
+		expect(push.stderr).not.toContain("operator-secret");
+		expect(push.stdout).toBe("");
+		expect(fixture.calls.map((call) => `${call.method} ${call.pathname}`)).toEqual([
+			"GET /v1/admin/catalog",
+			"POST /v1/admin/catalog/preview",
+		]);
+	});
 });
 
-function catalogServer(): { baseUrl: string; calls: RecordedCall[] } {
+function catalogServer(options: { previewConflict?: boolean } = {}): {
+	baseUrl: string;
+	calls: RecordedCall[];
+} {
 	const calls: RecordedCall[] = [];
 	const server = Bun.serve({
 		port: 0,
@@ -105,6 +133,18 @@ function catalogServer(): { baseUrl: string; calls: RecordedCall[] } {
 				});
 			}
 			if (request.method === "POST" && url.pathname === "/v1/admin/catalog/preview") {
+				if (options.previewConflict === true) {
+					return Response.json(
+						{
+							success: false,
+							error: {
+								code: "CATALOG_REVISION_CONFLICT",
+								message: "Catalog revision 7 is stale",
+							},
+						},
+						{ status: 409 },
+					);
+				}
 				return Response.json({
 					success: true,
 					data: {
@@ -137,17 +177,12 @@ async function runCli(
 	baseUrl: string,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
 	const environment: Record<string, string> = {
-		...Object.fromEntries(
-			Object.entries(process.env).filter(
-				(entry): entry is [string, string] => entry[1] !== undefined,
-			),
-		),
+		...createSanitizedProcessEnv(),
 		BILLING_BASE_URL: baseUrl,
 		BILLING_PROJECT_API_KEY: "project-secret",
 		BILLING_OPERATOR_API_KEY: "operator-secret",
 		BILLING_ACTOR: "catalog-test",
 	};
-	delete environment.BILLING_PROJECT_KEY;
 	const processHandle = Bun.spawn(
 		[process.execPath, "run", "scripts/billing-catalog.ts", ...args],
 		{

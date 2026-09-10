@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 import { buildStripeConfig, StripeBillingClient } from "../../../src/providers/stripe/client";
 
 const stripeEnv = {
@@ -246,4 +246,67 @@ describe("StripeBillingClient", () => {
 			},
 		]);
 	});
+
+	it("verifies webhook signatures with Stripe.webhooks.generateTestHeaderString", async () => {
+		const secret = "whsec_unit";
+		const payload = JSON.stringify({
+			id: "evt_unit",
+			object: "event",
+			api_version: "2026-01-28.clover",
+			created: 1_780_185_600,
+			type: "checkout.session.completed",
+			livemode: false,
+			pending_webhooks: 1,
+			request: { id: null, idempotency_key: null },
+			data: { object: { id: "cs_unit", object: "checkout.session" } },
+		});
+		const client = new StripeBillingClient(
+			buildStripeConfig({
+				...stripeEnv,
+				secretKey: "sk_test_unit",
+				webhookSecret: secret,
+			}),
+		);
+		const header = await stripeTestHeader(payload, secret);
+		const event = await client.constructWebhookEvent(payload, header);
+		expect(event.id).toBe("evt_unit");
+		expect(event.type).toBe("checkout.session.completed");
+
+		const tampered = header.replace(/v1=([0-9a-f]+)$/i, (_match, hex: string) => {
+			const last = hex.at(-1) ?? "0";
+			return `v1=${hex.slice(0, -1)}${last === "0" ? "1" : "0"}`;
+		});
+		await expect(client.constructWebhookEvent(payload, tampered)).rejects.toThrow();
+
+		const stale = await stripeTestHeader(payload, secret, {
+			timestamp: Math.floor(Date.now() / 1000) - 400,
+		});
+		await expect(client.constructWebhookEvent(payload, stale)).rejects.toThrow(/tolerance/i);
+
+		const wrongSecret = await stripeTestHeader(payload, "whsec_other");
+		await expect(client.constructWebhookEvent(payload, wrongSecret)).rejects.toThrow();
+
+		await expect(client.constructWebhookEvent(`${payload} `, header)).rejects.toThrow();
+
+		const valid = await stripeTestHeader(payload, secret);
+		const invalidV1 = valid.replace(/v1=([0-9a-f]+)/i, (_match, hex: string) => {
+			const last = hex.at(-1) ?? "0";
+			return `v1=${hex.slice(0, -1)}${last === "0" ? "1" : "0"}`;
+		});
+		const rotated = `${invalidV1},${valid.match(/v1=[0-9a-f]+/i)?.[0]}`;
+		const rotatedEvent = await client.constructWebhookEvent(payload, rotated);
+		expect(rotatedEvent.id).toBe("evt_unit");
+	});
 });
+
+async function stripeTestHeader(
+	payload: string,
+	secret: string,
+	options: { timestamp?: number } = {},
+): Promise<string> {
+	try {
+		return Stripe.webhooks.generateTestHeaderString({ payload, secret, ...options });
+	} catch {
+		return await Stripe.webhooks.generateTestHeaderStringAsync({ payload, secret, ...options });
+	}
+}

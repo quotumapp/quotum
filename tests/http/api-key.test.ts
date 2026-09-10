@@ -20,17 +20,53 @@ describe("requireApiKey", () => {
 
 	it("rejects missing or wrong bearer tokens", async () => {
 		const app = new Hono();
-		app.use("*", requireApiKey(projectContextResolver({ credentials: { secret: "voysee" } })));
+		const resolver = projectContextResolver({ credentials: { secret: "voysee" } });
+		const resolveCredential = resolver.resolveCredential.bind(resolver);
+		let calls = 0;
+		resolver.resolveCredential = async (token) => {
+			calls += 1;
+			return await resolveCredential(token);
+		};
+		app.use("*", requireApiKey(resolver));
 		app.get("/", (c) => c.json({ ok: true }));
 
-		expect((await app.request("/")).status).toBe(401);
+		const missing = await app.request("/");
+		expect(missing.status).toBe(401);
+		expect(await missing.json()).toEqual({
+			success: false,
+			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+		});
+		expect(calls).toBe(0);
+
+		const wrong = await app.request("/", { headers: { authorization: "Bearer wrong" } });
+		expect(wrong.status).toBe(401);
+		expect(await wrong.json()).toEqual({
+			success: false,
+			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+		});
+		expect(calls).toBe(1);
+
 		expect(
 			(
 				await app.request("/", {
-					headers: { authorization: "Bearer wrong" },
+					headers: { authorization: "Basic secret" },
 				})
 			).status,
 		).toBe(401);
+		expect(
+			(
+				await app.request("/", {
+					headers: { authorization: "Bearer secret " },
+				})
+			).status,
+		).toBe(200);
+		expect(
+			(
+				await app.request("/", {
+					headers: { authorization: "bearer secret" },
+				})
+			).status,
+		).toBe(200);
 	});
 
 	it("resolves project-scoped bearer tokens onto request context", async () => {

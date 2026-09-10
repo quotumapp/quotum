@@ -110,11 +110,13 @@ describe("platform bootstrap check", () => {
 		const directory = await mkdtemp(join(tmpdir(), "quotum-platform-credentials-"));
 		const path = join(directory, "credentials.json");
 		const manifest = parsePlatformBootstrapManifest(JSON.stringify(validManifest()));
+		const issued: unknown[] = [];
 		try {
 			await expect(
 				applyPlatformBootstrap(
 					{
-						async apply() {
+						async apply(appliedManifest, credentials) {
+							issued.push({ appliedManifest, credentials });
 							return {
 								state: "exact" as const,
 								organizationCount: 1,
@@ -136,7 +138,26 @@ describe("platform bootstrap check", () => {
 			const output = JSON.parse(await readFile(path, "utf8")) as {
 				credentials: Array<{ credential: string }>;
 			};
-			expect(output.credentials[0]?.credential).toMatch(/^qpk_v1\./);
+			const written = output.credentials[0]?.credential;
+			expect(written).toMatch(/^qpk_v1\./);
+			const parsed = parseProjectApiCredential(written ?? "");
+			expect(parsed).not.toBeNull();
+			if (parsed === null) {
+				throw new Error("expected a parsed credential");
+			}
+			expect(issued).toEqual([
+				{
+					appliedManifest: manifest,
+					credentials: [
+						{
+							credentialId: parsed.credentialId,
+							projectInstanceKey: "voysee-production",
+							secretVerifier: parsed.secretVerifier,
+						},
+					],
+				},
+			]);
+			expect(hashProjectApiCredential(written ?? "")).toEqual(parsed.secretVerifier);
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}

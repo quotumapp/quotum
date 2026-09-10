@@ -794,13 +794,27 @@ describe("billing app", () => {
 			"/v1/admin/reconciliation/subscriptions/run",
 			`/v1/admin/projection-jobs/${validProjectionJobId}/retry`,
 		]) {
-			const response = await app.request(path, {
+			const missing = await app.request(path, {
 				method: "POST",
 				headers: { authorization: "Bearer secret" },
 			});
-
-			expect(response.status).toBe(401);
-			expect(await response.json()).toEqual({
+			expect(missing.status).toBe(401);
+			expect(await missing.json()).toEqual({
+				success: false,
+				error: {
+					code: "UNAUTHORIZED",
+					message: "Invalid billing operator key",
+				},
+			});
+			const sameLengthWrong = await app.request(path, {
+				method: "POST",
+				headers: {
+					authorization: "Bearer secret",
+					"x-billing-operator-key": "operator-secret-kez",
+				},
+			});
+			expect(sameLengthWrong.status).toBe(401);
+			expect(await sameLengthWrong.json()).toEqual({
 				success: false,
 				error: {
 					code: "UNAUTHORIZED",
