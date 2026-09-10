@@ -26,6 +26,13 @@ start at 1.0.
   from the new process environment, and preserve the auth secret's exact value. Retain old image
   and configuration together for rollback. No database migration is required for this change.
 
+### Fixed
+
+- Google OIDC test fixtures always alter decoded signature bytes when testing forged tokens,
+  avoiding intermittent failures caused by changing only unused Base64 bits.
+
+## [0.9.2] - 2026-09-10
+
 ### Added
 
 - `bun run test:load`, a load lane that boots the real service against a disposable Postgres and
