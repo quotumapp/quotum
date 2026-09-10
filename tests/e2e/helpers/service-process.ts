@@ -30,8 +30,22 @@ export async function startBillingService(
 	return {
 		baseUrl,
 		pid: proc.pid,
-		request(path, init) {
-			return fetch(`${baseUrl}${path}`, init);
+		async request(path, init) {
+			const response = await fetch(`${baseUrl}${path}`, init);
+			if (path !== "/livez") {
+				const { assertOpenApiResponse } = await import("../../helpers/openapi");
+				const requestContentType = new Headers(init?.headers).get("content-type");
+				await assertOpenApiResponse(init?.method ?? "GET", path, response, {
+					requestContentType,
+					requestBody:
+						typeof init?.body === "string"
+							? requestContentType?.includes("application/json")
+								? JSON.parse(init.body)
+								: init.body
+							: undefined,
+				});
+			}
+			return response;
 		},
 		sendSignal(signal) {
 			proc.kill(signal);

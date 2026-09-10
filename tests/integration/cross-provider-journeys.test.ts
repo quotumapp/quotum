@@ -252,7 +252,11 @@ async function postStripeWebhook(
 			"content-type": "application/json",
 			"stripe-signature": "sig_test",
 		},
-		body: JSON.stringify(body),
+		body: JSON.stringify({
+			type: "checkout.session.completed",
+			data: { object: {} },
+			...body,
+		}),
 	});
 }
 

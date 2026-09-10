@@ -309,7 +309,11 @@ async function postStripeWebhook(
 			"content-type": "application/json",
 			"stripe-signature": "sig_test",
 		},
-		body: JSON.stringify({ id: "evt_http_edge_checkout" }),
+		body: JSON.stringify({
+			id: "evt_http_edge_checkout",
+			type: "checkout.session.completed",
+			data: { object: {} },
+		}),
 	});
 }
 

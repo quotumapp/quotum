@@ -59,6 +59,7 @@ export function registerAdminRoutes({
 	app.use("/v1/admin/reconciliation/subscriptions/run", requireOperatorApiKey(operatorApiKey));
 	app.use("/v1/admin/projection-jobs/:jobId/retry", requireOperatorApiKey(operatorApiKey));
 	app.use("/v1/admin/metrics", requireOperatorApiKey(operatorApiKey));
+	app.use("/v1/admin/catalog/*", requireOperatorApiKey(operatorApiKey));
 
 	registerRoute(app, adminContracts.getV1AdminMetrics, (c) => {
 		c.header("content-type", "text/plain; version=0.0.4");

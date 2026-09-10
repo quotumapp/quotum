@@ -173,7 +173,10 @@ export class MerchantBrowser {
 				body: body === undefined ? undefined : JSON.stringify(body),
 			}),
 		);
-		await assertOpenApiResponse(method, path, response);
+		await assertOpenApiResponse(method, path, response, {
+			requestBody: body,
+			requestContentType: body === undefined ? null : "application/json",
+		});
 		for (const cookie of response.headers.getSetCookie()) {
 			const first = cookie.split(";")[0] ?? "";
 			const separator = first.indexOf("=");

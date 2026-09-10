@@ -12,6 +12,7 @@ import type {
 } from "../../src/platform/contracts";
 import { capabilitiesFor, SESSION_COOKIE } from "../../src/platform/security";
 import { mutationTarget } from "../../src/platform/step-up";
+import { withOpenApiAssertions } from "../../tests/helpers/openapi";
 import { createIntegrationBillingEnv } from "../../tests/integration/helpers/local-postgres";
 import { MerchantBrowser, merchantFixture, password } from "./fixture";
 
@@ -64,7 +65,7 @@ describe("merchant platform transactions", () => {
 			environment: "sandbox",
 		});
 		const env = createIntegrationBillingEnv(process.env.POSTGRES_URI ?? "");
-		const billing = createApp({ env, projectContextResolver: resolver });
+		const billing = withOpenApiAssertions(createApp({ env, projectContextResolver: resolver }));
 		expect(
 			(
 				await billing.request("/v1/admin/stats/summary", {

@@ -258,6 +258,45 @@ localDescribe("billing auth and tenancy integration", () => {
 		expectEmptySnapshot((await allowed.json()).data, "gateway_user");
 	});
 
+	it("rejects unknown, suspended, and internal gateway projects", async () => {
+		const gatewayEnv = {
+			...context.env,
+			authMode: "gateway" as const,
+			trustGatewayProjectHeader: true,
+		};
+		const { app } = createIntegrationApp({
+			env: gatewayEnv,
+			repository: context.repository,
+		});
+		const unknown = await app.request("/v1/billing-accounts/gateway_user/entitlements", {
+			headers: { "x-billing-project-key": "does-not-exist" },
+		});
+		expect(unknown.status).toBe(404);
+		const internal = await app.request("/v1/billing-accounts/gateway_user/entitlements", {
+			headers: { "x-billing-project-key": "billing-internal" },
+		});
+		expect(internal.status).toBe(404);
+	});
+
+	it("ignores the gateway project header in api_key mode and scopes bearer+header to the bearer", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const ignored = await app.request("/v1/billing-accounts/gateway_user/entitlements", {
+			headers: { "x-billing-project-key": "voysee" },
+		});
+		expect(ignored.status).toBe(401);
+		const mismatched = await app.request("/v1/billing-accounts/gateway_user/entitlements", {
+			headers: {
+				...authHeaders("voysee"),
+				"x-billing-project-key": "wiseley",
+			},
+		});
+		expect(mismatched.status).toBe(200);
+		expectEmptySnapshot((await mismatched.json()).data, "gateway_user");
+	});
+
 	it("does not expose the removed unscoped Apple webhook alias", async () => {
 		const { app, apple, authHeaders } = createIntegrationApp({
 			env: context.env,

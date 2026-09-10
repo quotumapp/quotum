@@ -1320,7 +1320,11 @@ async function postStripeWebhook(
 	return await fixture.app.request("/v1/projects/voysee/webhooks/stripe", {
 		method: "POST",
 		headers,
-		body: JSON.stringify(body),
+		body: JSON.stringify({
+			type: "checkout.session.completed",
+			data: { object: {} },
+			...body,
+		}),
 	});
 }
 
