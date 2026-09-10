@@ -57,7 +57,7 @@ export async function runProjectionWorkerOnce({
 	workerId = "integration-worker",
 	maxAttempts = env.projectionSyncMaxAttempts,
 	batchSize = 25,
-	now = () => new Date(Date.now() + 60_000),
+	now = () => new Date(),
 	metrics,
 }: {
 	env: BillingEnv;
@@ -91,7 +91,7 @@ export async function runStoreEventReplayWorkerOnce({
 	workerId = "integration-worker",
 	maxAttempts = env.storeEventReplayMaxAttempts,
 	batchSize = 25,
-	now = () => new Date(Date.now() + 60_000),
+	now = () => new Date(),
 }: {
 	env: BillingEnv;
 	repository: StoreEventReplayRepository;
@@ -122,7 +122,7 @@ export async function runSubscriptionReconciliationWorkerOnce({
 	workerId = "integration-worker",
 	maxAttempts = env.subscriptionReconciliationMaxAttempts,
 	batchSize = 25,
-	now = () => new Date(Date.now() + 60_000),
+	now = () => new Date(),
 }: {
 	env: BillingEnv;
 	repository: SubscriptionReconciliationRepository;

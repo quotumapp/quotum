@@ -42,7 +42,12 @@ describe("package scripts", () => {
 		expect(e2eRunner).toContain("container.stop");
 		expect(e2eRunner).toContain("RUN_BILLING_E2E_TESTS");
 		expect(e2eRunner).toContain('"--timeout=20000"');
-		expect(e2eRunner).toContain('"bun", ["test", "--timeout=20000", "tests/e2e"]');
+		expect(e2eRunner).toContain(
+			'"bun", ["test", "--timeout=20000", ...junitReporterArgs(reportPath), "tests/e2e"]',
+		);
+		expect(e2eRunner).toContain('"scripts/test-migration-integrity.ts"');
+		expect(runner).toContain("BILLING_TEST_LANE");
+		expect(e2eRunner).toContain("BILLING_TEST_LANE");
 		expect(runner).not.toContain("POSTGRES_URI is required for integration tests");
 		expect(postgresLib).not.toContain("supabase");
 	});

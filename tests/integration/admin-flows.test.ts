@@ -783,7 +783,6 @@ function createRealReplayOperationApp(calls: string[]): ReturnType<typeof create
 				repository: context.repository,
 				projectContextResolver: context.projectContextResolver,
 				providers: (project) => adminReplayProvidersForProject(project.projectInstanceKey, calls),
-				now: () => new Date(Date.now() + 60_000),
 				jitterMs: () => 0,
 			}),
 			reconciliationWorker: {

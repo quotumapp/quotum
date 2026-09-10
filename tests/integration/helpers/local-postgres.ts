@@ -4,6 +4,7 @@ import { type BillingDatabase, createBillingDatabaseConnection } from "../../../
 import { BillingRepository } from "../../../src/db/repository";
 import type { ProjectInstanceContextResolver } from "../../../src/projects/context";
 import type { FixtureBillingEnv as BillingEnv } from "../../../src/testing/connection-fixtures";
+import { requireLaneFlag } from "../../helpers/test-lane";
 import { integrationProjects } from "./catalog-fixtures";
 import { integrationProjectContexts } from "./platform-fixture";
 
@@ -27,7 +28,12 @@ export function describeLocalPostgres<T extends (name: string, fn: () => void) =
 	describeFn: T,
 	describeSkipFn: T,
 ): T {
-	return (isPostgresIntegrationEnabled() ? describeFn : describeSkipFn) as T;
+	if (isPostgresIntegrationEnabled()) {
+		return describeFn;
+	}
+	requireLaneFlag("integration");
+	requireLaneFlag("merchant");
+	return describeSkipFn;
 }
 
 export async function createLocalPostgresContext(): Promise<LocalPostgresContext> {
