@@ -967,7 +967,9 @@ async function getAdminList(
 	path: string,
 	projectKey: "voysee" | "wiseley" = "voysee",
 ): Promise<{ data: Array<Record<string, unknown>>; pagination: { nextCursor: string | null } }> {
-	const response = await app.request(path, { headers: authHeaders(projectKey) });
+	const response = await app.request(path, {
+		headers: path.includes("/catalog/") ? operatorHeaders(projectKey) : authHeaders(projectKey),
+	});
 	expect(response.status).toBe(200);
 	const body = await response.json();
 	expect(body.success).toBe(true);
