@@ -64,12 +64,13 @@ export function e2eServiceEnv({
 		BILLING_OPERATOR_API_KEY: e2eOperatorKey,
 		// Merchant authentication is always on. Test mode keeps mail in memory: the test
 		// entrypoints inject a capture mailer, and no e2e scenario triggers merchant mail.
-		MERCHANT_AUTH_SECRET: e2eMerchantAuthSecret,
+		QUOTUM_AUTH_SECRET: e2eMerchantAuthSecret,
 		MERCHANT_TERMS_VERSION: "e2e-2026-09-10",
 		MERCHANT_PRIVACY_VERSION: "e2e-2026-09-10",
-		MERCHANT_EMAIL_ACCOUNT_ID: "e2e-account",
-		MERCHANT_EMAIL_API_TOKEN: "e2e-email-token",
-		MERCHANT_EMAIL_FROM: "no-reply@e2e.test",
+		QUOTUM_EMAIL_PROVIDER: "cloudflare",
+		QUOTUM_EMAIL_CLOUDFLARE_ACCOUNT_ID: "e2e-account",
+		QUOTUM_EMAIL_CLOUDFLARE_API_TOKEN: "e2e-email-token",
+		QUOTUM_EMAIL_FROM: "no-reply@e2e.test",
 		BILLING_TEST_CONNECTIONS_JSON: e2eProjectRuntimeJson(receiverUrl),
 		BILLING_TRUST_GATEWAY_PROJECT_HEADER: "false",
 		BILLING_WORKER_POLL_INTERVAL_MS: "250",

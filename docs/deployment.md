@@ -33,17 +33,76 @@ required value is missing or unsafe for the selected environment.
 | `BILLING_OPERATOR_API_KEY` | Operator credential for catalog publication, replay, reconciliation, and admin metrics. At least 16 characters, separate from project credentials. Required in production. |
 | `QUOTUM_SECRETS_KEY_ID`, `QUOTUM_SECRETS_KEY_BASE64` | Identifier and base64 32-byte AES key that encrypts stored provider and projection connections. Keep the key outside Postgres and its backups. Rotate with `bun run connections:rotate-secrets`. |
 | `MERCHANT_ORIGIN`, `MERCHANT_PUBLIC_URL` | Merchant origin and public/legal-page URL. Both must be explicitly set to nonblank values in production, including when `BILLING_ENV` is unset. Development and test defaults are `https://app.quotum.dev` and `https://quotum.dev`. The merchant origin must be exact HTTPS outside tests. |
-| `MERCHANT_AUTH_SECRET` | At least 32 characters; session and token HMACs. Never reuse another secret. |
+| `QUOTUM_AUTH_SECRET` | Operator-owned secret for Quotum sessions and token HMACs, at least 32 characters. Never reuse another secret. |
 | `MERCHANT_TERMS_VERSION`, `MERCHANT_PRIVACY_VERSION` | Approved legal document versions. Signup outside test mode refuses draft versions. |
-| `MERCHANT_EMAIL_ACCOUNT_ID`, `MERCHANT_EMAIL_API_TOKEN`, `MERCHANT_EMAIL_FROM` | Cloudflare Email Service transport for verification and OTP mail. Verify SPF, DKIM, and DMARC first. |
+| `QUOTUM_EMAIL_PROVIDER` | Required explicit choice: `cloudflare` or `resend`. No default or automatic failover. |
+| `QUOTUM_EMAIL_FROM` | Quotum's sender email address, from a domain verified with the selected provider. |
+| `QUOTUM_EMAIL_CLOUDFLARE_ACCOUNT_ID`, `QUOTUM_EMAIL_CLOUDFLARE_API_TOKEN` | Required only for Cloudflare Email Service. |
+| `QUOTUM_EMAIL_RESEND_API_KEY` | Required only for Resend. Use a key permitted to send from the configured domain. |
 | `MERCHANT_SIGNUP_ENABLED` | Defaults to `true`; set `false` to close registration. |
 | `MERCHANT_GOOGLE_CLIENT_ID`, `MERCHANT_GOOGLE_CLIENT_SECRET` | Optional Google sign-in. Register `https://<merchant-origin>/api/auth/callback/google`. |
 
 Merchant authentication is always on. There is no switch to run the service without it, and the
-process refuses to start until the settings above validate. Only `BILLING_ENV=test` relaxes the
-HTTPS origin and mail-transport requirements, for the guarded test entrypoints. Email currently
-requires Cloudflare outside tests; SMTP is not an available configuration selector. Close signup
-explicitly until the deployment is ready.
+process refuses to start until the settings above validate, even with signup disabled. Only
+`BILLING_ENV=test` permits absent email configuration, and runtime wiring still requires an injected
+capture mailer. Explicit partial configuration is rejected in tests too. SMTP is not an available
+configuration selector. Close signup explicitly until the deployment is ready.
+
+### Quotum-owned email delivery
+
+These are service-operator settings, not merchant registration fields or customer integrations.
+Merchants register their recipient email address; Quotum sends verification, password reset, OTP,
+invitation and invite-request messages through the selected adapter. Templates and authentication
+rules are independent of the provider.
+
+Cloudflare example:
+
+```dotenv
+QUOTUM_EMAIL_PROVIDER=cloudflare
+QUOTUM_EMAIL_FROM=no-reply@example.com
+QUOTUM_EMAIL_CLOUDFLARE_ACCOUNT_ID=CHANGE_ME
+QUOTUM_EMAIL_CLOUDFLARE_API_TOKEN=CHANGE_ME
+```
+
+Resend example (no Cloudflare credentials needed):
+
+```dotenv
+QUOTUM_EMAIL_PROVIDER=resend
+QUOTUM_EMAIL_FROM=no-reply@example.com
+QUOTUM_EMAIL_RESEND_API_KEY=CHANGE_ME
+```
+
+Onboard the sender domain with the selected provider before using production authentication.
+Follow [Cloudflare's email sending setup](https://developers.cloudflare.com/email-service/get-started/)
+or [Resend's domain verification](https://resend.com/docs/dashboard/domains/introduction), including
+provider-required DNS records and the domain's SPF, DKIM and DMARC policy. Store API credentials
+and `QUOTUM_AUTH_SECRET` in the deployment secret manager; never collect them in signup forms.
+
+Both adapters use HTTPS, a ten-second timeout per request and at most three attempts. HTTP 429/5xx
+responses retry with bounded backoff (250/500 ms, or numeric Retry-After capped at five seconds).
+Other failures return the sanitized `EMAIL_DELIVERY_FAILED` error. Resend reuses one idempotency key
+within a send's retries; each new send gets a fresh key. Provider acceptance does not establish inbox
+delivery. CI uses synthetic transports and capture mailers, not external inboxes.
+
+### Upgrade from the merchant-prefixed settings
+
+This is a breaking configuration rename; old names are rejected even if new names are also set:
+
+| Retired setting | Replacement |
+| --- | --- |
+| `MERCHANT_AUTH_SECRET` | `QUOTUM_AUTH_SECRET` |
+| `MERCHANT_EMAIL_FROM` | `QUOTUM_EMAIL_FROM` |
+| `MERCHANT_EMAIL_ACCOUNT_ID` | `QUOTUM_EMAIL_CLOUDFLARE_ACCOUNT_ID` |
+| `MERCHANT_EMAIL_API_TOKEN` | `QUOTUM_EMAIL_CLOUDFLARE_API_TOKEN` |
+
+Prepare the new configuration and roll it out together with the new application version. Add
+`QUOTUM_EMAIL_PROVIDER` explicitly. Preserve the auth secret's exact value when renaming it;
+renaming must not rotate sessions or token HMACs. Remove retired keys from the new process's
+injected environment, and retain the previous configuration securely for rollback with the old
+image. If the deployment uses a shared mutable Secret, coordinate the switch so old instances
+cannot restart against new-only settings. This change needs no database migration.
+
+
 
 A fresh deployment needs no customer bootstrap. Start the service, then let merchants onboard
 through the merchant application and configure providers and projections under **Integrations**.
@@ -129,7 +188,7 @@ In `gateway` mode, billing-level key checks are disabled for non-webhook `/v1/*`
 
 `bun run test:stripe-entrypoint` starts the service with an in-memory connection fixture and a
 network-free fake Stripe client. It requires `BILLING_ENV=test`, `BILLING_TEST_FAKE_STRIPE=true`,
-`MERCHANT_AUTH_SECRET`, and the two legal versions; it refuses external provider traffic and keeps
+`QUOTUM_AUTH_SECRET`, and the two legal versions; it refuses external provider traffic and keeps
 merchant mail in memory instead of sending it. It accepts
 `BILLING_TEST_FAKE_STRIPE_PAYMENT_BEHAVIOR=succeeded|action_required|retryable_failure`,
 `BILLING_TEST_FAKE_STRIPE_DEFAULT_PAYMENT_METHOD=missing`, and

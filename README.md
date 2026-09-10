@@ -36,8 +36,9 @@ bun run migrate
 bun run dev
 ```
 
-Merchant authentication is always on and currently requires Cloudflare email outside
-`BILLING_ENV=test`; copy `.env.example` before `bun run dev`. The fake test entrypoints are not
+Merchant authentication is always on and requires an explicitly selected Cloudflare or Resend
+email sender outside `BILLING_ENV=test`; copy `.env.example` before `bun run dev`. The operator owns
+the `QUOTUM_AUTH_SECRET` and `QUOTUM_EMAIL_*` settings. The fake test entrypoints are not
 production configurations. `/ready` checks database/schema health;
 customer integrations and production activation have separate checks.
 

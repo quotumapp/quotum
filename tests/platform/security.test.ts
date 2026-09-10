@@ -124,7 +124,7 @@ describe("merchant security boundaries", () => {
 		expect(
 			loadMerchantConfig({
 				BILLING_ENV: "test",
-				MERCHANT_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
+				QUOTUM_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
 				MERCHANT_TERMS_VERSION: "test-2026-09-10",
 				MERCHANT_PRIVACY_VERSION: "test-2026-09-10",
 			}),
@@ -133,16 +133,16 @@ describe("merchant security boundaries", () => {
 			loadMerchantConfig({
 				MERCHANT_ORIGIN: "https://app.example.com",
 				MERCHANT_PUBLIC_URL: "https://example.com",
-				MERCHANT_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
+				QUOTUM_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
 				MERCHANT_TERMS_VERSION: "2026-09-01",
 				MERCHANT_PRIVACY_VERSION: "2026-09-01",
 			}),
-		).toThrow("email configuration is required");
+		).toThrow("QUOTUM_EMAIL_PROVIDER is required");
 		expect(() =>
 			loadMerchantConfig({
 				MERCHANT_ORIGIN: "https://app.example.com",
 				MERCHANT_PUBLIC_URL: "https://example.com",
-				MERCHANT_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
+				QUOTUM_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
 				MERCHANT_SIGNUP_ENABLED: "true",
 				MERCHANT_TERMS_VERSION: "draft-2026-09-05",
 				MERCHANT_PRIVACY_VERSION: "draft-2026-09-05",

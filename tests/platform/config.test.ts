@@ -4,12 +4,13 @@ import { loadMerchantConfig } from "../../src/platform/config";
 const merchantEnv = {
 	MERCHANT_ORIGIN: "https://app.example.com",
 	MERCHANT_PUBLIC_URL: "https://example.com",
-	MERCHANT_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
+	QUOTUM_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
 	MERCHANT_TERMS_VERSION: "2026-09-01",
 	MERCHANT_PRIVACY_VERSION: "2026-09-01",
-	MERCHANT_EMAIL_ACCOUNT_ID: "test-account",
-	MERCHANT_EMAIL_API_TOKEN: "test-token",
-	MERCHANT_EMAIL_FROM: "mail@example.com",
+	QUOTUM_EMAIL_PROVIDER: "cloudflare",
+	QUOTUM_EMAIL_CLOUDFLARE_ACCOUNT_ID: "test-account",
+	QUOTUM_EMAIL_CLOUDFLARE_API_TOKEN: "test-token",
+	QUOTUM_EMAIL_FROM: "mail@example.com",
 };
 
 describe("merchant deployment URLs", () => {

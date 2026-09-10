@@ -12,6 +12,18 @@ start at 1.0.
 
 ## [Unreleased]
 
+### Platform email configuration (breaking)
+
+- Added explicit `QUOTUM_EMAIL_PROVIDER=cloudflare|resend` selection and a Resend REST adapter.
+  Resend requires `QUOTUM_EMAIL_RESEND_API_KEY` and the shared `QUOTUM_EMAIL_FROM` sender address.
+- Renamed `MERCHANT_AUTH_SECRET` to `QUOTUM_AUTH_SECRET`, `MERCHANT_EMAIL_FROM` to
+  `QUOTUM_EMAIL_FROM`, and Cloudflare's `MERCHANT_EMAIL_ACCOUNT_ID` / `MERCHANT_EMAIL_API_TOKEN`
+  to `QUOTUM_EMAIL_CLOUDFLARE_ACCOUNT_ID` / `QUOTUM_EMAIL_CLOUDFLARE_API_TOKEN`. Old names are
+  rejected. These configure Quotum's own sender and authentication, not merchant registration.
+- Upgrade configuration and application together: set the explicit provider, remove retired keys
+  from the new process environment, and preserve the auth secret's exact value. Retain old image
+  and configuration together for rollback. No database migration is required for this change.
+
 ### Added
 
 - `bun run test:load`, a load lane that boots the real service against a disposable Postgres and
