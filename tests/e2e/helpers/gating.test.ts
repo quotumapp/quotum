@@ -9,16 +9,19 @@ describe("e2e gating", () => {
 		);
 	});
 
-	it("keeps describeE2e as a skip wrapper when the flag is unset", () => {
+	it("selects the skip wrapper when the enabling flag is unset", () => {
 		const names: string[] = [];
-		const skip = ((name: string) => {
-			names.push(name);
+		const run = ((name: string) => {
+			names.push(`run:${name}`);
 		}) as unknown as typeof describe;
-		describeE2e(describe, skip)("gated", () => undefined);
+		const skip = ((name: string) => {
+			names.push(`skip:${name}`);
+		}) as unknown as typeof describe;
+		describeE2e(run, skip)("gated", () => undefined);
 		if (process.env.RUN_BILLING_E2E_TESTS === "1") {
-			expect(names).toEqual([]);
+			expect(names).toEqual(["run:gated"]);
 		} else {
-			expect(names).toEqual(["gated"]);
+			expect(names).toEqual(["skip:gated"]);
 		}
 	});
 });
