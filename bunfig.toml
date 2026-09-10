@@ -1,0 +1,5 @@
+[test]
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["tests/**", "scripts/**", "src/testing/**"]
+# Do not add coverageThreshold: Bun 1.4 enforces it per file, so any 0%-covered
+# integration-only module fails the run. Totals are gated by scripts/check-coverage.ts.

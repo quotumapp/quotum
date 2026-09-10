@@ -16,6 +16,7 @@
 		"catalog:provision": "bun run scripts/provision-catalog.ts",
 		"catalog": "bun run scripts/billing-catalog.ts",
 		"test": "bun test tests",
+		"test:coverage": "bun test tests --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=coverage && bun run scripts/check-coverage.ts coverage/lcov.info",
 		"test:e2e": "bun run scripts/test-e2e.ts",
 		"test:integration": "bun run scripts/test-integration.ts",
 		"test:load": "bun run scripts/test-load.ts",
