@@ -1,6 +1,12 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { SQL } from "bun";
+import {
+	calculateMigrationChecksum,
+	type MigrationSource,
+	shouldRunMigrationInTransaction,
+	verifyAppliedMigrations,
+} from "./db/migration-integrity";
 
 const postgresUri = process.env.POSTGRES_URI;
 if (postgresUri === undefined || postgresUri.trim() === "") {
@@ -8,6 +14,7 @@ if (postgresUri === undefined || postgresUri.trim() === "") {
 	process.exit(1);
 }
 
+const migrationsDir = resolveMigrationsDir();
 const sql = new SQL(postgresUri, {
 	max: 1,
 	idleTimeout: 60,
@@ -20,17 +27,27 @@ const sql = new SQL(postgresUri, {
 });
 const migrationAdvisoryLockNamespace = 760_911;
 const migrationAdvisoryLockKey = 520_384_001;
-const concurrentIndexPattern = /CREATE\s+INDEX\s+CONCURRENTLY/i;
 
 interface MigrationRow {
 	id: string;
 	checksum: string;
 }
 
-async function calculateHash(content: string): Promise<string> {
-	const hasher = new Bun.CryptoHasher("sha256");
-	hasher.update(content);
-	return hasher.digest("hex");
+const readMigration: MigrationSource = async (filename) => {
+	const file = Bun.file(join(migrationsDir, filename));
+	return (await file.exists()) ? await file.text() : null;
+};
+
+function resolveMigrationsDir(): string {
+	const override = process.env.BILLING_MIGRATIONS_DIR?.trim();
+	if (override === undefined || override === "") {
+		return join(import.meta.dir, "../migrations");
+	}
+	if (process.env.BILLING_ENV !== "test") {
+		console.error("BILLING_MIGRATIONS_DIR is only honoured when BILLING_ENV=test");
+		process.exit(1);
+	}
+	return override;
 }
 
 async function ensureMigrationsTable(): Promise<void> {
@@ -49,42 +66,14 @@ async function getAppliedMigrations(): Promise<Map<string, string>> {
 }
 
 async function getMigrationFiles(): Promise<string[]> {
-	const migrationsDir = join(import.meta.dir, "../migrations");
 	const files = await readdir(migrationsDir);
 	return files.filter((file) => file.endsWith(".sql")).sort();
 }
 
-async function verifyAppliedMigrations(applied: Map<string, string>): Promise<void> {
-	const migrationsDir = join(import.meta.dir, "../migrations");
-	const errors: string[] = [];
-
-	for (const [id, storedChecksum] of applied) {
-		const filename = `${id}.sql`;
-		const file = Bun.file(join(migrationsDir, filename));
-		if (!(await file.exists())) {
-			errors.push(`${filename} - FILE NOT FOUND`);
-			continue;
-		}
-
-		const currentChecksum = await calculateHash(await file.text());
-		if (storedChecksum !== currentChecksum) {
-			errors.push(`${filename} - CHECKSUM MISMATCH`);
-		}
-	}
-
-	if (errors.length > 0) {
-		for (const error of errors) {
-			console.error(error);
-		}
-		throw new Error("Migration integrity check failed");
-	}
-}
-
 async function runMigration(filename: string): Promise<void> {
-	const migrationsDir = join(import.meta.dir, "../migrations");
 	const migrationId = filename.replace(/\.sql$/, "");
 	const content = await Bun.file(join(migrationsDir, filename)).text();
-	const checksum = await calculateHash(content);
+	const checksum = calculateMigrationChecksum(content);
 
 	console.log(`Running migration ${filename}`);
 	if (shouldRunMigrationInTransaction(content)) {
@@ -103,7 +92,7 @@ async function migrate(): Promise<void> {
 	await withMigrationAdvisoryLock(async () => {
 		await ensureMigrationsTable();
 		const applied = await getAppliedMigrations();
-		await verifyAppliedMigrations(applied);
+		await verifyAppliedMigrations(applied, readMigration);
 
 		const pending = (await getMigrationFiles()).filter(
 			(file) => !applied.has(file.replace(/\.sql$/, "")),
@@ -119,12 +108,6 @@ async function migrate(): Promise<void> {
 	});
 }
 
-function shouldRunMigrationInTransaction(content: string): boolean {
-	return (
-		!concurrentIndexPattern.test(content) && !/^\s*--\s*migrate:\s*no-transaction/im.test(content)
-	);
-}
-
 async function withMigrationAdvisoryLock(callback: () => Promise<void>): Promise<void> {
 	await sql`SELECT pg_advisory_lock(${migrationAdvisoryLockNamespace}, ${migrationAdvisoryLockKey})`;
 	try {
@@ -137,7 +120,7 @@ async function withMigrationAdvisoryLock(callback: () => Promise<void>): Promise
 async function status(): Promise<void> {
 	await ensureMigrationsTable();
 	const applied = await getAppliedMigrations();
-	await verifyAppliedMigrations(applied);
+	await verifyAppliedMigrations(applied, readMigration);
 
 	for (const file of await getMigrationFiles()) {
 		const id = file.replace(/\.sql$/, "");

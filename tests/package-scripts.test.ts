@@ -49,14 +49,19 @@ describe("package scripts", () => {
 
 	it("keeps migration and runtime entrypoints production-safe", () => {
 		const migrate = readFileSync(join(process.cwd(), "src/migrate.ts"), "utf8");
+		const integrity = readFileSync(join(process.cwd(), "src/db/migration-integrity.ts"), "utf8");
 		const index = readFileSync(join(process.cwd(), "src/index.ts"), "utf8");
 
 		expect(migrate).toContain("pg_advisory_lock");
 		expect(migrate).toContain("pg_advisory_unlock");
-		expect(migrate).toContain("storedChecksum !== currentChecksum");
+		expect(migrate).toContain("verifyAppliedMigrations(");
+		expect(migrate).toContain("shouldRunMigrationInTransaction(");
+		expect(migrate).toContain('from "./db/migration-integrity"');
+		expect(migrate).toContain('BILLING_ENV !== "test"');
+		expect(integrity).toContain("storedChecksum !== currentChecksum");
+		expect(integrity).toContain("CREATE\\s+INDEX\\s+CONCURRENTLY");
 		expect(migrate).not.toContain("isAcceptedMigrationChecksum");
-		expect(migrate).toContain("shouldRunMigrationInTransaction");
-		expect(migrate).toContain("CREATE\\s+INDEX\\s+CONCURRENTLY");
+		expect(integrity).not.toContain("isAcceptedMigrationChecksum");
 		expect(index).not.toContain("await import(");
 	});
 
