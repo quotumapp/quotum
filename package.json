@@ -59,7 +59,10 @@
 	},
 	"overrides": {
 		"form-data": "4.0.6",
-		"google-auth-library": "11.0.2"
+		"google-auth-library": "11.0.2",
+		"brace-expansion": "2.1.4",
+		"protobufjs": "7.6.6",
+		"qs": "6.16.0"
 	},
 	"engines": {
 		"bun": ">=1.4.0 <1.5.0"
