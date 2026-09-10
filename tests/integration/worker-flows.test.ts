@@ -637,6 +637,65 @@ localDescribe("Worker flows integration", () => {
 		});
 		await expectSubscriptionReconciliationFailure(context.sql);
 	});
+
+	it("keeps Google 404 subscription reconciliation retryable", async () => {
+		const fixture = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		await verifyGoogleSubscription(fixture, {
+			projectKey: "wiseley",
+			purchaseToken: "purchase_token_stale",
+		});
+		await makeSubscriptionStale(context.sql, "wiseley", "purchase_token_stale");
+		fixture.google.failNext(
+			"getSubscriptionPurchase",
+			Object.assign(new Error("Google Play 404"), { status: 404 }),
+		);
+		const google = new GooglePlayBillingService({
+			config: {
+				packageName: "com.voysee.app",
+				obfuscatedAccountIdSecret: "google-account-link-secret",
+				previousObfuscatedAccountIdSecrets: [],
+				rtdnAudience: null,
+				rtdnServiceAccountEmail: null,
+				rtdnAuthorizedParty: null,
+				enablePublisherMutations: true,
+			},
+			client: fixture.google.client,
+			repository: context.repository.forProject(integrationProjectContext("wiseley")),
+		});
+		const result = await runSubscriptionReconciliationWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: { apple: null, google, stripe: null },
+		});
+		expect(result).toMatchObject({
+			providerClaimed: 1,
+			providerProcessed: 0,
+			providerFailed: 1,
+		});
+		const [row] = await context.sql<
+			{
+				provider_reconciliation_attempts: number;
+				provider_reconciliation_error: string | null;
+				provider_reconciliation_next_attempt_at: string | null;
+				provider_reconciliation_locked_by: string | null;
+			}[]
+		>`
+			SELECT provider_reconciliation_attempts, provider_reconciliation_error,
+				provider_reconciliation_next_attempt_at::text AS provider_reconciliation_next_attempt_at,
+				provider_reconciliation_locked_by
+			FROM subscriptions
+			JOIN projects ON projects.id = subscriptions.project_id
+			WHERE projects.key = 'wiseley'
+				AND subscriptions.external_subscription_id = 'purchase_token_stale'
+		`;
+		expect(row.provider_reconciliation_attempts).toBe(1);
+		expect(row.provider_reconciliation_error).toMatch(/404/);
+		expect(row.provider_reconciliation_next_attempt_at).toEqual(expect.any(String));
+		expect(row.provider_reconciliation_locked_by).toBeNull();
+	});
 });
 
 async function verifyGoogleConsumable(

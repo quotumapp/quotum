@@ -2,7 +2,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import type { SQL } from "bun";
 import type { EntitlementSnapshot, ProjectionPayload } from "../../src/billing/types";
 import { createGoogleObfuscatedAccountId } from "../../src/providers/google/account-link";
-import { createIntegrationApp } from "./helpers/app-fixture";
+import { signGoogleOidcToken } from "../helpers/google-oidc";
+import {
+	createIntegrationApp,
+	integrationGoogleOidcKeys,
+	integrationGoogleRtdnAudience,
+} from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	expectCustomer,
@@ -196,7 +201,7 @@ localDescribe("Google route flows integration", () => {
 		const purchase = await withIsoDateSqlParameters(() => verifyGoogleConsumable(app, authHeaders));
 		google.setProductPurchaseState("CANCELLED");
 
-		const response = await withIsoDateSqlParameters(() => postGoogleRtdn(app));
+		const response = await withIsoDateSqlParameters(() => postGoogleRtdn(app, "message_product"));
 
 		expect(purchase.status).toBe(200);
 		expect(response.status).toBe(200);
@@ -276,7 +281,7 @@ localDescribe("Google route flows integration", () => {
 		});
 		await createGoogleAccountLink(app, authHeaders);
 
-		const response = await withIsoDateSqlParameters(() => postGoogleRtdn(app));
+		const response = await withIsoDateSqlParameters(() => postGoogleRtdn(app, "message_product"));
 		const body = await response.json();
 
 		expect(response.status).toBe(200);
@@ -315,7 +320,7 @@ localDescribe("Google route flows integration", () => {
 		});
 
 		const purchase = await withIsoDateSqlParameters(() => verifyGoogleConsumable(app, authHeaders));
-		const voided = await withIsoDateSqlParameters(() => postGoogleRtdn(app));
+		const voided = await withIsoDateSqlParameters(() => postGoogleRtdn(app, "message_voided"));
 		const body = await voided.json();
 
 		expect(purchase.status).toBe(200);
@@ -380,7 +385,7 @@ localDescribe("Google route flows integration", () => {
 		});
 		await withIsoDateSqlParameters(() => verifyGoogleConsumable(first.app, first.authHeaders));
 		first.google.setRefundableQuantity(2);
-		await withIsoDateSqlParameters(() => postGoogleRtdn(first.app));
+		await withIsoDateSqlParameters(() => postGoogleRtdn(first.app, "message_voided"));
 
 		await expectGoogleReversalState(context.sql, {
 			status: "completed",
@@ -410,7 +415,7 @@ localDescribe("Google route flows integration", () => {
 			googleVoidedRefundType: 2,
 			googleVoidedEventTimeMillis: "1780185602000",
 		});
-		await withIsoDateSqlParameters(() => postGoogleRtdn(second.app));
+		await withIsoDateSqlParameters(() => postGoogleRtdn(second.app, "message_voided"));
 		await expectGoogleReversalState(context.sql, {
 			status: "completed",
 			reversedQuantity: "2",
@@ -433,7 +438,7 @@ localDescribe("Google route flows integration", () => {
 			googleVoidedRefundType: 1,
 			googleVoidedEventTimeMillis: "1780185603000",
 		});
-		await withIsoDateSqlParameters(() => postGoogleRtdn(final.app));
+		await withIsoDateSqlParameters(() => postGoogleRtdn(final.app, "message_voided"));
 		await expectGoogleReversalState(context.sql, {
 			status: "voided",
 			reversedQuantity: "3",
@@ -459,7 +464,7 @@ localDescribe("Google route flows integration", () => {
 		});
 
 		const purchase = await withIsoDateSqlParameters(() => verifyGoogleConsumable(app, authHeaders));
-		const voided = await withIsoDateSqlParameters(() => postGoogleRtdn(app));
+		const voided = await withIsoDateSqlParameters(() => postGoogleRtdn(app, "message_voided"));
 		const body = await voided.json();
 
 		expect(purchase.status).toBe(200);
@@ -531,6 +536,91 @@ localDescribe("Google route flows integration", () => {
 			projection_sync_jobs: 0,
 		});
 	});
+
+	it("records a second Google RTDN messageId without granting twice", async () => {
+		const { app, google, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			googleRtdn: "one_time",
+		});
+		await createGoogleAccountLink(app, authHeaders);
+		expect((await postGoogleRtdn(app, "message_product")).status).toBe(200);
+		expect((await postGoogleRtdn(app, "message_product_2")).status).toBe(200);
+		expect(google.calls.filter((call) => call.startsWith("getProductPurchase"))).toHaveLength(2);
+		await expectTableCounts(context.sql, {
+			customers: 1,
+			provider_customers: 1,
+			purchases: 1,
+			store_events: 2,
+		});
+	});
+
+	it("returns 500 and writes no purchase when Google Play verify throws", async () => {
+		const { app, google, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		google.failNext("getProductPurchase", new Error("Play API down"));
+		const response = await verifyGoogleConsumable(app, authHeaders);
+		expect(response.status).toBe(500);
+		expect(google.calls).toEqual([]);
+		await expectTableCounts(context.sql, {
+			purchases: 0,
+			store_events: 0,
+			projection_sync_jobs: 0,
+		});
+	});
+
+	it("accepts a real signed Google RTDN and rejects forged tokens without Play calls", async () => {
+		const { app, google, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			googleRtdnVerification: "real",
+		});
+		await createGoogleAccountLink(app, authHeaders);
+		const valid = await postSignedGoogleRtdn(app);
+		expect(valid.status).toBe(200);
+		expect((await valid.json()).data).toMatchObject({
+			processed: true,
+			eventType: "SUBSCRIPTION_PURCHASED",
+			messageId: "message_oidc",
+		});
+		expect(google.calls).toEqual([
+			"getSubscriptionPurchase:purchase_token_1",
+			expect.stringMatching(/^acknowledgeSubscriptionPurchase:/),
+		]);
+		await expectTableCounts(context.sql, {
+			purchases: 1,
+			subscriptions: 1,
+			store_events: 1,
+		});
+
+		google.calls.length = 0;
+		await resetAndSeedIntegrationData(context.sql);
+		const { app: forgedApp, google: forgedGoogle } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			googleRtdnVerification: "real",
+		});
+		await createGoogleAccountLink(forgedApp, authHeaders);
+		const cases = [
+			await postSignedGoogleRtdn(forgedApp, { aud: "https://example.invalid/wrong-aud" }),
+			await postSignedGoogleRtdn(forgedApp, { exp: Math.floor(Date.now() / 1000) - 3600 }),
+			await postSignedGoogleRtdn(forgedApp, { tamper: true }),
+			await postSignedGoogleRtdn(forgedApp, { email_verified: false }),
+		];
+		for (const response of cases) {
+			expect(response.status).toBe(401);
+			expect((await response.json()).error.code).toBe("GOOGLE_PLAY_RTDN_UNAUTHORIZED");
+		}
+		expect(forgedGoogle.calls).toEqual([]);
+		await expectTableCounts(context.sql, {
+			purchases: 0,
+			subscriptions: 0,
+			store_events: 0,
+			projection_sync_jobs: 0,
+		});
+	});
 });
 
 function googleAccountId(billingAccountId: string): string {
@@ -591,8 +681,59 @@ async function verifyGoogleConsumable(
 	});
 }
 
+async function postSignedGoogleRtdn(
+	app: ReturnType<typeof createIntegrationApp>["app"],
+	overrides: Record<string, unknown> & { tamper?: boolean } = {},
+): Promise<Response> {
+	const now = Math.floor(Date.now() / 1000);
+	const { tamper, ...claimOverrides } = overrides;
+	const claims = {
+		iss: "https://accounts.google.com",
+		aud: integrationGoogleRtdnAudience,
+		azp: "pubsub-push-client-id",
+		email: "pubsub-push@example.iam.gserviceaccount.com",
+		email_verified: true,
+		iat: now - 10,
+		exp: now + 300,
+		...claimOverrides,
+	};
+	let token = signGoogleOidcToken(
+		integrationGoogleOidcKeys.keys.privateKey,
+		claims,
+		integrationGoogleOidcKeys.kid,
+	);
+	if (tamper === true) {
+		token = `${token.slice(0, -2)}aa`;
+	}
+	const notification = {
+		version: "1.0",
+		packageName: "com.voysee.app",
+		eventTimeMillis: "1780185600000",
+		subscriptionNotification: {
+			version: "1.0",
+			notificationType: 4,
+			purchaseToken: "purchase_token_1",
+		},
+	};
+	return await app.request("/v1/projects/voysee/webhooks/google", {
+		method: "POST",
+		headers: {
+			authorization: `Bearer ${token}`,
+			"content-type": "application/json",
+		},
+		body: JSON.stringify({
+			message: {
+				data: Buffer.from(JSON.stringify(notification)).toString("base64"),
+				messageId: "message_oidc",
+			},
+			subscription: "projects/integration/subscriptions/billing",
+		}),
+	});
+}
+
 async function postGoogleRtdn(
 	app: ReturnType<typeof createIntegrationApp>["app"],
+	messageId = "message_1",
 ): Promise<Response> {
 	return await app.request("/v1/projects/voysee/webhooks/google", {
 		method: "POST",
@@ -603,7 +744,7 @@ async function postGoogleRtdn(
 		body: JSON.stringify({
 			message: {
 				data: "eyJpbnRlZ3JhdGlvbiI6dHJ1ZX0=",
-				messageId: "message_1",
+				messageId,
 			},
 			subscription: "projects/integration/subscriptions/billing",
 		}),

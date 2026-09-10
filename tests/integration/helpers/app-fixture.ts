@@ -11,6 +11,7 @@ import { createGoogleObfuscatedAccountId } from "../../../src/providers/google/a
 import { GooglePlayBillingService } from "../../../src/providers/google/service";
 import { StripeBillingService } from "../../../src/providers/stripe/service";
 import type { FixtureBillingEnv as BillingEnv } from "../../../src/testing/connection-fixtures";
+import { createGoogleOidcTestKeys, createTestGoogleOidcVerifier } from "../../helpers/google-oidc";
 import { withOpenApiAssertions } from "../../helpers/openapi";
 import {
 	createFakeAppleStoreKitClient,
@@ -18,6 +19,10 @@ import {
 	createFakeStripeBillingClient,
 } from "./fake-provider-clients";
 import { integrationProjectContext, integrationProjectCredential } from "./platform-fixture";
+
+export const integrationGoogleOidcKeys = createGoogleOidcTestKeys();
+export const integrationGoogleRtdnAudience =
+	"https://billing.integration.test/v1/projects/voysee/webhooks/google";
 
 type StripeEventFixture = ReturnType<typeof import("./fake-provider-clients").stripeEvent>;
 
@@ -29,6 +34,7 @@ export interface CreateIntegrationAppOptions {
 	stripeCheckoutSessionFailures?: number;
 	stripeCheckoutSession?: Record<string, unknown>;
 	googleRtdn?: "subscription" | "one_time" | "voided";
+	googleRtdnVerification?: "stub" | "real";
 	googleVoidedPurchaseToken?: string;
 	googleProductQuantity?: number;
 	googleProductRefundableQuantity?: number;
@@ -46,6 +52,7 @@ export function createIntegrationApp({
 	stripeCheckoutSessionFailures,
 	stripeCheckoutSession,
 	googleRtdn = "subscription",
+	googleRtdnVerification = "stub",
 	googleVoidedPurchaseToken = "purchase_token_1",
 	googleProductQuantity,
 	googleProductRefundableQuantity,
@@ -96,61 +103,78 @@ export function createIntegrationApp({
 					packageName: "com.voysee.app",
 					obfuscatedAccountIdSecret: "google-account-link-secret",
 					previousObfuscatedAccountIdSecrets: [],
-					rtdnAudience: "https://billing.integration.test/v1/projects/voysee/webhooks/google",
+					rtdnAudience: integrationGoogleRtdnAudience,
 					rtdnServiceAccountEmail: "pubsub-push@example.iam.gserviceaccount.com",
 					rtdnAuthorizedParty: "pubsub-push-client-id",
 					enablePublisherMutations: true,
 				},
 				client: google.client,
 				repository: projectRepository,
-				verifyRtdnAuthorization: async () => undefined,
-				verifyRtdn: async () =>
-					googleRtdn === "voided"
-						? {
-								messageId: "message_voided",
-								externalEventId: "google:message_voided",
-								notification: {
-									version: "1.0",
-									packageName: "com.voysee.app",
-									eventTimeMillis: googleVoidedEventTimeMillis,
-									voidedPurchaseNotification: {
-										purchaseToken: googleVoidedPurchaseToken,
-										orderId: "GPA.1111-2222-3333-44444",
-										productType: 2,
-										refundType: googleVoidedRefundType,
-									},
-								},
-							}
-						: googleRtdn === "one_time"
-							? {
-									messageId: "message_product",
-									externalEventId: "google:message_product",
-									notification: {
-										version: "1.0",
-										packageName: "com.voysee.app",
-										eventTimeMillis: "1780185600000",
-										oneTimeProductNotification: {
-											version: "1.0",
-											notificationType: 1,
-											purchaseToken: "purchase_token_1",
-											sku: "echo_credits_10",
-										},
-									},
-								}
-							: {
-									messageId: "message_1",
-									externalEventId: "google:message_1",
-									notification: {
-										version: "1.0",
-										packageName: "com.voysee.app",
-										eventTimeMillis: "1780185600000",
-										subscriptionNotification: {
-											version: "1.0",
-											notificationType: 4,
-											purchaseToken: "purchase_token_1",
-										},
-									},
-								},
+				...(googleRtdnVerification === "real"
+					? {
+							verifyOidcToken: createTestGoogleOidcVerifier(
+								integrationGoogleOidcKeys.kid,
+								integrationGoogleOidcKeys.pem,
+							),
+						}
+					: {
+							verifyRtdnAuthorization: async () => undefined,
+							verifyRtdn: async (input) => {
+								const fallback =
+									googleRtdn === "voided"
+										? "message_voided"
+										: googleRtdn === "one_time"
+											? "message_product"
+											: "message_1";
+								const messageId = rtdnMessageId(input.body, fallback);
+								return googleRtdn === "voided"
+									? {
+											messageId,
+											externalEventId: `google:${messageId}`,
+											notification: {
+												version: "1.0",
+												packageName: "com.voysee.app",
+												eventTimeMillis: googleVoidedEventTimeMillis,
+												voidedPurchaseNotification: {
+													purchaseToken: googleVoidedPurchaseToken,
+													orderId: "GPA.1111-2222-3333-44444",
+													productType: 2,
+													refundType: googleVoidedRefundType,
+												},
+											},
+										}
+									: googleRtdn === "one_time"
+										? {
+												messageId,
+												externalEventId: `google:${messageId}`,
+												notification: {
+													version: "1.0",
+													packageName: "com.voysee.app",
+													eventTimeMillis: "1780185600000",
+													oneTimeProductNotification: {
+														version: "1.0",
+														notificationType: 1,
+														purchaseToken: "purchase_token_1",
+														sku: "echo_credits_10",
+													},
+												},
+											}
+										: {
+												messageId,
+												externalEventId: `google:${messageId}`,
+												notification: {
+													version: "1.0",
+													packageName: "com.voysee.app",
+													eventTimeMillis: "1780185600000",
+													subscriptionNotification: {
+														version: "1.0",
+														notificationType: 4,
+														purchaseToken: "purchase_token_1",
+													},
+												},
+											};
+							},
+						}),
 			}),
 			stripeBillingService: new StripeBillingService({
 				config: {
@@ -207,4 +231,14 @@ export function createIntegrationApp({
 			return { authorization: `Bearer ${integrationProjectCredential(projectKey)}` };
 		},
 	};
+}
+
+function rtdnMessageId(body: unknown, fallback: string): string {
+	if (typeof body !== "object" || body === null) {
+		return fallback;
+	}
+	const message = (body as { message?: { messageId?: unknown } }).message;
+	return typeof message?.messageId === "string" && message.messageId.trim() !== ""
+		? message.messageId.trim()
+		: fallback;
 }

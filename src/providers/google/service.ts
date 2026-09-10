@@ -310,6 +310,7 @@ export class GooglePlayBillingService {
 		return verifyGooglePubSubAuthorization(
 			{ authorizationHeader },
 			this.dependencies.config as GooglePlayConfig,
+			this.dependencies.verifyOidcToken,
 		);
 	}
 
