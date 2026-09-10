@@ -112,3 +112,16 @@ export function createIntegrationBillingEnv(
 		...overrides,
 	};
 }
+
+export function withProjectionUrl(
+	env: BillingEnv,
+	projectionUrl: string,
+	projectInstanceKey = "voysee",
+): BillingEnv {
+	return {
+		...env,
+		connectionFixtures: env.connectionFixtures.map((project) =>
+			project.projectInstanceKey === projectInstanceKey ? { ...project, projectionUrl } : project,
+		),
+	};
+}

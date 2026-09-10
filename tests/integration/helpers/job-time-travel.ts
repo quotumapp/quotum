@@ -51,6 +51,45 @@ export async function expireStoreEventLock(sql: SQL, eventId: string): Promise<v
 	`;
 }
 
+export async function expireAutoTopupJobLock(sql: SQL, jobId: string): Promise<void> {
+	await sql`
+		UPDATE auto_topup_jobs
+		SET locked_at = now() - INTERVAL '6 minutes'
+		WHERE id = ${jobId}
+			AND status = 'processing'
+	`;
+}
+
+export async function expireSubscriptionChangeLock(sql: SQL, changeId: string): Promise<void> {
+	await sql`
+		UPDATE subscription_changes
+		SET locked_at = now() - INTERVAL '6 minutes'
+		WHERE id = ${changeId}
+			AND status = 'processing'
+	`;
+}
+
+export async function expireUsageInvoicePeriodLock(sql: SQL, periodId: string): Promise<void> {
+	await sql`
+		UPDATE usage_invoice_periods
+		SET locked_at = now() - INTERVAL '6 minutes'
+		WHERE id = ${periodId}
+			AND status = 'processing'
+	`;
+}
+
+export async function expireSubscriptionReconciliationLock(
+	sql: SQL,
+	subscriptionId: string,
+): Promise<void> {
+	await sql`
+		UPDATE subscriptions
+		SET provider_reconciliation_locked_at = now() - INTERVAL '6 minutes'
+		WHERE id = ${subscriptionId}
+			AND provider_reconciliation_locked_by IS NOT NULL
+	`;
+}
+
 export async function seedReplayEvent(
 	sql: SQL,
 	input: {

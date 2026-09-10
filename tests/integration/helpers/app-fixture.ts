@@ -27,6 +27,7 @@ export interface CreateIntegrationAppOptions {
 	stripeEvent?: StripeEventFixture;
 	stripeConstructWebhookError?: Error;
 	stripeCheckoutSessionFailures?: number;
+	stripeCheckoutSession?: Record<string, unknown>;
 	googleRtdn?: "subscription" | "one_time" | "voided";
 	googleVoidedPurchaseToken?: string;
 	googleProductQuantity?: number;
@@ -43,6 +44,7 @@ export function createIntegrationApp({
 	stripeEvent,
 	stripeConstructWebhookError,
 	stripeCheckoutSessionFailures,
+	stripeCheckoutSession,
 	googleRtdn = "subscription",
 	googleVoidedPurchaseToken = "purchase_token_1",
 	googleProductQuantity,
@@ -70,6 +72,7 @@ export function createIntegrationApp({
 		event: stripeEvent,
 		constructWebhookError: stripeConstructWebhookError,
 		createCheckoutSessionFailures: stripeCheckoutSessionFailures,
+		checkoutSession: stripeCheckoutSession,
 	});
 	const projectProviderServices: ProjectProviderServiceOverrides<
 		AppleStoreKitService,

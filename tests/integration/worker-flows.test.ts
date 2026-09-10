@@ -10,6 +10,7 @@ import { createGoogleObfuscatedAccountId } from "../../src/providers/google/acco
 import { GooglePlayBillingService } from "../../src/providers/google/service";
 import type { StoreEventReplayProviders } from "../../src/workers/store-event-replay";
 import type { SubscriptionReconciliationProviders } from "../../src/workers/subscription-reconciliation";
+import { createLocalProjectionReceiver } from "../helpers/projection-receiver";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import { expectProjectionJob, expectStoreEvent, expectTableCounts } from "./helpers/db-assertions";
@@ -18,6 +19,7 @@ import {
 	describeLocalPostgres,
 	integrationProjectContext,
 	type LocalPostgresContext,
+	withProjectionUrl,
 } from "./helpers/local-postgres";
 import {
 	createRecordingProjectionFetch,
@@ -120,6 +122,40 @@ localDescribe("Worker flows integration", () => {
 		expect(succeededJob.last_error).toBeNull();
 		expect(succeededJob.locked_at).toBeNull();
 		expect(succeededJob.locked_by).toBeNull();
+	});
+
+	it("times out a held projection delivery, releases the lock, and records exactly one request", async () => {
+		const receiver = createLocalProjectionReceiver({ secret: "voysee-projection-secret" });
+		try {
+			const env = withProjectionUrl(context.env, receiver.url);
+			const fixture = createIntegrationApp({
+				env,
+				repository: context.repository,
+			});
+			expect((await verifyGoogleConsumable(fixture)).status).toBe(200);
+			const hold = receiver.holdNextResponse();
+			const result = await runProjectionWorkerOnce({
+				env,
+				repository: context.repository,
+				fetch: globalThis.fetch,
+				timeoutMs: 200,
+			});
+			expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+			const failedJob = await expectProjectionJob(context.sql, {
+				billingAccountId: "integration_user",
+				reason: "purchase_verified",
+				status: "pending",
+			});
+			expect(failedJob.attempts).toBe(1);
+			expect(failedJob.locked_by).toBeNull();
+			expect(failedJob.last_error).toMatch(
+				/^Projection delivery failed for project voysee: .*(timed out|TimeoutError|abort)/i,
+			);
+			expect(receiver.requests).toHaveLength(1);
+			hold.release();
+		} finally {
+			receiver.stop();
+		}
 	});
 
 	it("marks projection delivery failures retryable", async () => {

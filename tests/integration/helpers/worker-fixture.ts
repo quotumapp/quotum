@@ -3,9 +3,19 @@ import type { ApiProjectProjectionFetch } from "../../../src/projections/http-ty
 import type { FixtureBillingEnv as BillingEnv } from "../../../src/testing/connection-fixtures";
 import { FixtureProjectionHttpClient as ProjectionHttpClient } from "../../../src/testing/connection-fixtures";
 import {
+	AutoTopupWorker,
+	type AutoTopupWorkerProvider,
+	type AutoTopupWorkerRepository,
+} from "../../../src/workers/auto-topup";
+import {
 	type ProjectionSyncRepository,
 	ProjectionSyncWorker,
 } from "../../../src/workers/projection-sync";
+import {
+	RecurringBillingWorker,
+	type RecurringBillingWorkerProvider,
+	type RecurringBillingWorkerRepository,
+} from "../../../src/workers/recurring-billing";
 import {
 	type StoreEventReplayProviderSelector,
 	type StoreEventReplayProviders,
@@ -19,6 +29,10 @@ import {
 	SubscriptionReconciliationWorker,
 } from "../../../src/workers/subscription-reconciliation";
 import { integrationProjectContextResolver } from "./platform-fixture";
+
+const noopWorkerLogger = {
+	error() {},
+};
 
 export interface ProjectionRequest {
 	url: string;
@@ -59,6 +73,7 @@ export async function runProjectionWorkerOnce({
 	batchSize = 25,
 	now = () => new Date(),
 	metrics,
+	timeoutMs,
 }: {
 	env: BillingEnv;
 	repository: ProjectionSyncRepository;
@@ -68,13 +83,14 @@ export async function runProjectionWorkerOnce({
 	batchSize?: number;
 	now?: () => Date;
 	metrics?: BillingMetrics;
+	timeoutMs?: number;
 }) {
 	const worker = new ProjectionSyncWorker({
 		workerId,
 		maxAttempts,
 		batchSize,
 		repository,
-		delivery: new ProjectionHttpClient({ projects: env.connectionFixtures, fetch }),
+		delivery: new ProjectionHttpClient({ projects: env.connectionFixtures, fetch, timeoutMs }),
 		projectContextResolver: integrationProjectContextResolver(),
 		now,
 		jitterMs: () => 0,
@@ -92,6 +108,7 @@ export async function runStoreEventReplayWorkerOnce({
 	maxAttempts = env.storeEventReplayMaxAttempts,
 	batchSize = 25,
 	now = () => new Date(),
+	leaseHeartbeatIntervalMs,
 }: {
 	env: BillingEnv;
 	repository: StoreEventReplayRepository;
@@ -100,6 +117,7 @@ export async function runStoreEventReplayWorkerOnce({
 	maxAttempts?: number;
 	batchSize?: number;
 	now?: () => Date;
+	leaseHeartbeatIntervalMs?: number;
 }) {
 	const worker = new StoreEventReplayWorker({
 		workerId,
@@ -110,6 +128,7 @@ export async function runStoreEventReplayWorkerOnce({
 		projectContextResolver: integrationProjectContextResolver(),
 		now,
 		jitterMs: () => 0,
+		leaseHeartbeatIntervalMs,
 	});
 
 	return await worker.runOnce();
@@ -123,6 +142,7 @@ export async function runSubscriptionReconciliationWorkerOnce({
 	maxAttempts = env.subscriptionReconciliationMaxAttempts,
 	batchSize = 25,
 	now = () => new Date(),
+	leaseHeartbeatIntervalMs,
 }: {
 	env: BillingEnv;
 	repository: SubscriptionReconciliationRepository;
@@ -131,6 +151,7 @@ export async function runSubscriptionReconciliationWorkerOnce({
 	maxAttempts?: number;
 	batchSize?: number;
 	now?: () => Date;
+	leaseHeartbeatIntervalMs?: number;
 }) {
 	const worker = new SubscriptionReconciliationWorker({
 		workerId,
@@ -142,7 +163,55 @@ export async function runSubscriptionReconciliationWorkerOnce({
 		projectContextResolver: integrationProjectContextResolver(),
 		now,
 		jitterMs: () => 0,
+		leaseHeartbeatIntervalMs,
 	});
 
+	return await worker.runOnce();
+}
+
+export async function runAutoTopupWorkerOnce({
+	repository,
+	provider,
+	workerId = "integration-worker",
+	batchSize = 25,
+	staleAfterMs,
+}: {
+	repository: AutoTopupWorkerRepository;
+	provider: AutoTopupWorkerProvider;
+	workerId?: string;
+	batchSize?: number;
+	staleAfterMs?: number;
+}) {
+	const worker = new AutoTopupWorker({
+		workerId,
+		batchSize,
+		staleAfterMs,
+		repository,
+		projectContextResolver: integrationProjectContextResolver(),
+		providerForProject: async () => provider,
+		logger: noopWorkerLogger,
+	});
+	return await worker.runOnce();
+}
+
+export async function runRecurringBillingWorkerOnce({
+	repository,
+	provider,
+	workerId = "integration-worker",
+	batchSize = 25,
+}: {
+	repository: RecurringBillingWorkerRepository;
+	provider: RecurringBillingWorkerProvider;
+	workerId?: string;
+	batchSize?: number;
+}) {
+	const worker = new RecurringBillingWorker({
+		workerId,
+		batchSize,
+		repository,
+		projectContextResolver: integrationProjectContextResolver(),
+		providerForProject: async () => provider,
+		logger: noopWorkerLogger,
+	});
 	return await worker.runOnce();
 }

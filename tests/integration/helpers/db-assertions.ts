@@ -77,6 +77,26 @@ export async function expectTableCounts(
 	}
 }
 
+export async function expectNoLocks(
+	sql: SQL,
+	table: string,
+	lockColumns: readonly string[] = ["locked_at", "locked_by"],
+): Promise<void> {
+	if (!/^[a-z_][a-z0-9_]*$/.test(table)) {
+		throw new Error(`invalid public table name ${table}`);
+	}
+	for (const column of lockColumns) {
+		if (!/^[a-z_][a-z0-9_]*$/.test(column)) {
+			throw new Error(`invalid lock column ${column}`);
+		}
+	}
+	const predicate = lockColumns.map((column) => `${column} IS NOT NULL`).join(" OR ");
+	const rows = await sql.unsafe<{ count: string }[]>(
+		`SELECT count(*)::text AS count FROM ${table} WHERE ${predicate}`,
+	);
+	expect(rows[0]?.count ?? "0").toBe("0");
+}
+
 export async function expectCustomer(
 	sql: SQL,
 	billingAccountId: string,

@@ -60,6 +60,7 @@ interface FakeStripeBillingClientOptions {
 	constructWebhookError?: Error;
 	createCustomerId?: (input: { billingAccountId: string; email: string | null }) => string;
 	createCheckoutSessionFailures?: number;
+	checkoutSession?: JsonRecord;
 }
 
 export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOptions) {
@@ -232,6 +233,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 	const calls: string[] = [];
 	const checkoutSessionParams: Stripe.Checkout.SessionCreateParams[] = [];
 	const portalSessionParams: Stripe.BillingPortal.SessionCreateParams[] = [];
+	const expiredSessions = new Set<string>();
 	let checkoutSessionFailuresRemaining = options.createCheckoutSessionFailures ?? 0;
 	const event =
 		options.event ?? stripeEvent("customer.subscription.updated", stripeSubscriptionObject());
@@ -280,8 +282,16 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			},
 			async retrieveCheckoutSession(sessionId: string) {
 				calls.push(`retrieveCheckoutSession:${sessionId}`);
-
-				return stripeCheckoutSessionObject({ id: sessionId });
+				const expired = expiredSessions.has(sessionId);
+				return stripeCheckoutSessionObject({
+					id: sessionId,
+					...(options.checkoutSession ?? {}),
+					...(expired ? { status: "expired", payment_status: "unpaid" } : {}),
+				});
+			},
+			async expireCheckoutSession(sessionId: string) {
+				calls.push(`expireCheckoutSession:${sessionId}`);
+				expiredSessions.add(sessionId);
 			},
 			async retrieveSubscription(subscriptionId: string) {
 				calls.push(`retrieveSubscription:${subscriptionId}`);

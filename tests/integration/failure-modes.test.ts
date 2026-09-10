@@ -11,6 +11,7 @@ import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
 	type LocalPostgresContext,
+	withProjectionUrl,
 } from "./helpers/local-postgres";
 import { createRecordingProjectionFetch, runProjectionWorkerOnce } from "./helpers/worker-fixture";
 
@@ -200,18 +201,6 @@ localDescribe("Failure modes integration", () => {
 		});
 	});
 });
-
-function withProjectionUrl(
-	env: LocalPostgresContext["env"],
-	projectionUrl: string,
-): LocalPostgresContext["env"] {
-	return {
-		...env,
-		connectionFixtures: env.connectionFixtures.map((project) =>
-			project.projectInstanceKey === "voysee" ? { ...project, projectionUrl } : project,
-		),
-	};
-}
 
 async function ingestStripeCheckout(
 	env: LocalPostgresContext["env"],
