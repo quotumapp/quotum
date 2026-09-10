@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { loadEnv } from "../src/env";
+import { isProductionProjectionUrlSafe, loadEnv } from "../src/env";
 
 const postgresUri = "postgresql://postgres:postgres@127.0.0.1:5432/postgres";
 const operatorApiKey = "billing-operator-key-secret";
@@ -184,6 +184,63 @@ describe("loadEnv", () => {
 		).toThrow("BILLING_OPERATOR_API_KEY is required in production");
 	});
 
+	it("defaults BILLING_ENV to production and still requires the operator key", () => {
+		expect(() => loadEnv({ POSTGRES_URI: postgresUri })).toThrow(
+			"BILLING_OPERATOR_API_KEY is required in production",
+		);
+	});
+
+	it("rejects BILLING_PROJECTION_ADAPTER", () => {
+		expect(() => loadEnv({ ...developmentSource, BILLING_PROJECTION_ADAPTER: "http" })).toThrow(
+			"BILLING_PROJECTION_ADAPTER has been removed; configure project projectionUrl and projectionSecret",
+		);
+	});
+
+	it("parses sample rates and rejects out-of-range values", () => {
+		expect(
+			loadEnv({ ...developmentSource, SENTRY_TRACES_SAMPLE_RATE: " 0.5 " }).sentry.tracesSampleRate,
+		).toBe(0.5);
+		expect(
+			loadEnv({ ...developmentSource, SENTRY_TRACES_SAMPLE_RATE: "1" }).sentry.tracesSampleRate,
+		).toBe(1);
+		expect(
+			loadEnv({ ...developmentSource, SENTRY_TRACES_SAMPLE_RATE: "0" }).sentry.tracesSampleRate,
+		).toBe(0);
+		for (const value of ["1.5", "-0.1", "abc", ""]) {
+			expect(() => loadEnv({ ...developmentSource, SENTRY_TRACES_SAMPLE_RATE: value })).toThrow(
+				"SENTRY_TRACES_SAMPLE_RATE must be a number between 0 and 1",
+			);
+		}
+	});
+
+	it("parses worker intervals after trim and rejects non-integers", () => {
+		expect(
+			loadEnv({ ...developmentSource, BILLING_WORKER_POLL_INTERVAL_MS: " 12 " })
+				.workerPollIntervalMs,
+		).toBe(12);
+		for (const value of ["1.5", "1e3", "-5", "0", "12abc", "0x10"]) {
+			expect(() =>
+				loadEnv({ ...developmentSource, BILLING_WORKER_POLL_INTERVAL_MS: value }),
+			).toThrow("BILLING_WORKER_POLL_INTERVAL_MS must be a positive integer");
+		}
+	});
+
+	it("rejects unknown auth modes and short operator keys", () => {
+		expect(() => loadEnv({ ...developmentSource, BILLING_AUTH_MODE: "none" })).toThrow(
+			"BILLING_AUTH_MODE",
+		);
+		expect(() => loadEnv({ ...developmentSource, BILLING_OPERATOR_API_KEY: "short" })).toThrow(
+			"BILLING_OPERATOR_API_KEY must be at least 16 characters",
+		);
+	});
+
+	it("parses postgres prepared-statement opt-out", () => {
+		expect(
+			loadEnv({ ...developmentSource, BILLING_POSTGRES_PREPARED_STATEMENTS: "false" })
+				.postgresPreparedStatements,
+		).toBe(false);
+	});
+
 	it("fails closed when required configuration is missing", () => {
 		expect(() => loadEnv({})).toThrow("POSTGRES_URI is required");
 	});
@@ -195,5 +252,49 @@ describe("loadEnv", () => {
 				BILLING_WORKER_POLL_INTERVAL_MS: "0",
 			}),
 		).toThrow("BILLING_WORKER_POLL_INTERVAL_MS must be a positive integer");
+	});
+});
+
+describe("isProductionProjectionUrlSafe", () => {
+	it("rejects loopback, private, link-local, mapped IPv6, localhost, credentials, and http", () => {
+		for (const value of [
+			"http://example.com",
+			"https://user:pw@example.com",
+			"https://localhost",
+			"https://foo.localhost",
+			"https://LOCALHOST",
+			"https://localhost.",
+			"https://127.0.0.1",
+			"https://10.0.0.1",
+			"https://[::1]",
+			"https://[::]",
+			"https://[::ffff:127.0.0.1]",
+			"https://172.16.0.1",
+			"https://192.168.1.1",
+			"https://169.254.169.254",
+			"https://0.0.0.0",
+			"https://[fc00::1]",
+			"https://[fe80::1]",
+			"not a url",
+		]) {
+			expect(isProductionProjectionUrlSafe(value)).toBe(false);
+		}
+	});
+
+	it("accepts public HTTPS destinations including CGNAT and NAT64 ranges denied at delivery time", () => {
+		for (const value of [
+			"https://[::ffff:8.8.8.8]",
+			"https://example.com.",
+			"https://EXAMPLE.COM/path",
+			"https://172.32.0.1",
+			"https://[2606:4700::1111]",
+			"https://8.8.8.8",
+			"https://example.com:8443",
+			"https://example.com#frag",
+			"https://100.64.0.1",
+			"https://[64:ff9b::808:808]",
+		]) {
+			expect(isProductionProjectionUrlSafe(value)).toBe(true);
+		}
 	});
 });
