@@ -317,6 +317,7 @@
       "sources": [
         "src/platform/auth.ts",
         "src/platform/email.ts",
+        "src/platform/resend-email.ts",
         "src/platform/team.ts"
       ]
     },

@@ -9,7 +9,7 @@ import { createMerchantBilling } from "../platform/billing";
 import type { MerchantConfig } from "../platform/config";
 import { MerchantStripeOAuth } from "../platform/connections/oauth";
 import { MerchantConnections } from "../platform/connections/service";
-import { CloudflareMerchantMailer, type MerchantMailer } from "../platform/email";
+import { createMerchantMailer, type MerchantMailer } from "../platform/email";
 import { MerchantStore } from "../platform/store";
 import { createConnectionEventApp } from "./connection-events";
 import { createConnectionValidation } from "./connection-validation";
@@ -36,8 +36,7 @@ export function attachMerchantRuntime(
 ): Hono {
 	const { config } = options;
 	const store = new MerchantStore(merchantSql(sql), config);
-	const mailer =
-		options.mailer ?? (config.email ? new CloudflareMerchantMailer(config.email) : null);
+	const mailer = options.mailer ?? (config.email ? createMerchantMailer(config.email) : null);
 	if (!mailer)
 		throw new Error("Merchant email transport is required; tests must inject a capture mailer");
 	const database = merchantAuthDatabase(sql);

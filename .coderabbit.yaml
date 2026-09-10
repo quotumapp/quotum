@@ -21,7 +21,7 @@ reviews:
 
   auto_review:
     enabled: true
-    drafts: false
+    drafts: true
 
   path_filters:
     - "!contracts/v1/**"

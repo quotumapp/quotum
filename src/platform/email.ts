@@ -1,4 +1,5 @@
-import type { MerchantConfig } from "./config";
+import type { QuotumEmailConfig } from "./config";
+import { ResendMerchantMailer } from "./resend-email";
 import { MerchantError } from "./security";
 
 export interface MerchantEmail {
@@ -10,6 +11,19 @@ export interface MerchantEmail {
 }
 export interface MerchantMailer {
 	send(message: MerchantEmail): Promise<void>;
+}
+
+export function createMerchantMailer(
+	config: QuotumEmailConfig,
+	transport: typeof fetch = fetch,
+	wait: (ms: number) => Promise<void> = (ms) => Bun.sleep(ms),
+): MerchantMailer {
+	switch (config.provider) {
+		case "cloudflare":
+			return new CloudflareMerchantMailer(config, transport, wait);
+		case "resend":
+			return new ResendMerchantMailer(config, transport, wait);
+	}
 }
 export function escapeHtml(value: string): string {
 	return value.replace(
@@ -34,7 +48,10 @@ export function linkMessage(
 }
 export class CloudflareMerchantMailer implements MerchantMailer {
 	constructor(
-		private readonly config: NonNullable<MerchantConfig["email"]>,
+		private readonly config: Omit<
+			Extract<QuotumEmailConfig, { provider: "cloudflare" }>,
+			"provider"
+		>,
 		private readonly transport: typeof fetch = fetch,
 		private readonly wait: (ms: number) => Promise<void> = (ms) => Bun.sleep(ms),
 	) {}
