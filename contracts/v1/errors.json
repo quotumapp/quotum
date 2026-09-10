@@ -61,7 +61,6 @@
       "sources": [
         "src/db/repository/controls-enterprise.ts",
         "src/db/repository/insights.ts",
-        "src/db/repository/metering.ts",
         "src/db/repository/usage-operations.ts"
       ]
     },

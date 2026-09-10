@@ -12,6 +12,8 @@ start at 1.0.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-10
+
 ### Added
 
 - `bun run test:load`, a load lane that boots the real service against a disposable Postgres and
@@ -91,6 +93,23 @@ start at 1.0.
 - Confirming a reservation updated the consumed quantity on every reservation holding the same
   allocation, not only its own, which understated the held quantity those other reservations later
   released. The update is now scoped to the confirming reservation.
+- Regenerated the wire error inventory to remove a stale source reference and restore the
+  generated-contract CI check.
+
+### Upgrade
+
+- Baselines `001_platform.sql` and `004_merchant.sql` have new formatting checksums;
+  `002_billing_core.sql` adds the per-account projection sequence and nullable usage-job payloads,
+  and `003_metering_and_pricing.sql` adds the projection debounce setting. Existing 0.9.0 databases
+  do not pass this release's checksum verification. Recreate disposable databases from all four
+  baselines; populated deployments need a backup and an explicit data-preserving transition as
+  described in [the schema policy](docs/operations.md#schema-and-upgrade-policy).
+- Before rollout, configure nonblank `MERCHANT_ORIGIN` and `MERCHANT_PUBLIC_URL`, and ensure
+  projection receivers accept `sequence` and coalesced usage deliveries. Drain old usage writers
+  and workers before transitioning the database, verify migration integrity, then start 0.9.1
+  and confirm `/ready`. Do not run old and new writers against the changed baseline together.
+- Named Postgres prepared statements now default to enabled. For transaction-mode poolers that
+  cannot retain them, set `BILLING_POSTGRES_PREPARED_STATEMENTS=false` before startup.
 
 ## [0.9.0] - 2026-09-09
 
