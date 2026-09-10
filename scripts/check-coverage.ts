@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { coverageShortfalls, formatLcovSummary, summarizeLcov } from "./lib/lcov-summary";
 
 const minimum = {
-	lines: 0.47,
-	functions: 0.54,
+	lines: 0.48,
+	functions: 0.55,
 } as const;
 
 const reportPath = process.argv[2] ?? "coverage/lcov.info";
