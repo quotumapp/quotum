@@ -5,6 +5,7 @@ import type { StripeOAuthPort } from "../platform/connections/oauth-port";
 /** Stripe Apps OAuth v2. Configuration identifies Quotum's app, never a customer's account. */
 export function createStripeOAuthPort(
 	env: Record<string, string | undefined> = process.env,
+	deps: { fetch?: typeof fetch } = {},
 ): StripeOAuthPort | null {
 	if (!env.STRIPE_APP_CLIENT_ID) return null;
 	const clientId = z.string().min(1).parse(env.STRIPE_APP_CLIENT_ID);
@@ -23,7 +24,8 @@ export function createStripeOAuthPort(
 		return { apiKey, webhookSecret };
 	};
 	const tokens = async (environment: "sandbox" | "production", body: URLSearchParams) => {
-		const response = await fetch("https://api.stripe.com/v1/oauth/token", {
+		const send = deps.fetch ?? fetch;
+		const response = await send("https://api.stripe.com/v1/oauth/token", {
 			method: "POST",
 			redirect: "error",
 			signal: AbortSignal.timeout(10_000),
@@ -48,6 +50,7 @@ export function createStripeOAuthPort(
 		const account = await new Stripe(result.access_token, {
 			timeout: 10_000,
 			maxNetworkRetries: 0,
+			httpClient: deps.fetch ? Stripe.createFetchHttpClient(deps.fetch) : undefined,
 		}).accounts.retrieve(null);
 		if (result.stripe_user_id && account.id !== result.stripe_user_id)
 			throw new Error("Stripe account mismatch");

@@ -6,6 +6,33 @@ import type {
 } from "../../../src/providers/apple/types";
 
 type JsonRecord = Record<string, unknown>;
+
+function attachFailNext<T extends { client: object }>(value: T) {
+	const pending = new Map<string, Error>();
+	const client = new Proxy(value.client, {
+		get(target, prop, receiver) {
+			const orig = Reflect.get(target, prop, receiver);
+			if (typeof orig !== "function") {
+				return orig;
+			}
+			return (...args: unknown[]) => {
+				const error = pending.get(String(prop));
+				if (error !== undefined) {
+					pending.delete(String(prop));
+					throw error;
+				}
+				return orig.apply(target, args);
+			};
+		},
+	});
+	return {
+		...value,
+		client,
+		failNext(method: string, error: Error) {
+			pending.set(method, error);
+		},
+	};
+}
 type AppleDateInput = Date | number | string;
 const farFutureSubscriptionExpiry = "2099-06-30T00:00:00.000Z";
 const farFutureSubscriptionPeriodEnd = 4_086_460_800;
@@ -69,7 +96,7 @@ export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOp
 		notificationUUID: "00000000-0000-0000-0000-000000000001",
 	});
 
-	return {
+	return attachFailNext({
 		calls,
 		client: {
 			async getLatestSubscriptionStatus(originalTransactionId: string) {
@@ -113,7 +140,7 @@ export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOp
 		setTransactionAppAccountToken(token: string | undefined) {
 			transactionAppAccountToken = token;
 		},
-	};
+	});
 }
 
 export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions) {
@@ -125,7 +152,7 @@ export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions)
 	let refundableQuantity = options.refundableQuantity ?? quantity;
 	let productPurchaseState = "PURCHASED";
 
-	return {
+	return attachFailNext({
 		calls,
 		client: {
 			async acknowledgeProductPurchase(productId: string, token: string) {
@@ -198,7 +225,7 @@ export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions)
 		setRefundableQuantity(value: number) {
 			refundableQuantity = value;
 		},
-	};
+	});
 }
 
 export function createFakeStripeBillingClient(options: FakeStripeBillingClientOptions = {}) {
@@ -209,7 +236,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 	const event =
 		options.event ?? stripeEvent("customer.subscription.updated", stripeSubscriptionObject());
 
-	return {
+	return attachFailNext({
 		calls,
 		checkoutSessionParams,
 		client: {
@@ -263,7 +290,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			},
 		},
 		portalSessionParams,
-	};
+	});
 }
 
 function stripeCustomerIdForBillingAccount(billingAccountId: string): string {

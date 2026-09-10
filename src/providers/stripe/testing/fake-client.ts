@@ -34,6 +34,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	private readonly invoiceLineKeys = new Set<string>();
 	private readonly subscriptionUpdates = new Map<string, { id: string }>();
 	private readonly priceAmountsMinor: Readonly<Record<string, number>>;
+	private readonly failures = new Map<string, Error>();
 
 	constructor(
 		private readonly config: StripeBillingConfig,
@@ -46,10 +47,23 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		};
 	}
 
+	failNext(method: string, error: Error): void {
+		this.failures.set(method, error);
+	}
+
+	private throwIfFailed(method: string): void {
+		const error = this.failures.get(method);
+		if (error !== undefined) {
+			this.failures.delete(method);
+			throw error;
+		}
+	}
+
 	async createCustomer(input: {
 		billingAccountId: string;
 		email: string | null;
 	}): Promise<{ id: string }> {
+		this.throwIfFailed("createCustomer");
 		return { id: `cus_fake_${digest(input.billingAccountId).slice(0, 24)}` };
 	}
 
@@ -57,6 +71,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		params: Stripe.Checkout.SessionCreateParams,
 		idempotencyKey?: string,
 	): Promise<{ id: string; url: string }> {
+		this.throwIfFailed("createCheckoutSession");
 		const existing =
 			idempotencyKey === undefined ? undefined : this.sessionsByIdempotencyKey.get(idempotencyKey);
 		if (existing !== undefined) {
@@ -129,6 +144,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		_params: Stripe.SubscriptionUpdateParams,
 		idempotencyKey: string,
 	): Promise<{ id: string }> {
+		this.throwIfFailed("updateSubscription");
 		const existing = this.subscriptionUpdates.get(idempotencyKey);
 		if (existing !== undefined) return existing;
 		const updated = { id: subscriptionId };
@@ -140,6 +156,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		params: Stripe.InvoiceCreateParams,
 		idempotencyKey: string,
 	): Promise<{ id: string }> {
+		this.throwIfFailed("createInvoice");
 		const existing = this.invoicesByIdempotencyKey.get(idempotencyKey);
 		if (existing !== undefined) return { id: existing.id };
 		const id = `in_fake_${digest(idempotencyKey).slice(0, 24)}`;
@@ -174,6 +191,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	}
 
 	async payInvoice(invoiceId: string, _idempotencyKey: string): Promise<unknown> {
+		this.throwIfFailed("payInvoice");
 		const invoice = this.requireInvoice(invoiceId);
 		if (this.options.paymentBehavior === "action_required") {
 			throw Object.assign(new Error("Customer authentication is required"), {
