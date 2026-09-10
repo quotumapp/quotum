@@ -1,17 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { AdminBillingRepository } from "../../src/db/admin-repository";
-import { renderDrizzleSql } from "../helpers/drizzle-sql";
 import { projectInstanceContext } from "../helpers/project-context";
-
-class FakeDatabase {
-	queries: string[] = [];
-	constructor(private readonly responses: Array<Record<string, unknown>[]>) {}
-
-	async execute(query: unknown) {
-		this.queries.push(renderDrizzleSql(query));
-		return this.responses.shift() ?? [];
-	}
-}
+import { FakeDatabase } from "./repository-fixture";
 
 describe("AdminBillingRepository", () => {
 	it("searches all declared customer match types with a bounded query pattern", async () => {
@@ -113,8 +103,8 @@ describe("AdminBillingRepository", () => {
 		expect(result.items[0]?.purchasedAt).toBe("2026-01-01T00:00:00.000Z");
 		expect(result.items[0]?.provider).toBe("stripe");
 		expect(database.queries[0]).toContain("project_id =");
-		expect(database.queries[0]).toContain(
-			JSON.stringify(projectInstanceContext("wiseley").projectInstanceId),
+		expect(database.boundParameter("project_id", 0)).toBe(
+			projectInstanceContext("wiseley").projectInstanceId,
 		);
 	});
 

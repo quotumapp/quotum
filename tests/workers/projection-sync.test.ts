@@ -3,6 +3,7 @@ import type { ProjectionSyncJobRow } from "../../src/db/repository";
 import type { BillingLogger } from "../../src/observability/logger";
 import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import { ProjectionSyncWorker } from "../../src/workers/projection-sync";
+import { createDeferred } from "../helpers/deferred";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const job = {
@@ -105,7 +106,8 @@ describe("ProjectionSyncWorker", () => {
 	});
 
 	it("delivers claimed jobs with bounded concurrency", async () => {
-		const releaseDeliveries = deferred<void>();
+		const releaseDeliveries = createDeferred<void>();
+		const bothStarted = createDeferred<void>();
 		const started: string[] = [];
 		let activeDeliveries = 0;
 		let maxActiveDeliveries = 0;
@@ -138,6 +140,9 @@ describe("ProjectionSyncWorker", () => {
 					started.push(jobId);
 					activeDeliveries += 1;
 					maxActiveDeliveries = Math.max(maxActiveDeliveries, activeDeliveries);
+					if (started.length === 2) {
+						bothStarted.resolve();
+					}
 					await releaseDeliveries.promise;
 					activeDeliveries -= 1;
 				},
@@ -147,7 +152,7 @@ describe("ProjectionSyncWorker", () => {
 		const run = worker.runOnce();
 		let assertionError: unknown;
 		try {
-			await sleep(10);
+			await bothStarted.promise;
 			expect(started).toEqual(["job_1", "job_2"]);
 			expect(maxActiveDeliveries).toBe(2);
 		} catch (error) {
@@ -568,21 +573,3 @@ describe("ProjectionSyncWorker", () => {
 		expect(calls).toEqual(["succeeded:job_usage"]);
 	});
 });
-
-function deferred<T>(): {
-	promise: Promise<T>;
-	resolve: (value: T | PromiseLike<T>) => void;
-	reject: (reason?: unknown) => void;
-} {
-	let resolve!: (value: T | PromiseLike<T>) => void;
-	let reject!: (reason?: unknown) => void;
-	const promise = new Promise<T>((innerResolve, innerReject) => {
-		resolve = innerResolve;
-		reject = innerReject;
-	});
-	return { promise, resolve, reject };
-}
-
-function sleep(milliseconds: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}

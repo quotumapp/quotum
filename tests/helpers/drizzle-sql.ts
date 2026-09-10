@@ -26,11 +26,11 @@ export function renderDrizzleSql(query: unknown): string {
 
 export function renderDrizzleSqlParams(query: unknown): unknown[] {
 	if (!isRecord(query)) {
-		return [];
+		throw new Error("Cannot render Drizzle SQL params");
 	}
 
 	if (typeof query.toQuery !== "function") {
-		return [];
+		throw new Error("Cannot render Drizzle SQL params");
 	}
 
 	try {
@@ -41,8 +41,8 @@ export function renderDrizzleSqlParams(query: unknown): unknown[] {
 			casing: { getColumnCasing: (column: { name: string }) => column.name },
 		});
 		return Array.isArray(rendered.params) ? rendered.params : [];
-	} catch {
-		return [];
+	} catch (cause) {
+		throw new Error("Cannot render Drizzle SQL params", { cause });
 	}
 }
 

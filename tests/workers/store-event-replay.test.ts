@@ -4,6 +4,7 @@ import type { BillingLogger } from "../../src/observability/logger";
 import { type BillingMetrics, createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import type { ProjectInstanceContext } from "../../src/projects/context";
 import { StoreEventReplayWorker } from "../../src/workers/store-event-replay";
+import { createDeferred } from "../helpers/deferred";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const workerContexts = [
@@ -544,6 +545,7 @@ describe("StoreEventReplayWorker", () => {
 		const events = [storeEvent()];
 		const { repository } = createRepository(events);
 		const renewed: string[] = [];
+		const renewedLease = createDeferred<void>();
 		const worker = new StoreEventReplayWorker({
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
@@ -553,12 +555,13 @@ describe("StoreEventReplayWorker", () => {
 				...repository,
 				renewStoreEventReplayJobLease: async (projectId, eventId, workerId) => {
 					renewed.push(`${projectId}:${eventId}:${workerId}`);
+					renewedLease.resolve();
 				},
 			},
 			providers: {
 				apple: {
 					replayStoreEvent: async () => {
-						await Bun.sleep(20);
+						await renewedLease.promise;
 						return { status: "processed" };
 					},
 				},
@@ -570,7 +573,7 @@ describe("StoreEventReplayWorker", () => {
 
 		await worker.runOnce();
 
-		expect(renewed).toContain("project_1:event_1:worker-a");
+		expect(renewed[0]).toBe("project_1:event_1:worker-a");
 	});
 
 	it("records run failures when events cannot be claimed", async () => {

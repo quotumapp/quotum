@@ -5,27 +5,29 @@ import { FakeDatabase, purchaseProjectionInput } from "./repository-fixture";
 
 describe("BillingRepository mutations", () => {
 	it("guards purchase conflict updates against terminal status regressions", async () => {
-		const database = new FakeDatabase([
-			[{ id: "customer-id", billing_account_id: "user-1" }],
+		const database = new FakeDatabase(
 			[
-				{
-					id: "store-product-id",
-					product_id: "product-id",
-					product_key: "lifetime_unlock",
-					product_type: "non_consumable",
-					credit_amount: 0,
-				},
+				[{ id: "customer-id", billing_account_id: "user-1" }],
+				[
+					{
+						id: "store-product-id",
+						product_id: "product-id",
+						product_key: "lifetime_unlock",
+						product_type: "non_consumable",
+						credit_amount: 0,
+					},
+				],
+				[{ id: "store-event-id" }],
+				[{ id: "purchase-id" }],
+				[{ id: "customer-id" }],
+				[],
+				[{ id: "customer-id" }],
+				[{ projection_sequence: 1, billing_account_id: "user-1" }],
+				[],
+				[{ project_id: "project-id" }],
 			],
-			[{ id: "store-event-id" }],
-			[{ id: "purchase-id" }],
-			[{ id: "customer-id" }],
-			[],
-			[{ id: "customer-id" }],
-			[{ projection_sequence: 1, billing_account_id: "user-1" }],
-			[],
-			[{ project_id: "project-id" }],
-			[{ id: "projection-job-id" }],
-		]);
+			{ strict: true },
+		);
 		const repository = new BillingRepository(database as never);
 
 		await repository.recordPurchaseAndEnqueueProjection(
@@ -33,6 +35,8 @@ describe("BillingRepository mutations", () => {
 			purchaseProjectionInput(),
 		);
 
+		database.assertConsumed();
+		expect(database.queries).toHaveLength(10);
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("purchases.status = 'completed' AND EXCLUDED.status <> 'completed'");
 		expect(queries).toMatch(/EXCLUDED\.status = 'completed'\s+AND purchases\.status = 'completed'/);
