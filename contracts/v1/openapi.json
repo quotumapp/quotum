@@ -13150,7 +13150,7 @@
   "info": {
     "description": "Complete implemented HTTP contract. Pre-GA; no stable v1 guarantee is implied.",
     "title": "Quotum API",
-    "version": "0.9.3"
+    "version": "0.9.4"
   },
   "openapi": "3.1.0",
   "paths": {

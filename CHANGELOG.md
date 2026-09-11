@@ -12,6 +12,29 @@ start at 1.0.
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-09-11
+
+### Added
+
+- A `users` load scenario that schedules one consume per billing account per second independently
+  of response time, with configurable user counts, in-flight limits, request timeouts and drain
+  periods. Reports distinguish scheduled, sent, accepted and dropped arrivals and reconcile
+  successful responses against durable usage records.
+- `--docker` explicitly selects a disposable Postgres container even when `POSTGRES_URI` is set.
+
+### Fixed
+
+- Load reports are written before a failing gate exits, retaining overload evidence and gate
+  failures. Reports include source and environment metadata and redact external database URIs.
+- Arrival-rate gates reject missing or denied authorizations, inconsistent durable usage and
+  projection backlogs that remain after the drain period.
+
+### Upgrade notes
+
+- No API, database schema or service environment changes. No migration or special upgrade order
+  is required from 0.9.3. `BUN_CONFIG_MAX_HTTP_REQUESTS` is an optional load-generator setting;
+  the operations guide documents it alongside the new CLI options.
+
 ## [0.9.3] - 2026-09-10
 
 ### Platform email configuration (breaking)
