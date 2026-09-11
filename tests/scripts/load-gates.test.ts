@@ -11,6 +11,26 @@ const result = (overrides: Partial<Parameters<typeof evaluateLoadGates>[0][numbe
 });
 
 describe("evaluateLoadGates", () => {
+	it("rejects lost scheduled users, business denials, and missing durable usage", () => {
+		const arrivals = {
+			scheduled: 100,
+			accepted: 100,
+			droppedCapacity: 0,
+			droppedLate: 0,
+			accounting: { missingAccepted: 0, invalidEvents: 0 },
+		};
+		expect(evaluateLoadGates([result({ scenario: "users", arrivals })])).toEqual([]);
+		for (const failed of [
+			{ ...arrivals, accepted: 99 },
+			{ ...arrivals, accepted: 90, droppedCapacity: 10 },
+			{ ...arrivals, accepted: 90, droppedLate: 10 },
+			{ ...arrivals, accounting: { missingAccepted: 1, invalidEvents: 0 } },
+			{ ...arrivals, accounting: { missingAccepted: 0, invalidEvents: 1 } },
+		]) {
+			expect(evaluateLoadGates([result({ scenario: "users", arrivals: failed })]).length).toBe(1);
+		}
+	});
+
 	it("fails on status 0, 5xx, leftover backlog, and optional thresholds", () => {
 		expect(evaluateLoadGates([result({ statuses: { "0": 1 } })])).toEqual([
 			"hot recorded 1 status 0 responses",

@@ -28,6 +28,41 @@ start at 1.0.
 
 ### Added
 
+- A `users` load scenario that schedules one consume per billing account per second independently
+  of response time, with configurable user counts, in-flight limits, request timeouts and drain
+  periods. Reports distinguish scheduled, sent, accepted and dropped arrivals and reconcile
+  successful responses against durable usage records.
+- `--docker` explicitly selects a disposable Postgres container even when `POSTGRES_URI` is set.
+
+### Fixed
+
+- Load reports are written before a failing gate exits, retaining overload evidence and gate
+  failures. Reports include source and environment metadata and redact external database URIs.
+- Arrival-rate gates reject missing or denied authorizations, inconsistent durable usage and
+  projection backlogs that remain after the drain period.
+
+### Upgrade notes
+
+- No API, database schema or service environment changes. No migration or special upgrade order
+  is required. `BUN_CONFIG_MAX_HTTP_REQUESTS` is an optional load-generator setting;
+  the operations guide documents it alongside the new CLI options.
+
+## [0.9.3] - 2026-09-10
+
+### Platform email configuration (breaking)
+
+- Added explicit `QUOTUM_EMAIL_PROVIDER=cloudflare|resend` selection and a Resend REST adapter.
+  Resend requires `QUOTUM_EMAIL_RESEND_API_KEY` and the shared `QUOTUM_EMAIL_FROM` sender address.
+- Renamed `MERCHANT_AUTH_SECRET` to `QUOTUM_AUTH_SECRET`, `MERCHANT_EMAIL_FROM` to
+  `QUOTUM_EMAIL_FROM`, and Cloudflare's `MERCHANT_EMAIL_ACCOUNT_ID` / `MERCHANT_EMAIL_API_TOKEN`
+  to `QUOTUM_EMAIL_CLOUDFLARE_ACCOUNT_ID` / `QUOTUM_EMAIL_CLOUDFLARE_API_TOKEN`. Old names are
+  rejected. These configure Quotum's own sender and authentication, not merchant registration.
+- Upgrade configuration and application together: set the explicit provider, remove retired keys
+  from the new process environment, and preserve the auth secret's exact value. Retain old image
+  and configuration together for rollback. No database migration is required for this change.
+
+### Added
+
 - `bun run test:load`, a load lane that boots the real service against a disposable Postgres and
   measures the metering hot path (hot account, spread accounts, reserve and confirm, check, workers
   idle) with client and server latency, Postgres statistics, statements per request, projection
