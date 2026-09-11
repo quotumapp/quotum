@@ -13,6 +13,7 @@ import { resetAndSeedIntegrationData } from "../tests/integration/helpers/catalo
 import { publishAiCreditsCatalog } from "../tests/integration/helpers/metering-catalog";
 import { integrationProjectContext } from "../tests/integration/helpers/platform-fixture";
 import { trapInterrupts } from "./lib/interrupts";
+import { driveUserArrivals } from "./lib/load-arrivals";
 import { evaluateLoadGates } from "./lib/load-gates";
 import {
 	applyTestcontainersDefaults,
@@ -28,7 +29,7 @@ import { bootstrapTestPlatform } from "./lib/test-platform-bootstrap";
  * with POSTGRES_URI against a sized instance for figures worth quoting.
  */
 
-type ScenarioKind = "hot" | "spread" | "reserve" | "check" | "workers-off";
+type ScenarioKind = "hot" | "spread" | "reserve" | "check" | "workers-off" | "users";
 
 interface Options {
 	durationMs: number;
@@ -43,6 +44,10 @@ interface Options {
 	recreateSchema: boolean;
 	minRps: number | null;
 	maxP99Ms: number | null;
+	users: readonly number[];
+	maxInFlight: number;
+	requestTimeoutMs: number;
+	drainMs: number;
 }
 
 interface DbSnapshot {
@@ -81,6 +86,25 @@ interface RunResult {
 		dbExecMsPerRequest: number | null;
 	};
 	cpu: { servicePercent: number | null; postgresPercent: number | null };
+	arrivals?: {
+		users: number;
+		windowMs: number;
+		scheduled: number;
+		sent: number;
+		droppedCapacity: number;
+		droppedLate: number;
+		peakInFlight: number;
+		inFlightAtEnd: number;
+		accepted: number;
+		acceptedDuringWindow: number;
+		requestDrainMs: number;
+		schedulingLagP99Ms: number;
+		scheduledLatencyP99Ms: number;
+		projectionBacklogBefore: number;
+		projectionBacklogAtEnd: number;
+		projectionDrainMs: number;
+		accounting: { committed: number; missingAccepted: number; invalidEvents: number };
+	};
 }
 
 const defaultConcurrency = [1, 8, 32, 64] as const;
@@ -150,6 +174,13 @@ async function main(options: Options): Promise<void> {
 		const repository = new BillingRepository(connection.db as never);
 		await publishAiCreditsCatalog(repository);
 		await seedAccounts(repository, options.accounts);
+		if (options.scenarios.includes("users")) {
+			// Fixture grants precede the load. Their initial snapshots are not usage traffic.
+			await connection.sql`
+				DELETE FROM projection_sync_jobs
+				WHERE project_id = ${integrationProjectContext().projectInstanceId}
+			`;
+		}
 		await printEnvironment(sampler, container, options);
 
 		const startService = (workersEnabled: boolean) =>
@@ -183,6 +214,22 @@ async function main(options: Options): Promise<void> {
 			return;
 		}
 		for (const scenario of options.scenarios) {
+			if (scenario === "users") {
+				for (const users of options.users) {
+					results.push(await runUserScenario(context, users));
+					// A failed arrival-rate level may leave server requests queued after client timeout.
+					// Stop that process before the next level; all data belongs to the disposable fixture.
+					await service.stop();
+					await connection.sql`
+						DELETE FROM projection_sync_jobs
+						WHERE project_id = ${integrationProjectContext().projectInstanceId}
+					`;
+					service = await startService(true);
+					context.client = createClient(service.baseUrl, apiKey);
+					context.servicePid = service.pid;
+				}
+				continue;
+			}
 			if (scenario === "workers-off") {
 				await service.stop();
 				service = await startService(false);
@@ -206,15 +253,31 @@ async function main(options: Options): Promise<void> {
 			minRps: options.minRps ?? undefined,
 			maxP99Ms: options.maxP99Ms ?? undefined,
 		});
+		if (options.out !== null) {
+			const report = {
+				generatedAt: new Date().toISOString(),
+				environment: {
+					bun: Bun.version,
+					platform: process.platform,
+					cpus: cpus().length,
+					totalMemoryGiB: round(totalmem() / 1024 ** 3),
+					httpConcurrencyLimit: process.env.BUN_CONFIG_MAX_HTTP_REQUESTS ?? "Bun default",
+					sourceRevision: Bun.spawnSync(["git", "rev-parse", "HEAD"]).stdout.toString().trim(),
+					workingTreeDirty:
+						Bun.spawnSync(["git", "status", "--porcelain"]).stdout.toString().trim() !== "",
+				},
+				options: {
+					...options,
+					postgresUri: options.postgresUri === null ? null : "[external disposable database]",
+				},
+				results,
+				gateFailures,
+			};
+			await writeFile(options.out, `${JSON.stringify(report, null, "\t")}\n`);
+			console.log(`\nResults written to ${options.out}`);
+		}
 		if (gateFailures.length > 0) {
 			throw new Error(`Load lane gates failed:\n${gateFailures.join("\n")}`);
-		}
-		if (options.out !== null) {
-			await writeFile(
-				options.out,
-				`${JSON.stringify({ generatedAt: new Date().toISOString(), options, results }, null, "\t")}\n`,
-			);
-			console.log(`\nResults written to ${options.out}`);
 		}
 	} finally {
 		await service?.stop();
@@ -335,6 +398,159 @@ async function runScenario(
 	return result;
 }
 
+async function runUserScenario(context: ScenarioContext, users: number): Promise<RunResult> {
+	const { client, options } = context;
+	console.log(`\nusers: ${users} independent billing accounts, 1 consume/user/second ...`);
+	// Warm the HTTP/catalogue path without adding unmeasured usage or projection work.
+	await drive(4, options.warmupMs, (worker, iteration) =>
+		client.check(`load-${(iteration * 4 + worker) % users}`),
+	);
+	const prefix = `load-users:${crypto.randomUUID()}:`;
+	const metricsBefore = await client.metrics();
+	const dbBefore = await snapshotDb(context.sql, context.statementStats);
+	const receiverBefore = context.receiver.count();
+	const lockSampler = startLockSampler(context.sampler);
+	const cpuSampler = startCpuSampler(context.servicePid, context.containerId);
+	const run = await driveUserArrivals(
+		{ users, durationMs: options.durationMs, maxInFlight: options.maxInFlight, maxLagMs: 100 },
+		(account, index) =>
+			client.consume(`load-${account}`, `${prefix}${index}`, options.requestTimeoutMs),
+	);
+	const [lockWaits, cpu] = await Promise.all([lockSampler.stop(), cpuSampler.stop()]);
+	const dbAfter = await snapshotDb(context.sql, context.statementStats);
+	const metricsAfter = await client.metrics();
+	const receiverAfter = context.receiver.count();
+	const latencies = run.samples.map((sample) => sample.ms).sort((a, b) => a - b);
+	const scheduledLatencies = run.samples
+		.map((sample) => sample.ms + sample.lagMs)
+		.sort((a, b) => a - b);
+	const lags = run.samples.map((sample) => sample.lagMs).sort((a, b) => a - b);
+	const statuses: Record<string, number> = {};
+	const acceptedKeys = new Set<string>();
+	let acceptedDuringWindow = 0;
+	let denied = 0;
+	for (const sample of run.samples) {
+		const status = String(sample.outcome?.status ?? 0);
+		statuses[status] = (statuses[status] ?? 0) + 1;
+		if (sample.outcome?.denied) denied += 1;
+		if (sample.outcome?.accepted) {
+			acceptedKeys.add(`${prefix}${sample.index}`);
+			if (sample.finishedAtMs <= options.durationMs) acceptedDuringWindow += 1;
+		}
+	}
+	const drainStartedAt = performance.now();
+	let backlog = dbAfter.projectionBacklog;
+	while (backlog > 0 && performance.now() - drainStartedAt < options.drainMs) {
+		await Bun.sleep(250);
+		const [row] = await context.sql<Array<{ backlog: number }>>`
+			SELECT count(*)::int AS backlog FROM projection_sync_jobs
+			WHERE status IN ('pending', 'processing', 'retrying')
+		`;
+		backlog = row?.backlog ?? backlog;
+	}
+	const projectionDrainMs = performance.now() - drainStartedAt;
+	const accounting = await verifyUserAccounting(context.sql, prefix, users, acceptedKeys);
+	const result: RunResult = {
+		scenario: "users",
+		operation: "consume",
+		concurrency: run.peakInFlight,
+		durationMs: Math.round(run.elapsedMs),
+		requests: run.sent,
+		ledgerCalls: run.sent,
+		unitsPerCall: 1,
+		rps: round(acceptedDuringWindow / (options.durationMs / 1000)),
+		ledgerCallsPerSecond: round(run.sent / (options.durationMs / 1000)),
+		clientMs: {
+			p50: round(percentile(latencies, 0.5)),
+			p95: round(percentile(latencies, 0.95)),
+			p99: round(percentile(latencies, 0.99)),
+			max: round(latencies.at(-1) ?? 0),
+		},
+		serverMs: histogramDelta(metricsBefore, metricsAfter, "consume"),
+		statuses,
+		denied,
+		db: {
+			xactPerSecond: round((dbAfter.xactCommit - dbBefore.xactCommit) / (run.elapsedMs / 1000)),
+			walMb: round(await walMegabytes(context.sql, dbBefore.walLsn, dbAfter.walLsn)),
+			deadTuplesDelta: dbAfter.deadTuples - dbBefore.deadTuples,
+			lockWaitSamples: lockWaits,
+			projectionJobsCreated: dbAfter.projectionJobs - dbBefore.projectionJobs,
+			projectionDelivered: receiverAfter - receiverBefore,
+			projectionBacklogAfter: backlog,
+			statementsPerRequest:
+				dbAfter.statementCalls === null || dbBefore.statementCalls === null || run.sent === 0
+					? null
+					: round((dbAfter.statementCalls - dbBefore.statementCalls) / run.sent),
+			dbExecMsPerRequest:
+				dbAfter.statementExecMs === null || dbBefore.statementExecMs === null || run.sent === 0
+					? null
+					: round((dbAfter.statementExecMs - dbBefore.statementExecMs) / run.sent),
+		},
+		cpu,
+		arrivals: {
+			users,
+			windowMs: options.durationMs,
+			scheduled: run.scheduled,
+			sent: run.sent,
+			droppedCapacity: run.droppedCapacity,
+			droppedLate: run.droppedLate,
+			peakInFlight: run.peakInFlight,
+			inFlightAtEnd: run.inFlightAtEnd,
+			accepted: acceptedKeys.size,
+			acceptedDuringWindow,
+			requestDrainMs: round(Math.max(0, run.elapsedMs - options.durationMs)),
+			schedulingLagP99Ms: round(percentile(lags, 0.99)),
+			scheduledLatencyP99Ms: round(percentile(scheduledLatencies, 0.99)),
+			projectionBacklogBefore: dbBefore.projectionBacklog,
+			projectionBacklogAtEnd: dbAfter.projectionBacklog,
+			projectionDrainMs: round(projectionDrainMs),
+			accounting,
+		},
+	};
+	console.log(
+		`- target ${users}/s; accepted during window ${result.rps}/s; accepted ${acceptedKeys.size}/${run.scheduled}; dropped ${run.droppedCapacity} capacity, ${run.droppedLate} generator; p99 ${result.clientMs.p99} ms`,
+	);
+	console.log(
+		`- projections ${dbAfter.projectionBacklog} -> ${backlog} after ${round(projectionDrainMs)} ms drain; committed ${accounting.committed}, missing accepted ${accounting.missingAccepted}, invalid events ${accounting.invalidEvents}`,
+	);
+	return result;
+}
+
+/** Check every successful reply against its durable claim and customer-scoped usage fact. */
+async function verifyUserAccounting(
+	sql: SQL,
+	prefix: string,
+	users: number,
+	acceptedKeys: ReadonlySet<string>,
+): Promise<{ committed: number; missingAccepted: number; invalidEvents: number }> {
+	const rows = await sql<Array<{ key: string; account: string; valid: boolean }>>`
+		SELECT claim.idempotency_key AS key, customer.billing_account_id AS account,
+			(event.id IS NOT NULL AND event.customer_id = claim.customer_id
+				AND event.operation = 'consume' AND event.quantity = 1
+				AND event.wallet_quantity = (claim.outcome->>'walletQuantity')::numeric) AS valid
+		FROM client_idempotency_claims claim
+		JOIN customers customer ON customer.project_id = claim.project_id AND customer.id = claim.customer_id
+		LEFT JOIN usage_events event ON event.project_id = claim.project_id
+			AND event.id = (claim.outcome->>'usageEventId')::uuid
+			AND event.recorded_at = (claim.outcome->>'recordedAt')::timestamptz
+		WHERE claim.project_id = ${integrationProjectContext().projectInstanceId}
+			AND claim.operation = 'consume' AND claim.idempotency_key LIKE ${`${prefix}%`}
+			AND claim.outcome->>'allowed' = 'true'
+	`;
+	const committed = new Set<string>();
+	let invalidEvents = 0;
+	for (const row of rows) {
+		committed.add(row.key);
+		const index = Number(row.key.slice(prefix.length));
+		if (!row.valid || row.account !== `load-${index % users}`) invalidEvents += 1;
+	}
+	return {
+		committed: rows.length,
+		missingAccepted: [...acceptedKeys].filter((key) => !committed.has(key)).length,
+		invalidEvents,
+	};
+}
+
 /** Lists every statement one hot request executes, from pg_stat_statements, with mean times. */
 async function profileOperation(
 	context: ScenarioContext,
@@ -383,6 +599,7 @@ interface RequestOutcome {
 	status: number;
 	denied: boolean;
 	ledgerCalls: number;
+	accepted?: boolean;
 }
 
 interface Sample extends RequestOutcome {
@@ -415,7 +632,11 @@ async function drive(
 }
 
 interface LoadClient {
-	consume(billingAccountId: string): Promise<RequestOutcome>;
+	consume(
+		billingAccountId: string,
+		operationId?: string,
+		timeoutMs?: number,
+	): Promise<RequestOutcome>;
 	check(billingAccountId: string): Promise<RequestOutcome>;
 	reserveAndConfirm(billingAccountId: string, quantity: string): Promise<RequestOutcome>;
 	metrics(): Promise<string>;
@@ -430,11 +651,16 @@ function createClient(baseUrl: string, apiKey: string): LoadClient {
 		path: string,
 		body: Record<string, unknown>,
 		idempotent: boolean,
+		operationId?: string,
+		timeoutMs?: number,
 	): Promise<{ status: number; data: Record<string, unknown> | null }> => {
 		const response = await fetch(`${baseUrl}${path}`, {
 			method: "POST",
-			headers: idempotent ? { ...headers, "Idempotency-Key": crypto.randomUUID() } : headers,
+			headers: idempotent
+				? { ...headers, "Idempotency-Key": operationId ?? crypto.randomUUID() }
+				: headers,
 			body: JSON.stringify(body),
+			signal: timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs),
 		});
 		const payload = (await response.json().catch(() => null)) as { data?: unknown } | null;
 		const data =
@@ -446,13 +672,20 @@ function createClient(baseUrl: string, apiKey: string): LoadClient {
 	const usage = (billingAccountId: string) =>
 		`/v1/billing-accounts/${encodeURIComponent(billingAccountId)}/usage`;
 	return {
-		async consume(billingAccountId) {
+		async consume(billingAccountId, operationId, timeoutMs) {
 			const { status, data } = await post(
 				`${usage(billingAccountId)}/consume`,
 				{ featureKey: "model_tokens", quantity: "1" },
 				true,
+				operationId,
+				timeoutMs,
 			);
-			return { status, denied: data?.allowed === false, ledgerCalls: 1 };
+			return {
+				status,
+				denied: data?.allowed === false,
+				accepted: status === 200 && data?.allowed === true,
+				ledgerCalls: 1,
+			};
 		},
 		async check(billingAccountId) {
 			const { status, data } = await post(
@@ -740,6 +973,20 @@ async function printEnvironment(
 }
 
 function printTable(results: readonly RunResult[]): void {
+	const userResults = results.filter((result) => result.arrivals !== undefined);
+	if (userResults.length > 0) {
+		console.log(
+			"\n| Users / requested RPS | Accepted RPS in window | Accepted / scheduled | Capacity drops | Generator drops | Client p99 ms | Projection backlog after drain |",
+		);
+		console.log("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+		for (const result of userResults) {
+			const arrivals = result.arrivals;
+			if (arrivals === undefined) continue;
+			console.log(
+				`| ${arrivals.users} | ${result.rps} | ${arrivals.accepted}/${arrivals.scheduled} | ${arrivals.droppedCapacity} | ${arrivals.droppedLate} | ${result.clientMs.p99} | ${result.db.projectionBacklogAfter} |`,
+			);
+		}
+	}
 	console.log(
 		"\n| Scenario | Operation | Conc. | RPS | Ledger calls/s | Client p50 ms | Client p99 ms | Server p99 ms (bucket) | Errors | Denied | Xact/s | WAL MB | Dead tuples | Lock waits max/mean | Proj. created | Proj. delivered | Proj. backlog | Stmts/req | DB ms/req | Service CPU % | PG CPU % |",
 	);
@@ -771,6 +1018,10 @@ function parseOptions(argv: readonly string[]): Options {
 		recreateSchema: false,
 		minRps: null,
 		maxP99Ms: null,
+		users: [100, 1000, 2000, 5000, 10000],
+		maxInFlight: 2000,
+		requestTimeoutMs: 5000,
+		drainMs: 10000,
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const flag = argv[index];
@@ -800,15 +1051,16 @@ function parseOptions(argv: readonly string[]): Options {
 				options.scenarios = requireValue()
 					.split(",")
 					.map((item) => item.trim())
-					.filter((item): item is ScenarioKind =>
-						(defaultScenarios as readonly string[]).includes(item),
-					);
+					.filter((item): item is ScenarioKind => [...defaultScenarios, "users"].includes(item));
 				break;
 			case "--out":
 				options.out = requireValue();
 				break;
 			case "--postgres-uri":
 				options.postgresUri = requireValue();
+				break;
+			case "--docker":
+				options.postgresUri = null;
 				break;
 			case "--pg-config":
 				options.pgConfig = [...options.pgConfig, requireValue()];
@@ -822,6 +1074,18 @@ function parseOptions(argv: readonly string[]): Options {
 			case "--max-p99-ms":
 				options.maxP99Ms = Number(requireValue());
 				break;
+			case "--users":
+				options.users = requireValue().split(",").map(Number);
+				break;
+			case "--max-in-flight":
+				options.maxInFlight = Number(requireValue());
+				break;
+			case "--request-timeout-ms":
+				options.requestTimeoutMs = Number(requireValue());
+				break;
+			case "--drain-seconds":
+				options.drainMs = Number(requireValue()) * 1000;
+				break;
 			case "--profile": {
 				const next = argv[index + 1];
 				if (next === "check" || next === "consume" || next === "reserve") {
@@ -834,7 +1098,7 @@ function parseOptions(argv: readonly string[]): Options {
 			}
 			case "--help":
 				console.log(
-					"bun run test:load [--duration s] [--warmup s] [--concurrency 1,8,32,64] [--accounts n] [--scenarios hot,spread,reserve,check,workers-off] [--out file.json] [--postgres-uri uri] [--pg-config setting=value ...] [--profile [consume|check|reserve]] [--recreate-schema]",
+					"bun run test:load [--duration s] [--warmup s] [--concurrency 1,8,32,64] [--accounts n] [--scenarios hot,spread,reserve,check,workers-off,users] [--users 100,1000,2000,5000,10000] [--max-in-flight 2000] [--request-timeout-ms 5000] [--drain-seconds 10] [--min-rps n] [--max-p99-ms n] [--out file.json] [--docker | --postgres-uri uri] [--pg-config setting=value ...] [--profile [consume|check|reserve]] [--recreate-schema]",
 				);
 				process.exit(0);
 				break;
@@ -846,5 +1110,23 @@ function parseOptions(argv: readonly string[]): Options {
 	if (!Number.isInteger(options.accounts) || options.accounts < 1)
 		throw new Error("--accounts must be a positive integer");
 	if (options.scenarios.length === 0) throw new Error("--scenarios selected nothing");
+	for (const [name, value] of Object.entries({
+		duration: options.durationMs,
+		"max-in-flight": options.maxInFlight,
+		"request-timeout-ms": options.requestTimeoutMs,
+		"drain-seconds": options.drainMs,
+	})) {
+		if (!Number.isInteger(value) || value < 1) throw new Error(`--${name} must be positive`);
+	}
+	if (!Number.isFinite(options.warmupMs) || options.warmupMs < 0)
+		throw new Error("--warmup must be nonnegative");
+	if (
+		options.users.length === 0 ||
+		options.users.some((value) => !Number.isInteger(value) || value < 1)
+	)
+		throw new Error("--users must contain positive integer user counts");
+	if (options.scenarios.includes("users")) {
+		options.accounts = Math.max(options.accounts, ...options.users);
+	}
 	return options;
 }
