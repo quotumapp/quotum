@@ -1,10 +1,10 @@
+import { registerQuotumProcessShutdown } from "../composition/public-runtime";
 import { createBillingReadinessCheck } from "../composition/runtime-readiness";
-import { initializePostgresHealth } from "../db/client";
 import {
 	FakeStripeBillingClient,
 	type FakeStripeBillingClientOptions,
 } from "../providers/stripe/testing/fake-client";
-import { createBillingRuntimeApp } from "../runtime";
+import { createBillingRuntime } from "../runtime";
 import { fixtureConnections, loadFixtureEnv } from "./connection-fixtures";
 import { MerchantCaptureMailer } from "./merchant-fakes";
 
@@ -15,9 +15,8 @@ if (process.env.BILLING_ENV !== "test" || process.env.BILLING_TEST_FAKE_STRIPE !
 }
 
 const env = loadFixtureEnv();
-await initializePostgresHealth();
 
-const app = createBillingRuntimeApp(env, {
+const runtime = createBillingRuntime(env, {
 	connections: fixtureConnections(env.connectionFixtures),
 	projectionFetch: globalThis.fetch,
 	stripeClientFactory: (config) => new FakeStripeBillingClient(config, fakeStripeOptions()),
@@ -25,7 +24,9 @@ const app = createBillingRuntimeApp(env, {
 	merchant: { mailer: new MerchantCaptureMailer() },
 });
 
-export default app;
+registerQuotumProcessShutdown(runtime);
+await runtime.start();
+export default runtime.app;
 
 function fakeStripeOptions(): FakeStripeBillingClientOptions {
 	const behavior = process.env.BILLING_TEST_FAKE_STRIPE_PAYMENT_BEHAVIOR;

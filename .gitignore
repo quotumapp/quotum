@@ -44,3 +44,5 @@ local-sandbox
 .playwright-cli
 # Generated CI compatibility reports
 contract-reports/
+
+graphify-out

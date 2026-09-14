@@ -45,10 +45,30 @@ export function createBillingDatabaseConnection(
 }
 
 let defaultConnection: BillingDatabaseConnection | null = null;
+let defaultConnectionConfig: { postgresUri: string; postgresPreparedStatements: boolean } | null =
+	null;
+
+/** Composition selects the one process-owned database before constructing repositories. */
+export function configureDefaultConnection(
+	env: Pick<BillingEnv, "postgresUri" | "postgresPreparedStatements">,
+): void {
+	if (
+		defaultConnectionConfig &&
+		(defaultConnectionConfig.postgresUri !== env.postgresUri ||
+			defaultConnectionConfig.postgresPreparedStatements !== env.postgresPreparedStatements)
+	) {
+		throw new Error("The process database is already configured differently");
+	}
+	defaultConnectionConfig = {
+		postgresUri: env.postgresUri,
+		postgresPreparedStatements: env.postgresPreparedStatements,
+	};
+	defaultConnection ??= createBillingDatabaseConnection(env);
+}
 
 function getDefaultConnection(): BillingDatabaseConnection {
-	defaultConnection ??= createBillingDatabaseConnection(loadEnv());
-	return defaultConnection;
+	if (defaultConnection === null) configureDefaultConnection(loadEnv());
+	return defaultConnection as BillingDatabaseConnection;
 }
 
 export const sql = new Proxy(function sqlProxy() {}, {
@@ -136,4 +156,5 @@ export async function closePool(): Promise<void> {
 
 	await defaultConnection.sql.close();
 	defaultConnection = null;
+	defaultConnectionConfig = null;
 }

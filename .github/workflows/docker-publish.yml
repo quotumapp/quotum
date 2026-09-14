@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: publish-${{ github.ref }}
@@ -20,7 +19,14 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+
   publish:
+    needs: [validate]
+    permissions:
+      contents: read
+      packages: write
     name: Build and push
     runs-on: ubuntu-latest
     steps:

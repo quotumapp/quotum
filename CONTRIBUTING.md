@@ -81,6 +81,14 @@ body when it is not obvious.
 
 ## Pull requests
 
+Keep history linear and prepare one commit per feature branch before merging. Fold follow-up
+changes into the branch commit with `git commit --amend`; squash intermediate commits with an
+interactive rebase when needed. Rebase the branch onto current `main` instead of merging `main`
+into it. Update a previously pushed branch with `git push --force-with-lease`. Run the required
+checks on the final amended commit, then use GitHub **Squash and merge**. Merge commits and
+rebase-merging multiple branch commits are not part of this workflow. Published `main` must not
+be rewritten without explicit authorization for a history repair.
+
 - Describe the change and the verification commands you ran.
 - Include request and response examples when HTTP behavior changes.
 - Link related issues.
