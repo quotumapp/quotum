@@ -9,7 +9,7 @@ import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import { BillingAdminOperations } from "../../src/operations/admin";
 import type { StoreEventReplayProviders } from "../../src/workers/store-event-replay";
 import { StoreEventReplayWorker } from "../../src/workers/store-event-replay";
-import { withOpenApiAssertions } from "../helpers/openapi";
+import { testRequest, withOpenApiAssertions } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import { expectCustomer } from "./helpers/db-assertions";
@@ -47,7 +47,8 @@ localDescribe("Admin flows integration", () => {
 		await seedRecentInactiveSubscriptions(context.sql, customer.id);
 
 		await withAdminReadApp(async (adminApp) => {
-			const byBillingAccount = await adminApp.request(
+			const byBillingAccount = await testRequest(
+				adminApp,
 				"/v1/admin/customers/by-billing-account/integration_user",
 				{
 					headers: authHeaders("voysee"),
@@ -105,7 +106,7 @@ localDescribe("Admin flows integration", () => {
 				}),
 			]);
 
-			const byId = await adminApp.request(`/v1/admin/customers/${customer.id}`, {
+			const byId = await testRequest(adminApp, `/v1/admin/customers/${customer.id}`, {
 				headers: authHeaders("voysee"),
 			});
 			expect(byId.status).toBe(200);
@@ -153,7 +154,8 @@ localDescribe("Admin flows integration", () => {
 				matchedValue: identifiers.entitlementKey,
 			});
 
-			const tooLong = await adminApp.request(
+			const tooLong = await testRequest(
+				adminApp,
 				`/v1/admin/customers/search?q=${encodeURIComponent("a".repeat(129))}`,
 				{ headers: authHeaders("voysee") },
 			);
@@ -425,7 +427,7 @@ localDescribe("Admin flows integration", () => {
 		const logs = createRecordingLogger();
 
 		await withAdminReadApp(async (adminApp) => {
-			const hidden = await adminApp.request(`/v1/admin/store-events/${eventId}`, {
+			const hidden = await testRequest(adminApp, `/v1/admin/store-events/${eventId}`, {
 				headers: authHeaders("voysee"),
 			});
 			expect(hidden.status).toBe(200);
@@ -433,7 +435,8 @@ localDescribe("Admin flows integration", () => {
 			expect(hiddenBody.success).toBe(true);
 			expect("rawPayload" in hiddenBody.data).toBe(false);
 
-			const included = await adminApp.request(
+			const included = await testRequest(
+				adminApp,
 				`/v1/admin/store-events/${eventId}?includeRawPayload=true`,
 				{ headers: authHeaders("voysee") },
 			);
@@ -504,7 +507,7 @@ localDescribe("Admin flows integration", () => {
 				`/v1/admin/customers/${missingId}`,
 				`/v1/admin/store-events/${missingId}`,
 			]) {
-				const response = await adminApp.request(path, { headers: authHeaders("voysee") });
+				const response = await testRequest(adminApp, path, { headers: authHeaders("voysee") });
 
 				expect(response.status).toBe(404);
 				expect(await response.json()).toMatchObject({
@@ -520,7 +523,7 @@ localDescribe("Admin flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const invalid = await fixture.app.request("/v1/purchases/verify", {
+		const invalid = await testRequest(fixture.app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				...fixture.authHeaders("voysee"),
@@ -545,7 +548,7 @@ localDescribe("Admin flows integration", () => {
 			metrics: fixture.metrics,
 		});
 
-		const metrics = await fixture.app.request("/v1/admin/metrics", {
+		const metrics = await testRequest(fixture.app, "/v1/admin/metrics", {
 			headers: {
 				...fixture.authHeaders("voysee"),
 				"x-billing-operator-key": "billing-integration-operator-key",
@@ -580,7 +583,7 @@ localDescribe("Admin flows integration", () => {
 			},
 		} as BillingAdminOperations);
 
-		const replay = await operationApp.request(`/v1/admin/store-events/${eventId}/replay`, {
+		const replay = await testRequest(operationApp, `/v1/admin/store-events/${eventId}/replay`, {
 			method: "POST",
 			headers: operatorHeaders("voysee"),
 		});
@@ -590,7 +593,8 @@ localDescribe("Admin flows integration", () => {
 			data: { eventId, status: "processed" },
 		});
 
-		const reconciliation = await operationApp.request(
+		const reconciliation = await testRequest(
+			operationApp,
 			"/v1/admin/reconciliation/subscriptions/run",
 			{
 				method: "POST",
@@ -624,7 +628,8 @@ localDescribe("Admin flows integration", () => {
 		const calls: string[] = [];
 		const operationApp = createRealReplayOperationApp(calls);
 
-		const missingOperator = await operationApp.request(
+		const missingOperator = await testRequest(
+			operationApp,
 			`/v1/admin/store-events/${wiseleyEventId}/replay`,
 			{
 				method: "POST",
@@ -633,7 +638,8 @@ localDescribe("Admin flows integration", () => {
 		);
 		expect(missingOperator.status).toBe(401);
 
-		const crossProjectReplay = await operationApp.request(
+		const crossProjectReplay = await testRequest(
+			operationApp,
 			`/v1/admin/store-events/${wiseleyEventId}/replay`,
 			{
 				method: "POST",
@@ -644,7 +650,8 @@ localDescribe("Admin flows integration", () => {
 		expect(calls).toEqual([]);
 		await expectAdminReplayEventStatus(context.sql, wiseleyEventId, "skipped");
 
-		const sameProjectReplay = await operationApp.request(
+		const sameProjectReplay = await testRequest(
+			operationApp,
 			`/v1/admin/store-events/${wiseleyEventId}/replay`,
 			{
 				method: "POST",
@@ -665,7 +672,7 @@ async function verifyGoogleSubscription(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	input: { purchaseToken?: string } = {},
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders("voysee"),
@@ -683,7 +690,7 @@ async function verifyGoogleSubscription(
 async function verifyGoogleConsumable(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders("voysee"),
@@ -702,7 +709,8 @@ async function verifyGoogleConsumable(
 async function createAppleAccountToken(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<void> {
-	const response = await fixture.app.request(
+	const response = await testRequest(
+		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
 		{
 			headers: fixture.authHeaders("voysee"),
@@ -716,7 +724,7 @@ async function createAppleAccountToken(
 async function verifyAppleSubscription(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders("voysee"),
@@ -944,9 +952,13 @@ async function expectSearchResult(
 	query: string,
 	expected: { matchType: string; matchedValue: string },
 ): Promise<void> {
-	const response = await app.request(`/v1/admin/customers/search?q=${encodeURIComponent(query)}`, {
-		headers: authHeaders("voysee"),
-	});
+	const response = await testRequest(
+		app,
+		`/v1/admin/customers/search?q=${encodeURIComponent(query)}`,
+		{
+			headers: authHeaders("voysee"),
+		},
+	);
 	expect(response.status).toBe(200);
 	const body = await response.json();
 	expect(body.success).toBe(true);
@@ -967,7 +979,7 @@ async function getAdminList(
 	path: string,
 	projectKey: "voysee" | "wiseley" = "voysee",
 ): Promise<{ data: Array<Record<string, unknown>>; pagination: { nextCursor: string | null } }> {
-	const response = await app.request(path, {
+	const response = await testRequest(app, path, {
 		headers: path.includes("/catalog/") ? operatorHeaders(projectKey) : authHeaders(projectKey),
 	});
 	expect(response.status).toBe(200);

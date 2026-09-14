@@ -5,7 +5,7 @@ Guidance for contributors and coding agents working in this repository. The long
 
 ## Project structure
 
-Bun/TypeScript/Hono billing service backed by one Postgres database. Runtime code lives in `src/`:
+Bun/TypeScript/Elysia billing service backed by one Postgres database. Runtime code lives in `src/`:
 `app.ts` and `app/` build the trusted-backend HTTP API; `platform/` owns organizations, identity,
 onboarding, connections, and audit behind consumer-owned ports; `billing/`, `catalog/`, and `db/`
 hold the billing domain, versioned catalog, and Drizzle repositories; `providers/` integrates Apple,

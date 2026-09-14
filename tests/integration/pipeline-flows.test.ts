@@ -3,6 +3,7 @@ import type { EntitlementSnapshot } from "../../src/billing/types";
 import { BillingAdminOperations } from "../../src/operations/admin";
 import { StripeBillingService } from "../../src/providers/stripe/service";
 import { StoreEventReplayWorker } from "../../src/workers/store-event-replay";
+import { testRequest } from "../helpers/openapi";
 import { createLocalProjectionReceiver } from "../helpers/projection-receiver";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -77,7 +78,8 @@ localDescribe("Pipeline flows integration", () => {
 			expect(succeededJob.locked_at).toBeNull();
 			expect(succeededJob.locked_by).toBeNull();
 
-			const entitlements = await fixture.app.request(
+			const entitlements = await testRequest(
+				fixture.app,
 				"/v1/billing-accounts/integration_user/entitlements",
 				{ headers: fixture.authHeaders("voysee") },
 			);
@@ -184,10 +186,14 @@ localDescribe("Pipeline flows integration", () => {
 				repository: context.repository,
 				adminOperations: createStripeReplayAdminOperations(env),
 			});
-			const replay = await replayApp.app.request(`/v1/admin/store-events/${skipped.id}/replay`, {
-				method: "POST",
-				headers: operatorHeaders(replayApp),
-			});
+			const replay = await testRequest(
+				replayApp.app,
+				`/v1/admin/store-events/${skipped.id}/replay`,
+				{
+					method: "POST",
+					headers: operatorHeaders(replayApp),
+				},
+			);
 			expect(replay.status).toBe(200);
 			expect(await replay.json()).toEqual({
 				success: true,
@@ -269,7 +275,8 @@ function withProjectionUrls(
 async function createAppleAccountToken(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<void> {
-	const response = await fixture.app.request(
+	const response = await testRequest(
+		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
 		{ headers: fixture.authHeaders("voysee") },
 	);
@@ -281,7 +288,7 @@ async function createAppleAccountToken(
 async function verifyAppleSubscription(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders("voysee"),
@@ -300,7 +307,7 @@ async function postStripeWebhook(
 	body: Record<string, unknown>,
 	projectKey = "voysee",
 ): Promise<Response> {
-	return await fixture.app.request(`/v1/projects/${projectKey}/webhooks/stripe`, {
+	return await testRequest(fixture.app, `/v1/projects/${projectKey}/webhooks/stripe`, {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
@@ -320,7 +327,8 @@ async function createGoogleConsumable(
 	billingAccountId: string,
 	purchaseToken: string,
 ): Promise<void> {
-	const link = await fixture.app.request(
+	const link = await testRequest(
+		fixture.app,
 		`/v1/billing-accounts/${billingAccountId}/providers/google/account-link`,
 		{
 			headers: fixture.authHeaders(projectKey),
@@ -328,7 +336,7 @@ async function createGoogleConsumable(
 	);
 	expect(link.status).toBe(200);
 
-	const response = await fixture.app.request("/v1/purchases/verify", {
+	const response = await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders(projectKey),

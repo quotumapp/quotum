@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Hono } from "hono";
-import { assertOpenApiResponse, withOpenApiAssertions } from "./openapi";
+import { assertOpenApiResponse, testRequest, withOpenApiAssertions } from "./openapi";
 
 describe("OpenAPI assertions", () => {
 	it("allows unknown templates and 404/405 for undeclared methods", async () => {
@@ -33,21 +32,24 @@ describe("OpenAPI assertions", () => {
 	});
 
 	it("validates 2xx mutation request bodies", async () => {
-		const app = withOpenApiAssertions(new Hono());
-		app.post("/v1/projects/voysee/webhooks/stripe", (c) =>
-			c.json({
-				success: true,
-				data: { status: "ignored", eventType: "x", entitlements: null },
-			}),
-		);
+		const app = withOpenApiAssertions({
+			handle: async () =>
+				new Response(
+					JSON.stringify({
+						success: true,
+						data: { status: "ignored", eventType: "x", entitlements: null },
+					}),
+					{ headers: { "content-type": "application/json" } },
+				),
+		});
 		await expect(
-			app.request("/v1/projects/voysee/webhooks/stripe", {
+			testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
 				method: "POST",
 				headers: { "content-type": "application/json", "stripe-signature": "sig" },
 				body: JSON.stringify({ id: "evt" }),
 			}),
 		).rejects.toThrow();
-		const valid = await app.request("/v1/projects/voysee/webhooks/stripe", {
+		const valid = await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: { "content-type": "application/json", "stripe-signature": "sig" },
 			body: JSON.stringify({
@@ -57,5 +59,22 @@ describe("OpenAPI assertions", () => {
 			}),
 		});
 		expect(valid.status).toBe(200);
+	});
+
+	it("fails a 2xx response served with an undocumented media type", async () => {
+		const app = withOpenApiAssertions({
+			handle: async () => new Response("ignored", { headers: { "content-type": "text/plain" } }),
+		});
+		await expect(
+			testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+				method: "POST",
+				headers: { "content-type": "application/json", "stripe-signature": "sig" },
+				body: JSON.stringify({
+					id: "evt",
+					type: "checkout.session.completed",
+					data: { object: {} },
+				}),
+			}),
+		).rejects.toThrow(/undocumented media text\/plain/);
 	});
 });

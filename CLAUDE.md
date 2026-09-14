@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Quotum is a Bun/TypeScript/Hono billing API on a single Postgres database. Product backends call
+Quotum is a Bun/TypeScript/Elysia billing API on a single Postgres database. Product backends call
 authenticated `/v1` APIs and consume signed projections; the merchant web app talks to `/api`.
 `AGENTS.md`, `CONTRIBUTING.md`, and the guides under `docs/` are the longer-form references and
 are kept current; do not duplicate them here, update them when behavior changes.
@@ -46,13 +46,15 @@ stale, so regenerate and commit them with any HTTP change.
 
 ### Two HTTP surfaces, one process
 
-- `src/index.ts` -> `src/runtime.ts` (`createBillingRuntimeApp`) builds everything: repositories,
-  provider services, six polling workers, shutdown hooks, then the "staff" Hono app from
-  `src/app.ts` (`createApp`) and the merchant app via `src/composition/merchant-runtime.ts`.
+- `src/index.ts` -> `src/composition/public-runtime.ts` (`createQuotumRuntime`) ->
+  `src/runtime.ts` (`createBillingRuntime`) builds everything: repositories, provider services,
+  six polling workers, shutdown hooks, then the "staff" Elysia app from `src/app.ts` (`createApp`)
+  and the merchant app, composed by `composeRuntimeApp` in `src/composition/merchant-runtime.ts`.
+  `runtime.app.fetch(request, server)` must receive Bun's server so client-IP limits work.
 - `/v1/*` is the trusted-backend API (`src/app/*-routes.ts`). Authentication is a project
-  credential resolved by `requireApiKey` into a `ProjectInstanceContext` stored on
-  `c.get("project")`; every repository call takes that context first. Operator-only admin routes
-  additionally require `X-Billing-Operator-Key`.
+  credential resolved in the staff app's authentication `derive` into a `ProjectInstanceContext`
+  exposed to handlers as `project`; every repository call takes that context first. Operator-only
+  admin routes additionally require `X-Billing-Operator-Key`.
 - `/api/*` is the merchant platform (`src/platform/app.ts`): Better Auth sessions, organizations,
   onboarding, provider connections. Merchant billing screens do not call billing code directly;
   they dispatch through `MerchantBillingPort` (`src/platform/application/billing-port.ts`), which
@@ -83,14 +85,33 @@ that the rule needs an exception.
 
 ### HTTP contract pipeline
 
-Every route is declared with `defineContract(method, path, { operationId, tags, body, params,
-query, responses })` from `src/shared/http-contract.ts` and mounted with `registerRoute(app,
-contract, handler)`. `defineContract` derives security schemes, standard error responses, and
-required headers (`Idempotency-Key`, `X-Billing-Actor`, `Origin`) from the path prefix and tags.
-Route modules export their contracts map (e.g. `meteringContracts`);
-`src/composition/openapi.ts` collects them all into `contracts/v1/openapi.json`. Integration
-tests wrap the app with `withOpenApiAssertions`, so an undocumented status code or a response
-that does not match its Zod schema fails the test, not just the contract check.
+The HTTP layer is Elysia (`src/app.ts` staff shell, `src/platform/app.ts` merchant shell). Every
+route is registered directly with `app.get/post/put/patch/delete(path, handler, config)`; the
+config carries Zod `body`/`query`/`params` schemas (Elysia validates them before the handler;
+failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(...)` from
+`src/shared/http.ts`. Handlers that validate input themselves document it with
+`operationDetail({ request: { body, query } })`.
+
+- Every Elysia instance uses `HTTP_APP_CONFIG` (`strictPath`). Gates, guards and limiter keys match
+  the routed path (`path` in hooks, `routedPath`), never `new URL(request.url).pathname`, which can
+  differ from what Elysia routed.
+- Private `/v1` bodies use `parse: [LENIENT_JSON_PARSE]`: every content type is read under the
+  256 KB cap and parsed as JSON. Parsers run before authentication, and a parser that returns
+  `undefined` for a request with a body lets Elysia fall through to its uncapped form, multipart
+  and binary parsers. Merchant bodies use `MERCHANT_JSON_PARSE` (64 KB, 415 for non-JSON);
+  operations that never read a body declare `parse: "none"`. Raw-body routes (webhooks, Better
+  Auth, billing proxy) use `parse: "none"` and the capped readers in `src/shared/body-limit.ts`.
+- Rate limiting runs before validation: webhook and aggregate gates in the shell's `onRequest`,
+  project-keyed and operator-key guards via `registerPostAuthGuard` inside the authentication
+  `derive`. Project selector checks on bodies run as a route `transform`, before validation strips
+  unknown keys.
+- `src/composition/openapi.ts` renders `contracts/v1/openapi.json` from the registered routes: Zod
+  request and response schemas, required headers derived from the path, and named components
+  (`<operationId>Response<status>` plus merchant/provider domain schemas that `quotum-ui` imports).
+  CI runs `oasdiff breaking` against the base revision.
+- Tests wrap apps with `withOpenApiAssertions`, so an undocumented status code, a response that
+  does not match its schema, or a successful request whose body does not match the documented
+  request schema fails the test, not just the contract check.
 
 ### Persistence
 

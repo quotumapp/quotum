@@ -3,6 +3,7 @@ import { createApp } from "../../src/app";
 import { syncConfiguredCatalog } from "../../src/catalog/provision";
 import { createBillingReadinessCheck } from "../../src/composition/runtime-readiness";
 import { checkPostgresHealth } from "../../src/db/client";
+import { testRequest } from "../helpers/openapi";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
@@ -28,7 +29,7 @@ localDescribe("local Postgres billing integration", () => {
 
 	it("keeps health public", async () => {
 		const app = createApp({ env: context.env });
-		const response = await app.request("/health");
+		const response = await testRequest(app, "/health");
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ status: "ok" });
@@ -44,9 +45,9 @@ localDescribe("local Postgres billing integration", () => {
 			},
 		});
 
-		const livez = await app.request("/livez");
-		const ready = await app.request("/ready");
-		const readyAgain = await app.request("/ready");
+		const livez = await testRequest(app, "/livez");
+		const ready = await testRequest(app, "/ready");
+		const readyAgain = await testRequest(app, "/ready");
 
 		expect(livez.status).toBe(200);
 		expect(await livez.json()).toEqual({ status: "ok" });

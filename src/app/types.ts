@@ -1,4 +1,3 @@
-import type { Context, MiddlewareHandler } from "hono";
 import type { AdminBillingReader } from "../admin/types";
 import type {
 	CommercialActionExecutionResult,
@@ -28,9 +27,60 @@ import type {
 } from "../projects/providers";
 import type { StripeCheckoutSessionStatus } from "../providers/stripe/service";
 import type { StripeCatalog } from "../providers/stripe/types";
+import type { AppElysia, ElysiaPluginLike } from "../shared/http";
 
-export type BillingHonoEnv = { Variables: { project: ProjectInstanceContext; requestId: string } };
-export type BillingContext = Context<BillingHonoEnv>;
+/** The staff /v1 application instance; per-route schemas keep handler typing local. */
+export type BillingElysia = AppElysia;
+
+/** Structural subset of Bun's server used for client IP resolution in rate limiting. */
+export type GuardServer = { requestIP(request: Request): { address: string } | null } | null;
+
+export interface PreAuthGateInput {
+	request: Request;
+	/** The path the router matched; see `routedPath`. */
+	path: string;
+	server: GuardServer;
+	set: { headers: Record<string, unknown> };
+}
+
+/**
+ * Gate executed from the shell's `onRequest` hook, before authentication and request validation.
+ * Returns a Response to reject the request, or undefined to continue. `matches` receives the
+ * routed path, never a path re-parsed from `request.url`.
+ */
+export interface PreAuthGate {
+	matches(path: string): boolean;
+	gate(input: PreAuthGateInput): Response | undefined;
+}
+
+export interface PostAuthGuardInput {
+	request: Request;
+	/** The path the router matched; see `routedPath`. */
+	path: string;
+	server: GuardServer;
+	projectKey: string;
+	set: { headers: Record<string, string> };
+}
+
+/**
+ * Guard executed inside the authentication derive, after project resolution but before request
+ * validation, the position the operator-key and path-group limiters have always held. `matches`
+ * receives the routed path so a guard can never disagree with the handler that will run.
+ */
+export interface PostAuthGuard {
+	matches(path: string): boolean;
+	guard(input: PostAuthGuardInput): void | Promise<void>;
+}
+
+/**
+ * Observes authenticated requests on a path group, e.g. to time them. It starts inside the
+ * authentication derive, before the path-group limiters, and finishes exactly once: "failed" when
+ * the request ends in an error response (validation, rate limiting or a handler error).
+ */
+export interface RequestObserver {
+	matches(path: string): boolean;
+	finish(input: { path: string; durationMs: number; result: "completed" | "failed" }): void;
+}
 
 export interface AppleStoreKitServiceLike {
 	getOrCreateAppAccountToken(billingAccountId: string): Promise<string>;
@@ -138,7 +188,7 @@ export interface AppDependencies {
 	connections?: RuntimeConnectionResolver;
 	env: BillingEnv;
 	/** Internal in-process adapters may supply already-authorized project context. */
-	projectAuthentication?: MiddlewareHandler<BillingHonoEnv>;
+	projectAuthentication?: ElysiaPluginLike;
 	entitlementService?: EntitlementService;
 	meteringService?: MeteringServiceLike;
 	controlsEnterpriseService?: ControlsEnterpriseRepositoryLike;
@@ -157,7 +207,7 @@ export interface AppDependencies {
 	logger?: BillingLogger;
 	metrics?: BillingMetrics;
 	readinessCheck?: () => boolean | Promise<boolean>;
-	requestObservabilityMiddleware?: MiddlewareHandler<BillingHonoEnv>;
+	requestObservabilityMiddleware?: ElysiaPluginLike;
 	projectContextResolver?: ProjectInstanceContextResolver;
 }
 

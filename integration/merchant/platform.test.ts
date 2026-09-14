@@ -12,7 +12,7 @@ import type {
 } from "../../src/platform/contracts";
 import { capabilitiesFor, SESSION_COOKIE } from "../../src/platform/security";
 import { mutationTarget } from "../../src/platform/step-up";
-import { withOpenApiAssertions } from "../../tests/helpers/openapi";
+import { testRequest, withOpenApiAssertions } from "../../tests/helpers/openapi";
 import { createIntegrationBillingEnv } from "../../tests/integration/helpers/local-postgres";
 import { MerchantBrowser, merchantFixture, password } from "./fixture";
 
@@ -68,7 +68,7 @@ describe("merchant platform transactions", () => {
 		const billing = withOpenApiAssertions(createApp({ env, projectContextResolver: resolver }));
 		expect(
 			(
-				await billing.request("/v1/admin/stats/summary", {
+				await testRequest(billing, "/v1/admin/stats/summary", {
 					headers: { authorization: `Bearer ${issued.credential}` },
 				})
 			).status,
@@ -77,7 +77,7 @@ describe("merchant platform transactions", () => {
 		await f.sql`UPDATE platform_organizations SET status='suspended' WHERE slug='acme'`;
 		expect(
 			(
-				await billing.request("/v1/admin/stats/summary", {
+				await testRequest(billing, "/v1/admin/stats/summary", {
 					headers: { authorization: `Bearer ${issued.credential}` },
 				})
 			).status,

@@ -1,6 +1,14 @@
-/** The portable surface exposed to distributions; it does not expose persistence or workers. */
+/** Bun's server as passed to `fetch`; the runtime only uses it to resolve client addresses. */
+export interface QuotumRequestServer {
+	requestIP(request: Request): { address: string } | null;
+}
+
+/**
+ * The portable surface exposed to distributions; it does not expose persistence or workers.
+ * Forward Bun's `server` argument (and the original Request object) so client-IP rate limits work.
+ */
 export interface QuotumApp {
-	fetch(request: Request): Response | Promise<Response>;
+	fetch(request: Request, server?: QuotumRequestServer | null): Response | Promise<Response>;
 }
 
 export interface QuotumScheduledJob {
@@ -68,10 +76,10 @@ export function createRuntimeLifecycle(options: {
 
 	return {
 		app: {
-			async fetch(request) {
+			async fetch(request, server) {
 				if (!accepting || !app) return Response.json({ status: "unavailable" }, { status: 503 });
 				const target = app;
-				const response = Promise.resolve().then(() => target.fetch(request));
+				const response = Promise.resolve().then(() => target.fetch(request, server));
 				requests.add(response);
 				try {
 					return await response;

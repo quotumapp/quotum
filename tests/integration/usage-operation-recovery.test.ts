@@ -24,6 +24,9 @@ const input: MeteringMutationInput = {
 	quantity: "100",
 	idempotencyKey: "operation:1",
 };
+
+import { testRequest } from "../helpers/openapi";
+
 let context: LocalPostgresContext;
 
 localDescribe("usage operation recovery", () => {
@@ -81,7 +84,7 @@ localDescribe("usage operation recovery", () => {
 			).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
 		}
 		const { app, authHeaders } = createIntegrationApp(context);
-		const response = await app.request("/v1/billing-accounts/recovery/usage/consume", {
+		const response = await testRequest(app, "/v1/billing-accounts/recovery/usage/consume", {
 			method: "POST",
 			headers: {
 				...authHeaders(),
@@ -437,12 +440,12 @@ localDescribe("usage operation recovery", () => {
 		expect(other.allowed).toBe(true);
 		const { app, authHeaders } = createIntegrationApp(context);
 		const path = `/v1/billing-accounts/recovery/usage/operations/consume/${encodeURIComponent(input.idempotencyKey)}`;
-		expect((await app.request(path)).status).toBe(401);
-		expect((await app.request(path, { headers: authHeaders("wiseley") })).status).toBe(404);
-		expect((await app.request(`${path}?projectId=spoof`, { headers: authHeaders() })).status).toBe(
-			400,
-		);
-		const response = await app.request(path, { headers: authHeaders() });
+		expect((await testRequest(app, path)).status).toBe(401);
+		expect((await testRequest(app, path, { headers: authHeaders("wiseley") })).status).toBe(404);
+		expect(
+			(await testRequest(app, `${path}?projectId=spoof`, { headers: authHeaders() })).status,
+		).toBe(400);
+		const response = await testRequest(app, path, { headers: authHeaders() });
 		expect(response.status).toBe(200);
 		const payload = await response.json();
 		expect(payload.data.outcome.balance.breakdown).toBeUndefined();
@@ -473,13 +476,13 @@ localDescribe("usage operation recovery", () => {
 				sourceKind: "operator",
 				sourceKey: input.billingAccountId,
 			});
-			expect((await app.request(path, { headers: authHeaders(key) })).status).toBe(404);
+			expect((await testRequest(app, path, { headers: authHeaders(key) })).status).toBe(404);
 			const result = await context.repository.consumeUsage(otherProject, {
 				...input,
 				quantity: "200",
 			});
 			eventIds.add(result.usageEventId);
-			const response = await app.request(path, { headers: authHeaders(key) });
+			const response = await testRequest(app, path, { headers: authHeaders(key) });
 			expect(response.status).toBe(200);
 			expect((await response.json()).data.outcome).toMatchObject({
 				usageEventId: result.usageEventId,
@@ -495,7 +498,8 @@ localDescribe("usage operation recovery", () => {
 	it("validates operation scope and rate-limits authenticated lookup", async () => {
 		const { app, authHeaders } = createIntegrationApp(context);
 		for (const suffix of ["unknown/key", `consume/${"a".repeat(201)}`, "consume/%20"]) {
-			const response = await app.request(
+			const response = await testRequest(
+				app,
 				`/v1/billing-accounts/recovery/usage/operations/${suffix}`,
 				{ headers: authHeaders() },
 			);
@@ -509,8 +513,12 @@ localDescribe("usage operation recovery", () => {
 			},
 		});
 		const path = "/v1/billing-accounts/recovery/usage/operations/consume/missing";
-		expect((await limited.app.request(path, { headers: limited.authHeaders() })).status).toBe(404);
-		expect((await limited.app.request(path, { headers: limited.authHeaders() })).status).toBe(429);
+		expect((await testRequest(limited.app, path, { headers: limited.authHeaders() })).status).toBe(
+			404,
+		);
+		expect((await testRequest(limited.app, path, { headers: limited.authHeaders() })).status).toBe(
+			429,
+		);
 	});
 });
 

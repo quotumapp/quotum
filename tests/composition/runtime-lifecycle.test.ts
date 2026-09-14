@@ -75,6 +75,30 @@ describe("distribution lifecycle", () => {
 		]);
 		await expect(runtime.start()).rejects.toThrow("cannot be restarted");
 	});
+	it("forwards the original request and Bun's server to the composed app", async () => {
+		const received: Array<{ request: Request; server: unknown }> = [];
+		const { runtime } = fixture({
+			compose: () => ({
+				app: {
+					fetch(request, server) {
+						received.push({ request, server });
+						return new Response("core");
+					},
+				},
+				jobs: [],
+			}),
+		});
+		await runtime.start();
+		const request = new Request("http://localhost/");
+		const server = { requestIP: () => ({ address: "192.0.2.10" }) };
+
+		await runtime.app.fetch(request, server);
+
+		expect(received).toHaveLength(1);
+		expect(received[0]?.request).toBe(request);
+		expect(received[0]?.server).toBe(server);
+		await runtime.stop();
+	});
 	it("drains requests and schedules before cleaning up persistence", async () => {
 		const request = createDeferred<Response>();
 		const worker = createDeferred();

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
+import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
@@ -147,7 +148,7 @@ localDescribe("HTTP edge integration", () => {
 			verifyAppleSubscription(fixture),
 			verifyGoogleConsumable(fixture, "wiseley"),
 			postStripeWebhook(fixture),
-			fixture.app.request("/v1/billing-accounts/integration_user/entitlements", {
+			testRequest(fixture.app, "/v1/billing-accounts/integration_user/entitlements", {
 				headers: fixture.authHeaders("wiseley"),
 			}),
 		]);
@@ -175,11 +176,13 @@ localDescribe("HTTP edge integration", () => {
 			},
 		});
 
-		const voyseeEntitlements = await fixture.app.request(
+		const voyseeEntitlements = await testRequest(
+			fixture.app,
 			"/v1/billing-accounts/integration_user/entitlements",
 			{ headers: fixture.authHeaders("voysee") },
 		);
-		const wiseleyEntitlements = await fixture.app.request(
+		const wiseleyEntitlements = await testRequest(
+			fixture.app,
 			"/v1/billing-accounts/integration_user/entitlements",
 			{ headers: fixture.authHeaders("wiseley") },
 		);
@@ -210,7 +213,7 @@ async function invalidVerify(
 	projectKey: "voysee" | "wiseley" = "voysee",
 	headers: HeadersInit = {},
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders(projectKey),
@@ -224,7 +227,7 @@ async function invalidVerify(
 async function invalidAppleWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<Response> {
-	return await fixture.app.request("/v1/projects/voysee/webhooks/apple", {
+	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/apple", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({}),
@@ -232,7 +235,7 @@ async function invalidAppleWebhook(
 }
 
 async function adminMetrics(fixture: ReturnType<typeof createIntegrationApp>): Promise<Response> {
-	return await fixture.app.request("/v1/admin/metrics", {
+	return await testRequest(fixture.app, "/v1/admin/metrics", {
 		headers: {
 			...fixture.authHeaders("voysee"),
 			"x-billing-operator-key": "billing-integration-operator-key",
@@ -243,7 +246,8 @@ async function adminMetrics(fixture: ReturnType<typeof createIntegrationApp>): P
 async function createAppleAccountToken(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<void> {
-	const response = await fixture.app.request(
+	const response = await testRequest(
+		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
 		{ headers: fixture.authHeaders("voysee") },
 	);
@@ -256,7 +260,8 @@ async function createGoogleAccountLink(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	projectKey: "wiseley",
 ): Promise<void> {
-	const response = await fixture.app.request(
+	const response = await testRequest(
+		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/google/account-link",
 		{ headers: fixture.authHeaders(projectKey) },
 	);
@@ -266,7 +271,7 @@ async function createGoogleAccountLink(
 async function verifyAppleSubscription(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders("voysee"),
@@ -284,7 +289,7 @@ async function verifyGoogleConsumable(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	projectKey: "wiseley",
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders(projectKey),
@@ -303,7 +308,7 @@ async function verifyGoogleConsumable(
 async function postStripeWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<Response> {
-	return await fixture.app.request("/v1/projects/voysee/webhooks/stripe", {
+	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/stripe", {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",

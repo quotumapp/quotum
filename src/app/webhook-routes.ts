@@ -1,11 +1,16 @@
-import type { Context, Hono } from "hono";
 import { z } from "zod";
 import { BillingError, isBillingError } from "../billing/errors";
-import { type RateLimitResult, rateLimitMiddleware } from "../http/rate-limit";
+import {
+	type RateLimiter,
+	rateLimitHeaders,
+	rateLimitResponse,
+	requestProjectIpAndPath,
+} from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
-import { defineContract, registerRoute } from "../shared/http-contract";
+import { parseCappedJson, readCappedText } from "../shared/body-limit";
+import { operationDetail } from "../shared/http";
 import {
 	AppleWebhookResultSchema,
 	EntitlementSnapshotSchema,
@@ -16,23 +21,16 @@ import {
 	requireGooglePlayBillingService,
 	requireStripeBillingService,
 } from "./provider-services";
-import type { BillingContext, BillingHonoEnv, ProjectProviderServiceResolver } from "./types";
-
-type RateLimiter = { check(key: string): RateLimitResult };
-
-export interface WebhookRoutesDependencies {
-	app: Hono<BillingHonoEnv>;
-	contextResolver: ProjectInstanceContextResolver;
-	webhookLimiter: RateLimiter;
-	rateLimitKey: (c: Context) => string;
-	providerServices: ProjectProviderServiceResolver;
-	billingMetrics: BillingMetrics;
-	billingLogger: BillingLogger;
-	parseJson(request: Request, maxBytes?: number): Promise<unknown>;
-	readRequestText(request: Request, maxBytes?: number): Promise<string>;
-}
+import type {
+	BillingElysia,
+	PreAuthGate,
+	PreAuthGateInput,
+	ProjectProviderServiceResolver,
+} from "./types";
 
 const publicWebhookMaxBodyBytes = 256 * 1024;
+
+const WEBHOOK_PATH_PATTERN = /^\/v1\/projects\/([^/]+)\/webhooks\/(apple|google|stripe)$/;
 
 const appleWebhookSchema = z.object({
 	signedPayload: z.string().trim().min(1),
@@ -49,17 +47,64 @@ const googleWebhookSchema = z
 	})
 	.loose();
 
-export function registerWebhookRoutes({
-	app,
-	contextResolver,
-	webhookLimiter,
-	rateLimitKey,
-	providerServices,
-	billingMetrics,
-	billingLogger,
-	parseJson,
-	readRequestText,
-}: WebhookRoutesDependencies): void {
+const stripeWebhookSchema = z
+	.object({
+		id: z.string(),
+		type: z.string(),
+		data: z.object({ object: z.record(z.string(), z.unknown()) }).loose(),
+	})
+	.loose();
+
+const tooLargeError = (): BillingError =>
+	new BillingError("Request body is too large", "REQUEST_BODY_TOO_LARGE", 413);
+
+/** Pre-authentication limiter for provider webhooks, mirroring their historical middleware. */
+export function webhookRateLimitPreAuthGate(
+	limiter: RateLimiter,
+	rateLimitKeyOptions: { trustProxyHeaders?: boolean },
+): PreAuthGate {
+	return {
+		matches: (path) => WEBHOOK_PATH_PATTERN.test(path),
+		gate({ request, path, server, set }: PreAuthGateInput) {
+			const projectKey = WEBHOOK_PATH_PATTERN.exec(path)?.[1] ?? null;
+			const result = limiter.check(
+				requestProjectIpAndPath(
+					{ request, path, server, projectKey },
+					{ trustProxyHeaders: rateLimitKeyOptions.trustProxyHeaders },
+				),
+			);
+			if (!result.allowed) {
+				return rateLimitResponse(result);
+			}
+			Object.assign(set.headers, rateLimitHeaders(result));
+			return undefined;
+		},
+	};
+}
+
+export function registerWebhookRoutes(input: {
+	app: BillingElysia;
+	contextResolver: ProjectInstanceContextResolver;
+	registerPreAuthGate: (gate: PreAuthGate) => void;
+	rateLimitKeyOptions: { trustProxyHeaders?: boolean };
+	webhookLimiter: RateLimiter;
+	providerServices: ProjectProviderServiceResolver;
+	billingMetrics: BillingMetrics;
+	billingLogger: BillingLogger;
+}): void {
+	const {
+		app,
+		contextResolver,
+		registerPreAuthGate,
+		rateLimitKeyOptions,
+		webhookLimiter,
+		providerServices,
+		billingMetrics,
+		billingLogger,
+	} = input;
+
+	registerPreAuthGate(webhookRateLimitPreAuthGate(webhookLimiter, rateLimitKeyOptions));
+
 	const webhookProject = async (projectKey: string): Promise<ProjectInstanceContext> => {
 		const resolution = await contextResolver.resolveInstanceKey(projectKey);
 		if (resolution.kind === "unavailable") {
@@ -105,9 +150,9 @@ export function registerWebhookRoutes({
 			throw error;
 		}
 	};
-	const handleAppleWebhook = async (c: BillingContext, project: ProjectInstanceContext) =>
+	const handleAppleWebhook = async (request: Request, project: ProjectInstanceContext) =>
 		withWebhookFailureRecording("apple", "Apple webhook failed", project, async () => {
-			const body = await parseJson(c.req.raw, publicWebhookMaxBodyBytes);
+			const body = await parseCappedJson(request, publicWebhookMaxBodyBytes, tooLargeError);
 			const parsed = appleWebhookSchema.safeParse(body);
 			if (!parsed.success) {
 				throw new BillingError("Invalid Apple webhook body", "INVALID_REQUEST", 400);
@@ -116,11 +161,11 @@ export function registerWebhookRoutes({
 			const result = await requireAppleStoreKitService(
 				await providerServices.appleStoreKitService(project, "recovery"),
 			).handleNotification(parsed.data);
-			return c.json({ success: true, data: result });
+			return { success: true as const, data: result };
 		});
-	const handleGoogleWebhook = async (c: BillingContext, project: ProjectInstanceContext) =>
+	const handleGoogleWebhook = async (request: Request, project: ProjectInstanceContext) =>
 		withWebhookFailureRecording("google", "Google webhook failed", project, async () => {
-			const authorizationHeader = c.req.header("authorization") ?? null;
+			const authorizationHeader = request.headers.get("authorization") ?? null;
 			if (!hasBearerToken(authorizationHeader)) {
 				throw new BillingError(
 					"Google Pub/Sub push token is required",
@@ -134,7 +179,7 @@ export function registerWebhookRoutes({
 			);
 			await service.verifyRtdnAuthorization?.(authorizationHeader);
 
-			const body = await parseJson(c.req.raw, publicWebhookMaxBodyBytes);
+			const body = await parseCappedJson(request, publicWebhookMaxBodyBytes, tooLargeError);
 			const parsed = googleWebhookSchema.safeParse(body);
 			if (!parsed.success) {
 				throw new BillingError("Invalid Google webhook body", "INVALID_REQUEST", 400);
@@ -144,43 +189,87 @@ export function registerWebhookRoutes({
 				authorizationHeader,
 				body: parsed.data,
 			});
-			return c.json({ success: true, data: result });
+			return { success: true as const, data: result };
 		});
-	const handleStripeWebhook = async (c: BillingContext, project: ProjectInstanceContext) =>
+	const handleStripeWebhook = async (request: Request, project: ProjectInstanceContext) =>
 		withWebhookFailureRecording("stripe", "Stripe webhook failed", project, async () => {
-			const rawBody = await readRequestText(c.req.raw, publicWebhookMaxBodyBytes);
+			const rawBody = await readCappedText(request, publicWebhookMaxBodyBytes, tooLargeError);
 			const result = await requireStripeBillingService(
 				await providerServices.stripeBillingService(project, "recovery"),
 			).handleWebhook({
 				rawBody,
-				signatureHeader: c.req.header("stripe-signature") ?? null,
+				signatureHeader: request.headers.get("stripe-signature") ?? null,
 			});
-			return c.json({ success: true, data: result });
+			return { success: true as const, data: result };
 		});
 
-	app.use(
-		"/v1/projects/:projectKey/webhooks/stripe",
-		rateLimitMiddleware({ limiter: webhookLimiter, key: rateLimitKey }),
-	);
-	app.use(
+	app.post(
 		"/v1/projects/:projectKey/webhooks/apple",
-		rateLimitMiddleware({ limiter: webhookLimiter, key: rateLimitKey }),
+		async ({ params, request }) =>
+			handleAppleWebhook(request, await webhookProject(params.projectKey)),
+		{
+			parse: "none",
+			params: z.object({ projectKey: z.string().min(1) }),
+			detail: operationDetail({
+				operationId: "postV1ProjectsByProjectKeyWebhooksApple",
+				tags: ["webhook"],
+				path: "/v1/projects/:projectKey/webhooks/apple",
+				security: [],
+				responses: {
+					200: z.object({ success: z.literal(true), data: AppleWebhookResultSchema }),
+				},
+				request: { body: appleWebhookSchema },
+			}),
+		},
 	);
-	app.use(
+
+	app.post(
 		"/v1/projects/:projectKey/webhooks/google",
-		rateLimitMiddleware({ limiter: webhookLimiter, key: rateLimitKey }),
+		async ({ params, request }) =>
+			handleGoogleWebhook(request, await webhookProject(params.projectKey)),
+		{
+			parse: "none",
+			params: z.object({ projectKey: z.string().min(1) }),
+			detail: operationDetail({
+				operationId: "postV1ProjectsByProjectKeyWebhooksGoogle",
+				tags: ["webhook"],
+				path: "/v1/projects/:projectKey/webhooks/google",
+				security: [{ googleOidc: [] }],
+				responses: {
+					200: z.object({ success: z.literal(true), data: GoogleWebhookResultSchema }),
+				},
+				request: { body: googleWebhookSchema },
+			}),
+		},
 	);
 
-	registerRoute(app, webhookContracts.postV1ProjectsByProjectKeyWebhooksApple, async (c) =>
-		handleAppleWebhook(c, await webhookProject(c.req.param("projectKey"))),
-	);
-
-	registerRoute(app, webhookContracts.postV1ProjectsByProjectKeyWebhooksGoogle, async (c) =>
-		handleGoogleWebhook(c, await webhookProject(c.req.param("projectKey"))),
-	);
-
-	registerRoute(app, webhookContracts.postV1ProjectsByProjectKeyWebhooksStripe, async (c) =>
-		handleStripeWebhook(c, await webhookProject(c.req.param("projectKey"))),
+	app.post(
+		"/v1/projects/:projectKey/webhooks/stripe",
+		async ({ params, request }) =>
+			handleStripeWebhook(request, await webhookProject(params.projectKey)),
+		{
+			parse: "none",
+			params: z.object({ projectKey: z.string().min(1) }),
+			detail: operationDetail({
+				operationId: "postV1ProjectsByProjectKeyWebhooksStripe",
+				tags: ["webhook"],
+				path: "/v1/projects/:projectKey/webhooks/stripe",
+				description:
+					"Raw JSON bytes are verified with Stripe-Signature before parsing; send the original provider payload.",
+				security: [{ stripeSignature: [] }],
+				responses: {
+					200: z.object({
+						success: z.literal(true),
+						data: z.object({
+							status: z.enum(["processed", "skipped", "ignored"]),
+							eventType: z.string(),
+							entitlements: z.union([EntitlementSnapshotSchema, z.null()]),
+						}),
+					}),
+				},
+				request: { body: stripeWebhookSchema },
+			}),
+		},
 	);
 }
 
@@ -210,70 +299,3 @@ function billingErrorCode(error: unknown): string {
 function hasBearerToken(authorizationHeader: string | null): boolean {
 	return /^Bearer\s+\S+$/i.test(authorizationHeader ?? "");
 }
-
-export const webhookContracts = {
-	postV1ProjectsByProjectKeyWebhooksApple: defineContract(
-		"post",
-		"/v1/projects/:projectKey/webhooks/apple",
-		{
-			operationId: "postV1ProjectsByProjectKeyWebhooksApple",
-			body: appleWebhookSchema,
-			security: [],
-			tags: ["webhook"],
-			params: z.object({ projectKey: z.string().min(1) }),
-			responses: {
-				200: z.object({
-					success: z.literal(true),
-					data: AppleWebhookResultSchema,
-				}),
-			},
-		},
-	),
-	postV1ProjectsByProjectKeyWebhooksGoogle: defineContract(
-		"post",
-		"/v1/projects/:projectKey/webhooks/google",
-		{
-			operationId: "postV1ProjectsByProjectKeyWebhooksGoogle",
-			body: googleWebhookSchema,
-			security: [{ googleOidc: [] }],
-			tags: ["webhook"],
-			params: z.object({ projectKey: z.string().min(1) }),
-			responses: {
-				200: z.object({
-					success: z.literal(true),
-					data: GoogleWebhookResultSchema,
-				}),
-			},
-		},
-	),
-	postV1ProjectsByProjectKeyWebhooksStripe: defineContract(
-		"post",
-		"/v1/projects/:projectKey/webhooks/stripe",
-		{
-			operationId: "postV1ProjectsByProjectKeyWebhooksStripe",
-			body: z
-				.object({
-					id: z.string(),
-					type: z.string(),
-					data: z.object({ object: z.record(z.string(), z.unknown()) }).loose(),
-				})
-				.loose(),
-			requestContentType: "application/json",
-			description:
-				"Raw JSON bytes are verified with Stripe-Signature before parsing; send the original provider payload.",
-			security: [{ stripeSignature: [] }],
-			tags: ["webhook"],
-			params: z.object({ projectKey: z.string().min(1) }),
-			responses: {
-				200: z.object({
-					success: z.literal(true),
-					data: z.object({
-						status: z.enum(["processed", "skipped", "ignored"]),
-						eventType: z.string(),
-						entitlements: z.union([EntitlementSnapshotSchema, z.null()]),
-					}),
-				}),
-			},
-		},
-	),
-} as const;

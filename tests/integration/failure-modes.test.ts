@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
 import type { ProjectionSyncReason } from "../../src/billing/types";
+import { testRequest } from "../helpers/openapi";
 import { createLocalProjectionReceiver } from "../helpers/projection-receiver";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -218,7 +219,7 @@ async function postStripeWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	body: Record<string, unknown>,
 ): Promise<Response> {
-	return await fixture.app.request("/v1/projects/voysee/webhooks/stripe", {
+	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/stripe", {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
@@ -235,7 +236,8 @@ async function postStripeWebhook(
 async function createAppleAccountToken(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<void> {
-	const response = await fixture.app.request(
+	const response = await testRequest(
+		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
 		{ headers: fixture.authHeaders("voysee") },
 	);
@@ -247,7 +249,7 @@ async function createAppleAccountToken(
 async function verifyAppleSubscription(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders("voysee"),

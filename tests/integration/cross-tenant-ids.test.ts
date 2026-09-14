@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import { expectTableCounts } from "./helpers/db-assertions";
@@ -58,7 +59,8 @@ localDescribe("Cross-tenant identifiers", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const confirm = await app.request(
+		const confirm = await testRequest(
+			app,
 			`/v1/billing-accounts/${sharedAccount}/usage/reservations/${reserved.reservationId}/confirm`,
 			{
 				method: "POST",
@@ -72,7 +74,8 @@ localDescribe("Cross-tenant identifiers", () => {
 		);
 		expect(confirm.status).toBe(404);
 		expect((await confirm.json()).error.code).toBe("RESERVATION_NOT_FOUND");
-		const release = await app.request(
+		const release = await testRequest(
+			app,
 			`/v1/billing-accounts/${sharedAccount}/usage/reservations/${reserved.reservationId}/release`,
 			{
 				method: "POST",
@@ -117,7 +120,7 @@ localDescribe("Cross-tenant identifiers", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const consumed = await app.request(`/v1/billing-accounts/${sharedAccount}/usage/consume`, {
+		const consumed = await testRequest(app, `/v1/billing-accounts/${sharedAccount}/usage/consume`, {
 			method: "POST",
 			headers: {
 				...authHeaders("voysee"),
@@ -128,7 +131,8 @@ localDescribe("Cross-tenant identifiers", () => {
 		});
 		expect(consumed.status).toBe(200);
 		const original = (await consumed.json()).data;
-		const correction = await app.request(
+		const correction = await testRequest(
+			app,
 			`/v1/billing-accounts/${sharedAccount}/usage/events/${original.usageEventId}/corrections`,
 			{
 				method: "POST",
@@ -232,7 +236,8 @@ localDescribe("Cross-tenant identifiers", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const httpTerminate = await app.request(
+		const httpTerminate = await testRequest(
+			app,
 			`/v1/admin/contracts/migration-stripe/${published.id}`,
 			{
 				method: "DELETE",
@@ -259,7 +264,8 @@ localDescribe("Cross-tenant identifiers", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const previewResponse = await app.request(
+		const previewResponse = await testRequest(
+			app,
 			`/v1/billing-accounts/${sharedAccount}/commercial-actions/preview`,
 			{
 				method: "POST",
@@ -274,15 +280,19 @@ localDescribe("Cross-tenant identifiers", () => {
 		);
 		expect(previewResponse.status).toBe(200);
 		const preview = (await previewResponse.json()).data;
-		const execute = await app.request(`/v1/billing-accounts/${sharedAccount}/commercial-actions`, {
-			method: "POST",
-			headers: {
-				...authHeaders("wiseley"),
-				"content-type": "application/json",
-				"idempotency-key": "commercial:foreign",
+		const execute = await testRequest(
+			app,
+			`/v1/billing-accounts/${sharedAccount}/commercial-actions`,
+			{
+				method: "POST",
+				headers: {
+					...authHeaders("wiseley"),
+					"content-type": "application/json",
+					"idempotency-key": "commercial:foreign",
+				},
+				body: JSON.stringify({ previewToken: preview.previewToken }),
 			},
-			body: JSON.stringify({ previewToken: preview.previewToken }),
-		});
+		);
 		expect(execute.status).toBe(409);
 		expect((await execute.json()).error.code).toBe("COMMERCIAL_PREVIEW_NOT_FOUND");
 	});
@@ -298,7 +308,8 @@ localDescribe("Cross-tenant identifiers", () => {
 				metadata: { billingAccountId: sharedAccount },
 			},
 		});
-		const expired = await app.request(
+		const expired = await testRequest(
+			app,
 			`/v1/billing-accounts/${sharedAccount}/providers/stripe/checkout-sessions/cs_test_integration/expire`,
 			{
 				method: "POST",
@@ -309,7 +320,8 @@ localDescribe("Cross-tenant identifiers", () => {
 		expect((await expired.json()).data).toMatchObject({ status: "expired" });
 		expect(stripe.calls).toContain("expireCheckoutSession:cs_test_integration");
 
-		const mismatched = await app.request(
+		const mismatched = await testRequest(
+			app,
 			"/v1/billing-accounts/other-account/providers/stripe/checkout-sessions/cs_test_integration/expire",
 			{
 				method: "POST",

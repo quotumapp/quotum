@@ -10,6 +10,7 @@ import { createGoogleObfuscatedAccountId } from "../../src/providers/google/acco
 import { GooglePlayBillingService } from "../../src/providers/google/service";
 import type { StoreEventReplayProviders } from "../../src/workers/store-event-replay";
 import type { SubscriptionReconciliationProviders } from "../../src/workers/subscription-reconciliation";
+import { testRequest } from "../helpers/openapi";
 import { createLocalProjectionReceiver } from "../helpers/projection-receiver";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -701,7 +702,7 @@ localDescribe("Worker flows integration", () => {
 async function verifyGoogleConsumable(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders("voysee"),
@@ -721,7 +722,7 @@ async function verifyGoogleSubscription(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	input: { projectKey: "voysee" | "wiseley"; purchaseToken: string },
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders(input.projectKey),
@@ -740,7 +741,8 @@ async function createGoogleAccountLink(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	billingAccountId: string,
 ): Promise<void> {
-	const response = await fixture.app.request(
+	const response = await testRequest(
+		fixture.app,
 		`/v1/billing-accounts/${billingAccountId}/providers/google/account-link`,
 		{
 			headers: fixture.authHeaders("voysee"),

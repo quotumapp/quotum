@@ -1,6 +1,6 @@
 # Quotum API
 
-Bun/TypeScript/Hono billing API with PostgreSQL, merchant administration and background workers.
+Bun/TypeScript/Elysia billing API with PostgreSQL, merchant administration and background workers.
 Billing owns its ledger, catalog, customers, subscriptions, provider events and durable operations.
 Product backends call authenticated APIs and consume signed projections into their own read models;
 they do not access Quotum's tables directly.

@@ -12,6 +12,8 @@ start at 1.0.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-14
+
 ### Added
 
 - Public runtime lifecycle and scheduler interfaces for unchanged, commit-pinned hosted distributions.
@@ -21,8 +23,38 @@ start at 1.0.
 
 - Container publication now requires the same standalone validation gates as public CI.
 - Runtime startup and shutdown explicitly own database selection, worker scheduling and draining.
-  No SQL migration, HTTP contract or environment variable changes.
+  No SQL migration or environment variable changes.
 
+### HTTP framework rewrite (minor breaks)
+
+- Replaced Hono 4 and `@hono/zod-openapi` with Elysia on both HTTP surfaces (`/v1` staff API and
+  `/api` merchant platform). The `defineContract`/`registerRoute` shim is gone: routes register
+  directly on Elysia with Zod schemas and `operationDetail` metadata (`src/shared/http.ts`).
+- Request validation runs in the framework before handlers. Paths, methods, status codes, error
+  codes and the envelope are unchanged; schema rejections now say `"Request validation failed"`
+  instead of a route-specific message.
+- Private `/v1` bodies of every content type are read under the 256 KB cap and parsed as JSON, as
+  before; form, multipart and binary bodies are rejected with 400. Because Elysia parses before
+  authentication, an oversized body now returns 413 even without credentials (previously 401).
+  Merchant `/api` routes keep the 64 KB cap and the 415 rule; operations that never read a body
+  (logout, session exchange, provisioning retry/credential/rotate, step-up completion) still accept
+  requests without one.
+- Routing is strict: `/x/` does not match `/x` (404, as with Hono). Operator-key guards, rate
+  limiters and limiter keys use the path Elysia routed, so no URL form reaches a handler its guard
+  did not inspect. Webhook and aggregate limiters still run before authentication; project-keyed
+  limiters and operator-key checks run after authentication and before validation.
+- `QuotumApp.fetch` accepts Bun's `server` as an optional second argument and forwards it, so
+  client-IP limits resolve the caller's address. Hosted distributions that wrap `runtime.app` must
+  pass it through; previously every client shared one "unknown" limiter bucket.
+- `contracts/v1/openapi.json` is generated from the registered routes (OpenAPI 3.1.2). Operations,
+  request bodies, parameters, required headers, responses and the 117 named components are
+  unchanged; some schemas are spelled differently (for example `anyOf` for nullable references),
+  and `oasdiff breaking` against 0.9.3 reports no breaking changes.
+- Sentry request tags are applied to a per-request isolation scope opened by the runtime.
+- Removed dependencies: `hono`, `@hono/zod-openapi`. Added: `elysia` and its peer
+  `@sinclair/typebox`.
+- Upgrade: replace the running image; no configuration or database migration is required. Roll
+  back by returning to the previous image.
 
 ## [0.9.3] - 2026-09-10
 

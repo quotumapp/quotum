@@ -3,6 +3,7 @@ import type { SQL } from "bun";
 import type { EntitlementSnapshot, ProjectionPayload } from "../../src/billing/types";
 import { createGoogleObfuscatedAccountId } from "../../src/providers/google/account-link";
 import { signGoogleOidcToken, tamperGoogleOidcSignature } from "../helpers/google-oidc";
+import { testRequest } from "../helpers/openapi";
 import {
 	createIntegrationApp,
 	integrationGoogleOidcKeys,
@@ -48,7 +49,8 @@ localDescribe("Google route flows integration", () => {
 		});
 		const expectedAccountId = googleAccountId("integration_user");
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/integration_user/providers/google/account-link",
 			{
 				headers: authHeaders("voysee"),
@@ -506,7 +508,7 @@ localDescribe("Google route flows integration", () => {
 			repository: context.repository,
 		});
 
-		const response = await app.request("/v1/purchases/verify", {
+		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				...authHeaders("voysee"),
@@ -631,7 +633,8 @@ async function createGoogleAccountLink(
 	app: ReturnType<typeof createIntegrationApp>["app"],
 	authHeaders: ReturnType<typeof createIntegrationApp>["authHeaders"],
 ): Promise<string> {
-	const response = await app.request(
+	const response = await testRequest(
+		app,
 		"/v1/billing-accounts/integration_user/providers/google/account-link",
 		{
 			headers: authHeaders("voysee"),
@@ -646,7 +649,7 @@ async function verifyGoogleSubscription(
 	app: ReturnType<typeof createIntegrationApp>["app"],
 	authHeaders: ReturnType<typeof createIntegrationApp>["authHeaders"],
 ): Promise<Response> {
-	return await app.request("/v1/purchases/verify", {
+	return await testRequest(app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...authHeaders("voysee"),
@@ -665,7 +668,7 @@ async function verifyGoogleConsumable(
 	app: ReturnType<typeof createIntegrationApp>["app"],
 	authHeaders: ReturnType<typeof createIntegrationApp>["authHeaders"],
 ): Promise<Response> {
-	return await app.request("/v1/purchases/verify", {
+	return await testRequest(app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...authHeaders("voysee"),
@@ -715,7 +718,7 @@ async function postSignedGoogleRtdn(
 			purchaseToken: "purchase_token_1",
 		},
 	};
-	return await app.request("/v1/projects/voysee/webhooks/google", {
+	return await testRequest(app, "/v1/projects/voysee/webhooks/google", {
 		method: "POST",
 		headers: {
 			authorization: `Bearer ${token}`,
@@ -735,7 +738,7 @@ async function postGoogleRtdn(
 	app: ReturnType<typeof createIntegrationApp>["app"],
 	messageId = "message_1",
 ): Promise<Response> {
-	return await app.request("/v1/projects/voysee/webhooks/google", {
+	return await testRequest(app, "/v1/projects/voysee/webhooks/google", {
 		method: "POST",
 		headers: {
 			authorization: "Bearer pubsub-token",

@@ -11,6 +11,7 @@ import type {
 	RecordStripeSubscriptionProjectionInput,
 } from "../../src/db/repository";
 import { createGoogleObfuscatedAccountId } from "../../src/providers/google/account-link";
+import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import {
 	resetAndSeedIntegrationData,
@@ -778,7 +779,8 @@ interface PurchaseStateRow {
 }
 
 async function createAppleAccountToken(fixture: Fixture): Promise<void> {
-	const response = await fixture.app.request(
+	const response = await testRequest(
+		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
 		{
 			headers: fixture.authHeaders("voysee"),
@@ -791,7 +793,7 @@ async function createAppleAccountToken(fixture: Fixture): Promise<void> {
 }
 
 async function verifyAppleSubscription(fixture: Fixture): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders("voysee"),
@@ -811,7 +813,7 @@ async function verifyGoogleConsumable(
 	projectKey = "voysee",
 	billingAccountId = "integration_user",
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders(projectKey),
@@ -832,7 +834,7 @@ async function postStripeWebhook(
 	body: Record<string, unknown>,
 	projectKey = "voysee",
 ): Promise<Response> {
-	return await fixture.app.request(`/v1/projects/${projectKey}/webhooks/stripe`, {
+	return await testRequest(fixture.app, `/v1/projects/${projectKey}/webhooks/stripe`, {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
@@ -851,7 +853,8 @@ async function createGoogleAccountLink(
 	billingAccountId: string,
 	projectKey = "voysee",
 ): Promise<string> {
-	const response = await fixture.app.request(
+	const response = await testRequest(
+		fixture.app,
 		`/v1/billing-accounts/${billingAccountId}/providers/google/account-link`,
 		{
 			headers: fixture.authHeaders(projectKey),
@@ -868,7 +871,7 @@ async function postGoogleRtdn(
 	projectKey = "voysee",
 	messageId = "message_1",
 ): Promise<Response> {
-	return await fixture.app.request(`/v1/projects/${projectKey}/webhooks/google`, {
+	return await testRequest(fixture.app, `/v1/projects/${projectKey}/webhooks/google`, {
 		method: "POST",
 		headers: {
 			authorization: "Bearer pubsub-token",

@@ -1,5 +1,5 @@
 import type { Integration, Log } from "@sentry/core";
-import type { Context, MiddlewareHandler } from "hono";
+import type { Elysia } from "elysia";
 import { BillingError, isBillingError } from "../billing/errors";
 import type { SentryEnv } from "../env";
 import type { BillingLogger } from "./logger";
@@ -18,8 +18,6 @@ export interface SentryInitOptions {
 
 export interface SentryClientLike {
 	init(options: SentryInitOptions): void;
-
-	honoIntegration?(): unknown;
 
 	logger?: {
 		info(message: string, attributes?: Record<string, unknown>): void;
@@ -65,15 +63,11 @@ export function initializeSentry(sentry: SentryClientLike, config: SentryEnv): v
 		return;
 	}
 
-	const honoIntegration = sentry.honoIntegration;
-	const integrations =
-		typeof honoIntegration === "function" ? [honoIntegration() as Integration] : undefined;
 	sentry.init({
 		dsn: config.dsn,
 		enableLogs: config.enableLogs,
 		tracesSampleRate: config.tracesSampleRate,
 		beforeSendLog: (log) => (shouldSendSentryLog(log, config) ? log : null),
-		...(integrations === undefined ? {} : { integrations }),
 	});
 }
 
@@ -102,30 +96,60 @@ export function createSentryBillingLogger({
 	};
 }
 
-export function createSentryRequestMiddleware(
+export interface SentryRequestScope {
+	/** Elysia hooks that tag the scope `run` opened for the request; install them on the app. */
+	plugin(app: Elysia): Elysia;
+	/**
+	 * Runs one request inside a fresh isolation scope. Elysia hooks cannot wrap the rest of the
+	 * request, so the dispatcher that calls `app.fetch` must call this; events captured while the
+	 * request runs then carry its `billing.request` tags. Without `run`, the hooks tag nothing,
+	 * which keeps request tags from leaking onto the process-wide scope.
+	 */
+	run<T>(request: Request, dispatch: () => T): T;
+}
+
+export function createSentryRequestScope(
 	sentry: SentryClientLike,
 	{ service = "billing" }: SentryRequestMiddlewareOptions = {},
-): MiddlewareHandler {
-	return async (c, next) => {
-		const run = async (scope: SentryScopeLike) => {
-			const requestContext = inferRequestContext(c, service);
-			applyScopeContext(scope, "billing.request", requestContext);
-			await next();
-			const completedContext = { ...requestContext, status: c.res.status };
-			applyScopeContext(scope, "billing.request", completedContext);
-		};
+): SentryRequestScope {
+	const scopes = new WeakMap<Request, SentryScopeLike>();
+	const contexts = new WeakMap<Request, Record<string, unknown>>();
+	const tag = (request: Request, extra: Record<string, unknown>) => {
+		const scope = scopes.get(request);
+		const requestContext = contexts.get(request);
+		if (scope !== undefined && requestContext !== undefined)
+			applyScopeContext(scope, "billing.request", { ...requestContext, ...extra });
+	};
 
-		const withIsolationScope = sentry.withIsolationScope;
-		if (typeof withIsolationScope === "function") {
-			return withIsolationScope(run);
-		}
-
-		const withScope = sentry.withScope;
-		if (typeof withScope === "function") {
-			return withScope(run);
-		}
-
-		await next();
+	return {
+		plugin: (app) =>
+			app
+				.onRequest(({ request }) => {
+					contexts.set(request, inferRequestContext(request, service));
+					tag(request, {});
+				})
+				.onAfterHandle(({ request, set }) => {
+					tag(request, { status: set.status ?? 200 });
+				})
+				.onError(({ request, error }) => {
+					tag(request, normalizeErrorAttributes(error));
+				}),
+		run(request, dispatch) {
+			const isolate = sentry.withIsolationScope ?? sentry.withScope;
+			if (typeof isolate !== "function") return dispatch();
+			let dispatched = false;
+			try {
+				return isolate((scope) => {
+					scopes.set(request, scope);
+					dispatched = true;
+					return dispatch();
+				});
+			} catch (error) {
+				// A Sentry failure before dispatch must not fail the request; handler errors propagate.
+				if (dispatched) throw error;
+				return dispatch();
+			}
+		},
 	};
 }
 
@@ -318,15 +342,16 @@ function stringTag(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-function inferRequestContext(c: Context, service: string): Record<string, unknown> {
-	const path = new URL(c.req.url).pathname;
+function inferRequestContext(request: Request, service: string): Record<string, unknown> {
+	const url = new URL(request.url);
+	const path = url.pathname;
 	const route = parameterizeBillingPath(path);
-	const projectKey = c.req.param("projectKey") ?? inferProjectKey(path);
+	const projectKey = inferProjectKey(path);
 	const provider = inferProvider(path);
 
 	return stripUndefined({
 		service,
-		method: c.req.method,
+		method: request.method,
 		route,
 		projectKey,
 		provider,

@@ -173,8 +173,8 @@ export class MerchantBrowser {
 			"idempotency-key": options.key ?? crypto.randomUUID(),
 			...options.headers,
 		});
-		const response = await this.fixture.app.fetch(
-			new Request(`${testConfig.origin}${path}`, {
+		const response = await this.fixture.app.handle(
+			new Request(new URL(path, "http://localhost"), {
 				method,
 				headers,
 				body: body === undefined ? undefined : JSON.stringify(body),

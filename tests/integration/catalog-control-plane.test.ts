@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
@@ -33,7 +34,7 @@ localDescribe("catalog control plane", () => {
 		});
 		const headers = operatorHeaders(authHeaders());
 		const intent = catalogIntent(1, "0.005");
-		const preview = await app.request("/v1/admin/catalog/preview", {
+		const preview = await testRequest(app, "/v1/admin/catalog/preview", {
 			method: "POST",
 			headers,
 			body: JSON.stringify({ expectedRevision: null, catalog: intent }),
@@ -60,7 +61,7 @@ localDescribe("catalog control plane", () => {
 			previewToken: previewData.previewToken,
 			catalog: intent,
 		};
-		const publish = await app.request("/v1/admin/catalog/publish", {
+		const publish = await testRequest(app, "/v1/admin/catalog/publish", {
 			method: "POST",
 			headers,
 			body: JSON.stringify(publishBody),
@@ -74,7 +75,7 @@ localDescribe("catalog control plane", () => {
 			duplicate: false,
 		});
 
-		const duplicate = await app.request("/v1/admin/catalog/publish", {
+		const duplicate = await testRequest(app, "/v1/admin/catalog/publish", {
 			method: "POST",
 			headers,
 			body: JSON.stringify(publishBody),
@@ -132,7 +133,7 @@ localDescribe("catalog control plane", () => {
 		const stalePreview = await previewCatalog(app, headers, null, catalogIntent(2, "0.004"));
 		await publishCatalog(app, headers, null, firstPreview.previewToken, firstIntent, errors);
 
-		const stale = await app.request("/v1/admin/catalog/publish", {
+		const stale = await testRequest(app, "/v1/admin/catalog/publish", {
 			method: "POST",
 			headers,
 			body: JSON.stringify({
@@ -145,7 +146,7 @@ localDescribe("catalog control plane", () => {
 		expect((await stale.json()).error.code).toBe("CATALOG_REVISION_CONFLICT");
 
 		const secondPreview = await previewCatalog(app, headers, 1, catalogIntent(2, "0.004"));
-		const mismatch = await app.request("/v1/admin/catalog/publish", {
+		const mismatch = await testRequest(app, "/v1/admin/catalog/publish", {
 			method: "POST",
 			headers,
 			body: JSON.stringify({
@@ -196,7 +197,7 @@ localDescribe("catalog control plane", () => {
 		`;
 
 		const omittedPlan = { ...firstIntent, plans: [] };
-		const omission = await app.request("/v1/admin/catalog/preview", {
+		const omission = await testRequest(app, "/v1/admin/catalog/preview", {
 			method: "POST",
 			headers,
 			body: JSON.stringify({ expectedRevision: 1, catalog: omittedPlan }),
@@ -237,13 +238,13 @@ localDescribe("catalog control plane", () => {
 		expect(state.active).toBe(false);
 		expect(state.subscription_plan_version_id).toBe(state.active_version_id);
 
-		const adminCatalog = await app.request("/v1/admin/catalog", { headers });
+		const adminCatalog = await testRequest(app, "/v1/admin/catalog", { headers });
 		expect(adminCatalog.status).toBe(200);
 		expect((await adminCatalog.json()).data.catalog).toMatchObject({
 			plans: [],
 			retiredPlanKeys: ["premium"],
 		});
-		const publicCatalog = await app.request("/v1/catalog?provider=stripe&channel=web", {
+		const publicCatalog = await testRequest(app, "/v1/catalog?provider=stripe&channel=web", {
 			headers: authHeaders("voysee"),
 		});
 		expect(publicCatalog.status).toBe(200);
@@ -258,7 +259,7 @@ localDescribe("catalog control plane", () => {
 		});
 		const headers = operatorHeaders(authHeaders());
 		const catalog = phaseTwoCatalogIntent();
-		const preview = await app.request("/v1/admin/catalog/preview", {
+		const preview = await testRequest(app, "/v1/admin/catalog/preview", {
 			method: "POST",
 			headers,
 			body: JSON.stringify({ expectedRevision: null, catalog }),
@@ -266,7 +267,7 @@ localDescribe("catalog control plane", () => {
 		expect(preview.status).toBe(200);
 		const previewData = (await preview.json()).data;
 		expect(previewData.impact.providerBindingsValidated).toBe(4);
-		const publish = await app.request("/v1/admin/catalog/publish", {
+		const publish = await testRequest(app, "/v1/admin/catalog/publish", {
 			method: "POST",
 			headers,
 			body: JSON.stringify({
@@ -323,7 +324,7 @@ localDescribe("catalog control plane", () => {
 				billing_units: "1.000000000",
 			},
 		]);
-		const publicCatalog = await app.request("/v1/catalog?provider=stripe&channel=web", {
+		const publicCatalog = await testRequest(app, "/v1/catalog?provider=stripe&channel=web", {
 			headers: authHeaders("voysee"),
 		});
 		expect(publicCatalog.status).toBe(200);
@@ -361,7 +362,8 @@ localDescribe("catalog control plane", () => {
 			],
 			oneTimePurchases: [{ key: "echo_credits_10", kind: "topup" }],
 		});
-		const checkout = await app.request(
+		const checkout = await testRequest(
+			app,
 			"/v1/billing-accounts/phase2-account/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -417,7 +419,8 @@ localDescribe("catalog control plane", () => {
 			JOIN plan_versions version ON version.id = plan.active_version_id
 			WHERE project.key = 'voysee' AND customer.billing_account_id = 'phase2-metered-account'
 		`;
-		const addonCheckout = await app.request(
+		const addonCheckout = await testRequest(
+			app,
 			"/v1/billing-accounts/phase2-metered-account/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -448,7 +451,8 @@ localDescribe("catalog control plane", () => {
 				ON price.project_id = subscription.project_id AND price.plan_version_id = subscription.plan_version_id
 			WHERE project.key = 'voysee' AND price.component_kind IN ('base', 'licensed')
 		`;
-		const changeResponse = await app.request(
+		const changeResponse = await testRequest(
+			app,
 			"/v1/billing-accounts/phase2-metered-account/subscriptions/sub_phase2_metered/changes",
 			{
 				method: "POST",
@@ -816,7 +820,7 @@ async function previewCatalog(
 	expectedRevision: number | null,
 	catalog: ReturnType<typeof catalogIntent>,
 ) {
-	const response = await app.request("/v1/admin/catalog/preview", {
+	const response = await testRequest(app, "/v1/admin/catalog/preview", {
 		method: "POST",
 		headers,
 		body: JSON.stringify({ expectedRevision, catalog }),
@@ -833,7 +837,7 @@ async function publishCatalog(
 	catalog: ReturnType<typeof catalogIntent>,
 	errors: unknown[] = [],
 ) {
-	const response = await app.request("/v1/admin/catalog/publish", {
+	const response = await testRequest(app, "/v1/admin/catalog/publish", {
 		method: "POST",
 		headers,
 		body: JSON.stringify({ expectedRevision, previewToken, catalog }),
