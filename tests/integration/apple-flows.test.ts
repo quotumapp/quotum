@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
 import type { EntitlementSnapshot, ProjectionPayload } from "../../src/billing/types";
+import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
@@ -39,7 +40,8 @@ localDescribe("Apple route flows integration", () => {
 			repository: context.repository,
 		});
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/integration_user/providers/apple/account-token",
 			{
 				headers: authHeaders("voysee"),
@@ -210,7 +212,7 @@ localDescribe("Apple route flows integration", () => {
 		await createAppleAccountToken(app, authHeaders, apple);
 
 		const response = await withIsoDateSqlParameters(() =>
-			app.request("/v1/projects/voysee/webhooks/apple", {
+			testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({ signedPayload: "signed-notification" }),
@@ -457,7 +459,7 @@ localDescribe("Apple route flows integration", () => {
 			repository: context.repository,
 		});
 
-		const response = await app.request("/v1/purchases/verify", {
+		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				...authHeaders("voysee"),
@@ -499,7 +501,7 @@ localDescribe("Apple route flows integration", () => {
 		apple.setTransactionAppAccountToken(undefined);
 		apple.setRenewalAppAccountToken(appAccountToken);
 
-		const response = await app.request("/v1/purchases/verify", {
+		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				...authHeaders("voysee"),
@@ -558,7 +560,8 @@ async function createAppleAccountToken(
 	authHeaders: ReturnType<typeof createIntegrationApp>["authHeaders"],
 	apple: ReturnType<typeof createIntegrationApp>["apple"],
 ): Promise<string> {
-	const response = await app.request(
+	const response = await testRequest(
+		app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
 		{
 			headers: authHeaders("voysee"),
@@ -574,7 +577,7 @@ async function verifyAppleSubscription(
 	app: ReturnType<typeof createIntegrationApp>["app"],
 	authHeaders: ReturnType<typeof createIntegrationApp>["authHeaders"],
 ): Promise<Response> {
-	return await app.request("/v1/purchases/verify", {
+	return await testRequest(app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...authHeaders("voysee"),

@@ -1,13 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import { Hono } from "hono";
+import { Elysia } from "elysia";
 import { BillingError } from "../../src/billing/errors";
 import type { SentryEnv } from "../../src/env";
 import {
 	createSentryBillingLogger,
-	createSentryRequestMiddleware,
+	createSentryRequestScope,
 	initializeSentry,
 	type SentryClientLike,
 } from "../../src/observability/sentry";
+import { testRequest } from "../helpers/openapi";
 
 const sentryEnv: SentryEnv = {
 	dsn: "https://sentry.example/123",
@@ -225,15 +226,25 @@ describe("createSentryBillingLogger", () => {
 	});
 });
 
-describe("createSentryRequestMiddleware", () => {
-	it("sets isolated request tags and context without raw sensitive request data", async () => {
+describe("createSentryRequestScope", () => {
+	function dispatch(
+		requestScope: ReturnType<typeof createSentryRequestScope>,
+		app: { handle(request: Request): Promise<Response> },
+		path: string,
+		init?: RequestInit,
+	): Promise<Response> {
+		const request = new Request(new URL(path, "http://localhost"), init);
+		return requestScope.run(request, () => app.handle(request));
+	}
+
+	it("tags one isolation scope per request without raw sensitive request data", async () => {
 		const { sentry, calls } = createRecordingSentry();
-		const app = new Hono();
+		const requestScope = createSentryRequestScope(sentry, { service: "billing" });
+		const app = new Elysia()
+			.use(requestScope.plugin)
+			.post("/v1/projects/:projectKey/webhooks/apple", () => ({ ok: true }));
 
-		app.use("*", createSentryRequestMiddleware(sentry, { service: "billing" }));
-		app.post("/v1/projects/:projectKey/webhooks/apple", (c) => c.json({ ok: true }));
-
-		const response = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const response = await dispatch(requestScope, app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -264,6 +275,151 @@ describe("createSentryRequestMiddleware", () => {
 				},
 			},
 		]);
+	});
+
+	it("parameterizes billing account routes without project or provider tags", async () => {
+		const { sentry, calls } = createRecordingSentry();
+		const requestScope = createSentryRequestScope(sentry, { service: "billing" });
+		const app = new Elysia()
+			.use(requestScope.plugin)
+			.get("/v1/billing-accounts/:billingAccountId/usage/series", () => ({ points: [] }));
+
+		const response = await dispatch(requestScope, app, "/v1/billing-accounts/abc/usage/series");
+
+		expect(response.status).toBe(200);
+		expect(calls.scopes).toEqual([
+			{
+				contexts: {
+					"billing.request": {
+						method: "GET",
+						route: "/v1/billing-accounts/:billingAccountId/usage/series",
+						service: "billing",
+						status: 200,
+					},
+				},
+				tags: {
+					method: "GET",
+					route: "/v1/billing-accounts/:billingAccountId/usage/series",
+					service: "billing",
+				},
+			},
+		]);
+	});
+
+	it("adds error attributes to the request scope when the handler throws a BillingError", async () => {
+		const { sentry, calls } = createRecordingSentry();
+		const requestScope = createSentryRequestScope(sentry, { service: "billing" });
+		const app = new Elysia()
+			.use(requestScope.plugin)
+			.post("/v1/projects/:projectKey/webhooks/stripe", () => {
+				throw new BillingError("Invalid signature", "INVALID_SIGNATURE", 400);
+			});
+
+		await dispatch(requestScope, app, "/v1/projects/myproject/webhooks/stripe", {
+			method: "POST",
+		});
+
+		expect(calls.scopes).toEqual([
+			{
+				contexts: {
+					"billing.request": {
+						"error.code": "INVALID_SIGNATURE",
+						"error.message": "Invalid signature",
+						"error.name": "BillingError",
+						"error.status": 400,
+						method: "POST",
+						projectKey: "myproject",
+						provider: "stripe",
+						route: "/v1/projects/:projectKey/webhooks/stripe",
+						service: "billing",
+					},
+				},
+				tags: {
+					billing_error_code: "INVALID_SIGNATURE",
+					method: "POST",
+					project_key: "myproject",
+					provider: "stripe",
+					route: "/v1/projects/:projectKey/webhooks/stripe",
+					service: "billing",
+				},
+			},
+		]);
+	});
+
+	it("keeps concurrent requests on their own scopes", async () => {
+		const { sentry, calls } = createRecordingSentry();
+		const requestScope = createSentryRequestScope(sentry, { service: "billing" });
+		const app = new Elysia()
+			.use(requestScope.plugin)
+			.post("/v1/projects/:projectKey/webhooks/apple", async () => {
+				await Bun.sleep(1);
+				return { ok: true };
+			});
+
+		await Promise.all(
+			["first", "second"].map((projectKey) =>
+				dispatch(requestScope, app, `/v1/projects/${projectKey}/webhooks/apple`, {
+					method: "POST",
+				}),
+			),
+		);
+
+		expect(calls.scopes.map((scope) => scope.tags.project_key)).toEqual(["first", "second"]);
+	});
+
+	it("never tags a process-wide scope for requests dispatched outside run", async () => {
+		const { sentry, calls } = createRecordingSentry();
+		const requestScope = createSentryRequestScope(sentry, { service: "billing" });
+		const app = new Elysia().use(requestScope.plugin).get("/health", () => ({ ok: true }));
+
+		const response = await testRequest(app, "/health");
+
+		expect(response.status).toBe(200);
+		expect(calls.scopes).toEqual([]);
+	});
+
+	it("falls back to withScope when the client does not expose an isolation scope", async () => {
+		const { sentry, calls } = createRecordingSentry();
+		const { withIsolationScope: _unused, ...withScopeOnly } = sentry;
+		const requestScope = createSentryRequestScope(withScopeOnly, { service: "billing" });
+		const app = new Elysia().use(requestScope.plugin).get("/health", () => ({ ok: true }));
+
+		const response = await dispatch(requestScope, app, "/health");
+
+		expect(response.status).toBe(200);
+		expect(calls.scopes).toEqual([
+			{
+				contexts: {
+					"billing.request": {
+						method: "GET",
+						route: "/health",
+						service: "billing",
+						status: 200,
+					},
+				},
+				tags: {
+					method: "GET",
+					route: "/health",
+					service: "billing",
+				},
+			},
+		]);
+	});
+
+	it("still dispatches the request when Sentry fails to open a scope", async () => {
+		const { sentry } = createRecordingSentry();
+		const requestScope = createSentryRequestScope(
+			{
+				...sentry,
+				withIsolationScope() {
+					throw new Error("sentry unavailable");
+				},
+			},
+			{ service: "billing" },
+		);
+		const app = new Elysia().use(requestScope.plugin).get("/health", () => ({ ok: true }));
+
+		expect((await dispatch(requestScope, app, "/health")).status).toBe(200);
 	});
 });
 

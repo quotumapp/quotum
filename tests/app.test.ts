@@ -19,7 +19,7 @@ import { type BillingMetrics, createInMemoryBillingMetrics } from "../src/observ
 import { BillingAdminOperations } from "../src/operations/admin";
 import type { FixtureBillingEnv as BillingEnv } from "../src/testing/connection-fixtures";
 import { fixtureConnections } from "../src/testing/connection-fixtures";
-import { withOpenApiAssertions } from "./helpers/openapi";
+import { testRequest, withOpenApiAssertions } from "./helpers/openapi";
 import { projectContextResolver, projectInstanceContext } from "./helpers/project-context";
 
 const env: BillingEnv = {
@@ -550,7 +550,7 @@ describe("billing app", () => {
 
 	it("exposes public health", async () => {
 		const app = createApp({ env });
-		const response = await app.request("/health");
+		const response = await testRequest(app, "/health");
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ status: "ok" });
 	});
@@ -558,9 +558,9 @@ describe("billing app", () => {
 	it("sets request ids on responses and preserves caller supplied ids", async () => {
 		const app = createApp({ env });
 
-		const generated = await app.request("/health");
+		const generated = await testRequest(app, "/health");
 		const generatedRequestId = generated.headers.get("x-request-id");
-		const forwarded = await app.request("/health", {
+		const forwarded = await testRequest(app, "/health", {
 			headers: { "x-request-id": "caller-request-1" },
 		});
 
@@ -583,7 +583,7 @@ describe("billing app", () => {
 			} as unknown as EntitlementService,
 		});
 
-		const response = await app.request("/v1/billing-accounts/user_1/entitlements", {
+		const response = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
 			headers: {
 				authorization: "Bearer secret",
 				"x-request-id": "request-123",
@@ -622,9 +622,9 @@ describe("billing app", () => {
 			readinessCheck: async () => true,
 		});
 
-		const livez = await unavailable.request("/livez");
-		const notReady = await unavailable.request("/ready");
-		const ready = await available.request("/ready");
+		const livez = await testRequest(unavailable, "/livez");
+		const notReady = await testRequest(unavailable, "/ready");
+		const ready = await testRequest(available, "/ready");
 
 		expect(livez.status).toBe(200);
 		expect(await livez.json()).toEqual({ status: "ok" });
@@ -636,7 +636,7 @@ describe("billing app", () => {
 
 	it("protects entitlement reads with API key auth", async () => {
 		const app = createApp({ env });
-		const response = await app.request("/v1/billing-accounts/user_1/entitlements");
+		const response = await testRequest(app, "/v1/billing-accounts/user_1/entitlements");
 		expect(response.status).toBe(401);
 	});
 
@@ -665,7 +665,7 @@ describe("billing app", () => {
 		const unknownCredential = (suffix: number) =>
 			`qpk_v1.00000000-0000-4000-8000-${String(suffix).padStart(12, "0")}.${"A".repeat(43)}`;
 		const request = (suffix: number, ip: string) =>
-			app.request("/v1/catalog", {
+			testRequest(app, "/v1/catalog", {
 				headers: {
 					authorization: `Bearer ${unknownCredential(suffix)}`,
 					"cf-connecting-ip": ip,
@@ -718,7 +718,7 @@ describe("billing app", () => {
 			},
 		});
 		const request = (suffix: number, ip: string) =>
-			app.request("/v1/catalog", {
+			testRequest(app, "/v1/catalog", {
 				headers: {
 					"x-billing-project-key": `unknown-${suffix}`,
 					"cf-connecting-ip": ip,
@@ -752,7 +752,7 @@ describe("billing app", () => {
 			}),
 		});
 
-		const response = await app.request(`/v1/admin/store-events/${validStoreEventId}/replay`, {
+		const response = await testRequest(app, `/v1/admin/store-events/${validStoreEventId}/replay`, {
 			method: "POST",
 			headers: { "x-billing-operator-key": "operator-secret-key" },
 		});
@@ -794,7 +794,7 @@ describe("billing app", () => {
 			"/v1/admin/reconciliation/subscriptions/run",
 			`/v1/admin/projection-jobs/${validProjectionJobId}/retry`,
 		]) {
-			const missing = await app.request(path, {
+			const missing = await testRequest(app, path, {
 				method: "POST",
 				headers: { authorization: "Bearer secret" },
 			});
@@ -806,7 +806,7 @@ describe("billing app", () => {
 					message: "Invalid billing operator key",
 				},
 			});
-			const sameLengthWrong = await app.request(path, {
+			const sameLengthWrong = await testRequest(app, path, {
 				method: "POST",
 				headers: {
 					authorization: "Bearer secret",
@@ -839,7 +839,7 @@ describe("billing app", () => {
 			stripeBillingService,
 		});
 
-		const response = await app.request("/v1/billing-accounts/user_1/entitlements");
+		const response = await testRequest(app, "/v1/billing-accounts/user_1/entitlements");
 
 		expect(response.status).toBe(401);
 		expect(await response.json()).toEqual({
@@ -882,16 +882,25 @@ describe("billing app", () => {
 		});
 
 		const gatewayHeaders = { "x-billing-project-key": "voysee" };
-		const entitlement = await app.request("/v1/billing-accounts/user_1/entitlements", {
+		const entitlement = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
 			headers: gatewayHeaders,
 		});
-		const apple = await app.request("/v1/billing-accounts/user_1/providers/apple/account-token", {
-			headers: gatewayHeaders,
-		});
-		const google = await app.request("/v1/billing-accounts/user_1/providers/google/account-link", {
-			headers: gatewayHeaders,
-		});
-		const stripe = await app.request(
+		const apple = await testRequest(
+			app,
+			"/v1/billing-accounts/user_1/providers/apple/account-token",
+			{
+				headers: gatewayHeaders,
+			},
+		);
+		const google = await testRequest(
+			app,
+			"/v1/billing-accounts/user_1/providers/google/account-link",
+			{
+				headers: gatewayHeaders,
+			},
+		);
+		const stripe = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -899,7 +908,7 @@ describe("billing app", () => {
 				body: JSON.stringify({ productKey: "credits_100" }),
 			},
 		);
-		const replay = await app.request(`/v1/admin/store-events/${validStoreEventId}/replay`, {
+		const replay = await testRequest(app, `/v1/admin/store-events/${validStoreEventId}/replay`, {
 			method: "POST",
 			headers: { ...gatewayHeaders, "x-billing-operator-key": "operator-secret-key" },
 		});
@@ -948,10 +957,10 @@ describe("billing app", () => {
 			},
 		});
 
-		const privateRoute = await app.request("/v1/billing-accounts/user_1/entitlements", {
+		const privateRoute = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
 			headers: { authorization: "Bearer inactive-project-key-123456" },
 		});
-		const webhook = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const webhook = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "signed-payload" }),
@@ -981,10 +990,10 @@ describe("billing app", () => {
 			},
 		});
 
-		const gateway = await app.request("/v1/billing-accounts/user_1/entitlements", {
+		const gateway = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
 			headers: { "x-billing-project-key": "voysee" },
 		});
-		const webhook = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const webhook = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "signed-payload" }),
@@ -1031,7 +1040,7 @@ describe("billing app", () => {
 			transactionId: "txn_1",
 		});
 
-		const voysee = await app.request("/v1/purchases/verify", {
+		const voysee = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer voysee-service-key-123456",
@@ -1039,7 +1048,7 @@ describe("billing app", () => {
 			},
 			body,
 		});
-		const wiseley = await app.request("/v1/purchases/verify", {
+		const wiseley = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer wiseley-service-key-123456",
@@ -1059,12 +1068,12 @@ describe("billing app", () => {
 			stripeBillingService,
 		});
 
-		const apple = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const apple = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "signed-payload" }),
 		});
-		const stripe = await app.request("/v1/projects/voysee/webhooks/stripe", {
+		const stripe = await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: { "stripe-signature": "t=123,v1=abc" },
 			body: JSON.stringify({
@@ -1099,7 +1108,7 @@ describe("billing app", () => {
 			}),
 		});
 
-		const response = await app.request(`/v1/admin/store-events/${validStoreEventId}/replay`, {
+		const response = await testRequest(app, `/v1/admin/store-events/${validStoreEventId}/replay`, {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -1138,7 +1147,7 @@ describe("billing app", () => {
 			}),
 		});
 
-		const response = await app.request("/v1/admin/store-events/not-a-uuid/replay", {
+		const response = await testRequest(app, "/v1/admin/store-events/not-a-uuid/replay", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -1184,7 +1193,7 @@ describe("billing app", () => {
 			}),
 		});
 
-		const response = await app.request("/v1/admin/reconciliation/subscriptions/run", {
+		const response = await testRequest(app, "/v1/admin/reconciliation/subscriptions/run", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -1228,13 +1237,17 @@ describe("billing app", () => {
 			}),
 		});
 
-		const response = await app.request(`/v1/admin/projection-jobs/${validProjectionJobId}/retry`, {
-			method: "POST",
-			headers: {
-				authorization: "Bearer secret",
-				"x-billing-operator-key": "operator-secret-key",
+		const response = await testRequest(
+			app,
+			`/v1/admin/projection-jobs/${validProjectionJobId}/retry`,
+			{
+				method: "POST",
+				headers: {
+					authorization: "Bearer secret",
+					"x-billing-operator-key": "operator-secret-key",
+				},
 			},
-		});
+		);
 
 		expect(response.status).toBe(200);
 		expect(calls).toEqual([{ projectKey: "voysee", jobId: validProjectionJobId }]);
@@ -1252,7 +1265,7 @@ describe("billing app", () => {
 			"/v1/admin/reconciliation/subscriptions/run",
 			`/v1/admin/projection-jobs/${validProjectionJobId}/retry`,
 		]) {
-			const response = await app.request(path, {
+			const response = await testRequest(app, path, {
 				method: "POST",
 				headers: {
 					authorization: "Bearer secret",
@@ -1275,13 +1288,14 @@ describe("billing app", () => {
 		const calls: Array<{ method: string; input: unknown }> = [];
 		const app = createApp({ env, adminBillingReader: createFakeAdminBillingReader(calls) });
 
-		const byBillingAccount = await app.request(
+		const byBillingAccount = await testRequest(
+			app,
 			"/v1/admin/customers/by-billing-account/%20account_1%20",
 			{
 				headers: { authorization: "Bearer secret" },
 			},
 		);
-		const byCustomerId = await app.request(`/v1/admin/customers/${validCustomerId}`, {
+		const byCustomerId = await testRequest(app, `/v1/admin/customers/${validCustomerId}`, {
 			headers: { authorization: "Bearer secret" },
 		});
 
@@ -1318,7 +1332,7 @@ describe("billing app", () => {
 			"/v1/admin/catalog/products?limit=7",
 			"/v1/admin/catalog/store-products?provider=stripe&channel=web&limit=8",
 		]) {
-			const response = await app.request(path, { headers });
+			const response = await testRequest(app, path, { headers });
 
 			expect(response.status).toBe(200);
 			const body = await response.json();
@@ -1363,7 +1377,8 @@ describe("billing app", () => {
 		const app = createApp({ env, adminBillingReader: createFakeAdminBillingReader(calls) });
 		const headers = { authorization: "Bearer secret" };
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/admin/stats/summary?provider=stripe&from=2026-01-01T00%3A00%3A00.000Z",
 			{ headers },
 		);
@@ -1415,7 +1430,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/admin/purchases", {
+		const response = await testRequest(app, "/v1/admin/purchases", {
 			headers: { authorization: "Bearer wiseley-service-key-123456" },
 		});
 
@@ -1434,7 +1449,7 @@ describe("billing app", () => {
 			`/v1/admin/customers/${validCustomerId}/store-events?eventType=checkout.session.completed`,
 			`/v1/admin/customers/${validCustomerId}/projection-jobs?reason=purchase_verified`,
 		]) {
-			const response = await app.request(path, { headers });
+			const response = await testRequest(app, path, { headers });
 
 			expect(response.status).toBe(200);
 			expect(await response.json()).toEqual({
@@ -1490,10 +1505,15 @@ describe("billing app", () => {
 		});
 		const headers = { authorization: "Bearer secret" };
 
-		const withoutRawPayload = await app.request(`/v1/admin/store-events/${validStoreEventId}`, {
-			headers,
-		});
-		const withRawPayload = await app.request(
+		const withoutRawPayload = await testRequest(
+			app,
+			`/v1/admin/store-events/${validStoreEventId}`,
+			{
+				headers,
+			},
+		);
+		const withRawPayload = await testRequest(
+			app,
 			`/v1/admin/store-events/${validStoreEventId}?includeRawPayload=true`,
 			{ headers },
 		);
@@ -1532,10 +1552,10 @@ describe("billing app", () => {
 		const app = createApp({ env, adminBillingReader: createFakeAdminBillingReader(calls) });
 		const headers = { authorization: "Bearer secret" };
 
-		const response = await app.request("/v1/admin/purchases?provider=not-a-provider", {
+		const response = await testRequest(app, "/v1/admin/purchases?provider=not-a-provider", {
 			headers,
 		});
-		const cursorResponse = await app.request("/v1/admin/purchases?cursor=not-base64", {
+		const cursorResponse = await testRequest(app, "/v1/admin/purchases?cursor=not-base64", {
 			headers,
 		});
 
@@ -1563,7 +1583,7 @@ describe("billing app", () => {
 			entitlementService: service,
 		});
 
-		const response = await app.request("/health");
+		const response = await testRequest(app, "/health");
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ status: "ok" });
@@ -1572,7 +1592,7 @@ describe("billing app", () => {
 	it("returns not-configured errors for explicitly disabled admin read routes", async () => {
 		const app = createApp({ env, adminBillingReader: null });
 
-		const response = await app.request("/v1/admin/customers/search?q=user_1", {
+		const response = await testRequest(app, "/v1/admin/customers/search?q=user_1", {
 			headers: { authorization: "Bearer secret" },
 		});
 
@@ -1598,7 +1618,7 @@ describe("billing app", () => {
 		});
 		const app = createApp({ env, entitlementService: service });
 
-		const response = await app.request("/v1/billing-accounts/user_1/entitlements", {
+		const response = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
 			headers: { authorization: "Bearer secret" },
 		});
 
@@ -1616,12 +1636,14 @@ describe("billing app", () => {
 	it("returns Apple app account tokens through API-key protected routes", async () => {
 		const app = createApp({ env, appleStoreKitService });
 
-		const unauthorized = await app.request(
+		const unauthorized = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/apple/account-token",
 		);
 		expect(unauthorized.status).toBe(401);
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/apple/account-token",
 			{
 				headers: { authorization: "Bearer secret" },
@@ -1637,7 +1659,7 @@ describe("billing app", () => {
 
 	it("verifies Apple purchases through API-key protected routes", async () => {
 		const app = createApp({ env, appleStoreKitService });
-		const response = await app.request("/v1/purchases/verify", {
+		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -1664,12 +1686,14 @@ describe("billing app", () => {
 	it("returns Google account links through API-key protected routes", async () => {
 		const app = createApp({ env, googlePlayBillingService });
 
-		const unauthorized = await app.request(
+		const unauthorized = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/google/account-link",
 		);
 		expect(unauthorized.status).toBe(401);
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/google/account-link",
 			{
 				headers: { authorization: "Bearer secret" },
@@ -1686,8 +1710,10 @@ describe("billing app", () => {
 	it("returns the Stripe web catalog and customer billing account", async () => {
 		const app = createApp({ env, stripeBillingService });
 		const headers = { authorization: "Bearer secret" };
-		const catalog = await app.request("/v1/catalog?provider=stripe&channel=web", { headers });
-		const account = await app.request("/v1/billing-accounts/user_1/billing-account", { headers });
+		const catalog = await testRequest(app, "/v1/catalog?provider=stripe&channel=web", { headers });
+		const account = await testRequest(app, "/v1/billing-accounts/user_1/billing-account", {
+			headers,
+		});
 
 		expect(catalog.status).toBe(200);
 		expect(await catalog.json()).toEqual({
@@ -1722,13 +1748,17 @@ describe("billing app", () => {
 	it("previews and executes a token-bound commercial action", async () => {
 		const app = createApp({ env, stripeBillingService });
 		const headers = { authorization: "Bearer secret", "content-type": "application/json" };
-		const preview = await app.request("/v1/billing-accounts/user_1/commercial-actions/preview", {
-			method: "POST",
-			headers,
-			body: JSON.stringify({
-				intent: { kind: "checkout_product", productKey: "credits_100" },
-			}),
-		});
+		const preview = await testRequest(
+			app,
+			"/v1/billing-accounts/user_1/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: { kind: "checkout_product", productKey: "credits_100" },
+				}),
+			},
+		);
 		expect(preview.status).toBe(200);
 		expect((await preview.json()).data).toMatchObject({
 			previewToken: "11111111-1111-4111-8111-111111111111",
@@ -1736,7 +1766,7 @@ describe("billing app", () => {
 			estimatedTotalMinor: 499,
 		});
 
-		const execute = await app.request("/v1/billing-accounts/user_1/commercial-actions", {
+		const execute = await testRequest(app, "/v1/billing-accounts/user_1/commercial-actions", {
 			method: "POST",
 			headers: { ...headers, "idempotency-key": "buy-credits-1" },
 			body: JSON.stringify({ previewToken: "11111111-1111-4111-8111-111111111111" }),
@@ -1799,11 +1829,12 @@ describe("billing app", () => {
 			},
 		});
 		const headers = { authorization: "Bearer secret" };
-		const events = await app.request(
+		const events = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/usage/events?featureKey=api_calls&limit=25",
 			{ headers },
 		);
-		const summary = await app.request("/v1/billing-accounts/user_1/billing-summary", {
+		const summary = await testRequest(app, "/v1/billing-accounts/user_1/billing-summary", {
 			headers,
 		});
 		expect(events.status).toBe(200);
@@ -1859,7 +1890,7 @@ describe("billing app", () => {
 		];
 
 		for (const path of paths) {
-			const response = await app.request(path, { headers });
+			const response = await testRequest(app, path, { headers });
 			expect(response.status).toBe(400);
 			expect((await response.json()).error.code).toBe("INVALID_REQUEST");
 		}
@@ -1869,14 +1900,14 @@ describe("billing app", () => {
 	it("rejects obsolete schema selectors and unknown Stripe catalog query parameters", async () => {
 		const app = createApp({ env, stripeBillingService });
 		for (const query of ["schemaVersion=1", "schemaVersion=2", "foo=bar"]) {
-			const response = await app.request(`/v1/catalog?provider=stripe&channel=web&${query}`, {
+			const response = await testRequest(app, `/v1/catalog?provider=stripe&channel=web&${query}`, {
 				headers: { authorization: "Bearer secret" },
 			});
 
 			expect(response.status).toBe(400);
 			expect(await response.json()).toEqual({
 				success: false,
-				error: { code: "INVALID_REQUEST", message: "Invalid billing catalog query" },
+				error: { code: "INVALID_REQUEST", message: "Request validation failed" },
 			});
 		}
 	});
@@ -1898,7 +1929,8 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -1969,7 +2001,8 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -2047,7 +2080,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const accepted = await app.request("/v1/projects/wiseley/webhooks/stripe", {
+		const accepted = await testRequest(app, "/v1/projects/wiseley/webhooks/stripe", {
 			method: "POST",
 			headers: { "stripe-signature": "wiseley-signature" },
 			body: JSON.stringify({
@@ -2056,7 +2089,7 @@ describe("billing app", () => {
 				data: { object: {} },
 			}),
 		});
-		const rejected = await app.request("/v1/projects/wiseley/webhooks/stripe", {
+		const rejected = await testRequest(app, "/v1/projects/wiseley/webhooks/stripe", {
 			method: "POST",
 			headers: { "stripe-signature": "voysee-signature" },
 			body: JSON.stringify({
@@ -2118,7 +2151,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/projects/wiseley/webhooks/apple", {
+		const response = await testRequest(app, "/v1/projects/wiseley/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "signed-payload" }),
@@ -2143,7 +2176,8 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/stripe/portal-sessions",
 			{
 				method: "POST",
@@ -2178,7 +2212,8 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/stripe/checkout-sessions/cs_test_123",
 			{
 				headers: { authorization: "Bearer secret" },
@@ -2218,7 +2253,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/projects/voysee/webhooks/stripe", {
+		const response = await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -2258,7 +2293,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/projects/voysee/webhooks/stripe", {
+		const response = await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: { "stripe-signature": "t=123,v1=abc" },
 			body: JSON.stringify({
@@ -2323,7 +2358,7 @@ describe("billing app", () => {
 				{ headers: { authorization: "Bearer secret" } },
 			),
 		]) {
-			const response = await app.request(request);
+			const response = await testRequest(app, request);
 
 			expect(response.status).toBe(503);
 			expect(await response.json()).toEqual({
@@ -2352,7 +2387,8 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -2368,12 +2404,13 @@ describe("billing app", () => {
 		expect(called).toBe(false);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "INVALID_REQUEST", message: "Invalid Stripe Checkout session body" },
+			error: { code: "INVALID_REQUEST", message: "Request validation failed" },
 		});
 	});
 
 	it("rejects caller-supplied project selectors on private billing routes", async () => {
 		let checkoutCalled = false;
+		let portalCalled = false;
 		let verifyCalled = false;
 		let entitlementCalled = false;
 		const app = createApp({
@@ -2397,6 +2434,10 @@ describe("billing app", () => {
 						url: "https://checkout.stripe.com/c/pay/cs_test_123",
 					});
 				},
+				createPortalSession() {
+					portalCalled = true;
+					return Promise.resolve({ url: "https://billing.stripe.com/session/bps_test_123" });
+				},
 			},
 			appleStoreKitService: {
 				...appleStoreKitService,
@@ -2411,7 +2452,8 @@ describe("billing app", () => {
 			},
 		});
 
-		const checkout = await app.request(
+		const checkout = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -2425,7 +2467,7 @@ describe("billing app", () => {
 				}),
 			},
 		);
-		const purchase = await app.request("/v1/purchases/verify", {
+		const purchase = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -2438,7 +2480,8 @@ describe("billing app", () => {
 				transactionId: "200000000000001",
 			}),
 		});
-		const nestedCheckout = await app.request(
+		const nestedCheckout = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -2452,14 +2495,28 @@ describe("billing app", () => {
 				}),
 			},
 		);
-		const entitlement = await app.request(
+		const entitlement = await testRequest(
+			app,
 			"/v1/billing-accounts/user_1/entitlements?project_id=wiseley",
 			{
 				headers: { authorization: "Bearer secret" },
 			},
 		);
+		// The portal body schema is not strict, so validation alone would strip the selector.
+		const portal = await testRequest(
+			app,
+			"/v1/billing-accounts/user_1/providers/stripe/portal-sessions",
+			{
+				method: "POST",
+				headers: {
+					authorization: "Bearer secret",
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ projectId: "wiseley" }),
+			},
+		);
 
-		for (const response of [checkout, purchase, nestedCheckout, entitlement]) {
+		for (const response of [checkout, purchase, nestedCheckout, entitlement, portal]) {
 			expect(response.status).toBe(400);
 			expect(await response.json()).toEqual({
 				success: false,
@@ -2470,6 +2527,7 @@ describe("billing app", () => {
 			});
 		}
 		expect(checkoutCalled).toBe(false);
+		expect(portalCalled).toBe(false);
 		expect(verifyCalled).toBe(false);
 		expect(entitlementCalled).toBe(false);
 	});
@@ -2522,7 +2580,7 @@ describe("billing app", () => {
 				"http://localhost/v1/billing-accounts/user_1/providers/stripe/checkout-sessions/cs_test_123",
 			),
 		]) {
-			const response = await app.request(request);
+			const response = await testRequest(app, request);
 			expect(response.status).toBe(401);
 		}
 
@@ -2531,7 +2589,7 @@ describe("billing app", () => {
 
 	it("verifies Google purchases through API-key protected routes", async () => {
 		const app = createApp({ env, googlePlayBillingService });
-		const response = await app.request("/v1/purchases/verify", {
+		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -2558,7 +2616,7 @@ describe("billing app", () => {
 
 	it("rejects Google one-time purchase verification without product ids", async () => {
 		const app = createApp({ env, googlePlayBillingService });
-		const response = await app.request("/v1/purchases/verify", {
+		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -2581,7 +2639,7 @@ describe("billing app", () => {
 
 	it("returns provider-not-configured for Google purchase verification without Google service", async () => {
 		const app = createApp({ env });
-		const response = await app.request("/v1/purchases/verify", {
+		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -2607,7 +2665,7 @@ describe("billing app", () => {
 
 	it("returns provider-not-configured for Apple purchase verification without Apple service", async () => {
 		const app = createApp({ env });
-		const response = await app.request("/v1/purchases/verify", {
+		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -2649,7 +2707,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/purchases/verify", {
+		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -2699,7 +2757,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/purchases/verify", {
+		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -2721,7 +2779,7 @@ describe("billing app", () => {
 
 	it("accepts public Apple webhooks without API key auth", async () => {
 		const app = createApp({ env, appleStoreKitService });
-		const response = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const response = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
@@ -2743,7 +2801,7 @@ describe("billing app", () => {
 
 	it("accepts public Google webhooks without API key auth", async () => {
 		const app = createApp({ env, googlePlayBillingService });
-		const response = await app.request("/v1/projects/voysee/webhooks/google", {
+		const response = await testRequest(app, "/v1/projects/voysee/webhooks/google", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer google-oidc-token",
@@ -2793,7 +2851,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/projects/voysee/webhooks/google", {
+		const response = await testRequest(app, "/v1/projects/voysee/webhooks/google", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer google-oidc-token",
@@ -2838,7 +2896,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/projects/voysee/webhooks/google", {
+		const response = await testRequest(app, "/v1/projects/voysee/webhooks/google", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: "{",
@@ -2860,7 +2918,7 @@ describe("billing app", () => {
 		const { logger, errors } = createRecordingLogger();
 		const app = createApp({ env, appleStoreKitService, metrics, logger });
 
-		const response = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const response = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({}),
@@ -2891,16 +2949,16 @@ describe("billing app", () => {
 		});
 		const app = createApp({ env, metrics });
 
-		const unauthorized = await app.request("/v1/admin/metrics");
+		const unauthorized = await testRequest(app, "/v1/admin/metrics");
 		expect(unauthorized.status).toBe(401);
-		const publicResponse = await app.request("/metrics");
+		const publicResponse = await testRequest(app, "/metrics");
 		expect(publicResponse.status).toBe(200);
 		expect(publicResponse.headers.get("content-type")).toBe("text/plain; version=0.0.4");
 		expect(await publicResponse.text()).toBe(
 			'billing_webhook_failures_total{code="INVALID_REQUEST",provider="apple"} 1\n',
 		);
 
-		const response = await app.request("/v1/admin/metrics", {
+		const response = await testRequest(app, "/v1/admin/metrics", {
 			headers: {
 				authorization: "Bearer secret",
 				"x-billing-operator-key": "operator-secret-key",
@@ -2941,7 +2999,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/projects/voysee/webhooks/google", {
+		const response = await testRequest(app, "/v1/projects/voysee/webhooks/google", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer invalid-google-token",
@@ -2964,7 +3022,7 @@ describe("billing app", () => {
 
 	it("rejects oversized public webhook bodies", async () => {
 		const app = createApp({ env, appleStoreKitService });
-		const response = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const response = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -2993,7 +3051,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const response = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "" }),
@@ -3026,8 +3084,8 @@ describe("billing app", () => {
 			}),
 		};
 
-		const allowed = await app.request("/v1/purchases/verify", request);
-		const limited = await app.request("/v1/purchases/verify", request);
+		const allowed = await testRequest(app, "/v1/purchases/verify", request);
+		const limited = await testRequest(app, "/v1/purchases/verify", request);
 
 		expect(allowed.status).toBe(200);
 		expect(limited.status).toBe(429);
@@ -3055,7 +3113,7 @@ describe("billing app", () => {
 			},
 		});
 
-		const response = await app.request("/v1/purchases/verify", {
+		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -3108,12 +3166,12 @@ describe("billing app", () => {
 			"x-forwarded-for": "203.0.113.20",
 		};
 
-		const appleAllowed = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const appleAllowed = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: appleHeaders,
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
 		});
-		const googleAllowed = await app.request("/v1/projects/voysee/webhooks/google", {
+		const googleAllowed = await testRequest(app, "/v1/projects/voysee/webhooks/google", {
 			method: "POST",
 			headers: googleHeaders,
 			body: JSON.stringify({
@@ -3121,7 +3179,7 @@ describe("billing app", () => {
 				subscription: "sub",
 			}),
 		});
-		const stripeAllowed = await app.request("/v1/projects/voysee/webhooks/stripe", {
+		const stripeAllowed = await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: stripeHeaders,
 			body: JSON.stringify({
@@ -3130,12 +3188,12 @@ describe("billing app", () => {
 				data: { object: {} },
 			}),
 		});
-		const appleLimited = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const appleLimited = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: appleHeaders,
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
 		});
-		const stripeLimited = await app.request("/v1/projects/voysee/webhooks/stripe", {
+		const stripeLimited = await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: stripeHeaders,
 			body: JSON.stringify({
@@ -3167,7 +3225,7 @@ describe("billing app", () => {
 			appleStoreKitService,
 		});
 
-		const first = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const first = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -3176,7 +3234,7 @@ describe("billing app", () => {
 			},
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
 		});
-		const sameFirstIp = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const sameFirstIp = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -3185,7 +3243,7 @@ describe("billing app", () => {
 			},
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
 		});
-		const differentCloudflareIp = await app.request("/v1/projects/voysee/webhooks/apple", {
+		const differentCloudflareIp = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -3207,17 +3265,17 @@ describe("billing app", () => {
 			metrics,
 		});
 
-		const unauthorized = await app.request("/v1/admin/metrics", {
+		const unauthorized = await testRequest(app, "/v1/admin/metrics", {
 			headers: { "x-forwarded-for": "203.0.113.40" },
 		});
-		const allowed = await app.request("/v1/admin/metrics", {
+		const allowed = await testRequest(app, "/v1/admin/metrics", {
 			headers: {
 				authorization: "Bearer secret",
 				"x-billing-operator-key": "operator-secret-key",
 				"x-forwarded-for": "203.0.113.40",
 			},
 		});
-		const limited = await app.request("/v1/admin/metrics", {
+		const limited = await testRequest(app, "/v1/admin/metrics", {
 			headers: {
 				authorization: "Bearer secret",
 				"x-billing-operator-key": "operator-secret-key",
@@ -3237,7 +3295,7 @@ describe("billing app", () => {
 
 	it("does not expose the retired project provisioning route", async () => {
 		const app = createApp({ env });
-		const response = await app.request("/v1/admin/projects", {
+		const response = await testRequest(app, "/v1/admin/projects", {
 			method: "POST",
 			headers: { authorization: "Bearer secret", "content-type": "application/json" },
 			body: JSON.stringify({ name: "Voysee" }),

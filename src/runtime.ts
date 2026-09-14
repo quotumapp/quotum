@@ -27,7 +27,7 @@ import { createConsoleBillingLogger } from "./observability/logger";
 import { createInMemoryBillingMetrics } from "./observability/metrics";
 import {
 	createSentryBillingLogger,
-	createSentryRequestMiddleware,
+	createSentryRequestScope,
 	initializeSentry,
 	type SentryClientLike,
 } from "./observability/sentry";
@@ -266,6 +266,10 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
 	});
 
+	const sentryRequestScope =
+		dependencies.sentry === undefined || env.sentry.dsn === null
+			? undefined
+			: createSentryRequestScope(dependencies.sentry);
 	const staff = createApp({
 		env,
 		connections,
@@ -276,10 +280,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		logger,
 		metrics,
 		readinessCheck: dependencies.readinessCheck,
-		requestObservabilityMiddleware:
-			dependencies.sentry === undefined || env.sentry.dsn === null
-				? undefined
-				: createSentryRequestMiddleware(dependencies.sentry),
+		requestObservabilityMiddleware: sentryRequestScope?.plugin,
 	});
 	const merchantBilling = createMerchantBillingPort({
 		repository: billingRepository,
@@ -302,6 +303,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const app = attachMerchantRuntime(staff, merchantBilling, {
 		...dependencies.merchant,
 		config: merchantConfig,
+		staffRequestScope: sentryRequestScope,
 		registerBackground: (worker) => {
 			jobs.push({
 				name: "stripe_app_events",

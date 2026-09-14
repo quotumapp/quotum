@@ -10,7 +10,11 @@ import {
 	createTestGoogleOidcVerifier,
 	signGoogleOidcToken,
 } from "../../tests/helpers/google-oidc";
-import { withOpenApiAssertions } from "../../tests/helpers/openapi";
+import {
+	type HandleableApp,
+	testRequest,
+	withOpenApiAssertions,
+} from "../../tests/helpers/openapi";
 import {
 	authorizeStripeApp,
 	isolatedStripeOAuthPort,
@@ -48,7 +52,7 @@ describe("connection-event webhook verification", () => {
 		const payload = JSON.stringify(event);
 		const header = await stripeTestHeader(payload, "whsec_synthetic");
 
-		const valid = await app.request(webhookPath(projectKey, versionId, "stripe"), {
+		const valid = await testRequest(app, webhookPath(projectKey, versionId, "stripe"), {
 			method: "POST",
 			headers: { "content-type": "application/json", "stripe-signature": header },
 			body: payload,
@@ -70,7 +74,7 @@ describe("connection-event webhook verification", () => {
 		});
 		expect(
 			(
-				await app.request(webhookPath(projectKey, versionId, "stripe"), {
+				await testRequest(app, webhookPath(projectKey, versionId, "stripe"), {
 					method: "POST",
 					headers: { "content-type": "application/json", "stripe-signature": tamperedHeader },
 					body: payload,
@@ -169,7 +173,7 @@ describe("connection-event webhook verification", () => {
 		await onboard(browser);
 		const { projectKey, versionId } = await draftStripe(browser);
 		const { app } = connectionEventApp([], stripeConnectionEvent());
-		const oversized = await app.request(webhookPath(projectKey, versionId, "stripe"), {
+		const oversized = await testRequest(app, webhookPath(projectKey, versionId, "stripe"), {
 			method: "POST",
 			headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=ab" },
 			body: "x".repeat(256 * 1024 + 1),
@@ -197,7 +201,7 @@ describe("connection-event webhook verification", () => {
 		const { app } = connectionEventApp([]);
 		const body = googlePushBody();
 		const token = signGoogleOidcToken(oidc.keys.privateKey, googleClaims(audience), oidc.kid);
-		const valid = await app.request(webhookPath(projectKey, versionId, "google"), {
+		const valid = await testRequest(app, webhookPath(projectKey, versionId, "google"), {
 			method: "POST",
 			headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
 			body: JSON.stringify(body),
@@ -215,7 +219,7 @@ describe("connection-event webhook verification", () => {
 		);
 		expect(
 			(
-				await app.request(webhookPath(projectKey, versionId, "google"), {
+				await testRequest(app, webhookPath(projectKey, versionId, "google"), {
 					method: "POST",
 					headers: { "content-type": "application/json", authorization: `Bearer ${wrong}` },
 					body: JSON.stringify(googlePushBody()),
@@ -231,7 +235,7 @@ describe("connection-event webhook verification", () => {
 		const { app } = connectionEventApp([]);
 		expect(
 			(
-				await app.request(webhookPath(projectKey, versionId, "apple"), {
+				await testRequest(app, webhookPath(projectKey, versionId, "apple"), {
 					method: "POST",
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({ signedPayload: "garbage" }),
@@ -291,7 +295,7 @@ describe("Stripe App webhook verification", () => {
 		);
 		expect(
 			(
-				await app.request("/v1/stripe-app/webhooks/test", {
+				await testRequest(app, "/v1/stripe-app/webhooks/test", {
 					method: "POST",
 					headers: { "content-type": "application/json", "stripe-signature": tamperedHeader },
 					body: JSON.stringify(tampered),
@@ -308,14 +312,15 @@ describe("Stripe App webhook verification", () => {
 			await f.sql`SELECT event_id FROM platform_stripe_app_events WHERE event_id='evt_invoice'`,
 		).toHaveLength(1);
 
-		const oversized = await app.request("/v1/stripe-app/webhooks/test", {
+		const oversized = await testRequest(app, "/v1/stripe-app/webhooks/test", {
 			method: "POST",
 			headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=ab" },
 			body: "x".repeat(256 * 1024 + 1),
 		});
 		expect(oversized.status).toBe(413);
 		expect(
-			(await app.request("/v1/stripe-app/webhooks/bogus", { method: "POST", body: "{}" })).status,
+			(await testRequest(app, "/v1/stripe-app/webhooks/bogus", { method: "POST", body: "{}" }))
+				.status,
 		).toBe(400);
 	});
 });
@@ -453,9 +458,7 @@ function stripeAppEvent(type: string, id: string, overrides: Record<string, unkn
 	};
 }
 
-type TestApp = {
-	request: (path: string, init?: RequestInit) => Response | Promise<Response>;
-};
+type TestApp = HandleableApp;
 
 async function postStripe(
 	app: TestApp,
@@ -465,7 +468,7 @@ async function postStripe(
 	header: string,
 	provider = "stripe",
 ) {
-	return await app.request(webhookPath(projectKey, versionId, provider), {
+	return await testRequest(app, webhookPath(projectKey, versionId, provider), {
 		method: "POST",
 		headers: { "content-type": "application/json", "stripe-signature": header },
 		body: JSON.stringify(event),
@@ -474,7 +477,7 @@ async function postStripe(
 
 async function postStripeApp(app: TestApp, event: Record<string, unknown>, mode: "test" | "live") {
 	const payload = JSON.stringify(event);
-	return await app.request(`/v1/stripe-app/webhooks/${mode}`, {
+	return await testRequest(app, `/v1/stripe-app/webhooks/${mode}`, {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",

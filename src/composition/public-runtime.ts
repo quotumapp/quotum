@@ -8,6 +8,7 @@ import { createBillingReadinessCheck } from "./runtime-readiness";
 
 export type {
 	QuotumApp,
+	QuotumRequestServer,
 	QuotumRuntime,
 	QuotumRuntimeScheduler,
 	QuotumScheduledJob,

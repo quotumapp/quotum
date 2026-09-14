@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
+import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
@@ -47,7 +48,7 @@ localDescribe("authoritative metering flows", () => {
 			idempotencyKey: "reserve",
 		});
 		const path = `/v1/billing-accounts/${billingAccountId}/usage/reservations/${reserved.reservationId}/confirm`;
-		const rejected = await app.request(path, {
+		const rejected = await testRequest(app, path, {
 			method: "POST",
 			headers: jsonHeaders(authHeaders(), "confirm-over"),
 			body: JSON.stringify({ quantity: "200" }),
@@ -333,7 +334,8 @@ localDescribe("authoritative metering flows", () => {
 			repository: context.repository,
 		});
 
-		const firstPage = await app.request(
+		const firstPage = await testRequest(
+			app,
 			"/v1/billing-accounts/insights_account/usage/events?limit=1",
 			{ headers: authHeaders() },
 		);
@@ -349,7 +351,8 @@ localDescribe("authoritative metering flows", () => {
 		]);
 		expect(firstBody.pagination.nextCursor).toEqual(expect.any(String));
 
-		const secondPage = await app.request(
+		const secondPage = await testRequest(
+			app,
 			`/v1/billing-accounts/insights_account/usage/events?limit=1&cursor=${encodeURIComponent(firstBody.pagination.nextCursor)}`,
 			{ headers: authHeaders() },
 		);
@@ -362,7 +365,8 @@ localDescribe("authoritative metering flows", () => {
 			}),
 		]);
 
-		const series = await app.request(
+		const series = await testRequest(
+			app,
 			"/v1/billing-accounts/insights_account/usage/series?interval=day",
 			{ headers: authHeaders() },
 		);
@@ -376,9 +380,13 @@ localDescribe("authoritative metering flows", () => {
 			}),
 		]);
 
-		const summary = await app.request("/v1/billing-accounts/insights_account/billing-summary", {
-			headers: authHeaders(),
-		});
+		const summary = await testRequest(
+			app,
+			"/v1/billing-accounts/insights_account/billing-summary",
+			{
+				headers: authHeaders(),
+			},
+		);
 		expect(summary.status).toBe(200);
 		expect((await summary.json()).data).toMatchObject({
 			schemaVersion: 1,
@@ -419,7 +427,8 @@ localDescribe("authoritative metering flows", () => {
 			balance: { available: "3", held: "7" },
 		});
 
-		const confirm = await app.request(
+		const confirm = await testRequest(
+			app,
 			`/v1/billing-accounts/account_2/usage/reservations/${accepted.reservationId}/confirm`,
 			{
 				method: "POST",
@@ -436,7 +445,8 @@ localDescribe("authoritative metering flows", () => {
 		const third = await reserveRequest(app, authHeaders(), "account_2", "reserve:3", "800");
 		const thirdData = (await third.json()).data;
 		expect(thirdData).toMatchObject({ allowed: true, walletQuantity: "4", status: "active" });
-		const release = await app.request(
+		const release = await testRequest(
+			app,
 			`/v1/billing-accounts/account_2/usage/reservations/${thirdData.reservationId}/release`,
 			{
 				method: "POST",
@@ -512,7 +522,8 @@ localDescribe("authoritative metering flows", () => {
 			"correction:consume",
 		);
 		const original = (await consumed.json()).data;
-		const correction = await app.request(
+		const correction = await testRequest(
+			app,
 			`/v1/billing-accounts/correction_account/usage/events/${original.usageEventId}/corrections`,
 			{
 				method: "POST",
@@ -1064,7 +1075,7 @@ function usageRequest(
 	body: Record<string, unknown>,
 	idempotencyKey?: string,
 ) {
-	return app.request(`/v1/billing-accounts/${billingAccountId}/usage/${operation}`, {
+	return testRequest(app, `/v1/billing-accounts/${billingAccountId}/usage/${operation}`, {
 		method: "POST",
 		headers: jsonHeaders(authHeaders, idempotencyKey),
 		body: JSON.stringify(body),
@@ -1078,7 +1089,7 @@ function reserveRequest(
 	idempotencyKey: string,
 	quantity: string,
 ) {
-	return app.request(`/v1/billing-accounts/${billingAccountId}/usage/reservations`, {
+	return testRequest(app, `/v1/billing-accounts/${billingAccountId}/usage/reservations`, {
 		method: "POST",
 		headers: jsonHeaders(authHeaders, idempotencyKey),
 		body: JSON.stringify({

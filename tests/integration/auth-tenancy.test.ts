@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { EntitlementSnapshot } from "../../src/billing/types";
 import { parseProjectApiCredential } from "../../src/platform/credentials/project-api-token";
+import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import { expectTableCounts } from "./helpers/db-assertions";
@@ -33,8 +34,8 @@ localDescribe("billing auth and tenancy integration", () => {
 			repository: context.repository,
 		});
 
-		const missing = await app.request("/v1/billing-accounts/integration_user/entitlements");
-		const allowed = await app.request("/v1/billing-accounts/integration_user/entitlements", {
+		const missing = await testRequest(app, "/v1/billing-accounts/integration_user/entitlements");
+		const allowed = await testRequest(app, "/v1/billing-accounts/integration_user/entitlements", {
 			headers: authHeaders("voysee"),
 		});
 
@@ -56,9 +57,13 @@ localDescribe("billing auth and tenancy integration", () => {
 		const parsed = parseProjectApiCredential(credential);
 		if (parsed === null) throw new Error("Expected a versioned integration credential");
 
-		const beforeRevocation = await app.request("/v1/billing-accounts/revoked_user/entitlements", {
-			headers: authHeaders("voysee"),
-		});
+		const beforeRevocation = await testRequest(
+			app,
+			"/v1/billing-accounts/revoked_user/entitlements",
+			{
+				headers: authHeaders("voysee"),
+			},
+		);
 		expect(beforeRevocation.status).toBe(200);
 
 		try {
@@ -67,9 +72,13 @@ localDescribe("billing auth and tenancy integration", () => {
 				SET revoked_at = now(), updated_at = now()
 				WHERE id = ${parsed.credentialId}
 			`;
-			const afterRevocation = await app.request("/v1/billing-accounts/revoked_user/entitlements", {
-				headers: authHeaders("voysee"),
-			});
+			const afterRevocation = await testRequest(
+				app,
+				"/v1/billing-accounts/revoked_user/entitlements",
+				{
+					headers: authHeaders("voysee"),
+				},
+			);
 			expect(afterRevocation.status).toBe(401);
 			expect(await afterRevocation.json()).toEqual({
 				success: false,
@@ -90,7 +99,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			repository: context.repository,
 		});
 
-		const response = await app.request("/v1/purchases/verify?project_id=wiseley", {
+		const response = await testRequest(app, "/v1/purchases/verify?project_id=wiseley", {
 			method: "POST",
 			headers: {
 				...authHeaders("voysee"),
@@ -130,7 +139,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			repository: context.repository,
 		});
 
-		const response = await app.request("/v1/projects/unknown/webhooks/apple", {
+		const response = await testRequest(app, "/v1/projects/unknown/webhooks/apple", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
@@ -161,12 +170,13 @@ localDescribe("billing auth and tenancy integration", () => {
 					SET lifecycle_status = ${lifecycleStatus}
 					WHERE key = 'wiseley'
 				`;
-				const privateResponse = await app.request(
+				const privateResponse = await testRequest(
+					app,
 					"/v1/billing-accounts/integration_user/entitlements",
 					{ headers: { authorization: `Bearer ${integrationProjectCredential("wiseley")}` } },
 				);
 				const callsBeforeWebhook = apple.calls.length;
-				const webhookResponse = await app.request("/v1/projects/wiseley/webhooks/apple", {
+				const webhookResponse = await testRequest(app, "/v1/projects/wiseley/webhooks/apple", {
 					method: "POST",
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({ signedPayload: `signed-notification-${lifecycleStatus}` }),
@@ -187,7 +197,8 @@ localDescribe("billing auth and tenancy integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const tokenResponse = await app.request(
+		const tokenResponse = await testRequest(
+			app,
 			"/v1/billing-accounts/same_user/providers/apple/account-token",
 			{
 				headers: authHeaders("voysee"),
@@ -199,7 +210,7 @@ localDescribe("billing auth and tenancy integration", () => {
 		apple.setAppAccountToken(tokenBody.data.appAccountToken);
 
 		const purchase = await withIsoDateSqlParameters(() =>
-			app.request("/v1/purchases/verify", {
+			testRequest(app, "/v1/purchases/verify", {
 				method: "POST",
 				headers: {
 					...authHeaders("voysee"),
@@ -213,10 +224,10 @@ localDescribe("billing auth and tenancy integration", () => {
 			}),
 		);
 
-		const voysee = await app.request("/v1/billing-accounts/same_user/entitlements", {
+		const voysee = await testRequest(app, "/v1/billing-accounts/same_user/entitlements", {
 			headers: authHeaders("voysee"),
 		});
-		const wiseley = await app.request("/v1/billing-accounts/same_user/entitlements", {
+		const wiseley = await testRequest(app, "/v1/billing-accounts/same_user/entitlements", {
 			headers: authHeaders("wiseley"),
 		});
 
@@ -241,8 +252,8 @@ localDescribe("billing auth and tenancy integration", () => {
 			repository: context.repository,
 		});
 
-		const missing = await app.request("/v1/billing-accounts/gateway_user/entitlements");
-		const allowed = await app.request("/v1/billing-accounts/gateway_user/entitlements", {
+		const missing = await testRequest(app, "/v1/billing-accounts/gateway_user/entitlements");
+		const allowed = await testRequest(app, "/v1/billing-accounts/gateway_user/entitlements", {
 			headers: { "x-billing-project-key": "voysee" },
 		});
 
@@ -268,11 +279,11 @@ localDescribe("billing auth and tenancy integration", () => {
 			env: gatewayEnv,
 			repository: context.repository,
 		});
-		const unknown = await app.request("/v1/billing-accounts/gateway_user/entitlements", {
+		const unknown = await testRequest(app, "/v1/billing-accounts/gateway_user/entitlements", {
 			headers: { "x-billing-project-key": "does-not-exist" },
 		});
 		expect(unknown.status).toBe(404);
-		const internal = await app.request("/v1/billing-accounts/gateway_user/entitlements", {
+		const internal = await testRequest(app, "/v1/billing-accounts/gateway_user/entitlements", {
 			headers: { "x-billing-project-key": "billing-internal" },
 		});
 		expect(internal.status).toBe(404);
@@ -283,11 +294,11 @@ localDescribe("billing auth and tenancy integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const ignored = await app.request("/v1/billing-accounts/gateway_user/entitlements", {
+		const ignored = await testRequest(app, "/v1/billing-accounts/gateway_user/entitlements", {
 			headers: { "x-billing-project-key": "voysee" },
 		});
 		expect(ignored.status).toBe(401);
-		const mismatched = await app.request("/v1/billing-accounts/gateway_user/entitlements", {
+		const mismatched = await testRequest(app, "/v1/billing-accounts/gateway_user/entitlements", {
 			headers: {
 				...authHeaders("voysee"),
 				"x-billing-project-key": "wiseley",
@@ -303,7 +314,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			repository: context.repository,
 		});
 
-		const webhook = await app.request("/v1/webhooks/apple", {
+		const webhook = await testRequest(app, "/v1/webhooks/apple", {
 			method: "POST",
 			headers: { ...authHeaders("voysee"), "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "signed-notification" }),

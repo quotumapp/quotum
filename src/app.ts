@@ -1,6 +1,4 @@
-import type { Context, MiddlewareHandler } from "hono";
-import { Hono } from "hono";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { Elysia } from "elysia";
 import type { AdminBillingReader } from "./admin/types";
 import { registerAdminRoutes } from "./app/admin-routes";
 import { registerCatalogRoutes } from "./app/catalog-routes";
@@ -9,7 +7,14 @@ import { registerCustomerRoutes } from "./app/customer-routes";
 import { registerInsightsRoutes } from "./app/insights-routes";
 import { registerMeteringRoutes } from "./app/metering-routes";
 import { createProjectProviderServiceResolver } from "./app/provider-services";
-import type { BillingHonoEnv, AppDependencies as CreateAppDependencies } from "./app/types";
+import { projectSelectorRejectedError, queryHasCallerProjectSelector } from "./app/request-context";
+import type {
+	AppDependencies as CreateAppDependencies,
+	PostAuthGuard,
+	PreAuthGate,
+	PreAuthGateInput,
+	RequestObserver,
+} from "./app/types";
 import { registerWebhookRoutes } from "./app/webhook-routes";
 import { EntitlementService } from "./billing/entitlements";
 import { BillingError, classifyBillingError, isBillingError } from "./billing/errors";
@@ -18,36 +23,58 @@ import { PostgresProjectInstanceContextResolver } from "./composition/project-in
 import { AdminBillingRepository } from "./db/admin-repository";
 import { checkPostgresHealth } from "./db/client";
 import { BillingRepository } from "./db/repository";
-import { requireApiKey } from "./http/api-key";
-import { operationalContracts } from "./http/operational-contracts";
+import { registerOperationalRoutes } from "./http/operational-routes";
 import {
 	createFixedWindowRateLimiter,
-	rateLimitMiddleware,
+	RateLimitExceeded,
+	type RateLimitServer,
+	rateLimitHeaders,
+	rateLimitResponse,
 	requestIp,
-	requestProjectIpAndPath,
 } from "./http/rate-limit";
 import { createNoopBillingLogger, safelyLogError } from "./observability/logger";
 import {
 	createInMemoryBillingMetrics,
 	safelyIncrementBillingMetric,
 } from "./observability/metrics";
-import { isTenantTrafficEligible, type ProjectInstanceContextResolver } from "./projects/context";
-import { registerRoute } from "./shared/http-contract";
-
-const privateApiMaxBodyBytes = 256 * 1024;
-
-const forbiddenProjectSelectorKeys = new Set(["projectId", "project_id"]);
+import {
+	isTenantTrafficEligible,
+	type ProjectInstanceContext,
+	type ProjectInstanceContextResolver,
+} from "./projects/context";
+import { DEFAULT_BODY_LIMIT_BYTES, isBodyTooLarge } from "./shared/body-limit";
+import {
+	type ErrorEnvelopeBody,
+	HTTP_APP_CONFIG,
+	LENIENT_JSON_PARSE,
+	lenientJsonParser,
+	routedPath,
+} from "./shared/http";
 
 export type { AppDependencies } from "./app/types";
 
-const rejectCallerProjectSelectors: MiddlewareHandler = async (c, next) => {
-	const url = new URL(c.req.url);
-	if (queryHasCallerProjectSelector(url.searchParams)) {
-		return projectSelectorRejectedResponse(c);
-	}
+const WEBHOOK_PATH_PATTERN = /^\/v1\/projects\/[^/]+\/webhooks\/(apple|google|stripe)$/;
 
-	await next();
-};
+const requestIds = new WeakMap<Request, string>();
+
+function aggregateV1RateLimitGate(
+	limiter: {
+		check(key: string): { allowed: boolean; remaining: number; resetAt: Date };
+	},
+	trustProxyHeaders?: boolean,
+): PreAuthGate {
+	return {
+		matches: (path) => path.startsWith("/v1/") && !WEBHOOK_PATH_PATTERN.test(path),
+		gate({ request, server }: PreAuthGateInput) {
+			// This aggregate guard is intentionally looser than any individual downstream policy.
+			const result = limiter.check(requestIp({ request, server }, { trustProxyHeaders }));
+			if (!result.allowed) {
+				return rateLimitResponse(result);
+			}
+			return undefined;
+		},
+	};
+}
 
 export function createApp({
 	env,
@@ -68,8 +95,8 @@ export function createApp({
 	readinessCheck,
 	requestObservabilityMiddleware,
 	projectContextResolver,
-}: CreateAppDependencies): Hono<BillingHonoEnv> {
-	const app = new Hono<BillingHonoEnv>();
+}: CreateAppDependencies) {
+	const app = new Elysia(HTTP_APP_CONFIG);
 	const billingLogger = logger ?? createNoopBillingLogger();
 	const billingMetrics = metrics ?? createInMemoryBillingMetrics();
 	let repository: BillingRepository | null = null;
@@ -118,38 +145,128 @@ export function createApp({
 	};
 	const contextResolver = projectContextResolver ?? new PostgresProjectInstanceContextResolver();
 	const checkReady = readinessCheck ?? checkPostgresHealth;
-	const webhookLimiter = createFixedWindowRateLimiter({
-		windowMs: env.rateLimit.windowMs,
-		limit: env.rateLimit.webhookLimit,
-	});
-	const verifyLimiter = createFixedWindowRateLimiter({
-		windowMs: env.rateLimit.windowMs,
-		limit: env.rateLimit.verifyLimit,
-	});
-	const adminLimiter = createFixedWindowRateLimiter({
-		windowMs: env.rateLimit.windowMs,
-		limit: env.rateLimit.adminLimit,
-	});
-	const meteringLimiter = createFixedWindowRateLimiter({
-		windowMs: env.rateLimit.windowMs,
-		limit: env.rateLimit.meteringLimit,
-	});
-	const projectResolutionLimiter = createFixedWindowRateLimiter({
-		windowMs: env.rateLimit.windowMs,
-		// This aggregate guard is intentionally looser than any individual downstream policy.
-		limit: Math.min(
-			Number.MAX_SAFE_INTEGER,
-			env.rateLimit.verifyLimit + env.rateLimit.adminLimit + env.rateLimit.meteringLimit,
-		),
-	});
-	const rateLimitKeyOptions = {
-		trustProxyHeaders: env.rateLimit.trustProxyHeaders,
+	const rateLimitKeyOptions = { trustProxyHeaders: env.rateLimit.trustProxyHeaders };
+
+	const preAuthGates: PreAuthGate[] = [];
+	const registerPreAuthGate = (gate: PreAuthGate): void => {
+		preAuthGates.push(gate);
 	};
-	const rateLimitKey = (c: Context): string => requestProjectIpAndPath(c, rateLimitKeyOptions);
-	app.onError((error, c) => {
+	const postAuthGuards: PostAuthGuard[] = [];
+	const registerPostAuthGuard = (guard: PostAuthGuard): void => {
+		postAuthGuards.push(guard);
+	};
+	const requestObservers: RequestObserver[] = [];
+	const registerRequestObserver = (observer: RequestObserver): void => {
+		requestObservers.push(observer);
+	};
+	const observedRequests = new WeakMap<
+		Request,
+		{ observers: RequestObserver[]; path: string; startedAt: number }
+	>();
+	const finishObservedRequest = (request: Request, result: "completed" | "failed"): void => {
+		const observed = observedRequests.get(request);
+		if (observed === undefined) return;
+		observedRequests.delete(request);
+		const durationMs = performance.now() - observed.startedAt;
+		for (const observer of observed.observers) {
+			try {
+				observer.finish({ path: observed.path, durationMs, result });
+			} catch {
+				// Observers are telemetry; they must never change the response.
+			}
+		}
+	};
+
+	app.parser(LENIENT_JSON_PARSE, lenientJsonParser);
+
+	if (requestObservabilityMiddleware !== undefined) {
+		app.use(requestObservabilityMiddleware);
+	}
+
+	app.onRequest((context) => {
+		const { request, set, server } = context;
+		const requestId =
+			requestIdFromHeader(request.headers.get("x-request-id")) ?? crypto.randomUUID();
+		requestIds.set(request, requestId);
+		set.headers["x-request-id"] = requestId;
+
+		const path = routedPath(context);
+		if (
+			path.startsWith("/v1/") &&
+			request.method !== "GET" &&
+			request.method !== "HEAD" &&
+			oversizedContentLength(request.headers.get("content-length"))
+		) {
+			return billingJsonResponse(413, {
+				success: false,
+				error: { code: "REQUEST_BODY_TOO_LARGE", message: "Request body is too large" },
+			});
+		}
+
+		const rateLimitServer = (server ?? null) as RateLimitServer | null;
+		for (const gate of preAuthGates) {
+			if (!gate.matches(path)) {
+				continue;
+			}
+			const rejection = gate.gate({ request, path, server: rateLimitServer, set });
+			if (rejection !== undefined) {
+				return rejection;
+			}
+		}
+		return undefined;
+	});
+
+	app.onError(({ request, error, set, code }) => {
+		finishObservedRequest(request, "failed");
+		const requestId = requestIds.get(request) ?? "";
+		const headers: Record<string, string> = {};
+		if (requestId !== "") {
+			headers["x-request-id"] = requestId;
+		}
+
+		if (isBodyTooLarge(error) || isBodyTooLarge((error as { cause?: unknown })?.cause)) {
+			return billingJsonResponse(
+				413,
+				{
+					success: false,
+					error: { code: "REQUEST_BODY_TOO_LARGE", message: "Request body is too large" },
+				},
+				headers,
+			);
+		}
+
+		if (code === "VALIDATION" || (typeof code === "string" && code === "PARSE")) {
+			set.status = 400;
+			return billingJsonResponse(
+				400,
+				{
+					success: false,
+					error: { code: "INVALID_REQUEST", message: "Request validation failed" },
+				},
+				headers,
+			);
+		}
+
+		if (error instanceof RateLimitExceeded) {
+			Object.assign(set.headers, rateLimitHeaders(error.result));
+			return billingJsonResponse(
+				429,
+				{ success: false, error: { code: "RATE_LIMITED", message: "Too many requests" } },
+				headers,
+			);
+		}
+
+		if (code === "NOT_FOUND" && !isBillingError(error)) {
+			return billingJsonResponse(
+				404,
+				{ success: false, error: { code: "NOT_FOUND", message: "Route not found" } },
+				headers,
+			);
+		}
+
 		const classified = classifyBillingError(error);
-		const requestId = c.get("requestId");
-		const routeGroup = routeGroupForPath(new URL(c.req.url).pathname);
+		const url = new URL(request.url);
+		const routeGroup = routeGroupForPath(url.pathname);
 		if (classified.status >= 500) {
 			safelyIncrementBillingMetric(billingMetrics, "billing_http_errors_total", {
 				route_group: routeGroup,
@@ -159,89 +276,84 @@ export function createApp({
 			});
 			safelyLogError(billingLogger, "Billing request failed", error, {
 				requestId,
-				method: c.req.method,
-				path: new URL(c.req.url).pathname,
+				method: request.method,
+				path: url.pathname,
 				routeGroup,
 				status: String(classified.status),
 				code: classified.code,
 				classification: classified.classification,
 			});
 		}
-		c.header("x-request-id", requestId);
-		return c.json(
-			{
-				success: false,
-				error: { code: classified.code, message: classified.message },
-			},
-			classified.status as ContentfulStatusCode,
+		return billingJsonResponse(
+			classified.status,
+			{ success: false, error: { code: classified.code, message: classified.message } },
+			headers,
 		);
 	});
 
-	app.use("*", async (c, next) => {
-		const requestId = requestIdFromHeader(c.req.header("x-request-id")) ?? crypto.randomUUID();
-		c.set("requestId", requestId);
-		c.header("x-request-id", requestId);
-		await next();
-	});
-
-	if (requestObservabilityMiddleware !== undefined) {
-		app.use("*", requestObservabilityMiddleware);
-	}
-
-	registerRoute(app, operationalContracts.health, (c) => c.json({ status: "ok" }));
-	registerRoute(app, operationalContracts.livez, (c) => c.json({ status: "ok" }));
-	registerRoute(app, operationalContracts.ready, async (c) => {
-		if (await checkReady()) {
-			return c.json({ status: "ok" });
-		}
-
-		return c.json({ status: "unavailable" }, 503);
-	});
-	registerRoute(app, operationalContracts.metrics, (c) => {
-		c.header("content-type", "text/plain; version=0.0.4");
-		return c.body(billingMetrics.renderPrometheus());
+	registerOperationalRoutes({
+		app,
+		readinessCheck: checkReady,
+		renderMetrics: () => billingMetrics.renderPrometheus(),
 	});
 
 	registerWebhookRoutes({
 		app,
 		contextResolver,
-		webhookLimiter,
-		rateLimitKey,
+		registerPreAuthGate,
+		rateLimitKeyOptions,
+		webhookLimiter: createWebhookLimiter(),
 		providerServices,
 		billingMetrics,
 		billingLogger,
-		parseJson,
-		readRequestText,
 	});
 
-	// Provider webhooks terminate in the routes registered above and retain their own
-	// pre-resolution limiter. This guard bounds database-backed resolution for the ordinary API.
-	app.use(
-		"/v1/*",
-		rateLimitMiddleware({
-			limiter: projectResolutionLimiter,
-			key: (c) => requestIp(c, rateLimitKeyOptions),
-			headers: "rejected_only",
-		}),
+	registerPreAuthGate(
+		aggregateV1RateLimitGate(createAggregateLimiter(), env.rateLimit.trustProxyHeaders),
 	);
 
-	if (env.authMode === "api_key") {
-		app.use("/v1/*", requireApiKey(contextResolver));
-	} else {
-		app.use("/v1/*", requireGatewayProjectContext(contextResolver));
-	}
-
-	app.use("/v1/*", rejectCallerProjectSelectors);
+	app.derive(async ({ request, path, server, set }) => {
+		const { project } =
+			env.authMode === "api_key"
+				? await resolveProjectFromApiKey(request, contextResolver)
+				: await resolveGatewayProject(request, contextResolver);
+		if (queryHasCallerProjectSelector(new URL(request.url).searchParams)) {
+			throw projectSelectorRejectedError();
+		}
+		const observers = requestObservers.filter((observer) => observer.matches(path));
+		if (observers.length > 0) {
+			observedRequests.set(request, { observers, path, startedAt: performance.now() });
+		}
+		// Path-group limiters and operator-key guards run here: after authentication, before request
+		// validation. They match the routed path so they always describe the handler that will run.
+		const rateLimitServer = (server ?? null) as RateLimitServer | null;
+		for (const guard of postAuthGuards) {
+			if (!guard.matches(path)) {
+				continue;
+			}
+			await guard.guard({
+				request,
+				path,
+				server: rateLimitServer,
+				projectKey: project.projectInstanceKey,
+				set: set as unknown as { headers: Record<string, string> },
+			});
+		}
+		return { project };
+	});
+	app.onAfterHandle(({ request }) => {
+		finishObservedRequest(request, "completed");
+	});
 
 	registerCustomerRoutes({
 		app,
-		verifyLimiter,
-		rateLimitKey,
+		verifyLimiter: createVerifyLimiter(),
+		rateLimitKeyOptions,
 		entitlementService: service,
 		providerServices,
 		billingMetrics,
 		billingLogger,
-		parsePrivateJson,
+		registerPostAuthGuard,
 	});
 	registerInsightsRoutes({
 		app,
@@ -253,8 +365,8 @@ export function createApp({
 	});
 	registerMeteringRoutes({
 		app,
-		meteringLimiter,
-		rateLimitKey,
+		meteringLimiter: createMeteringLimiter(),
+		rateLimitKeyOptions,
 		meteringService: {
 			getOperation: (...args) => getMeteringService().getOperation(...args),
 			getBalance: (...args) => getMeteringService().getBalance(...args),
@@ -266,49 +378,99 @@ export function createApp({
 			correct: (...args) => getMeteringService().correct(...args),
 		},
 		billingMetrics,
-		parsePrivateJson,
+		registerPostAuthGuard,
+		registerRequestObserver,
 	});
 	registerControlsRoutes({
 		app,
 		operatorApiKey: env.operatorApiKey,
 		service: controlsService,
-		parsePrivateJson,
+		registerPostAuthGuard,
 	});
 	registerAdminRoutes({
 		app,
-		adminLimiter,
-		rateLimitKey,
+		adminLimiter: createAdminLimiter(),
+		rateLimitKeyOptions,
 		operatorApiKey: env.operatorApiKey,
 		billingMetrics,
 		billingLogger,
 		getAdminBillingReader,
 		adminOperations: adminOperations ?? null,
+		registerPostAuthGuard,
 	});
 	registerCatalogRoutes({
 		app,
 		operatorApiKey: env.operatorApiKey,
 		catalogControlPlane: catalogService,
-		parsePrivateJson,
+		registerPostAuthGuard,
 	});
 
-	app.notFound((c) =>
-		c.json(
-			{
-				success: false,
-				error: { code: "NOT_FOUND", message: "Route not found" },
-			},
-			404,
-		),
-	);
-
 	return app;
+
+	function createWebhookLimiter() {
+		return createFixedWindowRateLimiter({
+			windowMs: env.rateLimit.windowMs,
+			limit: env.rateLimit.webhookLimit,
+		});
+	}
+	function createVerifyLimiter() {
+		return createFixedWindowRateLimiter({
+			windowMs: env.rateLimit.windowMs,
+			limit: env.rateLimit.verifyLimit,
+		});
+	}
+	function createAdminLimiter() {
+		return createFixedWindowRateLimiter({
+			windowMs: env.rateLimit.windowMs,
+			limit: env.rateLimit.adminLimit,
+		});
+	}
+	function createMeteringLimiter() {
+		return createFixedWindowRateLimiter({
+			windowMs: env.rateLimit.windowMs,
+			limit: env.rateLimit.meteringLimit,
+		});
+	}
+	function createAggregateLimiter() {
+		return createFixedWindowRateLimiter({
+			windowMs: env.rateLimit.windowMs,
+			// This aggregate guard is intentionally looser than any individual downstream policy.
+			limit: Math.min(
+				Number.MAX_SAFE_INTEGER,
+				env.rateLimit.verifyLimit + env.rateLimit.adminLimit + env.rateLimit.meteringLimit,
+			),
+		});
+	}
 }
 
-function requireGatewayProjectContext(
+function resolveProjectFromApiKey(
+	request: Request,
 	resolver: ProjectInstanceContextResolver,
-): MiddlewareHandler<BillingHonoEnv> {
-	return async (c, next) => {
-		const projectKey = c.req.header("x-billing-project-key")?.trim();
+): Promise<{ project: ProjectInstanceContext }> {
+	return (async () => {
+		const token = parseBearerToken(request.headers.get("authorization"));
+		const resolution =
+			token === null ? { kind: "not_found" as const } : await resolver.resolveCredential(token);
+		if (resolution.kind === "unavailable") {
+			throw new BillingError(
+				"Billing project context is unavailable",
+				"BILLING_PROJECT_CONTEXT_UNAVAILABLE",
+				503,
+			);
+		}
+		if (resolution.kind !== "resolved" || !isTenantTrafficEligible(resolution.context)) {
+			throw new BillingError("Invalid billing API key", "UNAUTHORIZED", 401);
+		}
+		return { project: resolution.context };
+	})();
+}
+
+function resolveGatewayProject(
+	request: Request,
+	resolver: ProjectInstanceContextResolver,
+): Promise<{ project: ProjectInstanceContext }> {
+	return (async () => {
+		const projectKey = request.headers.get("x-billing-project-key")?.trim();
 		if (projectKey === undefined || projectKey === "") {
 			throw new BillingError(
 				"Billing project context is required",
@@ -331,13 +493,37 @@ function requireGatewayProjectContext(
 				404,
 			);
 		}
-
-		c.set("project", resolution.context);
-		await next();
-	};
+		return { project: resolution.context };
+	})();
 }
 
-function requestIdFromHeader(value: string | undefined): string | null {
+function parseBearerToken(authorization: string | null): string | null {
+	const match = /^Bearer\s+(.+)$/i.exec(authorization ?? "");
+	return match?.[1] ?? null;
+}
+
+function oversizedContentLength(contentLength: string | null): boolean {
+	if (contentLength === null) {
+		return false;
+	}
+	const parsedContentLength = Number.parseInt(contentLength, 10);
+	return (
+		String(parsedContentLength) === contentLength && parsedContentLength > DEFAULT_BODY_LIMIT_BYTES
+	);
+}
+
+function billingJsonResponse(
+	status: number,
+	body: ErrorEnvelopeBody,
+	extraHeaders: Record<string, string> = {},
+): Response {
+	return new Response(JSON.stringify(body), {
+		status,
+		headers: { "content-type": "application/json", ...extraHeaders },
+	});
+}
+
+function requestIdFromHeader(value: string | null): string | null {
 	const requestId = value?.trim();
 	return requestId === undefined || requestId === "" ? null : requestId;
 }
@@ -362,119 +548,4 @@ function routeGroupForPath(path: string): string {
 		return "purchase";
 	}
 	return "unknown";
-}
-
-function queryHasCallerProjectSelector(params: URLSearchParams): boolean {
-	for (const key of forbiddenProjectSelectorKeys) {
-		if (params.has(key)) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-function hasCallerProjectSelector(value: unknown, seen = new Set<object>()): boolean {
-	if (typeof value !== "object" || value === null) {
-		return false;
-	}
-
-	if (seen.has(value)) {
-		return false;
-	}
-	seen.add(value);
-
-	if (Array.isArray(value)) {
-		return value.some((item) => hasCallerProjectSelector(item, seen));
-	}
-
-	for (const [key, child] of Object.entries(value)) {
-		if (forbiddenProjectSelectorKeys.has(key) || hasCallerProjectSelector(child, seen)) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-function projectSelectorRejectedError(): BillingError {
-	return new BillingError("Project is resolved from billing credentials", "INVALID_REQUEST", 400);
-}
-
-function projectSelectorRejectedResponse(c: Parameters<MiddlewareHandler>[0]) {
-	return c.json(
-		{
-			success: false,
-			error: {
-				code: "INVALID_REQUEST",
-				message: "Project is resolved from billing credentials",
-			},
-		},
-		400,
-	);
-}
-
-async function parseJson(request: Request, maxBytes?: number): Promise<unknown> {
-	try {
-		const text = await readRequestText(request, maxBytes);
-		return JSON.parse(text);
-	} catch (error) {
-		if (isBillingError(error)) {
-			throw error;
-		}
-
-		return null;
-	}
-}
-
-async function parsePrivateJson(request: Request): Promise<unknown> {
-	const body = await parseJson(request, privateApiMaxBodyBytes);
-	if (hasCallerProjectSelector(body)) {
-		throw projectSelectorRejectedError();
-	}
-	return body;
-}
-
-async function readRequestText(request: Request, maxBytes?: number): Promise<string> {
-	if (maxBytes !== undefined) {
-		const contentLength = request.headers.get("content-length");
-		if (contentLength !== null) {
-			const parsedContentLength = Number.parseInt(contentLength, 10);
-			if (String(parsedContentLength) === contentLength && parsedContentLength > maxBytes) {
-				throw new BillingError("Request body is too large", "REQUEST_BODY_TOO_LARGE", 413);
-			}
-		}
-	}
-
-	if (request.body === null) {
-		return "";
-	}
-
-	const reader = request.body.getReader();
-	const chunks: Uint8Array[] = [];
-	let totalBytes = 0;
-
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) {
-			break;
-		}
-
-		totalBytes += value.byteLength;
-		if (maxBytes !== undefined && totalBytes > maxBytes) {
-			await reader.cancel();
-			throw new BillingError("Request body is too large", "REQUEST_BODY_TOO_LARGE", 413);
-		}
-
-		chunks.push(value);
-	}
-
-	const body = new Uint8Array(totalBytes);
-	let offset = 0;
-	for (const chunk of chunks) {
-		body.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
-
-	return new TextDecoder().decode(body);
 }

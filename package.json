@@ -1,6 +1,6 @@
 {
 	"name": "quotum-api",
-	"version": "0.9.3",
+	"version": "0.10.0",
 	"exports": {
 		"./sdk": "./src/sdk/index.ts",
 		"./runtime": "./src/composition/public-runtime.ts",
@@ -39,12 +39,12 @@
 	"dependencies": {
 		"@apple/app-store-server-library": "3.1.0",
 		"@googleapis/androidpublisher": "38.0.0",
-		"@hono/zod-openapi": "^1.6.3",
 		"@sentry/bun": "^10.74.0",
+		"@sinclair/typebox": "^0.34.52",
 		"better-auth": "1.7.3",
 		"drizzle-orm": "^0.45.2",
+		"elysia": "^1.4.30",
 		"google-auth-library": "11.0.2",
-		"hono": "^4.13.7",
 		"openapi3-ts": "^4.6.1",
 		"stripe": "22.6.2",
 		"zod": "^4.6.1",

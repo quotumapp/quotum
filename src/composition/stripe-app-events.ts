@@ -1,32 +1,39 @@
-import { Hono } from "hono";
+import { Elysia } from "elysia";
 import Stripe from "stripe";
 import { z } from "zod";
 import { BillingRepository } from "../db/repository";
-import {
-	createFixedWindowRateLimiter,
-	rateLimitMiddleware,
-	requestIpAndPath,
-} from "../http/rate-limit";
+import { createFixedWindowRateLimiter } from "../http/rate-limit";
 import type { StripeOAuthPort } from "../platform/connections/oauth-port";
 import type { ConnectionRepository } from "../platform/connections/repository";
 import { StripeAppEvents } from "../platform/connections/stripe-events";
 import { buildStripeConfig, StripeBillingClient } from "../providers/stripe/client";
 import { StripeBillingService } from "../providers/stripe/service";
-import { defineContract, registerRoute } from "../shared/http-contract";
+import { HTTP_APP_CONFIG, operationDetail } from "../shared/http";
 import { createRuntimeConnectionResolver } from "./connections";
+import { ipRateLimitGate, rawJsonResponse, readCappedRawBody } from "./ingress-http";
 import { PostgresProjectInstanceContextResolver } from "./project-instance-persistence";
-export const stripeAppEventContract = defineContract("post", "/v1/stripe-app/webhooks/:mode", {
-	operationId: "stripeAppWebhook",
-	tags: ["connection-events"],
-	security: [{ stripeSignature: [] }],
-	params: z.object({ mode: z.enum(["test", "live"]) }),
-	body: z.unknown(),
-	responses: {
-		200: z.object({ success: z.literal(true) }),
-		400: z.object({ success: z.literal(false) }),
-		413: z.object({ success: z.literal(false) }),
-	},
-});
+
+const STRIPE_APP_EVENT_PATH = "/v1/stripe-app/webhooks/:mode";
+
+/** OpenAPI metadata for the Stripe app webhook durable inbox. */
+export function stripeAppEventDetail(): Record<string, unknown> {
+	return operationDetail({
+		operationId: "stripeAppWebhook",
+		tags: ["connection-events"],
+		path: STRIPE_APP_EVENT_PATH,
+		security: [{ stripeSignature: [] }],
+		responses: {
+			200: z.object({ success: z.literal(true) }),
+			400: z.object({ success: z.literal(false) }),
+			413: z.object({ success: z.literal(false) }),
+		},
+		request: {
+			params: z.object({ mode: z.enum(["test", "live"]) }),
+			body: z.unknown(),
+		},
+	});
+}
+
 export function createStripeAppEvents(repository: ConnectionRepository, oauth: StripeOAuthPort) {
 	const events = new StripeAppEvents(repository.sql);
 	const resolver = new PostgresProjectInstanceContextResolver();
@@ -71,51 +78,45 @@ export function createStripeAppEvents(repository: ConnectionRepository, oauth: S
 			}
 		}
 	};
-	const app = new Hono();
-	app.use(
-		"/v1/stripe-app/webhooks/:mode",
-		rateLimitMiddleware({
-			limiter: createFixedWindowRateLimiter({ windowMs: 60_000, limit: 120, maxBuckets: 10_000 }),
-			key: (c) => requestIpAndPath(c),
-		}),
-	);
-	registerRoute(app, stripeAppEventContract, async (c) => {
-		const mode = z.enum(["test", "live"]).safeParse(c.req.param("mode"));
-		if (!mode.success) return c.json({ success: false }, 400);
-		const reader = c.req.raw.body?.getReader();
-		let size = 0;
-		const chunks: Uint8Array[] = [];
-		if (reader)
-			for (;;) {
-				const value = await reader.read();
-				if (value.done) break;
-				size += value.value.byteLength;
-				if (size > 256 * 1024) {
-					await reader.cancel();
-					return c.json({ success: false }, 413);
-				}
-				chunks.push(value.value);
-			}
-		try {
-			const stripe = new Stripe("sk_test_signature_verification_only");
-			const event = await stripe.webhooks.constructEventAsync(
-				Buffer.concat(chunks).toString("utf8"),
-				c.req.header("stripe-signature") ?? "",
-				oauth.webhookSecret(mode.data === "live" ? "production" : "sandbox"),
-			);
-			if (!event.account || event.livemode !== (mode.data === "live"))
-				throw new Error("Account required");
-			await events.accept({
-				event_id: event.id,
-				account_id: event.account,
-				livemode: event.livemode,
-				payload: JSON.parse(JSON.stringify(event)),
-			});
-			// Durable inbox polling performs provider work outside the webhook request.
-			return c.json({ success: true });
-		} catch {
-			return c.json({ success: false }, 400);
-		}
+	const limiter = createFixedWindowRateLimiter({
+		windowMs: 60_000,
+		limit: 120,
+		maxBuckets: 10_000,
 	});
+	const app = new Elysia(HTTP_APP_CONFIG);
+	app.post(
+		STRIPE_APP_EVENT_PATH,
+		async ({ params, request }) => {
+			const mode = z.enum(["test", "live"]).safeParse(params.mode);
+			if (!mode.success) return rawJsonResponse(400, { success: false });
+			const read = await readCappedRawBody(request, 256 * 1024);
+			if ("tooLarge" in read) return rawJsonResponse(413, { success: false });
+			try {
+				const stripe = new Stripe("sk_test_signature_verification_only");
+				const event = await stripe.webhooks.constructEventAsync(
+					read.body,
+					request.headers.get("stripe-signature") ?? "",
+					oauth.webhookSecret(mode.data === "live" ? "production" : "sandbox"),
+				);
+				if (!event.account || event.livemode !== (mode.data === "live"))
+					throw new Error("Account required");
+				await events.accept({
+					event_id: event.id,
+					account_id: event.account,
+					livemode: event.livemode,
+					payload: JSON.parse(JSON.stringify(event)),
+				});
+				// Durable inbox polling performs provider work outside the webhook request.
+				return rawJsonResponse(200, { success: true });
+			} catch {
+				return rawJsonResponse(400, { success: false });
+			}
+		},
+		{
+			parse: "none",
+			beforeHandle: ipRateLimitGate(limiter),
+			detail: stripeAppEventDetail(),
+		},
+	);
 	return { app, runOnce };
 }

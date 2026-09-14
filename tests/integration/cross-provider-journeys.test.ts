@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
+import { testRequest } from "../helpers/openapi";
 import { createLocalProjectionReceiver } from "../helpers/projection-receiver";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -56,7 +57,8 @@ localDescribe("Cross-provider journeys integration", () => {
 			expect((await verifyAppleSubscription(fixture)).status).toBe(200);
 			expect((await postStripeWebhook(fixture, { id: "evt_checkout" })).status).toBe(200);
 
-			const entitlementResponse = await fixture.app.request(
+			const entitlementResponse = await testRequest(
+				fixture.app,
 				"/v1/billing-accounts/integration_user/entitlements",
 				{ headers: fixture.authHeaders("voysee") },
 			);
@@ -127,7 +129,8 @@ localDescribe("Cross-provider journeys integration", () => {
 			activeProviders: ["stripe"],
 			statuses: ["apple:expired", "stripe:active"],
 		});
-		const entitlements = await stripeFixture.app.request(
+		const entitlements = await testRequest(
+			stripeFixture.app,
 			"/v1/billing-accounts/integration_user/entitlements",
 			{ headers: stripeFixture.authHeaders("voysee") },
 		);
@@ -160,7 +163,8 @@ localDescribe("Cross-provider journeys integration", () => {
 			activeProviders: ["apple"],
 			statuses: ["apple:active"],
 		});
-		const entitlements = await refund.app.request(
+		const entitlements = await testRequest(
+			refund.app,
 			"/v1/billing-accounts/integration_user/entitlements",
 			{
 				headers: refund.authHeaders("voysee"),
@@ -176,12 +180,14 @@ localDescribe("Cross-provider journeys integration", () => {
 		});
 
 		await createAppleAccountToken(fixture);
-		const google = await fixture.app.request(
+		const google = await testRequest(
+			fixture.app,
 			"/v1/billing-accounts/integration_user/providers/google/account-link",
 			{ headers: fixture.authHeaders("voysee") },
 		);
 		expect(google.status).toBe(200);
-		const checkout = await fixture.app.request(
+		const checkout = await testRequest(
+			fixture.app,
 			"/v1/billing-accounts/integration_user/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -216,7 +222,8 @@ function withProjectionUrl(projectionUrl: string): LocalPostgresContext["env"] {
 async function createAppleAccountToken(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<void> {
-	const response = await fixture.app.request(
+	const response = await testRequest(
+		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
 		{ headers: fixture.authHeaders("voysee") },
 	);
@@ -228,7 +235,7 @@ async function createAppleAccountToken(
 async function verifyAppleSubscription(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<Response> {
-	return await fixture.app.request("/v1/purchases/verify", {
+	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
 			...fixture.authHeaders("voysee"),
@@ -246,7 +253,7 @@ async function postStripeWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	body: Record<string, unknown>,
 ): Promise<Response> {
-	return await fixture.app.request("/v1/projects/voysee/webhooks/stripe", {
+	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/stripe", {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",

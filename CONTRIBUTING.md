@@ -45,9 +45,11 @@ they finish.
 
 ## HTTP contract
 
-Every route is described by an authored Zod response schema and registered through
-`registerRoute`. When you add or change an operation, update its schema and regenerate the
-committed OpenAPI artifacts:
+Every route is described by an authored Zod response schema and registered directly on the Elysia
+app with `operationDetail` metadata (`operationId`, `tags`, `responses`). Request bodies, query
+and path parameters are documented from the route's Elysia validators, or from
+`operationDetail({ request })` when the handler validates input itself. When you add or change an
+operation, update its schema and regenerate the committed OpenAPI artifacts:
 
 ```sh
 bun run openapi:generate

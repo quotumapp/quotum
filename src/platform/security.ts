@@ -111,6 +111,9 @@ export function requireCapability(role: MerchantRole, capability: MerchantCapabi
 	if (!roleCapabilities[role].includes(capability))
 		throw new MerchantError("FORBIDDEN", "You do not have permission to perform this action.", 403);
 }
+/** Elysia's parse-name union only knows built-ins; the value is registered through app.parser. */
+export const MERCHANT_JSON_PARSE = "merchantJson" as never;
+
 export function idempotencyKey(request: Request): string {
 	const value = request.headers.get("idempotency-key");
 	if (!value || !/^[A-Za-z0-9._:-]{8,128}$/.test(value))

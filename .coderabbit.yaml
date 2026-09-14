@@ -62,7 +62,8 @@ reviews:
         cross-domain logic leaking out of here into either side.
     - path: "src/app/**/*-routes.ts"
       instructions: >-
-        Routes are declared with defineContract and mounted with registerRoute. Any change to a
+        Routes are registered directly on Elysia with operationDetail metadata and use the routed
+        path (not the URL pathname) for guards and limiters. Any change to a
         path, method, status code, header, or Zod schema requires regenerating
         contracts/v1/openapi.json and contracts/v1/errors.json in the same PR; flag route changes
         without the regenerated contract. Check that new error responses are declared so the

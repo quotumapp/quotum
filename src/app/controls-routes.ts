@@ -1,18 +1,16 @@
-import type { Hono } from "hono";
 import { z } from "zod";
 import type { ControlsEnterpriseRepositoryLike } from "../billing/controls";
-import { InvalidRequestError } from "../billing/errors";
-import { defineContract, registerRoute } from "../shared/http-contract";
-import { requireOperatorApiKey } from "./admin-routes";
+import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
+import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/controls-responses";
-import { privateProject, requireActor } from "./request-context";
-import type { BillingContext, BillingHonoEnv } from "./types";
+import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
+import type { BillingElysia, PostAuthGuard } from "./types";
 
 export interface ControlsRoutesDependencies {
-	app: Hono<BillingHonoEnv>;
+	app: BillingElysia;
 	operatorApiKey: string | null;
 	service: ControlsEnterpriseRepositoryLike;
-	parsePrivateJson(request: Request): Promise<unknown>;
+	registerPostAuthGuard: (guard: PostAuthGuard) => void;
 }
 
 const accountParams = z.object({ billingAccountId: z.string().trim().min(1).max(200) }).strict();
@@ -94,397 +92,6 @@ export const migrationBody = z
 	})
 	.strict();
 
-export function registerControlsRoutes({
-	app,
-	operatorApiKey,
-	service,
-	parsePrivateJson,
-}: ControlsRoutesDependencies): void {
-	app.use("/v1/admin/contracts/*", requireOperatorApiKey(operatorApiKey));
-	app.use("/v1/admin/catalog-migrations/*", requireOperatorApiKey(operatorApiKey));
-	app.use("/v1/admin/auto-topups/*", requireOperatorApiKey(operatorApiKey));
-
-	registerRoute(
-		app,
-		controlsContracts.postV1BillingAccountsByBillingAccountIdEntities,
-		async (c) => {
-			const params = parse(
-				accountParams,
-				c.req.param(),
-				"Invalid billing-account route parameters",
-			);
-			const body = parse(entityBody, await parsePrivateJson(c.req.raw), "Invalid entity body");
-			const result = await service.createEntity(privateProject(c), {
-				billingAccountId: params.billingAccountId,
-				...body,
-			});
-			return c.json({ success: true, data: result }, 201);
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.getV1BillingAccountsByBillingAccountIdEntities,
-		async (c) => {
-			const params = parse(
-				accountParams,
-				c.req.param(),
-				"Invalid billing-account route parameters",
-			);
-			return c.json({
-				success: true,
-				data: await service.listEntities(privateProject(c), params.billingAccountId),
-			});
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.putV1BillingAccountsByBillingAccountIdControls,
-		async (c) => {
-			const params = parse(
-				accountParams,
-				c.req.param(),
-				"Invalid billing-account route parameters",
-			);
-			const body = parse(controlBody, await parsePrivateJson(c.req.raw), "Invalid control body");
-			const result = await service.upsertControl(privateProject(c), {
-				billingAccountId: params.billingAccountId,
-				...body,
-				featureKey: body.featureKey ?? null,
-				currency: body.currency ?? null,
-				actor: requireActor(c),
-			});
-			return c.json({ success: true, data: result });
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.getV1BillingAccountsByBillingAccountIdControls,
-		async (c) => {
-			const params = parse(
-				accountParams,
-				c.req.param(),
-				"Invalid billing-account route parameters",
-			);
-			const query = parse(
-				effectiveControlsQuerySchema,
-				Object.fromEntries(new URL(c.req.url).searchParams),
-				"Invalid control query",
-			);
-			return c.json({
-				success: true,
-				data: await service.listEffectiveControls(
-					privateProject(c),
-					params.billingAccountId,
-					query.entityId,
-				),
-			});
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.postV1BillingAccountsByBillingAccountIdUsageAlerts,
-		async (c) => {
-			const params = parse(
-				accountParams,
-				c.req.param(),
-				"Invalid billing-account route parameters",
-			);
-			const body = parse(alertBody, await parsePrivateJson(c.req.raw), "Invalid usage-alert body");
-			const result = await service.createUsageAlert(privateProject(c), {
-				billingAccountId: params.billingAccountId,
-				...body,
-				actor: requireActor(c),
-			});
-			return c.json({ success: true, data: result }, 201);
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.getV1BillingAccountsByBillingAccountIdUsageAlerts,
-		async (c) => {
-			const params = parse(
-				accountParams,
-				c.req.param(),
-				"Invalid billing-account route parameters",
-			);
-			return c.json({
-				success: true,
-				data: await service.listUsageAlerts(privateProject(c), params.billingAccountId),
-			});
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.getV1BillingAccountsByBillingAccountIdUsageAlertEvents,
-		async (c) => {
-			const params = parse(
-				accountParams,
-				c.req.param(),
-				"Invalid billing-account route parameters",
-			);
-			const rawLimit = new URL(c.req.url).searchParams.get("limit");
-			const limit = rawLimit === null ? 100 : Number(rawLimit);
-			return c.json({
-				success: true,
-				data: await service.listUsageAlertEvents(privateProject(c), params.billingAccountId, limit),
-			});
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.putV1BillingAccountsByBillingAccountIdAutoTopup,
-		async (c) => {
-			const params = parse(
-				accountParams,
-				c.req.param(),
-				"Invalid billing-account route parameters",
-			);
-			const body = parse(
-				autoTopupBody,
-				await parsePrivateJson(c.req.raw),
-				"Invalid auto-top-up body",
-			);
-			const result = await service.upsertAutoTopupPolicy(privateProject(c), {
-				billingAccountId: params.billingAccountId,
-				...body,
-				actor: requireActor(c),
-			});
-			return c.json({ success: true, data: result });
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.getV1BillingAccountsByBillingAccountIdAutoTopup,
-		async (c) => {
-			const params = parse(
-				accountParams,
-				c.req.param(),
-				"Invalid billing-account route parameters",
-			);
-			const query = parse(
-				autoTopupQuerySchema,
-				Object.fromEntries(new URL(c.req.url).searchParams),
-				"Invalid auto-top-up query",
-			);
-			return c.json({
-				success: true,
-				data: await service.getAutoTopupPolicy(
-					privateProject(c),
-					params.billingAccountId,
-					query.featureKey,
-					query.entityId,
-				),
-			});
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.postV1AdminAutoTopupsByBillingAccountIdByPolicyIdReset,
-		async (c) => {
-			const params = parse(policyParams, c.req.param(), "Invalid auto-top-up route parameters");
-			return c.json({
-				success: true,
-				data: await service.resetAutoTopupCircuit(
-					privateProject(c),
-					params.billingAccountId,
-					params.policyId,
-					requireActor(c),
-				),
-			});
-		},
-	);
-
-	registerRoute(app, controlsContracts.postV1AdminContractsPreview, async (c) => {
-		const body = parse(contractBody, await parsePrivateJson(c.req.raw), "Invalid contract body");
-		return c.json({
-			success: true,
-			data: await service.previewEnterpriseContract(privateProject(c), contractInput(body, c)),
-		});
-	});
-
-	registerRoute(app, controlsContracts.postV1AdminContractsPublish, async (c) => {
-		const body = parse(
-			postV1AdminContractsPublishBodySchema,
-			await parsePrivateJson(c.req.raw),
-			"Invalid contract publish body",
-		);
-		return c.json({
-			success: true,
-			data: await service.publishEnterpriseContract(privateProject(c), {
-				...contractInput(body, c),
-				previewToken: body.previewToken,
-			}),
-		});
-	});
-
-	registerRoute(app, controlsContracts.getV1AdminContractsByBillingAccountId, async (c) => {
-		const params = parse(accountParams, c.req.param(), "Invalid contract route parameters");
-		return c.json({
-			success: true,
-			data: await service.listEnterpriseContracts(privateProject(c), params.billingAccountId),
-		});
-	});
-
-	registerRoute(
-		app,
-		controlsContracts.deleteV1AdminContractsByBillingAccountIdByContractId,
-		async (c) => {
-			const params = parse(contractParams, c.req.param(), "Invalid contract route parameters");
-			return c.json({
-				success: true,
-				data: await service.terminateEnterpriseContract(
-					privateProject(c),
-					params.billingAccountId,
-					params.contractId,
-					requireActor(c),
-				),
-			});
-		},
-	);
-
-	registerRoute(app, controlsContracts.postV1AdminCatalogMigrationsPreview, async (c) => {
-		const body = parse(migrationBody, await parsePrivateJson(c.req.raw), "Invalid migration body");
-		return c.json({
-			success: true,
-			data: await service.previewCatalogMigration(privateProject(c), {
-				...body,
-				actor: requireActor(c),
-			}),
-		});
-	});
-
-	registerRoute(app, controlsContracts.postV1AdminCatalogMigrationsPublish, async (c) => {
-		const body = parse(
-			postV1AdminCatalogMigrationsPublishBodySchema,
-			await parsePrivateJson(c.req.raw),
-			"Invalid migration publish body",
-		);
-		return c.json({
-			success: true,
-			data: await service.publishCatalogMigration(privateProject(c), {
-				...body,
-				actor: requireActor(c),
-			}),
-		});
-	});
-
-	registerRoute(
-		app,
-		controlsContracts.getV1BillingAccountsByBillingAccountIdLicensePools,
-		async (c) => {
-			const params = parse(
-				accountParams,
-				c.req.param(),
-				"Invalid billing-account route parameters",
-			);
-			return c.json({
-				success: true,
-				data: await service.listLicensePools(privateProject(c), params.billingAccountId),
-			});
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.postV1BillingAccountsByBillingAccountIdLicenseAssignments,
-		async (c) => {
-			const params = parse(
-				accountParams,
-				c.req.param(),
-				"Invalid billing-account route parameters",
-			);
-			const body = parse(
-				postV1BillingAccountsByBillingAccountIdLicenseAssignmentsBodySchema,
-				await parsePrivateJson(c.req.raw),
-				"Invalid license assignment body",
-			);
-			return c.json(
-				{
-					success: true,
-					data: await service.assignLicense(privateProject(c), {
-						billingAccountId: params.billingAccountId,
-						...body,
-						actor: requireActor(c),
-					}),
-				},
-				201,
-			);
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.deleteV1BillingAccountsByBillingAccountIdLicenseAssignmentsByAssignmentId,
-		async (c) => {
-			const params = parse(
-				assignmentParams,
-				c.req.param(),
-				"Invalid license assignment route parameters",
-			);
-			return c.json({
-				success: true,
-				data: await service.revokeLicense(privateProject(c), {
-					billingAccountId: params.billingAccountId,
-					assignmentId: params.assignmentId,
-					actor: requireActor(c),
-				}),
-			});
-		},
-	);
-
-	registerRoute(
-		app,
-		controlsContracts.getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKey,
-		async (c) => {
-			const params = parse(
-				licenseCheckParams,
-				c.req.param(),
-				"Invalid entity-license route parameters",
-			);
-			const rawQuantity = new URL(c.req.url).searchParams.get("quantity");
-			const requiredQuantity = rawQuantity === null ? 1 : Number(rawQuantity);
-			return c.json({
-				success: true,
-				data: await service.checkEntityLicense(privateProject(c), {
-					billingAccountId: params.billingAccountId,
-					entityId: params.entityId,
-					featureKey: params.featureKey,
-					requiredQuantity,
-				}),
-			});
-		},
-	);
-}
-
-function contractInput(body: z.infer<typeof contractBody>, c: BillingContext) {
-	return {
-		...body,
-		effectiveAt: new Date(body.effectiveAt),
-		expiresAt: body.expiresAt == null ? null : new Date(body.expiresAt),
-		controls: body.controls?.map((control) => ({
-			...control,
-			featureKey: control.featureKey ?? null,
-			currency: control.currency ?? null,
-		})),
-		actor: requireActor(c),
-	};
-}
-
-function parse<T>(schema: z.ZodType<T>, value: unknown, message: string): T {
-	const parsed = schema.safeParse(value);
-	if (!parsed.success) throw new InvalidRequestError(message);
-	return parsed.data;
-}
-
 const postV1AdminContractsPublishBodySchema = contractBody
 	.extend({ previewToken: z.string().regex(/^[a-f0-9]{64}$/) })
 	.strict();
@@ -507,238 +114,532 @@ const autoTopupQuerySchema = z
 const effectiveControlsQuerySchema = z
 	.object({ entityId: z.string().trim().min(1).max(200).optional() })
 	.strict();
-export const controlsContracts = {
-	postV1BillingAccountsByBillingAccountIdEntities: defineContract(
-		"post",
+
+export function registerControlsRoutes({
+	app,
+	operatorApiKey,
+	service,
+	registerPostAuthGuard,
+}: ControlsRoutesDependencies): void {
+	registerPostAuthGuard(
+		operatorApiKeyGuard(operatorApiKey, (p) =>
+			/^\/v1\/admin\/(contracts|catalog-migrations|auto-topups)\//.test(p),
+		),
+	);
+
+	app.post(
 		"/v1/billing-accounts/:billingAccountId/entities",
+		async ({ body, params, project, set }) => {
+			const result = await service.createEntity(privateProject(project), {
+				billingAccountId: params.billingAccountId,
+				...body,
+			});
+			set.status = 201;
+			return { success: true, data: result };
+		},
 		{
-			operationId: "postV1BillingAccountsByBillingAccountIdEntities",
-			tags: ["controls"],
+			parse: [LENIENT_JSON_PARSE],
 			params: accountParams,
 			body: entityBody,
-			responses: {
-				"201": responses.postV1BillingAccountsByBillingAccountIdEntitiesResponse201Schema,
-			},
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1BillingAccountsByBillingAccountIdEntities",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/entities",
+				responses: {
+					201: responses.postV1BillingAccountsByBillingAccountIdEntitiesResponse201Schema,
+				},
+			}),
 		},
-	),
-	getV1BillingAccountsByBillingAccountIdEntities: defineContract(
-		"get",
+	);
+
+	app.get(
 		"/v1/billing-accounts/:billingAccountId/entities",
-		{
-			operationId: "getV1BillingAccountsByBillingAccountIdEntities",
-			tags: ["controls"],
-			params: accountParams,
-			responses: {
-				"200": responses.getV1BillingAccountsByBillingAccountIdEntitiesResponse200Schema,
-			},
+		async ({ params, project }) => {
+			return {
+				success: true,
+				data: await service.listEntities(privateProject(project), params.billingAccountId),
+			};
 		},
-	),
-	putV1BillingAccountsByBillingAccountIdControls: defineContract(
-		"put",
-		"/v1/billing-accounts/:billingAccountId/controls",
 		{
-			operationId: "putV1BillingAccountsByBillingAccountIdControls",
-			tags: ["controls"],
+			params: accountParams,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdEntities",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/entities",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdEntitiesResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.put(
+		"/v1/billing-accounts/:billingAccountId/controls",
+		async ({ body, request, params, project }) => {
+			const result = await service.upsertControl(privateProject(project), {
+				billingAccountId: params.billingAccountId,
+				...body,
+				featureKey: body.featureKey ?? null,
+				currency: body.currency ?? null,
+				actor: requireActor(request.headers),
+			});
+			return { success: true, data: result };
+		},
+		{
+			parse: [LENIENT_JSON_PARSE],
 			params: accountParams,
 			body: controlBody,
-			responses: {
-				"200": responses.putV1BillingAccountsByBillingAccountIdControlsResponse200Schema,
-			},
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "putV1BillingAccountsByBillingAccountIdControls",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/controls",
+				responses: {
+					200: responses.putV1BillingAccountsByBillingAccountIdControlsResponse200Schema,
+				},
+			}),
 		},
-	),
-	getV1BillingAccountsByBillingAccountIdControls: defineContract(
-		"get",
+	);
+
+	app.get(
 		"/v1/billing-accounts/:billingAccountId/controls",
-		{
-			operationId: "getV1BillingAccountsByBillingAccountIdControls",
-			query: effectiveControlsQuerySchema,
-			tags: ["controls"],
-			params: accountParams,
-			responses: {
-				"200": responses.getV1BillingAccountsByBillingAccountIdControlsResponse200Schema,
-			},
+		async ({ params, project, query }) => {
+			return {
+				success: true,
+				data: await service.listEffectiveControls(
+					privateProject(project),
+					params.billingAccountId,
+					query.entityId,
+				),
+			};
 		},
-	),
-	postV1BillingAccountsByBillingAccountIdUsageAlerts: defineContract(
-		"post",
-		"/v1/billing-accounts/:billingAccountId/usage-alerts",
 		{
-			operationId: "postV1BillingAccountsByBillingAccountIdUsageAlerts",
-			tags: ["controls"],
+			params: accountParams,
+			query: effectiveControlsQuerySchema,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdControls",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/controls",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdControlsResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.post(
+		"/v1/billing-accounts/:billingAccountId/usage-alerts",
+		async ({ body, request, params, project, set }) => {
+			const result = await service.createUsageAlert(privateProject(project), {
+				billingAccountId: params.billingAccountId,
+				...body,
+				actor: requireActor(request.headers),
+			});
+			set.status = 201;
+			return { success: true, data: result };
+		},
+		{
+			parse: [LENIENT_JSON_PARSE],
 			params: accountParams,
 			body: alertBody,
-			responses: {
-				"201": responses.postV1BillingAccountsByBillingAccountIdUsageAlertsResponse201Schema,
-			},
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1BillingAccountsByBillingAccountIdUsageAlerts",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/usage-alerts",
+				responses: {
+					201: responses.postV1BillingAccountsByBillingAccountIdUsageAlertsResponse201Schema,
+				},
+			}),
 		},
-	),
-	getV1BillingAccountsByBillingAccountIdUsageAlerts: defineContract(
-		"get",
+	);
+
+	app.get(
 		"/v1/billing-accounts/:billingAccountId/usage-alerts",
-		{
-			operationId: "getV1BillingAccountsByBillingAccountIdUsageAlerts",
-			tags: ["controls"],
-			params: accountParams,
-			responses: {
-				"200": responses.getV1BillingAccountsByBillingAccountIdUsageAlertsResponse200Schema,
-			},
+		async ({ params, project }) => {
+			return {
+				success: true,
+				data: await service.listUsageAlerts(privateProject(project), params.billingAccountId),
+			};
 		},
-	),
-	getV1BillingAccountsByBillingAccountIdUsageAlertEvents: defineContract(
-		"get",
+		{
+			params: accountParams,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdUsageAlerts",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/usage-alerts",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdUsageAlertsResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.get(
 		"/v1/billing-accounts/:billingAccountId/usage-alert-events",
-		{
-			operationId: "getV1BillingAccountsByBillingAccountIdUsageAlertEvents",
-			query: z.object({ limit: z.coerce.number().optional() }),
-			tags: ["controls"],
-			params: accountParams,
-			responses: {
-				"200": responses.getV1BillingAccountsByBillingAccountIdUsageAlertEventsResponse200Schema,
-			},
+		async ({ params, project, request }) => {
+			const rawLimit = new URL(request.url).searchParams.get("limit");
+			const limit = rawLimit === null ? 100 : Number(rawLimit);
+			return {
+				success: true,
+				data: await service.listUsageAlertEvents(
+					privateProject(project),
+					params.billingAccountId,
+					limit,
+				),
+			};
 		},
-	),
-	putV1BillingAccountsByBillingAccountIdAutoTopup: defineContract(
-		"put",
-		"/v1/billing-accounts/:billingAccountId/auto-topup",
 		{
-			operationId: "putV1BillingAccountsByBillingAccountIdAutoTopup",
-			tags: ["controls"],
+			params: accountParams,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdUsageAlertEvents",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/usage-alert-events",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdUsageAlertEventsResponse200Schema,
+				},
+				request: { query: z.object({ limit: z.coerce.number().nullable().optional() }) },
+			}),
+		},
+	);
+
+	app.put(
+		"/v1/billing-accounts/:billingAccountId/auto-topup",
+		async ({ body, request, params, project }) => {
+			const result = await service.upsertAutoTopupPolicy(privateProject(project), {
+				billingAccountId: params.billingAccountId,
+				...body,
+				actor: requireActor(request.headers),
+			});
+			return { success: true, data: result };
+		},
+		{
+			parse: [LENIENT_JSON_PARSE],
 			params: accountParams,
 			body: autoTopupBody,
-			responses: {
-				"200": responses.putV1BillingAccountsByBillingAccountIdAutoTopupResponse200Schema,
-			},
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "putV1BillingAccountsByBillingAccountIdAutoTopup",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/auto-topup",
+				responses: {
+					200: responses.putV1BillingAccountsByBillingAccountIdAutoTopupResponse200Schema,
+				},
+			}),
 		},
-	),
-	getV1BillingAccountsByBillingAccountIdAutoTopup: defineContract(
-		"get",
+	);
+
+	app.get(
 		"/v1/billing-accounts/:billingAccountId/auto-topup",
+		async ({ params, project, query }) => {
+			return {
+				success: true,
+				data: await service.getAutoTopupPolicy(
+					privateProject(project),
+					params.billingAccountId,
+					query.featureKey,
+					query.entityId,
+				),
+			};
+		},
 		{
-			operationId: "getV1BillingAccountsByBillingAccountIdAutoTopup",
+			params: accountParams,
 			query: autoTopupQuerySchema,
-			tags: ["controls"],
-			params: accountParams,
-			responses: {
-				"200": responses.getV1BillingAccountsByBillingAccountIdAutoTopupResponse200Schema,
-			},
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdAutoTopup",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/auto-topup",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdAutoTopupResponse200Schema,
+				},
+			}),
 		},
-	),
-	postV1AdminAutoTopupsByBillingAccountIdByPolicyIdReset: defineContract(
-		"post",
+	);
+
+	app.post(
 		"/v1/admin/auto-topups/:billingAccountId/:policyId/reset",
+		async ({ request, params, project }) => {
+			return {
+				success: true,
+				data: await service.resetAutoTopupCircuit(
+					privateProject(project),
+					params.billingAccountId,
+					params.policyId,
+					requireActor(request.headers),
+				),
+			};
+		},
 		{
-			operationId: "postV1AdminAutoTopupsByBillingAccountIdByPolicyIdReset",
-			tags: ["controls"],
 			params: policyParams,
-			responses: {
-				"200": responses.postV1AdminAutoTopupsByBillingAccountIdByPolicyIdResetResponse200Schema,
-			},
+			detail: operationDetail({
+				operationId: "postV1AdminAutoTopupsByBillingAccountIdByPolicyIdReset",
+				tags: ["controls"],
+				path: "/v1/admin/auto-topups/:billingAccountId/:policyId/reset",
+				responses: {
+					200: responses.postV1AdminAutoTopupsByBillingAccountIdByPolicyIdResetResponse200Schema,
+				},
+			}),
 		},
-	),
-	postV1AdminContractsPreview: defineContract("post", "/v1/admin/contracts/preview", {
-		operationId: "postV1AdminContractsPreview",
-		tags: ["controls"],
-		body: contractBody,
-		responses: { "200": responses.postV1AdminContractsPreviewResponse200Schema },
-	}),
-	postV1AdminContractsPublish: defineContract("post", "/v1/admin/contracts/publish", {
-		operationId: "postV1AdminContractsPublish",
-		tags: ["controls"],
-		body: postV1AdminContractsPublishBodySchema,
-		responses: { "200": responses.postV1AdminContractsPublishResponse200Schema },
-	}),
-	getV1AdminContractsByBillingAccountId: defineContract(
-		"get",
+	);
+
+	app.post(
+		"/v1/admin/contracts/preview",
+		async ({ body, request, project }) => {
+			return {
+				success: true,
+				data: await service.previewEnterpriseContract(
+					privateProject(project),
+					contractInput(body, request.headers),
+				),
+			};
+		},
+		{
+			parse: [LENIENT_JSON_PARSE],
+			body: contractBody,
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1AdminContractsPreview",
+				tags: ["controls"],
+				path: "/v1/admin/contracts/preview",
+				responses: { 200: responses.postV1AdminContractsPreviewResponse200Schema },
+			}),
+		},
+	);
+
+	app.post(
+		"/v1/admin/contracts/publish",
+		async ({ body, request, project }) => {
+			return {
+				success: true,
+				data: await service.publishEnterpriseContract(privateProject(project), {
+					...contractInput(body, request.headers),
+					previewToken: body.previewToken,
+				}),
+			};
+		},
+		{
+			parse: [LENIENT_JSON_PARSE],
+			body: postV1AdminContractsPublishBodySchema,
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1AdminContractsPublish",
+				tags: ["controls"],
+				path: "/v1/admin/contracts/publish",
+				responses: { 200: responses.postV1AdminContractsPublishResponse200Schema },
+			}),
+		},
+	);
+
+	app.get(
 		"/v1/admin/contracts/:billingAccountId",
-		{
-			operationId: "getV1AdminContractsByBillingAccountId",
-			tags: ["controls"],
-			params: accountParams,
-			responses: { "200": responses.getV1AdminContractsByBillingAccountIdResponse200Schema },
+		async ({ params, project }) => {
+			return {
+				success: true,
+				data: await service.listEnterpriseContracts(
+					privateProject(project),
+					params.billingAccountId,
+				),
+			};
 		},
-	),
-	deleteV1AdminContractsByBillingAccountIdByContractId: defineContract(
-		"delete",
+		{
+			params: accountParams,
+			detail: operationDetail({
+				operationId: "getV1AdminContractsByBillingAccountId",
+				tags: ["controls"],
+				path: "/v1/admin/contracts/:billingAccountId",
+				responses: { 200: responses.getV1AdminContractsByBillingAccountIdResponse200Schema },
+			}),
+		},
+	);
+
+	app.delete(
 		"/v1/admin/contracts/:billingAccountId/:contractId",
+		async ({ request, params, project }) => {
+			return {
+				success: true,
+				data: await service.terminateEnterpriseContract(
+					privateProject(project),
+					params.billingAccountId,
+					params.contractId,
+					requireActor(request.headers),
+				),
+			};
+		},
 		{
-			operationId: "deleteV1AdminContractsByBillingAccountIdByContractId",
-			tags: ["controls"],
 			params: contractParams,
-			responses: {
-				"200": responses.deleteV1AdminContractsByBillingAccountIdByContractIdResponse200Schema,
-			},
+			detail: operationDetail({
+				operationId: "deleteV1AdminContractsByBillingAccountIdByContractId",
+				tags: ["controls"],
+				path: "/v1/admin/contracts/:billingAccountId/:contractId",
+				responses: {
+					200: responses.deleteV1AdminContractsByBillingAccountIdByContractIdResponse200Schema,
+				},
+			}),
 		},
-	),
-	postV1AdminCatalogMigrationsPreview: defineContract(
-		"post",
+	);
+
+	app.post(
 		"/v1/admin/catalog-migrations/preview",
+		async ({ body, request, project }) => {
+			return {
+				success: true,
+				data: await service.previewCatalogMigration(privateProject(project), {
+					...body,
+					actor: requireActor(request.headers),
+				}),
+			};
+		},
 		{
-			operationId: "postV1AdminCatalogMigrationsPreview",
-			tags: ["controls"],
+			parse: [LENIENT_JSON_PARSE],
 			body: migrationBody,
-			responses: { "200": responses.postV1AdminCatalogMigrationsPreviewResponse200Schema },
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1AdminCatalogMigrationsPreview",
+				tags: ["controls"],
+				path: "/v1/admin/catalog-migrations/preview",
+				responses: { 200: responses.postV1AdminCatalogMigrationsPreviewResponse200Schema },
+			}),
 		},
-	),
-	postV1AdminCatalogMigrationsPublish: defineContract(
-		"post",
+	);
+
+	app.post(
 		"/v1/admin/catalog-migrations/publish",
+		async ({ body, request, project }) => {
+			return {
+				success: true,
+				data: await service.publishCatalogMigration(privateProject(project), {
+					...body,
+					actor: requireActor(request.headers),
+				}),
+			};
+		},
 		{
-			operationId: "postV1AdminCatalogMigrationsPublish",
-			tags: ["controls"],
+			parse: [LENIENT_JSON_PARSE],
 			body: postV1AdminCatalogMigrationsPublishBodySchema,
-			responses: { "200": responses.postV1AdminCatalogMigrationsPublishResponse200Schema },
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1AdminCatalogMigrationsPublish",
+				tags: ["controls"],
+				path: "/v1/admin/catalog-migrations/publish",
+				responses: { 200: responses.postV1AdminCatalogMigrationsPublishResponse200Schema },
+			}),
 		},
-	),
-	getV1BillingAccountsByBillingAccountIdLicensePools: defineContract(
-		"get",
+	);
+
+	app.get(
 		"/v1/billing-accounts/:billingAccountId/license-pools",
-		{
-			operationId: "getV1BillingAccountsByBillingAccountIdLicensePools",
-			tags: ["controls"],
-			params: accountParams,
-			responses: {
-				"200": responses.getV1BillingAccountsByBillingAccountIdLicensePoolsResponse200Schema,
-			},
+		async ({ params, project }) => {
+			return {
+				success: true,
+				data: await service.listLicensePools(privateProject(project), params.billingAccountId),
+			};
 		},
-	),
-	postV1BillingAccountsByBillingAccountIdLicenseAssignments: defineContract(
-		"post",
-		"/v1/billing-accounts/:billingAccountId/license-assignments",
 		{
-			operationId: "postV1BillingAccountsByBillingAccountIdLicenseAssignments",
-			tags: ["controls"],
+			params: accountParams,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdLicensePools",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/license-pools",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdLicensePoolsResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.post(
+		"/v1/billing-accounts/:billingAccountId/license-assignments",
+		async ({ body, request, params, project, set }) => {
+			const result = await service.assignLicense(privateProject(project), {
+				billingAccountId: params.billingAccountId,
+				...body,
+				actor: requireActor(request.headers),
+			});
+			set.status = 201;
+			return { success: true, data: result };
+		},
+		{
+			parse: [LENIENT_JSON_PARSE],
 			params: accountParams,
 			body: postV1BillingAccountsByBillingAccountIdLicenseAssignmentsBodySchema,
-			responses: {
-				"201": responses.postV1BillingAccountsByBillingAccountIdLicenseAssignmentsResponse201Schema,
-			},
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1BillingAccountsByBillingAccountIdLicenseAssignments",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/license-assignments",
+				responses: {
+					201: responses.postV1BillingAccountsByBillingAccountIdLicenseAssignmentsResponse201Schema,
+				},
+			}),
 		},
-	),
-	deleteV1BillingAccountsByBillingAccountIdLicenseAssignmentsByAssignmentId: defineContract(
-		"delete",
+	);
+
+	app.delete(
 		"/v1/billing-accounts/:billingAccountId/license-assignments/:assignmentId",
+		async ({ request, params, project }) => {
+			return {
+				success: true,
+				data: await service.revokeLicense(privateProject(project), {
+					billingAccountId: params.billingAccountId,
+					assignmentId: params.assignmentId,
+					actor: requireActor(request.headers),
+				}),
+			};
+		},
 		{
-			operationId: "deleteV1BillingAccountsByBillingAccountIdLicenseAssignmentsByAssignmentId",
-			tags: ["controls"],
 			params: assignmentParams,
-			responses: {
-				"200":
-					responses.deleteV1BillingAccountsByBillingAccountIdLicenseAssignmentsByAssignmentIdResponse200Schema,
-			},
+			detail: operationDetail({
+				operationId: "deleteV1BillingAccountsByBillingAccountIdLicenseAssignmentsByAssignmentId",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/license-assignments/:assignmentId",
+				responses: {
+					200: responses.deleteV1BillingAccountsByBillingAccountIdLicenseAssignmentsByAssignmentIdResponse200Schema,
+				},
+			}),
 		},
-	),
-	getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKey: defineContract(
-		"get",
+	);
+
+	app.get(
 		"/v1/billing-accounts/:billingAccountId/entities/:entityId/licenses/:featureKey",
-		{
-			operationId: "getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKey",
-			query: z.object({ quantity: z.coerce.number().optional() }),
-			tags: ["controls"],
-			params: licenseCheckParams,
-			responses: {
-				"200":
-					responses.getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKeyResponse200Schema,
-			},
+		async ({ params, project, request }) => {
+			const rawQuantity = new URL(request.url).searchParams.get("quantity");
+			const requiredQuantity = rawQuantity === null ? 1 : Number(rawQuantity);
+			return {
+				success: true,
+				data: await service.checkEntityLicense(privateProject(project), {
+					billingAccountId: params.billingAccountId,
+					entityId: params.entityId,
+					featureKey: params.featureKey,
+					requiredQuantity,
+				}),
+			};
 		},
-	),
-} as const;
+		{
+			params: licenseCheckParams,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKey",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/entities/:entityId/licenses/:featureKey",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKeyResponse200Schema,
+				},
+				request: { query: z.object({ quantity: z.coerce.number().nullable().optional() }) },
+			}),
+		},
+	);
+}
+
+function contractInput(body: z.infer<typeof contractBody>, headers: Headers) {
+	return {
+		...body,
+		effectiveAt: new Date(body.effectiveAt),
+		expiresAt: body.expiresAt == null ? null : new Date(body.expiresAt),
+		controls: body.controls?.map((control) => ({
+			...control,
+			featureKey: control.featureKey ?? null,
+			currency: control.currency ?? null,
+		})),
+		actor: requireActor(headers),
+	};
+}

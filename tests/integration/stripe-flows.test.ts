@@ -7,6 +7,7 @@ import type {
 	ProjectionSyncStatus,
 } from "../../src/billing/types";
 import type { RecordStripeCreditReversalProjectionInput } from "../../src/db/repository";
+import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
@@ -53,7 +54,8 @@ localDescribe("Stripe route flows integration", () => {
 			repository: context.repository,
 		});
 
-		const consumable = await app.request(
+		const consumable = await testRequest(
+			app,
 			"/v1/billing-accounts/integration_user/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -67,7 +69,8 @@ localDescribe("Stripe route flows integration", () => {
 				}),
 			},
 		);
-		const subscription = await app.request(
+		const subscription = await testRequest(
+			app,
 			"/v1/billing-accounts/integration_user/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -175,7 +178,8 @@ localDescribe("Stripe route flows integration", () => {
 			...authHeaders("voysee"),
 			"content-type": "application/json",
 		};
-		const previewResponse = await app.request(
+		const previewResponse = await testRequest(
+			app,
 			"/v1/billing-accounts/integration_user/commercial-actions/preview",
 			{
 				method: "POST",
@@ -200,7 +204,7 @@ localDescribe("Stripe route flows integration", () => {
 		expect(preview.previewToken).toMatch(/^[0-9a-f-]{36}$/);
 
 		const execute = (idempotencyKey: string) =>
-			app.request("/v1/billing-accounts/integration_user/commercial-actions", {
+			testRequest(app, "/v1/billing-accounts/integration_user/commercial-actions", {
 				method: "POST",
 				headers: { ...headers, "idempotency-key": idempotencyKey },
 				body: JSON.stringify({ previewToken: preview.previewToken }),
@@ -248,7 +252,8 @@ localDescribe("Stripe route flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
 			{
 				method: "POST",
@@ -289,7 +294,8 @@ localDescribe("Stripe route flows integration", () => {
 			"content-type": "application/json",
 		};
 		const preview = async (billingAccountId: string) => {
-			const response = await app.request(
+			const response = await testRequest(
+				app,
 				`/v1/billing-accounts/${billingAccountId}/commercial-actions/preview`,
 				{
 					method: "POST",
@@ -303,7 +309,7 @@ localDescribe("Stripe route flows integration", () => {
 			return (await response.json()).data.previewToken as string;
 		};
 		const execute = (billingAccountId: string, previewToken: string, idempotencyKey: string) =>
-			app.request(`/v1/billing-accounts/${billingAccountId}/commercial-actions`, {
+			testRequest(app, `/v1/billing-accounts/${billingAccountId}/commercial-actions`, {
 				method: "POST",
 				headers: { ...headers, "idempotency-key": idempotencyKey },
 				body: JSON.stringify({ previewToken }),
@@ -356,7 +362,8 @@ localDescribe("Stripe route flows integration", () => {
 			...authHeaders("voysee"),
 			"content-type": "application/json",
 		};
-		const previewResponse = await app.request(
+		const previewResponse = await testRequest(
+			app,
 			"/v1/billing-accounts/retry_account/commercial-actions/preview",
 			{
 				method: "POST",
@@ -368,7 +375,7 @@ localDescribe("Stripe route flows integration", () => {
 		);
 		const previewToken = (await previewResponse.json()).data.previewToken as string;
 		const execute = (idempotencyKey: string) =>
-			app.request("/v1/billing-accounts/retry_account/commercial-actions", {
+			testRequest(app, "/v1/billing-accounts/retry_account/commercial-actions", {
 				method: "POST",
 				headers: { ...headers, "idempotency-key": idempotencyKey },
 				body: JSON.stringify({ previewToken }),
@@ -408,7 +415,7 @@ localDescribe("Stripe route flows integration", () => {
 			repository: context.repository,
 		});
 		const request = () =>
-			app.request("/v1/billing-accounts/integration_user/providers/stripe/checkout-sessions", {
+			testRequest(app, "/v1/billing-accounts/integration_user/providers/stripe/checkout-sessions", {
 				method: "POST",
 				headers: {
 					...authHeaders("voysee"),
@@ -448,7 +455,8 @@ localDescribe("Stripe route flows integration", () => {
 			repository: context.repository,
 		});
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/integration_user/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
@@ -477,14 +485,16 @@ localDescribe("Stripe route flows integration", () => {
 			repository: context.repository,
 		});
 
-		const first = await app.request(
+		const first = await testRequest(
+			app,
 			"/v1/billing-accounts/integration_user/providers/stripe/portal-sessions",
 			{
 				method: "POST",
 				headers: authHeaders("voysee"),
 			},
 		);
-		const second = await app.request(
+		const second = await testRequest(
+			app,
 			"/v1/billing-accounts/integration_user/providers/stripe/portal-sessions",
 			{
 				method: "POST",
@@ -539,7 +549,8 @@ localDescribe("Stripe route flows integration", () => {
 			repository: context.repository,
 		});
 
-		const response = await app.request(
+		const response = await testRequest(
+			app,
 			"/v1/billing-accounts/integration_user/providers/stripe/checkout-sessions/cs_test_integration",
 			{
 				headers: authHeaders("voysee"),
@@ -745,7 +756,8 @@ localDescribe("Stripe route flows integration", () => {
 		expect(projectionJob.payload.purchase).toBeUndefined();
 		expect(projectionJob.payload.reversal).toBeUndefined();
 
-		const entitlements = await fixture.app.request(
+		const entitlements = await testRequest(
+			fixture.app,
 			"/v1/billing-accounts/integration_user/entitlements",
 			{
 				headers: fixture.authHeaders("voysee"),
@@ -1317,7 +1329,7 @@ async function postStripeWebhook(
 		headers["stripe-signature"] = signature;
 	}
 
-	return await fixture.app.request("/v1/projects/voysee/webhooks/stripe", {
+	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/stripe", {
 		method: "POST",
 		headers,
 		body: JSON.stringify({

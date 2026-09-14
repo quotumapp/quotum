@@ -2,7 +2,6 @@ import { expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import Ajv from "ajv/dist/2020";
 import addFormats from "ajv-formats";
-import type { Hono } from "hono";
 import type { OpenAPIObject } from "openapi3-ts/oas31";
 
 const specification = JSON.parse(
@@ -72,28 +71,45 @@ export async function assertOpenApiResponse(
 	).toBe(true);
 }
 
-export function withOpenApiAssertions<T extends Pick<Hono, "request">>(
+export interface HandleableApp {
+	handle(request: Request): Promise<Response>;
+}
+
+/**
+ * Send a test request through an Elysia app. Paths may be root-relative; a localhost origin is
+ * implied (Elysia's router only rejects single-character hostnames). A prebuilt Request passes
+ * through untouched.
+ */
+export function testRequest(
+	app: HandleableApp,
+	path: string | Request,
+	init?: RequestInit,
+): Promise<Response> {
+	if (path instanceof Request) {
+		return app.handle(init === undefined ? path : new Request(path, init));
+	}
+	return app.handle(new Request(new URL(path, "http://localhost"), init));
+}
+
+/**
+ * Wrap an app so every dispatched request is validated against the checked-in OpenAPI snapshot.
+ * Returns the same app with `handle` patched; use `testRequest` (or `app.handle`) to dispatch.
+ */
+export function withOpenApiAssertions<T extends HandleableApp>(
 	app: T,
 	options: { allowUndocumented?: boolean } = {},
 ): T {
-	const request = app.request.bind(app);
-	app.request = async (...args: Parameters<typeof request>) => {
-		const input = args[0];
-		const init = args[1];
-		const requestObject = input instanceof Request ? input : undefined;
-		const method = init?.method ?? requestObject?.method ?? "GET";
-		const url = requestObject?.url ?? String(input);
-		const requestContentType =
-			requestObject?.headers.get("content-type") ??
-			new Headers(init?.headers as HeadersInit | undefined).get("content-type");
+	const handle = app.handle.bind(app);
+	app.handle = async (request: Request) => {
+		const method = request.method;
+		const url = request.url;
+		const requestContentType = request.headers.get("content-type");
 		let requestBody: unknown;
-		if (requestObject !== undefined) {
-			const cloned = requestObject.clone();
+		if (request.body !== null && request.body !== undefined) {
+			const cloned = request.clone();
 			requestBody = await readRequestBody(cloned, requestContentType);
-		} else if (typeof init?.body === "string") {
-			requestBody = parseMaybeJson(init.body, requestContentType);
 		}
-		const response = await request(...args);
+		const response = await handle(request);
 		await assertOpenApiResponse(method, url, response, {
 			allowUndocumented: options.allowUndocumented,
 			requestBody,

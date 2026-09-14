@@ -52,7 +52,9 @@ and required extension interfaces are implemented here first.
 
 `quotum-api/runtime` exports `loadQuotumRuntimeConfig()`, `createQuotumRuntime(config, options?)`,
 `registerQuotumProcessShutdown(runtime)` and their types. The runtime exposes `app.fetch`, `start()`
-and `stop()`. Construction performs no background work or signal registration. Startup selects the
+and `stop()`. `app.fetch(request, server)` takes Bun's server as its optional second argument;
+a distribution that wraps it must forward that argument and the original Request object, or every
+client shares one IP rate-limit bucket. Construction performs no background work or signal registration. Startup selects the
 configured database, constructs the app and schedules jobs; one active runtime per process is
 supported. Repeated start/stop calls share their operation, and a stopped runtime cannot restart.
 Stop refuses new requests, drains active requests and scheduled work, then closes resources.

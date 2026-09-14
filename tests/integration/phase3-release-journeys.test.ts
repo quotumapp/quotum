@@ -8,6 +8,7 @@ import {
 } from "../../src/providers/stripe/testing/fake-client";
 import { AutoTopupWorker } from "../../src/workers/auto-topup";
 import { RecurringBillingWorker } from "../../src/workers/recurring-billing";
+import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
@@ -113,7 +114,8 @@ localDescribe("Phase 3 release journeys", () => {
 			allowed: true,
 		});
 
-		const alertEvents = await fixture.app.request(
+		const alertEvents = await testRequest(
+			fixture.app,
 			`/v1/billing-accounts/${account}/usage-alert-events`,
 			{ headers: fixture.authHeaders() },
 		);
@@ -122,7 +124,8 @@ localDescribe("Phase 3 release journeys", () => {
 			(await alertEvents.json()).data.map((event: { eventType: string }) => event.eventType),
 		).toEqual(["threshold_crossed", "threshold_rearmed", "threshold_crossed"]);
 
-		const balance = await fixture.app.request(
+		const balance = await testRequest(
+			fixture.app,
 			`/v1/billing-accounts/${account}/balances/ai_credits`,
 			{ headers: fixture.authHeaders() },
 		);
@@ -185,7 +188,8 @@ localDescribe("Phase 3 release journeys", () => {
 		expect(runs.reduce((sum, run) => sum + run.claimed, 0)).toBe(1);
 		expect(runs.reduce((sum, run) => sum + run.succeeded, 0)).toBe(1);
 
-		const balance = await fixture.app.request(
+		const balance = await testRequest(
+			fixture.app,
 			`/v1/billing-accounts/${account}/balances/ai_credits`,
 			{ headers: fixture.authHeaders() },
 		);
@@ -426,7 +430,7 @@ localDescribe("Phase 3 release journeys", () => {
 			previewToken: preview.previewToken,
 		});
 		expect(publish.status).toBe(200);
-		const contracts = await fixture.app.request("/v1/admin/contracts/migration-stripe", {
+		const contracts = await testRequest(fixture.app, "/v1/admin/contracts/migration-stripe", {
 			headers: operator,
 		});
 		expect((await contracts.json()).data).toHaveLength(1);
@@ -441,9 +445,13 @@ localDescribe("Phase 3 release journeys", () => {
 				).status,
 			).toBe(201);
 		}
-		const pools = await fixture.app.request("/v1/billing-accounts/migration-stripe/license-pools", {
-			headers: auth,
-		});
+		const pools = await testRequest(
+			fixture.app,
+			"/v1/billing-accounts/migration-stripe/license-pools",
+			{
+				headers: auth,
+			},
+		);
 		const [pool] = (await pools.json()).data as Array<{ id: string }>;
 		const assignment = await postJson(
 			fixture.app,
@@ -462,7 +470,8 @@ localDescribe("Phase 3 release journeys", () => {
 				)
 			).status,
 		).toBe(409);
-		const check = await fixture.app.request(
+		const check = await testRequest(
+			fixture.app,
 			"/v1/billing-accounts/migration-stripe/entities/workspace-a/licenses/licensed_seats?quantity=7",
 			{ headers: auth },
 		);
@@ -588,7 +597,7 @@ async function postJson(
 	headers: HeadersInit,
 	body: unknown,
 ): Promise<Response> {
-	return await app.request(path, {
+	return await testRequest(app, path, {
 		method: "POST",
 		headers: { ...headers, "content-type": "application/json" },
 		body: JSON.stringify(body),
@@ -601,7 +610,7 @@ async function putJson(
 	headers: HeadersInit,
 	body: unknown,
 ): Promise<Response> {
-	return await app.request(path, {
+	return await testRequest(app, path, {
 		method: "PUT",
 		headers: { ...headers, "content-type": "application/json" },
 		body: JSON.stringify(body),

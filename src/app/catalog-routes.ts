@@ -1,18 +1,17 @@
-import type { Hono } from "hono";
 import { z } from "zod";
-import { BillingError, InvalidRequestError } from "../billing/errors";
+import { BillingError } from "../billing/errors";
 import type { CatalogControlPlaneLike } from "../catalog/types";
-import { defineContract, registerRoute } from "../shared/http-contract";
-import { requireOperatorApiKey } from "./admin-routes";
+import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
+import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/catalog-responses";
-import { privateProject, requireActor } from "./request-context";
-import type { BillingHonoEnv } from "./types";
+import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
+import type { BillingElysia, PostAuthGuard } from "./types";
 
 export interface CatalogRoutesDependencies {
-	app: Hono<BillingHonoEnv>;
+	app: BillingElysia;
 	operatorApiKey: string | null;
 	catalogControlPlane: CatalogControlPlaneLike;
-	parsePrivateJson(request: Request): Promise<unknown>;
+	registerPostAuthGuard: (guard: PostAuthGuard) => void;
 }
 
 const featureSchema = z
@@ -181,68 +180,78 @@ export function registerCatalogRoutes({
 	app,
 	operatorApiKey,
 	catalogControlPlane,
-	parsePrivateJson,
+	registerPostAuthGuard,
 }: CatalogRoutesDependencies): void {
-	app.use("/v1/admin/catalog/*", requireOperatorApiKey(operatorApiKey));
-	app.use("/v1/admin/catalog", requireOperatorApiKey(operatorApiKey));
+	registerPostAuthGuard(
+		operatorApiKeyGuard(operatorApiKey, (p) => /^\/v1\/admin\/catalog(\/.*)?$/.test(p)),
+	);
 
-	registerRoute(app, catalogContracts.getV1AdminCatalog, async (c) => {
-		if (catalogControlPlane.getPublished === undefined) {
-			throw new BillingError("Published catalog reads are not configured", "NOT_CONFIGURED", 503);
-		}
-		const result = await catalogControlPlane.getPublished(privateProject(c));
-		return c.json({ success: true, data: result });
-	});
+	app.get(
+		"/v1/admin/catalog",
+		async ({ project }) => {
+			if (catalogControlPlane.getPublished === undefined) {
+				throw new BillingError("Published catalog reads are not configured", "NOT_CONFIGURED", 503);
+			}
+			const result = await catalogControlPlane.getPublished(privateProject(project));
+			return { success: true, data: result };
+		},
+		{
+			detail: operationDetail({
+				operationId: "getV1AdminCatalog",
+				tags: ["catalog"],
+				path: "/v1/admin/catalog",
+				responses: {
+					200: responses.getV1AdminCatalogResponse200Schema,
+				},
+			}),
+		},
+	);
 
-	registerRoute(app, catalogContracts.postV1AdminCatalogPreview, async (c) => {
-		const body = parseSchema(
-			previewSchema,
-			await parsePrivateJson(c.req.raw),
-			"Invalid catalog preview body",
-		);
-		const result = await catalogControlPlane.preview(privateProject(c), {
-			...body,
-			actor: requireActor(c),
-		});
-		return c.json({ success: true, data: result });
-	});
+	app.post(
+		"/v1/admin/catalog/preview",
+		async ({ body, request, project }) => {
+			const result = await catalogControlPlane.preview(privateProject(project), {
+				...body,
+				actor: requireActor(request.headers),
+			});
+			return { success: true, data: result };
+		},
+		{
+			parse: [LENIENT_JSON_PARSE],
+			body: previewSchema,
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1AdminCatalogPreview",
+				tags: ["catalog"],
+				path: "/v1/admin/catalog/preview",
+				responses: {
+					200: responses.postV1AdminCatalogPreviewResponse200Schema,
+				},
+			}),
+		},
+	);
 
-	registerRoute(app, catalogContracts.postV1AdminCatalogPublish, async (c) => {
-		const body = parseSchema(
-			publishSchema,
-			await parsePrivateJson(c.req.raw),
-			"Invalid catalog publish body",
-		);
-		const result = await catalogControlPlane.publish(privateProject(c), {
-			...body,
-			actor: requireActor(c),
-		});
-		return c.json({ success: true, data: result });
-	});
+	app.post(
+		"/v1/admin/catalog/publish",
+		async ({ body, request, project }) => {
+			const result = await catalogControlPlane.publish(privateProject(project), {
+				...body,
+				actor: requireActor(request.headers),
+			});
+			return { success: true, data: result };
+		},
+		{
+			parse: [LENIENT_JSON_PARSE],
+			body: publishSchema,
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1AdminCatalogPublish",
+				tags: ["catalog"],
+				path: "/v1/admin/catalog/publish",
+				responses: {
+					200: responses.postV1AdminCatalogPublishResponse200Schema,
+				},
+			}),
+		},
+	);
 }
-
-function parseSchema<T>(schema: z.ZodType<T>, value: unknown, message: string): T {
-	const parsed = schema.safeParse(value);
-	if (!parsed.success) throw new InvalidRequestError(message);
-	return parsed.data;
-}
-
-export const catalogContracts = {
-	getV1AdminCatalog: defineContract("get", "/v1/admin/catalog", {
-		operationId: "getV1AdminCatalog",
-		tags: ["catalog"],
-		responses: { "200": responses.getV1AdminCatalogResponse200Schema },
-	}),
-	postV1AdminCatalogPreview: defineContract("post", "/v1/admin/catalog/preview", {
-		operationId: "postV1AdminCatalogPreview",
-		tags: ["catalog"],
-		body: previewSchema,
-		responses: { "200": responses.postV1AdminCatalogPreviewResponse200Schema },
-	}),
-	postV1AdminCatalogPublish: defineContract("post", "/v1/admin/catalog/publish", {
-		operationId: "postV1AdminCatalogPublish",
-		tags: ["catalog"],
-		body: publishSchema,
-		responses: { "200": responses.postV1AdminCatalogPublishResponse200Schema },
-	}),
-} as const;

@@ -1,5 +1,8 @@
-import type { Context, MiddlewareHandler } from "hono";
-import { getConnInfo } from "hono/bun";
+/**
+ * Fixed-window rate limiting for the staff surface. Limiters run ahead of request validation:
+ * webhook and aggregate gates execute from `onRequest` hooks, and project-keyed group gates run
+ * inside the authentication `derive` and signal rejection by throwing `RateLimitExceeded`.
+ */
 
 export interface RateLimitResult {
 	allowed: boolean;
@@ -7,15 +10,17 @@ export interface RateLimitResult {
 	resetAt: Date;
 }
 
-interface RateLimitBucket {
-	windowStart: number;
-	count: number;
+export type RateLimiter = { check(key: string): RateLimitResult };
+
+/** Structural subset of Bun's server used for client IP resolution. */
+export interface RateLimitServer {
+	requestIP(request: Request): { address: string } | null;
 }
 
 interface RequestRateLimitKeyOptions {
 	trustProxyHeaders?: boolean;
 	knownProjectKeys?: ReadonlySet<string>;
-	remoteAddress?: (c: Context) => string | null;
+	remoteAddress?: (request: Request) => string | null;
 }
 
 export function createFixedWindowRateLimiter(options: {
@@ -79,93 +84,146 @@ export function createFixedWindowRateLimiter(options: {
 	};
 }
 
-export function rateLimitMiddleware(options: {
-	limiter: { check(key: string): RateLimitResult };
-	key: (c: Context) => string;
-	headers?: "always" | "rejected_only";
-}): MiddlewareHandler {
-	return async (c, next) => {
-		const result = options.limiter.check(options.key(c));
-		if (options.headers !== "rejected_only" || !result.allowed) {
-			c.header("ratelimit-remaining", String(result.remaining));
-			c.header("ratelimit-reset", result.resetAt.toISOString());
-		}
+interface RateLimitBucket {
+	windowStart: number;
+	count: number;
+}
 
-		if (!result.allowed) {
-			return c.json(
-				{
-					success: false,
-					error: { code: "RATE_LIMITED", message: "Too many requests" },
-				},
-				429,
-			);
-		}
+/** Thrown by derive-phase gates; the shell maps it onto the 429 envelope with limiter headers. */
+export class RateLimitExceeded extends Error {
+	readonly result: RateLimitResult;
 
-		await next();
+	constructor(result: RateLimitResult) {
+		super("Too many requests");
+		this.name = "RateLimitExceeded";
+		this.result = result;
+	}
+}
+
+export function rateLimitHeaders(result: RateLimitResult): Record<string, string> {
+	return {
+		"ratelimit-remaining": String(result.remaining),
+		"ratelimit-reset": result.resetAt.toISOString(),
 	};
 }
 
-export function requestIp(c: Context, options: RequestRateLimitKeyOptions = {}): string {
-	return requestClientIp(c, options);
+export function rateLimitResponse(result: RateLimitResult): Response {
+	return new Response(
+		JSON.stringify({
+			success: false,
+			error: { code: "RATE_LIMITED", message: "Too many requests" },
+		}),
+		{ status: 429, headers: { "content-type": "application/json", ...rateLimitHeaders(result) } },
+	);
 }
 
-export function requestIpAndPath(c: Context, options: RequestRateLimitKeyOptions = {}): string {
-	const ip = requestIp(c, options);
-	const pathname = normalizedRateLimitPath(new URL(c.req.url).pathname);
-
-	return `${ip}:${pathname}`;
+export interface RateLimitTarget {
+	request: Request;
+	/** The routed path; falls back to the URL pathname for callers outside the router. */
+	path?: string;
+	server?: RateLimitServer | null;
+	/** Resolved project instance key (or a known path parameter) when the caller has one. */
+	projectKey?: string | null;
 }
 
-export function requestProjectIpAndPath(
-	c: Context,
+export function requestIp(
+	target: Pick<RateLimitTarget, "request" | "server">,
 	options: RequestRateLimitKeyOptions = {},
 ): string {
-	const ip = requestClientIp(c, options);
-	const pathname = normalizedRateLimitPath(new URL(c.req.url).pathname);
-	const projectKey = rateLimitProjectKey(c, options.knownProjectKeys);
-
-	return `${projectKey}:${ip}:${pathname}`;
-}
-
-function requestClientIp(c: Context, options: RequestRateLimitKeyOptions): string {
-	const forwardedFor = c.req.header("x-forwarded-for");
+	const forwardedFor = target.request.headers.get("x-forwarded-for");
 	const firstForwardedIp = forwardedFor?.split(",")[0]?.trim();
-	const cloudflareIp = c.req.header("cf-connecting-ip")?.trim();
+	const cloudflareIp = target.request.headers.get("cf-connecting-ip")?.trim();
 	if (options.trustProxyHeaders === true && (cloudflareIp || firstForwardedIp)) {
 		return cloudflareIp || firstForwardedIp || "unknown";
 	}
 
 	try {
-		return options.remoteAddress?.(c) ?? getConnInfo(c).remote.address ?? "unknown";
+		return options.remoteAddress?.(target.request) ?? serverIp(target.server, target.request);
 	} catch {
 		return "unknown";
 	}
 }
 
-function rateLimitProjectKey(c: Context, knownProjectKeys?: ReadonlySet<string>): string {
-	const contextProject = c.get("project") as { projectInstanceKey?: unknown } | undefined;
-	if (
-		typeof contextProject?.projectInstanceKey === "string" &&
-		contextProject.projectInstanceKey.trim() !== ""
-	) {
-		return `project:${contextProject.projectInstanceKey}`;
-	}
-
-	const paramProjectKey = c.req.param("projectKey")?.trim();
-	if (
-		paramProjectKey !== undefined &&
-		paramProjectKey !== "" &&
-		(knownProjectKeys === undefined || knownProjectKeys.has(paramProjectKey))
-	) {
-		return `project:${paramProjectKey}`;
-	}
-
-	return "project:unknown";
+function serverIp(server: RateLimitServer | null | undefined, request: Request): string {
+	return server?.requestIP(request)?.address ?? "unknown";
 }
 
-function normalizedRateLimitPath(pathname: string): string {
+export function requestIpAndPath(
+	target: RateLimitTarget,
+	options: RequestRateLimitKeyOptions = {},
+): string {
+	const ip = requestIp(target, options);
+	const pathname = normalizedRateLimitPath(targetPath(target));
+
+	return `${ip}:${pathname}`;
+}
+
+export function requestProjectIpAndPath(
+	target: RateLimitTarget,
+	options: RequestRateLimitKeyOptions = {},
+): string {
+	const ip = requestIp(target, options);
+	const pathname = normalizedRateLimitPath(targetPath(target));
+	const projectKey = target.projectKey?.trim()
+		? `project:${target.projectKey.trim()}`
+		: "project:unknown";
+
+	return `${projectKey}:${ip}:${pathname}`;
+}
+
+function targetPath(target: RateLimitTarget): string {
+	return target.path ?? new URL(target.request.url).pathname;
+}
+
+export function normalizedRateLimitPath(pathname: string): string {
 	return pathname.replace(
 		/^\/v1\/projects\/[^/]+\/webhooks\/(apple|google|stripe)$/,
 		"/v1/projects/:projectKey/webhooks/$1",
 	);
+}
+
+/** Post-authentication guard shape shared with the shell's derive pipeline. */
+export interface PostAuthRateLimitGuard {
+	matches(path: string): boolean;
+	guard(input: {
+		request: Request;
+		path: string;
+		server: { requestIP(request: Request): { address: string } | null } | null;
+		projectKey: string;
+		set: { headers: Record<string, string> };
+	}): void;
+}
+
+/**
+ * Post-authentication rate-limit guard for path groups; throws `RateLimitExceeded` so the shell
+ * renders the 429 envelope, and mirrors limiter headers onto successful responses by default.
+ */
+export function projectScopedRateLimitGuard(options: {
+	limiter: RateLimiter;
+	matches(path: string): boolean;
+	headers?: "always" | "rejected_only";
+	trustProxyHeaders?: boolean;
+}): PostAuthRateLimitGuard {
+	return {
+		matches: options.matches,
+		guard(input) {
+			const result = options.limiter.check(
+				requestProjectIpAndPath(
+					{
+						request: input.request,
+						path: input.path,
+						server: input.server,
+						projectKey: input.projectKey,
+					},
+					{ trustProxyHeaders: options.trustProxyHeaders },
+				),
+			);
+			if (!result.allowed) {
+				throw new RateLimitExceeded(result);
+			}
+			if (options.headers !== "rejected_only") {
+				Object.assign(input.set.headers, rateLimitHeaders(result));
+			}
+		},
+	};
 }

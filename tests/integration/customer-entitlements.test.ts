@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
 import type { EntitlementSnapshot } from "../../src/billing/types";
+import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import { expectTableCounts } from "./helpers/db-assertions";
@@ -33,7 +34,7 @@ localDescribe("customer entitlement route integration", () => {
 			repository: context.repository,
 		});
 
-		const response = await app.request("/v1/billing-accounts/new_customer/entitlements", {
+		const response = await testRequest(app, "/v1/billing-accounts/new_customer/entitlements", {
 			headers: authHeaders("voysee"),
 		});
 
@@ -55,7 +56,8 @@ localDescribe("customer entitlement route integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const tokenResponse = await app.request(
+		const tokenResponse = await testRequest(
+			app,
 			"/v1/billing-accounts/shared_user/providers/apple/account-token",
 			{
 				headers: authHeaders("voysee"),
@@ -66,7 +68,7 @@ localDescribe("customer entitlement route integration", () => {
 		apple.setAppAccountToken((await tokenResponse.json()).data.appAccountToken);
 
 		const verification = await withIsoDateSqlParameters(() =>
-			app.request("/v1/purchases/verify", {
+			testRequest(app, "/v1/purchases/verify", {
 				method: "POST",
 				headers: {
 					...authHeaders("voysee"),
@@ -79,10 +81,10 @@ localDescribe("customer entitlement route integration", () => {
 				}),
 			}),
 		);
-		const voysee = await app.request("/v1/billing-accounts/shared_user/entitlements", {
+		const voysee = await testRequest(app, "/v1/billing-accounts/shared_user/entitlements", {
 			headers: authHeaders("voysee"),
 		});
-		const wiseley = await app.request("/v1/billing-accounts/shared_user/entitlements", {
+		const wiseley = await testRequest(app, "/v1/billing-accounts/shared_user/entitlements", {
 			headers: authHeaders("wiseley"),
 		});
 
@@ -108,13 +110,15 @@ localDescribe("customer entitlement route integration", () => {
 			integrationProjectContext(),
 			"subscription_lifecycle_user",
 		);
-		const lifecycleResponse = await app.request(
+		const lifecycleResponse = await testRequest(
+			app,
 			"/v1/billing-accounts/subscription_lifecycle_user/entitlements",
 			{
 				headers: authHeaders("voysee"),
 			},
 		);
-		const legacyResponse = await app.request(
+		const legacyResponse = await testRequest(
+			app,
 			"/v1/billing-accounts/legacy_null_subscription_user/entitlements",
 			{
 				headers: authHeaders("voysee"),

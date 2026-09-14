@@ -98,8 +98,7 @@
       "code": "BILLING_PROJECT_CONTEXT_UNAVAILABLE",
       "sources": [
         "src/app.ts",
-        "src/app/webhook-routes.ts",
-        "src/http/api-key.ts"
+        "src/app/webhook-routes.ts"
       ]
     },
     {
@@ -508,6 +507,7 @@
         "src/app.ts",
         "src/app/customer-routes.ts",
         "src/app/insights-routes.ts",
+        "src/app/request-context.ts",
         "src/app/webhook-routes.ts",
         "src/billing/errors.ts",
         "src/operations/admin.ts",
@@ -753,6 +753,8 @@
     {
       "code": "RATE_LIMITED",
       "sources": [
+        "src/app.ts",
+        "src/composition/ingress-http.ts",
         "src/http/rate-limit.ts",
         "src/platform/store.ts"
       ]
@@ -760,7 +762,8 @@
     {
       "code": "REQUEST_BODY_TOO_LARGE",
       "sources": [
-        "src/app.ts"
+        "src/app.ts",
+        "src/app/webhook-routes.ts"
       ]
     },
     {
@@ -974,9 +977,9 @@
     {
       "code": "UNAUTHORIZED",
       "sources": [
+        "src/app.ts",
         "src/app/admin-routes.ts",
-        "src/billing/errors.ts",
-        "src/http/api-key.ts"
+        "src/billing/errors.ts"
       ]
     },
     {
