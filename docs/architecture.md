@@ -41,3 +41,33 @@ The policy is deny-by-default:
 - `migrations/`: ordered schema authority.
 - `tests/`: unit, integration, and end-to-end coverage mirroring the source layout.
 - `contracts/v1/`: generated OpenAPI contract and error inventory.
+
+## Distributions and public runtime interfaces
+
+GitHub `quotumapp/quotum` owns the public core: billing, generic merchant functionality, providers,
+SQL migrations, worker business logic, tests and standalone documentation. A hosted distribution
+consumes an unchanged public commit. Hosted composition, routing/fencing policy, tenant migration
+coordination and infrastructure scheduler integration belong to that distribution. Reusable fixes
+and required extension interfaces are implemented here first.
+
+`quotum-api/runtime` exports `loadQuotumRuntimeConfig()`, `createQuotumRuntime(config, options?)`,
+`registerQuotumProcessShutdown(runtime)` and their types. The runtime exposes `app.fetch`, `start()`
+and `stop()`. Construction performs no background work or signal registration. Startup selects the
+configured database, constructs the app and schedules jobs; one active runtime per process is
+supported. Repeated start/stop calls share their operation, and a stopped runtime cannot restart.
+Stop refuses new requests, drains active requests and scheduled work, then closes resources.
+Process entrypoints explicitly register signal handling with the existing ten-second deadline.
+
+The optional `scheduler.schedule({ name, runOnce, pollIntervalMs })` returns a handle with
+`stop(): Promise<void>`. An adapter must stop future invocations and await in-flight work. The
+public polling scheduler remains the default. This interface does not move billing logic into the
+scheduler and does not support multiple databases or merchant movement by itself.
+
+`quotum-api/testing/merchant` exports `createMerchantTestRuntime({ composeApp? })` for disposable
+browser integration. It reuses the public synthetic providers and control server and requires the
+existing explicit test flags and loopback origin. Callers must stop its returned runtime. Production
+code must not import this testing export. The standalone test entrypoint uses the same factory.
+
+Distributions invoke the pinned checkout's `migrate` and `migrate:status` commands. Core migrations
+remain unchanged and checksum-verified; private migration coordination does not authorize edits to
+core SQL or ledger tables. Generic merchant features remain available to standalone operators.

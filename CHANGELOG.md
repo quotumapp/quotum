@@ -12,6 +12,18 @@ start at 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- Public runtime lifecycle and scheduler interfaces for unchanged, commit-pinned hosted distributions.
+- Reusable guarded merchant test runtime for exercising downstream composition.
+
+### Changed
+
+- Container publication now requires the same standalone validation gates as public CI.
+- Runtime startup and shutdown explicitly own database selection, worker scheduling and draining.
+  No SQL migration, HTTP contract or environment variable changes.
+
+
 ## [0.9.3] - 2026-09-10
 
 ### Platform email configuration (breaking)

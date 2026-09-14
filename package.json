@@ -2,7 +2,9 @@
 	"name": "quotum-api",
 	"version": "0.9.3",
 	"exports": {
-		"./sdk": "./src/sdk/index.ts"
+		"./sdk": "./src/sdk/index.ts",
+		"./runtime": "./src/composition/public-runtime.ts",
+		"./testing/merchant": "./src/testing/merchant-runtime.ts"
 	},
 	"bin": {
 		"billing-catalog": "./scripts/billing-catalog.ts"

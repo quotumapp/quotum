@@ -9,8 +9,13 @@ import {
 import { createMerchantBillingPort } from "./composition/merchant-billing";
 import { attachMerchantRuntime, type MerchantRuntimeOptions } from "./composition/merchant-runtime";
 import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
+import {
+	createRuntimeLifecycle,
+	type QuotumRuntimeScheduler,
+	type QuotumScheduledJob,
+} from "./composition/runtime-lifecycle";
 import { AdminBillingRepository } from "./db/admin-repository";
-import { closePool } from "./db/client";
+import { closePool, configureDefaultConnection, initializePostgresHealth } from "./db/client";
 import { BillingRepository } from "./db/repository";
 import {
 	ProjectionSyncJobRepository,
@@ -23,6 +28,7 @@ import { createInMemoryBillingMetrics } from "./observability/metrics";
 import {
 	createSentryBillingLogger,
 	createSentryRequestMiddleware,
+	initializeSentry,
 	type SentryClientLike,
 } from "./observability/sentry";
 import { BillingAdminOperations } from "./operations/admin";
@@ -45,7 +51,6 @@ import {
 	type StripeBillingClientDependency,
 	StripeBillingService,
 } from "./providers/stripe/service";
-import { registerBillingRuntimeShutdown } from "./shutdown";
 import type { AutoTopupWorkerProvider } from "./workers/auto-topup";
 import { AutoTopupWorker } from "./workers/auto-topup";
 import { MeteringMaintenanceWorker } from "./workers/metering-maintenance";
@@ -70,6 +75,7 @@ type WorkerProjectProviders = {
 };
 
 export interface BillingRuntimeDependencies {
+	scheduler?: QuotumRuntimeScheduler;
 	projectionFetch?: ApiProjectProjectionFetch;
 	connections?: RuntimeConnectionResolver;
 	merchant?: MerchantRuntimeOptions;
@@ -83,12 +89,9 @@ export interface BillingRuntimeDependencies {
 	) => StripeBillingClientDependency;
 }
 
-export function createBillingRuntimeApp(
-	env: BillingEnv,
-	dependencies: BillingRuntimeDependencies = {},
-) {
+function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDependencies = {}) {
 	const merchantConfig = dependencies.merchant?.config ?? loadMerchantConfig();
-	const merchantRuntimes: Array<{ stop(): Promise<void> }> = [];
+	const jobs: QuotumScheduledJob[] = [];
 	const billingRepository = new BillingRepository();
 	const baseLogger = createConsoleBillingLogger();
 	const logger =
@@ -232,62 +235,35 @@ export function createBillingRuntimeApp(
 		projectionRepository: billingRepository,
 	});
 
-	const projectionSyncRuntime = startPollingRuntime({
+	jobs.push({
 		name: "projection_sync",
-		worker: projectionSyncWorker,
+		runOnce: () => projectionSyncWorker.runOnce(),
 		pollIntervalMs: env.workerPollIntervalMs,
-		logger,
 	});
-	const storeEventReplayRuntime = startPollingRuntime({
+	jobs.push({
 		name: "store_event_replay",
-		worker: storeEventReplayWorker,
+		runOnce: () => storeEventReplayWorker.runOnce(),
 		pollIntervalMs: env.storeEventReplayPollIntervalMs,
-		logger,
 	});
-	const subscriptionReconciliationRuntime = startPollingRuntime({
+	jobs.push({
 		name: "subscription_reconciliation",
-		worker: subscriptionReconciliationWorker,
+		runOnce: () => subscriptionReconciliationWorker.runOnce(),
 		pollIntervalMs: env.subscriptionReconciliationPollIntervalMs,
-		logger,
 	});
-	const meteringMaintenanceRuntime = startPollingRuntime({
+	jobs.push({
 		name: "metering_maintenance",
-		worker: meteringMaintenanceWorker,
+		runOnce: () => meteringMaintenanceWorker.runOnce(),
 		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
-		logger,
 	});
-	const recurringBillingRuntime = startPollingRuntime({
+	jobs.push({
 		name: "recurring_billing",
-		worker: recurringBillingWorker,
+		runOnce: () => recurringBillingWorker.runOnce(),
 		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
-		logger,
 	});
-	const autoTopupRuntime = startPollingRuntime({
+	jobs.push({
 		name: "auto_topup",
-		worker: autoTopupWorker,
+		runOnce: () => autoTopupWorker.runOnce(),
 		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
-		logger,
-	});
-
-	registerBillingRuntimeShutdown({
-		process,
-		runtimes: [
-			projectionSyncRuntime,
-			storeEventReplayRuntime,
-			subscriptionReconciliationRuntime,
-			meteringMaintenanceRuntime,
-			recurringBillingRuntime,
-			autoTopupRuntime,
-		],
-		cleanup: [
-			async () => {
-				await Promise.all(merchantRuntimes.map((runtime) => runtime.stop()));
-			},
-			() => closePool(),
-			async () => {
-				await dependencies.sentry?.flush?.(2_000);
-			},
-		],
 	});
 
 	const staff = createApp({
@@ -323,18 +299,59 @@ export function createBillingRuntimeApp(
 		}),
 		operations: adminOperations,
 	});
-	return attachMerchantRuntime(staff, merchantBilling, {
+	const app = attachMerchantRuntime(staff, merchantBilling, {
 		...dependencies.merchant,
 		config: merchantConfig,
 		registerBackground: (worker) => {
-			merchantRuntimes.push(
-				startPollingRuntime({
-					name: "stripe_app_events",
-					worker,
-					pollIntervalMs: env.storeEventReplayPollIntervalMs,
-					logger,
-				}),
-			);
+			jobs.push({
+				name: "stripe_app_events",
+				runOnce: () => worker.runOnce(),
+				pollIntervalMs: env.storeEventReplayPollIntervalMs,
+			});
 		},
+	});
+	return { app, jobs, logger };
+}
+
+let runtimeActive = false;
+
+export function createBillingRuntime(
+	env: BillingEnv,
+	dependencies: BillingRuntimeDependencies = {},
+) {
+	let pollingLogger: ReturnType<typeof createConsoleBillingLogger> | undefined;
+	return createRuntimeLifecycle({
+		acquire() {
+			if (runtimeActive) throw new Error("Only one active Quotum runtime is supported per process");
+			runtimeActive = true;
+			return () => {
+				runtimeActive = false;
+			};
+		},
+		async initialize() {
+			configureDefaultConnection(env);
+			if (dependencies.sentry) initializeSentry(dependencies.sentry, env.sentry);
+			await initializePostgresHealth();
+		},
+		compose: () => {
+			const composed = composeBillingRuntime(env, dependencies);
+			pollingLogger = composed.logger;
+			return composed;
+		},
+		scheduler: dependencies.scheduler ?? {
+			schedule(job) {
+				return startPollingRuntime({
+					...job,
+					worker: { runOnce: job.runOnce },
+					logger: pollingLogger,
+				});
+			},
+		},
+		cleanup: [
+			() => closePool(),
+			async () => {
+				await dependencies.sentry?.flush?.(2_000);
+			},
+		],
 	});
 }

@@ -54,8 +54,8 @@ Update `package.json` and `CHANGELOG.md`, verify the release commit, then push i
 `vX.Y.Z` tag to the GitHub repository `quotumapp/quotum`. Confirm the tag's `Publish image` run
 succeeds and GHCR contains `X.Y.Z`, `X.Y`, and `latest`; record the image digest. A package version
 bump or push to `main` alone does not publish a versioned image. Check the remote explicitly:
-`origin` may point to GitLab. Publishing runs independently of CI, so passing release checks is
-required before tagging. Report a release as published only after verifying the versioned image.
+`origin` may point to GitLab. Publishing runs the shared standalone validation workflow before its publish job; passing release
+checks is required before tagging. Report a release as published only after verifying the versioned image.
 
 ## Security and configuration
 

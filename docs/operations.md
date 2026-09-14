@@ -219,8 +219,11 @@ The [Publish image workflow](../.github/workflows/docker-publish.yml) publishes
 The workflow rejects a release tag that differs from `v` plus the tagged commit's `package.json`
 version. A package version bump or a `main` push alone does not publish versioned image tags.
 Git tags already present on GitHub do not prove that an image was built. The workflow listens to
-pushes; it has no GitHub Release event or manual dispatch trigger. Publishing runs independently of
-[CI](../.github/workflows/ci.yml) and does not wait for its checks.
+pushes; it has no GitHub Release event or manual dispatch trigger. Both publishing and ordinary
+[CI](../.github/workflows/ci.yml) call the same [standalone validation](../.github/workflows/validate.yml).
+The publish job requires successful validation of its exact source commit. Validation checks out
+only this public repository, requires no private siblings or corporate credentials, and has read-only
+repository permissions; registry write access is limited to the publishing job.
 
 1. Prepare the release commit on `main`: update `package.json` and [CHANGELOG.md](../CHANGELOG.md),
    including migration compatibility, environment changes and upgrade order. Complete
