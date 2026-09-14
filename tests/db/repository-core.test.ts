@@ -1,7 +1,19 @@
 import { describe, expect, it } from "bun:test";
+import { SQL } from "bun";
 import { BillingRepository } from "../../src/db/repository";
 import { projectInstanceContext } from "../helpers/project-context";
 import { FakeDatabase } from "./repository-fixture";
+
+/**
+ * Models the error shape production sees: drizzle rethrows a `DrizzleQueryError` wrapper whose
+ * `cause` is Bun's `SQL.PostgresError`, which carries the driver code plus the SQLSTATE on
+ * `errno`.
+ */
+function driverError(errno: string, message: string): Error {
+	return new Error(message, {
+		cause: new SQL.PostgresError(message, { code: "ERR_POSTGRES_SERVER_ERROR", errno }),
+	});
+}
 
 describe("BillingRepository core", () => {
 	it("reads entitlement snapshots from billing tables", async () => {
@@ -100,7 +112,7 @@ describe("BillingRepository core", () => {
 		database.transaction = async (callback) => {
 			attempts += 1;
 			if (attempts < 3) {
-				throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+				throw driverError("40P01", "deadlock detected");
 			}
 			return await runTransaction(callback);
 		};
@@ -116,13 +128,13 @@ describe("BillingRepository core", () => {
 		let attempts = 0;
 		database.transaction = async () => {
 			attempts += 1;
-			throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+			throw driverError("40P01", "deadlock detected");
 		};
 		const repository = new BillingRepository(database as never);
 
 		await expect(
 			repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1"),
-		).rejects.toMatchObject({ code: "40P01" });
+		).rejects.toMatchObject({ cause: { errno: "40P01" } });
 		expect(attempts).toBe(3);
 	});
 
@@ -132,14 +144,32 @@ describe("BillingRepository core", () => {
 			let attempts = 0;
 			database.transaction = async () => {
 				attempts += 1;
-				throw Object.assign(new Error(code), { code });
+				throw driverError(code, code);
 			};
 			const repository = new BillingRepository(database as never);
 
 			await expect(
 				repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1"),
-			).rejects.toMatchObject({ code });
+			).rejects.toMatchObject({ cause: { errno: code } });
 			expect(attempts).toBe(1);
 		}
+	});
+
+	it("retries executors that surface the SQLSTATE as the top-level code", async () => {
+		const database = new FakeDatabase([[{ id: "customer-id" }], [], [{ id: "customer-id" }], []]);
+		const runTransaction = database.transaction.bind(database);
+		let attempts = 0;
+		database.transaction = async (callback) => {
+			attempts += 1;
+			if (attempts < 3) {
+				throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+			}
+			return await runTransaction(callback);
+		};
+		const repository = new BillingRepository(database as never);
+
+		await repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1");
+
+		expect(attempts).toBe(3);
 	});
 });

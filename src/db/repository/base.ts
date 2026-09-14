@@ -17,13 +17,36 @@ export abstract class RepositoryModule {
 	}
 }
 
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+
+/**
+ * Reads the PostgreSQL SQLSTATE off a thrown error. Drizzle wraps driver errors in
+ * `DrizzleQueryError` with the original error on `cause`, and Bun's SQL driver reports the
+ * SQLSTATE on `errno` while its own `code` is a driver name like `ERR_POSTGRES_SERVER_ERROR`,
+ * so the cause chain has to be walked and both fields checked.
+ */
+export function sqlstateOf(error: unknown): string | null {
+	const visited = new Set<object>();
+	let current: unknown = error;
+	for (let depth = 0; depth < 8; depth += 1) {
+		if (typeof current !== "object" || current === null || visited.has(current)) {
+			return null;
+		}
+		visited.add(current);
+		const link = current as { errno?: unknown; code?: unknown; cause?: unknown };
+		if (typeof link.errno === "string" && SQLSTATE_PATTERN.test(link.errno)) {
+			return link.errno;
+		}
+		if (typeof link.code === "string" && SQLSTATE_PATTERN.test(link.code)) {
+			return link.code;
+		}
+		current = link.cause;
+	}
+	return null;
+}
+
 function isPostgresDeadlock(error: unknown): boolean {
-	return (
-		typeof error === "object" &&
-		error !== null &&
-		"code" in error &&
-		(error as { code?: unknown }).code === "40P01"
-	);
+	return sqlstateOf(error) === "40P01";
 }
 
 async function delay(milliseconds: number): Promise<void> {

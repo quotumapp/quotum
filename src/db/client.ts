@@ -2,6 +2,7 @@ import { SQL } from "bun";
 import { type BunSQLDatabase, drizzle } from "drizzle-orm/bun-sql";
 import type { BillingEnv } from "../env";
 import { loadEnv } from "../env";
+import { sqlstateOf } from "./repository/base";
 import * as schema from "./schema";
 
 export type BillingSchema = typeof schema;
@@ -93,7 +94,7 @@ export const db = new Proxy(
 	},
 ) as BillingDatabase;
 
-const transientConnectionErrors = new Set(["ERR_POSTGRES_LIFETIME_TIMEOUT", "08P01"]);
+const transientConnectionErrors = new Set(["ERR_POSTGRES_LIFETIME_TIMEOUT"]);
 
 let postgresStartupHealth: PostgresHealthSnapshot = {
 	healthy: false,
@@ -105,7 +106,12 @@ function isTransientConnectionError(error: unknown): boolean {
 		return false;
 	}
 
-	if (error instanceof SQL.PostgresError && transientConnectionErrors.has(error.code)) {
+	// Server SQLSTATEs arrive on `errno` (see `sqlstateOf`), so `error.code` alone only ever
+	// matched driver-level names.
+	if (
+		(error instanceof SQL.PostgresError && transientConnectionErrors.has(error.code)) ||
+		sqlstateOf(error) === "08P01"
+	) {
 		return true;
 	}
 
