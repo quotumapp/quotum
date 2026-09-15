@@ -8,17 +8,21 @@ The [Dockerfile](../Dockerfile) builds a multi-stage image on `oven/bun:1.4.2` c
 `migrations/`, and production dependencies. It listens on `PORT` (default `3000`) and runs
 `bun run src/index.ts`.
 
-```sh
-docker build -t quotum-api:0.9.1 \
-  --build-arg BUILD_VERSION=0.9.1 --build-arg BUILD_COMMIT="$(git rev-parse HEAD)" .
+Released images are published to `ghcr.io/quotumapp/quotum` for `linux/amd64` and `linux/arm64`.
+Each [GitHub Release](https://github.com/quotumapp/quotum/releases) lists the image digest; pin
+deployments to it rather than to the moving `X.Y` or `latest` tags. To build locally instead:
 
-docker run --rm --env-file .env -p 3000:3000 quotum-api:0.9.1
+```sh
+docker build -t quotum-api:0.10.1 \
+  --build-arg BUILD_VERSION=0.10.1 --build-arg BUILD_COMMIT="$(git rev-parse HEAD)" .
+
+docker run --rm --env-file .env -p 3000:3000 quotum-api:0.10.1
 ```
 
 Run migrations from the same image before starting a new version:
 
 ```sh
-docker run --rm --env-file .env quotum-api:0.9.1 bun run migrate
+docker run --rm --env-file .env quotum-api:0.10.1 bun run migrate
 ```
 
 ## Required variables

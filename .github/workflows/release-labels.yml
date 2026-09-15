@@ -1,0 +1,54 @@
+name: Release labels
+
+# Labels merged pull requests from their Conventional Commit titles so generated release notes group
+# them. Runs after merge on main, so pull request code never runs with this write token.
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  label:
+    name: Label merged pull requests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Apply labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            commits=$(git rev-list "$BEFORE..$AFTER")
+          else
+            commits="$AFTER"
+          fi
+          for sha in $commits; do
+            gh api "repos/$GH_REPO/commits/$sha/pulls" \
+              --jq '.[] | select(.merged_at != null) | [.number, .title] | @tsv' |
+              while IFS=$'\t' read -r number title; do
+                if ! labels=$(PR_TITLE="$title" bun scripts/release.ts pr-title); then
+                  echo "::warning::#$number has no Conventional Commit title; label it by hand."
+                  continue
+                fi
+                args=()
+                while read -r label; do
+                  args+=(-f "labels[]=$label")
+                done <<< "$labels"
+                gh api --method POST "repos/$GH_REPO/issues/$number/labels" "${args[@]}" > /dev/null
+                echo "#$number: $(echo "$labels" | paste -sd, -)"
+              done
+          done

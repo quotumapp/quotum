@@ -113,6 +113,7 @@ const testSupportPaths = new Set([
 	"scripts/check-coverage.ts",
 	"scripts/check-module-boundaries.ts",
 	"scripts/projection-receiver.ts",
+	"scripts/release.ts",
 	"scripts/test-e2e.ts",
 	"scripts/test-integration.ts",
 	"scripts/test-load.ts",

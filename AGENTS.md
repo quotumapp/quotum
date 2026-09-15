@@ -50,19 +50,24 @@ published feature branch, push with `--force-with-lease`. Use squash merge for p
 never create merge commits. Do not rewrite published `main` except for an explicitly authorized
 history repair.
 
-Use Conventional Commits with a subject under 72 characters. Pull requests describe the change,
+Use Conventional Commits with a subject under 72 characters. The pull request title becomes the
+squash commit and must use the same form; the `PR title` check enforces it, and merged pull requests
+are labelled from it for release notes. Pull requests describe the change,
 list the verification commands run, call out migration and environment variable changes with their
 upgrade order, and include request and response examples when HTTP behavior changes.
 
 ## Releases and container publishing
 
 For release work, follow the [publishing checklist](docs/operations.md#publish-a-container-release).
-Update `package.json` and `CHANGELOG.md`, verify the release commit, then push its matching
-`vX.Y.Z` tag to the GitHub repository `quotumapp/quotum`. Confirm the tag's `Publish image` run
-succeeds and GHCR contains `X.Y.Z`, `X.Y`, and `latest`; record the image digest. A package version
-bump or push to `main` alone does not publish a versioned image. Check the remote explicitly:
-`origin` may point to GitLab. Publishing runs the shared standalone validation workflow before its publish job; passing release
-checks is required before tagging. Report a release as published only after verifying the versioned image.
+Update `package.json` and `CHANGELOG.md` through a pull request, verify the merged commit, then
+push its matching `vX.Y.Z` tag to the GitHub repository `quotumapp/quotum`. Confirm the tag's
+`Publish image` run succeeds, GHCR contains `X.Y.Z` and `X.Y` (plus `latest` for the highest stable
+version), and the GitHub Release shows the same image digest and its assets. A package version bump
+or push to `main` alone does not publish a versioned image. Check the remote explicitly: a GitLab
+remote does not trigger publishing. Publishing runs the shared standalone validation workflow before
+its publish job; passing release checks is required before tagging. Published releases are immutable,
+so fix a bad release with a new patch. Report a release as published only after verifying the GitHub
+Release and the versioned image.
 
 ## Security and configuration
 

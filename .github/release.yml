@@ -1,0 +1,31 @@
+# Groups generated GitHub Release notes. Labels come from pull request titles
+# (.github/workflows/release-labels.yml); a pull request lands in the first matching category.
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+  categories:
+    - title: Breaking changes ⚠️
+      labels:
+        - breaking
+    - title: Security 🔒
+      labels:
+        - security
+    - title: Features ✨
+      labels:
+        - feature
+    - title: Fixes 🔧
+      labels:
+        - bug
+    - title: Performance 📊
+      labels:
+        - performance
+    - title: Docs 📖
+      labels:
+        - documentation
+    - title: Maintenance ⚙️
+      labels:
+        - maintenance
+    - title: Other changes
+      labels:
+        - "*"

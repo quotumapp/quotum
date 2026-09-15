@@ -77,9 +77,10 @@ introduce breaking changes.
 
 ## Commit messages
 
-Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `refactor:`,
-`docs:`, `test:`, `chore:`, `ci:`. Keep the subject under 72 characters and explain the why in the
-body when it is not obvious.
+Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `perf:`,
+`refactor:`, `docs:`, `test:`, `build:`, `ci:`, `chore:`, `revert:`, with an optional lowercase scope
+such as `fix(db):`. Mark breaking changes with `!`, for example `feat!:`. Keep the subject under 72
+characters and explain the why in the body when it is not obvious.
 
 ## Pull requests
 
@@ -91,6 +92,13 @@ checks on the final amended commit, then use GitHub **Squash and merge**. Merge 
 rebase-merging multiple branch commits are not part of this workflow. Published `main` must not
 be rewritten without explicit authorization for a history repair.
 
+The pull request title becomes the squash commit on `main`, so it must be a Conventional Commit
+subject under 72 characters; the `PR title` check fails otherwise. After merge, the pull request is
+labelled from its title for the grouped GitHub Release notes: `feat` becomes `feature`, `fix` becomes
+`bug`, `perf` becomes `performance`, `docs` becomes `documentation`, other types become
+`maintenance`, and `!` adds `breaking`. Maintainers add `security` by hand for security fixes and
+`ignore-for-release` for changes that should not appear in release notes.
+
 - Describe the change and the verification commands you ran.
 - Include request and response examples when HTTP behavior changes.
 - Link related issues.
@@ -100,8 +108,9 @@ be rewritten without explicit authorization for a history repair.
 
 Follow the [container release checklist](docs/operations.md#publish-a-container-release) for version
 and changelog updates, verification, the GitHub tag push, and confirmation of the GHCR image.
-The release tag must match `package.json`. Pushing `main` publishes only the rolling `main` image;
-changing the package version alone does not create a versioned image.
+The release tag must match `package.json`, and `CHANGELOG.md` must have a section for that version.
+Pushing `main` publishes only the rolling `main` image; changing the package version alone does not
+create a versioned image. The tag's workflow publishes the image and then the GitHub Release.
 
 ## License of contributions
 
