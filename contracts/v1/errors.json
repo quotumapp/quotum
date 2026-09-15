@@ -342,7 +342,7 @@
       "code": "ENTITY_NOT_FOUND",
       "sources": [
         "src/db/repository/controls-enterprise.ts",
-        "src/db/repository/metering.ts"
+        "src/db/repository/metering-persistence.ts"
       ]
     },
     {
@@ -368,7 +368,7 @@
       "code": "FEATURE_NOT_FOUND",
       "sources": [
         "src/db/repository/controls-enterprise.ts",
-        "src/db/repository/metering.ts"
+        "src/db/repository/metering-persistence.ts"
       ]
     },
     {
@@ -460,7 +460,7 @@
     {
       "code": "INSUFFICIENT_BALANCE",
       "sources": [
-        "src/db/repository/metering.ts"
+        "src/db/repository/metering-persistence.ts"
       ]
     },
     {
@@ -573,13 +573,13 @@
     {
       "code": "METER_RATE_NOT_ACTIVATED",
       "sources": [
-        "src/db/repository/metering.ts"
+        "src/db/repository/metering-persistence.ts"
       ]
     },
     {
       "code": "METERING_CONFIGURATION_ERROR",
       "sources": [
-        "src/db/repository/metering.ts"
+        "src/db/repository/metering-persistence.ts"
       ]
     },
     {
@@ -787,7 +787,7 @@
     {
       "code": "RESERVATION_NOT_FOUND",
       "sources": [
-        "src/db/repository/metering.ts"
+        "src/db/repository/metering-persistence.ts"
       ]
     },
     {

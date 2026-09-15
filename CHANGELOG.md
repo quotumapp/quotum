@@ -12,6 +12,13 @@ start at 1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- The 40P01 deadlock retry and the 08P01 transient-connection retry never matched in production:
+  drizzle wraps driver errors in `DrizzleQueryError` with the PostgreSQL error on `cause`, and Bun
+  reports the SQLSTATE on `errno`, not `code`. Both checks now read the SQLSTATE through the cause
+  chain; a real-driver test proves the deadlock retry.
+
 ## [0.10.0] - 2026-09-14
 
 ### Added

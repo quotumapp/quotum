@@ -1,6 +1,6 @@
 {
 	"name": "quotum-api",
-	"version": "0.10.0",
+	"version": "0.10.1",
 	"exports": {
 		"./sdk": "./src/sdk/index.ts",
 		"./runtime": "./src/composition/public-runtime.ts",

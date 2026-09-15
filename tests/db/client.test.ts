@@ -1,8 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SQL } from "bun";
-import { getPostgresStartupHealth, initializePostgresHealth } from "../../src/db/client";
+import { SQL } from "bun";
+import {
+	checkPostgresHealth,
+	getPostgresStartupHealth,
+	initializePostgresHealth,
+} from "../../src/db/client";
 
 type CountingSqlClient = ((
 	strings: TemplateStringsArray,
@@ -63,6 +67,32 @@ describe("billing database client", () => {
 		getPostgresStartupHealth();
 		getPostgresStartupHealth();
 
+		expect(client.getCallCount()).toBe(1);
+	});
+
+	it("retries a transient SQLSTATE error reported on errno and returns healthy", async () => {
+		const client = createCountingSqlClient([
+			new SQL.PostgresError("protocol violation", {
+				code: "ERR_POSTGRES_SERVER_ERROR",
+				errno: "08P01",
+			}),
+			[{ "?column?": 1 }],
+		]);
+
+		expect(await checkPostgresHealth(asSqlClient(client))).toBe(true);
+		expect(client.getCallCount()).toBe(2);
+	});
+
+	it("reports a non-transient SQLSTATE unhealthy without a second attempt", async () => {
+		const client = createCountingSqlClient([
+			new SQL.PostgresError("division by zero", {
+				code: "ERR_POSTGRES_SERVER_ERROR",
+				errno: "22012",
+			}),
+			[{ "?column?": 1 }],
+		]);
+
+		expect(await checkPostgresHealth(asSqlClient(client))).toBe(false);
 		expect(client.getCallCount()).toBe(1);
 	});
 });
