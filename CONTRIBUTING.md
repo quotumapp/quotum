@@ -38,7 +38,7 @@ they finish.
 
 - SQL files under `migrations/` are the source of truth and are checksum-verified by the migration
   runner. Before 1.0 they are baseline files that evolve in place: edit the domain file, recreate
-  your database, and note the change in the changelog. Incremental migrations start at 1.0.
+  your database, and describe the change in the pull request. Incremental migrations start at 1.0.
 - Keep the Drizzle schema in `src/db/schema.ts` in step with the SQL.
 - Call out every schema change and every environment variable change in the pull request description,
   including upgrade order when workers must be drained first.
@@ -96,21 +96,28 @@ The pull request title becomes the squash commit on `main`, so it must be a Conv
 subject under 72 characters; the `PR title` check fails otherwise. After merge, the pull request is
 labelled from its title for the grouped GitHub Release notes: `feat` becomes `feature`, `fix` becomes
 `bug`, `perf` becomes `performance`, `docs` becomes `documentation`, other types become
-`maintenance`, and `!` adds `breaking`. Maintainers add `security` by hand for security fixes and
-`ignore-for-release` for changes that should not appear in release notes.
+`maintenance`, `!` adds `breaking`, and `chore(release):` gets `ignore-for-release`. Maintainers add
+`security` by hand for security fixes and `ignore-for-release` for other changes that should not
+appear in release notes.
+
+Release notes list pull requests by title only, so the pull request description is the detailed
+record of a change. Do not bump the `package.json` version in feature pull requests; the version
+changes only in the release pull request.
 
 - Describe the change and the verification commands you ran.
+- For breaking changes, schema or environment changes, write the upgrade notes operators need:
+  what changes, what to configure, and the upgrade order.
 - Include request and response examples when HTTP behavior changes.
 - Link related issues.
 - Keep pull requests focused; unrelated refactors belong in their own change.
 
 ## Publishing a release
 
-Follow the [container release checklist](docs/operations.md#publish-a-container-release) for version
-and changelog updates, verification, the GitHub tag push, and confirmation of the GHCR image.
-The release tag must match `package.json`, and `CHANGELOG.md` must have a section for that version.
-Pushing `main` publishes only the rolling `main` image; changing the package version alone does not
-create a versioned image. The tag's workflow publishes the image and then the GitHub Release.
+Follow the [container release checklist](docs/operations.md#publish-a-container-release) for the
+release pull request, verification, the GitHub tag push, and confirmation of the GHCR image.
+The release tag must match `package.json`. Pushing `main` publishes only the rolling `main` image;
+changing the package version alone does not create a versioned image. The tag's workflow publishes
+the image and then the GitHub Release.
 
 ## License of contributions
 

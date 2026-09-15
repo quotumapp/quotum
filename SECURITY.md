@@ -21,7 +21,7 @@ possible. We will credit reporters in the release notes unless you ask us not to
 This project is pre-1.0. Security fixes are published for the latest release line only, as a new
 patch release on `main` listed on [GitHub Releases](https://github.com/quotumapp/quotum/releases).
 Older minor versions do not receive backported fixes. Before 1.0 the schema baselines evolve in
-place; follow each release's upgrade notes and the
+place; follow the upgrade notes in the pull requests each release lists and the
 [schema policy](docs/operations.md#schema-and-upgrade-policy) when upgrading.
 
 ## Scope

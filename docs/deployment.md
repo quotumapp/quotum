@@ -9,7 +9,8 @@ The [Dockerfile](../Dockerfile) builds a multi-stage image on `oven/bun:1.4.2` c
 `bun run src/index.ts`.
 
 Released images are published to `ghcr.io/quotumapp/quotum` for `linux/amd64` and `linux/arm64`.
-Each [GitHub Release](https://github.com/quotumapp/quotum/releases) lists the image digest; pin
+Each [GitHub Release](https://github.com/quotumapp/quotum/releases) records the image digest in its
+`image.json` asset; pin
 deployments to it rather than to the moving `X.Y` or `latest` tags. To build locally instead:
 
 ```sh

@@ -5,13 +5,12 @@ All notable changes to the Quotum Billing API are documented here. The format fo
 [Semantic Versioning](https://semver.org/) with the pre-1.0 caveat that minor releases may contain
 breaking changes; each entry names them and the required upgrade order.
 
-Every release is tagged `vX.Y.Z`, published as a container image with the same version, and
-listed on [GitHub Releases](https://github.com/quotumapp/quotum/releases) with its notes from this
-file. Before 1.0 the schema ships as baseline files under `migrations/` that evolve in place and are
+This file covers releases up to 0.10.1. Later release notes are on
+[GitHub Releases](https://github.com/quotumapp/quotum/releases), generated from the merged pull
+requests; each pull request describes its migration, environment and upgrade-order changes. Before
+1.0 the schema ships as baseline files under `migrations/` that evolve in place and are
 checksum-verified; recreate a database from them rather than migrating it. Incremental migrations
 start at 1.0.
-
-## [Unreleased]
 
 ## [0.10.1] - 2026-09-15
 

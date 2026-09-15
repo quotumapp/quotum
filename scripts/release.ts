@@ -4,16 +4,14 @@ import { parseArgs } from "node:util";
 import {
 	classifyPrTitle,
 	latestStableTag,
-	parseChangelog,
 	releaseMeta,
 	renderImageManifest,
-	renderReleaseNotes,
 	renderUnreleasedSummary,
 } from "./lib/release";
 
 const usage = `Usage:
   bun scripts/release.ts meta <tag>
-  bun scripts/release.ts notes <version> --digest sha256:... [--previous vX.Y.Z] [--out-dir dir]
+  bun scripts/release.ts image-manifest <version> --digest sha256:... [--out-dir dir]
   bun scripts/release.ts pr-title            (reads PR_TITLE)
   bun scripts/release.ts unreleased`;
 
@@ -61,23 +59,12 @@ function meta(positionals: string[]) {
 	});
 }
 
-function notes(
-	positionals: string[],
-	values: { digest?: string; previous?: string; "out-dir"?: string },
-) {
+function imageManifest(positionals: string[], values: { digest?: string; "out-dir"?: string }) {
 	const version = positionals[0];
 	if (!version || !values.digest) {
 		throw new Error(usage);
 	}
 	const outDir = values["out-dir"] ?? "release";
-	const sections = parseChangelog(readFileSync("CHANGELOG.md", "utf8"));
-	const body = renderReleaseNotes({
-		sections,
-		version,
-		previous: values.previous || undefined,
-		digest: values.digest,
-		repository: repository(),
-	});
 	const serverUrl = process.env.GITHUB_SERVER_URL;
 	const runId = process.env.GITHUB_RUN_ID;
 	const manifest = renderImageManifest({
@@ -89,9 +76,8 @@ function notes(
 			serverUrl && runId ? `${serverUrl}/${repository()}/actions/runs/${runId}` : undefined,
 	});
 	mkdirSync(outDir, { recursive: true });
-	writeFileSync(join(outDir, "notes.md"), body);
 	writeFileSync(join(outDir, "image.json"), manifest);
-	console.log(`Wrote ${join(outDir, "notes.md")} and ${join(outDir, "image.json")}`);
+	console.log(`Wrote ${join(outDir, "image.json")}`);
 }
 
 function prTitle() {
@@ -137,7 +123,6 @@ try {
 		allowPositionals: true,
 		options: {
 			digest: { type: "string" },
-			previous: { type: "string" },
 			"out-dir": { type: "string" },
 		},
 	});
@@ -146,8 +131,8 @@ try {
 		case "meta":
 			meta(rest);
 			break;
-		case "notes":
-			notes(rest, values);
+		case "image-manifest":
+			imageManifest(rest, values);
 			break;
 		case "pr-title":
 			prTitle();

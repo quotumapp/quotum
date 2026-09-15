@@ -125,20 +125,19 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
 
-      - name: Render release notes
+      - name: Record image digest
         env:
           VERSION: ${{ needs.publish.outputs.version }}
-          PREVIOUS: ${{ needs.publish.outputs.previous }}
           DIGEST: ${{ needs.publish.outputs.digest }}
-        run: bun scripts/release.ts notes "$VERSION" --previous "$PREVIOUS" --digest "$DIGEST" --out-dir release
+        run: bun scripts/release.ts image-manifest "$VERSION" --digest "$DIGEST" --out-dir release
 
+      # Notes are GitHub's generated pull request list; upgrade details live in each pull request.
       # Assets are attached to a draft before publishing because published releases are immutable.
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-          VERSION: ${{ needs.publish.outputs.version }}
           PREVIOUS: ${{ needs.publish.outputs.previous }}
           LATEST: ${{ needs.publish.outputs.latest }}
           PRERELEASE: ${{ needs.publish.outputs.prerelease }}
@@ -151,7 +150,7 @@ jobs:
             fi
             gh release delete "$TAG" --yes
           fi
-          args=(--draft --verify-tag --title "Quotum $VERSION" --notes-file release/notes.md --generate-notes)
+          args=(--draft --verify-tag --title "$TAG" --generate-notes)
           if [ -n "$PREVIOUS" ]; then
             args+=(--notes-start-tag "$PREVIOUS")
           fi
