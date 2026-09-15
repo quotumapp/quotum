@@ -151,14 +151,14 @@ guards. The quickstart in `docs/quickstart.md` uses `bun run test:stripe-entrypo
 - Biome: tabs, 100 columns, double quotes, organized imports. `contracts/v1` is excluded from
   formatting because it is generated.
 - Strict TypeScript, kebab-case file names, `*.test.ts` under `tests/` mirroring `src/`.
-- Conventional Commits, subject under 72 characters. Bump `package.json` version when a change
-  ships; CI warns on an unchanged version. For releases, follow
+- Conventional Commits, subject under 72 characters. Do not bump the `package.json` version in
+  feature pull requests; a `chore(release): vX.Y.Z` pull request bumps it. For releases, follow
   [the publishing checklist](docs/operations.md#publish-a-container-release): push the matching
   Git tag to GitHub and verify the GitHub Release and the versioned GHCR image. A version bump or
   `main` push alone does not publish a versioned image. PR titles are the squash commit subject,
-  checked by `PR title` and mapped to release-note labels by `scripts/release.ts`. CI fails when
-  `CHANGELOG.md` has no section for the `package.json` version. See
-  [AGENTS.md](AGENTS.md#releases-and-container-publishing).
+  checked by `PR title` and mapped to release-note labels by `scripts/release.ts`. Release notes
+  are GitHub's generated pull request list; upgrade details belong in pull request descriptions.
+  `CHANGELOG.md` is frozen at 0.10.1. See [AGENTS.md](AGENTS.md#releases-and-container-publishing).
 - `tests/package-scripts.test.ts` pins the exact text of several package scripts, the Dockerfile,
   and `src/migrate.ts` safety patterns. Changing those requires updating that test deliberately.
 - Migrations, bootstrap credential output, credential handling, and provider webhook verification

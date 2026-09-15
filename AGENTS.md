@@ -54,13 +54,15 @@ Use Conventional Commits with a subject under 72 characters. The pull request ti
 squash commit and must use the same form; the `PR title` check enforces it, and merged pull requests
 are labelled from it for release notes. Pull requests describe the change,
 list the verification commands run, call out migration and environment variable changes with their
-upgrade order, and include request and response examples when HTTP behavior changes.
+upgrade order, and include request and response examples when HTTP behavior changes. Release notes
+list pull requests by title only, so the description is the detailed record. Do not bump the
+`package.json` version in feature pull requests.
 
 ## Releases and container publishing
 
 For release work, follow the [publishing checklist](docs/operations.md#publish-a-container-release).
-Update `package.json` and `CHANGELOG.md` through a pull request, verify the merged commit, then
-push its matching `vX.Y.Z` tag to the GitHub repository `quotumapp/quotum`. Confirm the tag's
+Bump `package.json` and regenerate the contracts in a `chore(release): vX.Y.Z` pull request, verify
+the merged commit, then push its matching `vX.Y.Z` tag to the GitHub repository `quotumapp/quotum`. Confirm the tag's
 `Publish image` run succeeds, GHCR contains `X.Y.Z` and `X.Y` (plus `latest` for the highest stable
 version), and the GitHub Release shows the same image digest and its assets. A package version bump
 or push to `main` alone does not publish a versioned image. Check the remote explicitly: a GitLab

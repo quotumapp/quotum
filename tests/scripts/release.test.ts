@@ -1,46 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
 import {
 	classifyPrTitle,
 	compareVersions,
 	latestStableTag,
-	parseChangelog,
 	releaseMeta,
 	renderImageManifest,
-	renderReleaseNotes,
 	renderUnreleasedSummary,
 } from "../../scripts/lib/release";
 
 const digest = `sha256:${"a".repeat(64)}`;
-
-const changelogFixture = [
-	"# Changelog",
-	"",
-	"Intro text.",
-	"",
-	"## [Unreleased]",
-	"",
-	"- Pending work.",
-	"",
-	"## [0.10.1] - 2026-09-16",
-	"",
-	"### Fixed",
-	"",
-	"- Deadlock retry.",
-	"",
-	"## [0.10.0] - 2026-09-14",
-	"",
-	"### Changed",
-	"",
-	"```sh",
-	"## not a heading inside a fence",
-	"```",
-	"",
-	"## [0.9.3] - 2026-09-10",
-	"",
-	"- Email providers.",
-	"",
-].join("\n");
 
 describe("compareVersions", () => {
 	it("orders by SemVer precedence", () => {
@@ -61,56 +29,6 @@ describe("compareVersions", () => {
 
 	it("rejects values that are not semantic versions", () => {
 		expect(() => compareVersions("0.10", "0.10.0")).toThrow("Not a semantic version: 0.10");
-	});
-});
-
-describe("parseChangelog", () => {
-	it("returns released sections in file order and skips Unreleased and fenced headings", () => {
-		const sections = parseChangelog(changelogFixture);
-		expect(sections.map((section) => section.version)).toEqual(["0.10.1", "0.10.0", "0.9.3"]);
-		expect(sections[0]).toEqual({
-			version: "0.10.1",
-			date: "2026-09-16",
-			body: "### Fixed\n\n- Deadlock retry.",
-		});
-		expect(sections[1].body).toContain("## not a heading inside a fence");
-	});
-
-	it("ignores headings inside tilde, indented and longer fences", () => {
-		const text = [
-			"## [0.2.0] - 2026-09-16",
-			"",
-			"~~~md",
-			"## tilde fence",
-			"```",
-			"## backticks do not close a tilde fence",
-			"~~~",
-			"",
-			"- Example:",
-			"   ````sh",
-			"## indented fence",
-			"   ```",
-			"## shorter marker does not close it",
-			"   ````",
-			"",
-			"## [0.1.0] - 2026-09-15",
-			"",
-			"- First.",
-		].join("\n");
-		const sections = parseChangelog(text);
-		expect(sections.map((section) => section.version)).toEqual(["0.2.0", "0.1.0"]);
-		expect(sections[0].body).toContain("## shorter marker does not close it");
-		expect(sections[1].body).toBe("- First.");
-	});
-
-	it("rejects duplicate versions", () => {
-		const text = "## [0.9.3] - 2026-09-10\n\n- a\n\n## [0.9.3] - 2026-09-10\n\n- b\n";
-		expect(() => parseChangelog(text)).toThrow("Duplicate changelog section: 0.9.3");
-	});
-
-	it("rejects malformed version headings", () => {
-		expect(() => parseChangelog("## [0.9.3]\n")).toThrow("Malformed changelog heading");
-		expect(() => parseChangelog("## 0.9.3 - 2026-09-10\n")).toThrow("Malformed changelog heading");
 	});
 });
 
@@ -173,66 +91,19 @@ describe("latestStableTag", () => {
 	});
 });
 
-describe("renderReleaseNotes", () => {
-	const sections = parseChangelog(changelogFixture);
-
-	it("includes every section after the previous release and the pinned image", () => {
-		const notes = renderReleaseNotes({
-			sections,
-			version: "0.10.1",
-			previous: "v0.9.3",
-			digest,
-			repository: "quotumapp/quotum",
-		});
-		expect(notes).toContain("## 0.10.1 (2026-09-16)\n\n### Fixed\n\n- Deadlock retry.");
-		expect(notes).toContain("## 0.10.0 (2026-09-14)");
-		expect(notes).not.toContain("## 0.9.3");
-		expect(notes).not.toContain("Pending work");
-		expect(notes).toContain("docker pull ghcr.io/quotumapp/quotum:0.10.1");
-		expect(notes).toContain(`\`ghcr.io/quotumapp/quotum@${digest}\``);
-		expect(notes).toContain(
-			"https://github.com/quotumapp/quotum/blob/v0.10.1/docs/operations.md#upgrade",
-		);
-		expect(notes.indexOf("## 0.10.1")).toBeLessThan(notes.indexOf("## 0.10.0"));
-	});
-
-	it("excludes newer sections when rendering a backport", () => {
-		const notes = renderReleaseNotes({
-			sections,
-			version: "0.9.3",
-			previous: "v0.9.2",
-			digest,
-			repository: "quotumapp/quotum",
-		});
-		expect(notes).toContain("## 0.9.3 (2026-09-10)");
-		expect(notes).not.toContain("## 0.10");
-	});
-
-	it("includes only its own section without a previous release", () => {
-		const notes = renderReleaseNotes({
-			sections,
-			version: "0.10.0",
-			previous: undefined,
-			digest,
-			repository: "quotumapp/quotum",
-		});
-		expect(notes).toContain("## 0.10.0");
-		expect(notes).not.toContain("## 0.9.3");
-		expect(notes).not.toContain("## 0.10.1");
-	});
-
-	it("fails without a changelog section or a valid digest", () => {
-		const input = { sections, previous: "v0.9.3", digest, repository: "quotumapp/quotum" };
-		expect(() => renderReleaseNotes({ ...input, version: "0.10.2" })).toThrow(
-			"CHANGELOG.md has no section for 0.10.2",
-		);
-		expect(() => renderReleaseNotes({ ...input, version: "0.10.1", digest: "sha256:abc" })).toThrow(
-			"Image digest must be sha256:<64 hex>",
-		);
-	});
-});
-
 describe("renderImageManifest", () => {
+	it("rejects a digest that is not sha256", () => {
+		expect(() =>
+			renderImageManifest({
+				repository: "quotumapp/quotum",
+				version: "0.10.1",
+				digest: "sha256:abc",
+				commit: "69eac11",
+				workflowRun: undefined,
+			}),
+		).toThrow("Image digest must be sha256:<64 hex>");
+	});
+
 	it("records the digest-pinned reference", () => {
 		expect(
 			JSON.parse(
@@ -263,6 +134,7 @@ describe("classifyPrTitle", () => {
 		["docs: explain releases", ["documentation"]],
 		["ci: publish GitHub Releases", ["maintenance"]],
 		["chore(test): harden suite gating", ["maintenance"]],
+		["chore(release): v0.11.0", ["ignore-for-release"]],
 		["feat!: rewrite HTTP layer from Hono to Elysia", ["breaking", "feature"]],
 		["refactor(platform/auth)!: drop legacy issuer", ["breaking", "maintenance"]],
 	])("labels %p", (title, labels) => {
@@ -316,13 +188,5 @@ describe("renderUnreleasedSummary", () => {
 			tagged: true,
 			markdown: "## Release status\n\n`v0.10.1` is tagged.\n\nNo changes since v0.10.1.\n",
 		});
-	});
-});
-
-describe("repository changelog", () => {
-	it("parses and has a section for the package version", () => {
-		const sections = parseChangelog(readFileSync("CHANGELOG.md", "utf8"));
-		const { version } = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
-		expect(sections.map((section) => section.version)).toContain(version);
 	});
 });

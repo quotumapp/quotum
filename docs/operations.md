@@ -55,11 +55,12 @@ Never reset populated production data as a routine upgrade.
 
 ## Upgrade
 
-1. Read the target version's [GitHub Release](https://github.com/quotumapp/quotum/releases), whose
-   notes include every [CHANGELOG.md](../CHANGELOG.md) entry since the previous release, and the
-   [schema policy](#schema-and-upgrade-policy). Establish database compatibility before rollout.
+1. Read the target version's [GitHub Release](https://github.com/quotumapp/quotum/releases) and
+   the descriptions of the pull requests it lists, starting with **Breaking changes**, and the
+   [schema policy](#schema-and-upgrade-policy). Releases up to 0.10.1 are described in
+   [CHANGELOG.md](../CHANGELOG.md). Establish database compatibility before rollout.
 2. Take a backup.
-3. If the entry says so, stop usage writers and workers on the old version.
+3. If the upgrade notes say so, stop usage writers and workers on the old version.
 4. Run `bun run migrate:status` from the target image. Stop if integrity verification fails;
    follow the schema policy before proceeding. On a compatible or freshly recreated disposable
    database, run `bun run migrate`. The runner takes an advisory lock, applies pending files in
@@ -202,9 +203,9 @@ projects do not require an unused Stripe connection.
 
 ## Release and support policy
 
-Quotum is pre-1.0. Each release must be tagged `vX.Y.Z`, listed in the changelog with its migrations
-and upgrade order, and published as a container image and a GitHub Release with the same version
-using the checklist below. Only the latest release line receives fixes, published as a new patch on
+Quotum is pre-1.0. Each release must be tagged `vX.Y.Z` and published as a container image and a
+GitHub Release with the same version using the checklist below. Its pull requests carry the
+migrations and upgrade order. Only the latest release line receives fixes, published as a new patch on
 `main`. Security issues are handled privately; see [SECURITY.md](../SECURITY.md).
 
 ## Publish a container release
@@ -220,7 +221,8 @@ The [Publish image workflow](../.github/workflows/docker-publish.yml) publishes
 
 The workflow rejects a release tag that differs from `v` plus the tagged commit's `package.json`
 version. A package version bump or a `main` push alone does not publish versioned image tags; each
-`main` run warns while the package version has no tag. Both publishing and ordinary
+`main` run lists the pull requests merged since the last release and warns while the package
+version has no tag. Both publishing and ordinary
 [CI](../.github/workflows/ci.yml) call the same [standalone validation](../.github/workflows/validate.yml).
 The publish job requires successful validation of its exact source commit. Validation checks out
 only this public repository, requires no private siblings or corporate credentials, and has read-only
@@ -228,20 +230,22 @@ repository permissions; registry write access is limited to the publishing job, 
 access to the release job that runs after it.
 
 The release job creates the GitHub Release only after the image is pushed, so a published release
-proves the image exists. Its notes contain every changelog section after the previous release tag
-(the previous stable tag, or the closest lower tag for a prerelease), the digest-pinned image
-reference, and the merged pull requests that GitHub groups by label through
-[`.github/release.yml`](../.github/release.yml), with a compare link. Labels come from pull request
+proves the image exists. Its notes are GitHub's generated list of the pull requests merged since
+the previous release tag (the previous stable tag, or the closest lower tag for a prerelease),
+grouped by label through [`.github/release.yml`](../.github/release.yml), with a compare link.
+Details and upgrade notes stay in the pull request descriptions. Labels come from pull request
 titles; see [CONTRIBUTING.md](../CONTRIBUTING.md#pull-requests). The release attaches
 `openapi.json` and `errors.json` from `contracts/v1/` and an `image.json` that records the image
 digest, commit and publishing run. Releases are immutable once published: assets and the tag cannot
 change, so correct a bad release with a new patch release. Release notes can still be edited.
 
-1. Prepare the release through a pull request to `main`: update `package.json` and
-   [CHANGELOG.md](../CHANGELOG.md), including migration compatibility, environment changes and
-   upgrade order. CI fails when the changelog has no `## [X.Y.Z] - YYYY-MM-DD` section for the
-   package version. Complete [release verification](#release-verification) for this revision and
-   merge the pull request.
+1. Review the pull requests merged since the last release; the latest `main` publishing run
+   summary lists them. Choose the version: before 1.0, a minor release for breaking changes or
+   features and a patch release for fixes only. Open a pull request titled
+   `chore(release): vX.Y.Z` that sets `package.json` to that version and runs
+   `bun run openapi:generate`, which embeds the version in `contracts/v1/openapi.json`. The pull
+   request is labelled `ignore-for-release` automatically. Complete
+   [release verification](#release-verification) for this revision and merge it.
 2. From a clean checkout of that `main` revision, verify the GitHub remote and CI for the merged
    commit. These examples use `github` for `quotumapp/quotum`; substitute the actual GitHub remote
    name if different. In the multi-repository workspace, a GitLab remote does not trigger GitHub
@@ -285,11 +289,12 @@ change, so correct a bad release with a new patch release. Release notes can sti
 
    ```sh
    gh release view "v$release_version" --repo quotumapp/quotum
+   gh release download "v$release_version" --repo quotumapp/quotum -p image.json -O - | jq -r .digest
    gh release verify "v$release_version" --repo quotumapp/quotum
    docker buildx imagetools inspect "ghcr.io/quotumapp/quotum:$release_version"
    ```
 
-   Verify both target platforms, that the digest in the release notes and `image.json` matches the
+   Verify both target platforms, that the digest in the release's `image.json` matches the
    inspected top-level digest, and that `X.Y` and, for the highest stable version, `latest` resolve
    to the same digest at publication time. Use the recorded digest to pin deployments; `main`, `X.Y`
    and `latest` move as subsequent builds are published. A release is published only after the
