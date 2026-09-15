@@ -13,7 +13,7 @@ unclassified or overlapping files and unresolved imports fail the check.
 | Platform | `src/platform` | Platform, shared |
 | Shared | `src/shared` | Shared |
 | Composition | `src/composition`, `src/app.ts`, `src/index.ts`, `src/runtime.ts`, `src/migrate.ts`, `src/platform-bootstrap.ts`, `src/shutdown.ts`, `scripts/provision-catalog.ts` | Everything |
-| Test support | `tests`, `src/testing`, scenario runners, `scripts/lib` | Everything |
+| Test support | `tests`, `src/testing`, scenario runners, release tooling (`scripts/release.ts`), `scripts/lib` | Everything |
 
 The policy is deny-by-default:
 

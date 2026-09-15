@@ -154,8 +154,11 @@ guards. The quickstart in `docs/quickstart.md` uses `bun run test:stripe-entrypo
 - Conventional Commits, subject under 72 characters. Bump `package.json` version when a change
   ships; CI warns on an unchanged version. For releases, follow
   [the publishing checklist](docs/operations.md#publish-a-container-release): push the matching
-  Git tag to GitHub and verify the versioned GHCR image. A version bump or `main` push alone
-  does not publish a versioned image. See [AGENTS.md](AGENTS.md#releases-and-container-publishing).
+  Git tag to GitHub and verify the GitHub Release and the versioned GHCR image. A version bump or
+  `main` push alone does not publish a versioned image. PR titles are the squash commit subject,
+  checked by `PR title` and mapped to release-note labels by `scripts/release.ts`. CI fails when
+  `CHANGELOG.md` has no section for the `package.json` version. See
+  [AGENTS.md](AGENTS.md#releases-and-container-publishing).
 - `tests/package-scripts.test.ts` pins the exact text of several package scripts, the Dockerfile,
   and `src/migrate.ts` safety patterns. Changing those requires updating that test deliberately.
 - Migrations, bootstrap credential output, credential handling, and provider webhook verification

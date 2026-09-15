@@ -55,7 +55,8 @@ Never reset populated production data as a routine upgrade.
 
 ## Upgrade
 
-1. Read the target version's entry in [CHANGELOG.md](../CHANGELOG.md) and the
+1. Read the target version's [GitHub Release](https://github.com/quotumapp/quotum/releases), whose
+   notes include every [CHANGELOG.md](../CHANGELOG.md) entry since the previous release, and the
    [schema policy](#schema-and-upgrade-policy). Establish database compatibility before rollout.
 2. Take a backup.
 3. If the entry says so, stop usage writers and workers on the old version.
@@ -202,42 +203,55 @@ projects do not require an unused Stripe connection.
 ## Release and support policy
 
 Quotum is pre-1.0. Each release must be tagged `vX.Y.Z`, listed in the changelog with its migrations
-and upgrade order, and published as a container image with the same version using the checklist
-below. Only the latest release line receives fixes, published as a new patch on `main`. Security
-issues are handled privately; see [SECURITY.md](../SECURITY.md).
+and upgrade order, and published as a container image and a GitHub Release with the same version
+using the checklist below. Only the latest release line receives fixes, published as a new patch on
+`main`. Security issues are handled privately; see [SECURITY.md](../SECURITY.md).
 
 ## Publish a container release
 
 The [Publish image workflow](../.github/workflows/docker-publish.yml) publishes
 `ghcr.io/quotumapp/quotum` for `linux/amd64` and `linux/arm64`:
 
-| GitHub push | Container tags |
-| --- | --- |
-| Commit on `main` | `main` (rolling development image) |
-| Stable release tag `vX.Y.Z` | `X.Y.Z`, `X.Y`, `latest` |
+| GitHub push | Container tags | GitHub Release |
+| --- | --- | --- |
+| Commit on `main` | `main` (rolling development image) | None; the run summary lists changes since the last release |
+| Stable release tag `vX.Y.Z` | `X.Y.Z`, `X.Y`, and `latest` when it is the highest stable version | Published, marked latest when it is the highest stable version |
+| Prerelease tag `vX.Y.Z-rc.N` | `X.Y.Z-rc.N` only | Published as a prerelease |
 
 The workflow rejects a release tag that differs from `v` plus the tagged commit's `package.json`
-version. A package version bump or a `main` push alone does not publish versioned image tags.
-Git tags already present on GitHub do not prove that an image was built. The workflow listens to
-pushes; it has no GitHub Release event or manual dispatch trigger. Both publishing and ordinary
+version. A package version bump or a `main` push alone does not publish versioned image tags; each
+`main` run warns while the package version has no tag. Both publishing and ordinary
 [CI](../.github/workflows/ci.yml) call the same [standalone validation](../.github/workflows/validate.yml).
 The publish job requires successful validation of its exact source commit. Validation checks out
 only this public repository, requires no private siblings or corporate credentials, and has read-only
-repository permissions; registry write access is limited to the publishing job.
+repository permissions; registry write access is limited to the publishing job, and release write
+access to the release job that runs after it.
 
-1. Prepare the release commit on `main`: update `package.json` and [CHANGELOG.md](../CHANGELOG.md),
-   including migration compatibility, environment changes and upgrade order. Complete
-   [release verification](#release-verification) for this revision and commit the release files.
-2. From a clean checkout of that `main` revision, verify the GitHub remote and push the commit.
-   These examples use `github` for `quotumapp/quotum`; substitute the actual GitHub remote name
-   if different. In the multi-repository workspace, `origin` may point to GitLab; a push there
-   does not trigger GitHub image publishing. The commands use Git, `jq`, GitHub CLI and Docker
-   Buildx. Keep the release variables in the same shell through the remaining steps.
+The release job creates the GitHub Release only after the image is pushed, so a published release
+proves the image exists. Its notes contain every changelog section after the previous release tag
+(the previous stable tag, or the closest lower tag for a prerelease), the digest-pinned image
+reference, and the merged pull requests that GitHub groups by label through
+[`.github/release.yml`](../.github/release.yml), with a compare link. Labels come from pull request
+titles; see [CONTRIBUTING.md](../CONTRIBUTING.md#pull-requests). The release attaches
+`openapi.json` and `errors.json` from `contracts/v1/` and an `image.json` that records the image
+digest, commit and publishing run. Releases are immutable once published: assets and the tag cannot
+change, so correct a bad release with a new patch release. Release notes can still be edited.
+
+1. Prepare the release through a pull request to `main`: update `package.json` and
+   [CHANGELOG.md](../CHANGELOG.md), including migration compatibility, environment changes and
+   upgrade order. CI fails when the changelog has no `## [X.Y.Z] - YYYY-MM-DD` section for the
+   package version. Complete [release verification](#release-verification) for this revision and
+   merge the pull request.
+2. From a clean checkout of that `main` revision, verify the GitHub remote and CI for the merged
+   commit. These examples use `github` for `quotumapp/quotum`; substitute the actual GitHub remote
+   name if different. In the multi-repository workspace, a GitLab remote does not trigger GitHub
+   image publishing. The commands use Git, `jq`, GitHub CLI and Docker Buildx. Keep the release
+   variables in the same shell through the remaining steps.
 
    ```sh
    git remote -v
-   release_commit=$(git rev-parse HEAD)
-   git push github main
+   git fetch github main --tags
+   release_commit=$(git rev-parse github/main)
    gh run list --repo quotumapp/quotum --workflow ci.yml --commit "$release_commit"
    ```
 
@@ -254,23 +268,30 @@ repository permissions; registry write access is limited to the publishing job.
 
    Push release tags individually: GitHub does not emit tag push events when more than three
    tags are pushed together. See [GitHub's push event documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#push).
-   Do not move an existing release tag to another commit.
-4. Find the `Publish image` run for the new `vX.Y.Z` tag and wait for success. The same commit
-   can also have a `main` publishing run, so check the run's ref:
+   A tag ruleset limits creating, moving and deleting `v*` tags to repository administrators. Do
+   not move an existing release tag to another commit.
+4. Find the `Publish image` run for the new `vX.Y.Z` tag and wait for both the `Build and push`
+   and `GitHub Release` jobs to succeed. The same commit can also have a `main` publishing run, so
+   check the run's ref:
 
    ```sh
    gh run list --repo quotumapp/quotum --workflow docker-publish.yml --commit "$release_commit"
    ```
 
-5. Confirm the version, minor and `latest` tags in [GHCR package versions](https://github.com/quotumapp/quotum/pkgs/container/quotum/versions).
-   Inspect the versioned image and record its top-level digest with the release commit and
-   publishing run URL:
+   If the release job fails after the image is pushed, re-run that job. It replaces an unpublished
+   draft and leaves an already published release unchanged.
+5. Confirm the image tags in [GHCR package versions](https://github.com/quotumapp/quotum/pkgs/container/quotum/versions)
+   and check the release against the registry:
 
    ```sh
+   gh release view "v$release_version" --repo quotumapp/quotum
+   gh release verify "v$release_version" --repo quotumapp/quotum
    docker buildx imagetools inspect "ghcr.io/quotumapp/quotum:$release_version"
    ```
 
-   Verify both target platforms and that the three release tags resolve to the same digest at
-   publication time. Use the recorded digest to pin deployments; `main`, `X.Y` and `latest` move
-   as subsequent builds are published. A release is published only after the versioned image is
-   verified in GHCR. Follow [Upgrade](#upgrade) separately to deploy it.
+   Verify both target platforms, that the digest in the release notes and `image.json` matches the
+   inspected top-level digest, and that `X.Y` and, for the highest stable version, `latest` resolve
+   to the same digest at publication time. Use the recorded digest to pin deployments; `main`, `X.Y`
+   and `latest` move as subsequent builds are published. A release is published only after the
+   GitHub Release and the versioned image are verified. Follow [Upgrade](#upgrade) separately to
+   deploy it.

@@ -5,12 +5,28 @@ All notable changes to the Quotum Billing API are documented here. The format fo
 [Semantic Versioning](https://semver.org/) with the pre-1.0 caveat that minor releases may contain
 breaking changes; each entry names them and the required upgrade order.
 
-Every release is tagged `vX.Y.Z` and published as a container image with the same version.
-Before 1.0 the schema ships as baseline files under `migrations/` that evolve in place and are
+Every release is tagged `vX.Y.Z`, published as a container image with the same version, and
+listed on [GitHub Releases](https://github.com/quotumapp/quotum/releases) with its notes from this
+file. Before 1.0 the schema ships as baseline files under `migrations/` that evolve in place and are
 checksum-verified; recreate a database from them rather than migrating it. Incremental migrations
 start at 1.0.
 
 ## [Unreleased]
+
+## [0.10.1] - 2026-09-15
+
+### Added
+
+- Every release tag publishes a GitHub Release with the changelog entries since the previous
+  release, the digest-pinned container image, the merged pull requests grouped by label, and the
+  `openapi.json`, `errors.json` and `image.json` assets.
+- Pull request titles are checked as Conventional Commit subjects, and merged pull requests are
+  labelled from them for release notes.
+
+### Changed
+
+- The `latest` image tag moves only to the highest stable release. A backport patch no longer takes
+  `latest`, and a prerelease tag such as `v1.0.0-rc.1` publishes only its full version tag.
 
 ### Fixed
 
@@ -18,6 +34,11 @@ start at 1.0.
   drizzle wraps driver errors in `DrizzleQueryError` with the PostgreSQL error on `cause`, and Bun
   reports the SQLSTATE on `errno`, not `code`. Both checks now read the SQLSTATE through the cause
   chain; a real-driver test proves the deadlock retry.
+- Restored the 0.9.1 and 0.9.2 entries and removed a duplicated 0.9.3 entry from this changelog.
+
+### Upgrade
+
+- Replace the running image; no API, database schema or environment changes.
 
 ## [0.10.0] - 2026-09-14
 
@@ -25,6 +46,13 @@ start at 1.0.
 
 - Public runtime lifecycle and scheduler interfaces for unchanged, commit-pinned hosted distributions.
 - Reusable guarded merchant test runtime for exercising downstream composition.
+- A `users` load scenario that schedules one consume per billing account per second independently
+  of response time, with configurable user counts, in-flight limits, request timeouts and drain
+  periods. Reports distinguish scheduled, sent, accepted and dropped arrivals and reconcile
+  successful responses against durable usage records.
+- `--docker` explicitly selects a disposable Postgres container even when `POSTGRES_URI` is set.
+- `BUN_CONFIG_MAX_HTTP_REQUESTS` is an optional load-generator setting; the operations guide
+  documents it alongside the new load CLI options.
 
 ### Changed
 
@@ -63,28 +91,6 @@ start at 1.0.
 - Upgrade: replace the running image; no configuration or database migration is required. Roll
   back by returning to the previous image.
 
-## [0.9.3] - 2026-09-10
-
-### Platform email configuration (breaking)
-
-- Added explicit `QUOTUM_EMAIL_PROVIDER=cloudflare|resend` selection and a Resend REST adapter.
-  Resend requires `QUOTUM_EMAIL_RESEND_API_KEY` and the shared `QUOTUM_EMAIL_FROM` sender address.
-- Renamed `MERCHANT_AUTH_SECRET` to `QUOTUM_AUTH_SECRET`, `MERCHANT_EMAIL_FROM` to
-  `QUOTUM_EMAIL_FROM`, and Cloudflare's `MERCHANT_EMAIL_ACCOUNT_ID` / `MERCHANT_EMAIL_API_TOKEN`
-  to `QUOTUM_EMAIL_CLOUDFLARE_ACCOUNT_ID` / `QUOTUM_EMAIL_CLOUDFLARE_API_TOKEN`. Old names are
-  rejected. These configure Quotum's own sender and authentication, not merchant registration.
-- Upgrade configuration and application together: set the explicit provider, remove retired keys
-  from the new process environment, and preserve the auth secret's exact value. Retain old image
-  and configuration together for rollback. No database migration is required for this change.
-
-### Added
-
-- A `users` load scenario that schedules one consume per billing account per second independently
-  of response time, with configurable user counts, in-flight limits, request timeouts and drain
-  periods. Reports distinguish scheduled, sent, accepted and dropped arrivals and reconcile
-  successful responses against durable usage records.
-- `--docker` explicitly selects a disposable Postgres container even when `POSTGRES_URI` is set.
-
 ### Fixed
 
 - Load reports are written before a failing gate exits, retaining overload evidence and gate
@@ -92,12 +98,6 @@ start at 1.0.
 - Arrival-rate gates reject missing or denied authorizations, inconsistent durable usage and
   projection backlogs that remain after the drain period.
 
-### Upgrade notes
-
-- No API, database schema or service environment changes. No migration or special upgrade order
-  is required. `BUN_CONFIG_MAX_HTTP_REQUESTS` is an optional load-generator setting;
-  the operations guide documents it alongside the new CLI options.
-
 ## [0.9.3] - 2026-09-10
 
 ### Platform email configuration (breaking)
@@ -111,6 +111,34 @@ start at 1.0.
 - Upgrade configuration and application together: set the explicit provider, remove retired keys
   from the new process environment, and preserve the auth secret's exact value. Retain old image
   and configuration together for rollback. No database migration is required for this change.
+
+### Fixed
+
+- Google OIDC test fixtures always alter decoded signature bytes when testing forged tokens,
+  avoiding intermittent failures caused by changing only unused Base64 bits.
+
+## [0.9.2] - 2026-09-10
+
+0.9.2 was cut from the rewritten public history and contains every 0.9.1 change.
+
+### Changed
+
+- Operator catalog routes under `/v1/admin/catalog/` require `X-Billing-Operator-Key`.
+- Projection delivery, Google Pub/Sub verification, Stripe OAuth, worker lease heartbeats and
+  shutdown accept optional injected timers, fetch, DNS lookup and token verifiers for tests; the
+  production defaults are unchanged. Migration integrity checks moved into
+  `src/db/migration-integrity.ts`.
+- Transitive dependency overrides for `brace-expansion`, `protobufjs` and `qs` address audit
+  findings.
+- CI randomizes unit test order, enforces coverage floors, fails Postgres-backed lanes that would
+  silently skip, and pins the `postgres:18-alpine` test image by digest.
+
+### Upgrade
+
+- Operator tooling that reads catalog admin routes must send `X-Billing-Operator-Key`. No schema or
+  environment changes beyond 0.9.1; upgrading from 0.9.0 follows the 0.9.1 upgrade notes.
+
+## [0.9.1] - 2026-09-10
 
 ### Added
 
@@ -191,6 +219,23 @@ start at 1.0.
 - Confirming a reservation updated the consumed quantity on every reservation holding the same
   allocation, not only its own, which understated the held quantity those other reservations later
   released. The update is now scoped to the confirming reservation.
+- Regenerated the wire error inventory to remove a stale source reference and restore the
+  generated-contract CI check.
+
+### Upgrade
+
+- Baselines `001_platform.sql` and `004_merchant.sql` have new formatting checksums;
+  `002_billing_core.sql` adds the per-account projection sequence and nullable usage-job payloads,
+  and `003_metering_and_pricing.sql` adds the projection debounce setting. Existing 0.9.0 databases
+  do not pass this release's checksum verification. Recreate disposable databases from all four
+  baselines; populated deployments need a backup and an explicit data-preserving transition as
+  described in [the schema policy](docs/operations.md#schema-and-upgrade-policy).
+- Before rollout, configure nonblank `MERCHANT_ORIGIN` and `MERCHANT_PUBLIC_URL`, and ensure
+  projection receivers accept `sequence` and coalesced usage deliveries. Drain old usage writers
+  and workers before transitioning the database, verify migration integrity, then start 0.9.1
+  and confirm `/ready`. Do not run old and new writers against the changed baseline together.
+- Named Postgres prepared statements now default to enabled. For transaction-mode poolers that
+  cannot retain them, set `BILLING_POSTGRES_PREPARED_STATEMENTS=false` before startup.
 
 ## [0.9.0] - 2026-09-09
 

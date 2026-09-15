@@ -19,8 +19,10 @@ possible. We will credit reporters in the release notes unless you ask us not to
 ## Supported versions
 
 This project is pre-1.0. Security fixes are published for the latest release line only, as a new
-patch release on `main`. Older minor versions do not receive backported fixes; upgrade by applying
-the forward-only migrations described in the README and the CHANGELOG entry for each version.
+patch release on `main` listed on [GitHub Releases](https://github.com/quotumapp/quotum/releases).
+Older minor versions do not receive backported fixes. Before 1.0 the schema baselines evolve in
+place; follow each release's upgrade notes and the
+[schema policy](docs/operations.md#schema-and-upgrade-policy) when upgrading.
 
 ## Scope
 
@@ -35,4 +37,4 @@ automated scanners without a demonstrated impact.
 
 Never include real credentials, database URLs, or customer data in a report. Provider keys,
 project credentials, and the `QUOTUM_SECRETS_KEY_BASE64` encryption key must stay outside the
-repository and outside database backups; see the README configuration section.
+repository and outside database backups; see [deployment and configuration](docs/deployment.md).
