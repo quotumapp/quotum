@@ -34,7 +34,7 @@ export const googlePlayProjectConfigSchema = z
 		serviceAccountKeyFile: z.string().trim().min(1).nullable(),
 		obfuscatedAccountIdSecret: z.string().trim().min(1),
 		previousObfuscatedAccountIdSecrets: z.array(z.string().trim().min(1)).default([]),
-		rtdnAudience: z.string().trim().url().nullable(),
+		rtdnAudience: z.string().trim().check(z.url()).nullable(),
 		rtdnServiceAccountEmail: z.string().trim().min(1).nullable(),
 		rtdnAuthorizedParty: z.string().trim().min(1).nullable().default(null),
 		enablePublisherMutations: z.boolean(),
@@ -68,15 +68,15 @@ export const stripeProjectConfigSchema = z
 	.object({
 		secretKey: z.string().trim().min(1),
 		webhookSecret: z.string().trim().min(1),
-		checkoutSuccessUrl: z.string().trim().url(),
-		checkoutCancelUrl: z.string().trim().url(),
-		portalReturnUrl: z.string().trim().url(),
+		checkoutSuccessUrl: z.string().trim().check(z.url()),
+		checkoutCancelUrl: z.string().trim().check(z.url()),
+		portalReturnUrl: z.string().trim().check(z.url()),
 		allowedReturnOrigins: z
 			.array(
 				z
 					.string()
 					.trim()
-					.url()
+					.check(z.url())
 					.refine((value) => {
 						const url = new URL(value);
 						return (url.protocol === "https:" || url.protocol === "http:") && url.origin === value;

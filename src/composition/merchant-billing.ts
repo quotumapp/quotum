@@ -257,7 +257,7 @@ export function createMerchantBillingPort(input: {
 				return ok(
 					await meter.correct(project, {
 						billingAccountId: account(),
-						originalUsageEventId: parse(z.string().uuid(), event),
+						originalUsageEventId: parse(z.uuid(), event),
 						originalRecordedAt: new Date(body.originalRecordedAt),
 						quantity: body.quantity,
 						reason: body.reason,
@@ -271,7 +271,7 @@ export function createMerchantBillingPort(input: {
 			case "events.replay":
 				return ok(await operations().replayStoreEvent(project, queries.parseEventIdParam(id)));
 			case "projections.retry":
-				return ok(await operations().retryProjectionSyncJob(project, parse(z.string().uuid(), id)));
+				return ok(await operations().retryProjectionSyncJob(project, parse(z.uuid(), id)));
 			case "contracts.preview":
 			case "contracts.publish": {
 				const body = parse(
@@ -375,7 +375,7 @@ export function createMerchantBillingPort(input: {
 				const body = parse(revokePromotionRedemptionBodySchema, command.body);
 				return ok(
 					await repo.promotions.revokePromotionRedemption(project, {
-						redemptionId: parse(z.string().uuid(), id),
+						redemptionId: parse(z.uuid(), id),
 						reason: body.reason,
 						actor,
 						idempotencyKey: requireKey(command),
@@ -395,12 +395,7 @@ export function createMerchantBillingPort(input: {
 				);
 			case "promotions.codes.deactivate":
 				return ok(
-					await repo.promotions.deactivatePromotionCode(
-						project,
-						id,
-						parse(z.string().uuid(), event),
-						actor,
-					),
+					await repo.promotions.deactivatePromotionCode(project, id, parse(z.uuid(), event), actor),
 				);
 			case "commercial.preview": {
 				const body = parse(commercialActionPreviewBodySchema, command.body);

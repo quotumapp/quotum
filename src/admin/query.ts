@@ -25,7 +25,7 @@ import type {
 	AdminSubscriptionListInput,
 } from "./types";
 
-const uuidSchema = z.string().trim().uuid();
+const uuidSchema = z.string().trim().check(z.uuid());
 const customerSearchQueryMaxLength = 128;
 const dateSchema = z
 	.string()
@@ -34,7 +34,7 @@ const dateSchema = z
 	.transform((value, context) => {
 		const date = new Date(value);
 		if (!Number.isFinite(date.getTime())) {
-			context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid date" });
+			context.addIssue({ code: "custom", message: "Invalid date" });
 			return z.NEVER;
 		}
 		return date.toISOString();
@@ -46,7 +46,7 @@ const cursorDateSchema = z
 	.transform((value, context) => {
 		const datePrefix = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/.exec(value);
 		if (datePrefix === null) {
-			context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid date" });
+			context.addIssue({ code: "custom", message: "Invalid date" });
 			return z.NEVER;
 		}
 		const year = Number(datePrefix[1]);
@@ -58,12 +58,12 @@ const cursorDateSchema = z
 			calendarDate.getUTCMonth() + 1 !== month ||
 			calendarDate.getUTCDate() !== day
 		) {
-			context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid date" });
+			context.addIssue({ code: "custom", message: "Invalid date" });
 			return z.NEVER;
 		}
 		const date = new Date(value);
 		if (!Number.isFinite(date.getTime())) {
-			context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid date" });
+			context.addIssue({ code: "custom", message: "Invalid date" });
 			return z.NEVER;
 		}
 		return value;

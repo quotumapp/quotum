@@ -46,7 +46,7 @@ const usageEventParamsSchema = subjectParamsSchema.extend({
 
 const filtersSchema = z.record(
 	z.string().trim().min(1).max(120),
-	z.union([z.string().max(256), z.number().finite(), z.boolean()]),
+	z.union([z.string().max(256), z.number(), z.boolean()]),
 );
 
 const usageBodySchema = z
