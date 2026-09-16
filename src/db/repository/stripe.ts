@@ -771,7 +771,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				await recordStripeSkippedEventInTransaction(tx, projectId, {
 					eventType: input.eventType,
 					externalEventId: input.externalEventId,
-					transactionId: input.paymentIntentId,
+					transactionId: input.transactionId,
 					purchaseKind: input.purchaseKind,
 					processingError: "Stripe customer could not be resolved for one-time purchase",
 					rawPayload: input.rawPayload,
@@ -797,7 +797,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				await recordStripeSkippedEventInTransaction(tx, projectId, {
 					eventType: input.eventType,
 					externalEventId: input.externalEventId,
-					transactionId: input.paymentIntentId,
+					transactionId: input.transactionId,
 					purchaseKind: input.purchaseKind,
 					processingError: "Stripe catalog product could not be resolved for one-time purchase",
 					rawPayload: input.rawPayload,
@@ -809,7 +809,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				await recordStripeSkippedEventInTransaction(tx, projectId, {
 					eventType: input.eventType,
 					externalEventId: input.externalEventId,
-					transactionId: input.paymentIntentId,
+					transactionId: input.transactionId,
 					purchaseKind: input.purchaseKind,
 					processingError: "Stripe catalog product type mismatch for one-time purchase",
 					rawPayload: input.rawPayload,
@@ -825,7 +825,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				eventType: input.eventType,
 				customerId: resolved.id,
 				storeProductId: storeProduct.id,
-				transactionId: input.paymentIntentId,
+				transactionId: input.transactionId,
 				purchaseKind: input.purchaseKind,
 				processingStatus: "processed",
 				processingError: null,
@@ -848,14 +848,16 @@ export class StripeBillingRepository extends RepositoryModule {
 				provider: "stripe",
 				channel: "web",
 				purchaseKind: input.purchaseKind,
-				transactionId: input.paymentIntentId,
+				transactionId: input.transactionId,
 				originalTransactionId: input.chargeId,
 				status: "completed",
 				purchasedAt: input.purchasedAt,
 				invalidatedAt: null,
 				invalidationReason: null,
 				rawPayload: input.rawPayload,
-				identityError: `Stripe purchase identity mismatch for payment intent ${input.paymentIntentId}`,
+				identityError: `Stripe purchase identity mismatch for transaction ${input.transactionId}`,
+				amountPaidMinor: input.amountPaidCents ?? null,
+				currency: input.currency ?? null,
 			});
 			if (input.purchaseKind === "consumable") {
 				await materializeTopupAllocation(tx, {
@@ -892,7 +894,7 @@ export class StripeBillingRepository extends RepositoryModule {
 						provider: "stripe",
 						channel: "web",
 						purchaseKind: input.purchaseKind,
-						transactionId: input.paymentIntentId,
+						transactionId: input.transactionId,
 						productKey: storeProduct.product_key,
 						creditAmount: storeProduct.credit_amount,
 						totalCreditAmount: storeProduct.credit_amount,

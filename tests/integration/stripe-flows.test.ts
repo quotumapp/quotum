@@ -993,6 +993,111 @@ localDescribe("Stripe route flows integration", () => {
 		expect(allocation).toEqual({ reversed_quantity: "5.000000000" });
 	});
 
+	it("grants credits for a fully discounted Stripe Checkout purchase", async () => {
+		await publishAiCreditsCatalog(context.repository);
+		const checkout = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			stripeEvent: stripeEvent(
+				"checkout.session.completed",
+				stripeCheckoutSessionObject({
+					id: "cs_fully_discounted",
+					amount_total: 0,
+					charge: null,
+					latest_charge: null,
+					payment_intent: null,
+					payment_status: "no_payment_required",
+				}),
+				"evt_fully_discounted",
+			),
+		});
+
+		const response = await withIsoDateSqlParameters(() =>
+			postStripeWebhook(checkout, { id: "evt_fully_discounted" }),
+		);
+
+		expect(response.status).toBe(200);
+		expect((await response.json()).data.status).toBe("processed");
+		expect(
+			await context.repository.getMeteringBalance(
+				integrationProjectContext(),
+				"integration_user",
+				"ai_credits",
+			),
+		).toMatchObject({ granted: "10", available: "10" });
+		const purchases = await context.sql<
+			Array<{ transaction_id: string; status: string; amount_paid_minor: string; currency: string }>
+		>`
+			SELECT transaction_id, status, amount_paid_minor::text, currency
+			FROM purchases
+		`;
+		expect(purchases).toEqual([
+			{
+				transaction_id: "cs_fully_discounted",
+				status: "completed",
+				amount_paid_minor: "0",
+				currency: "usd",
+			},
+		]);
+		await expectProjectionJobByKey(context.sql, "stripe:payment:cs_fully_discounted:projection");
+	});
+
+	it("reverses all credits when a discounted Stripe purchase is refunded in full", async () => {
+		await publishAiCreditsCatalog(context.repository);
+		const checkout = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			stripeEvent: stripeEvent(
+				"checkout.session.completed",
+				stripeCheckoutSessionObject({ amount_total: 399 }),
+				"evt_discounted_checkout",
+			),
+		});
+		const refund = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			stripeEvent: stripeEvent(
+				"refund.created",
+				stripeRefundObject({ id: "re_discounted", amount: 399 }),
+				"evt_discounted_refund",
+			),
+		});
+
+		const checkoutResponse = await withIsoDateSqlParameters(() =>
+			postStripeWebhook(checkout, { id: "evt_discounted_checkout" }),
+		);
+		const refundResponse = await withIsoDateSqlParameters(() =>
+			postStripeWebhook(refund, { id: "evt_discounted_refund" }),
+		);
+
+		expect(checkoutResponse.status).toBe(200);
+		expect(refundResponse.status).toBe(200);
+		expect((await refundResponse.json()).data.status).toBe("processed");
+		expect(
+			await context.repository.getMeteringBalance(
+				integrationProjectContext(),
+				"integration_user",
+				"ai_credits",
+			),
+		).toMatchObject({ available: "0" });
+		const [purchase] = await context.sql<
+			Array<{
+				amount_paid_minor: string;
+				reversed_amount: string;
+				reversed_credit_amount: number;
+			}>
+		>`
+			SELECT amount_paid_minor::text, reversed_amount::text, reversed_credit_amount
+			FROM purchases
+			WHERE transaction_id = 'pi_integration'
+		`;
+		expect(purchase).toEqual({
+			amount_paid_minor: "399",
+			reversed_amount: "399",
+			reversed_credit_amount: 10,
+		});
+	});
+
 	it("ignores cumulative charge.refunded events around incremental refund events", async () => {
 		await context.sql`
 			UPDATE products
@@ -1014,7 +1119,7 @@ localDescribe("Stripe route flows integration", () => {
 			repository: context.repository,
 			stripeEvent: stripeEvent(
 				"checkout.session.completed",
-				stripeCheckoutSessionObject(),
+				stripeCheckoutSessionObject({ amount_total: 1000 }),
 				"evt_checkout_cumulative_refund",
 			),
 		});
@@ -1144,6 +1249,7 @@ localDescribe("Stripe route flows integration", () => {
 					stripeCustomerId: "cus_operation_topup",
 					externalProductId: "prod_stripe_credits_10",
 					externalPriceId: "price_credits_10",
+					transactionId: "pi_operation_topup",
 					paymentIntentId: "pi_operation_topup",
 					chargeId: "ch_operation_topup",
 					checkoutSessionId: "cs_operation_topup",

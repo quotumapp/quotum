@@ -76,7 +76,12 @@ export function normalizeStripeCheckoutSession(
 		});
 	}
 
-	if (optionalString(input.session.payment_status) !== "paid") {
+	const paymentStatus = optionalString(input.session.payment_status);
+	// A fully discounted session completes without a charge or a PaymentIntent.
+	const nothingCharged =
+		paymentStatus === "no_payment_required" &&
+		optionalNonnegativeInteger(input.session.amount_total) === 0;
+	if (paymentStatus !== "paid" && !nothingCharged) {
 		return ignored({
 			eventId: input.eventId,
 			eventType,
@@ -94,10 +99,11 @@ export function normalizeStripeCheckoutSession(
 		throw new Error("Stripe payment Checkout purchase kind is not supported");
 	}
 	const paymentIntent = optionalRecord(input.session.payment_intent);
-	const paymentIntentId = requiredId(
-		input.session.payment_intent,
-		"Stripe Checkout session payment intent",
-	);
+	const paymentIntentId = nothingCharged
+		? optionalId(input.session.payment_intent)
+		: requiredId(input.session.payment_intent, "Stripe Checkout session payment intent");
+	const checkoutSessionId = requireString(input.session.id, "Stripe Checkout session id");
+	const transactionId = paymentIntentId ?? checkoutSessionId;
 
 	return {
 		kind: "credit_purchase",
@@ -112,12 +118,13 @@ export function normalizeStripeCheckoutSession(
 			"Stripe Checkout session product id",
 		),
 		externalPriceId: requireString(metadata.externalPriceId, "Stripe Checkout session price id"),
+		transactionId,
 		paymentIntentId,
 		chargeId:
 			optionalId(input.session.charge) ??
 			optionalId(paymentIntent?.latest_charge) ??
 			optionalId(input.session.latest_charge),
-		checkoutSessionId: requireString(input.session.id, "Stripe Checkout session id"),
+		checkoutSessionId,
 		amountPaidCents:
 			optionalNonnegativeInteger(input.session.amount_total) ??
 			optionalNonnegativeInteger(paymentIntent?.amount),
@@ -129,7 +136,7 @@ export function normalizeStripeCheckoutSession(
 		rawPayload: input.session,
 		eventType,
 		externalEventId: input.eventId,
-		projectionIdempotencyKey: `stripe:payment:${paymentIntentId}:projection`,
+		projectionIdempotencyKey: `stripe:payment:${transactionId}:projection`,
 	};
 }
 

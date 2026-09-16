@@ -67,7 +67,9 @@ export interface NormalizedStripeCreditPurchaseCommand {
 	stripeCustomerId: string | null;
 	externalProductId: string;
 	externalPriceId: string;
-	paymentIntentId: string;
+	/** Purchase identity: the PaymentIntent id, or the Checkout Session id when nothing was charged. */
+	transactionId: string;
+	paymentIntentId: string | null;
 	chargeId: string | null;
 	checkoutSessionId: string;
 	amountPaidCents: number | null;

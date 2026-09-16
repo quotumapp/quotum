@@ -177,6 +177,8 @@ describe("BillingRepository Stripe", () => {
 		});
 
 		const queries = database.queries.join("\n");
+		expect(queries).toContain("COALESCE(pu.amount_paid_minor, sp.price_amount) AS price_amount");
+		expect(queries).toContain("COALESCE(pu.currency, sp.currency) AS currency");
 		expect(queries).toContain("reversed_amount");
 		expect(queries).toContain("reversed_credit_amount");
 		expect(queries).toContain('\\"creditAmount\\":5');

@@ -95,6 +95,7 @@ describe("Stripe normalizer", () => {
 			stripeCustomerId: "cus_123",
 			externalProductId: "prod_credits_100",
 			externalPriceId: "price_credits_100",
+			transactionId: "pi_123",
 			paymentIntentId: "pi_123",
 			chargeId: null,
 			amountPaidCents: 499,
@@ -107,6 +108,58 @@ describe("Stripe normalizer", () => {
 			throw new Error("Expected credit purchase command");
 		}
 		expect(command.purchasedAt.toISOString()).toBe("2026-02-02T02:40:00.000Z");
+	});
+
+	it("records fully discounted payment Checkout sessions by Checkout Session id", () => {
+		const command = normalizeStripeCheckoutSession({
+			eventId: "evt_free",
+			session: {
+				id: "cs_free",
+				mode: "payment",
+				payment_status: "no_payment_required",
+				customer: "cus_123",
+				payment_intent: null,
+				amount_total: 0,
+				currency: "usd",
+				created: stripeSeconds,
+				metadata: checkoutMetadata(),
+			},
+		});
+
+		expect(command).toMatchObject({
+			kind: "credit_purchase",
+			billingAccountId: "user_1",
+			transactionId: "cs_free",
+			paymentIntentId: null,
+			checkoutSessionId: "cs_free",
+			amountPaidCents: 0,
+			currency: "usd",
+			projectionIdempotencyKey: "stripe:payment:cs_free:projection",
+		});
+	});
+
+	it("ignores payment Checkout sessions that owe money but are not paid", () => {
+		for (const session of [
+			{ payment_status: "unpaid", amount_total: 499 },
+			{ payment_status: "no_payment_required", amount_total: 499 },
+			{ payment_status: "no_payment_required", amount_total: null },
+		]) {
+			const command = normalizeStripeCheckoutSession({
+				eventId: "evt_unpaid",
+				session: {
+					id: "cs_unpaid",
+					mode: "payment",
+					customer: "cus_123",
+					payment_intent: null,
+					currency: "usd",
+					created: stripeSeconds,
+					metadata: checkoutMetadata(),
+					...session,
+				},
+			});
+
+			expect(command).toMatchObject({ kind: "ignored", reason: "payment_session_not_paid" });
+		}
 	});
 
 	it("normalizes subscription-mode Checkout sessions to identity only without grants", () => {
