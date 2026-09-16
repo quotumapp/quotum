@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { CreatePromotionInput, PromotionCodeInput } from "../../src/billing/promotions";
 import type { ReservePromotionRedemptionInput } from "../../src/db/repository/promotions";
+import { testRequest } from "../helpers/openapi";
+import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
@@ -490,6 +492,222 @@ localDescribe("promotion repository", () => {
 		expect(
 			(await context.repository.promotions.getPromotion(project, "spring-sale")).redemptionCounts,
 		).toEqual({ reserved: 2, applied: 0, released: 0, reversed: 0 });
+	});
+});
+
+localDescribe("promotion HTTP API", () => {
+	beforeAll(async () => {
+		context = await createLocalPostgresContext();
+	});
+
+	beforeEach(async () => {
+		await resetAndSeedIntegrationData(context.sql);
+		await publishAiCreditsCatalog(context.repository);
+		await publishAiCreditsCatalog(context.repository, "wiseley");
+	});
+
+	afterAll(async () => {
+		await context.sql.close();
+	});
+
+	it("manages promotions through operator routes and validates codes for an account", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const operator = {
+			...authHeaders("voysee"),
+			"x-billing-operator-key": context.env.operatorApiKey ?? "",
+			"x-billing-actor": actor,
+			"content-type": "application/json",
+		};
+		const body = JSON.stringify({
+			key: "premium-launch",
+			name: "Premium launch",
+			effect: {
+				kind: "discount",
+				discount: {
+					type: "amount",
+					amounts: [{ currency: "usd", amountOffMinor: 300 }],
+					duration: "repeating",
+					durationMonths: 3,
+				},
+			},
+			targets: [{ kind: "plan", key: "premium" }],
+			allowedChannels: ["web"],
+			codes: [
+				{ code: "LAUNCH", maxRedemptions: 50 },
+				{ code: "LAUNCH-EXPIRED", expiresAt: "2026-01-01T00:00:00Z" },
+				{ code: "LAUNCH-VIP", billingAccountId: "vip-account" },
+			],
+		});
+
+		const created = await testRequest(app, "/v1/admin/promotions", {
+			method: "POST",
+			headers: operator,
+			body,
+		});
+		const replay = await testRequest(app, "/v1/admin/promotions", {
+			method: "POST",
+			headers: operator,
+			body,
+		});
+		expect(created.status).toBe(201);
+		expect(replay.status).toBe(200);
+		expect((await created.json()).data).toMatchObject({
+			key: "premium-launch",
+			effect: {
+				kind: "discount",
+				discount: { type: "amount", amounts: [{ currency: "USD", amountOffMinor: 300 }] },
+			},
+			codeCounts: { total: 3, active: 3 },
+		});
+
+		const validate = async (billingAccountId: string, payload: unknown) => {
+			const response = await testRequest(
+				app,
+				`/v1/billing-accounts/${billingAccountId}/promotion-codes/validate`,
+				{
+					method: "POST",
+					headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+					body: JSON.stringify(payload),
+				},
+			);
+			expect(response.status).toBe(200);
+			return (await response.json()).data;
+		};
+		expect(
+			await validate("buyer", { code: "launch", target: { kind: "plan", key: "premium" } }),
+		).toMatchObject({
+			valid: true,
+			reason: null,
+			promotion: { key: "premium-launch", effectKind: "discount" },
+			code: { code: "LAUNCH" },
+		});
+		expect(await validate("buyer", { code: "LAUNCH-EXPIRED" })).toMatchObject({
+			valid: false,
+			reason: "PROMOTION_CODE_EXPIRED",
+		});
+		expect(await validate("buyer", { code: "LAUNCH-VIP" })).toEqual({
+			valid: false,
+			reason: "PROMOTION_CODE_NOT_FOUND",
+			promotion: null,
+			code: null,
+		});
+		expect(await validate("buyer", { code: "LAUNCH", channel: "ios" })).toMatchObject({
+			valid: false,
+			reason: "PROMOTION_CODE_CHANNEL_NOT_SUPPORTED",
+		});
+		expect(
+			await validate("buyer", {
+				code: "LAUNCH",
+				target: { kind: "product", key: "echo_credits_10" },
+			}),
+		).toMatchObject({ valid: false, reason: "PROMOTION_CODE_NOT_APPLICABLE" });
+		expect(await validate("nobody", { code: "UNKNOWN" })).toMatchObject({
+			valid: false,
+			reason: "PROMOTION_CODE_NOT_FOUND",
+		});
+		expect(
+			await context.sql`SELECT id FROM customers WHERE billing_account_id IN ('buyer', 'nobody')`,
+		).toHaveLength(0);
+
+		const codes = await testRequest(app, "/v1/admin/promotions/premium-launch/codes?active=true", {
+			headers: operator,
+		});
+		const launch = (await codes.json()).data.find(
+			(item: { code: string }) => item.code === "LAUNCH",
+		);
+		await context.repository.promotions.reservePromotionRedemption(
+			project,
+			reservation({
+				customerId: await customerId("buyer"),
+				billingAccountId: "buyer",
+				promotionCodeId: launch.id,
+			}),
+		);
+		expect(await validate("buyer", { code: "LAUNCH" })).toMatchObject({
+			valid: false,
+			reason: "PROMOTION_CODE_ALREADY_REDEEMED",
+		});
+		const redemptions = await testRequest(
+			app,
+			"/v1/admin/promotions/premium-launch/redemptions?billingAccountId=buyer",
+			{ headers: operator },
+		);
+		expect((await redemptions.json()).data).toMatchObject([
+			{ billingAccountId: "buyer", code: "LAUNCH", status: "reserved" },
+		]);
+
+		const deactivated = await testRequest(
+			app,
+			`/v1/admin/promotions/premium-launch/codes/${launch.id}/deactivate`,
+			{ method: "POST", headers: operator },
+		);
+		expect((await deactivated.json()).data).toMatchObject({ active: false, deactivatedBy: actor });
+		const archived = await testRequest(app, "/v1/admin/promotions/premium-launch/archive", {
+			method: "POST",
+			headers: operator,
+		});
+		expect((await archived.json()).data.status).toBe("archived");
+		const added = await testRequest(app, "/v1/admin/promotions/premium-launch/codes", {
+			method: "POST",
+			headers: operator,
+			body: JSON.stringify({ codes: [{ code: "TOO-LATE" }] }),
+		});
+		expect(added.status).toBe(409);
+		expect((await added.json()).error.code).toBe("PROMOTION_ARCHIVED");
+	});
+
+	it("isolates promotions and codes between project instances", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({ codes: [{ code: "SHARED" }] }),
+		);
+		const wiseleyOperator = {
+			...authHeaders("wiseley"),
+			"x-billing-operator-key": context.env.operatorApiKey ?? "",
+			"x-billing-actor": actor,
+			"content-type": "application/json",
+		};
+
+		const read = await testRequest(app, "/v1/admin/promotions/spring-sale", {
+			headers: wiseleyOperator,
+		});
+		const validate = await testRequest(app, "/v1/billing-accounts/buyer/promotion-codes/validate", {
+			method: "POST",
+			headers: { ...authHeaders("wiseley"), "content-type": "application/json" },
+			body: JSON.stringify({ code: "SHARED" }),
+		});
+		const sameKey = await testRequest(app, "/v1/admin/promotions", {
+			method: "POST",
+			headers: wiseleyOperator,
+			body: JSON.stringify({
+				key: "spring-sale",
+				name: "Wiseley spring",
+				effect: {
+					kind: "discount",
+					discount: { type: "percent", percentOffBps: 500, duration: "forever" },
+				},
+				codes: [{ code: "SHARED" }],
+			}),
+		});
+
+		expect(read.status).toBe(404);
+		expect((await read.json()).error.code).toBe("PROMOTION_NOT_FOUND");
+		expect((await validate.json()).data).toMatchObject({
+			valid: false,
+			reason: "PROMOTION_CODE_NOT_FOUND",
+		});
+		expect(sameKey.status).toBe(201);
+		const listed = await testRequest(app, "/v1/admin/promotions", { headers: wiseleyOperator });
+		expect((await listed.json()).data.map((item: { name: string }) => item.name)).toEqual([
+			"Wiseley spring",
+		]);
 	});
 });
 

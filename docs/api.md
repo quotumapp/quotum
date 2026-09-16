@@ -122,6 +122,41 @@ bun run catalog push ./billing.catalog.ts
 The backend SDK (`quotum-api/sdk`) wraps catalog, commercial, usage, and selected admin calls and
 keeps credentials server-side.
 
+## Promotions
+
+A promotion is an immutable offer with one effect: a `discount` (percent in basis points, or a
+fixed amount per currency, lasting `once`, `repeating` for 1-36 months, or `forever`), a
+`feature_grant` of consumable feature quantities, or a `plan_grant` of a plan for a number of days
+or months. It can target plan or product keys and restrict the channels (`web`, `ios`, `android`)
+where a code may be entered. Changing terms means creating a new promotion.
+
+Operators manage promotions with project authentication, `X-Billing-Operator-Key`, and
+`X-Billing-Actor` on mutations:
+
+- `POST /v1/admin/promotions` creates a promotion and optional codes. It returns `201`, or `200`
+  when the same key is replayed with identical terms; different terms return
+  `PROMOTION_KEY_CONFLICT`.
+- `GET /v1/admin/promotions` and `GET /v1/admin/promotions/:promotionKey` list and read promotions
+  with code and redemption counts.
+- `POST /v1/admin/promotions/:promotionKey/codes` adds codes all-or-nothing;
+  `GET .../codes` lists them; `POST .../codes/:codeId/deactivate` deactivates one.
+- `POST /v1/admin/promotions/:promotionKey/archive` stops new redemptions.
+- `GET /v1/admin/promotions/:promotionKey/redemptions` lists the redemption ledger.
+
+Codes use 3-64 letters, digits, or hyphens and are unique per project instance regardless of
+case. Each code can set a start and expiry, a global cap, a per-customer cap (one by default,
+`null` for unlimited), a first-purchase-only rule, and a billing-account restriction. A code marked
+`hostedCheckoutEnabled` cannot carry a per-customer cap or an account restriction.
+
+`POST /v1/billing-accounts/:billingAccountId/promotion-codes/validate` lets the trusted backend
+check a code before offering it. It needs only project authentication, never creates a customer
+or takes a use, and returns `200` with `valid` and a `reason` such as `PROMOTION_CODE_EXPIRED`,
+`PROMOTION_CODE_EXHAUSTED`, `PROMOTION_CODE_ALREADY_REDEEMED`, or
+`PROMOTION_CODE_NOT_APPLICABLE` for a `target` the promotion does not cover. Unknown codes and codes
+restricted to another account both report `PROMOTION_CODE_NOT_FOUND` without promotion details.
+It is rate limited per project with the purchase-verification limit
+(`BILLING_VERIFY_RATE_LIMIT_PER_WINDOW`), counted separately from verification.
+
 ## Admin operations
 
 Admin routes require project authentication; operational mutations also require
@@ -148,6 +183,7 @@ Operations:
   `DELETE /v1/admin/contracts/:billingAccountId/:contractId`.
 - `POST /v1/admin/catalog-migrations/preview`, `POST /v1/admin/catalog-migrations/publish`.
 - `POST /v1/admin/auto-topups/:billingAccountId/:policyId/reset`.
+- Promotion management under `/v1/admin/promotions`; see [Promotions](#promotions).
 - `POST /v1/admin/store-events/:eventId/replay`.
 - `POST /v1/admin/reconciliation/subscriptions/run`.
 - `POST /v1/admin/projection-jobs/:jobId/retry`.

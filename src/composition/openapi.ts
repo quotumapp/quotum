@@ -13,6 +13,7 @@ import * as controlsResponses from "../app/contracts/controls-responses";
 import * as customerResponses from "../app/contracts/customer-responses";
 import * as insightsResponses from "../app/contracts/insights-responses";
 import * as meteringResponses from "../app/contracts/metering-responses";
+import * as promotionResponses from "../app/contracts/promotion-responses";
 import * as providerResponses from "../app/contracts/provider-responses";
 import type { BillingEnv } from "../env";
 import { createMerchantApp } from "../platform/app";
@@ -124,6 +125,7 @@ function schemaNames(): Map<z.ZodType, string> {
 		insightsResponses,
 		meteringResponses,
 		platformResponses,
+		promotionResponses,
 	])
 		add(module, /^[A-Za-z][A-Za-z0-9]*Response\d{3}Schema$/);
 	return names;
@@ -317,6 +319,7 @@ function headerParameters(route: DocumentedRoute): ParameterObject[] {
 		const actor =
 			((tags.includes("catalog") || tags.includes("controls")) &&
 				!route.path.endsWith("/entities")) ||
+			(tags.includes("promotions") && route.path.startsWith("/v1/admin/")) ||
 			route.path.endsWith("/corrections");
 		const idempotent =
 			(tags.includes("metering") && !route.path.endsWith("/check")) ||
