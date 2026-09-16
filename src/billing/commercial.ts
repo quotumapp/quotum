@@ -8,6 +8,7 @@ export type CommercialActionIntent =
 			email?: string | null;
 			successUrl?: string | null;
 			cancelUrl?: string | null;
+			expiresAt?: number;
 	  }
 	| {
 			kind: "checkout_product";
@@ -15,6 +16,7 @@ export type CommercialActionIntent =
 			email?: string | null;
 			successUrl?: string | null;
 			cancelUrl?: string | null;
+			expiresAt?: number;
 	  }
 	| {
 			kind: "subscription_change";

@@ -245,6 +245,51 @@ localDescribe("Stripe route flows integration", () => {
 		});
 	});
 
+	it("carries the Checkout expiration from a commercial intent into the Checkout Session", async () => {
+		const { app, stripe, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = {
+			...authHeaders("voysee"),
+			"content-type": "application/json",
+		};
+		const expiresAt = Math.floor(Date.now() / 1000) + 2 * 60 * 60;
+		const previewResponse = await testRequest(
+			app,
+			"/v1/billing-accounts/expiring_checkout_user/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: { kind: "checkout_product", productKey: "echo_credits_10", expiresAt },
+				}),
+			},
+		);
+		expect(previewResponse.status).toBe(200);
+		const preview = (await previewResponse.json()).data;
+
+		const executed = await testRequest(
+			app,
+			"/v1/billing-accounts/expiring_checkout_user/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "commercial:checkout:expiring" },
+				body: JSON.stringify({ previewToken: preview.previewToken }),
+			},
+		);
+
+		expect(executed.status).toBe(200);
+		expect(stripe.checkoutSessionParams).toHaveLength(1);
+		expect(stripe.checkoutSessionParams[0]?.expires_at).toBe(expiresAt);
+		const [stored] = await context.sql<Array<{ intent: { expiresAt?: number } }>>`
+			SELECT intent
+			FROM commercial_action_previews
+			WHERE preview_token = ${preview.previewToken}::uuid
+		`;
+		expect(stored?.intent.expiresAt).toBe(expiresAt);
+	});
+
 	it("previews subscription changes through the project-scoped repository", async () => {
 		await seedPhase3ControlCatalog(context.sql);
 		await seedPhase3CatalogMigration(context.sql);
