@@ -32,6 +32,7 @@ import {
 	releaseControlHolds,
 } from "./controls-runtime";
 import { enqueueUsageProjection } from "./entitlements";
+import { addUtcInterval, meterLimitWindowBounds, startOfUtcMonth } from "./meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -266,12 +267,12 @@ export async function meterLimitDecision(
 	}
 	const active = rows[0];
 	if (active !== undefined) {
-		const start = new Date(active.period_start_at);
-		const end =
-			active.period_end_at === null
-				? addUtcInterval(start, active.reset_interval)
-				: new Date(active.period_end_at);
-		const bounds = rollWindowBounds(start, end, active.reset_interval, new Date());
+		const bounds = meterLimitWindowBounds(
+			active.period_start_at,
+			active.period_end_at,
+			active.reset_interval,
+			new Date(),
+		);
 		const overagePrice =
 			active.overage_policy === "allowed"
 				? await resolveMeteredOveragePrice(executor, projectId, String(active.plan_item_id))
@@ -708,10 +709,9 @@ export async function readMeterLimitBalance(
 				AND windows.feature_id = ${featureId(meterLimit.feature)}
 				AND windows.entity_id IS NOT DISTINCT FROM ${entityId}::bigint
 				AND windows.filter_key IS NOT DISTINCT FROM ${filterKey}
-				AND windows.window_start_at <= now()
-				AND windows.window_end_at > now()
+				AND windows.window_start_at = ${meterLimit.windowStartAt.toISOString()}::timestamptz
+				AND windows.window_end_at = ${meterLimit.windowEndAt.toISOString()}::timestamptz
 			GROUP BY windows.id, windows.usage
-			LIMIT 1
 		`,
 	);
 	return meterLimitBalance(meterLimit, row?.usage ?? "0", row?.held ?? "0");
@@ -825,46 +825,6 @@ function directRate(feature: FeatureRow): RateDecision {
 		ratePerUnit: "1",
 		tiers: [],
 	};
-}
-
-function rollWindowBounds(
-	start: Date,
-	end: Date,
-	interval: "month" | "year",
-	now: Date,
-): { start: Date; end: Date } {
-	if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end) {
-		throw new BillingError(
-			"Meter-limit subscription has invalid period bounds",
-			"METERING_CONFIGURATION_ERROR",
-			409,
-			{ classification: "persistence_conflict" },
-		);
-	}
-	let currentStart = start;
-	let currentEnd = end;
-	while (currentEnd <= now) {
-		currentStart = currentEnd;
-		currentEnd = addUtcInterval(currentEnd, interval);
-	}
-	return { start: currentStart, end: currentEnd };
-}
-
-export function addUtcInterval(value: Date, interval: "month" | "year"): Date {
-	const result = new Date(value);
-	if (interval === "month") result.setUTCMonth(result.getUTCMonth() + 1);
-	else result.setUTCFullYear(result.getUTCFullYear() + 1);
-	return result;
-}
-
-export function addUtcMonths(value: Date, months: number): Date {
-	const result = new Date(value);
-	result.setUTCMonth(result.getUTCMonth() + months);
-	return result;
-}
-
-function startOfUtcMonth(value: Date): Date {
-	return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
 }
 
 interface RateCardRow {

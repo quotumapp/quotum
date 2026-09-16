@@ -85,6 +85,7 @@ describe("BillingRepository workers", () => {
 			[{ id: "customer-id" }],
 			[{ projection_sequence: 1, billing_account_id: "user-1" }],
 			[],
+			[],
 			[{ project_id: "project-id" }],
 			[{ id: "projection-job-id" }],
 		]);

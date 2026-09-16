@@ -24,6 +24,7 @@ describe("BillingRepository mutations", () => {
 				[{ id: "customer-id" }],
 				[{ projection_sequence: 1, billing_account_id: "user-1" }],
 				[],
+				[],
 				[{ project_id: "project-id" }],
 			],
 			{ strict: true },
@@ -36,7 +37,7 @@ describe("BillingRepository mutations", () => {
 		);
 
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(10);
+		expect(database.queries).toHaveLength(11);
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("purchases.status = 'completed' AND EXCLUDED.status <> 'completed'");
 		expect(queries).toMatch(/EXCLUDED\.status = 'completed'\s+AND purchases\.status = 'completed'/);
