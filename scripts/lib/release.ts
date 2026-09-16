@@ -186,34 +186,38 @@ export function classifyPrTitle(title: string): PrTitleResult {
 }
 
 export interface UnreleasedSummaryInput {
-	version: string;
-	tags: readonly string[];
 	since: string | undefined;
 	subjects: readonly string[];
 }
 
-export function renderUnreleasedSummary(input: UnreleasedSummaryInput): {
-	tagged: boolean;
-	markdown: string;
-} {
-	const tagged = input.tags.includes(`v${input.version}`);
+export function renderUnreleasedSummary(input: UnreleasedSummaryInput): string {
 	const lines = ["## Release status", ""];
-	lines.push(
-		tagged
-			? `\`v${input.version}\` is tagged.`
-			: `\`package.json\` is at ${input.version}, but \`v${input.version}\` is not tagged yet.`,
-		"",
-	);
 	if (input.since === undefined) {
 		lines.push("No stable release tag exists yet.");
 	} else if (input.subjects.length === 0) {
 		lines.push(`No changes since ${input.since}.`);
 	} else {
 		lines.push(`Changes since ${input.since}:`, "");
-		for (const subject of input.subjects) {
-			lines.push(`- ${subject}`);
-		}
+		for (const subject of input.subjects) lines.push(`- ${subject}`);
 	}
 	lines.push("");
-	return { tagged, markdown: lines.join("\n") };
+	return lines.join("\n");
+}
+
+/** Tags define releases; branch builds identify their source commit. */
+export function buildVersion(
+	refType: string | undefined,
+	refName: string | undefined,
+	sha: string,
+): string {
+	if (refType === "tag") return releaseMeta(refName ?? "", []).version;
+	if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error("Invalid build commit");
+	return `0.0.0-dev.${sha}`;
+}
+
+export function versionedContract(contract: string, version: string): string {
+	if (!isVersion(version)) throw new Error(`Not a semantic version: ${version}`);
+	const document = JSON.parse(contract);
+	document.info.version = version;
+	return `${JSON.stringify(document, null, 2)}\n`;
 }

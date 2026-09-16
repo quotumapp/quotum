@@ -1,15 +1,19 @@
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
+	buildVersion,
 	classifyPrTitle,
 	latestStableTag,
 	releaseMeta,
 	renderImageManifest,
 	renderUnreleasedSummary,
+	versionedContract,
 } from "./lib/release";
 
 const usage = `Usage:
+  bun scripts/release.ts build-version
+  bun scripts/release.ts contracts <version> [--out-dir dir]
   bun scripts/release.ts meta <tag>
   bun scripts/release.ts image-manifest <version> --digest sha256:... [--out-dir dir]
   bun scripts/release.ts pr-title            (reads PR_TITLE)
@@ -95,7 +99,6 @@ function prTitle() {
 }
 
 function unreleased() {
-	const { version } = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
 	const tags = releaseTags();
 	const since = latestStableTag(tags);
 	const subjects =
@@ -105,17 +108,12 @@ function unreleased() {
 					.split("\n")
 					.map((line) => line.trim())
 					.filter(Boolean);
-	const summary = renderUnreleasedSummary({ version, tags, since, subjects });
+	const summary = renderUnreleasedSummary({ since, subjects });
 	const summaryPath = process.env.GITHUB_STEP_SUMMARY;
 	if (summaryPath) {
-		appendFileSync(summaryPath, summary.markdown);
+		appendFileSync(summaryPath, summary);
 	}
-	console.log(summary.markdown);
-	if (!summary.tagged) {
-		console.log(
-			`::warning title=Release not tagged::package.json is ${version} but v${version} is not tagged. Follow the release checklist to publish it.`,
-		);
-	}
+	console.log(summary);
 }
 
 try {
@@ -128,6 +126,26 @@ try {
 	});
 	const [command, ...rest] = positionals;
 	switch (command) {
+		case "build-version":
+			writeOutputs({
+				version: buildVersion(
+					process.env.GITHUB_REF_TYPE,
+					process.env.GITHUB_REF_NAME,
+					process.env.GITHUB_SHA ?? git("rev-parse", "HEAD").trim(),
+				),
+			});
+			break;
+		case "contracts": {
+			const content = versionedContract(
+				readFileSync("contracts/v1/openapi.json", "utf8"),
+				rest[0] ?? "",
+			);
+			const outDir = values["out-dir"] ?? "release";
+			mkdirSync(outDir, { recursive: true });
+			writeFileSync(join(outDir, "openapi.json"), content);
+			copyFileSync("contracts/v1/errors.json", join(outDir, "errors.json"));
+			break;
+		}
 		case "meta":
 			meta(rest);
 			break;

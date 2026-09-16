@@ -9,8 +9,7 @@ are kept current; do not duplicate them here, update them when behavior changes.
 
 ## Commands
 
-Bun `>=1.4.0 <1.5.0` only (`packageManager` pins 1.4.2). Docker is required for every
-Postgres-backed lane.
+Bun `>=1.4.0 <1.5.0` only. Docker is required for every Postgres-backed lane.
 
 ```sh
 bun install --frozen-lockfile
@@ -152,8 +151,9 @@ guards. The quickstart in `docs/quickstart.md` uses `bun run test:stripe-entrypo
   formatting because it is generated.
 - Strict TypeScript, kebab-case file names, `*.test.ts` under `tests/` mirroring `src/`.
 - Conventional Commits, subject under 72 characters. Do not bump the `package.json` version in
-  feature pull requests; a `chore(release): vX.Y.Z` pull request bumps it. For releases, follow
-  [the publishing checklist](docs/operations.md#publish-a-container-release): push the matching
+  feature pull requests; it stays at `0.0.0-dev`. Releases tag an existing verified `main` commit,
+  without a release branch or version-bump PR. For releases, follow
+  [the publishing checklist](docs/operations.md#publish-a-container-release): push the chosen
   Git tag to GitHub and verify the GitHub Release and the versioned GHCR image. A version bump or
   `main` push alone does not publish a versioned image. PR titles are the squash commit subject,
   checked by `PR title` and mapped to release-note labels by `scripts/release.ts`. Release notes
