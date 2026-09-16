@@ -64,6 +64,7 @@ import { BillingInsightsRepository } from "./repository/insights";
 import { type GrantAllocationInput, MeteringBillingRepository } from "./repository/metering";
 import { ProjectScopedBillingRepository } from "./repository/project-scoped";
 import { ProjectionJobBillingRepository } from "./repository/projection-jobs";
+import { PromotionRepository } from "./repository/promotions";
 import { RecurringPricingRepository } from "./repository/recurring-pricing";
 import { StoreEventReplayBillingRepository } from "./repository/store-event-replay";
 import { StripeBillingRepository } from "./repository/stripe";
@@ -138,6 +139,7 @@ export class BillingRepository {
 	private readonly metering: MeteringBillingRepository;
 	private readonly catalog: CatalogControlPlane;
 	readonly controlsEnterprise: ControlsEnterpriseRepository;
+	readonly promotions: PromotionRepository;
 
 	constructor(
 		database: TransactionalQueryExecutor = defaultDb as unknown as TransactionalQueryExecutor,
@@ -156,6 +158,7 @@ export class BillingRepository {
 		this.metering = new MeteringBillingRepository(database);
 		this.catalog = new CatalogControlPlane(database);
 		this.controlsEnterprise = new ControlsEnterpriseRepository(database);
+		this.promotions = new PromotionRepository(database);
 	}
 
 	async claimAutoTopupJobs(

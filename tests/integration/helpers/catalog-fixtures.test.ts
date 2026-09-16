@@ -8,6 +8,14 @@ import {
 describe("integration catalog fixtures", () => {
 	it("uses public billing tables in dependency reset order", () => {
 		expect(publicBillingTableResetOrder).toEqual([
+			"promotion_audit_events",
+			"promotion_redemptions",
+			"promotion_provider_objects",
+			"promotion_codes",
+			"promotion_grant_items",
+			"promotion_targets",
+			"promotion_discount_amounts",
+			"promotions",
 			"commercial_action_previews",
 			"license_assignments",
 			"license_pools",

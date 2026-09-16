@@ -1719,6 +1719,411 @@ CREATE INDEX IF NOT EXISTS idx_billing_commercial_previews_expiry
 CREATE INDEX IF NOT EXISTS idx_billing_commercial_previews_account_created
 	ON commercial_action_previews (project_id, billing_account_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS promotions (
+	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	key TEXT COLLATE "C" NOT NULL CHECK (char_length(key) BETWEEN 1 AND 120),
+	name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 200),
+	effect_kind TEXT NOT NULL CHECK (effect_kind IN ('discount', 'feature_grant', 'plan_grant')),
+	status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+	allowed_channels TEXT[] NOT NULL DEFAULT ARRAY['web', 'ios', 'android']::text[],
+	discount_type TEXT CHECK (discount_type IS NULL OR discount_type IN ('percent', 'amount')),
+	percent_off_bps INTEGER CHECK (percent_off_bps IS NULL OR percent_off_bps BETWEEN 1 AND 10000),
+	discount_duration TEXT CHECK (
+		discount_duration IS NULL OR discount_duration IN ('once', 'repeating', 'forever')
+	),
+	duration_months INTEGER CHECK (duration_months IS NULL OR duration_months BETWEEN 1 AND 36),
+	plan_id BIGINT,
+	grant_duration_unit TEXT CHECK (grant_duration_unit IS NULL OR grant_duration_unit IN ('day', 'month')),
+	grant_duration_count INTEGER CHECK (
+		grant_duration_count IS NULL OR grant_duration_count BETWEEN 1 AND 730
+	),
+	terms_hash TEXT COLLATE "C" NOT NULL CHECK (char_length(terms_hash) = 64),
+	metadata JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(metadata) = 'object'),
+	created_by TEXT NOT NULL CHECK (char_length(created_by) BETWEEN 1 AND 200),
+	archived_by TEXT CHECK (archived_by IS NULL OR char_length(archived_by) BETWEEN 1 AND 200),
+	archived_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT promotions_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT promotions_project_key_unique UNIQUE (project_id, key),
+	CONSTRAINT promotions_project_plan_fk FOREIGN KEY (project_id, plan_id)
+		REFERENCES plans(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotions_allowed_channels_check CHECK (
+		cardinality(allowed_channels) BETWEEN 1 AND 3
+		AND allowed_channels <@ ARRAY['web', 'ios', 'android']::text[]
+	),
+	CONSTRAINT promotions_effect_terms_check CHECK (
+		(
+			effect_kind = 'discount'
+			AND discount_type IS NOT NULL
+			AND discount_duration IS NOT NULL
+			AND (discount_type = 'percent') = (percent_off_bps IS NOT NULL)
+			AND (discount_duration = 'repeating') = (duration_months IS NOT NULL)
+			AND plan_id IS NULL AND grant_duration_unit IS NULL AND grant_duration_count IS NULL
+		)
+		OR (
+			effect_kind = 'feature_grant'
+			AND discount_type IS NULL AND percent_off_bps IS NULL
+			AND discount_duration IS NULL AND duration_months IS NULL
+			AND plan_id IS NULL AND grant_duration_unit IS NULL AND grant_duration_count IS NULL
+		)
+		OR (
+			effect_kind = 'plan_grant'
+			AND discount_type IS NULL AND percent_off_bps IS NULL
+			AND discount_duration IS NULL AND duration_months IS NULL
+			AND plan_id IS NOT NULL AND grant_duration_unit IS NOT NULL
+			AND grant_duration_count IS NOT NULL
+		)
+	),
+	CONSTRAINT promotions_archive_check CHECK (
+		(status = 'active' AND archived_at IS NULL AND archived_by IS NULL)
+		OR (status = 'archived' AND archived_at IS NOT NULL AND archived_by IS NOT NULL)
+	)
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_promotions_project_created
+	ON promotions (project_id, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS promotion_discount_amounts (
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	promotion_id UUID NOT NULL,
+	currency TEXT COLLATE "C" NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+	amount_off_minor BIGINT NOT NULL CHECK (amount_off_minor > 0),
+	CONSTRAINT promotion_discount_amounts_pkey PRIMARY KEY (project_id, promotion_id, currency),
+	CONSTRAINT promotion_discount_amounts_project_promotion_fk FOREIGN KEY (project_id, promotion_id)
+		REFERENCES promotions(project_id, id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS promotion_targets (
+	id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	promotion_id UUID NOT NULL,
+	target_kind TEXT NOT NULL CHECK (target_kind IN ('plan', 'product')),
+	plan_id BIGINT,
+	product_id UUID,
+	CONSTRAINT promotion_targets_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT promotion_targets_project_promotion_fk FOREIGN KEY (project_id, promotion_id)
+		REFERENCES promotions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_targets_project_plan_fk FOREIGN KEY (project_id, plan_id)
+		REFERENCES plans(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_targets_project_product_fk FOREIGN KEY (project_id, product_id)
+		REFERENCES products(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_targets_shape_check CHECK (
+		(target_kind = 'plan' AND plan_id IS NOT NULL AND product_id IS NULL)
+		OR (target_kind = 'product' AND product_id IS NOT NULL AND plan_id IS NULL)
+	)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_targets_plan
+	ON promotion_targets (project_id, promotion_id, plan_id)
+	WHERE plan_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_targets_product
+	ON promotion_targets (project_id, promotion_id, product_id)
+	WHERE product_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS promotion_grant_items (
+	id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	promotion_id UUID NOT NULL,
+	feature_id BIGINT NOT NULL,
+	quantity NUMERIC(28, 9) NOT NULL CHECK (quantity > 0),
+	expires_after_seconds BIGINT CHECK (expires_after_seconds IS NULL OR expires_after_seconds > 0),
+	CONSTRAINT promotion_grant_items_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT promotion_grant_items_project_feature_unique UNIQUE (project_id, promotion_id, feature_id),
+	CONSTRAINT promotion_grant_items_project_promotion_fk FOREIGN KEY (project_id, promotion_id)
+		REFERENCES promotions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_grant_items_project_feature_fk FOREIGN KEY (project_id, feature_id)
+		REFERENCES features(project_id, id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS promotion_codes (
+	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	promotion_id UUID NOT NULL,
+	code TEXT COLLATE "C" NOT NULL CHECK (code ~ '^[A-Za-z0-9-]{3,64}$'),
+	normalized_code TEXT COLLATE "C" NOT NULL CHECK (normalized_code ~ '^[A-Z0-9-]{3,64}$'),
+	active BOOLEAN NOT NULL DEFAULT true,
+	starts_at TIMESTAMPTZ,
+	expires_at TIMESTAMPTZ,
+	max_redemptions INTEGER CHECK (max_redemptions IS NULL OR max_redemptions > 0),
+	max_redemptions_per_customer INTEGER CHECK (
+		max_redemptions_per_customer IS NULL OR max_redemptions_per_customer > 0
+	),
+	first_purchase_only BOOLEAN NOT NULL DEFAULT false,
+	billing_account_id TEXT COLLATE "C" CHECK (
+		billing_account_id IS NULL OR char_length(billing_account_id) BETWEEN 1 AND 200
+	),
+	hosted_checkout_enabled BOOLEAN NOT NULL DEFAULT false,
+	redeemed_count INTEGER NOT NULL DEFAULT 0 CHECK (redeemed_count >= 0),
+	reserved_count INTEGER NOT NULL DEFAULT 0 CHECK (reserved_count >= 0),
+	created_by TEXT NOT NULL CHECK (char_length(created_by) BETWEEN 1 AND 200),
+	deactivated_by TEXT CHECK (deactivated_by IS NULL OR char_length(deactivated_by) BETWEEN 1 AND 200),
+	deactivated_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT promotion_codes_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT promotion_codes_project_code_unique UNIQUE (project_id, normalized_code),
+	CONSTRAINT promotion_codes_project_promotion_fk FOREIGN KEY (project_id, promotion_id)
+		REFERENCES promotions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_codes_normalized_check CHECK (normalized_code = upper(code)),
+	CONSTRAINT promotion_codes_window_check CHECK (
+		starts_at IS NULL OR expires_at IS NULL OR expires_at > starts_at
+	),
+	CONSTRAINT promotion_codes_deactivation_check CHECK (
+		(active AND deactivated_at IS NULL AND deactivated_by IS NULL)
+		OR (NOT active AND deactivated_at IS NOT NULL AND deactivated_by IS NOT NULL)
+	),
+	-- Stripe cannot enforce a per-customer cap or an account restriction on hosted entry.
+	CONSTRAINT promotion_codes_hosted_check CHECK (
+		NOT hosted_checkout_enabled
+		OR (billing_account_id IS NULL AND max_redemptions_per_customer IS NULL)
+	)
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_promotion_codes_promotion_created
+	ON promotion_codes (project_id, promotion_id, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS promotion_provider_objects (
+	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	promotion_id UUID NOT NULL,
+	promotion_code_id UUID,
+	parent_object_id UUID,
+	provider TEXT NOT NULL CHECK (provider IN ('stripe', 'apple', 'google')),
+	object_kind TEXT NOT NULL CHECK (
+		object_kind IN (
+			'coupon',
+			'promotion_code',
+			'apple_promotional_offer',
+			'apple_offer_code',
+			'google_developer_offer',
+			'google_promo_code'
+		)
+	),
+	external_id TEXT COLLATE "C" CHECK (external_id IS NULL OR char_length(external_id) BETWEEN 1 AND 255),
+	product_external_id TEXT COLLATE "C" CHECK (
+		product_external_id IS NULL OR char_length(product_external_id) BETWEEN 1 AND 255
+	),
+	base_plan_id TEXT COLLATE "C" CHECK (base_plan_id IS NULL OR char_length(base_plan_id) BETWEEN 1 AND 255),
+	redemption_code TEXT COLLATE "C" CHECK (
+		redemption_code IS NULL OR char_length(redemption_code) BETWEEN 1 AND 255
+	),
+	applies_to JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(applies_to) = 'object'),
+	applies_to_hash TEXT COLLATE "C" CHECK (applies_to_hash IS NULL OR char_length(applies_to_hash) = 64),
+	catalog_revision_id BIGINT,
+	status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'ready', 'failed', 'retired')),
+	desired_active BOOLEAN NOT NULL DEFAULT true,
+	desired_generation INTEGER NOT NULL DEFAULT 0 CHECK (desired_generation >= 0),
+	provider_active BOOLEAN,
+	retire_requested BOOLEAN NOT NULL DEFAULT false,
+	attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+	next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	locked_at TIMESTAMPTZ,
+	locked_by TEXT CHECK (locked_by IS NULL OR char_length(locked_by) BETWEEN 1 AND 200),
+	error TEXT CHECK (error IS NULL OR char_length(error) <= 2000),
+	ready_at TIMESTAMPTZ,
+	retired_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT promotion_provider_objects_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT promotion_provider_objects_project_promotion_fk FOREIGN KEY (project_id, promotion_id)
+		REFERENCES promotions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_provider_objects_project_code_fk FOREIGN KEY (project_id, promotion_code_id)
+		REFERENCES promotion_codes(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_provider_objects_project_parent_fk FOREIGN KEY (project_id, parent_object_id)
+		REFERENCES promotion_provider_objects(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_provider_objects_project_revision_fk FOREIGN KEY (project_id, catalog_revision_id)
+		REFERENCES catalog_revisions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_provider_objects_shape_check CHECK (
+		(
+			object_kind = 'coupon' AND provider = 'stripe'
+			AND promotion_code_id IS NULL AND parent_object_id IS NULL AND applies_to_hash IS NOT NULL
+		)
+		OR (
+			object_kind = 'promotion_code' AND provider = 'stripe'
+			AND promotion_code_id IS NOT NULL AND parent_object_id IS NOT NULL
+		)
+		OR (
+			object_kind IN ('apple_promotional_offer', 'apple_offer_code') AND provider = 'apple'
+			AND parent_object_id IS NULL AND external_id IS NOT NULL AND product_external_id IS NOT NULL
+		)
+		OR (
+			object_kind IN ('google_developer_offer', 'google_promo_code') AND provider = 'google'
+			AND parent_object_id IS NULL AND product_external_id IS NOT NULL
+			AND (external_id IS NOT NULL OR redemption_code IS NOT NULL)
+		)
+	),
+	CONSTRAINT promotion_provider_objects_state_check CHECK (
+		(status <> 'ready' OR (external_id IS NOT NULL OR redemption_code IS NOT NULL) AND ready_at IS NOT NULL)
+		AND (status <> 'failed' OR error IS NOT NULL)
+		AND (status <> 'retired' OR retired_at IS NOT NULL)
+	)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_coupon
+	ON promotion_provider_objects (project_id, promotion_id, provider, applies_to_hash)
+	WHERE object_kind = 'coupon' AND status <> 'retired';
+
+-- One live Stripe promotion code per Quotum code: Stripe requires active codes to be unique, so
+-- a replacement can only be created after the previous object is retired.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_live_code
+	ON promotion_provider_objects (project_id, promotion_code_id, provider)
+	WHERE object_kind = 'promotion_code' AND status <> 'retired';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_external
+	ON promotion_provider_objects (project_id, provider, object_kind, external_id)
+	WHERE external_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_promotion
+	ON promotion_provider_objects (project_id, promotion_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_due
+	ON promotion_provider_objects (next_attempt_at, id)
+	WHERE status = 'pending' OR (status = 'ready' AND provider_active IS DISTINCT FROM desired_active);
+
+CREATE TABLE IF NOT EXISTS promotion_redemptions (
+	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	promotion_id UUID NOT NULL,
+	promotion_code_id UUID,
+	customer_id UUID NOT NULL,
+	channel TEXT NOT NULL CHECK (channel IN ('web', 'ios', 'android')),
+	status TEXT NOT NULL CHECK (status IN ('reserved', 'applied', 'released', 'reversed')),
+	provider TEXT NOT NULL CHECK (provider IN ('quotum', 'stripe', 'apple', 'google')),
+	source TEXT NOT NULL CHECK (
+		source IN ('api_redeem', 'commercial_action', 'stripe_hosted_checkout', 'apple_offer', 'google_offer')
+	),
+	commercial_action_preview_id UUID,
+	subscription_change_id UUID,
+	purchase_id UUID,
+	provider_object_id UUID,
+	stripe_coupon_id TEXT COLLATE "C",
+	stripe_promotion_code_id TEXT COLLATE "C",
+	stripe_checkout_session_id TEXT COLLATE "C",
+	stripe_invoice_id TEXT COLLATE "C",
+	external_subscription_id TEXT COLLATE "C",
+	provider_subscription_ref TEXT COLLATE "C",
+	provider_transaction_id TEXT COLLATE "C",
+	provider_offer_type TEXT COLLATE "C",
+	last_observed_transaction_id TEXT COLLATE "C",
+	last_observed_at TIMESTAMPTZ,
+	currency TEXT COLLATE "C" CHECK (currency IS NULL OR currency ~ '^[A-Z]{3}$'),
+	amount_subtotal_minor BIGINT CHECK (amount_subtotal_minor IS NULL OR amount_subtotal_minor >= 0),
+	amount_discount_minor BIGINT CHECK (amount_discount_minor IS NULL OR amount_discount_minor >= 0),
+	amount_total_minor BIGINT CHECK (amount_total_minor IS NULL OR amount_total_minor >= 0),
+	effect_snapshot JSONB NOT NULL CHECK (jsonb_typeof(effect_snapshot) = 'object'),
+	result JSONB CHECK (
+		result IS NULL OR (jsonb_typeof(result) = 'object' AND octet_length(result::text) <= 16384)
+	),
+	limit_violation TEXT CHECK (
+		limit_violation IS NULL
+		OR limit_violation IN ('global', 'first_purchase', 'not_applicable', 'inactive', 'expired')
+	),
+	actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),
+	reason TEXT CHECK (reason IS NULL OR char_length(reason) BETWEEN 1 AND 500),
+	idempotency_key TEXT COLLATE "C" NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
+	request_hash TEXT COLLATE "C" NOT NULL CHECK (char_length(request_hash) = 64),
+	reserved_until TIMESTAMPTZ,
+	applied_at TIMESTAMPTZ,
+	released_at TIMESTAMPTZ,
+	reversed_at TIMESTAMPTZ,
+	reversal_actor TEXT CHECK (reversal_actor IS NULL OR char_length(reversal_actor) BETWEEN 1 AND 200),
+	reversal_reason TEXT CHECK (reversal_reason IS NULL OR char_length(reversal_reason) BETWEEN 1 AND 500),
+	reversal_idempotency_key TEXT COLLATE "C" CHECK (
+		reversal_idempotency_key IS NULL OR char_length(reversal_idempotency_key) BETWEEN 1 AND 255
+	),
+	reversal_request_hash TEXT COLLATE "C" CHECK (
+		reversal_request_hash IS NULL OR char_length(reversal_request_hash) = 64
+	),
+	reversal_result JSONB CHECK (
+		reversal_result IS NULL
+		OR (jsonb_typeof(reversal_result) = 'object' AND octet_length(reversal_result::text) <= 16384)
+	),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT promotion_redemptions_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT promotion_redemptions_idempotency_unique UNIQUE (project_id, customer_id, idempotency_key),
+	CONSTRAINT promotion_redemptions_project_promotion_fk FOREIGN KEY (project_id, promotion_id)
+		REFERENCES promotions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_redemptions_project_code_fk FOREIGN KEY (project_id, promotion_code_id)
+		REFERENCES promotion_codes(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_redemptions_project_customer_fk FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id) ON DELETE CASCADE,
+	CONSTRAINT promotion_redemptions_project_preview_fk FOREIGN KEY (project_id, commercial_action_preview_id)
+		REFERENCES commercial_action_previews(project_id, id) ON DELETE SET NULL (commercial_action_preview_id),
+	CONSTRAINT promotion_redemptions_project_change_fk FOREIGN KEY (project_id, subscription_change_id)
+		REFERENCES subscription_changes(project_id, id) ON DELETE SET NULL (subscription_change_id),
+	CONSTRAINT promotion_redemptions_project_purchase_fk FOREIGN KEY (project_id, purchase_id)
+		REFERENCES purchases(project_id, id) ON DELETE SET NULL (purchase_id),
+	CONSTRAINT promotion_redemptions_project_provider_object_fk FOREIGN KEY (project_id, provider_object_id)
+		REFERENCES promotion_provider_objects(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_redemptions_code_required_check CHECK (
+		promotion_code_id IS NOT NULL OR source IN ('apple_offer', 'google_offer')
+	),
+	CONSTRAINT promotion_redemptions_state_check CHECK (
+		(status = 'reserved' AND reserved_until IS NOT NULL AND applied_at IS NULL AND released_at IS NULL AND reversed_at IS NULL)
+		OR (status = 'applied' AND applied_at IS NOT NULL AND reversed_at IS NULL)
+		OR (status = 'released' AND released_at IS NOT NULL AND applied_at IS NULL AND reversed_at IS NULL)
+		OR (status = 'reversed' AND applied_at IS NOT NULL AND reversed_at IS NOT NULL)
+	)
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_promotion_redemptions_code_customer
+	ON promotion_redemptions (project_id, promotion_code_id, customer_id)
+	WHERE status IN ('reserved', 'applied', 'reversed');
+
+CREATE INDEX IF NOT EXISTS idx_billing_promotion_redemptions_reserved_expiry
+	ON promotion_redemptions (reserved_until, id)
+	WHERE status = 'reserved';
+
+CREATE INDEX IF NOT EXISTS idx_billing_promotion_redemptions_promotion_created
+	ON promotion_redemptions (project_id, promotion_id, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_billing_promotion_redemptions_customer_created
+	ON promotion_redemptions (project_id, customer_id, created_at DESC, id DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_redemptions_checkout_session
+	ON promotion_redemptions (project_id, stripe_checkout_session_id)
+	WHERE stripe_checkout_session_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_redemptions_subscription_change
+	ON promotion_redemptions (project_id, subscription_change_id)
+	WHERE subscription_change_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_billing_promotion_redemptions_purchase
+	ON promotion_redemptions (project_id, purchase_id)
+	WHERE purchase_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS promotion_audit_events (
+	id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	promotion_id UUID NOT NULL,
+	promotion_code_id UUID,
+	action TEXT NOT NULL CHECK (
+		action IN (
+			'promotion_created',
+			'promotion_archived',
+			'codes_added',
+			'code_deactivated',
+			'provider_mapping_added',
+			'provider_sync_requested'
+		)
+	),
+	actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),
+	details JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(details) = 'object'),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT promotion_audit_events_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT promotion_audit_events_project_promotion_fk FOREIGN KEY (project_id, promotion_id)
+		REFERENCES promotions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_audit_events_project_code_fk FOREIGN KEY (project_id, promotion_code_id)
+		REFERENCES promotion_codes(project_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_promotion_audit_events_promotion_created
+	ON promotion_audit_events (project_id, promotion_id, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_billing_usage_events_customer_feature_time
 	ON usage_events (project_id, customer_id, meter_feature_id, recorded_at DESC, id DESC);
 

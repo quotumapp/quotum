@@ -431,6 +431,7 @@
       "code": "IDEMPOTENCY_CONFLICT",
       "sources": [
         "src/db/repository/commercial-actions.ts",
+        "src/db/repository/promotions.ts",
         "src/db/repository/recurring-pricing.ts",
         "src/db/repository/stripe.ts",
         "src/db/repository/usage-operations.ts",
@@ -718,6 +719,108 @@
       "code": "PROJECTION_VERIFICATION_FAILED",
       "sources": [
         "src/composition/connection-validation.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_ARCHIVED",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_CODE_ALREADY_REDEEMED",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_CODE_CHANNEL_NOT_SUPPORTED",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_CODE_CONFLICT",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_CODE_EXHAUSTED",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_CODE_EXPIRED",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_CODE_FIRST_PURCHASE_ONLY",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_CODE_INACTIVE",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_CODE_INVALID_FORMAT",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_CODE_NOT_FOUND",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_CODE_NOT_STARTED",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_HOSTED_CHECKOUT_UNSUPPORTED",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_KEY_CONFLICT",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_NOT_FOUND",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_REDEMPTION_NOT_FOUND",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_TARGET_NOT_FOUND",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_TERMS_INVALID",
+      "sources": [
+        "src/billing/promotions.ts"
       ]
     },
     {

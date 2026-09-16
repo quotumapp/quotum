@@ -2517,6 +2517,406 @@ export const licenseAssignments = pgTable(
 	],
 );
 
+export const promotions = pgTable(
+	"promotions",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		key: text("key").notNull(),
+		name: text("name").notNull(),
+		effectKind: text("effect_kind").$type<"discount" | "feature_grant" | "plan_grant">().notNull(),
+		status: text("status").$type<"active" | "archived">().notNull().default("active"),
+		allowedChannels: text("allowed_channels")
+			.array()
+			.$type<Array<"web" | "ios" | "android">>()
+			.notNull()
+			.default(sql`ARRAY['web', 'ios', 'android']::text[]`),
+		discountType: text("discount_type").$type<"percent" | "amount">(),
+		percentOffBps: integer("percent_off_bps"),
+		discountDuration: text("discount_duration").$type<"once" | "repeating" | "forever">(),
+		durationMonths: integer("duration_months"),
+		planId: bigint("plan_id", { mode: "number" }),
+		grantDurationUnit: text("grant_duration_unit").$type<"day" | "month">(),
+		grantDurationCount: integer("grant_duration_count"),
+		termsHash: text("terms_hash").notNull(),
+		metadata: metadataColumn(),
+		createdBy: text("created_by").notNull(),
+		archivedBy: text("archived_by"),
+		archivedAt: timestamp("archived_at", { withTimezone: true }),
+		...timestampColumns(),
+	},
+	(table) => [
+		unique("promotions_project_id_id_unique").on(table.projectId, table.id),
+		unique("promotions_project_key_unique").on(table.projectId, table.key),
+		foreignKey({
+			name: "promotions_project_plan_fk",
+			columns: [table.projectId, table.planId],
+			foreignColumns: [plans.projectId, plans.id],
+		}),
+		index("idx_billing_promotions_project_created").on(table.projectId, table.createdAt, table.id),
+	],
+);
+
+export const promotionDiscountAmounts = pgTable(
+	"promotion_discount_amounts",
+	{
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		promotionId: uuid("promotion_id").notNull(),
+		currency: text("currency").notNull(),
+		amountOffMinor: bigint("amount_off_minor", { mode: "number" }).notNull(),
+	},
+	(table) => [
+		primaryKey({
+			name: "promotion_discount_amounts_pkey",
+			columns: [table.projectId, table.promotionId, table.currency],
+		}),
+		foreignKey({
+			name: "promotion_discount_amounts_project_promotion_fk",
+			columns: [table.projectId, table.promotionId],
+			foreignColumns: [promotions.projectId, promotions.id],
+		}),
+	],
+);
+
+export const promotionTargets = pgTable(
+	"promotion_targets",
+	{
+		id: meteringId(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		promotionId: uuid("promotion_id").notNull(),
+		targetKind: text("target_kind").$type<"plan" | "product">().notNull(),
+		planId: bigint("plan_id", { mode: "number" }),
+		productId: uuid("product_id"),
+	},
+	(table) => [
+		unique("promotion_targets_project_id_id_unique").on(table.projectId, table.id),
+		foreignKey({
+			name: "promotion_targets_project_promotion_fk",
+			columns: [table.projectId, table.promotionId],
+			foreignColumns: [promotions.projectId, promotions.id],
+		}),
+		uniqueIndex("idx_billing_promotion_targets_plan")
+			.on(table.projectId, table.promotionId, table.planId)
+			.where(sql`${table.planId} IS NOT NULL`),
+		uniqueIndex("idx_billing_promotion_targets_product")
+			.on(table.projectId, table.promotionId, table.productId)
+			.where(sql`${table.productId} IS NOT NULL`),
+	],
+);
+
+export const promotionGrantItems = pgTable(
+	"promotion_grant_items",
+	{
+		id: meteringId(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		promotionId: uuid("promotion_id").notNull(),
+		featureId: bigint("feature_id", { mode: "number" }).notNull(),
+		quantity: quantityColumn("quantity").notNull(),
+		expiresAfterSeconds: bigint("expires_after_seconds", { mode: "number" }),
+	},
+	(table) => [
+		unique("promotion_grant_items_project_id_id_unique").on(table.projectId, table.id),
+		unique("promotion_grant_items_project_feature_unique").on(
+			table.projectId,
+			table.promotionId,
+			table.featureId,
+		),
+		foreignKey({
+			name: "promotion_grant_items_project_promotion_fk",
+			columns: [table.projectId, table.promotionId],
+			foreignColumns: [promotions.projectId, promotions.id],
+		}),
+		foreignKey({
+			name: "promotion_grant_items_project_feature_fk",
+			columns: [table.projectId, table.featureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
+	],
+);
+
+export const promotionCodes = pgTable(
+	"promotion_codes",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		promotionId: uuid("promotion_id").notNull(),
+		code: text("code").notNull(),
+		normalizedCode: text("normalized_code").notNull(),
+		active: boolean("active").notNull().default(true),
+		startsAt: timestamp("starts_at", { withTimezone: true }),
+		expiresAt: timestamp("expires_at", { withTimezone: true }),
+		maxRedemptions: integer("max_redemptions"),
+		maxRedemptionsPerCustomer: integer("max_redemptions_per_customer"),
+		firstPurchaseOnly: boolean("first_purchase_only").notNull().default(false),
+		billingAccountId: text("billing_account_id"),
+		hostedCheckoutEnabled: boolean("hosted_checkout_enabled").notNull().default(false),
+		redeemedCount: integer("redeemed_count").notNull().default(0),
+		reservedCount: integer("reserved_count").notNull().default(0),
+		createdBy: text("created_by").notNull(),
+		deactivatedBy: text("deactivated_by"),
+		deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
+		...timestampColumns(),
+	},
+	(table) => [
+		unique("promotion_codes_project_id_id_unique").on(table.projectId, table.id),
+		unique("promotion_codes_project_code_unique").on(table.projectId, table.normalizedCode),
+		foreignKey({
+			name: "promotion_codes_project_promotion_fk",
+			columns: [table.projectId, table.promotionId],
+			foreignColumns: [promotions.projectId, promotions.id],
+		}),
+		index("idx_billing_promotion_codes_promotion_created").on(
+			table.projectId,
+			table.promotionId,
+			table.createdAt,
+			table.id,
+		),
+		check(
+			"promotion_codes_hosted_check",
+			sql`NOT ${table.hostedCheckoutEnabled} OR (${table.billingAccountId} IS NULL AND ${table.maxRedemptionsPerCustomer} IS NULL)`,
+		),
+	],
+);
+
+export const promotionProviderObjects = pgTable(
+	"promotion_provider_objects",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		promotionId: uuid("promotion_id").notNull(),
+		promotionCodeId: uuid("promotion_code_id"),
+		parentObjectId: uuid("parent_object_id"),
+		provider: text("provider").$type<"stripe" | "apple" | "google">().notNull(),
+		objectKind: text("object_kind")
+			.$type<
+				| "coupon"
+				| "promotion_code"
+				| "apple_promotional_offer"
+				| "apple_offer_code"
+				| "google_developer_offer"
+				| "google_promo_code"
+			>()
+			.notNull(),
+		externalId: text("external_id"),
+		productExternalId: text("product_external_id"),
+		basePlanId: text("base_plan_id"),
+		redemptionCode: text("redemption_code"),
+		appliesTo: jsonb("applies_to").$type<Record<string, unknown>>().notNull().default({}),
+		appliesToHash: text("applies_to_hash"),
+		catalogRevisionId: bigint("catalog_revision_id", { mode: "number" }),
+		status: text("status")
+			.$type<"pending" | "ready" | "failed" | "retired">()
+			.notNull()
+			.default("pending"),
+		desiredActive: boolean("desired_active").notNull().default(true),
+		desiredGeneration: integer("desired_generation").notNull().default(0),
+		providerActive: boolean("provider_active"),
+		retireRequested: boolean("retire_requested").notNull().default(false),
+		attempts: integer("attempts").notNull().default(0),
+		nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+		lockedAt: timestamp("locked_at", { withTimezone: true }),
+		lockedBy: text("locked_by"),
+		error: text("error"),
+		readyAt: timestamp("ready_at", { withTimezone: true }),
+		retiredAt: timestamp("retired_at", { withTimezone: true }),
+		...timestampColumns(),
+	},
+	(table) => [
+		unique("promotion_provider_objects_project_id_id_unique").on(table.projectId, table.id),
+		foreignKey({
+			name: "promotion_provider_objects_project_promotion_fk",
+			columns: [table.projectId, table.promotionId],
+			foreignColumns: [promotions.projectId, promotions.id],
+		}),
+		foreignKey({
+			name: "promotion_provider_objects_project_code_fk",
+			columns: [table.projectId, table.promotionCodeId],
+			foreignColumns: [promotionCodes.projectId, promotionCodes.id],
+		}),
+		uniqueIndex("idx_billing_promotion_provider_objects_coupon")
+			.on(table.projectId, table.promotionId, table.provider, table.appliesToHash)
+			.where(sql`${table.objectKind} = 'coupon' AND ${table.status} <> 'retired'`),
+		uniqueIndex("idx_billing_promotion_provider_objects_live_code")
+			.on(table.projectId, table.promotionCodeId, table.provider)
+			.where(sql`${table.objectKind} = 'promotion_code' AND ${table.status} <> 'retired'`),
+		uniqueIndex("idx_billing_promotion_provider_objects_external")
+			.on(table.projectId, table.provider, table.objectKind, table.externalId)
+			.where(sql`${table.externalId} IS NOT NULL`),
+		index("idx_billing_promotion_provider_objects_promotion").on(
+			table.projectId,
+			table.promotionId,
+			table.createdAt,
+		),
+		index("idx_billing_promotion_provider_objects_due")
+			.on(table.nextAttemptAt, table.id)
+			.where(
+				sql`${table.status} = 'pending' OR (${table.status} = 'ready' AND ${table.providerActive} IS DISTINCT FROM ${table.desiredActive})`,
+			),
+	],
+);
+
+export const promotionRedemptions = pgTable(
+	"promotion_redemptions",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		promotionId: uuid("promotion_id").notNull(),
+		promotionCodeId: uuid("promotion_code_id"),
+		customerId: uuid("customer_id").notNull(),
+		channel: text("channel").$type<"web" | "ios" | "android">().notNull(),
+		status: text("status").$type<"reserved" | "applied" | "released" | "reversed">().notNull(),
+		provider: text("provider").$type<"quotum" | "stripe" | "apple" | "google">().notNull(),
+		source: text("source")
+			.$type<
+				| "api_redeem"
+				| "commercial_action"
+				| "stripe_hosted_checkout"
+				| "apple_offer"
+				| "google_offer"
+			>()
+			.notNull(),
+		commercialActionPreviewId: uuid("commercial_action_preview_id"),
+		subscriptionChangeId: uuid("subscription_change_id"),
+		purchaseId: uuid("purchase_id"),
+		providerObjectId: uuid("provider_object_id"),
+		stripeCouponId: text("stripe_coupon_id"),
+		stripePromotionCodeId: text("stripe_promotion_code_id"),
+		stripeCheckoutSessionId: text("stripe_checkout_session_id"),
+		stripeInvoiceId: text("stripe_invoice_id"),
+		externalSubscriptionId: text("external_subscription_id"),
+		providerSubscriptionRef: text("provider_subscription_ref"),
+		providerTransactionId: text("provider_transaction_id"),
+		providerOfferType: text("provider_offer_type"),
+		lastObservedTransactionId: text("last_observed_transaction_id"),
+		lastObservedAt: timestamp("last_observed_at", { withTimezone: true }),
+		currency: text("currency"),
+		amountSubtotalMinor: bigint("amount_subtotal_minor", { mode: "number" }),
+		amountDiscountMinor: bigint("amount_discount_minor", { mode: "number" }),
+		amountTotalMinor: bigint("amount_total_minor", { mode: "number" }),
+		effectSnapshot: jsonb("effect_snapshot").$type<Record<string, unknown>>().notNull(),
+		result: jsonb("result").$type<Record<string, unknown>>(),
+		limitViolation: text("limit_violation").$type<
+			"global" | "first_purchase" | "not_applicable" | "inactive" | "expired"
+		>(),
+		actor: text("actor").notNull(),
+		reason: text("reason"),
+		idempotencyKey: text("idempotency_key").notNull(),
+		requestHash: text("request_hash").notNull(),
+		reservedUntil: timestamp("reserved_until", { withTimezone: true }),
+		appliedAt: timestamp("applied_at", { withTimezone: true }),
+		releasedAt: timestamp("released_at", { withTimezone: true }),
+		reversedAt: timestamp("reversed_at", { withTimezone: true }),
+		reversalActor: text("reversal_actor"),
+		reversalReason: text("reversal_reason"),
+		reversalIdempotencyKey: text("reversal_idempotency_key"),
+		reversalRequestHash: text("reversal_request_hash"),
+		reversalResult: jsonb("reversal_result").$type<Record<string, unknown>>(),
+		...timestampColumns(),
+	},
+	(table) => [
+		unique("promotion_redemptions_project_id_id_unique").on(table.projectId, table.id),
+		unique("promotion_redemptions_idempotency_unique").on(
+			table.projectId,
+			table.customerId,
+			table.idempotencyKey,
+		),
+		foreignKey({
+			name: "promotion_redemptions_project_promotion_fk",
+			columns: [table.projectId, table.promotionId],
+			foreignColumns: [promotions.projectId, promotions.id],
+		}),
+		foreignKey({
+			name: "promotion_redemptions_project_code_fk",
+			columns: [table.projectId, table.promotionCodeId],
+			foreignColumns: [promotionCodes.projectId, promotionCodes.id],
+		}),
+		foreignKey({
+			name: "promotion_redemptions_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		index("idx_billing_promotion_redemptions_code_customer")
+			.on(table.projectId, table.promotionCodeId, table.customerId)
+			.where(sql`${table.status} IN ('reserved', 'applied', 'reversed')`),
+		index("idx_billing_promotion_redemptions_reserved_expiry")
+			.on(table.reservedUntil, table.id)
+			.where(sql`${table.status} = 'reserved'`),
+		index("idx_billing_promotion_redemptions_promotion_created").on(
+			table.projectId,
+			table.promotionId,
+			table.createdAt,
+			table.id,
+		),
+		index("idx_billing_promotion_redemptions_customer_created").on(
+			table.projectId,
+			table.customerId,
+			table.createdAt,
+			table.id,
+		),
+		uniqueIndex("idx_billing_promotion_redemptions_checkout_session")
+			.on(table.projectId, table.stripeCheckoutSessionId)
+			.where(sql`${table.stripeCheckoutSessionId} IS NOT NULL`),
+		uniqueIndex("idx_billing_promotion_redemptions_subscription_change")
+			.on(table.projectId, table.subscriptionChangeId)
+			.where(sql`${table.subscriptionChangeId} IS NOT NULL`),
+		index("idx_billing_promotion_redemptions_purchase")
+			.on(table.projectId, table.purchaseId)
+			.where(sql`${table.purchaseId} IS NOT NULL`),
+	],
+);
+
+export const promotionAuditEvents = pgTable(
+	"promotion_audit_events",
+	{
+		id: meteringId(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		promotionId: uuid("promotion_id").notNull(),
+		promotionCodeId: uuid("promotion_code_id"),
+		action: text("action")
+			.$type<
+				| "promotion_created"
+				| "promotion_archived"
+				| "codes_added"
+				| "code_deactivated"
+				| "provider_mapping_added"
+				| "provider_sync_requested"
+			>()
+			.notNull(),
+		actor: text("actor").notNull(),
+		details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table) => [
+		unique("promotion_audit_events_project_id_id_unique").on(table.projectId, table.id),
+		foreignKey({
+			name: "promotion_audit_events_project_promotion_fk",
+			columns: [table.projectId, table.promotionId],
+			foreignColumns: [promotions.projectId, promotions.id],
+		}),
+		index("idx_billing_promotion_audit_events_promotion_created").on(
+			table.projectId,
+			table.promotionId,
+			table.createdAt,
+		),
+	],
+);
+
 export type ProjectRow = typeof projects.$inferSelect;
 export type CustomerRow = typeof customers.$inferSelect;
 export type ProductRow = typeof products.$inferSelect;
@@ -2563,3 +2963,7 @@ export type CatalogMigrationDraftRow = typeof catalogMigrationDrafts.$inferSelec
 export type CatalogMigrationJobRow = typeof catalogMigrationJobs.$inferSelect;
 export type LicensePoolRow = typeof licensePools.$inferSelect;
 export type LicenseAssignmentRow = typeof licenseAssignments.$inferSelect;
+export type PromotionRow = typeof promotions.$inferSelect;
+export type PromotionCodeRecordRow = typeof promotionCodes.$inferSelect;
+export type PromotionProviderObjectRow = typeof promotionProviderObjects.$inferSelect;
+export type PromotionRedemptionRow = typeof promotionRedemptions.$inferSelect;

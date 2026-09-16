@@ -38,7 +38,7 @@ The current schema is initialized from these ordered baseline files:
 | --- | --- |
 | [001_platform.sql](../migrations/001_platform.sql) | Organizations, projects, instances, credentials and customer connections |
 | [002_billing_core.sql](../migrations/002_billing_core.sql) | Billing accounts, purchases, subscriptions, entitlements and provider/projection jobs |
-| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls and commercial actions |
+| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions and promotions |
 | [004_merchant.sql](../migrations/004_merchant.sql) | Merchant identity, authentication, sessions, membership, audit and connection OAuth state |
 <!-- migration-inventory:end -->
 
