@@ -124,13 +124,24 @@ plaintext is never retained, so every integration needs a replacement:
 
 ## Workers
 
-One process runs the HTTP API and all workers: projection delivery, provider event replay,
-subscription reconciliation, metering maintenance (reservation expiry, rollovers, rollup close,
-retention sweeps), recurring billing, and automatic top-ups. Replicas coordinate through leased jobs with
-heartbeats; projection delivery claims up to 25 jobs per poll from a candidate set bounded by the
-batch size and delivers five concurrently. Usage-driven projections are one job per billing account
-built at delivery, so the backlog is bounded by active accounts. Tune intervals and attempt limits
-with the `BILLING_*` variables listed in [deployment.md](deployment.md#optional-variables).
+One process runs the HTTP API and all workers. Each polls on the interval shown:
+
+| Worker | Interval variable |
+| --- | --- |
+| Projection delivery | `BILLING_WORKER_POLL_INTERVAL_MS` |
+| Provider event replay | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
+| Subscription reconciliation | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
+| Metering maintenance (reservation expiry, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
+| Recurring billing | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
+| Automatic top-ups | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
+| Promotion maintenance (expired reservation release, Stripe coupons and hosted promotion codes) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
+| Stripe App event processing, only when the Apps OAuth integration is configured | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
+
+Replicas coordinate through leased jobs with heartbeats; projection delivery claims up to 25 jobs
+per poll from a candidate set bounded by the batch size and delivers five concurrently.
+Usage-driven projections are one job per billing account built at delivery, so the backlog is
+bounded by active accounts. Tune intervals and attempt limits with the `BILLING_*` variables listed
+in [deployment.md](deployment.md#optional-variables).
 
 Raw usage is partitioned monthly. Technical retention uses `metering_settings.raw_usage_retention_days`
 (default 400); durable monthly rollups outlive deleted raw rows. This default is not a legal
@@ -138,7 +149,6 @@ retention guarantee or an implemented versioned privacy policy.
 
 Automatic top-up failures require resolving the payment/configuration cause before a protected
 circuit reset. Use replay/retry routes for durable work; do not manually advance job state.
-Stripe app-event polling runs when the Apps OAuth integration is configured.
 
 ## Load lane
 

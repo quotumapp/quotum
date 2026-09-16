@@ -206,10 +206,10 @@ refund Stripe purchases instead. A second revocation with another key returns
 
 ## Admin operations
 
-Admin routes require project authentication; operational mutations also require
-`X-Billing-Operator-Key`.
+Every admin route requires project authentication. The routes listed under Operator routes also
+require `X-Billing-Operator-Key`, including their reads.
 
-Reads:
+Reads with project authentication only:
 
 - `GET /v1/admin/customers/search?q=...`: prefix match across account, customer, provider, and
   transaction ids; queries are capped at 128 characters.
@@ -222,12 +222,13 @@ Reads:
   usage reads. Each row carries `customerId`, `billingAccountId`, and nullable `customerEmail`.
 - `GET /v1/admin/store-events/:eventId` with optional `includeRawPayload=true` (audit-logged, secrets
   redacted).
-- `GET /v1/admin/catalog/products`, `GET /v1/admin/catalog/store-products`,
-  `GET /v1/admin/stats/summary`.
+- `GET /v1/admin/stats/summary`.
 
-Operations:
+Operator routes:
 
-- `GET /v1/admin/catalog`, `POST /v1/admin/catalog/preview`, `POST /v1/admin/catalog/publish`.
+- `GET /v1/admin/catalog`, `GET /v1/admin/catalog/products`,
+  `GET /v1/admin/catalog/store-products`, `POST /v1/admin/catalog/preview`,
+  `POST /v1/admin/catalog/publish`.
 - `POST /v1/admin/contracts/preview`, `POST /v1/admin/contracts/publish`,
   `GET /v1/admin/contracts/:billingAccountId`,
   `DELETE /v1/admin/contracts/:billingAccountId/:contractId`.

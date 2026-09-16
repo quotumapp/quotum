@@ -131,16 +131,22 @@ mode; they are not addressed by a project key.
 
 Quotum never writes your database. It delivers signed HTTP `billing_state_v1` projections with
 the entitlement and exact-string balance snapshot to the connection's projection URL, retrying
-with backoff. Verify `X-Billing-Signature` and `X-Billing-Timestamp`, apply idempotently by
-`idempotencyKey`, and treat the projection as a read model: authorization decisions must use the
-metering API.
+with backoff. Verify `X-Billing-Signature` and `X-Billing-Timestamp`, and treat the projection as a
+read model: authorization decisions must use the metering API. Order snapshots per billing account
+by `sequence`, and record `purchase` and `reversal` facts idempotently by their key.
+`idempotencyKey` identifies the job, not a delivery: retries resend it, and every usage-driven
+delivery for an account reuses one key, so discarding a payload whose key was already seen drops
+newer usage snapshots. [`scripts/projection-receiver.ts`](../scripts/projection-receiver.ts) is a
+reference receiver.
 
 Purchase, provider-webhook and reconciliation projections are delivered per event. Usage-driven
 projections are coalesced: one delivery per billing account covers every consume, reservation and
 confirmation since the previous one, is sent after the project's debounce
 (`metering_settings.projection_usage_debounce_ms`, default one second), and carries the state
-current at delivery, so a receiver sees fewer deliveries than usage calls. Every payload includes a
+current at delivery, so a receiver sees fewer deliveries than usage calls. Payloads carry a
 per-account `sequence`; a receiver that already applied a higher sequence for the account may
-discard the snapshot but should still record any `purchase` or `reversal` facts by their key. Set
+discard the snapshot but should still record any `purchase` or `reversal` facts by their key. The
+payload schema keeps `sequence` optional; treat a payload without it as unordered and apply it as
+current. Set
 `usageDelivery` to `off` on the projection connection when your backend takes balances from the
 consume response and only needs purchase and provider events.

@@ -133,7 +133,8 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
 
 `src/workers/runtime.ts` (`startPollingRuntime`) runs each worker's `runOnce` on an interval:
 projection sync, store-event replay, subscription reconciliation, metering maintenance,
-recurring billing, auto top-up, promotion maintenance. Workers lease job rows by `worker_id` (`locked_by` columns,
+recurring billing, auto top-up, promotion maintenance, plus Stripe App event processing when Apps
+OAuth is configured. Workers lease job rows by `worker_id` (`locked_by` columns,
 refreshed by `src/workers/lease-heartbeat.ts`) and retry with `src/workers/backoff.ts`, so a
 worker must only touch rows it holds. Projection sync delivers signed `billing_state_v1`
 payloads to each project's configured projection URL via `src/projections/http-client.ts`.
