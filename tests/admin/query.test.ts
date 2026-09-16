@@ -72,6 +72,8 @@ describe("admin query parsing", () => {
 	it("parses UUID route params", () => {
 		expect(parseCustomerIdParam(customerId)).toBe(customerId);
 		expect(parseEventIdParam(eventId)).toBe(eventId);
+		expect(parseCustomerIdParam(` \t${customerId} \n`)).toBe(customerId);
+		expect(parseEventIdParam(` \t${eventId} \n`)).toBe(eventId);
 		expectInvalidRequest(() => parseCustomerIdParam("not-a-uuid"), "Invalid customer id");
 		expectInvalidRequest(() => parseEventIdParam("not-a-uuid"), "Invalid store event id");
 	});

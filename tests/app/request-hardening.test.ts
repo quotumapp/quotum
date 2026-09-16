@@ -126,6 +126,24 @@ function meteredStream(totalBytes: number, chunkBytes = 64 * 1024) {
 }
 
 describe("private request bodies", () => {
+	it("rejects non-finite JSON filter numbers before invoking metering", async () => {
+		const metering = recordingMeteringService();
+		const { app } = createApp({ meteringService: metering.service });
+		for (const value of ["1e400", "-1e400"]) {
+			const response = await send(app, consumePath, {
+				method: "POST",
+				headers: { ...auth, "idempotency-key": "non-finite", "content-type": "application/json" },
+				body: `{"featureKey":"api_calls","quantity":"1","filters":{"size":${value}}}`,
+			});
+			expect(response.status).toBe(400);
+			expect(await response.json()).toEqual({
+				success: false,
+				error: { code: "INVALID_REQUEST", message: "Request validation failed" },
+			});
+		}
+		expect(metering.calls).toEqual([]);
+	});
+
 	it("rejects form, multipart and binary bodies without reaching the handler", async () => {
 		const metering = recordingMeteringService();
 		const { app } = createApp({ meteringService: metering.service });

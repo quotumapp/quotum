@@ -34,18 +34,18 @@ const stripeCheckoutSessionBodySchema = z
 	.object({
 		productKey: z.string().trim().min(1).optional(),
 		planKey: z.string().trim().min(1).optional(),
-		quantities: z.record(z.string().trim().min(1), z.number().int().positive().safe()).optional(),
+		quantities: z.record(z.string().trim().min(1), z.number().int().positive()).optional(),
 		email: z.string().trim().min(1).nullable().optional(),
-		successUrl: z.string().trim().url().nullable().optional(),
-		cancelUrl: z.string().trim().url().nullable().optional(),
-		expiresAt: z.number().int().positive().safe().optional(),
+		successUrl: z.string().trim().check(z.url()).nullable().optional(),
+		cancelUrl: z.string().trim().check(z.url()).nullable().optional(),
+		expiresAt: z.number().int().positive().optional(),
 	})
 	.strict()
 	.refine((value) => (value.productKey === undefined) !== (value.planKey === undefined));
 
 /** Portal sessions historically accept a request without a body. */
 const stripePortalSessionBodySchema = z
-	.object({ returnUrl: z.string().trim().url().nullable().optional() })
+	.object({ returnUrl: z.string().trim().check(z.url()).nullable().optional() })
 	.optional();
 
 const stripeCatalogQuerySchema = z
@@ -70,7 +70,7 @@ const stripeSubscriptionChangeParamsSchema = stripeCustomerRouteParamsSchema.ext
 const stripeSubscriptionChangeBodySchema = z
 	.object({
 		targetPlanKey: z.string().trim().min(1),
-		quantities: z.record(z.string().trim().min(1), z.number().int().positive().safe()).default({}),
+		quantities: z.record(z.string().trim().min(1), z.number().int().positive()).default({}),
 		effectiveMode: z.enum(["immediate", "period_end"]).optional(),
 		prorationBehavior: z.enum(["always_invoice", "create_prorations", "none"]).optional(),
 	})
@@ -81,13 +81,11 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 		.object({
 			kind: z.literal("checkout_plan"),
 			planKey: z.string().trim().min(1),
-			quantities: z
-				.record(z.string().trim().min(1), z.number().int().positive().safe())
-				.default({}),
+			quantities: z.record(z.string().trim().min(1), z.number().int().positive()).default({}),
 			email: z.string().trim().min(1).nullable().optional(),
-			successUrl: z.string().trim().url().nullable().optional(),
-			cancelUrl: z.string().trim().url().nullable().optional(),
-			expiresAt: z.number().int().positive().safe().optional(),
+			successUrl: z.string().trim().check(z.url()).nullable().optional(),
+			cancelUrl: z.string().trim().check(z.url()).nullable().optional(),
+			expiresAt: z.number().int().positive().optional(),
 			promotionCode: z
 				.string()
 				.trim()
@@ -102,9 +100,9 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 			kind: z.literal("checkout_product"),
 			productKey: z.string().trim().min(1),
 			email: z.string().trim().min(1).nullable().optional(),
-			successUrl: z.string().trim().url().nullable().optional(),
-			cancelUrl: z.string().trim().url().nullable().optional(),
-			expiresAt: z.number().int().positive().safe().optional(),
+			successUrl: z.string().trim().check(z.url()).nullable().optional(),
+			cancelUrl: z.string().trim().check(z.url()).nullable().optional(),
+			expiresAt: z.number().int().positive().optional(),
 			promotionCode: z
 				.string()
 				.trim()
@@ -119,9 +117,7 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 			kind: z.literal("subscription_change"),
 			externalSubscriptionId: z.string().trim().min(1),
 			targetPlanKey: z.string().trim().min(1),
-			quantities: z
-				.record(z.string().trim().min(1), z.number().int().positive().safe())
-				.default({}),
+			quantities: z.record(z.string().trim().min(1), z.number().int().positive()).default({}),
 			effectiveMode: z.enum(["immediate", "period_end"]).optional(),
 			prorationBehavior: z.enum(["always_invoice", "create_prorations", "none"]).optional(),
 			promotionCode: z
@@ -137,9 +133,7 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 export const commercialActionPreviewBodySchema = z
 	.object({ intent: commercialActionIntentSchema })
 	.strict();
-export const commercialActionExecuteBodySchema = z
-	.object({ previewToken: z.string().uuid() })
-	.strict();
+export const commercialActionExecuteBodySchema = z.object({ previewToken: z.uuid() }).strict();
 
 const purchaseVerificationSchema = z
 	.discriminatedUnion("provider", [

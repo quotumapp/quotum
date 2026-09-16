@@ -30,8 +30,8 @@ const codeSchema = z
 const channelSchema = z.enum(["web", "ios", "android"]);
 const durationSchema = z.enum(["once", "repeating", "forever"]);
 const durationMonthsSchema = z.number().int().min(1).max(36).nullable().optional();
-const timestampSchema = z.string().datetime({ offset: true }).nullable().optional();
-const positiveIntegerSchema = z.number().int().positive().safe();
+const timestampSchema = z.iso.datetime({ offset: true }).nullable().optional();
+const positiveIntegerSchema = z.number().int().positive();
 
 const discountBodySchema = z.discriminatedUnion("type", [
 	z
@@ -177,9 +177,9 @@ export const listAccountRedemptionsQuerySchema = z
 	})
 	.strict();
 
-const redemptionParams = z.object({ redemptionId: z.string().uuid() }).strict();
+const redemptionParams = z.object({ redemptionId: z.uuid() }).strict();
 const accountRedemptionParams = z
-	.object({ billingAccountId: z.string().trim().min(1).max(200), redemptionId: z.string().uuid() })
+	.object({ billingAccountId: z.string().trim().min(1).max(200), redemptionId: z.uuid() })
 	.strict();
 
 export function requirePromotionIdempotencyKey(value: string | null): string {
@@ -204,7 +204,7 @@ function optionalActor(headers: Headers): string | null {
 }
 
 const promotionParams = z.object({ promotionKey: keySchema }).strict();
-const codeParams = promotionParams.extend({ codeId: z.string().uuid() }).strict();
+const codeParams = promotionParams.extend({ codeId: z.uuid() }).strict();
 const accountParams = z.object({ billingAccountId: z.string().trim().min(1).max(200) }).strict();
 
 type EffectBody = z.infer<typeof effectBodySchema>;

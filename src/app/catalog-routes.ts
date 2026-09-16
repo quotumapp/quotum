@@ -37,8 +37,8 @@ const providerBindingSchema = z
 const priceTierSchema = z
 	.object({
 		upToQuantity: z.string().trim().min(1).max(80).nullable(),
-		unitAmountMinor: z.number().int().nonnegative().safe(),
-		flatAmountMinor: z.number().int().nonnegative().safe().optional(),
+		unitAmountMinor: z.number().int().nonnegative(),
+		flatAmountMinor: z.number().int().nonnegative().optional(),
 	})
 	.strict();
 
@@ -46,11 +46,11 @@ const priceSchema = z
 	.object({
 		key: z.string().trim().min(1).max(120),
 		currency: z.string().trim().length(3),
-		unitAmountMinor: z.number().int().nonnegative().safe(),
+		unitAmountMinor: z.number().int().nonnegative(),
 		billingUnits: z.string().trim().min(1).max(80),
 		billingInterval: z.enum(["month", "year"]),
-		minimumQuantity: z.number().int().positive().safe(),
-		maximumQuantity: z.number().int().positive().safe().nullable(),
+		minimumQuantity: z.number().int().positive(),
+		maximumQuantity: z.number().int().positive().nullable(),
 		taxBehavior: z.enum(["inclusive", "exclusive", "unspecified"]),
 		pricingModel: z.enum(["flat", "graduated", "volume"]).optional(),
 		tiers: z.array(priceTierSchema).min(1).max(100).optional(),
@@ -64,7 +64,7 @@ const planItemSchema = z
 		itemKind: z.enum(["access", "allocation", "meter_limit", "licensed_quantity"]),
 		quantity: z.string().trim().min(1).max(80).nullable(),
 		resetInterval: z.enum(["month", "year"]).nullable(),
-		expiresAfterSeconds: z.number().int().positive().safe().nullable(),
+		expiresAfterSeconds: z.number().int().positive().nullable(),
 		overagePolicy: z.enum(["blocked", "allowed"]),
 		allocationScope: z.enum(["account", "entity", "license_pool"]).optional(),
 		rollover: z
@@ -98,13 +98,13 @@ const planSchema = z
 	.object({
 		key: z.string().trim().min(1).max(120),
 		name: z.string().trim().min(1).max(200),
-		version: z.number().int().positive().safe(),
+		version: z.number().int().positive(),
 		currency: z.string().trim().min(3).max(3).nullable(),
-		baseAmountMinor: z.number().int().nonnegative().safe().nullable(),
+		baseAmountMinor: z.number().int().nonnegative().nullable(),
 		billingInterval: z.enum(["month", "year"]).nullable(),
 		trialDays: z.number().int().min(0).max(730).nullable(),
 		kind: z.enum(["base", "addon"]).optional(),
-		tierRank: z.number().int().safe().optional(),
+		tierRank: z.number().int().optional(),
 		trialRequiresPaymentMethod: z.boolean().optional(),
 		trialEndBehavior: z.enum(["cancel", "pause"]).optional(),
 		upgradeProrationBehavior: z.enum(["always_invoice", "create_prorations", "none"]).optional(),
@@ -144,7 +144,7 @@ const topupSchema = z
 		key: z.string().trim().min(1).max(120),
 		featureKey: z.string().trim().min(1).max(120),
 		quantity: z.string().trim().min(1).max(80),
-		expiresAfterSeconds: z.number().int().positive().safe().nullable(),
+		expiresAfterSeconds: z.number().int().positive().nullable(),
 		providerBindings: z.array(providerBindingSchema).min(1).max(20),
 	})
 	.strict();
@@ -163,14 +163,14 @@ const catalogSchema = z
 
 export const previewSchema = z
 	.object({
-		expectedRevision: z.number().int().positive().safe().nullable(),
+		expectedRevision: z.number().int().positive().nullable(),
 		catalog: catalogSchema,
 	})
 	.strict();
 
 export const publishSchema = z
 	.object({
-		expectedRevision: z.number().int().positive().safe().nullable(),
+		expectedRevision: z.number().int().positive().nullable(),
 		previewToken: z.string().regex(/^[a-f0-9]{64}$/),
 		catalog: catalogSchema,
 	})

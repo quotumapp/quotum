@@ -62,7 +62,7 @@ const autoTopupBody = z
 		cooldownSeconds: z.number().int().min(30).max(86_400).optional(),
 		limitIntervalSeconds: z.number().int().min(60).max(31_536_000).optional(),
 		maxPurchasesPerInterval: z.number().int().min(1).max(1000).optional(),
-		maxSpendMinor: z.number().int().positive().safe().nullable().optional(),
+		maxSpendMinor: z.number().int().positive().nullable().optional(),
 		maxConsecutiveFailures: z.number().int().min(1).max(100).optional(),
 	})
 	.strict();
@@ -72,10 +72,10 @@ export const contractBody = z
 	.object({
 		billingAccountId: z.string().trim().min(1).max(200),
 		contractKey: z.string().trim().min(1).max(120),
-		version: z.number().int().positive().safe(),
+		version: z.number().int().positive(),
 		planKey: z.string().trim().min(1).max(120),
-		effectiveAt: z.string().datetime({ offset: true }),
-		expiresAt: z.string().datetime({ offset: true }).nullable().optional(),
+		effectiveAt: z.iso.datetime({ offset: true }),
+		expiresAt: z.iso.datetime({ offset: true }).nullable().optional(),
 		replacesCommercialDefaults: z.boolean().optional(),
 		terms: z.record(z.string(), z.unknown()).optional(),
 		controls: z.array(contractControl).max(50).optional(),
@@ -85,9 +85,9 @@ export const contractBody = z
 export const migrationBody = z
 	.object({
 		fromPlanKey: z.string().trim().min(1).max(120),
-		fromVersion: z.number().int().positive().safe(),
+		fromVersion: z.number().int().positive(),
 		toPlanKey: z.string().trim().min(1).max(120),
-		toVersion: z.number().int().positive().safe(),
+		toVersion: z.number().int().positive(),
 		effectiveMode: z.enum(["immediate", "period_end"]),
 	})
 	.strict();
@@ -102,7 +102,7 @@ const postV1BillingAccountsByBillingAccountIdLicenseAssignmentsBodySchema = z
 	.object({
 		poolId: z.string().regex(/^\d+$/),
 		entityId: z.string().trim().min(1).max(200),
-		quantity: z.number().int().positive().safe(),
+		quantity: z.number().int().positive(),
 	})
 	.strict();
 const autoTopupQuerySchema = z
