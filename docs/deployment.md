@@ -14,16 +14,16 @@ Each [GitHub Release](https://github.com/quotumapp/quotum/releases) records the 
 deployments to it rather than to the moving `X.Y` or `latest` tags. To build locally instead:
 
 ```sh
-docker build -t quotum-api:0.11.0 \
-  --build-arg BUILD_VERSION=0.11.0 --build-arg BUILD_COMMIT="$(git rev-parse HEAD)" .
+docker build -t quotum-api:0.11.1 \
+  --build-arg BUILD_VERSION=0.11.1 --build-arg BUILD_COMMIT="$(git rev-parse HEAD)" .
 
-docker run --rm --env-file .env -p 3000:3000 quotum-api:0.11.0
+docker run --rm --env-file .env -p 3000:3000 quotum-api:0.11.1
 ```
 
 Run migrations from the same image before starting a new version:
 
 ```sh
-docker run --rm --env-file .env quotum-api:0.11.0 bun run migrate
+docker run --rm --env-file .env quotum-api:0.11.1 bun run migrate
 ```
 
 ## Required variables
