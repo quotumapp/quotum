@@ -776,6 +776,12 @@
       ]
     },
     {
+      "code": "PROMOTION_CODE_NOT_APPLICABLE",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
       "code": "PROMOTION_CODE_NOT_FOUND",
       "sources": [
         "src/billing/promotions.ts"

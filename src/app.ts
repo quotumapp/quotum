@@ -6,6 +6,7 @@ import { registerControlsRoutes } from "./app/controls-routes";
 import { registerCustomerRoutes } from "./app/customer-routes";
 import { registerInsightsRoutes } from "./app/insights-routes";
 import { registerMeteringRoutes } from "./app/metering-routes";
+import { registerPromotionRoutes } from "./app/promotion-routes";
 import { createProjectProviderServiceResolver } from "./app/provider-services";
 import { projectSelectorRejectedError, queryHasCallerProjectSelector } from "./app/request-context";
 import type {
@@ -82,6 +83,7 @@ export function createApp({
 	entitlementService,
 	meteringService,
 	controlsEnterpriseService,
+	promotionService,
 	catalogControlPlane,
 	billingInsightsService,
 	appleStoreKitService,
@@ -402,6 +404,14 @@ export function createApp({
 		app,
 		operatorApiKey: env.operatorApiKey,
 		catalogControlPlane: catalogService,
+		registerPostAuthGuard,
+	});
+	registerPromotionRoutes({
+		app,
+		operatorApiKey: env.operatorApiKey,
+		service: promotionService ?? getRepository().promotions,
+		validationLimiter: createVerifyLimiter(),
+		rateLimitKeyOptions,
 		registerPostAuthGuard,
 	});
 

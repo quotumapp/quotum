@@ -134,6 +134,11 @@ test("documents request bodies, required headers and the named schemas clients i
 		required: ["expectedRevision", "previewToken", "catalog"],
 	});
 	expect(headers(publish)).toEqual(["X-Billing-Actor!"]);
+	expect(headers(operation("/v1/admin/promotions", "post"))).toEqual(["X-Billing-Actor!"]);
+	expect(headers(operation("/v1/admin/promotions/{promotionKey}", "get"))).toEqual([]);
+	expect(
+		headers(operation("/v1/billing-accounts/{billingAccountId}/promotion-codes/validate", "post")),
+	).toEqual([]);
 	expect(jsonBody(operation("/v1/purchases/verify", "post"))).toBeDefined();
 	const alertEvents = operation(
 		"/v1/billing-accounts/{billingAccountId}/usage-alert-events",

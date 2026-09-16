@@ -14,6 +14,7 @@ import type {
 	UsageSeriesPoint,
 } from "../billing/insights";
 import type { MeteringServiceLike } from "../billing/metering";
+import type { PromotionServiceLike } from "../billing/promotions";
 import type { CatalogControlPlaneLike } from "../catalog/types";
 import type { BillingEnv } from "../env";
 import type { BillingLogger } from "../observability/logger";
@@ -192,6 +193,7 @@ export interface AppDependencies {
 	entitlementService?: EntitlementService;
 	meteringService?: MeteringServiceLike;
 	controlsEnterpriseService?: ControlsEnterpriseRepositoryLike;
+	promotionService?: PromotionServiceLike;
 	catalogControlPlane?: CatalogControlPlaneLike;
 	billingInsightsService?: BillingInsightsServiceLike;
 	appleStoreKitService?: AppleStoreKitServiceLike | null;

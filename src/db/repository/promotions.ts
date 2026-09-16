@@ -12,6 +12,7 @@ import {
 	type PromotionCodeInput,
 	type PromotionCodeRecord,
 	type PromotionEffect,
+	type PromotionErrorCode,
 	type PromotionLimitViolation,
 	type PromotionListResult,
 	type PromotionRecord,
@@ -19,8 +20,11 @@ import {
 	type PromotionRedemptionRecord,
 	type PromotionRedemptionSource,
 	type PromotionRedemptionStatus,
+	type PromotionServiceLike,
 	type PromotionStatus,
 	type PromotionTarget,
+	type PromotionValidation,
+	type PromotionValidationInput,
 	promotionCodeUnavailability,
 	promotionError,
 	promotionQuantity,
@@ -187,7 +191,7 @@ export interface PromotionListInput {
 	cursor?: string | null;
 }
 
-export class PromotionRepository extends RepositoryModule {
+export class PromotionRepository extends RepositoryModule implements PromotionServiceLike {
 	async createPromotion(
 		project: ProjectInstanceContext,
 		input: CreatePromotionInput,
@@ -443,6 +447,72 @@ export class PromotionRepository extends RepositoryModule {
 			input.limit + 1,
 		);
 		return paginate(rows, input.limit, toRedemptionRecord);
+	}
+
+	/**
+	 * Read-only check of whether a billing account could use a code now. Never creates a customer
+	 * and never takes a use; an unknown or restricted code reveals nothing about the promotion.
+	 */
+	async validatePromotionCode(
+		project: ProjectInstanceContext,
+		input: PromotionValidationInput,
+	): Promise<PromotionValidation> {
+		const projectId = project.projectInstanceId;
+		const resolved = await resolvePromotionCodeInTx(this.database, projectId, input.code);
+		const notFound: PromotionValidation = {
+			valid: false,
+			reason: "PROMOTION_CODE_NOT_FOUND",
+			promotion: null,
+			code: null,
+		};
+		if (resolved === null) {
+			return notFound;
+		}
+		const { promotion, code } = resolved;
+		const clock = await executeOne<{ now: Timestamp }>(
+			this.database,
+			drizzleSql`SELECT now() AS now`,
+		);
+		const reason =
+			promotionCodeUnavailability(
+				{
+					promotionStatus: promotion.status,
+					allowedChannels: promotion.allowedChannels,
+					active: code.active,
+					startsAt: code.startsAt === null ? null : new Date(code.startsAt),
+					expiresAt: code.expiresAt === null ? null : new Date(code.expiresAt),
+					billingAccountId: code.billingAccountId,
+					maxRedemptions: code.maxRedemptions,
+					redeemedCount: code.redeemedCount,
+					reservedCount: code.reservedCount,
+				},
+				{
+					now: clock === null ? new Date() : new Date(toIso(clock.now)),
+					billingAccountId: input.billingAccountId,
+					channel: input.channel,
+				},
+			) ??
+			targetMismatch(promotion, input.target ?? null) ??
+			(await customerIneligibility(this.database, projectId, input.billingAccountId, code));
+		if (reason === "PROMOTION_CODE_NOT_FOUND") {
+			return notFound;
+		}
+		return {
+			valid: reason === null,
+			reason,
+			promotion: {
+				key: promotion.key,
+				name: promotion.name,
+				effectKind: promotion.effect.kind,
+				allowedChannels: promotion.allowedChannels,
+			},
+			code: {
+				id: code.id,
+				code: code.code,
+				expiresAt: code.expiresAt,
+				hostedCheckoutEnabled: code.hostedCheckoutEnabled,
+			},
+		};
 	}
 
 	/** Reads a code and its promotion by the code a customer typed. Never creates a customer. */
@@ -868,6 +938,65 @@ async function releaseCustomerExpiredReservations(
 			`,
 		);
 	}
+}
+
+function targetMismatch(
+	promotion: PromotionRecord,
+	target: PromotionTarget | null,
+): PromotionErrorCode | null {
+	if (target === null) {
+		return null;
+	}
+	if (promotion.effect.kind !== "discount") {
+		return "PROMOTION_CODE_NOT_APPLICABLE";
+	}
+	return promotion.targets.length === 0 ||
+		promotion.targets.some(
+			(candidate) => candidate.kind === target.kind && candidate.key === target.key,
+		)
+		? null
+		: "PROMOTION_CODE_NOT_APPLICABLE";
+}
+
+async function customerIneligibility(
+	executor: QueryExecutor,
+	projectId: string,
+	billingAccountId: string,
+	code: PromotionCodeRecord,
+): Promise<PromotionErrorCode | null> {
+	if (code.maxRedemptionsPerCustomer === null && !code.firstPurchaseOnly) {
+		return null;
+	}
+	const customer = await executeOne<{ id: string }>(
+		executor,
+		drizzleSql`
+			SELECT id FROM customers
+			WHERE project_id = ${projectId} AND billing_account_id = ${billingAccountId}
+		`,
+	);
+	if (customer === null) {
+		return null;
+	}
+	if (code.maxRedemptionsPerCustomer !== null) {
+		const used = await executeOne<{ count: number }>(
+			executor,
+			drizzleSql`
+				SELECT count(*)::integer AS count
+				FROM promotion_redemptions
+				WHERE project_id = ${projectId}
+					AND promotion_code_id = ${code.id}
+					AND customer_id = ${customer.id}
+					AND status IN ('reserved', 'applied', 'reversed')
+			`,
+		);
+		if ((used?.count ?? 0) >= code.maxRedemptionsPerCustomer) {
+			return "PROMOTION_CODE_ALREADY_REDEEMED";
+		}
+	}
+	if (code.firstPurchaseOnly && (await customerHasPurchased(executor, projectId, customer.id))) {
+		return "PROMOTION_CODE_FIRST_PURCHASE_ONLY";
+	}
+	return null;
 }
 
 async function readCodeAvailability(

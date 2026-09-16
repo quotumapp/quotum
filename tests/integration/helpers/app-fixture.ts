@@ -197,6 +197,7 @@ export function createIntegrationApp({
 			entitlementService: new EntitlementService(repository),
 			meteringService: new MeteringService(repository),
 			controlsEnterpriseService: repository.controlsEnterprise,
+			promotionService: repository.promotions,
 			billingInsightsService: {
 				listUsageEvents: (...args) => repository.listUsageEvents(...args),
 				getUsageSeries: (...args) => repository.getUsageSeries(...args),

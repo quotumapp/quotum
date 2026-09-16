@@ -1,3 +1,4 @@
+import type { ProjectInstanceContext } from "../projects/context";
 import { canonicalDecimal, positiveDecimal, sha256Hex, stableJson } from "./decimal";
 import { BillingError } from "./errors";
 
@@ -176,6 +177,79 @@ export interface PromotionListResult<T> {
 	nextCursor: string | null;
 }
 
+export interface PromotionValidationInput {
+	billingAccountId: string;
+	code: string;
+	channel: PromotionChannel;
+	target?: PromotionTarget | null;
+}
+
+export interface PromotionValidation {
+	valid: boolean;
+	reason: PromotionErrorCode | null;
+	promotion: {
+		key: string;
+		name: string;
+		effectKind: PromotionEffectKind;
+		allowedChannels: PromotionChannel[];
+	} | null;
+	code: {
+		id: string;
+		code: string;
+		expiresAt: string | null;
+		hostedCheckoutEnabled: boolean;
+	} | null;
+}
+
+/** Operator management and read-only validation, as the HTTP routes use them. */
+export interface PromotionServiceLike {
+	createPromotion(
+		project: ProjectInstanceContext,
+		input: CreatePromotionInput,
+	): Promise<{ promotion: PromotionRecord; created: boolean }>;
+	getPromotion(project: ProjectInstanceContext, key: string): Promise<PromotionRecord>;
+	listPromotions(
+		project: ProjectInstanceContext,
+		input: { limit: number; cursor?: string | null; status?: PromotionStatus | null },
+	): Promise<PromotionListResult<PromotionRecord>>;
+	archivePromotion(
+		project: ProjectInstanceContext,
+		key: string,
+		actor: string,
+	): Promise<PromotionRecord>;
+	addPromotionCodes(
+		project: ProjectInstanceContext,
+		key: string,
+		codes: readonly PromotionCodeInput[],
+		actor: string,
+	): Promise<{ codes: PromotionCodeRecord[]; created: number }>;
+	listPromotionCodes(
+		project: ProjectInstanceContext,
+		key: string,
+		input: { limit: number; cursor?: string | null; active?: boolean | null },
+	): Promise<PromotionListResult<PromotionCodeRecord>>;
+	deactivatePromotionCode(
+		project: ProjectInstanceContext,
+		key: string,
+		codeId: string,
+		actor: string,
+	): Promise<PromotionCodeRecord>;
+	listPromotionRedemptions(
+		project: ProjectInstanceContext,
+		key: string,
+		input: {
+			limit: number;
+			cursor?: string | null;
+			status?: PromotionRedemptionStatus | null;
+			billingAccountId?: string | null;
+		},
+	): Promise<PromotionListResult<PromotionRedemptionRecord>>;
+	validatePromotionCode(
+		project: ProjectInstanceContext,
+		input: PromotionValidationInput,
+	): Promise<PromotionValidation>;
+}
+
 /** The mutable state that decides whether a code can be used right now. */
 export interface PromotionCodeAvailability {
 	promotionStatus: PromotionStatus;
@@ -234,6 +308,11 @@ const promotionErrorDefinitions = [
 		code: "PROMOTION_CODE_FIRST_PURCHASE_ONLY",
 		status: 409,
 		message: "Promotion code is limited to a first purchase",
+	},
+	{
+		code: "PROMOTION_CODE_NOT_APPLICABLE",
+		status: 409,
+		message: "Promotion code does not apply to this purchase",
 	},
 	{
 		code: "PROMOTION_CODE_CHANNEL_NOT_SUPPORTED",
