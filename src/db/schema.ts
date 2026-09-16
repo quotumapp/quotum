@@ -2564,8 +2564,24 @@ export const promotions = pgTable(
 			name: "promotions_project_plan_fk",
 			columns: [table.projectId, table.planId],
 			foreignColumns: [plans.projectId, plans.id],
-		}),
-		index("idx_billing_promotions_project_created").on(table.projectId, table.createdAt, table.id),
+		}).onDelete("restrict"),
+		index("idx_billing_promotions_project_created").on(
+			table.projectId,
+			table.createdAt.desc(),
+			table.id.desc(),
+		),
+		check(
+			"promotions_allowed_channels_check",
+			sql`cardinality(${table.allowedChannels}) BETWEEN 1 AND 3 AND ${table.allowedChannels} <@ ARRAY['web', 'ios', 'android']::text[]`,
+		),
+		check(
+			"promotions_effect_terms_check",
+			sql`(${table.effectKind} = 'discount' AND ${table.discountType} IS NOT NULL AND ${table.discountDuration} IS NOT NULL AND (${table.discountType} = 'percent') = (${table.percentOffBps} IS NOT NULL) AND (${table.discountDuration} = 'repeating') = (${table.durationMonths} IS NOT NULL) AND ${table.planId} IS NULL AND ${table.grantDurationUnit} IS NULL AND ${table.grantDurationCount} IS NULL) OR (${table.effectKind} = 'feature_grant' AND ${table.discountType} IS NULL AND ${table.percentOffBps} IS NULL AND ${table.discountDuration} IS NULL AND ${table.durationMonths} IS NULL AND ${table.planId} IS NULL AND ${table.grantDurationUnit} IS NULL AND ${table.grantDurationCount} IS NULL) OR (${table.effectKind} = 'plan_grant' AND ${table.discountType} IS NULL AND ${table.percentOffBps} IS NULL AND ${table.discountDuration} IS NULL AND ${table.durationMonths} IS NULL AND ${table.planId} IS NOT NULL AND ${table.grantDurationUnit} IS NOT NULL AND ${table.grantDurationCount} IS NOT NULL)`,
+		),
+		check(
+			"promotions_archive_check",
+			sql`(${table.status} = 'active' AND ${table.archivedAt} IS NULL AND ${table.archivedBy} IS NULL) OR (${table.status} = 'archived' AND ${table.archivedAt} IS NOT NULL AND ${table.archivedBy} IS NOT NULL)`,
+		),
 	],
 );
 
@@ -2588,7 +2604,7 @@ export const promotionDiscountAmounts = pgTable(
 			name: "promotion_discount_amounts_project_promotion_fk",
 			columns: [table.projectId, table.promotionId],
 			foreignColumns: [promotions.projectId, promotions.id],
-		}),
+		}).onDelete("restrict"),
 	],
 );
 
@@ -2610,7 +2626,21 @@ export const promotionTargets = pgTable(
 			name: "promotion_targets_project_promotion_fk",
 			columns: [table.projectId, table.promotionId],
 			foreignColumns: [promotions.projectId, promotions.id],
-		}),
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "promotion_targets_project_plan_fk",
+			columns: [table.projectId, table.planId],
+			foreignColumns: [plans.projectId, plans.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "promotion_targets_project_product_fk",
+			columns: [table.projectId, table.productId],
+			foreignColumns: [products.projectId, products.id],
+		}).onDelete("restrict"),
+		check(
+			"promotion_targets_shape_check",
+			sql`(${table.targetKind} = 'plan' AND ${table.planId} IS NOT NULL AND ${table.productId} IS NULL) OR (${table.targetKind} = 'product' AND ${table.productId} IS NOT NULL AND ${table.planId} IS NULL)`,
+		),
 		uniqueIndex("idx_billing_promotion_targets_plan")
 			.on(table.projectId, table.promotionId, table.planId)
 			.where(sql`${table.planId} IS NOT NULL`),
@@ -2643,12 +2673,12 @@ export const promotionGrantItems = pgTable(
 			name: "promotion_grant_items_project_promotion_fk",
 			columns: [table.projectId, table.promotionId],
 			foreignColumns: [promotions.projectId, promotions.id],
-		}),
+		}).onDelete("restrict"),
 		foreignKey({
 			name: "promotion_grant_items_project_feature_fk",
 			columns: [table.projectId, table.featureId],
 			foreignColumns: [features.projectId, features.id],
-		}),
+		}).onDelete("restrict"),
 	],
 );
 
@@ -2684,12 +2714,21 @@ export const promotionCodes = pgTable(
 			name: "promotion_codes_project_promotion_fk",
 			columns: [table.projectId, table.promotionId],
 			foreignColumns: [promotions.projectId, promotions.id],
-		}),
+		}).onDelete("restrict"),
 		index("idx_billing_promotion_codes_promotion_created").on(
 			table.projectId,
 			table.promotionId,
-			table.createdAt,
-			table.id,
+			table.createdAt.desc(),
+			table.id.desc(),
+		),
+		check("promotion_codes_normalized_check", sql`${table.normalizedCode} = upper(${table.code})`),
+		check(
+			"promotion_codes_window_check",
+			sql`${table.startsAt} IS NULL OR ${table.expiresAt} IS NULL OR ${table.expiresAt} > ${table.startsAt}`,
+		),
+		check(
+			"promotion_codes_deactivation_check",
+			sql`(${table.active} AND ${table.deactivatedAt} IS NULL AND ${table.deactivatedBy} IS NULL) OR (NOT ${table.active} AND ${table.deactivatedAt} IS NOT NULL AND ${table.deactivatedBy} IS NOT NULL)`,
 		),
 		check(
 			"promotion_codes_hosted_check",
@@ -2749,12 +2788,30 @@ export const promotionProviderObjects = pgTable(
 			name: "promotion_provider_objects_project_promotion_fk",
 			columns: [table.projectId, table.promotionId],
 			foreignColumns: [promotions.projectId, promotions.id],
-		}),
+		}).onDelete("restrict"),
 		foreignKey({
 			name: "promotion_provider_objects_project_code_fk",
 			columns: [table.projectId, table.promotionCodeId],
 			foreignColumns: [promotionCodes.projectId, promotionCodes.id],
-		}),
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "promotion_provider_objects_project_parent_fk",
+			columns: [table.projectId, table.parentObjectId],
+			foreignColumns: [table.projectId, table.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "promotion_provider_objects_project_revision_fk",
+			columns: [table.projectId, table.catalogRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}).onDelete("restrict"),
+		check(
+			"promotion_provider_objects_shape_check",
+			sql`(${table.objectKind} = 'coupon' AND ${table.provider} = 'stripe' AND ${table.promotionCodeId} IS NULL AND ${table.parentObjectId} IS NULL AND ${table.appliesToHash} IS NOT NULL) OR (${table.objectKind} = 'promotion_code' AND ${table.provider} = 'stripe' AND ${table.promotionCodeId} IS NOT NULL AND ${table.parentObjectId} IS NOT NULL) OR (${table.objectKind} IN ('apple_promotional_offer', 'apple_offer_code') AND ${table.provider} = 'apple' AND ${table.parentObjectId} IS NULL AND ${table.externalId} IS NOT NULL AND ${table.productExternalId} IS NOT NULL) OR (${table.objectKind} IN ('google_developer_offer', 'google_promo_code') AND ${table.provider} = 'google' AND ${table.parentObjectId} IS NULL AND ${table.productExternalId} IS NOT NULL AND (${table.externalId} IS NOT NULL OR ${table.redemptionCode} IS NOT NULL))`,
+		),
+		check(
+			"promotion_provider_objects_state_check",
+			sql`(${table.status} <> 'ready' OR (${table.externalId} IS NOT NULL OR ${table.redemptionCode} IS NOT NULL) AND ${table.readyAt} IS NOT NULL) AND (${table.status} <> 'failed' OR ${table.error} IS NOT NULL) AND (${table.status} <> 'retired' OR ${table.retiredAt} IS NOT NULL)`,
+		),
 		uniqueIndex("idx_billing_promotion_provider_objects_coupon")
 			.on(table.projectId, table.promotionId, table.provider, table.appliesToHash)
 			.where(sql`${table.objectKind} = 'coupon' AND ${table.status} <> 'retired'`),
@@ -2848,17 +2905,45 @@ export const promotionRedemptions = pgTable(
 			name: "promotion_redemptions_project_promotion_fk",
 			columns: [table.projectId, table.promotionId],
 			foreignColumns: [promotions.projectId, promotions.id],
-		}),
+		}).onDelete("restrict"),
 		foreignKey({
 			name: "promotion_redemptions_project_code_fk",
 			columns: [table.projectId, table.promotionCodeId],
 			foreignColumns: [promotionCodes.projectId, promotionCodes.id],
-		}),
+		}).onDelete("restrict"),
 		foreignKey({
 			name: "promotion_redemptions_project_customer_fk",
 			columns: [table.projectId, table.customerId],
 			foreignColumns: [customers.projectId, customers.id],
 		}).onDelete("cascade"),
+		foreignKey({
+			name: "promotion_redemptions_project_preview_fk",
+			columns: [table.projectId, table.commercialActionPreviewId],
+			foreignColumns: [commercialActionPreviews.projectId, commercialActionPreviews.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "promotion_redemptions_project_change_fk",
+			columns: [table.projectId, table.subscriptionChangeId],
+			foreignColumns: [subscriptionChanges.projectId, subscriptionChanges.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "promotion_redemptions_project_purchase_fk",
+			columns: [table.projectId, table.purchaseId],
+			foreignColumns: [purchases.projectId, purchases.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "promotion_redemptions_project_provider_object_fk",
+			columns: [table.projectId, table.providerObjectId],
+			foreignColumns: [promotionProviderObjects.projectId, promotionProviderObjects.id],
+		}).onDelete("restrict"),
+		check(
+			"promotion_redemptions_code_required_check",
+			sql`${table.promotionCodeId} IS NOT NULL OR ${table.source} IN ('apple_offer', 'google_offer')`,
+		),
+		check(
+			"promotion_redemptions_state_check",
+			sql`(${table.status} = 'reserved' AND ${table.reservedUntil} IS NOT NULL AND ${table.appliedAt} IS NULL AND ${table.releasedAt} IS NULL AND ${table.reversedAt} IS NULL) OR (${table.status} = 'applied' AND ${table.appliedAt} IS NOT NULL AND ${table.reversedAt} IS NULL) OR (${table.status} = 'released' AND ${table.releasedAt} IS NOT NULL AND ${table.appliedAt} IS NULL AND ${table.reversedAt} IS NULL) OR (${table.status} = 'reversed' AND ${table.appliedAt} IS NOT NULL AND ${table.reversedAt} IS NOT NULL)`,
+		),
 		index("idx_billing_promotion_redemptions_code_customer")
 			.on(table.projectId, table.promotionCodeId, table.customerId)
 			.where(sql`${table.status} IN ('reserved', 'applied', 'reversed')`),
@@ -2868,14 +2953,14 @@ export const promotionRedemptions = pgTable(
 		index("idx_billing_promotion_redemptions_promotion_created").on(
 			table.projectId,
 			table.promotionId,
-			table.createdAt,
-			table.id,
+			table.createdAt.desc(),
+			table.id.desc(),
 		),
 		index("idx_billing_promotion_redemptions_customer_created").on(
 			table.projectId,
 			table.customerId,
-			table.createdAt,
-			table.id,
+			table.createdAt.desc(),
+			table.id.desc(),
 		),
 		uniqueIndex("idx_billing_promotion_redemptions_checkout_session")
 			.on(table.projectId, table.stripeCheckoutSessionId)
@@ -2918,11 +3003,16 @@ export const promotionAuditEvents = pgTable(
 			name: "promotion_audit_events_project_promotion_fk",
 			columns: [table.projectId, table.promotionId],
 			foreignColumns: [promotions.projectId, promotions.id],
-		}),
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "promotion_audit_events_project_code_fk",
+			columns: [table.projectId, table.promotionCodeId],
+			foreignColumns: [promotionCodes.projectId, promotionCodes.id],
+		}).onDelete("restrict"),
 		index("idx_billing_promotion_audit_events_promotion_created").on(
 			table.projectId,
 			table.promotionId,
-			table.createdAt,
+			table.createdAt.desc(),
 		),
 	],
 );

@@ -2052,11 +2052,11 @@ CREATE TABLE IF NOT EXISTS promotion_redemptions (
 	CONSTRAINT promotion_redemptions_project_customer_fk FOREIGN KEY (project_id, customer_id)
 		REFERENCES customers(project_id, id) ON DELETE CASCADE,
 	CONSTRAINT promotion_redemptions_project_preview_fk FOREIGN KEY (project_id, commercial_action_preview_id)
-		REFERENCES commercial_action_previews(project_id, id) ON DELETE SET NULL (commercial_action_preview_id),
+		REFERENCES commercial_action_previews(project_id, id) ON DELETE RESTRICT,
 	CONSTRAINT promotion_redemptions_project_change_fk FOREIGN KEY (project_id, subscription_change_id)
-		REFERENCES subscription_changes(project_id, id) ON DELETE SET NULL (subscription_change_id),
+		REFERENCES subscription_changes(project_id, id) ON DELETE RESTRICT,
 	CONSTRAINT promotion_redemptions_project_purchase_fk FOREIGN KEY (project_id, purchase_id)
-		REFERENCES purchases(project_id, id) ON DELETE SET NULL (purchase_id),
+		REFERENCES purchases(project_id, id) ON DELETE RESTRICT,
 	CONSTRAINT promotion_redemptions_project_provider_object_fk FOREIGN KEY (project_id, provider_object_id)
 		REFERENCES promotion_provider_objects(project_id, id) ON DELETE RESTRICT,
 	CONSTRAINT promotion_redemptions_code_required_check CHECK (

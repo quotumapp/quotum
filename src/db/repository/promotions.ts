@@ -332,6 +332,9 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 			const projectId = project.projectInstanceId;
 			const promotion = await requirePromotion(tx, projectId, drizzleSql`p.key = ${key}`, true);
 			const normalized = normalizePromotionCodes(codes, promotion);
+			if (normalized.length === 0) {
+				return { codes: [], created: 0 };
+			}
 			const created = await insertCodes(tx, projectId, promotion.id, normalized, actor, {
 				requireActive: true,
 			});
