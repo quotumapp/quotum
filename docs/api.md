@@ -182,6 +182,28 @@ adds the coupon to the subscription while keeping its existing discounts, applie
 change applies, and releases it when the change fails for good. Metered overage invoices and
 automatic top-ups are billed at list price.
 
+`POST /v1/billing-accounts/:billingAccountId/promotion-redemptions` redeems a code outside a
+purchase. It needs project authentication, an `Idempotency-Key`, and a body with `code` and the
+`channel` where the customer entered it; `X-Billing-Actor` is optional and defaults to the billing
+account. A `feature_grant` code takes one use and returns `kind: "granted"` with one reward
+allocation per feature. Rewards expire `expiresAfterSeconds` after redemption, are spent like any
+other allocation, and trigger a coalesced `usage_changed` projection. A `discount` code takes no use
+and returns `kind: "requires_commercial_action"`; pass it as `promotionCode` to a commercial action.
+Codes cannot be redeemed on `ios`, because App Store rules bar unlocking digital content with
+developer codes (`PROMOTION_CODE_CHANNEL_NOT_SUPPORTED`). Replaying the key returns the stored
+result with `duplicate: true`, and reusing it for a different code or channel returns
+`IDEMPOTENCY_CONFLICT`. Redemption shares the validation rate limit.
+`GET .../promotion-redemptions` and `GET .../promotion-redemptions/:redemptionId` read one
+account's ledger.
+
+`POST /v1/admin/promotion-redemptions/:redemptionId/revoke` takes back a Quotum grant. It needs the
+operator key, `X-Billing-Actor`, an `Idempotency-Key`, and a `reason`. Every unexpired reward
+allocation stops counting; what was already consumed stays consumed, and the response reports the
+reversed, consumed, and held quantity per allocation. The use stays counted against the code's
+limits. Only applied `quotum` redemptions can be revoked (`PROMOTION_REDEMPTION_NOT_REVOCABLE`);
+refund Stripe purchases instead. A second revocation with another key returns
+`PROMOTION_REDEMPTION_ALREADY_REVERSED`.
+
 ## Admin operations
 
 Admin routes require project authentication; operational mutations also require
@@ -208,7 +230,8 @@ Operations:
   `DELETE /v1/admin/contracts/:billingAccountId/:contractId`.
 - `POST /v1/admin/catalog-migrations/preview`, `POST /v1/admin/catalog-migrations/publish`.
 - `POST /v1/admin/auto-topups/:billingAccountId/:policyId/reset`.
-- Promotion management under `/v1/admin/promotions`; see [Promotions](#promotions).
+- Promotion management under `/v1/admin/promotions` and
+  `POST /v1/admin/promotion-redemptions/:redemptionId/revoke`; see [Promotions](#promotions).
 - `POST /v1/admin/store-events/:eventId/replay`.
 - `POST /v1/admin/reconciliation/subscriptions/run`.
 - `POST /v1/admin/projection-jobs/:jobId/retry`.

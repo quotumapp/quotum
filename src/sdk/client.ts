@@ -22,8 +22,10 @@ import type {
 	PromotionCodeInput,
 	PromotionCodeRecord,
 	PromotionRecord,
+	PromotionRedeemResult,
 	PromotionRedemptionRecord,
 	PromotionRedemptionStatus,
+	PromotionRevokeResult,
 	PromotionTarget,
 	PromotionValidation,
 } from "../billing/promotions";
@@ -258,6 +260,30 @@ export class BillingClient {
 				this.requestPage<PromotionRedemptionRecord>(
 					pathWithQuery(`/v1/admin/promotions/${segment(promotionKey)}/redemptions`, query),
 					{ operator: true },
+				),
+			redeem: (
+				billingAccountId: string,
+				input: { code: string; channel: PromotionChannel },
+				idempotencyKey: string,
+			) =>
+				this.request<PromotionRedeemResult>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/promotion-redemptions`,
+					{ method: "POST", body: input, idempotencyKey },
+				),
+			accountRedemptions: (
+				billingAccountId: string,
+				query: { limit?: number; cursor?: string } = {},
+			) =>
+				this.requestPage<PromotionRedemptionRecord>(
+					pathWithQuery(
+						`/v1/billing-accounts/${segment(billingAccountId)}/promotion-redemptions`,
+						query,
+					),
+				),
+			revokeRedemption: (redemptionId: string, reason: string, idempotencyKey: string) =>
+				this.request<PromotionRevokeResult>(
+					`/v1/admin/promotion-redemptions/${segment(redemptionId)}/revoke`,
+					{ method: "POST", body: { reason }, operator: true, idempotencyKey },
 				),
 			validate: (
 				billingAccountId: string,

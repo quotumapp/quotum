@@ -1564,6 +1564,8 @@ export const balanceAllocations = pgTable(
 		rolloverOriginAllocationId: bigint("rollover_origin_allocation_id", { mode: "number" }),
 		rolloverPolicyRevision: integer("rollover_policy_revision"),
 		rolloverProcessedAt: timestamp("rollover_processed_at", { withTimezone: true }),
+		// Composite FK to promotion_redemptions is added after that table in the SQL baseline.
+		promotionRedemptionId: uuid("promotion_redemption_id"),
 		...timestampColumns(),
 	},
 	(table) => [
@@ -1578,6 +1580,13 @@ export const balanceAllocations = pgTable(
 		uniqueIndex("idx_billing_balance_allocations_rollover_origin")
 			.on(table.projectId, table.rolloverOriginAllocationId)
 			.where(sql`${table.rolloverOriginAllocationId} IS NOT NULL`),
+		index("idx_billing_balance_allocations_promotion_redemption")
+			.on(table.projectId, table.promotionRedemptionId)
+			.where(sql`${table.promotionRedemptionId} IS NOT NULL`),
+		check(
+			"balance_allocations_reward_provenance_check",
+			sql`(${table.sourceKind} = 'reward') = (${table.promotionRedemptionId} IS NOT NULL)`,
+		),
 	],
 );
 

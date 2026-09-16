@@ -409,6 +409,7 @@ CREATE TABLE IF NOT EXISTS balance_allocations (
 	rollover_origin_allocation_id BIGINT,
 	rollover_policy_revision INTEGER,
 	rollover_processed_at TIMESTAMPTZ,
+	promotion_redemption_id UUID,
 	CONSTRAINT balance_allocations_project_id_id_unique UNIQUE (project_id, id),
 	CONSTRAINT balance_allocations_source_unique UNIQUE (project_id, feature_id, source_kind, source_key),
 	CONSTRAINT balance_allocations_project_customer_fk FOREIGN KEY (project_id, customer_id)
@@ -436,6 +437,10 @@ CREATE TABLE IF NOT EXISTS balance_allocations (
 			AND rollover_policy_revision IS NOT NULL AND rollover_policy_revision > 0)
 		OR (source_kind <> 'rollover' AND rollover_origin_allocation_id IS NULL
 			AND rollover_policy_revision IS NULL)
+	),
+	-- A reward exists only as the effect of one promotion redemption, which carries its provenance.
+	CONSTRAINT balance_allocations_reward_provenance_check CHECK (
+		(source_kind = 'reward') = (promotion_redemption_id IS NOT NULL)
 	)
 );
 
@@ -2130,6 +2135,16 @@ CREATE INDEX IF NOT EXISTS idx_billing_usage_events_customer_feature_time
 CREATE INDEX idx_client_operation_result_expiry
  ON client_idempotency_claims (result_expires_at, id)
  WHERE outcome IS NOT NULL AND completed_at IS NOT NULL;
+
+ALTER TABLE balance_allocations
+	ADD CONSTRAINT balance_allocations_project_promotion_redemption_fk
+			FOREIGN KEY (project_id, promotion_redemption_id)
+			REFERENCES promotion_redemptions(project_id, id)
+			ON DELETE RESTRICT;
+
+CREATE INDEX IF NOT EXISTS idx_billing_balance_allocations_promotion_redemption
+	ON balance_allocations (project_id, promotion_redemption_id)
+	WHERE promotion_redemption_id IS NOT NULL;
 
 -- Constraints on tables defined in earlier files that reference this file's tables.
 ALTER TABLE projects

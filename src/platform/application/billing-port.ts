@@ -26,6 +26,11 @@ export const merchantBillingOperations = [
 	["GET", "/admin/promotions/:promotionKey", "promotions.detail"],
 	["GET", "/admin/promotions/:promotionKey/codes", "promotions.codes"],
 	["GET", "/admin/promotions/:promotionKey/redemptions", "promotions.redemptions"],
+	[
+		"GET",
+		"/billing-accounts/:billingAccountId/promotion-redemptions",
+		"account.promotion-redemptions",
+	],
 	["POST", "/admin/catalog/preview", "catalog.preview"],
 	["POST", "/admin/catalog/publish", "catalog.publish"],
 	["POST", "/admin/store-events/:eventId/replay", "events.replay"],
@@ -37,6 +42,7 @@ export const merchantBillingOperations = [
 	["POST", "/admin/promotions", "promotions.create"],
 	["POST", "/admin/promotions/:promotionKey/archive", "promotions.archive"],
 	["POST", "/admin/promotions/:promotionKey/provider-sync", "promotions.sync"],
+	["POST", "/admin/promotion-redemptions/:redemptionId/revoke", "promotions.redemptions.revoke"],
 	["POST", "/admin/promotions/:promotionKey/codes", "promotions.codes.add"],
 	[
 		"POST",

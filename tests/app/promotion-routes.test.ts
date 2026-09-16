@@ -3,6 +3,7 @@ import { createApp } from "../../src/app";
 import type {
 	PromotionCodeRecord,
 	PromotionRecord,
+	PromotionRedemptionRecord,
 	PromotionServiceLike,
 } from "../../src/billing/promotions";
 import type { FixtureBillingEnv as BillingEnv } from "../../src/testing/connection-fixtures";
@@ -99,6 +100,32 @@ const code: PromotionCodeRecord = {
 	deactivatedAt: null,
 };
 
+const redemption: PromotionRedemptionRecord = {
+	id: "33333333-3333-4333-8333-333333333333",
+	promotionKey: "launch-credits",
+	promotionCodeId: code.id,
+	code: "LAUNCH",
+	billingAccountId: "acct_1",
+	channel: "web",
+	status: "applied",
+	provider: "quotum",
+	source: "api_redeem",
+	stripeCheckoutSessionId: null,
+	externalSubscriptionId: null,
+	currency: null,
+	amountSubtotalMinor: null,
+	amountDiscountMinor: null,
+	amountTotalMinor: null,
+	limitViolation: null,
+	actor: "billing-account:acct_1",
+	reason: null,
+	reservedUntil: null,
+	appliedAt: "2026-09-16T00:00:00.000Z",
+	releasedAt: null,
+	reversedAt: null,
+	createdAt: "2026-09-16T00:00:00.000Z",
+};
+
 function recordingService() {
 	const calls: Array<{ method: string; args: unknown[] }> = [];
 	let created = true;
@@ -122,6 +149,44 @@ function recordingService() {
 		deactivatePromotionCode: record("deactivatePromotionCode", { ...code, active: false }),
 		listPromotionRedemptions: record("listPromotionRedemptions", { items: [], nextCursor: null }),
 		requestPromotionProviderSync: record("requestPromotionProviderSync", promotion),
+		redeemPromotionCode: record("redeemPromotionCode", {
+			kind: "granted",
+			duplicate: false,
+			redemption,
+			grant: {
+				features: [
+					{
+						featureKey: "ai_tokens",
+						quantity: "1000",
+						expiresAt: null,
+						allocationId: "41",
+					},
+				],
+			},
+		}),
+		listAccountRedemptions: record("listAccountRedemptions", {
+			items: [redemption],
+			nextCursor: null,
+		}),
+		getAccountRedemption: record("getAccountRedemption", redemption),
+		revokePromotionRedemption: record("revokePromotionRedemption", {
+			duplicate: false,
+			redemption: {
+				...redemption,
+				status: "reversed",
+				reversedAt: "2026-09-17T00:00:00.000Z",
+			},
+			reversedAllocations: [
+				{
+					allocationId: "41",
+					featureKey: "ai_tokens",
+					reversedQuantity: "600",
+					consumedQuantity: "400",
+					heldQuantity: "0",
+					expired: false,
+				},
+			],
+		}),
 		validatePromotionCode: record("validatePromotionCode", {
 			valid: true,
 			reason: null,
@@ -301,6 +366,108 @@ describe("promotion routes", () => {
 						code: "spring",
 						channel: "web",
 						target: { kind: "plan", key: "pro" },
+					},
+				],
+			},
+		]);
+	});
+
+	it("redeems codes with a required idempotency key and limits only code entry", async () => {
+		const { service, calls } = recordingService();
+		const app = promotionApp(service);
+		const backend = { authorization: "Bearer secret", "content-type": "application/json" };
+		const redeem = (
+			headers: Record<string, string>,
+			body: unknown = { code: "launch", channel: "web" },
+		) =>
+			testRequest(app, "/v1/billing-accounts/acct_1/promotion-redemptions", {
+				method: "POST",
+				headers,
+				body: JSON.stringify(body),
+			});
+
+		const reads = await Promise.all(
+			[1, 2, 3].map(() =>
+				testRequest(app, "/v1/billing-accounts/acct_1/promotion-redemptions?limit=5", {
+					headers: backend,
+				}),
+			),
+		);
+		const detail = await testRequest(
+			app,
+			`/v1/billing-accounts/acct_1/promotion-redemptions/${redemption.id}`,
+			{ headers: backend },
+		);
+		const missingKey = await redeem(backend);
+		const granted = await redeem({
+			...backend,
+			"idempotency-key": "redeem-1",
+			"x-billing-actor": "user:42",
+		});
+		const limited = await redeem({ ...backend, "idempotency-key": "redeem-2" });
+
+		expect(reads.map((response) => response.status)).toEqual([200, 200, 200]);
+		expect((await reads[0]?.json())?.data).toEqual([redemption]);
+		expect((await detail.json()).data.id).toBe(redemption.id);
+		expect(missingKey.status).toBe(400);
+		expect(granted.status).toBe(200);
+		expect((await granted.json()).data).toMatchObject({
+			kind: "granted",
+			grant: { features: [{ featureKey: "ai_tokens", quantity: "1000" }] },
+		});
+		expect(limited.status).toBe(429);
+		expect(calls.map((call) => [call.method, ...call.args])).toEqual([
+			["listAccountRedemptions", "acct_1", { limit: 5, cursor: null }],
+			["listAccountRedemptions", "acct_1", { limit: 5, cursor: null }],
+			["listAccountRedemptions", "acct_1", { limit: 5, cursor: null }],
+			["getAccountRedemption", "acct_1", redemption.id],
+			[
+				"redeemPromotionCode",
+				{
+					billingAccountId: "acct_1",
+					code: "launch",
+					channel: "web",
+					idempotencyKey: "redeem-1",
+					actor: "user:42",
+				},
+			],
+		]);
+	});
+
+	it("revokes redemptions only with the operator key, an actor and an idempotency key", async () => {
+		const { service, calls } = recordingService();
+		const app = promotionApp(service);
+		const path = `/v1/admin/promotion-redemptions/${redemption.id}/revoke`;
+		const revoke = (headers: Record<string, string>) =>
+			testRequest(app, path, {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ reason: "Fraudulent signup" }),
+			});
+		const { "x-billing-operator-key": _key, ...withoutOperator } = operatorHeaders;
+		const { "x-billing-actor": _actor, ...withoutActor } = operatorHeaders;
+
+		const noOperator = await revoke({ ...withoutOperator, "idempotency-key": "revoke-1" });
+		const noActor = await revoke({ ...withoutActor, "idempotency-key": "revoke-1" });
+		const noKey = await revoke(operatorHeaders);
+		const revoked = await revoke({ ...operatorHeaders, "idempotency-key": "revoke-1" });
+
+		expect(noOperator.status).toBe(401);
+		expect(noActor.status).toBe(400);
+		expect(noKey.status).toBe(400);
+		expect(revoked.status).toBe(200);
+		expect((await revoked.json()).data.reversedAllocations).toEqual([
+			expect.objectContaining({ reversedQuantity: "600", consumedQuantity: "400" }),
+		]);
+		expect(calls).toEqual([
+			{
+				method: "revokePromotionRedemption",
+				args: [
+					{
+						redemptionId: redemption.id,
+						reason: "Fraudulent signup",
+						actor: "operator@example.com",
+						idempotencyKey: "revoke-1",
 					},
 				],
 			},

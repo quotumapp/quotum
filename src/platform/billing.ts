@@ -23,7 +23,7 @@ const readPatterns = [
 	`admin/store-events(?:/${id})?`,
 	"admin/projection-jobs",
 	"admin/catalog(?:/(?:products|store-products))?",
-	`admin/billing-accounts/${account}/(?:billing-summary|billing-account|controls|usage/(?:events|series))`,
+	`admin/billing-accounts/${account}/(?:billing-summary|billing-account|controls|usage/(?:events|series)|promotion-redemptions)`,
 	`admin/promotions(?:/${account}(?:/(?:codes|redemptions))?)?`,
 ];
 export function merchantBillingRoute(
@@ -70,7 +70,7 @@ export function merchantBillingRoute(
 		return { path, capability: "operations.write", action: null, sensitive: false };
 	if (
 		(method === "POST" &&
-			/^(?:admin\/(?:contracts|catalog-migrations)\/publish|admin\/billing-accounts\/[^/]+\/(?:commercial-actions|usage\/events\/[^/]+\/corrections)|admin\/promotions(?:\/[^/]+\/(?:archive|provider-sync|codes|codes\/[^/]+\/deactivate))?)$/.test(
+			/^(?:admin\/(?:contracts|catalog-migrations)\/publish|admin\/billing-accounts\/[^/]+\/(?:commercial-actions|usage\/events\/[^/]+\/corrections)|admin\/promotions(?:\/[^/]+\/(?:archive|provider-sync|codes|codes\/[^/]+\/deactivate))?|admin\/promotion-redemptions\/[^/]+\/revoke)$/.test(
 				suffix,
 			)) ||
 		(method === "PUT" && /^admin\/billing-accounts\/[^/]+\/controls$/.test(suffix))

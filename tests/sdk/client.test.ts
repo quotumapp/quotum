@@ -258,6 +258,48 @@ describe("BillingClient", () => {
 		expect(await calls[4]?.json()).toEqual({ code: "SPRING", channel: "web" });
 	});
 
+	it("redeems codes, reads the account ledger and revokes redemptions", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			operatorKey: "operator-secret",
+			actor: "support@example.com",
+			fetch: async (input, init) => {
+				const request = new Request(input, init);
+				calls.push(request);
+				return request.method === "GET"
+					? Response.json({ success: true, data: [], pagination: { nextCursor: null } })
+					: Response.json({ success: true, data: {} });
+			},
+		});
+
+		await client.promotions.redeem("account 1", { code: "LAUNCH", channel: "android" }, "redeem-1");
+		const page = await client.promotions.accountRedemptions("account 1", { limit: 5 });
+		await client.promotions.revokeRedemption(
+			"33333333-3333-4333-8333-333333333333",
+			"Fraudulent signup",
+			"revoke-1",
+		);
+
+		expect(page).toEqual({ data: [], nextCursor: null });
+		expect(
+			calls.map(
+				(call) => `${call.method} ${new URL(call.url).pathname}${new URL(call.url).search}`,
+			),
+		).toEqual([
+			"POST /v1/billing-accounts/account%201/promotion-redemptions",
+			"GET /v1/billing-accounts/account%201/promotion-redemptions?limit=5",
+			"POST /v1/admin/promotion-redemptions/33333333-3333-4333-8333-333333333333/revoke",
+		]);
+		expect(calls[0]?.headers.get("idempotency-key")).toBe("redeem-1");
+		expect(calls[0]?.headers.has("x-billing-operator-key")).toBe(false);
+		expect(await calls[0]?.json()).toEqual({ code: "LAUNCH", channel: "android" });
+		expect(calls[2]?.headers.get("idempotency-key")).toBe("revoke-1");
+		expect(calls[2]?.headers.get("x-billing-operator-key")).toBe("operator-secret");
+		expect(await calls[2]?.json()).toEqual({ reason: "Fraudulent signup" });
+	});
+
 	it("uses the reviewed catalog body for preview and publication", async () => {
 		const calls: Request[] = [];
 		const catalog = { features: [], plans: [], topups: [], rateCards: [] };

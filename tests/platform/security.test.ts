@@ -123,6 +123,7 @@ describe("merchant security boundaries", () => {
 			"/api/billing/admin/promotions/spring-sale",
 			"/api/billing/admin/promotions/spring-sale/codes",
 			"/api/billing/admin/promotions/spring-sale/redemptions",
+			"/api/billing/admin/billing-accounts/acct_1/promotion-redemptions",
 		])
 			expect(merchantBillingRoute("GET", path, "production")).toMatchObject({
 				capability: "billing.read",
@@ -134,6 +135,7 @@ describe("merchant security boundaries", () => {
 			"/api/billing/admin/promotions/spring-sale/provider-sync",
 			"/api/billing/admin/promotions/spring-sale/codes",
 			"/api/billing/admin/promotions/spring-sale/codes/22222222-2222-4222-8222-222222222222/deactivate",
+			"/api/billing/admin/promotion-redemptions/33333333-3333-4333-8333-333333333333/revoke",
 		]) {
 			expect(merchantBillingRoute("POST", path, "production")).toMatchObject({
 				capability: "operations.write",
@@ -147,6 +149,8 @@ describe("merchant security boundaries", () => {
 			"/api/billing/admin/promotions/spring-sale/redemptions",
 			"/api/billing/admin/promotions/spring-sale/codes/extra/segments/deactivate",
 			"/api/billing/admin/promotions/spring-sale/codes/abc/deactivate/extra",
+			"/api/billing/admin/billing-accounts/acct_1/promotion-redemptions",
+			"/api/billing/admin/promotion-redemptions/a/b/revoke",
 		])
 			expect(merchantBillingRoute("POST", path, "sandbox")).toBeNull();
 		expect(
