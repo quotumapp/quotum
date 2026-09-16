@@ -371,6 +371,7 @@ export function registerControlsRoutes({
 			};
 		},
 		{
+			parse: "none",
 			params: policyParams,
 			detail: operationDetail({
 				operationId: "postV1AdminAutoTopupsByBillingAccountIdByPolicyIdReset",
@@ -467,6 +468,7 @@ export function registerControlsRoutes({
 			};
 		},
 		{
+			parse: "none",
 			params: contractParams,
 			detail: operationDetail({
 				operationId: "deleteV1AdminContractsByBillingAccountIdByContractId",
@@ -588,6 +590,7 @@ export function registerControlsRoutes({
 			};
 		},
 		{
+			parse: "none",
 			params: assignmentParams,
 			detail: operationDetail({
 				operationId: "deleteV1BillingAccountsByBillingAccountIdLicenseAssignmentsByAssignmentId",

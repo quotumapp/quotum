@@ -428,6 +428,7 @@ export function registerAdminRoutes({
 			return { success: true, data: result };
 		},
 		{
+			parse: "none",
 			params: eventIdParamsSchema,
 			detail: operationDetail({
 				operationId: "postV1AdminStoreEventsByEventIdReplay",
@@ -450,6 +451,7 @@ export function registerAdminRoutes({
 			return { success: true, data: result };
 		},
 		{
+			parse: "none",
 			detail: operationDetail({
 				operationId: "postV1AdminReconciliationSubscriptionsRun",
 				tags: ["admin"],
@@ -475,6 +477,7 @@ export function registerAdminRoutes({
 			return { success: true, data: result };
 		},
 		{
+			parse: "none",
 			params: jobIdParamsSchema,
 			detail: operationDetail({
 				operationId: "postV1AdminProjectionJobsByJobIdRetry",

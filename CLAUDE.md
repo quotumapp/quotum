@@ -100,6 +100,9 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
   and binary parsers. Merchant bodies use `MERCHANT_JSON_PARSE` (64 KB, 415 for non-JSON);
   operations that never read a body declare `parse: "none"`. Raw-body routes (webhooks, Better
   Auth, billing proxy) use `parse: "none"` and the capped readers in `src/shared/body-limit.ts`.
+  A route without an explicit parser is not body-less: Elysia's built-in parsers read the whole
+  body before authentication. `tests/http/route-body-parsers.test.ts` checks every non-GET route
+  in the documented apps for one of these bounded parsers.
 - Rate limiting runs before validation: webhook and aggregate gates in the shell's `onRequest`,
   project-keyed and operator-key guards via `registerPostAuthGuard` inside the authentication
   `derive`. Project selector checks on bodies run as a route `transform`, before validation strips

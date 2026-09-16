@@ -250,6 +250,132 @@ describe("private request bodies", () => {
 	});
 });
 
+/** A request body produced only as the server pulls it, with no read-ahead: unread means zero. */
+function unreadStream(totalBytes: number, chunkBytes = 64 * 1024) {
+	let pulled = 0;
+	const stream = new ReadableStream<Uint8Array>(
+		{
+			pull(controller) {
+				if (pulled >= totalBytes) {
+					controller.close();
+					return;
+				}
+				const size = Math.min(chunkBytes, totalBytes - pulled);
+				pulled += size;
+				controller.enqueue(new Uint8Array(size).fill(120));
+			},
+		},
+		{ highWaterMark: 0 },
+	);
+	return { stream, pulled: () => pulled };
+}
+
+const bodylessOperations = [
+	{ method: "POST", path: "/v1/admin/store-events/11111111-1111-4111-8111-111111111111/replay" },
+	{ method: "POST", path: "/v1/admin/reconciliation/subscriptions/run" },
+	{ method: "POST", path: "/v1/admin/projection-jobs/22222222-2222-4222-8222-222222222222/retry" },
+	{ method: "POST", path: "/v1/admin/auto-topups/user_1/7/reset" },
+	{ method: "DELETE", path: "/v1/admin/contracts/user_1/8" },
+	{ method: "DELETE", path: "/v1/billing-accounts/user_1/license-assignments/9" },
+	{
+		method: "POST",
+		path: "/v1/billing-accounts/user_1/providers/stripe/checkout-sessions/cs_test_1/expire",
+	},
+] as const;
+
+const bodyContentTypes = [
+	"application/json",
+	"text/plain",
+	"application/x-www-form-urlencoded",
+	"multipart/form-data; boundary=quotum",
+	"application/octet-stream",
+];
+
+/** Services for the body-less operations; each records its call and returns a plain result. */
+function bodylessServices() {
+	const calls: string[] = [];
+	const result =
+		(name: string) =>
+		async (..._args: unknown[]): Promise<never> => {
+			calls.push(name);
+			return { handled: name } as never;
+		};
+	return {
+		calls,
+		dependencies: {
+			adminOperations: {
+				replayStoreEvent: result("replayStoreEvent"),
+				runSubscriptionReconciliation: result("runSubscriptionReconciliation"),
+				retryProjectionSyncJob: result("retryProjectionSyncJob"),
+			} as never,
+			controlsEnterpriseService: {
+				resetAutoTopupCircuit: result("resetAutoTopupCircuit"),
+				terminateEnterpriseContract: result("terminateEnterpriseContract"),
+				revokeLicense: result("revokeLicense"),
+			} as never,
+			stripeBillingService: { expireCheckoutSession: result("expireCheckoutSession") } as never,
+		},
+	};
+}
+
+describe("operations without a request body", () => {
+	it("never reads the body of an unauthenticated request", async () => {
+		for (const { method, path } of bodylessOperations) {
+			for (const contentType of bodyContentTypes) {
+				const label = `${method} ${path} ${contentType}`;
+				const { app, credentialLookups } = createApp();
+				const body = unreadStream(8 * 1024 * 1024);
+				const request = new Request(new URL(path, "http://localhost"), {
+					method,
+					headers: { authorization: "Bearer wrong", "content-type": contentType },
+					body: body.stream,
+					duplex: "half",
+				} as RequestInit);
+
+				const response = await app.handle(request);
+
+				expect(response.status, label).toBe(401);
+				expect(await response.json(), label).toEqual({
+					success: false,
+					error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+				});
+				expect(credentialLookups(), label).toBe(1);
+				expect(body.pulled(), label).toBe(0);
+				expect(request.bodyUsed, label).toBe(false);
+			}
+		}
+	});
+
+	it("runs each operation without reading the body it was sent", async () => {
+		for (const { method, path } of bodylessOperations) {
+			for (const contentType of bodyContentTypes) {
+				const label = `${method} ${path} ${contentType}`;
+				const services = bodylessServices();
+				const { app } = createApp(services.dependencies);
+				const body = unreadStream(8 * 1024 * 1024);
+				const request = new Request(new URL(path, "http://localhost"), {
+					method,
+					headers: {
+						...auth,
+						"x-billing-operator-key": "operator-secret-key",
+						"x-billing-actor": "operator@example.com",
+						"content-type": contentType,
+					},
+					body: body.stream,
+					duplex: "half",
+				} as RequestInit);
+
+				const response = await app.handle(request);
+
+				expect(response.status, label).toBe(200);
+				expect(services.calls, label).toHaveLength(1);
+				expect(body.pulled(), label).toBe(0);
+				expect(request.bodyUsed, label).toBe(false);
+			}
+		}
+	});
+});
+
 describe("routing", () => {
 	it("keeps the verify limiter on every URL form that reaches the verify handler", async () => {
 		const { app } = createApp({ rateLimit: { verifyLimit: 1 } });

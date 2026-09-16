@@ -541,6 +541,7 @@ export function registerCustomerRoutes({
 			return { success: true, data: await stripe.expireCheckoutSession(params) };
 		},
 		{
+			parse: "none",
 			params: stripeCheckoutSessionRouteParamsSchema,
 			detail: operationDetail({
 				operationId: "expireStripeCheckoutSession",

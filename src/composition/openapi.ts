@@ -388,7 +388,11 @@ function operationObject(renderer: SchemaRenderer, route: DocumentedRoute): Oper
 	} as OperationObject;
 }
 
-export async function generateOpenApi(version: string) {
+/**
+ * The staff and merchant apps with every route registered against registration-only stubs. The
+ * contract is rendered from these apps, and route-table tests inspect the same instances.
+ */
+export function buildDocumentedApps(): readonly Elysia[] {
 	const staff = createApp({ env: documentEnv(), projectContextResolver: stubResolver });
 	const store = documentStore();
 	// Registration-only stubs: routes are registered against these but never invoked.
@@ -399,10 +403,14 @@ export async function generateOpenApi(version: string) {
 		auth: createMerchantAuth(store, { send: unavailable }, undefined),
 		connections: stubConnections,
 	});
+	return [staff, merchant];
+}
+
+export async function generateOpenApi(version: string) {
 	const names = schemaNames();
 	const renderer = new SchemaRenderer(names);
 	const paths: Record<string, PathItemObject> = {};
-	for (const route of [...documentedRoutes([staff, merchant]), ...documentedIngressRoutes()]) {
+	for (const route of [...documentedRoutes(buildDocumentedApps()), ...documentedIngressRoutes()]) {
 		const path = route.path.replace(/:([A-Za-z][A-Za-z0-9]*)/g, "{$1}");
 		paths[path] ??= {};
 		const item = paths[path] as Record<string, unknown>;
