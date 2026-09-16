@@ -14,6 +14,8 @@ export class MerchantError extends Error {
 export const SESSION_COOKIE = "__Host-quotum_session";
 export const CSRF_COOKIE = "__Host-quotum_csrf";
 export const IDLE_MS = 30 * 60_000;
+// Persist session activity at most this often. Idle expiry counts from persisted activity.
+export const SESSION_TOUCH_MS = 60_000;
 export const ABSOLUTE_MS = 12 * 60 * 60_000;
 export const STEP_UP_MS = 10 * 60_000;
 export const INVITATION_MS = 7 * 24 * 60 * 60_000;
