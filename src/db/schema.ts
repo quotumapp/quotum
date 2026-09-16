@@ -3,6 +3,7 @@ import {
 	bigint,
 	boolean,
 	check,
+	customType,
 	foreignKey,
 	index,
 	integer,
@@ -32,6 +33,11 @@ import type { ProjectEnvironment, ProjectLifecycleStatus } from "../projects/con
 
 const metadataColumn = () =>
 	jsonb("metadata").$type<Record<string, unknown>>().notNull().default({});
+const bytea = customType<{ data: Uint8Array }>({
+	dataType() {
+		return "bytea";
+	},
+});
 const timestampColumns = () => ({
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -57,6 +63,44 @@ export const projects = pgTable(
 		unique("projects_platform_project_environment_unique").on(
 			table.platformProjectId,
 			table.environment,
+		),
+	],
+);
+
+export const platformProjectApiCredentials = pgTable(
+	"platform_project_api_credentials",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectInstanceId: uuid("project_instance_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		audience: text("audience").$type<"billing_api">().notNull().default("billing_api"),
+		secretVerifier: bytea("secret_verifier").notNull(),
+		expiresAt: timestamp("expires_at", { withTimezone: true }),
+		revokedAt: timestamp("revoked_at", { withTimezone: true }),
+		...timestampColumns(),
+	},
+	(table) => [
+		uniqueIndex("idx_platform_project_api_credentials_secret_verifier").on(table.secretVerifier),
+		index("idx_platform_project_api_credentials_instance").on(table.projectInstanceId),
+		index("idx_platform_project_api_credentials_active_instance")
+			.on(table.projectInstanceId, table.createdAt.desc())
+			.where(sql`${table.revokedAt} IS NULL`),
+		check(
+			"platform_project_api_credentials_audience_check",
+			sql`${table.audience} = 'billing_api'`,
+		),
+		check(
+			"platform_project_api_credentials_verifier_check",
+			sql`octet_length(${table.secretVerifier}) = 32`,
+		),
+		check(
+			"platform_project_api_credentials_expiry_check",
+			sql`${table.expiresAt} IS NULL OR ${table.expiresAt} > ${table.createdAt}`,
+		),
+		check(
+			"platform_project_api_credentials_revocation_check",
+			sql`${table.revokedAt} IS NULL OR ${table.revokedAt} >= ${table.createdAt}`,
 		),
 	],
 );
