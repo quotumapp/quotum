@@ -138,6 +138,31 @@ describe("Stripe normalizer", () => {
 		});
 	});
 
+	it("keeps the PaymentIntent identity when a fully discounted session still has one", () => {
+		const command = normalizeStripeCheckoutSession({
+			eventId: "evt_free_with_intent",
+			session: {
+				id: "cs_free_with_intent",
+				mode: "payment",
+				payment_status: "no_payment_required",
+				customer: "cus_123",
+				payment_intent: "pi_free",
+				amount_total: 0,
+				currency: "usd",
+				created: stripeSeconds,
+				metadata: checkoutMetadata(),
+			},
+		});
+
+		expect(command).toMatchObject({
+			kind: "credit_purchase",
+			transactionId: "pi_free",
+			paymentIntentId: "pi_free",
+			checkoutSessionId: "cs_free_with_intent",
+			projectionIdempotencyKey: "stripe:payment:pi_free:projection",
+		});
+	});
+
 	it("ignores payment Checkout sessions that owe money but are not paid", () => {
 		for (const session of [
 			{ payment_status: "unpaid", amount_total: 499 },
