@@ -1,11 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import {
+	buildVersion,
 	classifyPrTitle,
 	compareVersions,
 	latestStableTag,
 	releaseMeta,
 	renderImageManifest,
 	renderUnreleasedSummary,
+	versionedContract,
 } from "../../scripts/lib/release";
 
 const digest = `sha256:${"a".repeat(64)}`;
@@ -164,29 +166,35 @@ describe("classifyPrTitle", () => {
 	});
 });
 
-describe("renderUnreleasedSummary", () => {
-	it("warns when the package version is untagged and lists changes since the last release", () => {
-		const summary = renderUnreleasedSummary({
-			version: "0.10.1",
-			tags: ["v0.9.3"],
-			since: "v0.9.3",
-			subjects: ["fix(db): retry deadlocks (#8)", "feat!: rewrite HTTP layer (#7)"],
-		});
-		expect(summary.tagged).toBe(false);
-		expect(summary.markdown).toContain("`v0.10.1` is not tagged yet");
-		expect(summary.markdown).toContain("Changes since v0.9.3:\n\n- fix(db): retry deadlocks (#8)");
+describe("tag-based builds", () => {
+	it("uses stable and prerelease tags regardless of package version", () => {
+		expect(buildVersion("tag", "v1.2.3", "abcdef0")).toBe("1.2.3");
+		expect(buildVersion("tag", "v1.2.3-rc.1", "abcdef0")).toBe("1.2.3-rc.1");
+		expect(() => buildVersion("tag", "v1.2", "abcdef0")).toThrow();
+		expect(buildVersion("branch", "main", "abcdef0")).toBe("0.0.0-dev.abcdef0");
 	});
+	it("stamps only the OpenAPI version", () => {
+		const document = { info: { title: "Quotum", version: "0.0.0-dev" }, paths: { "/health": {} } };
+		expect(JSON.parse(versionedContract(JSON.stringify(document), "1.2.3"))).toEqual({
+			...document,
+			info: { ...document.info, version: "1.2.3" },
+		});
+		expect(() => versionedContract(JSON.stringify(document), "bad")).toThrow();
+	});
+});
 
-	it("reports a tagged version with no further changes", () => {
-		const summary = renderUnreleasedSummary({
-			version: "0.10.1",
-			tags: ["v0.10.1"],
-			since: "v0.10.1",
-			subjects: [],
-		});
-		expect(summary).toEqual({
-			tagged: true,
-			markdown: "## Release status\n\n`v0.10.1` is tagged.\n\nNo changes since v0.10.1.\n",
-		});
+describe("renderUnreleasedSummary", () => {
+	it("lists changes since the last release", () => {
+		expect(renderUnreleasedSummary({ since: "v0.9.3", subjects: ["fix: retry (#8)"] })).toContain(
+			"Changes since v0.9.3:\n\n- fix: retry (#8)",
+		);
+	});
+	it("handles no changes and no stable release", () => {
+		expect(renderUnreleasedSummary({ since: "v0.10.1", subjects: [] })).toContain(
+			"No changes since v0.10.1.",
+		);
+		expect(renderUnreleasedSummary({ since: undefined, subjects: [] })).toContain(
+			"No stable release tag exists yet.",
+		);
 	});
 });

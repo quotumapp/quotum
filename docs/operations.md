@@ -252,10 +252,11 @@ The [Publish image workflow](../.github/workflows/docker-publish.yml) publishes
 | Stable release tag `vX.Y.Z` | `X.Y.Z`, `X.Y`, and `latest` when it is the highest stable version | Published, marked latest when it is the highest stable version |
 | Prerelease tag `vX.Y.Z-rc.N` | `X.Y.Z-rc.N` only | Published as a prerelease |
 
-The workflow rejects a release tag that differs from `v` plus the tagged commit's `package.json`
-version. A package version bump or a `main` push alone does not publish versioned image tags; each
-`main` run lists the pull requests merged since the last release and warns while the package
-version has no tag. Both publishing and ordinary
+The Git tag is the release version; no release branch, version-bump commit or release PR is
+required. `package.json` and the committed OpenAPI snapshot keep `0.0.0-dev`. Release builds
+use the tag version for `BUILD_VERSION`, OCI metadata and the attached OpenAPI `info.version`.
+Branch builds use `0.0.0-dev.<commit>`; each `main` run lists changes since the last stable release.
+Both publishing and ordinary
 [CI](../.github/workflows/ci.yml) call the same [standalone validation](../.github/workflows/validate.yml).
 The publish job requires successful validation of its exact source commit. Validation checks out
 only this public repository, requires no private siblings or corporate credentials, and has read-only
@@ -268,17 +269,16 @@ the previous release tag (the previous stable tag, or the closest lower tag for 
 grouped by label through [`.github/release.yml`](../.github/release.yml), with a compare link.
 Details and upgrade notes stay in the pull request descriptions. Labels come from pull request
 titles; see [CONTRIBUTING.md](../CONTRIBUTING.md#pull-requests). The release attaches
-`openapi.json` and `errors.json` from `contracts/v1/` and an `image.json` that records the image
+`openapi.json` (copied from `contracts/v1/` with only `info.version` stamped), the unchanged
+`errors.json`, and an `image.json` that records the image
 digest, commit and publishing run. Releases are immutable once published: assets and the tag cannot
 change, so correct a bad release with a new patch release. Release notes can still be edited.
 
 1. Review the pull requests merged since the last release; the latest `main` publishing run
    summary lists them. Choose the version: before 1.0, a minor release for breaking changes or
-   features and a patch release for fixes only. Open a pull request titled
-   `chore(release): vX.Y.Z` that sets `package.json` to that version and runs
-   `bun run openapi:generate`, which embeds the version in `contracts/v1/openapi.json`. The pull
-   request is labelled `ignore-for-release` automatically. Complete
-   [release verification](#release-verification) for this revision and merge it.
+   features and a patch release for fixes only. Select the existing `main` commit to release and
+   complete [release verification](#release-verification) for that revision. Do not bump
+   `package.json` or create a release PR.
 2. From a clean checkout of that `main` revision, verify the GitHub remote and CI for the merged
    commit. These examples use `github` for `quotumapp/quotum`; substitute the actual GitHub remote
    name if different. In the multi-repository workspace, a GitLab remote does not trigger GitHub
@@ -294,11 +294,11 @@ change, so correct a bad release with a new patch release. Release notes can sti
 
    Wait for CI to succeed for this exact commit before continuing. A successful `main` image
    build alone is not the release verification gate.
-3. Read the committed version, create its matching annotated tag on the verified commit, and
+3. Set the chosen version, create its annotated tag on the verified commit, and
    push that one tag to GitHub:
 
    ```sh
-   release_version=$(git show "${release_commit}:package.json" | jq -r .version)
+   release_version=X.Y.Z # Replace with the chosen version, without the v prefix
    git tag -a "v$release_version" "$release_commit" -m "Release v$release_version"
    git push github "refs/tags/v$release_version"
    ```

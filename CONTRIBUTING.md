@@ -115,7 +115,7 @@ appear in release notes.
 
 Release notes list pull requests by title only, so the pull request description is the detailed
 record of a change. Do not bump the `package.json` version in feature pull requests; the version
-changes only in the release pull request.
+stays at `0.0.0-dev`. Release versions come from Git tags.
 
 - Describe the change and the verification commands you ran.
 - For breaking changes, schema or environment changes, write the upgrade notes operators need:
@@ -127,9 +127,9 @@ changes only in the release pull request.
 ## Publishing a release
 
 Follow the [container release checklist](docs/operations.md#publish-a-container-release) for the
-release pull request, verification, the GitHub tag push, and confirmation of the GHCR image.
-The release tag must match `package.json`. Pushing `main` publishes only the rolling `main` image;
-changing the package version alone does not create a versioned image. The tag's workflow publishes
+verification, the GitHub tag push, and confirmation of the GHCR image. Tag an existing verified
+`main` commit; no release branch or version-bump PR is required. Pushing `main` publishes only
+the rolling `main` image. The tag's workflow publishes
 the image and then the GitHub Release.
 
 ## License of contributions
