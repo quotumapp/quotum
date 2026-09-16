@@ -187,6 +187,53 @@ describe("merchant platform transactions", () => {
 			).status,
 		).toBe(404);
 	});
+	it("manages promotions through the merchant billing proxy", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		const headers = {
+			"x-quotum-organization": "acme",
+			"x-quotum-project": "example",
+			"x-quotum-environment": "sandbox",
+		};
+		const body = {
+			key: "launch",
+			name: "Launch discount",
+			effect: {
+				kind: "discount",
+				discount: { type: "percent", percentOffBps: 1500, duration: "forever" },
+			},
+			codes: [{ code: "LAUNCH" }],
+		};
+
+		const created = await browser.request("/api/billing/admin/promotions", body, {
+			key: "promotion-create",
+			headers,
+		});
+		const replay = await browser.request("/api/billing/admin/promotions", body, {
+			key: "promotion-create-again",
+			headers,
+		});
+		const listed = await browser.request("/api/billing/admin/promotions", undefined, { headers });
+		const codes = await browser.request("/api/billing/admin/promotions/launch/codes", undefined, {
+			headers,
+		});
+		const [launch] = (await codes.json()).data;
+		const deactivated = await browser.request(
+			`/api/billing/admin/promotions/launch/codes/${launch.id}/deactivate`,
+			{},
+			{ key: "promotion-deactivate", headers },
+		);
+
+		expect(created.status).toBe(201);
+		expect((await created.json()).data).toMatchObject({
+			key: "launch",
+			createdBy: expect.any(String),
+		});
+		expect(replay.status).toBe(200);
+		expect((await listed.json()).data.map((item: { key: string }) => item.key)).toEqual(["launch"]);
+		expect((await deactivated.json()).data).toMatchObject({ code: "LAUNCH", active: false });
+	});
 	it("accepts an invitation once under concurrent requests and immediately revokes a removed member's session", async () => {
 		const owner = new MerchantBrowser(f);
 		await owner.signup();

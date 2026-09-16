@@ -9,6 +9,15 @@ import {
 } from "../app/customer-routes";
 import { dateRange, usageEventsQuerySchema, usageSeriesQuerySchema } from "../app/insights-routes";
 import { correctionBodySchema } from "../app/metering-routes";
+import {
+	addPromotionCodesBodySchema,
+	createPromotionBodySchema,
+	createPromotionInput,
+	listPromotionCodesQuerySchema,
+	listPromotionRedemptionsQuerySchema,
+	listPromotionsQuerySchema,
+	promotionCodeInputs,
+} from "../app/promotion-routes";
 import { requireStripeBillingService } from "../app/provider-services";
 import type { ProjectProviderServiceResolver } from "../app/types";
 import { BillingError, InvalidRequestError, isBillingError } from "../billing/errors";
@@ -284,6 +293,66 @@ export function createMerchantBillingPort(input: {
 						),
 						actor,
 					}),
+				);
+			case "promotions": {
+				const input = parse(listPromotionsQuerySchema, command.query);
+				return list(
+					await repo.promotions.listPromotions(project, {
+						limit: input.limit,
+						cursor: input.cursor ?? null,
+						status: input.status ?? null,
+					}),
+				);
+			}
+			case "promotions.detail":
+				return ok(await repo.promotions.getPromotion(project, id));
+			case "promotions.codes": {
+				const input = parse(listPromotionCodesQuerySchema, command.query);
+				return list(
+					await repo.promotions.listPromotionCodes(project, id, {
+						limit: input.limit,
+						cursor: input.cursor ?? null,
+						active: input.active === undefined ? null : input.active === "true",
+					}),
+				);
+			}
+			case "promotions.redemptions": {
+				const input = parse(listPromotionRedemptionsQuerySchema, command.query);
+				return list(
+					await repo.promotions.listPromotionRedemptions(project, id, {
+						limit: input.limit,
+						cursor: input.cursor ?? null,
+						status: input.status ?? null,
+						billingAccountId: input.billingAccountId ?? null,
+					}),
+				);
+			}
+			case "promotions.create": {
+				const result = await repo.promotions.createPromotion(
+					project,
+					createPromotionInput(parse(createPromotionBodySchema, command.body), actor),
+				);
+				return ok(result.promotion, result.created ? 201 : 200);
+			}
+			case "promotions.archive":
+				return ok(await repo.promotions.archivePromotion(project, id, actor));
+			case "promotions.codes.add":
+				return ok(
+					await repo.promotions.addPromotionCodes(
+						project,
+						id,
+						promotionCodeInputs(parse(addPromotionCodesBodySchema, command.body).codes),
+						actor,
+					),
+				);
+			case "promotions.codes.deactivate":
+				return ok(
+					await repo.promotions.deactivatePromotionCode(
+						project,
+						id,
+						parse(z.string().uuid(), event),
+						actor,
+					),
 				);
 			case "commercial.preview": {
 				const body = parse(commercialActionPreviewBodySchema, command.body);

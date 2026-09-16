@@ -117,6 +117,41 @@ describe("merchant security boundaries", () => {
 			)?.path,
 		).toBe("/v1/billing-accounts/customer/controls");
 	});
+	it("maps promotion management to read and audited write capabilities", () => {
+		for (const path of [
+			"/api/billing/admin/promotions",
+			"/api/billing/admin/promotions/spring-sale",
+			"/api/billing/admin/promotions/spring-sale/codes",
+			"/api/billing/admin/promotions/spring-sale/redemptions",
+		])
+			expect(merchantBillingRoute("GET", path, "production")).toMatchObject({
+				capability: "billing.read",
+				sensitive: false,
+			});
+		for (const path of [
+			"/api/billing/admin/promotions",
+			"/api/billing/admin/promotions/spring-sale/archive",
+			"/api/billing/admin/promotions/spring-sale/codes",
+			"/api/billing/admin/promotions/spring-sale/codes/22222222-2222-4222-8222-222222222222/deactivate",
+		]) {
+			expect(merchantBillingRoute("POST", path, "production")).toMatchObject({
+				capability: "operations.write",
+				action: "operations.write",
+				sensitive: true,
+				path: path.replace("/api/billing/", "/v1/"),
+			});
+			expect(merchantBillingRoute("POST", path, "sandbox")?.sensitive).toBe(false);
+		}
+		for (const path of [
+			"/api/billing/admin/promotions/spring-sale/redemptions",
+			"/api/billing/admin/promotions/spring-sale/codes/extra/segments/deactivate",
+			"/api/billing/admin/promotions/spring-sale/codes/abc/deactivate/extra",
+		])
+			expect(merchantBillingRoute("POST", path, "sandbox")).toBeNull();
+		expect(
+			merchantBillingRoute("GET", "/api/billing/admin/promotions/a/codes/b", "sandbox"),
+		).toBeNull();
+	});
 	it("requires merchant configuration everywhere and rejects draft signup policies", () => {
 		expect(() => loadMerchantConfig({})).toThrow();
 		expect(() => loadMerchantConfig({ BILLING_ENV: "test" })).toThrow();

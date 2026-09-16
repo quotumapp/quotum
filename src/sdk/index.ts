@@ -4,6 +4,15 @@ export type {
 	CommercialActionPreview,
 } from "../billing/commercial";
 export type {
+	CreatePromotionInput,
+	PromotionCodeInput,
+	PromotionCodeRecord,
+	PromotionEffect,
+	PromotionRecord,
+	PromotionRedemptionRecord,
+	PromotionValidation,
+} from "../billing/promotions";
+export type {
 	UsageOperationKind,
 	UsageOperationLookupInput,
 	UsageOperationLookupResult,
