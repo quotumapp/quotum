@@ -1,4 +1,5 @@
 import type { SQL as DrizzleSQL } from "drizzle-orm";
+import type { StripeCheckoutPromotionFacts } from "../../billing/promotions";
 import type {
 	BillingChannel,
 	BillingProvider,
@@ -270,6 +271,7 @@ export interface RecordStripeCreditPurchaseProjectionInput {
 	paymentIntentId: string | null;
 	chargeId: string | null;
 	checkoutSessionId?: string | null;
+	promotion?: StripeCheckoutPromotionFacts | null;
 	amountPaidCents?: number | null;
 	currency?: string | null;
 	purchasedAt: Date;

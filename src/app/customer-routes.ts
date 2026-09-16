@@ -88,6 +88,13 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 			successUrl: z.string().trim().url().nullable().optional(),
 			cancelUrl: z.string().trim().url().nullable().optional(),
 			expiresAt: z.number().int().positive().safe().optional(),
+			promotionCode: z
+				.string()
+				.trim()
+				.regex(/^[A-Za-z0-9-]{3,64}$/)
+				.nullable()
+				.optional(),
+			allowPromotionCodes: z.boolean().optional(),
 		})
 		.strict(),
 	z
@@ -98,6 +105,13 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 			successUrl: z.string().trim().url().nullable().optional(),
 			cancelUrl: z.string().trim().url().nullable().optional(),
 			expiresAt: z.number().int().positive().safe().optional(),
+			promotionCode: z
+				.string()
+				.trim()
+				.regex(/^[A-Za-z0-9-]{3,64}$/)
+				.nullable()
+				.optional(),
+			allowPromotionCodes: z.boolean().optional(),
 		})
 		.strict(),
 	z

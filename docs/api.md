@@ -157,6 +157,25 @@ restricted to another account both report `PROMOTION_CODE_NOT_FOUND` without pro
 It is rate limited per project with the purchase-verification limit
 (`BILLING_VERIFY_RATE_LIMIT_PER_WINDOW`), counted separately from verification.
 
+Checkout intents (`checkout_plan`, `checkout_product`) accept one discount entry mode:
+
+- `promotionCode`: the backend applies a code it collected. Preview runs the same checks as
+  validation and returns `subtotalMinor`, `discountTotalMinor`, the discounted
+  `estimatedTotalMinor`, per-line `subtotalMinor`/`discountMinor`/`totalMinor`, the `promotion`
+  terms, and for recurring plans a `nextCycle` whose `discountStatus` is `applies` or `ended`.
+  Tiered lines stay `provider_calculated`. Execution reserves one use of the code, passes the
+  promotion's Stripe coupon to Checkout, and returns `promotionRedemption`; the completed Checkout
+  webhook applies the use, and an expired or failed session releases it. A fully refunded purchase
+  marks its redemption `reversed` but keeps the use counted.
+- `allowPromotionCodes: true`: Stripe shows its own code field. Only codes marked
+  `hostedCheckoutEnabled` exist in Stripe; Quotum records their use from the completed Checkout
+  webhook, including uses past a cap that Stripe accepted.
+
+Sending both returns `PROMOTION_CODE_ENTRY_CONFLICT`. A promotion without a Stripe coupon yet is
+created during execution; if Stripe rejected it, execution returns `PROMOTION_PROVIDER_NOT_READY`.
+Subscription changes do not accept codes yet. Metered overage invoices and automatic top-ups are
+billed at list price.
+
 ## Admin operations
 
 Admin routes require project authentication; operational mutations also require

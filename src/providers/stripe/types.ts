@@ -1,3 +1,4 @@
+import type { StripeCheckoutPromotionFacts } from "../../billing/promotions";
 import type { ProjectionSyncReason, SubscriptionStatus } from "../../billing/types";
 
 export interface StripeCatalog {
@@ -46,6 +47,7 @@ export interface StripeCatalog {
 
 export type NormalizedStripeCommand =
 	| NormalizedStripeIdentityOnlyCommand
+	| NormalizedStripeCheckoutPromotionReleaseCommand
 	| NormalizedStripeCreditPurchaseCommand
 	| NormalizedStripeSubscriptionCommand
 	| NormalizedStripeCreditReversalCommand
@@ -55,6 +57,18 @@ export interface NormalizedStripeIdentityOnlyCommand {
 	kind: "identity_only";
 	billingAccountId: string;
 	stripeCustomerId: string;
+	eventType: string;
+	externalEventId: string;
+	rawPayload: Record<string, unknown>;
+	promotion?: NormalizedStripeCheckoutPromotion | null;
+}
+
+export type NormalizedStripeCheckoutPromotion = StripeCheckoutPromotionFacts;
+
+export interface NormalizedStripeCheckoutPromotionReleaseCommand {
+	kind: "checkout_promotion_release";
+	checkoutSessionId: string;
+	redemptionId: string | null;
 	eventType: string;
 	externalEventId: string;
 	rawPayload: Record<string, unknown>;
@@ -72,6 +86,7 @@ export interface NormalizedStripeCreditPurchaseCommand {
 	paymentIntentId: string | null;
 	chargeId: string | null;
 	checkoutSessionId: string;
+	promotion?: NormalizedStripeCheckoutPromotion | null;
 	amountPaidCents: number | null;
 	currency: string | null;
 	purchasedAt: Date;

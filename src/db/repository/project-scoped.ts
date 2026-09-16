@@ -5,6 +5,13 @@ import type {
 	StoredCommercialActionPreview,
 } from "../../billing/commercial";
 import type {
+	CommercialPromotion,
+	PromotionRedemptionStatus,
+	PromotionStripeSyncJob,
+	PromotionTarget,
+	StripeCheckoutPromotionFacts,
+} from "../../billing/promotions";
+import type {
 	SubscriptionChangeInput,
 	SubscriptionChangeOperation,
 	SubscriptionChangePreview,
@@ -101,6 +108,70 @@ export class ProjectScopedBillingRepository {
 		draft: CommercialPreviewDraft,
 	): Promise<CommercialActionPreview> {
 		return await this.repository.createCommercialActionPreview(this.project, draft);
+	}
+
+	async resolveCommercialPromotion(input: {
+		billingAccountId: string;
+		code: string;
+		target: PromotionTarget;
+	}): Promise<CommercialPromotion> {
+		return await this.repository.promotions.resolveCommercialPromotion(this.project, input);
+	}
+
+	async reserveCommercialPromotion(
+		input: Parameters<BillingRepository["promotions"]["reserveCommercialPromotion"]>[1],
+	): Promise<{ id: string; status: PromotionRedemptionStatus }> {
+		return await this.repository.promotions.reserveCommercialPromotion(this.project, input);
+	}
+
+	async attachPromotionCheckoutSession(input: {
+		redemptionId: string;
+		checkoutSessionId: string;
+		reservedUntil: Date;
+	}): Promise<void> {
+		await this.repository.promotions.attachPromotionCheckoutSession(this.project, input);
+	}
+
+	async recordStripeCheckoutPromotion(input: {
+		billingAccountId: string;
+		promotion: StripeCheckoutPromotionFacts;
+	}): Promise<void> {
+		await this.repository.promotions.recordStripeCheckoutPromotion(this.project, input);
+	}
+
+	async releaseStripeCheckoutPromotion(input: {
+		checkoutSessionId: string;
+		redemptionId: string | null;
+	}): Promise<void> {
+		await this.repository.promotions.releaseStripeCheckoutPromotion(this.project, input);
+	}
+
+	async prepareStripeCoupon(promotionId: string) {
+		return await this.repository.promotionProviders.prepareStripeCoupon(this.project, promotionId);
+	}
+
+	async claimStripePromotionObject(
+		objectId: string,
+		workerId: string,
+	): Promise<PromotionStripeSyncJob | null> {
+		return await this.repository.promotionProviders.claimStripeObject(
+			this.project,
+			objectId,
+			workerId,
+		);
+	}
+
+	async markStripePromotionObjectOutcome(
+		objectId: string,
+		workerId: string,
+		outcome: Parameters<BillingRepository["promotionProviders"]["markStripeObjectOutcome"]>[3],
+	): Promise<void> {
+		await this.repository.promotionProviders.markStripeObjectOutcome(
+			this.project.projectInstanceId,
+			objectId,
+			workerId,
+			outcome,
+		);
 	}
 
 	async getCommercialActionPreview(

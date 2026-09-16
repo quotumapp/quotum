@@ -1,5 +1,7 @@
 import type { SubscriptionStatus } from "../../billing/types";
 import type {
+	NormalizedStripeCheckoutPromotion,
+	NormalizedStripeCheckoutPromotionReleaseCommand,
 	NormalizedStripeCommand,
 	NormalizedStripeCreditReversalCommand,
 	NormalizedStripeIgnoredCommand,
@@ -64,6 +66,7 @@ export function normalizeStripeCheckoutSession(
 			eventType,
 			externalEventId: input.eventId,
 			rawPayload: input.session,
+			promotion: checkoutPromotion(input.session),
 		};
 	}
 
@@ -125,6 +128,7 @@ export function normalizeStripeCheckoutSession(
 			optionalId(paymentIntent?.latest_charge) ??
 			optionalId(input.session.latest_charge),
 		checkoutSessionId,
+		promotion: checkoutPromotion(input.session),
 		amountPaidCents:
 			optionalNonnegativeInteger(input.session.amount_total) ??
 			optionalNonnegativeInteger(paymentIntent?.amount),
@@ -137,6 +141,61 @@ export function normalizeStripeCheckoutSession(
 		eventType,
 		externalEventId: input.eventId,
 		projectionIdempotencyKey: `stripe:payment:${transactionId}:projection`,
+	};
+}
+
+/** An expired or failed Checkout Session frees the promotion use it reserved. */
+export function normalizeStripeCheckoutSessionTermination(input: {
+	eventId: string;
+	eventType: string;
+	session: Record<string, unknown>;
+}): NormalizedStripeCheckoutPromotionReleaseCommand | NormalizedStripeCommand {
+	const metadata = optionalRecord(input.session.metadata) ?? {};
+	const redemptionId = optionalString(metadata.quotumPromotionRedemptionId);
+	if (redemptionId === null) {
+		return ignored({
+			eventId: input.eventId,
+			eventType: input.eventType,
+			rawPayload: input.session,
+			reason: "checkout_session_without_promotion",
+		});
+	}
+	return {
+		kind: "checkout_promotion_release",
+		checkoutSessionId: requireString(input.session.id, "Stripe Checkout session id"),
+		redemptionId,
+		eventType: input.eventType,
+		externalEventId: input.eventId,
+		rawPayload: input.session,
+	};
+}
+
+function checkoutPromotion(
+	session: Record<string, unknown>,
+): NormalizedStripeCheckoutPromotion | null {
+	const metadata = optionalRecord(session.metadata) ?? {};
+	const redemptionId = optionalString(metadata.quotumPromotionRedemptionId);
+	const discounts = Array.isArray(session.discounts)
+		? session.discounts.map((entry) => optionalRecord(entry) ?? {})
+		: [];
+	const couponIds = discounts.flatMap((discount) => optionalId(discount.coupon) ?? []);
+	const promotionCodeIds = discounts.flatMap(
+		(discount) => optionalId(discount.promotion_code) ?? [],
+	);
+	if (redemptionId === null && couponIds.length === 0 && promotionCodeIds.length === 0) {
+		return null;
+	}
+	const totals = optionalRecord(session.total_details);
+	return {
+		checkoutSessionId: requireString(session.id, "Stripe Checkout session id"),
+		redemptionId,
+		couponIds,
+		promotionCodeIds,
+		subscriptionId: optionalId(session.subscription),
+		currency: optionalString(session.currency),
+		amountSubtotalMinor: optionalNonnegativeInteger(session.amount_subtotal),
+		amountDiscountMinor: optionalNonnegativeInteger(totals?.amount_discount),
+		amountTotalMinor: optionalNonnegativeInteger(session.amount_total),
 	};
 }
 

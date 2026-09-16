@@ -114,9 +114,11 @@ quantity changes apply immediately by default, downgrades at period end. Base an
 are Checkout line items; metered overage is invoiced by the recurring billing worker after the period
 closes. Add-ons use a separate subscription and require an active base plan.
 
-Refunds and disputes reverse credits proportionally to the cumulative reversed amount and are
+Refunds and disputes reverse credits proportionally to the cumulative reversed amount paid and are
 deduplicated by refund id. Configure Stripe to send `refund.created` and `refund.updated`;
-`charge.refunded` is safely ignored.
+`charge.refunded` is safely ignored. For promotion codes, also send `checkout.session.expired` and
+`checkout.session.async_payment_failed` so reserved uses are released promptly; the promotion
+maintenance worker releases them an hour after the session could have completed otherwise.
 
 Regular provider webhooks use `/v1/projects/:projectKey/webhooks/:provider`. Connection setup also
 exposes the version-specific route

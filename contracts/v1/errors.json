@@ -746,6 +746,12 @@
       ]
     },
     {
+      "code": "PROMOTION_CODE_ENTRY_CONFLICT",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
       "code": "PROMOTION_CODE_EXHAUSTED",
       "sources": [
         "src/billing/promotions.ts"
@@ -794,6 +800,12 @@
       ]
     },
     {
+      "code": "PROMOTION_CURRENCY_NOT_SUPPORTED",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
       "code": "PROMOTION_HOSTED_CHECKOUT_UNSUPPORTED",
       "sources": [
         "src/billing/promotions.ts"
@@ -807,6 +819,12 @@
     },
     {
       "code": "PROMOTION_NOT_FOUND",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_PROVIDER_NOT_READY",
       "sources": [
         "src/billing/promotions.ts"
       ]

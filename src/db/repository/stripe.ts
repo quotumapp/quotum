@@ -30,6 +30,10 @@ import {
 } from "./invalidations";
 import { upsertPurchase, upsertSubscription } from "./mutations";
 import { parseNullableNonnegativeInteger, parseStripeWebStoreProductRow } from "./parsers";
+import {
+	recordCheckoutPromotionInTx,
+	reversePromotionRedemptionsForPurchaseInTx,
+} from "./promotions";
 import { executeOne, executeRows, jsonb } from "./query";
 import { processedStripeRecordingResult, skippedStripeRecordingResult } from "./results";
 import {
@@ -859,6 +863,13 @@ export class StripeBillingRepository extends RepositoryModule {
 				amountPaidMinor: input.amountPaidCents ?? null,
 				currency: input.currency ?? null,
 			});
+			if (input.promotion !== undefined && input.promotion !== null) {
+				await recordCheckoutPromotionInTx(tx, projectId, {
+					customerId: resolved.id,
+					purchaseId,
+					promotion: input.promotion,
+				});
+			}
 			if (input.purchaseKind === "consumable") {
 				await materializeTopupAllocation(tx, {
 					projectId,
@@ -1324,6 +1335,9 @@ export class StripeBillingRepository extends RepositoryModule {
 				WHERE pu.id = ${target.purchase_id}
 			`,
 			);
+			if (fullyReversed) {
+				await reversePromotionRedemptionsForPurchaseInTx(tx, projectId, target.purchase_id);
+			}
 			if (target.purchase_kind === "consumable") {
 				await setPurchaseAllocationReversal(tx, {
 					projectId,

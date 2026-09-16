@@ -103,11 +103,45 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 					currency: z.string(),
 					interval: z.union([z.null(), z.literal("month"), z.literal("year")]),
 					pricingModel: z.enum(["flat", "graduated", "volume"]),
+					subtotalMinor: z.union([z.null(), z.number()]),
+					discountMinor: z.union([z.null(), z.number()]),
+					totalMinor: z.union([z.null(), z.number()]),
 				}),
 			),
 			estimatedTotalMinor: z.union([z.null(), z.number()]),
+			subtotalMinor: z.union([z.null(), z.number()]),
+			discountTotalMinor: z.union([z.null(), z.number()]),
 			currency: z.union([z.null(), z.string()]),
 			amountStatus: z.enum(["exact", "provider_calculated"]),
+			promotionCodeEntry: z.enum(["none", "code", "hosted"]),
+			promotion: z.union([
+				z.null(),
+				z.object({
+					promotionKey: z.string(),
+					promotionName: z.string(),
+					promotionCodeId: z.string(),
+					code: z.string(),
+					discount: z.object({
+						type: z.enum(["percent", "amount"]),
+						percentOffBps: z.union([z.null(), z.number()]),
+						amountOffMinor: z.union([z.null(), z.number()]),
+						currency: z.union([z.null(), z.string()]),
+						duration: z.enum(["once", "repeating", "forever"]),
+						durationMonths: z.union([z.null(), z.number()]),
+					}),
+				}),
+			]),
+			nextCycle: z.union([
+				z.null(),
+				z.object({
+					interval: z.enum(["month", "year"]),
+					currency: z.union([z.null(), z.string()]),
+					subtotalMinor: z.union([z.null(), z.number()]),
+					discountMinor: z.union([z.null(), z.number()]),
+					totalMinor: z.union([z.null(), z.number()]),
+					discountStatus: z.enum(["none", "applies", "ended", "provider_calculated"]),
+				}),
+			]),
 			effectiveMode: z.union([z.null(), z.literal("immediate"), z.literal("period_end")]),
 			effectiveAt: z.union([z.null(), z.string()]),
 			prorationBehavior: z.union([
@@ -137,6 +171,9 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse200
 			sessionId: z.string(),
 			url: z.string(),
 			duplicate: z.boolean(),
+			promotionRedemption: z
+				.union([z.null(), z.object({ id: z.string(), status: z.enum(["reserved", "applied"]) })])
+				.optional(),
 		}),
 		z.object({
 			kind: z.literal("subscription_change"),
@@ -156,6 +193,9 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse202
 			sessionId: z.string(),
 			url: z.string(),
 			duplicate: z.boolean(),
+			promotionRedemption: z
+				.union([z.null(), z.object({ id: z.string(), status: z.enum(["reserved", "applied"]) })])
+				.optional(),
 		}),
 		z.object({
 			kind: z.literal("subscription_change"),

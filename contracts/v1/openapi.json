@@ -11644,6 +11644,12 @@
                   "string"
                 ]
               },
+              "discountTotalMinor": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
               "effectiveAt": {
                 "type": [
                   "null",
@@ -11693,6 +11699,12 @@
                     "currency": {
                       "type": "string"
                     },
+                    "discountMinor": {
+                      "type": [
+                        "null",
+                        "number"
+                      ]
+                    },
                     "interval": {
                       "anyOf": [
                         {
@@ -11729,6 +11741,18 @@
                     "quantity": {
                       "type": "number"
                     },
+                    "subtotalMinor": {
+                      "type": [
+                        "null",
+                        "number"
+                      ]
+                    },
+                    "totalMinor": {
+                      "type": [
+                        "null",
+                        "number"
+                      ]
+                    },
                     "unitAmountMinor": {
                       "type": "number"
                     }
@@ -11740,13 +11764,159 @@
                     "unitAmountMinor",
                     "currency",
                     "interval",
-                    "pricingModel"
+                    "pricingModel",
+                    "subtotalMinor",
+                    "discountMinor",
+                    "totalMinor"
                   ],
                   "type": "object"
                 },
                 "type": "array"
               },
+              "nextCycle": {
+                "properties": {
+                  "currency": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "discountMinor": {
+                    "type": [
+                      "null",
+                      "number"
+                    ]
+                  },
+                  "discountStatus": {
+                    "enum": [
+                      "none",
+                      "applies",
+                      "ended",
+                      "provider_calculated"
+                    ],
+                    "type": "string"
+                  },
+                  "interval": {
+                    "enum": [
+                      "month",
+                      "year"
+                    ],
+                    "type": "string"
+                  },
+                  "subtotalMinor": {
+                    "type": [
+                      "null",
+                      "number"
+                    ]
+                  },
+                  "totalMinor": {
+                    "type": [
+                      "null",
+                      "number"
+                    ]
+                  }
+                },
+                "required": [
+                  "interval",
+                  "currency",
+                  "subtotalMinor",
+                  "discountMinor",
+                  "totalMinor",
+                  "discountStatus"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "previewToken": {
+                "type": "string"
+              },
+              "promotion": {
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "discount": {
+                    "properties": {
+                      "amountOffMinor": {
+                        "type": [
+                          "null",
+                          "number"
+                        ]
+                      },
+                      "currency": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "duration": {
+                        "enum": [
+                          "once",
+                          "repeating",
+                          "forever"
+                        ],
+                        "type": "string"
+                      },
+                      "durationMonths": {
+                        "type": [
+                          "null",
+                          "number"
+                        ]
+                      },
+                      "percentOffBps": {
+                        "type": [
+                          "null",
+                          "number"
+                        ]
+                      },
+                      "type": {
+                        "enum": [
+                          "percent",
+                          "amount"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "percentOffBps",
+                      "amountOffMinor",
+                      "currency",
+                      "duration",
+                      "durationMonths"
+                    ],
+                    "type": "object"
+                  },
+                  "promotionCodeId": {
+                    "type": "string"
+                  },
+                  "promotionKey": {
+                    "type": "string"
+                  },
+                  "promotionName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "promotionKey",
+                  "promotionName",
+                  "promotionCodeId",
+                  "code",
+                  "discount"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "promotionCodeEntry": {
+                "enum": [
+                  "none",
+                  "code",
+                  "hosted"
+                ],
                 "type": "string"
               },
               "prorationBehavior": {
@@ -11789,6 +11959,12 @@
               "stateFingerprint": {
                 "type": "string"
               },
+              "subtotalMinor": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
               "targetId": {
                 "type": "string"
               },
@@ -11816,8 +11992,13 @@
               "provider",
               "lineItems",
               "estimatedTotalMinor",
+              "subtotalMinor",
+              "discountTotalMinor",
               "currency",
               "amountStatus",
+              "promotionCodeEntry",
+              "promotion",
+              "nextCycle",
               "effectiveMode",
               "effectiveAt",
               "prorationBehavior",
@@ -11856,6 +12037,28 @@
                       "checkout"
                     ],
                     "type": "string"
+                  },
+                  "promotionRedemption": {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "reserved",
+                          "applied"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "status"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
                   },
                   "sessionId": {
                     "type": "string"
@@ -11942,6 +12145,28 @@
                       "checkout"
                     ],
                     "type": "string"
+                  },
+                  "promotionRedemption": {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "reserved",
+                          "applied"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "status"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
                   },
                   "sessionId": {
                     "type": "string"
@@ -18395,6 +18620,9 @@
                       {
                         "additionalProperties": false,
                         "properties": {
+                          "allowPromotionCodes": {
+                            "type": "boolean"
+                          },
                           "cancelUrl": {
                             "format": "uri",
                             "type": [
@@ -18423,6 +18651,13 @@
                             "minLength": 1,
                             "type": "string"
                           },
+                          "promotionCode": {
+                            "pattern": "^[A-Za-z0-9-]{3,64}$",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "quantities": {
                             "additionalProperties": {
                               "exclusiveMinimum": 0,
@@ -18448,6 +18683,9 @@
                       {
                         "additionalProperties": false,
                         "properties": {
+                          "allowPromotionCodes": {
+                            "type": "boolean"
+                          },
                           "cancelUrl": {
                             "format": "uri",
                             "type": [
@@ -18475,6 +18713,13 @@
                           "productKey": {
                             "minLength": 1,
                             "type": "string"
+                          },
+                          "promotionCode": {
+                            "pattern": "^[A-Za-z0-9-]{3,64}$",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           },
                           "successUrl": {
                             "format": "uri",
@@ -48569,6 +48814,9 @@
                       {
                         "additionalProperties": false,
                         "properties": {
+                          "allowPromotionCodes": {
+                            "type": "boolean"
+                          },
                           "cancelUrl": {
                             "format": "uri",
                             "type": [
@@ -48597,6 +48845,13 @@
                             "minLength": 1,
                             "type": "string"
                           },
+                          "promotionCode": {
+                            "pattern": "^[A-Za-z0-9-]{3,64}$",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "quantities": {
                             "additionalProperties": {
                               "exclusiveMinimum": 0,
@@ -48622,6 +48877,9 @@
                       {
                         "additionalProperties": false,
                         "properties": {
+                          "allowPromotionCodes": {
+                            "type": "boolean"
+                          },
                           "cancelUrl": {
                             "format": "uri",
                             "type": [
@@ -48649,6 +48907,13 @@
                           "productKey": {
                             "minLength": 1,
                             "type": "string"
+                          },
+                          "promotionCode": {
+                            "pattern": "^[A-Za-z0-9-]{3,64}$",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           },
                           "successUrl": {
                             "format": "uri",

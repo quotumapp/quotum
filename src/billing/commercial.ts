@@ -1,4 +1,5 @@
 import type { StripeProrationBehavior } from "./pricing";
+import type { CommercialPromotion, PromotionDiscountDuration } from "./promotions";
 
 export type CommercialActionIntent =
 	| {
@@ -9,6 +10,8 @@ export type CommercialActionIntent =
 			successUrl?: string | null;
 			cancelUrl?: string | null;
 			expiresAt?: number;
+			promotionCode?: string | null;
+			allowPromotionCodes?: boolean;
 	  }
 	| {
 			kind: "checkout_product";
@@ -17,6 +20,8 @@ export type CommercialActionIntent =
 			successUrl?: string | null;
 			cancelUrl?: string | null;
 			expiresAt?: number;
+			promotionCode?: string | null;
+			allowPromotionCodes?: boolean;
 	  }
 	| {
 			kind: "subscription_change";
@@ -35,6 +40,34 @@ export interface CommercialLineItem {
 	currency: string;
 	interval: "month" | "year" | null;
 	pricingModel: "flat" | "graduated" | "volume";
+	/** Null when Stripe prices the line, such as tiered pricing. */
+	subtotalMinor?: number | null;
+	discountMinor?: number | null;
+	totalMinor?: number | null;
+}
+
+export interface CommercialPreviewPromotion {
+	promotionKey: string;
+	promotionName: string;
+	promotionCodeId: string;
+	code: string;
+	discount: {
+		type: "percent" | "amount";
+		percentOffBps: number | null;
+		amountOffMinor: number | null;
+		currency: string | null;
+		duration: PromotionDiscountDuration;
+		durationMonths: number | null;
+	};
+}
+
+export interface CommercialPreviewNextCycle {
+	interval: "month" | "year";
+	currency: string | null;
+	subtotalMinor: number | null;
+	discountMinor: number | null;
+	totalMinor: number | null;
+	discountStatus: "none" | "applies" | "ended" | "provider_calculated";
 }
 
 export interface CommercialActionPreview {
@@ -48,8 +81,13 @@ export interface CommercialActionPreview {
 	provider: "stripe";
 	lineItems: CommercialLineItem[];
 	estimatedTotalMinor: number | null;
+	subtotalMinor: number | null;
+	discountTotalMinor: number | null;
 	currency: string | null;
 	amountStatus: "exact" | "provider_calculated";
+	promotionCodeEntry: "none" | "code" | "hosted";
+	promotion: CommercialPreviewPromotion | null;
+	nextCycle: CommercialPreviewNextCycle | null;
 	effectiveMode: "immediate" | "period_end" | null;
 	effectiveAt: string | null;
 	prorationBehavior: StripeProrationBehavior | null;
@@ -74,6 +112,7 @@ export type CommercialActionExecutionResult =
 			sessionId: string;
 			url: string;
 			duplicate: boolean;
+			promotionRedemption?: { id: string; status: "reserved" | "applied" } | null;
 	  }
 	| {
 			kind: "subscription_change";
@@ -89,4 +128,6 @@ export interface CommercialPreviewDraft {
 	intentHash: string;
 	stateFingerprint: string;
 	preview: Omit<CommercialActionPreview, "previewToken" | "expiresAt">;
+	/** Server-side only: the validated code behind the preview, never stored or returned. */
+	promotion?: CommercialPromotion | null;
 }

@@ -188,38 +188,80 @@ export class PromotionProviderObjectRepository extends RepositoryModule {
 			);
 			const jobs: PromotionStripeSyncJob[] = [];
 			for (const row of claimed) {
-				const detail = await executeOne<ClaimedObjectRow>(
-					tx,
-					drizzleSql`
-						SELECT
-							o.project_id, project.key AS project_key, o.id, o.object_kind, o.status,
-							o.external_id, o.desired_active, o.desired_generation, o.provider_active,
-							o.retire_requested, o.attempts, o.applies_to,
-							p.key AS promotion_key, p.name AS promotion_name, p.discount_type,
-							p.percent_off_bps, p.discount_duration, p.duration_months,
-							COALESCE((
-								SELECT jsonb_agg(
-									jsonb_build_object('currency', a.currency, 'amountOffMinor', a.amount_off_minor)
-									ORDER BY a.currency
-								)
-								FROM promotion_discount_amounts a
-								WHERE a.project_id = p.project_id AND a.promotion_id = p.id
-							), '[]'::jsonb) AS amounts,
-							c.code, c.expires_at, c.max_redemptions, c.first_purchase_only,
-							parent.external_id AS coupon_external_id
-						FROM promotion_provider_objects o
-						JOIN projects project ON project.id = o.project_id
-						JOIN promotions p ON p.project_id = o.project_id AND p.id = o.promotion_id
-						LEFT JOIN promotion_codes c
-							ON c.project_id = o.project_id AND c.id = o.promotion_code_id
-						LEFT JOIN promotion_provider_objects parent
-							ON parent.project_id = o.project_id AND parent.id = o.parent_object_id
-						WHERE o.project_id = ${row.project_id} AND o.id = ${row.id}
-					`,
-				);
-				if (detail !== null) jobs.push(toSyncJob(detail));
+				const job = await loadSyncJob(tx, row.project_id, row.id);
+				if (job !== null) jobs.push(job);
 			}
 			return jobs;
+		});
+	}
+
+	/**
+	 * Brings the promotion's coupon up to date with the catalog and returns it, so a commercial
+	 * action can create it inline when the worker has not run yet.
+	 */
+	async prepareStripeCoupon(
+		project: ProjectInstanceContext,
+		promotionId: string,
+	): Promise<{
+		objectId: string;
+		status: string;
+		externalId: string | null;
+		error: string | null;
+	}> {
+		return await this.transaction(async (tx) => {
+			const projectId = project.projectInstanceId;
+			await reconcileCouponInTx(tx, projectId, promotionId);
+			const coupon = await executeOne<{
+				id: string;
+				status: string;
+				external_id: string | null;
+				error: string | null;
+			}>(
+				tx,
+				drizzleSql`
+					SELECT id, status, external_id, error
+					FROM promotion_provider_objects
+					WHERE project_id = ${projectId}
+						AND promotion_id = ${promotionId}
+						AND object_kind = 'coupon'
+						AND status <> 'retired'
+					ORDER BY created_at DESC, id DESC
+					LIMIT 1
+				`,
+			);
+			if (coupon === null) throw promotionError("PROMOTION_PROVIDER_NOT_READY");
+			return {
+				objectId: coupon.id,
+				status: coupon.status,
+				externalId: coupon.external_id,
+				error: coupon.error,
+			};
+		});
+	}
+
+	/** Leases one pending object for an inline sync; null when another process holds it. */
+	async claimStripeObject(
+		project: ProjectInstanceContext,
+		objectId: string,
+		workerId: string,
+	): Promise<PromotionStripeSyncJob | null> {
+		return await this.transaction(async (tx) => {
+			const projectId = project.projectInstanceId;
+			const staleBefore = new Date(Date.now() - 5 * 60_000).toISOString();
+			const claimed = await executeOne<{ project_id: string; id: string }>(
+				tx,
+				drizzleSql`
+					UPDATE promotion_provider_objects
+					SET locked_at = now(), locked_by = ${workerId}, attempts = attempts + 1, updated_at = now()
+					WHERE project_id = ${projectId}
+						AND id = ${objectId}
+						AND provider = 'stripe'
+						AND status = 'pending'
+						AND (locked_at IS NULL OR locked_at < ${staleBefore}::timestamptz)
+					RETURNING project_id, id
+				`,
+			);
+			return claimed === null ? null : await loadSyncJob(tx, claimed.project_id, claimed.id);
 		});
 	}
 
@@ -519,6 +561,43 @@ async function stripeProductsForPromotion(
 		`,
 	);
 	return rows.map((row) => row.external_product_id).sort();
+}
+
+async function loadSyncJob(
+	tx: QueryExecutor,
+	projectId: string,
+	objectId: string,
+): Promise<PromotionStripeSyncJob | null> {
+	const detail = await executeOne<ClaimedObjectRow>(
+		tx,
+		drizzleSql`
+			SELECT
+				o.project_id, project.key AS project_key, o.id, o.object_kind, o.status,
+				o.external_id, o.desired_active, o.desired_generation, o.provider_active,
+				o.retire_requested, o.attempts, o.applies_to,
+				p.key AS promotion_key, p.name AS promotion_name, p.discount_type,
+				p.percent_off_bps, p.discount_duration, p.duration_months,
+				COALESCE((
+					SELECT jsonb_agg(
+						jsonb_build_object('currency', a.currency, 'amountOffMinor', a.amount_off_minor)
+						ORDER BY a.currency
+					)
+					FROM promotion_discount_amounts a
+					WHERE a.project_id = p.project_id AND a.promotion_id = p.id
+				), '[]'::jsonb) AS amounts,
+				c.code, c.expires_at, c.max_redemptions, c.first_purchase_only,
+				parent.external_id AS coupon_external_id
+			FROM promotion_provider_objects o
+			JOIN projects project ON project.id = o.project_id
+			JOIN promotions p ON p.project_id = o.project_id AND p.id = o.promotion_id
+			LEFT JOIN promotion_codes c
+				ON c.project_id = o.project_id AND c.id = o.promotion_code_id
+			LEFT JOIN promotion_provider_objects parent
+				ON parent.project_id = o.project_id AND parent.id = o.parent_object_id
+			WHERE o.project_id = ${projectId} AND o.id = ${objectId}
+		`,
+	);
+	return detail === null ? null : toSyncJob(detail);
 }
 
 function toSyncJob(row: ClaimedObjectRow): PromotionStripeSyncJob {
