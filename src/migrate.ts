@@ -7,10 +7,14 @@ import {
 	shouldRunMigrationInTransaction,
 	verifyAppliedMigrations,
 } from "./db/migration-integrity";
+import { createCliBillingLogger } from "./observability/logger";
+import { writeStdout } from "./shared/cli-output";
+
+const logger = createCliBillingLogger();
 
 const postgresUri = process.env.POSTGRES_URI;
 if (postgresUri === undefined || postgresUri.trim() === "") {
-	console.error("POSTGRES_URI environment variable is required");
+	logger.error("POSTGRES_URI environment variable is required", undefined);
 	process.exit(1);
 }
 
@@ -44,7 +48,7 @@ function resolveMigrationsDir(): string {
 		return join(import.meta.dir, "../migrations");
 	}
 	if (process.env.BILLING_ENV !== "test") {
-		console.error("BILLING_MIGRATIONS_DIR is only honoured when BILLING_ENV=test");
+		logger.error("BILLING_MIGRATIONS_DIR is only honoured when BILLING_ENV=test", undefined);
 		process.exit(1);
 	}
 	return override;
@@ -75,7 +79,7 @@ async function runMigration(filename: string): Promise<void> {
 	const content = await Bun.file(join(migrationsDir, filename)).text();
 	const checksum = calculateMigrationChecksum(content);
 
-	console.log(`Running migration ${filename}`);
+	logger.info("Running migration", { filename });
 	if (shouldRunMigrationInTransaction(content)) {
 		await sql.begin(async (tx) => {
 			await tx.unsafe(content);
@@ -85,7 +89,7 @@ async function runMigration(filename: string): Promise<void> {
 		await sql.unsafe(content);
 		await sql`INSERT INTO migrations (id, checksum) VALUES (${migrationId}, ${checksum})`;
 	}
-	console.log(`Applied migration ${filename}`);
+	logger.info("Applied migration", { filename });
 }
 
 async function migrate(): Promise<void> {
@@ -98,7 +102,7 @@ async function migrate(): Promise<void> {
 			(file) => !applied.has(file.replace(/\.sql$/, "")),
 		);
 		if (pending.length === 0) {
-			console.log("No pending migrations");
+			logger.info("No pending migrations");
 			return;
 		}
 
@@ -124,7 +128,7 @@ async function status(): Promise<void> {
 
 	for (const file of await getMigrationFiles()) {
 		const id = file.replace(/\.sql$/, "");
-		console.log(`${applied.has(id) ? "applied" : "pending"} ${file}`);
+		writeStdout(`${applied.has(id) ? "applied" : "pending"} ${file}`);
 	}
 }
 

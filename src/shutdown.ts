@@ -1,3 +1,4 @@
+import { createPinoBillingLogger } from "./observability/logger";
 import type { PollingRuntimeTimers, TimeoutHandle } from "./workers/runtime";
 
 type ShutdownSignal = "SIGINT" | "SIGTERM";
@@ -19,9 +20,6 @@ type ShutdownLogger = {
 	error(message: string, error: unknown): void;
 };
 
-const defaultLogger: ShutdownLogger = {
-	error: (message, error) => console.error(message, error),
-};
 const defaultShutdownTimeoutMs = 10_000;
 const defaultShutdownTimers: PollingRuntimeTimers = {
 	setTimeout(callback, ms) {
@@ -47,7 +45,7 @@ export const registerBillingRuntimeShutdown = ({
 	runtimes,
 	cleanup = [],
 	shutdownTimeoutMs = defaultShutdownTimeoutMs,
-	logger = defaultLogger,
+	logger = createPinoBillingLogger(),
 	timers,
 }: {
 	process: ProcessLike;

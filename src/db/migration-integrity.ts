@@ -1,3 +1,5 @@
+import { createCliBillingLogger } from "../observability/logger";
+
 export const concurrentIndexPattern = /CREATE\s+INDEX\s+CONCURRENTLY/i;
 const noTransactionMarker = /^\s*--\s*migrate:\s*no-transaction/im;
 
@@ -33,14 +35,16 @@ export async function findMigrationIntegrityProblems(
 export async function verifyAppliedMigrations(
 	applied: ReadonlyMap<string, string>,
 	readMigration: MigrationSource,
-	reportProblem: (line: string) => void = console.error,
+	reportProblem?: (line: string) => void,
 ): Promise<void> {
 	const problems = await findMigrationIntegrityProblems(applied, readMigration);
 	if (problems.length === 0) {
 		return;
 	}
+	const logger = reportProblem === undefined ? createCliBillingLogger() : undefined;
 	for (const problem of problems) {
-		reportProblem(problem);
+		if (reportProblem) reportProblem(problem);
+		else logger?.error(problem, undefined);
 	}
 	throw new Error("Migration integrity check failed");
 }

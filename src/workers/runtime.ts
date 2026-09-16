@@ -1,3 +1,4 @@
+import { createPinoBillingLogger } from "../observability/logger";
 import type { ProjectionSyncRunResult } from "./projection-sync";
 
 export type TimeoutHandle = ReturnType<typeof setTimeout> | number | object;
@@ -45,16 +46,12 @@ const defaultTimers: PollingRuntimeTimers = {
 	clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
-const defaultLogger: PollingRuntimeLogger = {
-	error: (message, error, context) => console.error(message, error, context),
-};
-
 export function startPollingRuntime({
 	name,
 	worker,
 	pollIntervalMs,
 	timers = defaultTimers,
-	logger = defaultLogger,
+	logger = createPinoBillingLogger(),
 }: PollingRuntimeOptions): ProjectionSyncRuntime {
 	let stopped = false;
 	let timeoutHandle: TimeoutHandle | null = null;

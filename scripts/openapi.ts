@@ -1,7 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { generateOpenApi } from "../src/composition/openapi";
+import { createCliBillingLogger } from "../src/observability/logger";
 import { generateErrorRegistry } from "./openapi-errors";
+
+const logger = createCliBillingLogger();
 
 export function canonical(value: unknown): unknown {
 	if (Array.isArray(value)) return value.map(canonical);
@@ -20,11 +23,11 @@ const content = `${JSON.stringify(canonical(await generateOpenApi(packageJson.ve
 if (process.argv.includes("--check")) {
 	if ((await readFile(output, "utf8")) !== content)
 		throw new Error("OpenAPI is stale. Run bun run openapi:generate.");
-	console.log("OpenAPI snapshot is current.");
+	logger.info("OpenAPI snapshot is current.");
 } else {
 	await mkdir(resolve(output, ".."), { recursive: true });
 	await writeFile(output, content);
-	console.log(`Generated ${output}`);
+	logger.info(`Generated ${output}`);
 }
 
 const registryPath = resolve(import.meta.dir, "../contracts/v1/errors.json");

@@ -166,6 +166,8 @@ Defaults in parentheses.
 - `BILLING_RATE_LIMIT_WINDOW_MS` (`60000`), `BILLING_VERIFY_RATE_LIMIT_PER_WINDOW` (`120`),
   `BILLING_WEBHOOK_RATE_LIMIT_PER_WINDOW` (`600`), `BILLING_METERING_RATE_LIMIT_PER_WINDOW`
   (`6000`), `BILLING_ADMIN_RATE_LIMIT_PER_WINDOW` (`60`).
+- `BILLING_LOG_LEVEL` (`info`): `trace`, `debug`, `info`, `warn`, `error`, `fatal`, or `silent`.
+  Controls local Pino diagnostics independently of Sentry; invalid or blank values are rejected.
 - `SENTRY_DSN` (unset disables Sentry), `SENTRY_ENABLE_LOGS` (`true`),
   `SENTRY_TRACES_SAMPLE_RATE` (`0.01`), `SENTRY_LOG_LEVEL` (`warn`),
   `SENTRY_CAPTURE_EXPECTED_ERRORS` (`false`).

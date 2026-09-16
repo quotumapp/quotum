@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CatalogIntent } from "../src/catalog/types";
 import { BillingClient } from "../src/sdk/client";
+import { writeStdout } from "../src/shared/cli-output";
 
 const [command, file] = process.argv.slice(2);
 
@@ -17,7 +18,7 @@ if (command === undefined || command === "help" || command === "--help") {
 		actor: process.env.BILLING_ACTOR ?? "catalog-cli",
 	});
 	if (command === "status") {
-		console.log(JSON.stringify(await client.catalog.status(), null, 2));
+		writeStdout(JSON.stringify(await client.catalog.status(), null, 2));
 	} else if (command === "diff" || command === "push") {
 		if (file === undefined) throw new Error(`${command} requires a catalog TypeScript file`);
 		const source = await loadCatalog(file);
@@ -28,7 +29,7 @@ if (command === undefined || command === "help" || command === "--help") {
 			catalog: source.catalog,
 		});
 		if (command === "diff") {
-			console.log(
+			writeStdout(
 				JSON.stringify(
 					{
 						changed: current.intentHash !== preview.intentHash,
@@ -48,7 +49,7 @@ if (command === undefined || command === "help" || command === "--help") {
 				previewToken: preview.previewToken,
 				catalog: source.catalog,
 			});
-			console.log(JSON.stringify(published, null, 2));
+			writeStdout(JSON.stringify(published, null, 2));
 		}
 	} else {
 		throw new Error(`Unknown catalog command: ${command}`);
@@ -106,7 +107,7 @@ function requiredEnv(name: string): string {
 }
 
 function printHelp(): void {
-	console.log(`billing-catalog <command> [catalog.ts]
+	writeStdout(`billing-catalog <command> [catalog.ts]
 
 Commands:
   status             Print the currently published catalog intent and revision

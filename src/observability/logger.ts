@@ -1,46 +1,51 @@
+import pino, { type DestinationStream } from "pino";
+import { type BillingLogLevel, loadBillingLogLevel } from "./log-level";
 import { stringifyUnknown } from "./stringify-unknown";
+
 export interface BillingLogger {
 	info(message: string, context?: Record<string, unknown>): void;
 	warn(message: string, context?: Record<string, unknown>): void;
 	error(message: string, error: unknown, context?: Record<string, unknown>): void;
 }
 
-export interface BillingLoggerWriter {
-	info(line: string): void;
-	warn(line: string): void;
-	error(line: string): void;
-}
-
-export interface ConsoleBillingLoggerOptions {
+export interface PinoBillingLoggerOptions {
+	level?: BillingLogLevel;
+	destination?: DestinationStream | 1 | 2;
 	now?: () => Date;
-	write?: BillingLoggerWriter;
 }
 
-export function createConsoleBillingLogger({
-	now = () => new Date(),
-	write = {
-		info: (line) => console.log(line),
-		warn: (line) => console.warn(line),
-		error: (line) => console.error(line),
-	},
-}: ConsoleBillingLoggerOptions = {}): BillingLogger {
+export function createPinoBillingLogger({
+	level = loadBillingLogLevel(),
+	destination = 1,
+	now,
+}: PinoBillingLoggerOptions = {}): BillingLogger {
+	const stream = typeof destination === "number" ? createDestination(destination) : destination;
+
+	const logger = pino(
+		{
+			level,
+			timestamp:
+				now === undefined ? pino.stdTimeFunctions.epochTime : () => `,"time":${safeTimestamp(now)}`,
+			serializers: { context: normalizeContext, err: normalizeLoggerError },
+		},
+		stream,
+	);
 	return {
 		info(message, context) {
-			writeSafely(write.info, serializeLogEvent(createLogEvent("info", message, now, context)));
+			writeSafely(() => logger.info({ context }, message));
 		},
 		warn(message, context) {
-			writeSafely(write.warn, serializeLogEvent(createLogEvent("warn", message, now, context)));
+			writeSafely(() => logger.warn({ context }, message));
 		},
 		error(message, error, context) {
-			writeSafely(
-				write.error,
-				serializeLogEvent({
-					...createLogEvent("error", message, now, context),
-					error: normalizeLoggerError(error),
-				}),
-			);
+			writeSafely(() => logger.error({ err: error, context }, message));
 		},
 	};
+}
+
+/** Keep diagnostic events out of machine-readable command output on stdout. */
+export function createCliBillingLogger(): BillingLogger {
+	return createPinoBillingLogger({ destination: 2 });
 }
 
 export function safelyLogInfo(
@@ -88,47 +93,34 @@ export function createNoopBillingLogger(): BillingLogger {
 	};
 }
 
-function createLogEvent(
-	level: "info" | "warn" | "error",
-	message: string,
-	now: () => Date,
-	context?: Record<string, unknown>,
-): Record<string, unknown> {
-	const timestamp = safeTimestamp(now);
-	return context === undefined
-		? { level, message, timestamp }
-		: { level, message, timestamp, context };
-}
-
-function normalizeLoggerError(error: unknown): { name: string; message: string; stack?: string } {
-	if (error instanceof Error) {
-		return typeof error.stack === "string" && error.stack.length > 0
-			? { name: error.name || "Error", message: error.message, stack: error.stack }
-			: { name: error.name || "Error", message: error.message };
-	}
-
-	return { name: "Error", message: stringifyUnknown(error) };
-}
-
-function safeTimestamp(now: () => Date): string {
+function normalizeLoggerError(error: unknown): { type: string; message: string; stack?: string } {
 	try {
-		const timestamp = now();
-		return Number.isNaN(timestamp.getTime()) ? "Invalid Date" : timestamp.toISOString();
+		if (error instanceof Error) {
+			return typeof error.stack === "string" && error.stack.length > 0
+				? { type: error.name || "Error", message: error.message, stack: error.stack }
+				: { type: error.name || "Error", message: error.message };
+		}
+		return { type: "Error", message: stringifyUnknown(error) };
 	} catch {
-		return "Invalid Date";
+		return { type: "Error", message: "[Unserializable]" };
 	}
 }
 
-function serializeLogEvent(event: Record<string, unknown>): string {
+function safeTimestamp(now: () => Date): number {
 	try {
-		return JSON.stringify(event, createSafeJsonReplacer());
+		const timestamp = now().getTime();
+		return Number.isFinite(timestamp) ? timestamp : Date.now();
 	} catch {
-		return JSON.stringify({
-			level: event.level,
-			message: event.message,
-			timestamp: event.timestamp,
-			context: "[Unserializable]",
-		});
+		return Date.now();
+	}
+}
+
+function normalizeContext(context: unknown): unknown {
+	if (context === undefined) return undefined;
+	try {
+		return JSON.parse(JSON.stringify(context, createSafeJsonReplacer()));
+	} catch {
+		return "[Unserializable]";
 	}
 }
 
@@ -153,10 +145,17 @@ function createSafeJsonReplacer(): (key: string, value: unknown) => unknown {
 	};
 }
 
-function writeSafely(write: (line: string) => void, line: string): void {
+function writeSafely(write: () => void): void {
 	try {
-		write(line);
+		write();
 	} catch {
 		// Observability must not alter billing behavior.
 	}
+}
+
+function createDestination(fd: 1 | 2): DestinationStream {
+	const stream = pino.destination({ dest: fd, sync: true });
+	// A broken output pipe must not crash the service through an emitted stream error.
+	stream.on("error", () => {});
+	return stream;
 }

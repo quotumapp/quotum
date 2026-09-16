@@ -4,6 +4,8 @@ import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { SQL } from "bun";
 import { createBillingDatabaseConnection } from "../src/db/client";
 import { BillingRepository } from "../src/db/repository";
+import { createCliBillingLogger } from "../src/observability/logger";
+import { writeStdout } from "../src/shared/cli-output";
 import { e2eServiceEnv } from "../tests/e2e/helpers/e2e-env";
 import {
 	type BillingServiceProcess,
@@ -22,6 +24,8 @@ import {
 } from "./lib/postgres-container";
 import { createSanitizedProcessEnv } from "./lib/sanitized-env";
 import { bootstrapTestPlatform } from "./lib/test-platform-bootstrap";
+
+const logger = createCliBillingLogger();
 
 /**
  * Load lane: boots the real service against a disposable Postgres and measures the metering hot
@@ -122,7 +126,7 @@ const interrupts = trapInterrupts();
 try {
 	await main(parseOptions(process.argv.slice(2)));
 } catch (error) {
-	console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
+	logger.error("Load lane failed", error);
 	process.exitCode = interrupts.exitCode() ?? 1;
 }
 
@@ -274,7 +278,7 @@ async function main(options: Options): Promise<void> {
 				gateFailures,
 			};
 			await writeFile(options.out, `${JSON.stringify(report, null, "\t")}\n`);
-			console.log(`\nResults written to ${options.out}`);
+			logger.info("Load results written", { path: options.out });
 		}
 		if (gateFailures.length > 0) {
 			throw new Error(`Load lane gates failed:\n${gateFailures.join("\n")}`);
@@ -288,7 +292,7 @@ async function main(options: Options): Promise<void> {
 			try {
 				await container.stop();
 			} catch (error) {
-				console.error(error instanceof Error ? error.message : String(error));
+				logger.error("Postgres test container cleanup failed", error);
 			}
 		}
 	}
@@ -400,7 +404,7 @@ async function runScenario(
 
 async function runUserScenario(context: ScenarioContext, users: number): Promise<RunResult> {
 	const { client, options } = context;
-	console.log(`\nusers: ${users} independent billing accounts, 1 consume/user/second ...`);
+	writeStdout(`\nusers: ${users} independent billing accounts, 1 consume/user/second ...`);
 	// Warm the HTTP/catalogue path without adding unmeasured usage or projection work.
 	await drive(4, options.warmupMs, (worker, iteration) =>
 		client.check(`load-${(iteration * 4 + worker) % users}`),
@@ -507,10 +511,10 @@ async function runUserScenario(context: ScenarioContext, users: number): Promise
 			accounting,
 		},
 	};
-	console.log(
+	writeStdout(
 		`- target ${users}/s; accepted during window ${result.rps}/s; accepted ${acceptedKeys.size}/${run.scheduled}; dropped ${run.droppedCapacity} capacity, ${run.droppedLate} generator; p99 ${result.clientMs.p99} ms`,
 	);
-	console.log(
+	writeStdout(
 		`- projections ${dbAfter.projectionBacklog} -> ${backlog} after ${round(projectionDrainMs)} ms drain; committed ${accounting.committed}, missing accepted ${accounting.missingAccepted}, invalid events ${accounting.invalidEvents}`,
 	);
 	return result;
@@ -581,15 +585,15 @@ async function profileOperation(
 	`;
 	const statements = rows.reduce((sum, row) => sum + row.calls, 0) / measured;
 	const execMs = rows.reduce((sum, row) => sum + row.total_ms, 0) / measured;
-	console.log(`\nProfile of one hot ${operation} over ${measured} sequential requests`);
-	console.log(
+	writeStdout(`\nProfile of one hot ${operation} over ${measured} sequential requests`);
+	writeStdout(
 		`- wall ${round(wallMs)} ms per ${operation}, ${round(statements)} statements, ${round(execMs)} ms Postgres execution`,
 	);
-	console.log("\n| Calls/request | Rows | Mean ms | Statement |");
-	console.log("| ---: | ---: | ---: | --- |");
+	writeStdout("\n| Calls/request | Rows | Mean ms | Statement |");
+	writeStdout("| ---: | ---: | ---: | --- |");
 	for (const row of rows) {
 		const text = row.query.replaceAll(/\s+/g, " ").trim();
-		console.log(
+		writeStdout(
 			`| ${round(row.calls / measured)} | ${round(row.rows / measured)} | ${round(row.mean_ms * 100) / 100} | ${text.length > 170 ? `${text.slice(0, 170)}…` : text} |`,
 		);
 	}
@@ -818,7 +822,7 @@ async function enableStatementStats(sql: SQL): Promise<boolean> {
 		await sql`SELECT pg_stat_statements_reset()`;
 		return true;
 	} catch {
-		console.log("- pg_stat_statements unavailable; statements per request will be n/a");
+		writeStdout("- pg_stat_statements unavailable; statements per request will be n/a");
 		return false;
 	}
 }
@@ -955,19 +959,19 @@ async function printEnvironment(
 	options: Options,
 ): Promise<void> {
 	const [row] = await sql<Array<{ version: string }>>`SELECT version() AS version`;
-	console.log("Load lane environment");
-	console.log(
+	writeStdout("Load lane environment");
+	writeStdout(
 		`- Bun ${Bun.version}, ${cpus().length} CPUs, ${round(totalmem() / 1024 ** 3)} GiB RAM`,
 	);
-	console.log(
+	writeStdout(
 		`- Postgres: ${row?.version ?? "unknown"}${container ? " (testcontainers, default config)" : ""}`,
 	);
-	console.log(
+	writeStdout(
 		`- duration ${options.durationMs} ms, warmup ${options.warmupMs} ms, concurrency ${options.concurrency.join("/")}, accounts ${options.accounts}, scenarios ${options.scenarios.join(",")}`,
 	);
 	if (options.pgConfig.length > 0)
-		console.log(`- extra Postgres settings: ${options.pgConfig.join(", ")}`);
-	console.log(
+		writeStdout(`- extra Postgres settings: ${options.pgConfig.join(", ")}`);
+	writeStdout(
 		"- Client, service and Postgres share this machine; treat results as shapes, not capacity.",
 	);
 }
@@ -975,22 +979,22 @@ async function printEnvironment(
 function printTable(results: readonly RunResult[]): void {
 	const userResults = results.filter((result) => result.arrivals !== undefined);
 	if (userResults.length > 0) {
-		console.log(
+		writeStdout(
 			"\n| Users / requested RPS | Accepted RPS in window | Accepted / scheduled | Capacity drops | Generator drops | Client p99 ms | Projection backlog after drain |",
 		);
-		console.log("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+		writeStdout("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
 		for (const result of userResults) {
 			const arrivals = result.arrivals;
 			if (arrivals === undefined) continue;
-			console.log(
+			writeStdout(
 				`| ${arrivals.users} | ${result.rps} | ${arrivals.accepted}/${arrivals.scheduled} | ${arrivals.droppedCapacity} | ${arrivals.droppedLate} | ${result.clientMs.p99} | ${result.db.projectionBacklogAfter} |`,
 			);
 		}
 	}
-	console.log(
+	writeStdout(
 		"\n| Scenario | Operation | Conc. | RPS | Ledger calls/s | Client p50 ms | Client p99 ms | Server p99 ms (bucket) | Errors | Denied | Xact/s | WAL MB | Dead tuples | Lock waits max/mean | Proj. created | Proj. delivered | Proj. backlog | Stmts/req | DB ms/req | Service CPU % | PG CPU % |",
 	);
-	console.log(
+	writeStdout(
 		"| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
 	);
 	for (const result of results) {
@@ -998,7 +1002,7 @@ function printTable(results: readonly RunResult[]): void {
 			.filter(([status]) => Number(status) >= 400 || Number(status) === 0)
 			.map(([status, count]) => `${status}:${count}`)
 			.join(" ");
-		console.log(
+		writeStdout(
 			`| ${result.scenario} | ${result.operation} | ${result.concurrency} | ${result.rps} | ${result.ledgerCallsPerSecond} | ${result.clientMs.p50} | ${result.clientMs.p99} | ${result.serverMs.p99 ?? "n/a"} | ${errors === "" ? "none" : errors} | ${result.denied} | ${result.db.xactPerSecond} | ${result.db.walMb} | ${result.db.deadTuplesDelta} | ${result.db.lockWaitSamples.max}/${result.db.lockWaitSamples.mean} | ${result.db.projectionJobsCreated} | ${result.db.projectionDelivered} | ${result.db.projectionBacklogAfter} | ${result.db.statementsPerRequest ?? "n/a"} | ${result.db.dbExecMsPerRequest ?? "n/a"} | ${result.cpu.servicePercent ?? "n/a"} | ${result.cpu.postgresPercent ?? "n/a"} |`,
 		);
 	}
@@ -1097,7 +1101,7 @@ function parseOptions(argv: readonly string[]): Options {
 				break;
 			}
 			case "--help":
-				console.log(
+				writeStdout(
 					"bun run test:load [--duration s] [--warmup s] [--concurrency 1,8,32,64] [--accounts n] [--scenarios hot,spread,reserve,check,workers-off,users] [--users 100,1000,2000,5000,10000] [--max-in-flight 2000] [--request-timeout-ms 5000] [--drain-seconds 10] [--min-rps n] [--max-p99-ms n] [--out file.json] [--docker | --postgres-uri uri] [--pg-config setting=value ...] [--profile [consume|check|reserve]] [--recreate-schema]",
 				);
 				process.exit(0);

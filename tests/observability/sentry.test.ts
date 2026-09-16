@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { Elysia } from "elysia";
 import { BillingError } from "../../src/billing/errors";
 import type { SentryEnv } from "../../src/env";
+import { createPinoBillingLogger } from "../../src/observability/logger";
 import {
 	createSentryBillingLogger,
 	createSentryRequestScope,
@@ -149,6 +150,24 @@ describe("createSentryBillingLogger", () => {
 				},
 			},
 		]);
+	});
+
+	it("forwards once to Sentry even when local Pino output is silent", () => {
+		const lines: string[] = [];
+		const { sentry, calls } = createRecordingSentry();
+		const logger = createSentryBillingLogger({
+			baseLogger: createPinoBillingLogger({
+				level: "silent",
+				destination: { write: (line) => lines.push(line) },
+			}),
+			sentry,
+			config: sentryEnv,
+		});
+		const error = new Error("database unavailable");
+		logger.error("Projection sync failed", error, { worker: "projection_sync" });
+		expect(lines).toEqual([]);
+		expect(calls.logs).toHaveLength(1);
+		expect(calls.captures).toEqual([error]);
 	});
 
 	it("does not capture expected BillingError responses unless configured", () => {

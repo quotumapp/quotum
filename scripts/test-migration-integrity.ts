@@ -2,6 +2,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQL } from "bun";
+import { createCliBillingLogger } from "../src/observability/logger";
+
+const logger = createCliBillingLogger();
 
 const postgresUri = requiredPostgresUri(process.env.POSTGRES_URI);
 const schema = "migration_integrity_test";
@@ -43,7 +46,7 @@ async function verifyChecksumDrift(adminSql: SQL): Promise<void> {
 			throw new Error(`Checksum failure was not reported\n${child.stdout}\n${child.stderr}`);
 		}
 
-		console.log("Strict migration integrity verified");
+		logger.info("Strict migration integrity verified");
 	});
 }
 
@@ -69,7 +72,7 @@ async function verifyMissingFile(adminSql: SQL): Promise<void> {
 			throw new Error(`Missing file was not reported\n${child.stdout}\n${child.stderr}`);
 		}
 
-		console.log("Missing migration file verified");
+		logger.info("Missing migration file verified");
 	});
 }
 
@@ -109,7 +112,7 @@ async function verifyStatusExitCodes(adminSql: SQL): Promise<void> {
 			);
 		}
 
-		console.log("Migration status exit codes verified");
+		logger.info("Migration status exit codes verified");
 	});
 }
 
@@ -153,7 +156,7 @@ async function verifyMidFileFailureRollback(adminSql: SQL): Promise<void> {
 				throw new Error("Rerun after rollback did not apply the repaired migration");
 			}
 
-			console.log("Transactional migration rollback and rerun verified");
+			logger.info("Transactional migration rollback and rerun verified");
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
@@ -192,7 +195,7 @@ async function verifyConcurrentIndexBranch(adminSql: SQL): Promise<void> {
 				throw new Error("CREATE INDEX CONCURRENTLY did not create the index");
 			}
 
-			console.log("Non-transactional CREATE INDEX CONCURRENTLY verified");
+			logger.info("Non-transactional CREATE INDEX CONCURRENTLY verified");
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
@@ -227,13 +230,21 @@ async function verifyAdvisoryLockExclusion(adminSql: SQL): Promise<void> {
 					`Migrate failed after the advisory lock was released\n${result.stdout}\n${result.stderr}`,
 				);
 			}
-			if (!result.stdout.includes("Applied migration 001_lock.sql")) {
+			if (
+				!result.stderr
+					.trim()
+					.split("\n")
+					.some((line) => {
+						const event = JSON.parse(line);
+						return event.msg === "Applied migration" && event.context?.filename === "001_lock.sql";
+					})
+			) {
 				throw new Error(
 					`Migrate did not apply after lock release\n${result.stdout}\n${result.stderr}`,
 				);
 			}
 
-			console.log("Advisory-lock exclusion verified");
+			logger.info("Advisory-lock exclusion verified");
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
