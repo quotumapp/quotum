@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import { createTestPlatformManifest } from "../../scripts/lib/test-platform-bootstrap";
 import {
 	BunPlatformUnitOfWork,
@@ -50,12 +51,13 @@ localDescribe("platform project identity persistence", () => {
 			credentialsIssued: 0,
 		});
 
-		const unexpected = generateProjectApiCredential();
+		const unexpected = generateProjectApiCredential("production");
 		await expect(
 			service.apply(manifest, [
 				{
 					credentialId: unexpected.credentialId,
 					projectInstanceKey: "voysee",
+					environment: unexpected.environment,
 					secretVerifier: unexpected.secretVerifier,
 				},
 			]),
@@ -184,6 +186,7 @@ localDescribe("platform project identity persistence", () => {
 			"idx_platform_organizations_slug",
 			"idx_platform_projects_organization",
 			"idx_billing_projects_platform_project",
+			"idx_platform_project_api_credentials_secret_verifier",
 			"idx_platform_project_api_credentials_instance",
 			"idx_platform_project_api_credentials_active_instance",
 		]) {
@@ -242,31 +245,58 @@ localDescribe("platform project identity persistence", () => {
 		expect(credentials[0]?.count).toBe(0);
 	});
 
-	it("stores only a verifier and treats expired credentials as ineligible", async () => {
+	it("stores only a whole-token verifier under the internal credential UUID", async () => {
 		const token = integrationProjectCredential("voysee");
+		const sandboxToken = integrationProjectCredential("voysee-sandbox");
+		expect(token).toMatch(/^pqpk_[A-Za-z0-9_-]{43}$/u);
+		expect(sandboxToken).toMatch(/^sqpk_[A-Za-z0-9_-]{43}$/u);
 		const parsed = parseProjectApiCredential(token);
-		if (parsed === null) throw new Error("Expected a versioned integration credential");
+		if (parsed === null) throw new Error("Expected an environment-prefixed integration credential");
 		const rows = await context.sql<
-			Array<{ verifier_hex: string; created_at: Date; expires_at: Date | null }>
+			Array<{
+				id: string;
+				project_instance_id: string;
+				verifier_hex: string;
+				created_at: Date;
+				expires_at: Date | null;
+			}>
 		>`
-			SELECT encode(secret_verifier, 'hex') AS verifier_hex, created_at, expires_at
+			SELECT id, project_instance_id, encode(secret_verifier, 'hex') AS verifier_hex, created_at,
+				expires_at
 			FROM platform_project_api_credentials
-			WHERE id = ${parsed.credentialId}
+			WHERE secret_verifier = ${parsed.secretVerifier}
 		`;
 		const row = rows[0];
 		if (row === undefined) throw new Error("Expected a persisted credential verifier");
+		expect(rows).toHaveLength(1);
+		expect(row.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u);
+		expect(token).not.toContain(row.id);
+		expect(row.project_instance_id).toBe(integrationProjectContext("voysee").projectInstanceId);
 		expect(row.verifier_hex).toBe(Buffer.from(parsed.secretVerifier).toString("hex"));
-		expect(row.verifier_hex).not.toContain(token);
+		expect(row.verifier_hex).toBe(createHash("sha256").update(token, "utf8").digest("hex"));
+		expect(row.verifier_hex).not.toContain(token.slice("pqpk_".length));
 
+		const plan = await context.sql.begin(async (transaction) => {
+			await transaction`SET LOCAL enable_seqscan = off`;
+			return await transaction<Array<Record<string, string>>>`
+				EXPLAIN (COSTS OFF)
+				SELECT id FROM platform_project_api_credentials
+				WHERE secret_verifier = ${parsed.secretVerifier}
+			`;
+		});
+		expect(plan.map((line) => Object.values(line).join("")).join("\n")).toContain(
+			"idx_platform_project_api_credentials_secret_verifier",
+		);
+
+		const resolver = new PostgresProjectInstanceContextResolver(context.sql);
 		try {
 			await context.sql`
 				UPDATE platform_project_api_credentials
 				SET created_at = now() - INTERVAL '2 days',
 					expires_at = now() - INTERVAL '1 day',
 					updated_at = now()
-				WHERE id = ${parsed.credentialId}
+				WHERE id = ${row.id}
 			`;
-			const resolver = new PostgresProjectInstanceContextResolver(context.sql);
 			await expect(resolver.resolveCredential(token)).resolves.toEqual({ kind: "ineligible" });
 		} finally {
 			await context.sql`
@@ -274,7 +304,69 @@ localDescribe("platform project identity persistence", () => {
 				SET created_at = ${row.created_at.toISOString()},
 					expires_at = ${row.expires_at?.toISOString() ?? null},
 					updated_at = now()
-				WHERE id = ${parsed.credentialId}
+				WHERE id = ${row.id}
+			`;
+		}
+		await expect(resolver.resolveCredential(token)).resolves.toMatchObject({
+			kind: "resolved",
+		});
+	});
+
+	it("enforces verifier uniqueness across credentials", async () => {
+		const token = integrationProjectCredential("voysee");
+		const parsed = parseProjectApiCredential(token);
+		if (parsed === null) throw new Error("Expected an environment-prefixed integration credential");
+		const otherInstance = integrationProjectContext("wiseley").projectInstanceId;
+
+		let captured: unknown = null;
+		try {
+			await context.sql`
+				INSERT INTO platform_project_api_credentials (project_instance_id, secret_verifier)
+				VALUES (${otherInstance}, ${parsed.secretVerifier})
+			`;
+		} catch (error) {
+			captured = error;
+		}
+		expect((captured as { errno?: unknown } | null)?.errno).toBe("23505");
+		const [count] = await context.sql<Array<{ count: number }>>`
+			SELECT count(*)::integer AS count
+			FROM platform_project_api_credentials
+			WHERE secret_verifier = ${parsed.secretVerifier}
+		`;
+		expect(count?.count).toBe(1);
+	});
+
+	it("rejects a credential whose prefix does not match the stored instance environment", async () => {
+		const resolver = new PostgresProjectInstanceContextResolver(context.sql);
+		const production = integrationProjectContext("voysee");
+		const sandbox = integrationProjectContext("voysee-sandbox");
+		const internal = integrationProjectContext("billing-internal");
+		const cases = [
+			{ token: generateProjectApiCredential("sandbox"), instanceId: production.projectInstanceId },
+			{ token: generateProjectApiCredential("production"), instanceId: sandbox.projectInstanceId },
+			{ token: generateProjectApiCredential("production"), instanceId: internal.projectInstanceId },
+			{ token: generateProjectApiCredential("sandbox"), instanceId: internal.projectInstanceId },
+		];
+		try {
+			for (const { token, instanceId } of cases) {
+				await context.sql`
+					INSERT INTO platform_project_api_credentials (id, project_instance_id, secret_verifier)
+					VALUES (${token.credentialId}, ${instanceId}, ${token.secretVerifier})
+				`;
+				await expect(resolver.resolveCredential(token.token)).resolves.toEqual({
+					kind: "not_found",
+				});
+			}
+			const unknown = generateProjectApiCredential("production");
+			await expect(resolver.resolveCredential(unknown.token)).resolves.toEqual({
+				kind: "not_found",
+			});
+			const legacy = `qpk_v1.${cases[0]?.token.credentialId}.${cases[0]?.token.token.slice(5)}`;
+			await expect(resolver.resolveCredential(legacy)).resolves.toEqual({ kind: "not_found" });
+		} finally {
+			await context.sql`
+				DELETE FROM platform_project_api_credentials
+				WHERE id IN ${context.sql(cases.map(({ token }) => token.credentialId))}
 			`;
 		}
 	});

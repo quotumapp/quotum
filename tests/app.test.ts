@@ -667,8 +667,7 @@ describe("billing app", () => {
 				},
 			},
 		});
-		const unknownCredential = (suffix: number) =>
-			`qpk_v1.00000000-0000-4000-8000-${String(suffix).padStart(12, "0")}.${"A".repeat(43)}`;
+		const unknownCredential = (suffix: number) => `sqpk_${String(suffix).padStart(43, "A")}`;
 		const request = (suffix: number, ip: string) =>
 			testRequest(app, "/v1/catalog", {
 				headers: {

@@ -403,7 +403,7 @@ it("activates only reviewed production readiness and discloses its credential on
 		{ headers: { "x-quotum-step-up-grant": token }, key: "activate-once" },
 	);
 	expect(activated.credentialDisclosed).toBe(true);
-	expect(activated.credential.length).toBeGreaterThan(30);
+	expect(activated.credential).toMatch(/^pqpk_[A-Za-z0-9_-]{43}$/u);
 	const replay = await browser.json<Record<string, unknown>>(
 		"/api/platform/environments/activate",
 		{ scope: prod, fingerprint: ready.fingerprint },
@@ -420,6 +420,31 @@ it("activates only reviewed production readiness and discloses its credential on
 	).toBe("resolved");
 	expect(JSON.stringify(await f.sql`SELECT * FROM platform_connection_operations`)).not.toContain(
 		activated.credential,
+	);
+
+	const rotateGrant = await grant(browser, "rotate-production", "credentials.rotate");
+	const rotated = await browser.json<{ credential: string; credentialDisclosed: boolean }>(
+		"/api/platform/environments/credentials/rotate",
+		{ scope: prod },
+		{ headers: { "x-quotum-step-up-grant": rotateGrant }, key: "rotate-production" },
+	);
+	expect(rotated.credentialDisclosed).toBe(true);
+	expect(rotated.credential).toMatch(/^pqpk_[A-Za-z0-9_-]{43}$/u);
+	expect(rotated.credential).not.toBe(activated.credential);
+	const rotateReplay = await browser.json<Record<string, unknown>>(
+		"/api/platform/environments/credentials/rotate",
+		{ scope: prod },
+		{ key: "rotate-production" },
+	);
+	expect(rotateReplay).toEqual({ credentialDisclosed: false });
+	const resolver = new PostgresProjectInstanceContextResolver(f.client);
+	expect(await resolver.resolveCredential(activated.credential)).toEqual({ kind: "ineligible" });
+	expect(await resolver.resolveCredential(rotated.credential)).toMatchObject({
+		kind: "resolved",
+		context: { environment: "production" },
+	});
+	expect(JSON.stringify(await f.sql`SELECT * FROM platform_connection_operations`)).not.toContain(
+		rotated.credential,
 	);
 });
 

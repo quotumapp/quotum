@@ -238,7 +238,7 @@ export class MerchantOnboarding {
 			);
 			if (!instance)
 				throw new MerchantError("SANDBOX_NOT_READY", "Finish sandbox provisioning first.", 409);
-			const credential = generateProjectApiCredential();
+			const credential = generateProjectApiCredential("sandbox");
 			await tx`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND revoked_at IS NULL`;
 			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,secret_verifier) VALUES(${credential.credentialId},${instance.id},'billing_api',${credential.secretVerifier})`;
 			await tx`UPDATE platform_provisioning_operations SET credential_delivery='delivered' WHERE id=${id}`;

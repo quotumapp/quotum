@@ -55,7 +55,11 @@ localDescribe("billing auth and tenancy integration", () => {
 		});
 		const credential = integrationProjectCredential("voysee");
 		const parsed = parseProjectApiCredential(credential);
-		if (parsed === null) throw new Error("Expected a versioned integration credential");
+		if (parsed === null) throw new Error("Expected an environment-prefixed integration credential");
+		const [stored] = await context.sql<Array<{ id: string }>>`
+			SELECT id FROM platform_project_api_credentials WHERE secret_verifier = ${parsed.secretVerifier}
+		`;
+		if (stored === undefined) throw new Error("Expected a stored integration credential");
 
 		const beforeRevocation = await testRequest(
 			app,
@@ -70,7 +74,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			await context.sql`
 				UPDATE platform_project_api_credentials
 				SET revoked_at = now(), updated_at = now()
-				WHERE id = ${parsed.credentialId}
+				WHERE id = ${stored.id}
 			`;
 			const afterRevocation = await testRequest(
 				app,
@@ -88,7 +92,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			await context.sql`
 				UPDATE platform_project_api_credentials
 				SET revoked_at = NULL, updated_at = now()
-				WHERE id = ${parsed.credentialId}
+				WHERE id = ${stored.id}
 			`;
 		}
 	});

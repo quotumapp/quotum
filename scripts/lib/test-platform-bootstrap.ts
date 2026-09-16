@@ -1,7 +1,10 @@
 import type { SQL } from "bun";
 import { BunPlatformUnitOfWork } from "../../src/composition/project-instance-persistence";
 import { createBillingDatabaseConnection } from "../../src/db/client";
-import type { PlatformBootstrapManifest } from "../../src/platform/bootstrap/manifest";
+import {
+	type PlatformBootstrapManifest,
+	platformBootstrapCredentialEnvironment,
+} from "../../src/platform/bootstrap/manifest";
 import { PlatformBootstrapService } from "../../src/platform/bootstrap/service";
 import { generateProjectApiCredential } from "../../src/platform/credentials/project-api-token";
 import type { ProjectInstanceContext } from "../../src/projects/context";
@@ -22,13 +25,16 @@ export async function bootstrapTestPlatform(
 		const inspection = await service.inspect(manifest);
 		const generated = inspection.credentialsToIssue.map((projectInstanceKey) => ({
 			projectInstanceKey,
-			...generateProjectApiCredential(),
+			...generateProjectApiCredential(
+				platformBootstrapCredentialEnvironment(manifest, projectInstanceKey),
+			),
 		}));
 		await service.apply(
 			manifest,
 			generated.map((credential) => ({
 				credentialId: credential.credentialId,
 				projectInstanceKey: credential.projectInstanceKey,
+				environment: credential.environment,
 				secretVerifier: credential.secretVerifier,
 			})),
 		);

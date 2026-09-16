@@ -118,6 +118,20 @@ export type PlatformBootstrapManifest = z.infer<typeof bootstrapManifestSchema>;
 export type PlatformBootstrapInstance =
 	PlatformBootstrapManifest["organizations"][number]["projects"][number]["instances"][number];
 
+export function platformBootstrapCredentialEnvironment(
+	manifest: PlatformBootstrapManifest,
+	projectInstanceKey: string,
+): "sandbox" | "production" {
+	const instance = manifest.organizations
+		.flatMap((organization) => organization.projects)
+		.flatMap((project) => project.instances)
+		.find((candidate) => candidate.key === projectInstanceKey);
+	if (instance === undefined || !instance.issueCredential || instance.environment === "internal") {
+		throw new Error(`Bootstrap does not declare a credential for ${projectInstanceKey}`);
+	}
+	return instance.environment;
+}
+
 export function parsePlatformBootstrapManifest(value: string): PlatformBootstrapManifest {
 	let parsedJson: unknown;
 	try {

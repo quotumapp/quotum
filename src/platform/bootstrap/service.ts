@@ -16,6 +16,7 @@ import type { PlatformBootstrapManifest } from "./manifest";
 export interface PreparedPlatformCredential {
 	credentialId: string;
 	projectInstanceKey: string;
+	environment: "sandbox" | "production";
 	secretVerifier: Uint8Array;
 }
 
@@ -78,6 +79,9 @@ export class PlatformBootstrapService {
 				const instance = instancesByKey.get(prepared.projectInstanceKey);
 				if (instance === undefined) {
 					throw new Error(`Unknown bootstrap project instance: ${prepared.projectInstanceKey}`);
+				}
+				if (instance.environment !== prepared.environment) {
+					throw new Error("Prepared credentials do not match the platform bootstrap plan");
 				}
 				await credentials.create({
 					id: prepared.credentialId,

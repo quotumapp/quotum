@@ -4,6 +4,7 @@ import { createBillingDatabaseConnection } from "./db/client";
 import {
 	type PlatformBootstrapManifest,
 	parsePlatformBootstrapManifest,
+	platformBootstrapCredentialEnvironment,
 } from "./platform/bootstrap/manifest";
 import {
 	type PlatformBootstrapResult,
@@ -62,7 +63,9 @@ export async function applyPlatformBootstrap(
 
 	const generated = credentialsToIssue.map((projectInstanceKey) => ({
 		projectInstanceKey,
-		...generateProjectApiCredential(),
+		...generateProjectApiCredential(
+			platformBootstrapCredentialEnvironment(manifest, projectInstanceKey),
+		),
 	}));
 	let outputCreated = false;
 	let result: PlatformBootstrapResult;
@@ -77,6 +80,7 @@ export async function applyPlatformBootstrap(
 			generated.map((credential) => ({
 				credentialId: credential.credentialId,
 				projectInstanceKey: credential.projectInstanceKey,
+				environment: credential.environment,
 				secretVerifier: credential.secretVerifier,
 			})),
 		);
