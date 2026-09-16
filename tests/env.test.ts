@@ -29,6 +29,7 @@ describe("loadEnv", () => {
 		});
 
 		expect(env).toEqual({
+			logLevel: "info",
 			postgresUri,
 			postgresPreparedStatements: true,
 			authMode: "api_key",
@@ -89,6 +90,20 @@ describe("loadEnv", () => {
 			logLevel: "warn",
 			captureExpectedErrors: false,
 		});
+	});
+
+	it("parses local log levels independently of Sentry and rejects invalid settings", () => {
+		expect(loadEnv(developmentSource).logLevel).toBe("info");
+		const env = loadEnv({
+			...developmentSource,
+			BILLING_LOG_LEVEL: "silent",
+			SENTRY_LOG_LEVEL: "warn",
+		});
+		expect(env.logLevel).toBe("silent");
+		expect(env.sentry.logLevel).toBe("warn");
+		expect(() => loadEnv({ ...developmentSource, BILLING_LOG_LEVEL: "invalid" })).toThrow(
+			"BILLING_LOG_LEVEL",
+		);
 	});
 
 	it("parses Sentry observability overrides", () => {

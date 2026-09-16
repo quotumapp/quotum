@@ -2,11 +2,14 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { createCliBillingLogger } from "../src/observability/logger";
 import { trapInterrupts } from "./lib/interrupts";
 import { run, startPostgresContainer } from "./lib/postgres-container";
 import { createSanitizedProcessEnv } from "./lib/sanitized-env";
 import { bootstrapTestPlatform } from "./lib/test-platform-bootstrap";
 import { assertLaneReport, junitReporterArgs, readJunitSummary } from "./lib/test-report";
+
+const logger = createCliBillingLogger();
 
 const postgresDatabase = "voysee_billing_test";
 const testTargets = process.argv.slice(2);
@@ -18,7 +21,7 @@ const interrupts = trapInterrupts();
 try {
 	await runIntegrationTests();
 } catch (error) {
-	console.error(error instanceof Error ? error.message : String(error));
+	logger.error("Integration lane failed", error);
 	process.exitCode = interrupts.exitCode() ?? 1;
 }
 
@@ -57,7 +60,7 @@ async function runIntegrationTests(): Promise<void> {
 			try {
 				await container.stop();
 			} catch (error) {
-				console.error(error instanceof Error ? error.message : String(error));
+				logger.error("Postgres test container cleanup failed", error);
 			}
 		}
 		if (reportDirectory !== undefined) {

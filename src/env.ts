@@ -1,5 +1,6 @@
 import { isIP } from "node:net";
 import { z } from "zod";
+import { type BillingLogLevel, billingLogLevelSchema } from "./observability/log-level";
 
 export type AppleEnvironmentName = "sandbox" | "production";
 export type BillingRuntimeEnvironment = "development" | "test" | "production";
@@ -59,6 +60,7 @@ export interface StripeBillingEnv {
 }
 
 export interface BillingEnv {
+	logLevel?: BillingLogLevel;
 	postgresUri: string;
 	postgresPreparedStatements: boolean;
 	authMode: BillingAuthMode;
@@ -79,6 +81,7 @@ export interface BillingEnv {
 }
 
 const envSchema = z.object({
+	BILLING_LOG_LEVEL: billingLogLevelSchema,
 	POSTGRES_URI: requiredString("POSTGRES_URI"),
 	BILLING_POSTGRES_PREPARED_STATEMENTS: z.enum(["true", "false"]).default("true"),
 	BILLING_OPERATOR_API_KEY: optionalString(),
@@ -166,6 +169,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 	}
 
 	return {
+		logLevel: parsed.BILLING_LOG_LEVEL,
 		postgresUri: parsed.POSTGRES_URI,
 		postgresPreparedStatements: parsed.BILLING_POSTGRES_PREPARED_STATEMENTS !== "false",
 		authMode,

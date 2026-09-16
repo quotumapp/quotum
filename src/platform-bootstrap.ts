@@ -11,6 +11,7 @@ import {
 	PlatformBootstrapService,
 } from "./platform/bootstrap/service";
 import { generateProjectApiCredential } from "./platform/credentials/project-api-token";
+import { writeStdout } from "./shared/cli-output";
 
 if (import.meta.main) {
 	await runPlatformBootstrap();
@@ -28,7 +29,7 @@ async function runPlatformBootstrap(): Promise<void> {
 	try {
 		const inspection = await service.inspect(manifest);
 		if (mode.kind === "check") {
-			console.log(JSON.stringify(inspection, null, 2));
+			writeStdout(JSON.stringify(inspection, null, 2));
 			process.exitCode = platformBootstrapCheckExitCode(inspection);
 		} else {
 			await applyPlatformBootstrap(
@@ -55,7 +56,7 @@ export async function applyPlatformBootstrap(
 	manifest: PlatformBootstrapManifest,
 	credentialsToIssue: readonly string[],
 	credentialsOut: string | null,
-	writeSummary: (message: string) => void = console.log,
+	writeSummary: (message: string) => void = writeStdout,
 ): Promise<void> {
 	if (credentialsToIssue.length > 0 && credentialsOut === null) {
 		throw new Error("--credentials-out is required when bootstrap will issue credentials");

@@ -122,6 +122,31 @@ plaintext is never retained, so every integration needs a replacement:
 - `GET /v1/admin/metrics` returns the registry through the project-authenticated admin boundary
   and requires `X-Billing-Operator-Key`. Health routes are public.
 
+## Diagnostic logs and command output
+
+Service diagnostics use newline-delimited Pino JSON on stdout, including warnings and errors.
+Operator scripts and migration diagnostics write the same format to stderr. Writes are synchronous
+so final fatal-error and shutdown events reach the destination before process exit. Logging failures
+must not change billing results. `BILLING_LOG_LEVEL` defaults to `info` and controls local output;
+`silent` disables it without disabling Sentry forwarding. Sentry retains its own `SENTRY_LOG_LEVEL`,
+expected-error policy, and context sanitization.
+
+Events use Pino's numeric `level`, epoch-millisecond `time`, `pid`, `hostname`, and `msg` fields.
+Additional fields remain nested under `context`; errors use `err.type`, `err.message`, and
+`err.stack` when present. Error objects do not contribute arbitrary additional properties.
+BigInt context values are decimal strings and circular references use `[Circular]`.
+
+When upgrading from console logging, update log collectors alongside the service: string `level`
+becomes numeric, `timestamp` becomes `time`, `message` becomes `msg`, and `error.name` becomes
+`err.type`. Collect service warnings/errors from stdout and script diagnostics from stderr.
+No database migration is required, and the new log-level setting is optional.
+
+Command results retain their plain output contracts: catalog and bootstrap JSON, migration-status
+lines, secret-rotation counts, release labels and summaries, help, and report tables. The
+service-principal command still prints its one-time credential as command output; do not collect it
+as a diagnostic log. The reference projection receiver logs delivery summaries without printing its
+configured secret.
+
 ## Workers
 
 One process runs the HTTP API and all workers: projection delivery, provider event replay,

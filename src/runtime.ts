@@ -23,7 +23,7 @@ import {
 	StoreEventReplayJobRepository,
 } from "./db/repository-domains";
 import type { BillingEnv } from "./env";
-import { createConsoleBillingLogger } from "./observability/logger";
+import { createPinoBillingLogger } from "./observability/logger";
 import { createInMemoryBillingMetrics } from "./observability/metrics";
 import {
 	createSentryBillingLogger,
@@ -98,7 +98,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const merchantConfig = dependencies.merchant?.config ?? loadMerchantConfig();
 	const jobs: QuotumScheduledJob[] = [];
 	const billingRepository = new BillingRepository();
-	const baseLogger = createConsoleBillingLogger();
+	const baseLogger = createPinoBillingLogger({ level: env.logLevel ?? "info" });
 	const logger =
 		dependencies.sentry === undefined
 			? baseLogger
@@ -357,7 +357,7 @@ export function createBillingRuntime(
 	env: BillingEnv,
 	dependencies: BillingRuntimeDependencies = {},
 ) {
-	let pollingLogger: ReturnType<typeof createConsoleBillingLogger> | undefined;
+	let pollingLogger: ReturnType<typeof createPinoBillingLogger> | undefined;
 	return createRuntimeLifecycle({
 		acquire() {
 			if (runtimeActive) throw new Error("Only one active Quotum runtime is supported per process");

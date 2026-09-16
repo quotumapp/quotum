@@ -1,6 +1,8 @@
 import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { createCliBillingLogger } from "../src/observability/logger";
+import { writeStdout } from "../src/shared/cli-output";
 import {
 	buildVersion,
 	classifyPrTitle,
@@ -10,6 +12,8 @@ import {
 	renderUnreleasedSummary,
 	versionedContract,
 } from "./lib/release";
+
+const logger = createCliBillingLogger();
 
 const usage = `Usage:
   bun scripts/release.ts build-version
@@ -81,7 +85,7 @@ function imageManifest(positionals: string[], values: { digest?: string; "out-di
 	});
 	mkdirSync(outDir, { recursive: true });
 	writeFileSync(join(outDir, "image.json"), manifest);
-	console.log(`Wrote ${join(outDir, "image.json")}`);
+	logger.info(`Wrote ${join(outDir, "image.json")}`);
 }
 
 function prTitle() {
@@ -91,11 +95,11 @@ function prTitle() {
 	}
 	const result = classifyPrTitle(title);
 	if (!result.ok) {
-		console.error(result.error);
+		logger.error(result.error, undefined);
 		process.exitCode = 1;
 		return;
 	}
-	console.log(result.labels.join("\n"));
+	writeStdout(result.labels.join("\n"));
 }
 
 function unreleased() {
@@ -113,7 +117,7 @@ function unreleased() {
 	if (summaryPath) {
 		appendFileSync(summaryPath, summary);
 	}
-	console.log(summary);
+	writeStdout(summary);
 }
 
 try {
@@ -162,6 +166,6 @@ try {
 			throw new Error(usage);
 	}
 } catch (error) {
-	console.error(error instanceof Error ? error.message : String(error));
+	logger.error("Release command failed", error);
 	process.exitCode = 1;
 }

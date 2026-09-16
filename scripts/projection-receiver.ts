@@ -7,8 +7,8 @@
  * - Mounts the `/internal/billing/projections` endpoint shape a product backend exposes.
  * - Verifies `X-Billing-Signature` and `X-Billing-Timestamp` exactly the way the projection
  *   worker computes them, including the replay window.
- * - Prints every accepted and rejected delivery to stdout; pass `--log=<file>` to also persist
- *   deliveries as JSON across restarts.
+ * - Logs accepted and rejected delivery summaries as Pino JSON to stderr. Pass `--log=<file>`
+ *   to also persist deliveries as JSON across restarts.
  * - Tracks the per-account `sequence` and flags a snapshot older than one already applied as
  *   stale while still acknowledging it, which is what a real receiver should do.
  * - Optionally fails the first responses to exercise retry and backoff behavior.
@@ -20,6 +20,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { createCliBillingLogger } from "../src/observability/logger";
+
+const logger = createCliBillingLogger();
 
 interface Args {
 	port: number;
@@ -214,7 +217,7 @@ const server = Bun.serve({
 		for (const [k, v] of request.headers.entries()) headerMap[k] = v;
 		if (!constantTimeEquals(auth, expectedAuth)) {
 			rejectedCount += 1;
-			console.log(`[receiver ${stamp}] REJECT 401 bad authorization`);
+			logger.warn("Projection rejected", { status: 401, reason: "bad authorization" });
 			deliveries.push({
 				at: stamp,
 				reason: "bad-authorization",
@@ -229,7 +232,7 @@ const server = Bun.serve({
 		const verification = verifyRequest(body, ts, sig);
 		if (!verification.ok) {
 			rejectedCount += 1;
-			console.log(`[receiver ${stamp}] REJECT 401 ${verification.reason}`);
+			logger.warn("Projection rejected", { status: 401, reason: verification.reason });
 			deliveries.push({
 				at: stamp,
 				reason: verification.reason,
@@ -244,7 +247,7 @@ const server = Bun.serve({
 		if (args.fail > 0) {
 			args.fail -= 1;
 			rejectedCount += 1;
-			console.log(`[receiver ${stamp}] DELIBERATE 503 fail=${args.fail} remaining`);
+			logger.warn("Projection deliberately failed", { status: 503, remaining: args.fail });
 			deliveries.push({
 				at: stamp,
 				reason: "deliberate-503",
@@ -271,9 +274,11 @@ const server = Bun.serve({
 		if (summary.sequence !== null && !stale) {
 			lastSequenceByAccount[summary.billingAccountId] = summary.sequence;
 		}
-		console.log(
-			`[receiver ${stamp}] ${stale ? "STALE" : "ACCEPT"} #${acceptedCount} reason=${summary.reason} billingAccountId=${summary.billingAccountId} sequence=${summary.sequence ?? "-"} purchase=${summary.purchase ?? "-"} reversal=${summary.reversal ?? "-"}`,
-		);
+		logger.info("Projection received", {
+			status: stale ? "stale" : "accepted",
+			acceptedCount,
+			...summary,
+		});
 		deliveries.push({
 			at: stamp,
 			reason: summary.reason,
@@ -287,9 +292,11 @@ const server = Bun.serve({
 	},
 });
 
-console.log(
-	`projection receiver listening on http://127.0.0.1:${server.port} (secret="${args.secret}", deliberate-fail-remaining=${args.fail}, log=${args.log || "stdout only"})`,
-);
+logger.info("Projection receiver listening", {
+	url: `http://127.0.0.1:${server.port}`,
+	deliberateFailRemaining: args.fail,
+	logFile: args.log || null,
+});
 
 // Keep the event loop alive even if Bun's --hot / async cleanup ends.
 setInterval(() => {}, 1 << 30);
