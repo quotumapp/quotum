@@ -122,6 +122,49 @@ plaintext is never retained, so every integration needs a replacement:
 - `GET /v1/admin/metrics` returns the registry through the project-authenticated admin boundary
   and requires `X-Billing-Operator-Key`. Health routes are public.
 
+Both metrics endpoints return Prometheus text (`text/plain; version=0.0.4`) containing process
+metrics by default, even before billing activity. Existing `billing_*` counters and metering
+histograms appear as their operations run. Runtime metrics have no project or customer labels;
+`bun_version_info` has only a `version` label.
+
+| Metric | Type and meaning |
+| --- | --- |
+| `process_cpu_user_seconds_total`, `process_cpu_system_seconds_total`, `process_cpu_seconds_total` | Counters: cumulative process CPU time in seconds, including time before exporter creation. |
+| `process_resident_memory_bytes` | Gauge: resident process memory in bytes. |
+| `nodejs_heap_size_total_bytes`, `nodejs_heap_size_used_bytes` | Gauges: Bun's JavaScript heap size and usage in bytes. |
+| `nodejs_external_memory_bytes` | Gauge: external memory reported by Bun in bytes. |
+| `process_start_time_seconds` | Gauge: process start time as Unix epoch seconds; stable across scrapes. |
+| `process_uptime_seconds` | Gauge: elapsed process uptime in seconds. |
+| `nodejs_eventloop_lag_seconds` | Gauge: delay in seconds of one immediate callback scheduled during the scrape. |
+| `bun_version_info{version="…"}` | Gauge: always `1`, labelled with the actual Bun version. |
+
+The `nodejs_*` names retain compatibility with common process dashboards; the memory readings
+describe Bun's JavaScriptCore runtime. Node/V8 GC, heap-space, active handle/request/resource,
+and event-loop utilization collectors are excluded because Bun's compatibility APIs cannot report
+them faithfully. Event-loop lag is one scrape-time sample, not an interval maximum or percentile.
+Collection runs only during scrapes, with no persistent sampling timer. Concurrent scrapes share
+an in-flight collection. Each app/runtime owns its registry and billing counters; process readings
+cover the entire process, including HTTP handling and workers.
+Billing instrumentation retains its synchronous interface. The HTTP layer combines its output
+with the asynchronous runtime exporter for both metrics endpoints, including when billing metrics
+are supplied through dependency injection.
+
+For an existing Prometheus deployment, scrape each Quotum replica directly, replacing the example
+target with its reachable address:
+
+```yaml
+scrape_configs:
+  - job_name: quotum
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["quotum:3000"]
+```
+
+Inspect the response with `curl http://127.0.0.1:3000/metrics`. Prometheus supplies the `job` and
+`instance` target labels. No additional Quotum environment variables, ports, migrations, or exporter
+processes are required. The runtime continues to return 503 before `start()` and after `stop()`.
+
 ## Diagnostic logs and command output
 
 Service diagnostics use newline-delimited Pino JSON on stdout, including warnings and errors.

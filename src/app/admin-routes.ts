@@ -21,7 +21,6 @@ import type { AdminBillingReader, AdminListResult } from "../admin/types";
 import { BillingError } from "../billing/errors";
 import { projectScopedRateLimitGuard } from "../http/rate-limit";
 import { type BillingLogger, safelyLogInfo } from "../observability/logger";
-import type { BillingMetrics } from "../observability/metrics";
 import type { BillingAdminOperations } from "../operations/admin";
 import { constantTimeEquals } from "../shared/constant-time-equals";
 import { operationDetail } from "../shared/http";
@@ -42,7 +41,7 @@ export interface AdminRoutesDependencies {
 	adminLimiter: { check(key: string): { allowed: boolean; remaining: number; resetAt: Date } };
 	rateLimitKeyOptions: { trustProxyHeaders?: boolean };
 	operatorApiKey: string | null;
-	billingMetrics: BillingMetrics;
+	renderMetrics: () => Promise<string>;
 	billingLogger: BillingLogger;
 	getAdminBillingReader: () => AdminBillingReader | null;
 	adminOperations: BillingAdminOperations | null;
@@ -54,7 +53,7 @@ export function registerAdminRoutes({
 	adminLimiter,
 	rateLimitKeyOptions,
 	operatorApiKey,
-	billingMetrics,
+	renderMetrics,
 	billingLogger,
 	getAdminBillingReader,
 	adminOperations,
@@ -76,8 +75,8 @@ export function registerAdminRoutes({
 
 	app.get(
 		"/v1/admin/metrics",
-		() =>
-			new Response(billingMetrics.renderPrometheus(), {
+		async () =>
+			new Response(await renderMetrics(), {
 				headers: { "content-type": "text/plain; version=0.0.4" },
 			}),
 		{

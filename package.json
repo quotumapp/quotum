@@ -39,6 +39,7 @@
 	"dependencies": {
 		"@apple/app-store-server-library": "3.1.0",
 		"@googleapis/androidpublisher": "38.0.0",
+		"@prometheus-io/client": "0.16.1",
 		"@sentry/bun": "^10.74.0",
 		"@sentry/core": "10.74.0",
 		"@sinclair/typebox": "^0.34.52",
