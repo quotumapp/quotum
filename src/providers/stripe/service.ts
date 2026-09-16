@@ -8,9 +8,17 @@ import type {
 	CommercialPreviewDraft,
 	StoredCommercialActionPreview,
 } from "../../billing/commercial";
+import { priceCommercialLines } from "../../billing/commercial-pricing";
 import { sha256Hex, stableJson } from "../../billing/decimal";
 import { BillingError } from "../../billing/errors";
-import type { PromotionStripeSyncJob, PromotionStripeSyncOutcome } from "../../billing/promotions";
+import {
+	type CommercialPromotion,
+	normalizePromotionCode,
+	type PromotionStripeSyncJob,
+	type PromotionStripeSyncOutcome,
+	type PromotionTarget,
+	promotionError,
+} from "../../billing/promotions";
 import type {
 	SubscriptionChangeInput,
 	SubscriptionChangeOperation,
@@ -39,6 +47,7 @@ import type { StoreEventReplayProviderResult } from "../../workers/store-event-r
 import { requireNonBlank } from "../validation";
 import {
 	normalizeStripeCheckoutSession,
+	normalizeStripeCheckoutSessionTermination,
 	normalizeStripeDispute,
 	normalizeStripeInvoice,
 	normalizeStripeRefund,
@@ -46,6 +55,7 @@ import {
 } from "./normalizer";
 import { type StripePromotionClient, syncPromotionStripeObject } from "./promotions";
 import type {
+	NormalizedStripeCheckoutPromotion,
 	NormalizedStripeCommand,
 	NormalizedStripeCreditPurchaseCommand,
 	NormalizedStripeCreditReversalCommand,
@@ -140,6 +150,48 @@ interface StripeBillingRepositoryDependency {
 		input: Omit<SubscriptionChangeInput, "idempotencyKey" | "expectedStateFingerprint">,
 	): Promise<SubscriptionChangePreview>;
 	createCommercialActionPreview?(draft: CommercialPreviewDraft): Promise<CommercialActionPreview>;
+	resolveCommercialPromotion?(input: {
+		billingAccountId: string;
+		code: string;
+		target: PromotionTarget;
+	}): Promise<CommercialPromotion>;
+	prepareStripeCoupon?(
+		promotionId: string,
+	): Promise<{ objectId: string; status: string; externalId: string | null; error: string | null }>;
+	claimStripePromotionObject?(
+		objectId: string,
+		workerId: string,
+	): Promise<PromotionStripeSyncJob | null>;
+	markStripePromotionObjectOutcome?(
+		objectId: string,
+		workerId: string,
+		outcome:
+			| { kind: "ready"; externalId: string; providerActive: boolean }
+			| { kind: "retired"; externalId: string | null }
+			| { kind: "failed"; error: string; nextAttemptAt: Date | null },
+	): Promise<void>;
+	recordStripeCheckoutPromotion?(input: {
+		billingAccountId: string;
+		promotion: NormalizedStripeCheckoutPromotion;
+	}): Promise<void>;
+	releaseStripeCheckoutPromotion?(input: {
+		checkoutSessionId: string;
+		redemptionId: string | null;
+	}): Promise<void>;
+	reserveCommercialPromotion?(input: {
+		billingAccountId: string;
+		promotionCodeId: string;
+		idempotencyKey: string;
+		requestHash: string;
+		reservedUntil: Date;
+		effectSnapshot: Record<string, unknown>;
+		stripeCouponId: string;
+	}): Promise<{ id: string; status: "reserved" | "applied" | "released" | "reversed" }>;
+	attachPromotionCheckoutSession?(input: {
+		redemptionId: string;
+		checkoutSessionId: string;
+		reservedUntil: Date;
+	}): Promise<void>;
 	getCommercialActionPreview?(
 		billingAccountId: string,
 		previewToken: string,
@@ -194,6 +246,10 @@ export interface CreateStripeCheckoutSessionInput {
 	cancelUrl?: string | null;
 	expectedTargetId?: string;
 	expiresAt?: number;
+	/** Stripe coupon id Quotum already validated and reserved for this request. */
+	discountCoupon?: string;
+	promotionRedemptionId?: string;
+	allowPromotionCodes?: boolean;
 }
 
 export interface StripeCheckoutSessionResult {
@@ -319,6 +375,11 @@ export class StripeBillingService {
 			successUrl,
 			cancelUrl,
 			...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
+			...(input.discountCoupon === undefined ? {} : { discountCoupon: input.discountCoupon }),
+			...(input.promotionRedemptionId === undefined
+				? {}
+				: { promotionRedemptionId: input.promotionRedemptionId }),
+			...(input.allowPromotionCodes === true ? { allowPromotionCodes: true } : {}),
 		});
 		if (idempotencyKey !== null) {
 			const receipt = await this.dependencies.repository.prepareStripeCheckoutRequest({
@@ -349,6 +410,12 @@ export class StripeBillingService {
 			metadata = checkoutMetadata(billingAccountId, product);
 			lineItems = [{ price: product.externalPriceId, quantity: 1 }];
 		}
+		if (input.discountCoupon !== undefined && input.allowPromotionCodes === true) {
+			throw promotionError("PROMOTION_CODE_ENTRY_CONFLICT");
+		}
+		if (input.promotionRedemptionId !== undefined) {
+			metadata = { ...metadata, quotumPromotionRedemptionId: input.promotionRedemptionId };
+		}
 		const params: Stripe.Checkout.SessionCreateParams = {
 			customer: stripeCustomerId,
 			...(input.expiresAt === undefined ? {} : { expires_at: input.expiresAt }),
@@ -359,6 +426,10 @@ export class StripeBillingService {
 			client_reference_id: billingAccountId,
 			metadata,
 			integration_identifier: this.dependencies.config.integrationIdentifier ?? "qfmxzjpa",
+			...(input.discountCoupon === undefined
+				? {}
+				: { discounts: [{ coupon: input.discountCoupon }] }),
+			...(input.allowPromotionCodes === true ? { allow_promotion_codes: true } : {}),
 		};
 		if ((this.dependencies.config.taxMode ?? "disabled") !== "disabled") {
 			params.automatic_tax = { enabled: true };
@@ -462,6 +533,73 @@ export class StripeBillingService {
 		);
 	}
 
+	/**
+	 * Returns the Stripe coupon for a promotion, creating it now when the worker has not yet. A
+	 * coupon another process is creating, or one Stripe rejected, is reported as not ready.
+	 */
+	private async ensureStripeCoupon(promotionId: string): Promise<string> {
+		const repository = this.dependencies.repository;
+		if (
+			repository.prepareStripeCoupon === undefined ||
+			repository.claimStripePromotionObject === undefined ||
+			repository.markStripePromotionObjectOutcome === undefined
+		) {
+			throw promotionError("PROMOTION_PROVIDER_NOT_READY");
+		}
+		const prepared = await repository.prepareStripeCoupon(promotionId);
+		if (prepared.status === "ready" && prepared.externalId !== null) return prepared.externalId;
+		if (prepared.status === "failed") {
+			throw promotionError(
+				"PROMOTION_PROVIDER_NOT_READY",
+				`The Stripe coupon for this promotion failed: ${prepared.error ?? "unknown error"}`,
+			);
+		}
+		const workerId = `commercial:${crypto.randomUUID()}`;
+		const job = await repository.claimStripePromotionObject(prepared.objectId, workerId);
+		if (job === null) throw promotionError("PROMOTION_PROVIDER_NOT_READY");
+		const outcome = await this.syncPromotionStripeObject(job);
+		if (outcome.kind === "ready") {
+			await repository.markStripePromotionObjectOutcome(prepared.objectId, workerId, outcome);
+			return outcome.externalId;
+		}
+		await repository.markStripePromotionObjectOutcome(prepared.objectId, workerId, {
+			kind: "failed",
+			error: outcome.kind === "failed" ? outcome.error : "Stripe coupon was retired",
+			nextAttemptAt: outcome.kind === "failed" && outcome.terminal ? null : new Date(),
+		});
+		throw promotionError("PROMOTION_PROVIDER_NOT_READY");
+	}
+
+	private async reserveCheckoutPromotion(input: {
+		billingAccountId: string;
+		promotion: CommercialPromotion;
+		idempotencyKey: string;
+		requestHash: string;
+		stripeCouponId: string;
+	}): Promise<{ id: string; status: "reserved" | "applied" }> {
+		const repository = this.dependencies.repository;
+		if (repository.reserveCommercialPromotion === undefined) {
+			throw promotionError("PROMOTION_PROVIDER_NOT_READY");
+		}
+		const redemption = await repository.reserveCommercialPromotion({
+			billingAccountId: input.billingAccountId,
+			promotionCodeId: input.promotion.promotionCodeId,
+			idempotencyKey: input.idempotencyKey,
+			requestHash: input.requestHash,
+			reservedUntil: new Date(Date.now() + 30 * 60_000),
+			effectSnapshot: {
+				kind: "discount",
+				promotionKey: input.promotion.promotionKey,
+				discount: input.promotion.discount,
+			},
+			stripeCouponId: input.stripeCouponId,
+		});
+		if (redemption.status !== "reserved" && redemption.status !== "applied") {
+			throw promotionError("PROMOTION_CODE_EXHAUSTED");
+		}
+		return { id: redemption.id, status: redemption.status };
+	}
+
 	async previewCommercialAction(input: {
 		billingAccountId: string;
 		intent: CommercialActionIntent;
@@ -524,6 +662,20 @@ export class StripeBillingService {
 				effectiveAt: operation.effectiveAt,
 			};
 		} else {
+			const executionKey = commercialExecutionKey(previewToken, idempotencyKey);
+			const promotion = current.promotion ?? null;
+			let redemption: { id: string; status: "reserved" | "applied" } | null = null;
+			let discountCoupon: string | undefined;
+			if (promotion !== null) {
+				discountCoupon = await this.ensureStripeCoupon(promotion.promotionId);
+				redemption = await this.reserveCheckoutPromotion({
+					billingAccountId,
+					promotion,
+					idempotencyKey: `promotion:${executionKey}`,
+					requestHash: current.intentHash,
+					stripeCouponId: discountCoupon,
+				});
+			}
 			const session = await this.createCheckoutSession({
 				billingAccountId,
 				...(current.intent.kind === "checkout_plan"
@@ -533,10 +685,21 @@ export class StripeBillingService {
 				successUrl: current.intent.successUrl,
 				cancelUrl: current.intent.cancelUrl,
 				...(current.intent.expiresAt === undefined ? {} : { expiresAt: current.intent.expiresAt }),
-				idempotencyKey: commercialExecutionKey(previewToken, idempotencyKey),
+				...(discountCoupon === undefined || redemption === null
+					? {}
+					: { discountCoupon, promotionRedemptionId: redemption.id }),
+				...(current.intent.allowPromotionCodes === true ? { allowPromotionCodes: true } : {}),
+				idempotencyKey: executionKey,
 				expectedTargetId: current.preview.targetId,
 			});
-			result = { kind: "checkout", ...session };
+			if (redemption?.status === "reserved") {
+				await this.dependencies.repository.attachPromotionCheckoutSession?.({
+					redemptionId: redemption.id,
+					checkoutSessionId: session.sessionId,
+					reservedUntil: checkoutReservationDeadline(current.intent.expiresAt),
+				});
+			}
+			result = { kind: "checkout", ...session, promotionRedemption: redemption };
 		}
 		return await repository.completeCommercialActionExecution({
 			billingAccountId,
@@ -574,6 +737,7 @@ export class StripeBillingService {
 				intent: normalized,
 				intentHash,
 				stateFingerprint: change.stateFingerprint,
+				promotion: null,
 				preview: {
 					schemaVersion: 1,
 					intentHash,
@@ -581,10 +745,20 @@ export class StripeBillingService {
 					billingAccountId,
 					action: normalized.kind,
 					provider: "stripe",
-					lineItems: change.lineItems,
+					lineItems: change.lineItems.map((line) => ({
+						...line,
+						subtotalMinor: null,
+						discountMinor: null,
+						totalMinor: null,
+					})),
 					estimatedTotalMinor: null,
+					subtotalMinor: null,
+					discountTotalMinor: null,
 					currency: oneCurrency(change.lineItems),
 					amountStatus: "provider_calculated",
+					promotionCodeEntry: "none",
+					promotion: null,
+					nextCycle: null,
 					effectiveMode: change.effectiveMode,
 					effectiveAt: change.effectiveAt,
 					prorationBehavior: change.prorationBehavior,
@@ -597,17 +771,39 @@ export class StripeBillingService {
 			};
 		}
 
+		const hostedEntry = normalized.allowPromotionCodes === true;
 		if (normalized.kind === "checkout_product") {
 			const product = await this.dependencies.repository.getStripeWebStoreProductByKey(
 				normalized.productKey,
 			);
-			const stateFingerprint = sha256Hex(stableJson(product));
-			const amount = product.priceAmount ?? 0;
+			const promotion = await this.commercialPromotion(billingAccountId, normalized.promotionCode, {
+				kind: "product",
+				key: product.productKey,
+			});
+			const stateFingerprint = promotionFingerprint(sha256Hex(stableJson(product)), promotion);
+			const priced = priceCommercialLines({
+				lines: [
+					{
+						key: product.productKey,
+						label: product.productName ?? product.productKey,
+						quantity: 1,
+						unitAmountMinor: product.priceAmount ?? 0,
+						currency: product.currency ?? "",
+						interval: null,
+						pricingModel: "flat",
+					},
+				],
+				currency: product.currency,
+				recurringInterval: recurringIntervalOf(product.billingPeriod),
+				promotion,
+				hostedEntry,
+			});
 			return {
 				billingAccountId,
 				intent: normalized,
 				intentHash,
 				stateFingerprint,
+				promotion,
 				preview: {
 					schemaVersion: 1,
 					intentHash,
@@ -615,20 +811,8 @@ export class StripeBillingService {
 					billingAccountId,
 					action: normalized.kind,
 					provider: "stripe",
-					lineItems: [
-						{
-							key: product.productKey,
-							label: product.productName ?? product.productKey,
-							quantity: 1,
-							unitAmountMinor: amount,
-							currency: product.currency ?? "",
-							interval: null,
-							pricingModel: "flat",
-						},
-					],
-					estimatedTotalMinor: product.priceAmount,
+					...priced,
 					currency: product.currency,
-					amountStatus: "exact",
 					effectiveMode: null,
 					effectiveAt: null,
 					prorationBehavior: null,
@@ -636,7 +820,6 @@ export class StripeBillingService {
 					fromPlanVersionId: null,
 					toPlanVersionId: null,
 					targetId: product.storeProductId,
-					warnings: [],
 				},
 			};
 		}
@@ -657,26 +840,43 @@ export class StripeBillingService {
 		}
 		const quantities = normalizedLicensedQuantities(normalized.quantities);
 		const lines = commercialPlanLines(plan, quantities);
-		const stateFingerprint = sha256Hex(stableJson({ plan, hasActiveBasePlan }));
-		const exact = lines.every((line) => line.pricingModel === "flat");
+		const promotion = await this.commercialPromotion(billingAccountId, normalized.promotionCode, {
+			kind: "plan",
+			key: plan.planKey,
+		});
+		const stateFingerprint = promotionFingerprint(
+			sha256Hex(stableJson({ plan, hasActiveBasePlan })),
+			promotion,
+		);
+		const currency = oneCurrency(lines);
+		const priced = priceCommercialLines({
+			lines,
+			currency,
+			recurringInterval: lines.find((line) => line.interval !== null)?.interval ?? null,
+			promotion,
+			hostedEntry,
+		});
+		if (promotion !== null && plan.trialDays !== null && plan.trialDays > 0) {
+			priced.warnings.push(
+				"The plan starts with a trial; Stripe applies the discount to invoices from the trial onward.",
+			);
+		}
+		const intentWithQuantities = { ...normalized, quantities };
 		return {
 			billingAccountId,
-			intent: { ...normalized, quantities },
-			intentHash: sha256Hex(stableJson({ ...normalized, quantities })),
+			intent: intentWithQuantities,
+			intentHash: sha256Hex(stableJson(intentWithQuantities)),
 			stateFingerprint,
+			promotion,
 			preview: {
 				schemaVersion: 1,
-				intentHash: sha256Hex(stableJson({ ...normalized, quantities })),
+				intentHash: sha256Hex(stableJson(intentWithQuantities)),
 				stateFingerprint,
 				billingAccountId,
 				action: normalized.kind,
 				provider: "stripe",
-				lineItems: lines,
-				estimatedTotalMinor: exact
-					? lines.reduce((total, line) => total + line.unitAmountMinor * line.quantity, 0)
-					: null,
-				currency: oneCurrency(lines),
-				amountStatus: exact ? "exact" : "provider_calculated",
+				...priced,
+				currency,
 				effectiveMode: "immediate",
 				effectiveAt: new Date().toISOString(),
 				prorationBehavior: null,
@@ -684,9 +884,21 @@ export class StripeBillingService {
 				fromPlanVersionId: null,
 				toPlanVersionId: plan.planVersionId,
 				targetId: plan.planVersionId,
-				warnings: exact ? [] : ["Stripe calculates tiered line totals during Checkout."],
 			},
 		};
+	}
+
+	private async commercialPromotion(
+		billingAccountId: string,
+		code: string | null | undefined,
+		target: PromotionTarget,
+	): Promise<CommercialPromotion | null> {
+		if (code === undefined || code === null) return null;
+		const repository = this.dependencies.repository;
+		if (repository.resolveCommercialPromotion === undefined) {
+			throw promotionError("PROMOTION_PROVIDER_NOT_READY");
+		}
+		return await repository.resolveCommercialPromotion({ billingAccountId, code, target });
 	}
 
 	async applySubscriptionChange(operation: SubscriptionChangeOperation): Promise<string> {
@@ -1148,6 +1360,18 @@ export class StripeBillingService {
 					stripeCustomerId: command.stripeCustomerId,
 					email: null,
 				});
+				if (command.promotion !== undefined && command.promotion !== null) {
+					await this.dependencies.repository.recordStripeCheckoutPromotion?.({
+						billingAccountId: command.billingAccountId,
+						promotion: command.promotion,
+					});
+				}
+				return { status: "processed", eventType: command.eventType, entitlements: null };
+			case "checkout_promotion_release":
+				await this.dependencies.repository.releaseStripeCheckoutPromotion?.({
+					checkoutSessionId: command.checkoutSessionId,
+					redemptionId: command.redemptionId,
+				});
 				return { status: "processed", eventType: command.eventType, entitlements: null };
 			case "credit_purchase":
 				return recordingResultToWebhookResult(
@@ -1217,6 +1441,13 @@ function normalizeSupportedEvent(event: ParsedStripeEvent): NormalizedStripeComm
 				eventCreated: event.created,
 				session: event.object,
 			});
+		case "checkout.session.expired":
+		case "checkout.session.async_payment_failed":
+			return normalizeStripeCheckoutSessionTermination({
+				eventId: event.id,
+				eventType: event.type,
+				session: event.object,
+			});
 		case "invoice.paid":
 		case "invoice.payment_failed":
 			return normalizeStripeInvoice({
@@ -1279,6 +1510,7 @@ function toStripeCreditPurchaseRepositoryInput(
 		paymentIntentId: command.paymentIntentId,
 		chargeId: command.chargeId,
 		checkoutSessionId: command.checkoutSessionId,
+		promotion: command.promotion ?? null,
 		amountPaidCents: command.amountPaidCents,
 		currency: command.currency,
 		purchasedAt: command.purchasedAt,
@@ -1513,11 +1745,20 @@ function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialAc
 				: { prorationBehavior: intent.prorationBehavior }),
 		};
 	}
+	const promotionCode =
+		intent.promotionCode === undefined || intent.promotionCode === null
+			? null
+			: normalizePromotionCode(intent.promotionCode);
+	if (promotionCode !== null && intent.allowPromotionCodes === true) {
+		throw promotionError("PROMOTION_CODE_ENTRY_CONFLICT");
+	}
 	const common = {
 		email: optionalNonBlankString(intent.email) ?? null,
 		successUrl: optionalNonBlankString(intent.successUrl) ?? null,
 		cancelUrl: optionalNonBlankString(intent.cancelUrl) ?? null,
 		...(intent.expiresAt === undefined ? {} : { expiresAt: intent.expiresAt }),
+		...(promotionCode === null ? {} : { promotionCode }),
+		...(intent.allowPromotionCodes === true ? { allowPromotionCodes: true } : {}),
 	};
 	return intent.kind === "checkout_plan"
 		? {
@@ -1531,6 +1772,23 @@ function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialAc
 				productKey: requireNonBlank(intent.productKey, "productKey"),
 				...common,
 			};
+}
+
+/** Adds promotion state to a preview fingerprint only when a code is used, so other hashes hold. */
+function promotionFingerprint(base: string, promotion: CommercialPromotion | null): string {
+	return promotion === null
+		? base
+		: sha256Hex(stableJson({ base, promotion: promotion.fingerprint }));
+}
+
+function recurringIntervalOf(billingPeriod: string): "month" | "year" | null {
+	return billingPeriod === "month" || billingPeriod === "year" ? billingPeriod : null;
+}
+
+/** A reservation outlives its Checkout Session by an hour so the completion webhook still finds it. */
+function checkoutReservationDeadline(expiresAt: number | undefined): Date {
+	const sessionEnd = expiresAt === undefined ? Date.now() + 24 * 60 * 60_000 : expiresAt * 1000;
+	return new Date(sessionEnd + 60 * 60_000);
 }
 
 function oneCurrency(lines: CommercialActionPreview["lineItems"]): string | null {
@@ -1641,6 +1899,8 @@ function skippedEventTransactionId(event: ParsedStripeEvent): string | null {
 	switch (event.type) {
 		case "checkout.session.completed":
 		case "checkout.session.async_payment_succeeded":
+		case "checkout.session.expired":
+		case "checkout.session.async_payment_failed":
 			return (
 				optionalId(event.object.payment_intent) ??
 				optionalId(event.object.subscription) ??
@@ -1813,6 +2073,9 @@ function checkoutRequestHash(value: {
 	successUrl: string;
 	cancelUrl: string;
 	expiresAt?: number;
+	discountCoupon?: string;
+	promotionRedemptionId?: string;
+	allowPromotionCodes?: boolean;
 }): string {
 	return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }

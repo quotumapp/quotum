@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import {
+	applyDiscountToLines,
 	type CreatePromotionInput,
+	discountAppliesNextCycle,
 	normalizeCreatePromotionInput,
 	normalizePromotionCode,
 	type PromotionCodeAvailability,
@@ -285,5 +287,73 @@ describe("promotion code availability", () => {
 		expect(promotionCodeUnavailability({ ...available, reservedCount: 2 }, context)).toBe(
 			"PROMOTION_CODE_EXHAUSTED",
 		);
+	});
+});
+
+describe("discount math", () => {
+	it("rounds percentages half up per line", () => {
+		expect(
+			applyDiscountToLines(
+				[499, 1250, 5],
+				{ type: "percent", percentOffBps: 2000, duration: "once", durationMonths: null },
+				"USD",
+			),
+		).toEqual({ lineDiscountsMinor: [100, 250, 1], discountTotalMinor: 351 });
+		expect(
+			applyDiscountToLines(
+				[1000],
+				{ type: "percent", percentOffBps: 10_000, duration: "forever", durationMonths: null },
+				"USD",
+			),
+		).toEqual({ lineDiscountsMinor: [1000], discountTotalMinor: 1000 });
+	});
+
+	it("splits fixed amounts by subtotal with largest remainders and caps at the subtotal", () => {
+		const discount = {
+			type: "amount" as const,
+			amounts: [{ currency: "USD", amountOffMinor: 100 }],
+			duration: "once" as const,
+			durationMonths: null,
+		};
+		expect(applyDiscountToLines([300, 300, 300], discount, "usd")).toEqual({
+			lineDiscountsMinor: [34, 33, 33],
+			discountTotalMinor: 100,
+		});
+		expect(applyDiscountToLines([10, 70, 20], discount, "USD")).toEqual({
+			lineDiscountsMinor: [10, 70, 20],
+			discountTotalMinor: 100,
+		});
+		expect(applyDiscountToLines([40, 20], discount, "USD")).toEqual({
+			lineDiscountsMinor: [40, 20],
+			discountTotalMinor: 60,
+		});
+		expect(applyDiscountToLines([0], discount, "USD")).toEqual({
+			lineDiscountsMinor: [0],
+			discountTotalMinor: 0,
+		});
+		expect(applyDiscountToLines([100, null], discount, "USD")).toEqual({
+			lineDiscountsMinor: [null, null],
+			discountTotalMinor: null,
+		});
+		expect(errorCode(() => applyDiscountToLines([100], discount, "EUR"))).toBe(
+			"PROMOTION_CURRENCY_NOT_SUPPORTED",
+		);
+	});
+
+	it("keeps recurring discounts only while their duration covers the next invoice", () => {
+		const percent = (
+			duration: "once" | "repeating" | "forever",
+			durationMonths: number | null,
+		) => ({
+			type: "percent" as const,
+			percentOffBps: 1000,
+			duration,
+			durationMonths,
+		});
+		expect(discountAppliesNextCycle(percent("forever", null), "year")).toBe(true);
+		expect(discountAppliesNextCycle(percent("once", null), "month")).toBe(false);
+		expect(discountAppliesNextCycle(percent("repeating", 3), "month")).toBe(true);
+		expect(discountAppliesNextCycle(percent("repeating", 1), "month")).toBe(false);
+		expect(discountAppliesNextCycle(percent("repeating", 12), "year")).toBe(false);
 	});
 });

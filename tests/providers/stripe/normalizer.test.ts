@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { SubscriptionStatus } from "../../../src/billing/types";
 import {
 	normalizeStripeCheckoutSession,
+	normalizeStripeCheckoutSessionTermination,
 	normalizeStripeDispute,
 	normalizeStripeInvoice,
 	normalizeStripeRefund,
@@ -163,6 +164,87 @@ describe("Stripe normalizer", () => {
 		});
 	});
 
+	it("carries Quotum and hosted-entry discount facts from completed Checkout sessions", () => {
+		const quotum = normalizeStripeCheckoutSession({
+			eventId: "evt_discounted",
+			session: {
+				id: "cs_discounted",
+				mode: "payment",
+				payment_status: "paid",
+				customer: "cus_123",
+				payment_intent: "pi_discounted",
+				amount_subtotal: 499,
+				amount_total: 399,
+				total_details: { amount_discount: 100, amount_tax: 0 },
+				discounts: [{ coupon: { id: "quotum_coupon" }, promotion_code: null }],
+				currency: "usd",
+				created: stripeSeconds,
+				metadata: { ...checkoutMetadata(), quotumPromotionRedemptionId: "redemption-1" },
+			},
+		});
+		const hosted = normalizeStripeCheckoutSession({
+			eventId: "evt_hosted",
+			session: {
+				id: "cs_hosted",
+				mode: "subscription",
+				payment_status: "paid",
+				customer: "cus_123",
+				subscription: "sub_hosted",
+				amount_subtotal: 999,
+				amount_total: 799,
+				total_details: { amount_discount: 200 },
+				discounts: [{ coupon: "quotum_coupon", promotion_code: "promo_hosted" }],
+				currency: "usd",
+				created: stripeSeconds,
+				metadata: checkoutMetadata({ productKey: "premium_monthly", purchaseKind: "subscription" }),
+			},
+		});
+
+		expect(quotum).toMatchObject({
+			promotion: {
+				checkoutSessionId: "cs_discounted",
+				redemptionId: "redemption-1",
+				couponIds: ["quotum_coupon"],
+				promotionCodeIds: [],
+				subscriptionId: null,
+				currency: "usd",
+				amountSubtotalMinor: 499,
+				amountDiscountMinor: 100,
+				amountTotalMinor: 399,
+			},
+		});
+		expect(hosted).toMatchObject({
+			kind: "identity_only",
+			promotion: {
+				redemptionId: null,
+				promotionCodeIds: ["promo_hosted"],
+				subscriptionId: "sub_hosted",
+				amountDiscountMinor: 200,
+			},
+		});
+	});
+
+	it("releases a reserved promotion only for sessions Quotum created with one", () => {
+		expect(
+			normalizeStripeCheckoutSessionTermination({
+				eventId: "evt_expired",
+				eventType: "checkout.session.expired",
+				session: { id: "cs_expired", metadata: { quotumPromotionRedemptionId: "redemption-1" } },
+			}),
+		).toMatchObject({
+			kind: "checkout_promotion_release",
+			checkoutSessionId: "cs_expired",
+			redemptionId: "redemption-1",
+		});
+		expect(
+			normalizeStripeCheckoutSessionTermination({
+				eventId: "evt_expired_plain",
+				eventType: "checkout.session.async_payment_failed",
+				session: { id: "cs_plain", metadata: {} },
+			}),
+		).toMatchObject({ kind: "ignored", reason: "checkout_session_without_promotion" });
+	});
+
 	it("ignores payment Checkout sessions that owe money but are not paid", () => {
 		for (const session of [
 			{ payment_status: "unpaid", amount_total: 499 },
@@ -211,6 +293,7 @@ describe("Stripe normalizer", () => {
 			eventType: "checkout.session.completed",
 			externalEventId: "evt_sub",
 			rawPayload: expect.any(Object),
+			promotion: null,
 		});
 		expect("projectionIdempotencyKey" in command).toBe(false);
 	});

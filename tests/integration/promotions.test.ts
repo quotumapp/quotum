@@ -8,6 +8,11 @@ import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
+	stripeCheckoutSessionObject,
+	stripeEvent,
+	stripeRefundObject,
+} from "./helpers/fake-provider-clients";
+import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
 	integrationProjectContext,
@@ -882,6 +887,397 @@ localDescribe("promotion Stripe provisioning", () => {
 		expect(await worker.runOnce()).toMatchObject({ ready: 1 });
 	});
 });
+
+localDescribe("promotion Checkout", () => {
+	beforeAll(async () => {
+		context = await createLocalPostgresContext();
+	});
+
+	beforeEach(async () => {
+		await resetAndSeedIntegrationData(context.sql);
+		await publishAiCreditsCatalog(context.repository);
+	});
+
+	afterAll(async () => {
+		await context.sql.close();
+	});
+
+	it("previews, executes, applies and reverses a discount code on a credit pack", async () => {
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({
+				key: "save-20",
+				name: "Save 20",
+				codes: [{ code: "SAVE20", maxRedemptions: 5 }],
+			}),
+		);
+		const { app, stripe, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+
+		const previewResponse = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: {
+						kind: "checkout_product",
+						productKey: "echo_credits_10",
+						promotionCode: "save20",
+					},
+				}),
+			},
+		);
+		expect(previewResponse.status).toBe(200);
+		const preview = (await previewResponse.json()).data;
+		expect(preview).toMatchObject({
+			subtotalMinor: 499,
+			discountTotalMinor: 100,
+			estimatedTotalMinor: 399,
+			amountStatus: "exact",
+			promotionCodeEntry: "code",
+			promotion: {
+				promotionKey: "save-20",
+				code: "SAVE20",
+				discount: { type: "percent", percentOffBps: 2000, duration: "once" },
+			},
+			lineItems: [{ subtotalMinor: 499, discountMinor: 100, totalMinor: 399 }],
+			nextCycle: null,
+		});
+
+		const execute = () =>
+			testRequest(app, "/v1/billing-accounts/integration_user/commercial-actions", {
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "checkout-save20" },
+				body: JSON.stringify({ previewToken: preview.previewToken }),
+			});
+		const executed = await execute();
+		const replayed = await execute();
+		expect(executed.status).toBe(200);
+		const result = (await executed.json()).data;
+		expect(result).toMatchObject({
+			kind: "checkout",
+			sessionId: "cs_test_integration",
+			promotionRedemption: { status: "reserved" },
+		});
+		expect((await replayed.json()).data).toEqual(result);
+		expect(stripe.checkoutSessionParams).toHaveLength(1);
+		const [coupon] = [...stripe.promotions.coupons.values()];
+		expect(stripe.checkoutSessionParams[0]).toMatchObject({
+			discounts: [{ coupon: coupon?.id }],
+			metadata: { quotumPromotionRedemptionId: result.promotionRedemption.id },
+			payment_intent_data: {
+				metadata: { quotumPromotionRedemptionId: result.promotionRedemption.id },
+			},
+		});
+		expect(stripe.checkoutSessionParams[0]?.allow_promotion_codes).toBeUndefined();
+		expect(coupon?.params).toMatchObject({
+			percent_off: 20,
+			duration: "once",
+			applies_to: { products: ["prod_stripe_credits_10"] },
+		});
+		const [reserved] = await context.sql<
+			Array<{ status: string; stripe_checkout_session_id: string }>
+		>`
+			SELECT status, stripe_checkout_session_id FROM promotion_redemptions
+		`;
+		expect(reserved).toEqual({
+			status: "reserved",
+			stripe_checkout_session_id: "cs_test_integration",
+		});
+
+		const completed = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			stripeEvent: stripeEvent(
+				"checkout.session.completed",
+				stripeCheckoutSessionObject({
+					amount_subtotal: 499,
+					amount_total: 399,
+					total_details: { amount_discount: 100 },
+					discounts: [{ coupon: coupon?.id, promotion_code: null }],
+					metadata: {
+						...stripeCheckoutSessionObject().metadata,
+						quotumPromotionRedemptionId: result.promotionRedemption.id,
+					},
+				}),
+				"evt_discounted_checkout",
+			),
+		});
+		expect((await postWebhook(completed, "evt_discounted_checkout")).status).toBe(200);
+		const [applied] = await context.sql<
+			Array<{
+				status: string;
+				purchase_id: string | null;
+				amount_discount_minor: string;
+				redeemed_count: number;
+				reserved_count: number;
+			}>
+		>`
+			SELECT r.status, r.purchase_id, r.amount_discount_minor::text, c.redeemed_count, c.reserved_count
+			FROM promotion_redemptions r
+			JOIN promotion_codes c ON c.id = r.promotion_code_id
+		`;
+		expect(applied).toMatchObject({
+			status: "applied",
+			amount_discount_minor: "100",
+			redeemed_count: 1,
+			reserved_count: 0,
+		});
+		expect(applied?.purchase_id).not.toBeNull();
+
+		const refund = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			stripeEvent: stripeEvent(
+				"refund.created",
+				stripeRefundObject({ id: "re_discounted", amount: 399 }),
+				"evt_discounted_refund",
+			),
+		});
+		expect((await postWebhook(refund, "evt_discounted_refund")).status).toBe(200);
+		const [reversed] = await context.sql<Array<{ status: string; redeemed_count: number }>>`
+			SELECT r.status, c.redeemed_count
+			FROM promotion_redemptions r
+			JOIN promotion_codes c ON c.id = r.promotion_code_id
+		`;
+		expect(reversed).toEqual({ status: "reversed", redeemed_count: 1 });
+	});
+
+	it("releases the use when the Checkout Session expires and rejects invalid codes", async () => {
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({
+				key: "credits-launch",
+				name: "Credits launch",
+				effect: {
+					kind: "discount",
+					discount: {
+						type: "amount",
+						amounts: [{ currency: "USD", amountOffMinor: 300 }],
+						duration: "repeating",
+						durationMonths: 3,
+					},
+				},
+				codes: [{ code: "LAUNCH" }],
+			}),
+		);
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const preview = async (intent: Record<string, unknown>) =>
+			await testRequest(app, "/v1/billing-accounts/launch_user/commercial-actions/preview", {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ intent }),
+			});
+
+		const wrongTarget = await preview({
+			kind: "checkout_product",
+			productKey: "premium_monthly",
+			promotionCode: "LAUNCH",
+		});
+		const bothEntries = await preview({
+			kind: "checkout_product",
+			productKey: "echo_credits_10",
+			promotionCode: "LAUNCH",
+			allowPromotionCodes: true,
+		});
+		const unknown = await preview({
+			kind: "checkout_product",
+			productKey: "echo_credits_10",
+			promotionCode: "NOPE",
+		});
+		expect(wrongTarget.status).toBe(409);
+		expect((await wrongTarget.json()).error.code).toBe("PROMOTION_CODE_NOT_APPLICABLE");
+		expect(bothEntries.status).toBe(400);
+		expect((await bothEntries.json()).error.code).toBe("PROMOTION_CODE_ENTRY_CONFLICT");
+		expect(unknown.status).toBe(404);
+		expect((await unknown.json()).error.code).toBe("PROMOTION_CODE_NOT_FOUND");
+
+		const launchPreview = await preview({
+			kind: "checkout_product",
+			productKey: "echo_credits_10",
+			promotionCode: "LAUNCH",
+		});
+		expect(launchPreview.status).toBe(200);
+		const previewBody = (await launchPreview.json()).data;
+		expect(previewBody).toMatchObject({
+			promotionCodeEntry: "code",
+			discountTotalMinor: 300,
+			estimatedTotalMinor: 199,
+			promotion: { code: "LAUNCH", discount: { amountOffMinor: 300, currency: "USD" } },
+		});
+		const executed = await testRequest(app, "/v1/billing-accounts/launch_user/commercial-actions", {
+			method: "POST",
+			headers: { ...headers, "idempotency-key": "checkout-launch" },
+			body: JSON.stringify({ previewToken: previewBody.previewToken }),
+		});
+		expect(executed.status).toBe(200);
+		const redemptionId = (await executed.json()).data.promotionRedemption.id;
+
+		const expired = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			stripeEvent: stripeEvent(
+				"checkout.session.expired",
+				{
+					id: "cs_test_integration",
+					object: "checkout.session",
+					mode: "payment",
+					status: "expired",
+					metadata: { quotumPromotionRedemptionId: redemptionId },
+				},
+				"evt_launch_expired",
+			),
+		});
+		expect((await postWebhook(expired, "evt_launch_expired")).status).toBe(200);
+		const [released] = await context.sql<Array<{ status: string; reserved_count: number }>>`
+			SELECT r.status, c.reserved_count
+			FROM promotion_redemptions r
+			JOIN promotion_codes c ON c.id = r.promotion_code_id
+		`;
+		expect(released).toEqual({ status: "released", reserved_count: 0 });
+	});
+
+	it("opens hosted code entry and records a code the customer typed on Stripe", async () => {
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({
+				key: "hosted-sale",
+				name: "Hosted sale",
+				codes: [{ code: "HOSTED10", hostedCheckoutEnabled: true, maxRedemptions: 1 }],
+			}),
+		);
+		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+		const worker = new PromotionMaintenanceWorker({
+			workerId: "hosted-worker",
+			repository: {
+				releaseExpiredPromotionReservations: (limit) =>
+					context.repository.promotions.releaseExpiredPromotionReservations(limit),
+				reconcilePromotionCoupons: (limit) =>
+					context.repository.promotionProviders.reconcilePromotionCoupons(limit),
+				ensureHostedPromotionCodeObjects: (limit) =>
+					context.repository.promotionProviders.ensureHostedPromotionCodeObjects(limit),
+				claimStripeObjects: (workerId, limit, staleBefore) =>
+					context.repository.promotionProviders.claimStripeObjects(workerId, limit, staleBefore),
+				markStripeObjectOutcome: (projectId, objectId, workerId, outcome) =>
+					context.repository.promotionProviders.markStripeObjectOutcome(
+						projectId,
+						objectId,
+						workerId,
+						outcome,
+					),
+			},
+			projectContextResolver: integrationProjectContextResolver(),
+			stripeForProject: () => ({
+				syncPromotionStripeObject: (job) => syncPromotionStripeObject(fixture.stripe.client, job),
+			}),
+			logger: { error() {} },
+		});
+		await worker.runOnce();
+		await worker.runOnce();
+		const promotion = await context.repository.promotions.getPromotion(project, "hosted-sale");
+		const hostedObject = promotion.providerObjects.find(
+			(object) => object.objectKind === "promotion_code",
+		);
+		expect(hostedObject).toMatchObject({ status: "ready", providerActive: true });
+
+		const headers = { ...fixture.authHeaders("voysee"), "content-type": "application/json" };
+		const previewResponse = await testRequest(
+			fixture.app,
+			"/v1/billing-accounts/hosted_user/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: {
+						kind: "checkout_product",
+						productKey: "echo_credits_10",
+						allowPromotionCodes: true,
+					},
+				}),
+			},
+		);
+		const preview = (await previewResponse.json()).data;
+		expect(preview).toMatchObject({
+			promotionCodeEntry: "hosted",
+			discountTotalMinor: 0,
+			promotion: null,
+		});
+		const executed = await testRequest(
+			fixture.app,
+			"/v1/billing-accounts/hosted_user/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "checkout-hosted" },
+				body: JSON.stringify({ previewToken: preview.previewToken }),
+			},
+		);
+		expect((await executed.json()).data).toMatchObject({ promotionRedemption: null });
+		expect(fixture.stripe.checkoutSessionParams[0]).toMatchObject({ allow_promotion_codes: true });
+		expect(fixture.stripe.checkoutSessionParams[0]?.discounts).toBeUndefined();
+
+		const completed = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			stripeEvent: stripeEvent(
+				"checkout.session.completed",
+				stripeCheckoutSessionObject({
+					id: "cs_hosted",
+					amount_subtotal: 499,
+					amount_total: 449,
+					total_details: { amount_discount: 50 },
+					discounts: [{ coupon: "quotum_hosted", promotion_code: hostedObject?.externalId }],
+					payment_intent: "pi_hosted",
+					customer: "cus_hosted_user",
+					metadata: { ...stripeCheckoutSessionObject().metadata, billingAccountId: "hosted_user" },
+					client_reference_id: "hosted_user",
+				}),
+				"evt_hosted_checkout",
+			),
+		});
+		expect((await postWebhook(completed, "evt_hosted_checkout")).status).toBe(200);
+		expect(await postWebhook(completed, "evt_hosted_checkout")).toBeDefined();
+		const redemptions = await context.repository.promotions.listPromotionRedemptions(
+			project,
+			"hosted-sale",
+			{ limit: 10 },
+		);
+		expect(redemptions.items).toMatchObject([
+			{
+				billingAccountId: "hosted_user",
+				source: "stripe_hosted_checkout",
+				status: "applied",
+				stripeCheckoutSessionId: "cs_hosted",
+				amountDiscountMinor: 50,
+				limitViolation: null,
+			},
+		]);
+		expect(
+			(
+				await context.repository.promotions.getPromotion(project, "hosted-sale")
+			).providerObjects.find((object) => object.objectKind === "promotion_code"),
+		).toMatchObject({ desiredActive: false });
+	});
+});
+
+async function postWebhook(
+	fixture: ReturnType<typeof createIntegrationApp>,
+	eventId: string,
+): Promise<Response> {
+	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/stripe", {
+		method: "POST",
+		headers: { "content-type": "application/json", "stripe-signature": "sig_test" },
+		body: JSON.stringify({ id: eventId, type: "checkout.session.completed", data: { object: {} } }),
+	});
+}
 
 function discountPromotion(overrides: Partial<CreatePromotionInput> = {}): CreatePromotionInput {
 	return {

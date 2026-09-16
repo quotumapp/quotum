@@ -384,6 +384,21 @@ const promotionErrorDefinitions = [
 		message: "Promotion code cannot be redeemed on this channel",
 	},
 	{
+		code: "PROMOTION_CODE_ENTRY_CONFLICT",
+		status: 400,
+		message: "Send either promotionCode or allowPromotionCodes, not both",
+	},
+	{
+		code: "PROMOTION_CURRENCY_NOT_SUPPORTED",
+		status: 409,
+		message: "Promotion has no discount amount in this currency",
+	},
+	{
+		code: "PROMOTION_PROVIDER_NOT_READY",
+		status: 503,
+		message: "The provider discount for this promotion is not ready yet",
+	},
+	{
 		code: "PROMOTION_REDEMPTION_NOT_FOUND",
 		status: 404,
 		message: "Promotion redemption was not found",
@@ -697,4 +712,108 @@ function invalidTerms(detail: string): BillingError {
 /** Canonical decimal for a grant quantity read back from NUMERIC(28, 9). */
 export function promotionQuantity(value: string): string {
 	return canonicalDecimal(value, "quantity");
+}
+
+/** A validated discount code for a commercial action, with the state its preview is bound to. */
+export interface CommercialPromotion {
+	promotionId: string;
+	promotionKey: string;
+	promotionName: string;
+	promotionCodeId: string;
+	code: string;
+	hostedCheckoutEnabled: boolean;
+	discount: PromotionDiscount;
+	/** Terms and code state that must not change between preview and execution; not counters. */
+	fingerprint: Record<string, unknown>;
+}
+
+export interface DiscountedLines {
+	lineDiscountsMinor: Array<number | null>;
+	discountTotalMinor: number | null;
+}
+
+/**
+ * Discounts line subtotals the way Stripe does for one coupon: a percentage rounds half up per line;
+ * a fixed amount is capped at the subtotal and split across lines in proportion to their subtotals,
+ * handing leftover minor units to the largest remainders, lower index first on ties.
+ */
+export function applyDiscountToLines(
+	subtotalsMinor: ReadonlyArray<number | null>,
+	discount: PromotionDiscount,
+	currency: string | null,
+): DiscountedLines {
+	if (subtotalsMinor.some((subtotal) => subtotal === null)) {
+		return { lineDiscountsMinor: subtotalsMinor.map(() => null), discountTotalMinor: null };
+	}
+	const subtotals = subtotalsMinor.map((subtotal) => BigInt(subtotal ?? 0));
+	let discounts: bigint[];
+	if (discount.type === "percent") {
+		const bps = BigInt(discount.percentOffBps);
+		discounts = subtotals.map((subtotal) => (subtotal * bps + 5_000n) / 10_000n);
+	} else {
+		const amount = discountAmountFor(discount, currency);
+		const total = subtotals.reduce((sum, subtotal) => sum + subtotal, 0n);
+		const capped = BigInt(amount) < total ? BigInt(amount) : total;
+		if (total === 0n) {
+			discounts = subtotals.map(() => 0n);
+		} else {
+			discounts = subtotals.map((subtotal) => (capped * subtotal) / total);
+			let leftover = capped - discounts.reduce((sum, value) => sum + value, 0n);
+			const order = subtotals
+				.map((subtotal, index) => ({ index, remainder: (capped * subtotal) % total }))
+				.sort((left, right) =>
+					left.remainder === right.remainder
+						? left.index - right.index
+						: left.remainder > right.remainder
+							? -1
+							: 1,
+				);
+			for (const { index } of order) {
+				if (leftover === 0n) break;
+				discounts[index] = (discounts[index] ?? 0n) + 1n;
+				leftover -= 1n;
+			}
+		}
+	}
+	const lineDiscountsMinor = discounts.map((value) => Number(value));
+	return {
+		lineDiscountsMinor,
+		discountTotalMinor: lineDiscountsMinor.reduce((sum, value) => sum + value, 0),
+	};
+}
+
+export function discountAmountFor(discount: PromotionDiscount, currency: string | null): number {
+	if (discount.type !== "amount") {
+		throw new Error("Only fixed discounts have currency amounts");
+	}
+	const match = discount.amounts.find(
+		(amount) => currency !== null && amount.currency === currency.toUpperCase(),
+	);
+	if (match === undefined) {
+		throw promotionError("PROMOTION_CURRENCY_NOT_SUPPORTED");
+	}
+	return match.amountOffMinor;
+}
+
+/** Whether a recurring discount still applies on the invoice after the first billing interval. */
+export function discountAppliesNextCycle(
+	discount: PromotionDiscount,
+	interval: "month" | "year",
+): boolean {
+	if (discount.duration === "forever") return true;
+	if (discount.duration === "once") return false;
+	return (discount.durationMonths ?? 0) > (interval === "year" ? 12 : 1);
+}
+
+/** Discount facts from a completed Checkout Session, present only when a discount was involved. */
+export interface StripeCheckoutPromotionFacts {
+	checkoutSessionId: string;
+	redemptionId: string | null;
+	couponIds: string[];
+	promotionCodeIds: string[];
+	subscriptionId: string | null;
+	currency: string | null;
+	amountSubtotalMinor: number | null;
+	amountDiscountMinor: number | null;
+	amountTotalMinor: number | null;
 }

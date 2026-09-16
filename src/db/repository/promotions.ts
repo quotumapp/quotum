@@ -1,8 +1,9 @@
 import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import { decodeAdminCursor, encodeAdminCursor } from "../../admin/query";
-import { databaseDecimal } from "../../billing/decimal";
+import { databaseDecimal, sha256Hex } from "../../billing/decimal";
 import { PersistenceConflictError } from "../../billing/errors";
 import {
+	type CommercialPromotion,
 	type CreatePromotionInput,
 	type NormalizedPromotionCode,
 	normalizeCreatePromotionInput,
@@ -29,10 +30,12 @@ import {
 	promotionCodeUnavailability,
 	promotionError,
 	promotionQuantity,
+	type StripeCheckoutPromotionFacts,
 } from "../../billing/promotions";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
+import { ensureCustomer } from "./identities";
 import { lockCustomerRow } from "./invalidations";
 import {
 	PromotionProviderObjectRepository,
@@ -552,6 +555,156 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 		return await this.getPromotion(project, key);
 	}
 
+	/**
+	 * Validates a discount code for one Checkout target and returns its terms with the state a
+	 * commercial preview is bound to. Every eligibility failure throws its promotion error.
+	 */
+	async resolveCommercialPromotion(
+		project: ProjectInstanceContext,
+		input: { billingAccountId: string; code: string; target: PromotionTarget },
+	): Promise<CommercialPromotion> {
+		const validation = await this.validatePromotionCode(project, {
+			billingAccountId: input.billingAccountId,
+			code: input.code,
+			channel: "web",
+			target: input.target,
+		});
+		if (!validation.valid) {
+			throw promotionError(validation.reason ?? "PROMOTION_CODE_NOT_FOUND");
+		}
+		const resolved = await resolvePromotionCodeInTx(
+			this.database,
+			project.projectInstanceId,
+			input.code,
+		);
+		if (resolved === null) throw promotionError("PROMOTION_CODE_NOT_FOUND");
+		const { promotion, code } = resolved;
+		if (promotion.effect.kind !== "discount") {
+			throw promotionError("PROMOTION_CODE_NOT_APPLICABLE");
+		}
+		return {
+			promotionId: promotion.id,
+			promotionKey: promotion.key,
+			promotionName: promotion.name,
+			promotionCodeId: code.id,
+			code: code.code,
+			hostedCheckoutEnabled: code.hostedCheckoutEnabled,
+			discount: promotion.effect.discount,
+			fingerprint: {
+				promotionId: promotion.id,
+				status: promotion.status,
+				termsHash: promotion.termsHash,
+				allowedChannels: promotion.allowedChannels,
+				codeId: code.id,
+				active: code.active,
+				startsAt: code.startsAt,
+				expiresAt: code.expiresAt,
+				billingAccountId: code.billingAccountId,
+				firstPurchaseOnly: code.firstPurchaseOnly,
+				maxRedemptionsPerCustomer: code.maxRedemptionsPerCustomer,
+			},
+		};
+	}
+
+	/** Reserves one use of a discount code for a commercial action, creating the customer if needed. */
+	async reserveCommercialPromotion(
+		project: ProjectInstanceContext,
+		input: {
+			billingAccountId: string;
+			promotionCodeId: string;
+			idempotencyKey: string;
+			requestHash: string;
+			reservedUntil: Date;
+			effectSnapshot: Record<string, unknown>;
+			stripeCouponId: string;
+		},
+	): Promise<{ id: string; status: PromotionRedemptionStatus }> {
+		return await this.transaction(async (tx) => {
+			const projectId = project.projectInstanceId;
+			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
+			const { redemption } = await reservePromotionRedemptionInTx(tx, projectId, {
+				customerId: customer.id,
+				billingAccountId: input.billingAccountId,
+				promotionCodeId: input.promotionCodeId,
+				channel: "web",
+				provider: "stripe",
+				source: "commercial_action",
+				idempotencyKey: input.idempotencyKey,
+				requestHash: input.requestHash,
+				reservedUntil: input.reservedUntil,
+				effectSnapshot: input.effectSnapshot,
+				actor: "commercial-action",
+				stripeCouponId: input.stripeCouponId,
+			});
+			return { id: redemption.id, status: redemption.status };
+		});
+	}
+
+	/** Binds a reservation to its Checkout Session and keeps it until the session can complete. */
+	async attachPromotionCheckoutSession(
+		project: ProjectInstanceContext,
+		input: { redemptionId: string; checkoutSessionId: string; reservedUntil: Date },
+	): Promise<void> {
+		await executeOne(
+			this.database,
+			drizzleSql`
+				UPDATE promotion_redemptions
+				SET stripe_checkout_session_id = COALESCE(stripe_checkout_session_id, ${input.checkoutSessionId}),
+					reserved_until = GREATEST(reserved_until, ${input.reservedUntil.toISOString()}::timestamptz),
+					updated_at = now()
+				WHERE project_id = ${project.projectInstanceId}
+					AND id = ${input.redemptionId}
+					AND status = 'reserved'
+				RETURNING id
+			`,
+		);
+	}
+
+	/** Records the discount of a completed subscription Checkout Session. */
+	async recordStripeCheckoutPromotion(
+		project: ProjectInstanceContext,
+		input: { billingAccountId: string; promotion: StripeCheckoutPromotionFacts },
+	): Promise<void> {
+		await this.transaction(async (tx) => {
+			const projectId = project.projectInstanceId;
+			const customer = await executeOne<{ id: string }>(
+				tx,
+				drizzleSql`
+					SELECT id FROM customers
+					WHERE project_id = ${projectId} AND billing_account_id = ${input.billingAccountId}
+				`,
+			);
+			if (customer === null) return;
+			await recordCheckoutPromotionInTx(tx, projectId, {
+				customerId: customer.id,
+				purchaseId: null,
+				promotion: input.promotion,
+			});
+		});
+	}
+
+	/** An expired or failed Checkout Session gives its reserved use back. */
+	async releaseStripeCheckoutPromotion(
+		project: ProjectInstanceContext,
+		input: { checkoutSessionId: string; redemptionId: string | null },
+	): Promise<void> {
+		if (input.redemptionId === null) return;
+		const redemptionId = input.redemptionId;
+		await this.transaction(async (tx) => {
+			const projectId = project.projectInstanceId;
+			const owned = await executeOne<{ id: string }>(
+				tx,
+				drizzleSql`
+					SELECT id FROM promotion_redemptions
+					WHERE project_id = ${projectId}
+						AND id = ${redemptionId}
+						AND (stripe_checkout_session_id IS NULL OR stripe_checkout_session_id = ${input.checkoutSessionId})
+				`,
+			);
+			if (owned !== null) await releasePromotionRedemptionInTx(tx, projectId, owned.id);
+		});
+	}
+
 	/** Reads a code and its promotion by the code a customer typed. Never creates a customer. */
 	async resolvePromotionCode(
 		project: ProjectInstanceContext,
@@ -912,6 +1065,129 @@ export async function releasePromotionRedemptionInTx(
 		});
 	}
 	return await requireRedemption(tx, projectId, current.id);
+}
+
+/**
+ * Applies the reservation a Quotum Checkout Session carried, or records codes the customer typed on
+ * hosted Checkout. Stripe already charged the discount, so hosted uses are recorded even past a cap.
+ */
+export async function recordCheckoutPromotionInTx(
+	tx: QueryExecutor,
+	projectId: string,
+	input: { customerId: string; purchaseId: string | null; promotion: StripeCheckoutPromotionFacts },
+): Promise<void> {
+	const facts = input.promotion;
+	const amounts = {
+		currency: facts.currency,
+		amountSubtotalMinor: facts.amountSubtotalMinor,
+		amountDiscountMinor: facts.amountDiscountMinor,
+		amountTotalMinor: facts.amountTotalMinor,
+	};
+	if (facts.redemptionId !== null) {
+		const owned = await executeOne<{ id: string }>(
+			tx,
+			drizzleSql`
+				SELECT id FROM promotion_redemptions
+				WHERE project_id = ${projectId}
+					AND id = ${facts.redemptionId}
+					AND customer_id = ${input.customerId}
+					AND (stripe_checkout_session_id IS NULL OR stripe_checkout_session_id = ${facts.checkoutSessionId})
+			`,
+		);
+		if (owned !== null) {
+			await applyPromotionRedemptionInTx(tx, projectId, {
+				redemptionId: owned.id,
+				purchaseId: input.purchaseId,
+				stripeCheckoutSessionId: facts.checkoutSessionId,
+				externalSubscriptionId: facts.subscriptionId,
+				...amounts,
+			});
+			return;
+		}
+	}
+	for (const stripePromotionCodeId of facts.promotionCodeIds) {
+		const mapping = await executeOne<{
+			id: string;
+			promotion_id: string;
+			promotion_code_id: string;
+		}>(
+			tx,
+			drizzleSql`
+				SELECT id, promotion_id, promotion_code_id
+				FROM promotion_provider_objects
+				WHERE project_id = ${projectId}
+					AND provider = 'stripe'
+					AND object_kind = 'promotion_code'
+					AND external_id = ${stripePromotionCodeId}
+			`,
+		);
+		if (mapping === null) continue;
+		await lockCustomerRow(tx, projectId, input.customerId);
+		const inserted = await executeOne<{ id: string }>(
+			tx,
+			drizzleSql`
+				INSERT INTO promotion_redemptions (
+					project_id, promotion_id, promotion_code_id, customer_id, channel, status, provider,
+					source, purchase_id, provider_object_id, stripe_promotion_code_id,
+					stripe_checkout_session_id, external_subscription_id, currency,
+					amount_subtotal_minor, amount_discount_minor, amount_total_minor, effect_snapshot,
+					actor, idempotency_key, request_hash, applied_at
+				)
+				VALUES (
+					${projectId}, ${mapping.promotion_id}, ${mapping.promotion_code_id}, ${input.customerId},
+					'web', 'applied', 'stripe', 'stripe_hosted_checkout', ${input.purchaseId}, ${mapping.id},
+					${stripePromotionCodeId}, ${facts.checkoutSessionId}, ${facts.subscriptionId},
+					${facts.currency?.toUpperCase() ?? null}, ${facts.amountSubtotalMinor},
+					${facts.amountDiscountMinor}, ${facts.amountTotalMinor}, ${jsonb({ kind: "discount" })},
+					'provider:stripe', ${`stripe:checkout:${facts.checkoutSessionId}`},
+					${sha256Hex(facts.checkoutSessionId)}, now()
+				)
+				ON CONFLICT DO NOTHING
+				RETURNING id
+			`,
+		);
+		if (inserted === null) continue;
+		const counters = await executeOne<{ over_cap: boolean }>(
+			tx,
+			drizzleSql`
+				UPDATE promotion_codes
+				SET redeemed_count = redeemed_count + 1, updated_at = now()
+				WHERE project_id = ${projectId} AND id = ${mapping.promotion_code_id}
+				RETURNING max_redemptions IS NOT NULL
+					AND redeemed_count + reserved_count > max_redemptions AS over_cap
+			`,
+		);
+		if (counters?.over_cap === true) {
+			await executeOne(
+				tx,
+				drizzleSql`
+					UPDATE promotion_redemptions SET limit_violation = 'global', updated_at = now()
+					WHERE project_id = ${projectId} AND id = ${inserted.id}
+					RETURNING id
+				`,
+			);
+		}
+		await refreshHostedCodeDesiredStateInTx(tx, projectId, {
+			promotionCodeId: mapping.promotion_code_id,
+		});
+	}
+}
+
+/** A fully refunded purchase keeps its use counted but marks the discount redemption reversed. */
+export async function reversePromotionRedemptionsForPurchaseInTx(
+	tx: QueryExecutor,
+	projectId: string,
+	purchaseId: string,
+): Promise<void> {
+	await executeRows(
+		tx,
+		drizzleSql`
+			UPDATE promotion_redemptions
+			SET status = 'reversed', reversed_at = now(), updated_at = now()
+			WHERE project_id = ${projectId} AND purchase_id = ${purchaseId} AND status = 'applied'
+			RETURNING id
+		`,
+	);
 }
 
 async function lockRedemption(
