@@ -32,23 +32,30 @@ export function rollWindowBounds(
 	}
 	let currentStart = start;
 	let currentEnd = end;
+	const subscriptionDay = start.getUTCDate();
 	while (currentEnd <= now) {
 		currentStart = currentEnd;
-		currentEnd = addUtcInterval(currentEnd, interval);
+		currentEnd = addUtcInterval(currentEnd, interval, subscriptionDay);
 	}
 	return { start: currentStart, end: currentEnd };
 }
 
-export function addUtcInterval(value: Date, interval: "month" | "year"): Date {
-	const result = new Date(value);
-	if (interval === "month") result.setUTCMonth(result.getUTCMonth() + 1);
-	else result.setUTCFullYear(result.getUTCFullYear() + 1);
-	return result;
+export function addUtcInterval(
+	value: Date,
+	interval: "month" | "year",
+	anchorDay = value.getUTCDate(),
+): Date {
+	return addUtcMonths(value, interval === "month" ? 1 : 12, anchorDay);
 }
 
-export function addUtcMonths(value: Date, months: number): Date {
+export function addUtcMonths(value: Date, months: number, anchorDay = value.getUTCDate()): Date {
 	const result = new Date(value);
+	result.setUTCDate(1);
 	result.setUTCMonth(result.getUTCMonth() + months);
+	const lastDay = new Date(
+		Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0),
+	).getUTCDate();
+	result.setUTCDate(Math.min(anchorDay, lastDay));
 	return result;
 }
 
