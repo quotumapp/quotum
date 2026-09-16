@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import type { CreatePromotionInput, PromotionCodeInput } from "../../src/billing/promotions";
 import type { ReservePromotionRedemptionInput } from "../../src/db/repository/promotions";
 import { syncPromotionStripeObject } from "../../src/providers/stripe/promotions";
+import { StripeBillingService } from "../../src/providers/stripe/service";
 import { createFakeStripePromotions } from "../../src/providers/stripe/testing/fake-promotions";
 import { PromotionMaintenanceWorker } from "../../src/workers/promotion-maintenance";
 import { testRequest } from "../helpers/openapi";
@@ -19,6 +20,7 @@ import {
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 import { publishAiCreditsCatalog } from "./helpers/metering-catalog";
+import { seedPhase3CatalogMigration, seedPhase3ControlCatalog } from "./helpers/phase3-fixtures";
 import { integrationProjectContextResolver } from "./helpers/platform-fixture";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
@@ -1265,6 +1267,184 @@ localDescribe("promotion Checkout", () => {
 				await context.repository.promotions.getPromotion(project, "hosted-sale")
 			).providerObjects.find((object) => object.objectKind === "promotion_code"),
 		).toMatchObject({ desiredActive: false });
+	});
+});
+
+localDescribe("promotion subscription changes", () => {
+	beforeAll(async () => {
+		context = await createLocalPostgresContext();
+	});
+
+	beforeEach(async () => {
+		await resetAndSeedIntegrationData(context.sql);
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({
+				key: "upgrade-offer",
+				name: "Upgrade offer",
+				targets: [{ kind: "plan", key: "migration-plan" }],
+				effect: {
+					kind: "discount",
+					discount: {
+						type: "percent",
+						percentOffBps: 1000,
+						duration: "repeating",
+						durationMonths: 3,
+					},
+				},
+				codes: [{ code: "UPGRADE" }, { code: "UPGRADE-TWO" }],
+			}),
+		);
+	});
+
+	afterAll(async () => {
+		await context.sql.close();
+	});
+
+	const intent = (promotionCode: string) => ({
+		kind: "subscription_change",
+		externalSubscriptionId: "sub_migrate_stripe",
+		targetPlanKey: "migration-plan",
+		quantities: { licensed_seats: 8 },
+		effectiveMode: "immediate",
+		promotionCode,
+	});
+
+	it("reserves with the change, keeps merchant discounts on Stripe and applies with the change", async () => {
+		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+		const headers = { ...fixture.authHeaders("voysee"), "content-type": "application/json" };
+		const preview = await testRequest(
+			fixture.app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+			{ method: "POST", headers, body: JSON.stringify({ intent: intent("upgrade") }) },
+		);
+		expect(preview.status).toBe(200);
+		const previewBody = (await preview.json()).data;
+		expect(previewBody).toMatchObject({
+			amountStatus: "provider_calculated",
+			promotionCodeEntry: "code",
+			promotion: { code: "UPGRADE", discount: { type: "percent", percentOffBps: 1000 } },
+			nextCycle: {
+				interval: "month",
+				subtotalMinor: 2700,
+				discountMinor: 270,
+				totalMinor: 2430,
+				discountStatus: "applies",
+			},
+		});
+
+		const executed = await testRequest(
+			fixture.app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "upgrade-with-code" },
+				body: JSON.stringify({ previewToken: previewBody.previewToken }),
+			},
+		);
+		expect(executed.status).toBe(202);
+		const result = (await executed.json()).data;
+		expect(result).toMatchObject({
+			kind: "subscription_change",
+			promotionRedemption: { status: "reserved" },
+		});
+
+		const stacked = await testRequest(
+			fixture.app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+			{ method: "POST", headers, body: JSON.stringify({ intent: intent("UPGRADE-TWO") }) },
+		);
+		expect(stacked.status).toBe(409);
+		expect((await stacked.json()).error.code).toBe("PROMOTION_STACKING_NOT_ALLOWED");
+
+		const [operation] = await context.repository.claimSubscriptionChanges("change-worker", 10);
+		if (operation === undefined) throw new Error("change was not claimed");
+		const coupon = [...fixture.stripe.promotions.coupons.values()][0];
+		expect(operation).toMatchObject({
+			changeId: result.changeId,
+			discountCouponId: coupon?.id,
+			promotionRedemption: { id: result.promotionRedemption.id, status: "reserved" },
+		});
+		fixture.stripe.subscriptionDiscounts.set("sub_migrate_stripe", [
+			{ id: "di_merchant", couponId: "co_merchant" },
+		]);
+		const service = new StripeBillingService({
+			config: {
+				projectKey: "voysee",
+				checkoutSuccessUrl: "https://app.integration.test/success?session_id={CHECKOUT_SESSION_ID}",
+				checkoutCancelUrl: "https://app.integration.test/cancel",
+				portalReturnUrl: "https://app.integration.test/account",
+			},
+			client: fixture.stripe.client,
+			repository: context.repository.forProject(project),
+		});
+		await service.applySubscriptionChange(operation);
+		expect(fixture.stripe.subscriptionUpdates[0]?.params.discounts).toEqual([
+			{ discount: "di_merchant" },
+			{ coupon: coupon?.id },
+		]);
+		expect(fixture.stripe.subscriptionUpdates[0]?.idempotencyKey).toStartWith(
+			`billing:subscription-change:${result.changeId}:discounts:`,
+		);
+		await context.repository.markSubscriptionChangeApplied(
+			project.projectInstanceId,
+			result.changeId,
+			"sub_migrate_stripe",
+			"change-worker",
+		);
+		const [redemption] = await context.sql<
+			Array<{ status: string; external_subscription_id: string; redeemed_count: number }>
+		>`
+			SELECT r.status, r.external_subscription_id, c.redeemed_count
+			FROM promotion_redemptions r
+			JOIN promotion_codes c ON c.id = r.promotion_code_id
+		`;
+		expect(redemption).toEqual({
+			status: "applied",
+			external_subscription_id: "sub_migrate_stripe",
+			redeemed_count: 1,
+		});
+	});
+
+	it("releases the reserved use when the change fails for good", async () => {
+		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+		const headers = { ...fixture.authHeaders("voysee"), "content-type": "application/json" };
+		const preview = (
+			await (
+				await testRequest(
+					fixture.app,
+					"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+					{ method: "POST", headers, body: JSON.stringify({ intent: intent("UPGRADE") }) },
+				)
+			).json()
+		).data;
+		const executed = await testRequest(
+			fixture.app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "upgrade-fails" },
+				body: JSON.stringify({ previewToken: preview.previewToken }),
+			},
+		);
+		const changeId = (await executed.json()).data.changeId;
+		await context.sql`UPDATE subscription_changes SET attempts = 7 WHERE id = ${changeId}`;
+		await context.repository.claimSubscriptionChanges("change-worker", 10);
+		await context.repository.markSubscriptionChangeFailed(
+			project.projectInstanceId,
+			changeId,
+			"Stripe rejected the change",
+			"change-worker",
+		);
+
+		const [released] = await context.sql<Array<{ status: string; reserved_count: number }>>`
+			SELECT r.status, c.reserved_count
+			FROM promotion_redemptions r
+			JOIN promotion_codes c ON c.id = r.promotion_code_id
+		`;
+		expect(released).toEqual({ status: "released", reserved_count: 0 });
 	});
 });
 

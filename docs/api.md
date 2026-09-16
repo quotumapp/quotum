@@ -173,8 +173,14 @@ Checkout intents (`checkout_plan`, `checkout_product`) accept one discount entry
 
 Sending both returns `PROMOTION_CODE_ENTRY_CONFLICT`. A promotion without a Stripe coupon yet is
 created during execution; if Stripe rejected it, execution returns `PROMOTION_PROVIDER_NOT_READY`.
-Subscription changes do not accept codes yet. Metered overage invoices and automatic top-ups are
-billed at list price.
+
+`subscription_change` intents accept `promotionCode` for the target plan. Proration stays
+`provider_calculated`; `nextCycle` shows the discounted renewal, or `provider_calculated` for a
+`once` discount. A subscription with a Quotum discount that can still apply rejects another code
+with `PROMOTION_STACKING_NOT_ALLOWED`. Execution reserves the use with the queued change. The worker
+adds the coupon to the subscription while keeping its existing discounts, applies the use when the
+change applies, and releases it when the change fails for good. Metered overage invoices and
+automatic top-ups are billed at list price.
 
 ## Admin operations
 

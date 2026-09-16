@@ -20,6 +20,11 @@ import type {
 } from "../../billing/recurring";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
+import {
+	applyPromotionRedemptionInTx,
+	releasePromotionRedemptionInTx,
+	reservePromotionRedemptionInTx,
+} from "./promotions";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -76,6 +81,9 @@ interface ChangeRow {
 	external_subscription_id: string;
 	to_plan_version_id: string | number | bigint;
 	requested_quantities: Record<string, number>;
+	redemption_id: string | null;
+	redemption_status: "reserved" | "applied" | null;
+	stripe_coupon_id: string | null;
 }
 
 export class RecurringPricingRepository extends RepositoryModule {
@@ -116,8 +124,30 @@ export class RecurringPricingRepository extends RepositoryModule {
 					quantities,
 					effectiveMode,
 					prorationBehavior,
+					...(input.promotion === undefined
+						? {}
+						: { promotionCodeId: input.promotion.promotionCodeId }),
 				}),
 			);
+			const reservePromotion = async (changeId: string) => {
+				if (input.promotion === undefined) return;
+				await reservePromotionRedemptionInTx(tx, projectId, {
+					customerId: context.customer_id,
+					billingAccountId: input.billingAccountId,
+					promotionCodeId: input.promotion.promotionCodeId,
+					channel: "web",
+					provider: "stripe",
+					source: "commercial_action",
+					idempotencyKey: input.promotion.idempotencyKey,
+					requestHash,
+					reservedUntil: new Date(effectiveAt.getTime() + 24 * 60 * 60_000),
+					effectSnapshot: input.promotion.effectSnapshot,
+					actor: "commercial-action",
+					subscriptionChangeId: changeId,
+					externalSubscriptionId: input.externalSubscriptionId,
+					stripeCouponId: input.promotion.stripeCouponId,
+				});
+			};
 			const existing = await executeOne<{ id: string; request_hash: string }>(
 				tx,
 				drizzleSql`
@@ -135,6 +165,7 @@ export class RecurringPricingRepository extends RepositoryModule {
 						"IDEMPOTENCY_CONFLICT",
 					);
 				}
+				await reservePromotion(existing.id);
 				return await buildChangeOperation(tx, existing.id, false);
 			}
 			const pending = await executeOne<{ id: string }>(
@@ -188,6 +219,7 @@ export class RecurringPricingRepository extends RepositoryModule {
 					"IDEMPOTENCY_CONFLICT",
 				);
 			}
+			await reservePromotion(row.id);
 			return await buildChangeOperation(tx, row.id, false);
 		});
 	}
@@ -245,6 +277,13 @@ export class RecurringPricingRepository extends RepositoryModule {
 				`,
 			);
 			if (row === null) throw new Error(`Subscription change ${changeId} was not owned by worker`);
+			const redemption = await changeRedemption(tx, projectInstanceId, changeId);
+			if (redemption !== null) {
+				await applyPromotionRedemptionInTx(tx, projectInstanceId, {
+					redemptionId: redemption.id,
+					externalSubscriptionId: redemption.external_subscription_id,
+				});
+			}
 			await executeRows(
 				tx,
 				drizzleSql`
@@ -280,6 +319,10 @@ export class RecurringPricingRepository extends RepositoryModule {
 			);
 			if (row === null) throw new Error(`Subscription change ${changeId} was not owned by worker`);
 			if (row?.status === "failed") {
+				const redemption = await changeRedemption(tx, projectInstanceId, changeId);
+				if (redemption !== null) {
+					await releasePromotionRedemptionInTx(tx, projectInstanceId, redemption.id);
+				}
 				await executeRows(
 					tx,
 					drizzleSql`
@@ -1084,6 +1127,23 @@ function subscriptionChangePreview(
 	};
 }
 
+async function changeRedemption(
+	executor: QueryExecutor,
+	projectId: string,
+	changeId: string,
+): Promise<{ id: string; external_subscription_id: string | null } | null> {
+	return await executeOne<{ id: string; external_subscription_id: string | null }>(
+		executor,
+		drizzleSql`
+			SELECT id, external_subscription_id
+			FROM promotion_redemptions
+			WHERE project_id = ${projectId}
+				AND subscription_change_id = ${changeId}
+				AND status = 'reserved'
+		`,
+	);
+}
+
 async function buildChangeOperation(
 	executor: QueryExecutor,
 	changeId: string,
@@ -1096,11 +1156,16 @@ async function buildChangeOperation(
 				changes.id, changes.project_id, project.key AS project_key, changes.status, changes.change_kind,
 				changes.effective_mode, changes.effective_at, changes.proration_behavior,
 				subscription.external_subscription_id, changes.to_plan_version_id,
-				changes.requested_quantities
+				changes.requested_quantities, redemption.id AS redemption_id,
+				redemption.status AS redemption_status, redemption.stripe_coupon_id
 			FROM subscription_changes changes
 			JOIN projects project ON project.id = changes.project_id
 			JOIN subscriptions subscription
 				ON subscription.project_id = changes.project_id AND subscription.id = changes.subscription_id
+			LEFT JOIN promotion_redemptions redemption
+				ON redemption.project_id = changes.project_id
+				AND redemption.subscription_change_id = changes.id
+				AND redemption.status IN ('reserved', 'applied')
 			WHERE changes.id = ${changeId}
 				${requireProcessing ? drizzleSql`AND changes.status = 'processing'` : drizzleSql``}
 		`,
@@ -1194,6 +1259,11 @@ async function buildChangeOperation(
 		prorationBehavior: change.proration_behavior,
 		externalSubscriptionId: change.external_subscription_id,
 		targetPlanVersionId: String(change.to_plan_version_id),
+		discountCouponId: change.stripe_coupon_id,
+		promotionRedemption:
+			change.redemption_id === null || change.redemption_status === null
+				? null
+				: { id: change.redemption_id, status: change.redemption_status },
 		items,
 	};
 }

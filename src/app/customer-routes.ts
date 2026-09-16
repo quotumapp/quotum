@@ -124,6 +124,12 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 				.default({}),
 			effectiveMode: z.enum(["immediate", "period_end"]).optional(),
 			prorationBehavior: z.enum(["always_invoice", "create_prorations", "none"]).optional(),
+			promotionCode: z
+				.string()
+				.trim()
+				.regex(/^[A-Za-z0-9-]{3,64}$/)
+				.nullable()
+				.optional(),
 		})
 		.strict(),
 ]);

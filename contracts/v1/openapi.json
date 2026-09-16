@@ -12096,6 +12096,28 @@
                     ],
                     "type": "string"
                   },
+                  "promotionRedemption": {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "reserved",
+                          "applied"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "status"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
                   "status": {
                     "enum": [
                       "pending",
@@ -12203,6 +12225,28 @@
                       "subscription_change"
                     ],
                     "type": "string"
+                  },
+                  "promotionRedemption": {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "reserved",
+                          "applied"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "status"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
                   },
                   "status": {
                     "enum": [
@@ -18754,6 +18798,13 @@
                               "subscription_change"
                             ],
                             "type": "string"
+                          },
+                          "promotionCode": {
+                            "pattern": "^[A-Za-z0-9-]{3,64}$",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           },
                           "prorationBehavior": {
                             "enum": [
@@ -48948,6 +48999,13 @@
                               "subscription_change"
                             ],
                             "type": "string"
+                          },
+                          "promotionCode": {
+                            "pattern": "^[A-Za-z0-9-]{3,64}$",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           },
                           "prorationBehavior": {
                             "enum": [

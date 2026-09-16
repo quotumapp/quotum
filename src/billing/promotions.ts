@@ -389,6 +389,11 @@ const promotionErrorDefinitions = [
 		message: "Send either promotionCode or allowPromotionCodes, not both",
 	},
 	{
+		code: "PROMOTION_STACKING_NOT_ALLOWED",
+		status: 409,
+		message: "The subscription already has an active promotion discount",
+	},
+	{
 		code: "PROMOTION_CURRENCY_NOT_SUPPORTED",
 		status: 409,
 		message: "Promotion has no discount amount in this currency",

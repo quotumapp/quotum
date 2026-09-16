@@ -34,6 +34,10 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	private readonly invoicesByIdempotencyKey = new Map<string, FakeInvoice>();
 	private readonly invoiceLineKeys = new Set<string>();
 	private readonly subscriptionUpdates = new Map<string, { id: string }>();
+	private readonly subscriptionDiscounts = new Map<
+		string,
+		Array<{ id: string; couponId: string | null }>
+	>();
 	private readonly priceAmountsMinor: Readonly<Record<string, number>>;
 	private readonly failures = new Map<string, Error>();
 	readonly promotions = createFakeStripePromotions();
@@ -148,7 +152,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 
 	async updateSubscription(
 		subscriptionId: string,
-		_params: Stripe.SubscriptionUpdateParams,
+		params: Stripe.SubscriptionUpdateParams,
 		idempotencyKey: string,
 	): Promise<{ id: string }> {
 		this.throwIfFailed("updateSubscription");
@@ -156,7 +160,31 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		if (existing !== undefined) return existing;
 		const updated = { id: subscriptionId };
 		this.subscriptionUpdates.set(idempotencyKey, updated);
+		if (Array.isArray(params.discounts)) {
+			const previous = this.subscriptionDiscounts.get(subscriptionId) ?? [];
+			this.subscriptionDiscounts.set(
+				subscriptionId,
+				params.discounts.map((discount, index) =>
+					discount.discount !== undefined
+						? (previous.find((entry) => entry.id === discount.discount) ?? {
+								id: discount.discount,
+								couponId: null,
+							})
+						: {
+								id: `di_fake_${digest(`${subscriptionId}:${index}`).slice(0, 16)}`,
+								couponId: discount.coupon ?? null,
+							},
+				),
+			);
+		}
 		return updated;
+	}
+
+	async retrieveSubscriptionDiscounts(
+		subscriptionId: string,
+	): Promise<Array<{ id: string; couponId: string | null }>> {
+		this.throwIfFailed("retrieveSubscriptionDiscounts");
+		return this.subscriptionDiscounts.get(subscriptionId) ?? [];
 	}
 
 	async createInvoice(

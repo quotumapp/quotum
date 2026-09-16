@@ -305,6 +305,7 @@ describe("BillingRepository workers", () => {
 		const database = new FakeDatabase([
 			[{ id: "change-id" }],
 			[],
+			[],
 			[{ status: "pending" }],
 			[{ id: "period-id" }],
 			[{ id: "adjustment-id" }],
@@ -338,20 +339,21 @@ describe("BillingRepository workers", () => {
 			"worker-a",
 		);
 
-		for (const query of [database.queries[0], database.queries[2], ...database.queries.slice(3)]) {
+		expect(database.queries[1]).toContain("subscription_change_id =");
+		for (const query of [database.queries[0], database.queries[3], ...database.queries.slice(4)]) {
 			expect(query).toContain("project_id =");
 			expect(query).toContain("locked_by =");
 		}
-		for (const params of [database.params[0], database.params[2], ...database.params.slice(3)]) {
+		for (const params of [database.params[0], database.params[3], ...database.params.slice(4)]) {
 			expect(params).toContain("project-id");
 			expect(params).toContain("worker-a");
 		}
 		// The catalog_migration_jobs row is keyed by subscription_change_id whose owner
 		// row was lease-fenced by the preceding UPDATE in the same transaction.
-		expect(database.queries[1]).toContain("UPDATE catalog_migration_jobs");
-		expect(database.queries[1]).toContain("project_id =");
-		expect(database.params[1]).toContain("project-id");
-		expect(database.params[1]).toContain("change-id");
-		expect(database.params[1]).not.toContain("worker-a");
+		expect(database.queries[2]).toContain("UPDATE catalog_migration_jobs");
+		expect(database.queries[2]).toContain("project_id =");
+		expect(database.params[2]).toContain("project-id");
+		expect(database.params[2]).toContain("change-id");
+		expect(database.params[2]).not.toContain("worker-a");
 	});
 });
