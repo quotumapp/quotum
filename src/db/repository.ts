@@ -11,6 +11,8 @@ import type {
 } from "../billing/commercial";
 import type {
 	CustomerBillingSummary,
+	ProjectUsageEventListInput,
+	ProjectUsageEventPage,
 	UsageEventListInput,
 	UsageEventPage,
 	UsageSeriesInput,
@@ -419,6 +421,13 @@ export class BillingRepository {
 		input: UsageEventListInput,
 	): Promise<UsageEventPage> {
 		return await this.insights.listUsageEvents(project, input);
+	}
+
+	async listProjectUsageEvents(
+		project: ProjectInstanceContext,
+		input: ProjectUsageEventListInput,
+	): Promise<ProjectUsageEventPage> {
+		return await this.insights.listProjectUsageEvents(project, input);
 	}
 
 	async getUsageSeries(

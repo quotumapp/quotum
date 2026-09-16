@@ -51,22 +51,34 @@ export const getV1BillingAccountsByBillingAccountIdBillingSummaryResponse200Sche
 	}),
 });
 
+const usageEventItemSchema = z.object({
+	id: z.string(),
+	recordedAt: z.string(),
+	occurredAt: z.union([z.null(), z.string()]),
+	effectiveAt: z.string(),
+	operation: z.enum(["consume", "confirm", "correction"]),
+	featureKey: z.string(),
+	featureUnit: z.string(),
+	entityId: z.union([z.null(), z.string()]),
+	quantity: z.string(),
+	walletQuantity: z.string(),
+	filterKey: z.union([z.null(), z.string()]),
+	metadata: z.record(z.string(), z.unknown()),
+});
+
 export const getV1BillingAccountsByBillingAccountIdUsageEventsResponse200Schema = z.object({
 	success: z.literal(true),
+	data: z.array(usageEventItemSchema),
+	pagination: z.object({ nextCursor: z.union([z.null(), z.string()]) }),
+});
+
+export const getV1AdminUsageEventsResponse200Schema = z.object({
+	success: z.literal(true),
 	data: z.array(
-		z.object({
-			id: z.string(),
-			recordedAt: z.string(),
-			occurredAt: z.union([z.null(), z.string()]),
-			effectiveAt: z.string(),
-			operation: z.enum(["consume", "confirm", "correction"]),
-			featureKey: z.string(),
-			featureUnit: z.string(),
-			entityId: z.union([z.null(), z.string()]),
-			quantity: z.string(),
-			walletQuantity: z.string(),
-			filterKey: z.union([z.null(), z.string()]),
-			metadata: z.record(z.string(), z.unknown()),
+		usageEventItemSchema.extend({
+			customerId: z.string(),
+			billingAccountId: z.string(),
+			customerEmail: z.union([z.null(), z.string()]),
 		}),
 	),
 	pagination: z.object({ nextCursor: z.union([z.null(), z.string()]) }),

@@ -154,6 +154,61 @@ localDescribe("Cross-tenant identifiers", () => {
 		await expectTableCounts(context.sql, { usage_events: 1 });
 	});
 
+	it("keeps project usage event lists isolated by project", async () => {
+		await publishAiCreditsCatalog(context.repository, "voysee");
+		await publishAiCreditsCatalog(context.repository, "wiseley");
+		await context.repository.grantAllocation(voysee, {
+			billingAccountId: sharedAccount,
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "fixture:voysee-shared",
+		});
+		await context.repository.grantAllocation(wiseley, {
+			billingAccountId: sharedAccount,
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "fixture:wiseley-shared",
+		});
+		await context.repository.consumeUsage(voysee, {
+			billingAccountId: sharedAccount,
+			featureKey: "model_tokens",
+			quantity: "100",
+			idempotencyKey: "consume:voysee-shared",
+		});
+		await context.repository.consumeUsage(wiseley, {
+			billingAccountId: sharedAccount,
+			featureKey: "model_tokens",
+			quantity: "200",
+			idempotencyKey: "consume:wiseley-shared",
+		});
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const voyseeList = await testRequest(app, "/v1/admin/usage-events", {
+			headers: authHeaders("voysee"),
+		});
+		expect(voyseeList.status).toBe(200);
+		const voyseeBody = await voyseeList.json();
+		expect(voyseeBody.data).toHaveLength(1);
+		expect(voyseeBody.data[0]).toMatchObject({
+			billingAccountId: sharedAccount,
+			quantity: "100",
+		});
+		const wiseleyList = await testRequest(app, "/v1/admin/usage-events", {
+			headers: authHeaders("wiseley"),
+		});
+		expect(wiseleyList.status).toBe(200);
+		const wiseleyBody = await wiseleyList.json();
+		expect(wiseleyBody.data).toHaveLength(1);
+		expect(wiseleyBody.data[0]).toMatchObject({
+			billingAccountId: sharedAccount,
+			quantity: "200",
+		});
+	});
+
 	it("rejects license revoke and contract terminate against another project's ids", async () => {
 		await seedPhase3ControlCatalog(context.sql);
 		await seedPhase3CatalogMigration(context.sql);

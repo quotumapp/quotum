@@ -22,6 +22,7 @@ const readPatterns = [
 	"admin/subscriptions",
 	`admin/store-events(?:/${id})?`,
 	"admin/projection-jobs",
+	"admin/usage-events",
 	"admin/catalog(?:/(?:products|store-products))?",
 	`admin/billing-accounts/${account}/(?:billing-summary|billing-account|controls|usage/(?:events|series))`,
 ];

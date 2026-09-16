@@ -95,6 +95,13 @@ describe("merchant security boundaries", () => {
 			mutationTarget("POST", "/api/billing/admin/catalog/publish", { a: 2 }),
 		);
 	});
+	it("exposes project usage events to merchants as a billing read", () => {
+		for (const environment of ["sandbox", "production"] as const) {
+			expect(
+				merchantBillingRoute("GET", "/api/billing/admin/usage-events", environment),
+			).toMatchObject({ capability: "billing.read", sensitive: false });
+		}
+	});
 	it("does not expose global reconciliation or provider routes to merchants", () => {
 		for (const path of [
 			"/api/billing/admin/reconciliation/subscriptions/run",

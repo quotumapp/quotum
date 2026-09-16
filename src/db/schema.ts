@@ -1809,6 +1809,7 @@ export const usageEvents = pgTable(
 			table.customerId,
 			table.recordedAt,
 		),
+		index("idx_billing_usage_events_project_time").on(table.projectId, table.recordedAt, table.id),
 		index("idx_billing_usage_events_customer_feature_time").on(
 			table.projectId,
 			table.customerId,

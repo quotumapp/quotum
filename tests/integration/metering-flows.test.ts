@@ -400,6 +400,113 @@ localDescribe("authoritative metering flows", () => {
 		});
 	});
 
+	it("lists usage events across billing accounts with paging and filters", async () => {
+		const project = integrationProjectContext();
+		for (const billingAccountId of ["project_account_a", "project_account_b"]) {
+			await context.repository.grantAllocation(project, {
+				billingAccountId,
+				featureKey: "ai_credits",
+				quantity: "10",
+				sourceKind: "operator",
+				sourceKey: `fixture:${billingAccountId}`,
+			});
+		}
+		const first = await context.repository.consumeUsage(project, {
+			billingAccountId: "project_account_a",
+			featureKey: "model_tokens",
+			quantity: "100",
+			idempotencyKey: "project-events:a",
+		});
+		const second = await context.repository.consumeUsage(project, {
+			billingAccountId: "project_account_b",
+			featureKey: "model_tokens",
+			quantity: "200",
+			idempotencyKey: "project-events:b",
+		});
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+
+		const list = await testRequest(app, "/v1/admin/usage-events?limit=50", {
+			headers: authHeaders(),
+		});
+		expect(list.status).toBe(200);
+		const listBody = await list.json();
+		expect(listBody.data).toHaveLength(2);
+		expect(listBody.data[0]).toMatchObject({
+			billingAccountId: "project_account_b",
+			featureKey: "model_tokens",
+			quantity: "200",
+		});
+		expect(listBody.data[1]).toMatchObject({
+			billingAccountId: "project_account_a",
+			featureKey: "model_tokens",
+			quantity: "100",
+		});
+		for (const row of listBody.data) {
+			expect(typeof row.customerId).toBe("string");
+			expect(typeof row.billingAccountId).toBe("string");
+			expect(row.customerEmail === null || typeof row.customerEmail === "string").toBe(true);
+		}
+		expect(listBody.pagination.nextCursor).toBeNull();
+		expect(first.usageEventId).not.toBe(second.usageEventId);
+
+		const firstPageResponse = await testRequest(app, "/v1/admin/usage-events?limit=1", {
+			headers: authHeaders(),
+		});
+		expect(firstPageResponse.status).toBe(200);
+		const firstPage = await firstPageResponse.json();
+		expect(firstPage.data).toHaveLength(1);
+		expect(firstPage.data[0]).toMatchObject({ billingAccountId: "project_account_b" });
+		expect(firstPage.pagination.nextCursor).toEqual(expect.any(String));
+		const secondPageResponse = await testRequest(
+			app,
+			`/v1/admin/usage-events?limit=1&cursor=${encodeURIComponent(firstPage.pagination.nextCursor)}`,
+			{ headers: authHeaders() },
+		);
+		expect(secondPageResponse.status).toBe(200);
+		const secondPage = await secondPageResponse.json();
+		expect(secondPage.data).toHaveLength(1);
+		expect(secondPage.data[0]).toMatchObject({ billingAccountId: "project_account_a" });
+
+		const filtered = await testRequest(
+			app,
+			"/v1/admin/usage-events?billingAccountId=project_account_a",
+			{ headers: authHeaders() },
+		);
+		expect(filtered.status).toBe(200);
+		const filteredBody = await filtered.json();
+		expect(filteredBody.data).toHaveLength(1);
+		expect(filteredBody.data[0]).toMatchObject({ billingAccountId: "project_account_a" });
+
+		const unknown = await testRequest(
+			app,
+			"/v1/admin/usage-events?billingAccountId=unknown_account",
+			{ headers: authHeaders() },
+		);
+		expect(unknown.status).toBe(200);
+		expect(await unknown.json()).toMatchObject({ success: true, data: [] });
+
+		const byOperation = await testRequest(app, "/v1/admin/usage-events?operation=consume", {
+			headers: authHeaders(),
+		});
+		expect(byOperation.status).toBe(200);
+		expect((await byOperation.json()).data).toHaveLength(2);
+		const byFeature = await testRequest(app, "/v1/admin/usage-events?featureKey=model_tokens", {
+			headers: authHeaders(),
+		});
+		expect(byFeature.status).toBe(200);
+		expect((await byFeature.json()).data).toHaveLength(2);
+		const missingFeature = await testRequest(
+			app,
+			"/v1/admin/usage-events?featureKey=api_requests",
+			{ headers: authHeaders() },
+		);
+		expect(missingFeature.status).toBe(200);
+		expect((await missingFeature.json()).data).toHaveLength(0);
+	});
+
 	it("serializes concurrent reservations and confirms or releases held capacity", async () => {
 		await context.repository.grantAllocation(integrationProjectContext(), {
 			billingAccountId: "account_2",

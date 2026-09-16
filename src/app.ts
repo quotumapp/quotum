@@ -359,6 +359,7 @@ export function createApp({
 		app,
 		service: billingInsightsService ?? {
 			listUsageEvents: (...args) => getRepository().listUsageEvents(...args),
+			listProjectUsageEvents: (...args) => getRepository().listProjectUsageEvents(...args),
 			getUsageSeries: (...args) => getRepository().getUsageSeries(...args),
 			getCustomerBillingSummary: (...args) => getRepository().getCustomerBillingSummary(...args),
 		},
