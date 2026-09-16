@@ -67,6 +67,7 @@ export class CaptureMailer implements MerchantMailer {
 }
 export function merchantFixture(
 	options: {
+		now?: () => Date;
 		google?: { clientId: string; clientSecret: string };
 		connectionValidation?: ConnectionValidationPort;
 		environmentBilling?: EnvironmentBillingPort;
@@ -84,7 +85,7 @@ export function merchantFixture(
 	const store = new MerchantStore(
 		sql,
 		{ ...testConfig, google: options.google ?? null },
-		() => new Date(Date.now() + timeOffset),
+		() => new Date((options.now?.().getTime() ?? Date.now()) + timeOffset),
 	);
 	const auth = createMerchantAuth(store, mailer, merchantAuthDatabase(client));
 	const onboarding = new MerchantOnboarding(store, async (environment) => {

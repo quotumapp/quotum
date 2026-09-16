@@ -18,6 +18,7 @@ import {
 	MerchantError,
 	randomToken,
 	SESSION_COOKIE,
+	SESSION_TOUCH_MS,
 	tokenHash,
 } from "./security";
 
@@ -33,6 +34,20 @@ export interface MerchantIdentity {
 	createdAt: Date;
 	lastSeenAt: Date;
 	absoluteExpiresAt: Date;
+}
+interface MerchantSessionRow {
+	id: string;
+	principal_id: string;
+	auth_user_id: string;
+	name: string;
+	email: string;
+	auth_method: MerchantAuthMethod;
+	issuer: string;
+	subject: string;
+	created_at: Date;
+	last_seen_at: Date;
+	absolute_expires_at: Date;
+	csrf_hash: string;
 }
 export interface MembershipRecord {
 	id: string;
@@ -131,23 +146,7 @@ export class MerchantStore {
 	async authenticate(request: Request): Promise<MerchantIdentity> {
 		const raw = cookieValue(request.headers, SESSION_COOKIE);
 		if (!raw) throw new MerchantError("SESSION_REQUIRED", "Sign in to continue.", 401);
-		const now = this.now();
-		const [row] = await this.sql<
-			{
-				id: string;
-				principal_id: string;
-				auth_user_id: string;
-				name: string;
-				email: string;
-				auth_method: MerchantAuthMethod;
-				issuer: string;
-				subject: string;
-				created_at: Date;
-				last_seen_at: Date;
-				absolute_expires_at: Date;
-				csrf_hash: string;
-			}[]
-		>`UPDATE platform_merchant_sessions s SET last_seen_at=${now} FROM platform_principals p,platform_auth_users u WHERE s.token_hash=${this.hash(raw)} AND s.principal_id=p.id AND p.auth_user_id=u.id AND p.status='active' AND s.revoked_at IS NULL AND s.absolute_expires_at>${now} AND s.last_seen_at>${new Date(now.getTime() - IDLE_MS)} RETURNING s.*,p.auth_user_id,u.name,u.email`;
+		const row = await this.touchSession(this.hash(raw), this.now());
 		if (!row)
 			throw new MerchantError(
 				"SESSION_EXPIRED",
@@ -172,6 +171,25 @@ export class MerchantStore {
 			lastSeenAt: row.last_seen_at,
 			absoluteExpiresAt: row.absolute_expires_at,
 		};
+	}
+	private async readValidSession(hash: string, now: Date): Promise<MerchantSessionRow | undefined> {
+		const [row] = await this.sql<
+			MerchantSessionRow[]
+		>`SELECT s.*,p.auth_user_id,u.name,u.email FROM platform_merchant_sessions s JOIN platform_principals p ON s.principal_id=p.id JOIN platform_auth_users u ON p.auth_user_id=u.id WHERE s.token_hash=${hash} AND p.status='active' AND s.revoked_at IS NULL AND s.absolute_expires_at>${now} AND s.last_seen_at>${new Date(now.getTime() - IDLE_MS)}`;
+		return row;
+	}
+	private async touchSession(hash: string, now: Date): Promise<MerchantSessionRow | undefined> {
+		const row = await this.readValidSession(hash, now);
+		const cutoff = new Date(now.getTime() - SESSION_TOUCH_MS);
+		if (!row || row.last_seen_at > cutoff) return row;
+		// Recheck validity and the interval under the UPDATE row lock. Concurrent requests
+		// can read the same old timestamp, but only one must write at this boundary.
+		const [updated] = await this.sql<
+			MerchantSessionRow[]
+		>`UPDATE platform_merchant_sessions s SET last_seen_at=${now} FROM platform_principals p,platform_auth_users u WHERE s.token_hash=${hash} AND s.principal_id=p.id AND p.auth_user_id=u.id AND p.status='active' AND s.revoked_at IS NULL AND s.absolute_expires_at>${now} AND s.last_seen_at>${new Date(now.getTime() - IDLE_MS)} AND s.last_seen_at<=${cutoff} RETURNING s.*,p.auth_user_id,u.name,u.email`;
+		// A missed update can mean a concurrent touch, revocation, rotation or deactivation.
+		// Never authorize from the stale first read. Re-read through the same validity checks.
+		return updated ?? this.readValidSession(hash, this.now());
 	}
 	async exchange(
 		authToken: string,
@@ -328,7 +346,7 @@ export class MerchantStore {
 			principal: { id: identity.principalId, name: identity.name, email: identity.email },
 			authMethod: identity.authMethod,
 			idleExpiresAt: new Date(
-				Math.min(this.now().getTime() + IDLE_MS, identity.absoluteExpiresAt.getTime()),
+				Math.min(identity.lastSeenAt.getTime() + IDLE_MS, identity.absoluteExpiresAt.getTime()),
 			).toISOString(),
 			absoluteExpiresAt: identity.absoluteExpiresAt.toISOString(),
 			memberships,
