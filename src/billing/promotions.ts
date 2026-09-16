@@ -124,7 +124,66 @@ export interface PromotionRecord {
 	archivedAt: string | null;
 	codeCounts: { total: number; active: number };
 	redemptionCounts: Record<PromotionRedemptionStatus, number>;
+	providerObjects: PromotionProviderObjectRecord[];
 }
+
+export type PromotionProviderObjectKind =
+	| "coupon"
+	| "promotion_code"
+	| "apple_promotional_offer"
+	| "apple_offer_code"
+	| "google_developer_offer"
+	| "google_promo_code";
+export type PromotionProviderObjectStatus = "pending" | "ready" | "failed" | "retired";
+
+export interface PromotionProviderObjectRecord {
+	id: string;
+	provider: "stripe" | "apple" | "google";
+	objectKind: PromotionProviderObjectKind;
+	promotionCodeId: string | null;
+	externalId: string | null;
+	status: PromotionProviderObjectStatus;
+	desiredActive: boolean;
+	providerActive: boolean | null;
+	error: string | null;
+	attempts: number;
+	updatedAt: string;
+}
+
+/** One claimed Stripe object with everything the provider call needs; no further reads required. */
+export type PromotionStripeSyncJob = {
+	projectId: string;
+	projectKey: string;
+	objectId: string;
+	promotionKey: string;
+	promotionName: string;
+	status: PromotionProviderObjectStatus;
+	externalId: string | null;
+	desiredActive: boolean;
+	desiredGeneration: number;
+	providerActive: boolean | null;
+	retireRequested: boolean;
+	attempts: number;
+} & (
+	| {
+			objectKind: "coupon";
+			discount: PromotionDiscount;
+			appliesToProducts: string[] | null;
+	  }
+	| {
+			objectKind: "promotion_code";
+			code: string;
+			couponExternalId: string;
+			expiresAt: string | null;
+			maxRedemptions: number | null;
+			firstPurchaseOnly: boolean;
+	  }
+);
+
+export type PromotionStripeSyncOutcome =
+	| { kind: "ready"; externalId: string; providerActive: boolean }
+	| { kind: "retired"; externalId: string | null }
+	| { kind: "failed"; error: string; terminal: boolean };
 
 export interface PromotionCodeRecord {
 	id: string;
@@ -248,6 +307,11 @@ export interface PromotionServiceLike {
 		project: ProjectInstanceContext,
 		input: PromotionValidationInput,
 	): Promise<PromotionValidation>;
+	requestPromotionProviderSync(
+		project: ProjectInstanceContext,
+		key: string,
+		actor: string,
+	): Promise<PromotionRecord>;
 }
 
 /** The mutable state that decides whether a code can be used right now. */

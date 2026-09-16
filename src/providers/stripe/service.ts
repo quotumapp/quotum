@@ -10,6 +10,7 @@ import type {
 } from "../../billing/commercial";
 import { sha256Hex, stableJson } from "../../billing/decimal";
 import { BillingError } from "../../billing/errors";
+import type { PromotionStripeSyncJob, PromotionStripeSyncOutcome } from "../../billing/promotions";
 import type {
 	SubscriptionChangeInput,
 	SubscriptionChangeOperation,
@@ -43,6 +44,7 @@ import {
 	normalizeStripeRefund,
 	normalizeStripeSubscription,
 } from "./normalizer";
+import { type StripePromotionClient, syncPromotionStripeObject } from "./promotions";
 import type {
 	NormalizedStripeCommand,
 	NormalizedStripeCreditPurchaseCommand,
@@ -104,6 +106,11 @@ export interface StripeBillingClientDependency {
 	finalizeInvoice?(invoiceId: string, idempotencyKey: string): Promise<unknown>;
 	payInvoice?(invoiceId: string, idempotencyKey: string): Promise<unknown>;
 	voidInvoice?(invoiceId: string, idempotencyKey: string): Promise<unknown>;
+	createCoupon?: StripePromotionClient["createCoupon"];
+	retrieveCoupon?: StripePromotionClient["retrieveCoupon"];
+	createPromotionCode?: StripePromotionClient["createPromotionCode"];
+	updatePromotionCode?: StripePromotionClient["updatePromotionCode"];
+	findPromotionCodes?: StripePromotionClient["findPromotionCodes"];
 }
 
 interface StripeBillingRepositoryDependency {
@@ -427,6 +434,32 @@ export class StripeBillingService {
 			);
 		}
 		return await this.dependencies.repository.prepareSubscriptionChange(input);
+	}
+
+	/** Creates or updates the Stripe coupon or promotion code behind one Quotum promotion object. */
+	async syncPromotionStripeObject(
+		job: PromotionStripeSyncJob,
+	): Promise<PromotionStripeSyncOutcome> {
+		const client = this.dependencies.client;
+		if (
+			client.createCoupon === undefined ||
+			client.retrieveCoupon === undefined ||
+			client.createPromotionCode === undefined ||
+			client.updatePromotionCode === undefined ||
+			client.findPromotionCodes === undefined
+		) {
+			return { kind: "failed", error: "Stripe promotions are unavailable", terminal: true };
+		}
+		return await syncPromotionStripeObject(
+			{
+				createCoupon: client.createCoupon.bind(client),
+				retrieveCoupon: client.retrieveCoupon.bind(client),
+				createPromotionCode: client.createPromotionCode.bind(client),
+				updatePromotionCode: client.updatePromotionCode.bind(client),
+				findPromotionCodes: client.findPromotionCodes.bind(client),
+			},
+			job,
+		);
 	}
 
 	async previewCommercialAction(input: {

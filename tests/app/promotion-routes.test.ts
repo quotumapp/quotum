@@ -76,6 +76,7 @@ const promotion: PromotionRecord = {
 	archivedAt: null,
 	codeCounts: { total: 1, active: 1 },
 	redemptionCounts: { reserved: 0, applied: 0, released: 0, reversed: 0 },
+	providerObjects: [],
 };
 
 const code: PromotionCodeRecord = {
@@ -120,6 +121,7 @@ function recordingService() {
 		listPromotionCodes: record("listPromotionCodes", { items: [code], nextCursor: null }),
 		deactivatePromotionCode: record("deactivatePromotionCode", { ...code, active: false }),
 		listPromotionRedemptions: record("listPromotionRedemptions", { items: [], nextCursor: null }),
+		requestPromotionProviderSync: record("requestPromotionProviderSync", promotion),
 		validatePromotionCode: record("validatePromotionCode", {
 			valid: true,
 			reason: null,
@@ -244,6 +246,10 @@ describe("promotion routes", () => {
 			method: "POST",
 			headers: operatorHeaders,
 		});
+		const synced = await testRequest(app, "/v1/admin/promotions/spring-sale/provider-sync", {
+			method: "POST",
+			headers: operatorHeaders,
+		});
 
 		expect(await list.json()).toMatchObject({
 			data: [{ key: "spring-sale" }],
@@ -253,6 +259,7 @@ describe("promotion routes", () => {
 		expect(redemptions.status).toBe(200);
 		expect((await deactivated.json()).data.active).toBe(false);
 		expect((await archived.json()).data.status).toBe("archived");
+		expect(synced.status).toBe(200);
 		expect(calls.map((call) => [call.method, ...call.args])).toEqual([
 			["listPromotions", { limit: 10, cursor: null, status: "active" }],
 			["listPromotionCodes", "spring-sale", { limit: 25, cursor: null, active: false }],
@@ -263,6 +270,7 @@ describe("promotion routes", () => {
 			],
 			["deactivatePromotionCode", "spring-sale", code.id, "operator@example.com"],
 			["archivePromotion", "spring-sale", "operator@example.com"],
+			["requestPromotionProviderSync", "spring-sale", "operator@example.com"],
 		]);
 	});
 

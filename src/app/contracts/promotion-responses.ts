@@ -61,6 +61,28 @@ const promotionSchema = z.object({
 		released: z.number(),
 		reversed: z.number(),
 	}),
+	providerObjects: z.array(
+		z.object({
+			id: z.string(),
+			provider: z.enum(["stripe", "apple", "google"]),
+			objectKind: z.enum([
+				"coupon",
+				"promotion_code",
+				"apple_promotional_offer",
+				"apple_offer_code",
+				"google_developer_offer",
+				"google_promo_code",
+			]),
+			promotionCodeId: z.union([z.null(), z.string()]),
+			externalId: z.union([z.null(), z.string()]),
+			status: z.enum(["pending", "ready", "failed", "retired"]),
+			desiredActive: z.boolean(),
+			providerActive: z.union([z.null(), z.boolean()]),
+			error: z.union([z.null(), z.string()]),
+			attempts: z.number(),
+			updatedAt: z.string(),
+		}),
+	),
 });
 
 const promotionCodeSchema = z.object({
@@ -142,6 +164,11 @@ export const getV1AdminPromotionsByPromotionKeyResponse200Schema = z.object({
 });
 
 export const postV1AdminPromotionsByPromotionKeyArchiveResponse200Schema = z.object({
+	success: z.literal(true),
+	data: promotionSchema,
+});
+
+export const postV1AdminPromotionsByPromotionKeyProviderSyncResponse200Schema = z.object({
 	success: z.literal(true),
 	data: promotionSchema,
 });

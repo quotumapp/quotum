@@ -336,6 +336,8 @@ export function createMerchantBillingPort(input: {
 			}
 			case "promotions.archive":
 				return ok(await repo.promotions.archivePromotion(project, id, actor));
+			case "promotions.sync":
+				return ok(await repo.promotions.requestPromotionProviderSync(project, id, actor));
 			case "promotions.codes.add":
 				return ok(
 					await repo.promotions.addPromotionCodes(

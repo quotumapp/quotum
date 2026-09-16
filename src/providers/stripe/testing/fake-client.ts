@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import Stripe from "stripe";
 import type { StripeBillingConfig } from "../client";
 import type { StripeBillingClientDependency } from "../service";
+import { createFakeStripePromotions } from "./fake-promotions";
 
 interface FakeCheckoutSession {
 	id: string;
@@ -35,6 +36,12 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	private readonly subscriptionUpdates = new Map<string, { id: string }>();
 	private readonly priceAmountsMinor: Readonly<Record<string, number>>;
 	private readonly failures = new Map<string, Error>();
+	readonly promotions = createFakeStripePromotions();
+	readonly createCoupon = this.promotions.createCoupon;
+	readonly retrieveCoupon = this.promotions.retrieveCoupon;
+	readonly createPromotionCode = this.promotions.createPromotionCode;
+	readonly updatePromotionCode = this.promotions.updatePromotionCode;
+	readonly findPromotionCodes = this.promotions.findPromotionCodes;
 
 	constructor(
 		private readonly config: StripeBillingConfig,

@@ -48,7 +48,7 @@ stale, so regenerate and commit them with any HTTP change.
 
 - `src/index.ts` -> `src/composition/public-runtime.ts` (`createQuotumRuntime`) ->
   `src/runtime.ts` (`createBillingRuntime`) builds everything: repositories, provider services,
-  six polling workers, shutdown hooks, then the "staff" Elysia app from `src/app.ts` (`createApp`)
+  seven polling workers, shutdown hooks, then the "staff" Elysia app from `src/app.ts` (`createApp`)
   and the merchant app, composed by `composeRuntimeApp` in `src/composition/merchant-runtime.ts`.
   `runtime.app.fetch(request, server)` must receive Bun's server so client-IP limits work.
 - `/v1/*` is the trusted-backend API (`src/app/*-routes.ts`). Authentication is a project
@@ -131,7 +131,7 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
 
 `src/workers/runtime.ts` (`startPollingRuntime`) runs each worker's `runOnce` on an interval:
 projection sync, store-event replay, subscription reconciliation, metering maintenance,
-recurring billing, auto top-up. Workers lease job rows by `worker_id` (`locked_by` columns,
+recurring billing, auto top-up, promotion maintenance. Workers lease job rows by `worker_id` (`locked_by` columns,
 refreshed by `src/workers/lease-heartbeat.ts`) and retry with `src/workers/backoff.ts`, so a
 worker must only touch rows it holds. Projection sync delivers signed `billing_state_v1`
 payloads to each project's configured projection URL via `src/projections/http-client.ts`.

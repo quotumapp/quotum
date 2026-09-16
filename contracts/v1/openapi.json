@@ -5024,6 +5024,91 @@
               "name": {
                 "type": "string"
               },
+              "providerObjects": {
+                "items": {
+                  "properties": {
+                    "attempts": {
+                      "type": "number"
+                    },
+                    "desiredActive": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "externalId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "objectKind": {
+                      "enum": [
+                        "coupon",
+                        "promotion_code",
+                        "apple_promotional_offer",
+                        "apple_offer_code",
+                        "google_developer_offer",
+                        "google_promo_code"
+                      ],
+                      "type": "string"
+                    },
+                    "promotionCodeId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "provider": {
+                      "enum": [
+                        "stripe",
+                        "apple",
+                        "google"
+                      ],
+                      "type": "string"
+                    },
+                    "providerActive": {
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "ready",
+                        "failed",
+                        "retired"
+                      ],
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "provider",
+                    "objectKind",
+                    "promotionCodeId",
+                    "externalId",
+                    "status",
+                    "desiredActive",
+                    "providerActive",
+                    "error",
+                    "attempts",
+                    "updatedAt"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "redemptionCounts": {
                 "properties": {
                   "applied": {
@@ -5095,7 +5180,8 @@
               "archivedBy",
               "archivedAt",
               "codeCounts",
-              "redemptionCounts"
+              "redemptionCounts",
+              "providerObjects"
             ],
             "type": "object"
           },
@@ -5350,6 +5436,91 @@
                 "name": {
                   "type": "string"
                 },
+                "providerObjects": {
+                  "items": {
+                    "properties": {
+                      "attempts": {
+                        "type": "number"
+                      },
+                      "desiredActive": {
+                        "type": "boolean"
+                      },
+                      "error": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "externalId": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "objectKind": {
+                        "enum": [
+                          "coupon",
+                          "promotion_code",
+                          "apple_promotional_offer",
+                          "apple_offer_code",
+                          "google_developer_offer",
+                          "google_promo_code"
+                        ],
+                        "type": "string"
+                      },
+                      "promotionCodeId": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "provider": {
+                        "enum": [
+                          "stripe",
+                          "apple",
+                          "google"
+                        ],
+                        "type": "string"
+                      },
+                      "providerActive": {
+                        "type": [
+                          "null",
+                          "boolean"
+                        ]
+                      },
+                      "status": {
+                        "enum": [
+                          "pending",
+                          "ready",
+                          "failed",
+                          "retired"
+                        ],
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "provider",
+                      "objectKind",
+                      "promotionCodeId",
+                      "externalId",
+                      "status",
+                      "desiredActive",
+                      "providerActive",
+                      "error",
+                      "attempts",
+                      "updatedAt"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
                 "redemptionCounts": {
                   "properties": {
                     "applied": {
@@ -5421,7 +5592,8 @@
                 "archivedBy",
                 "archivedAt",
                 "codeCounts",
-                "redemptionCounts"
+                "redemptionCounts",
+                "providerObjects"
               ],
               "type": "object"
             },
@@ -9684,6 +9856,91 @@
               "name": {
                 "type": "string"
               },
+              "providerObjects": {
+                "items": {
+                  "properties": {
+                    "attempts": {
+                      "type": "number"
+                    },
+                    "desiredActive": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "externalId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "objectKind": {
+                      "enum": [
+                        "coupon",
+                        "promotion_code",
+                        "apple_promotional_offer",
+                        "apple_offer_code",
+                        "google_developer_offer",
+                        "google_promo_code"
+                      ],
+                      "type": "string"
+                    },
+                    "promotionCodeId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "provider": {
+                      "enum": [
+                        "stripe",
+                        "apple",
+                        "google"
+                      ],
+                      "type": "string"
+                    },
+                    "providerActive": {
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "ready",
+                        "failed",
+                        "retired"
+                      ],
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "provider",
+                    "objectKind",
+                    "promotionCodeId",
+                    "externalId",
+                    "status",
+                    "desiredActive",
+                    "providerActive",
+                    "error",
+                    "attempts",
+                    "updatedAt"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "redemptionCounts": {
                 "properties": {
                   "applied": {
@@ -9755,7 +10012,8 @@
               "archivedBy",
               "archivedAt",
               "codeCounts",
-              "redemptionCounts"
+              "redemptionCounts",
+              "providerObjects"
             ],
             "type": "object"
           },
@@ -10009,6 +10267,417 @@
         ],
         "type": "object"
       },
+      "postV1AdminPromotionsByPromotionKeyProviderSyncResponse200": {
+        "properties": {
+          "data": {
+            "properties": {
+              "allowedChannels": {
+                "items": {
+                  "enum": [
+                    "web",
+                    "ios",
+                    "android"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "archivedAt": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "archivedBy": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "codeCounts": {
+                "properties": {
+                  "active": {
+                    "type": "number"
+                  },
+                  "total": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "total",
+                  "active"
+                ],
+                "type": "object"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "effect": {
+                "oneOf": [
+                  {
+                    "properties": {
+                      "discount": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "duration": {
+                                "enum": [
+                                  "once",
+                                  "repeating",
+                                  "forever"
+                                ],
+                                "type": "string"
+                              },
+                              "durationMonths": {
+                                "type": [
+                                  "null",
+                                  "number"
+                                ]
+                              },
+                              "percentOffBps": {
+                                "type": "number"
+                              },
+                              "type": {
+                                "enum": [
+                                  "percent"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "percentOffBps",
+                              "duration",
+                              "durationMonths"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "amounts": {
+                                "items": {
+                                  "properties": {
+                                    "amountOffMinor": {
+                                      "type": "number"
+                                    },
+                                    "currency": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "currency",
+                                    "amountOffMinor"
+                                  ],
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              "duration": {
+                                "enum": [
+                                  "once",
+                                  "repeating",
+                                  "forever"
+                                ],
+                                "type": "string"
+                              },
+                              "durationMonths": {
+                                "type": [
+                                  "null",
+                                  "number"
+                                ]
+                              },
+                              "type": {
+                                "enum": [
+                                  "amount"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "amounts",
+                              "duration",
+                              "durationMonths"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "kind": {
+                        "enum": [
+                          "discount"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "discount"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "items": {
+                        "items": {
+                          "properties": {
+                            "expiresAfterSeconds": {
+                              "type": [
+                                "null",
+                                "number"
+                              ]
+                            },
+                            "featureKey": {
+                              "type": "string"
+                            },
+                            "quantity": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "featureKey",
+                            "quantity",
+                            "expiresAfterSeconds"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "kind": {
+                        "enum": [
+                          "feature_grant"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "items"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "durationCount": {
+                        "type": "number"
+                      },
+                      "durationUnit": {
+                        "enum": [
+                          "day",
+                          "month"
+                        ],
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "plan_grant"
+                        ],
+                        "type": "string"
+                      },
+                      "planKey": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "planKey",
+                      "durationUnit",
+                      "durationCount"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "metadata": {
+                "additionalProperties": {},
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "providerObjects": {
+                "items": {
+                  "properties": {
+                    "attempts": {
+                      "type": "number"
+                    },
+                    "desiredActive": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "externalId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "objectKind": {
+                      "enum": [
+                        "coupon",
+                        "promotion_code",
+                        "apple_promotional_offer",
+                        "apple_offer_code",
+                        "google_developer_offer",
+                        "google_promo_code"
+                      ],
+                      "type": "string"
+                    },
+                    "promotionCodeId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "provider": {
+                      "enum": [
+                        "stripe",
+                        "apple",
+                        "google"
+                      ],
+                      "type": "string"
+                    },
+                    "providerActive": {
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "ready",
+                        "failed",
+                        "retired"
+                      ],
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "provider",
+                    "objectKind",
+                    "promotionCodeId",
+                    "externalId",
+                    "status",
+                    "desiredActive",
+                    "providerActive",
+                    "error",
+                    "attempts",
+                    "updatedAt"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "redemptionCounts": {
+                "properties": {
+                  "applied": {
+                    "type": "number"
+                  },
+                  "released": {
+                    "type": "number"
+                  },
+                  "reserved": {
+                    "type": "number"
+                  },
+                  "reversed": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "reserved",
+                  "applied",
+                  "released",
+                  "reversed"
+                ],
+                "type": "object"
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "archived"
+                ],
+                "type": "string"
+              },
+              "targets": {
+                "items": {
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "plan",
+                        "product"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "key"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "termsHash": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "key",
+              "name",
+              "status",
+              "effect",
+              "targets",
+              "allowedChannels",
+              "metadata",
+              "termsHash",
+              "createdBy",
+              "createdAt",
+              "archivedBy",
+              "archivedAt",
+              "codeCounts",
+              "redemptionCounts",
+              "providerObjects"
+            ],
+            "type": "object"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ],
+        "type": "object"
+      },
       "postV1AdminPromotionsResponse200": {
         "properties": {
           "data": {
@@ -10246,6 +10915,91 @@
               "name": {
                 "type": "string"
               },
+              "providerObjects": {
+                "items": {
+                  "properties": {
+                    "attempts": {
+                      "type": "number"
+                    },
+                    "desiredActive": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "externalId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "objectKind": {
+                      "enum": [
+                        "coupon",
+                        "promotion_code",
+                        "apple_promotional_offer",
+                        "apple_offer_code",
+                        "google_developer_offer",
+                        "google_promo_code"
+                      ],
+                      "type": "string"
+                    },
+                    "promotionCodeId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "provider": {
+                      "enum": [
+                        "stripe",
+                        "apple",
+                        "google"
+                      ],
+                      "type": "string"
+                    },
+                    "providerActive": {
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "ready",
+                        "failed",
+                        "retired"
+                      ],
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "provider",
+                    "objectKind",
+                    "promotionCodeId",
+                    "externalId",
+                    "status",
+                    "desiredActive",
+                    "providerActive",
+                    "error",
+                    "attempts",
+                    "updatedAt"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "redemptionCounts": {
                 "properties": {
                   "applied": {
@@ -10317,7 +11071,8 @@
               "archivedBy",
               "archivedAt",
               "codeCounts",
-              "redemptionCounts"
+              "redemptionCounts",
+              "providerObjects"
             ],
             "type": "object"
           },
@@ -10571,6 +11326,91 @@
               "name": {
                 "type": "string"
               },
+              "providerObjects": {
+                "items": {
+                  "properties": {
+                    "attempts": {
+                      "type": "number"
+                    },
+                    "desiredActive": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "externalId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "objectKind": {
+                      "enum": [
+                        "coupon",
+                        "promotion_code",
+                        "apple_promotional_offer",
+                        "apple_offer_code",
+                        "google_developer_offer",
+                        "google_promo_code"
+                      ],
+                      "type": "string"
+                    },
+                    "promotionCodeId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "provider": {
+                      "enum": [
+                        "stripe",
+                        "apple",
+                        "google"
+                      ],
+                      "type": "string"
+                    },
+                    "providerActive": {
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "ready",
+                        "failed",
+                        "retired"
+                      ],
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "provider",
+                    "objectKind",
+                    "promotionCodeId",
+                    "externalId",
+                    "status",
+                    "desiredActive",
+                    "providerActive",
+                    "error",
+                    "attempts",
+                    "updatedAt"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "redemptionCounts": {
                 "properties": {
                   "applied": {
@@ -10642,7 +11482,8 @@
               "archivedBy",
               "archivedAt",
               "codeCounts",
-              "redemptionCounts"
+              "redemptionCounts",
+              "providerObjects"
             ],
             "type": "object"
           },
@@ -27066,6 +27907,236 @@
           }
         ],
         "summary": "POST /api/billing/admin/promotions/{promotionKey}/codes/{codeId}/deactivate",
+        "tags": [
+          "merchant-billing"
+        ]
+      }
+    },
+    "/api/billing/admin/promotions/{promotionKey}/provider-sync": {
+      "post": {
+        "description": "Requires operations.write in sandbox and operations.write in production. Production requires an action-bound step-up grant. ",
+        "operationId": "merchantPostV1AdminPromotionsByPromotionKeyProviderSync",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "promotionKey",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Organization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Project",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Environment",
+            "required": true,
+            "schema": {
+              "enum": [
+                "sandbox",
+                "production"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Step-Up-Grant",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/postV1AdminPromotionsByPromotionKeyProviderSyncResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "POST /api/billing/admin/promotions/{promotionKey}/provider-sync",
         "tags": [
           "merchant-billing"
         ]
@@ -44752,6 +45823,189 @@
           }
         ],
         "summary": "POST /v1/admin/promotions/{promotionKey}/codes/{codeId}/deactivate",
+        "tags": [
+          "promotions"
+        ]
+      }
+    },
+    "/v1/admin/promotions/{promotionKey}/provider-sync": {
+      "post": {
+        "operationId": "postV1AdminPromotionsByPromotionKeyProviderSync",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "promotionKey",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Billing-Actor",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/postV1AdminPromotionsByPromotionKeyProviderSyncResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "POST /v1/admin/promotions/{promotionKey}/provider-sync",
         "tags": [
           "promotions"
         ]

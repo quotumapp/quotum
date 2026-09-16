@@ -218,6 +218,11 @@ export class BillingClient {
 				this.request<PromotionRecord>(`/v1/admin/promotions/${segment(promotionKey)}`, {
 					operator: true,
 				}),
+			syncProviders: (promotionKey: string) =>
+				this.request<PromotionRecord>(
+					`/v1/admin/promotions/${segment(promotionKey)}/provider-sync`,
+					{ method: "POST", operator: true },
+				),
 			archive: (promotionKey: string) =>
 				this.request<PromotionRecord>(`/v1/admin/promotions/${segment(promotionKey)}/archive`, {
 					method: "POST",

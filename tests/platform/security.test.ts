@@ -131,6 +131,7 @@ describe("merchant security boundaries", () => {
 		for (const path of [
 			"/api/billing/admin/promotions",
 			"/api/billing/admin/promotions/spring-sale/archive",
+			"/api/billing/admin/promotions/spring-sale/provider-sync",
 			"/api/billing/admin/promotions/spring-sale/codes",
 			"/api/billing/admin/promotions/spring-sale/codes/22222222-2222-4222-8222-222222222222/deactivate",
 		]) {
