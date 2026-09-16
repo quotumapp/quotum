@@ -208,6 +208,56 @@ describe("BillingClient", () => {
 		expect(page).toEqual({ data: [], nextCursor: "next-page" });
 	});
 
+	it("manages promotions with operator identity and validates codes with project credentials", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			operatorKey: "operator-secret",
+			actor: "growth@example.com",
+			fetch: async (input, init) => {
+				const request = new Request(input, init);
+				calls.push(request);
+				return new URL(request.url).pathname.endsWith("/codes") && request.method === "GET"
+					? Response.json({ success: true, data: [], pagination: { nextCursor: "next" } })
+					: Response.json({ success: true, data: {} });
+			},
+		});
+
+		await client.promotions.create({
+			key: "spring/sale",
+			name: "Spring sale",
+			effect: {
+				kind: "discount",
+				discount: { type: "percent", percentOffBps: 2000, duration: "once", durationMonths: null },
+			},
+			codes: [{ code: "SPRING" }],
+		});
+		const codes = await client.promotions.listCodes("spring/sale", { active: true, limit: 10 });
+		await client.promotions.deactivateCode("spring/sale", "22222222-2222-4222-8222-222222222222");
+		await client.promotions.archive("spring/sale");
+		await client.promotions.validate("account 1", { code: "SPRING", channel: "web" });
+
+		expect(codes).toEqual({ data: [], nextCursor: "next" });
+		expect(
+			calls.map(
+				(call) => `${call.method} ${new URL(call.url).pathname}${new URL(call.url).search}`,
+			),
+		).toEqual([
+			"POST /v1/admin/promotions",
+			"GET /v1/admin/promotions/spring%2Fsale/codes?active=true&limit=10",
+			"POST /v1/admin/promotions/spring%2Fsale/codes/22222222-2222-4222-8222-222222222222/deactivate",
+			"POST /v1/admin/promotions/spring%2Fsale/archive",
+			"POST /v1/billing-accounts/account%201/promotion-codes/validate",
+		]);
+		for (const call of calls.slice(0, 4)) {
+			expect(call.headers.get("x-billing-operator-key")).toBe("operator-secret");
+			expect(call.headers.get("x-billing-actor")).toBe("growth@example.com");
+		}
+		expect(calls[4]?.headers.has("x-billing-operator-key")).toBe(false);
+		expect(await calls[4]?.json()).toEqual({ code: "SPRING", channel: "web" });
+	});
+
 	it("uses the reviewed catalog body for preview and publication", async () => {
 		const calls: Request[] = [];
 		const catalog = { features: [], plans: [], topups: [], rateCards: [] };

@@ -16,6 +16,17 @@ import type {
 	ReservationResult,
 	ReserveUsageInput,
 } from "../billing/metering";
+import type {
+	CreatePromotionInput,
+	PromotionChannel,
+	PromotionCodeInput,
+	PromotionCodeRecord,
+	PromotionRecord,
+	PromotionRedemptionRecord,
+	PromotionRedemptionStatus,
+	PromotionTarget,
+	PromotionValidation,
+} from "../billing/promotions";
 import type { EntitlementSnapshot } from "../billing/types";
 import type {
 	UsageOperationLookupInput,
@@ -55,6 +66,7 @@ export class BillingClient {
 	readonly commercial;
 	readonly usage;
 	readonly purchases;
+	readonly promotions;
 	readonly admin;
 
 	private readonly baseUrl: string;
@@ -190,6 +202,66 @@ export class BillingClient {
 					method: "POST",
 					body: input,
 				}),
+		};
+		this.promotions = {
+			create: (input: Omit<CreatePromotionInput, "actor">) =>
+				this.request<PromotionRecord>("/v1/admin/promotions", {
+					method: "POST",
+					body: input,
+					operator: true,
+				}),
+			list: (query: { status?: "active" | "archived"; limit?: number; cursor?: string } = {}) =>
+				this.requestPage<PromotionRecord>(pathWithQuery("/v1/admin/promotions", query), {
+					operator: true,
+				}),
+			get: (promotionKey: string) =>
+				this.request<PromotionRecord>(`/v1/admin/promotions/${segment(promotionKey)}`, {
+					operator: true,
+				}),
+			archive: (promotionKey: string) =>
+				this.request<PromotionRecord>(`/v1/admin/promotions/${segment(promotionKey)}/archive`, {
+					method: "POST",
+					operator: true,
+				}),
+			addCodes: (promotionKey: string, codes: PromotionCodeInput[]) =>
+				this.request<{ codes: PromotionCodeRecord[]; created: number }>(
+					`/v1/admin/promotions/${segment(promotionKey)}/codes`,
+					{ method: "POST", body: { codes }, operator: true },
+				),
+			listCodes: (
+				promotionKey: string,
+				query: { active?: boolean; limit?: number; cursor?: string } = {},
+			) =>
+				this.requestPage<PromotionCodeRecord>(
+					pathWithQuery(`/v1/admin/promotions/${segment(promotionKey)}/codes`, query),
+					{ operator: true },
+				),
+			deactivateCode: (promotionKey: string, codeId: string) =>
+				this.request<PromotionCodeRecord>(
+					`/v1/admin/promotions/${segment(promotionKey)}/codes/${segment(codeId)}/deactivate`,
+					{ method: "POST", operator: true },
+				),
+			listRedemptions: (
+				promotionKey: string,
+				query: {
+					status?: PromotionRedemptionStatus;
+					billingAccountId?: string;
+					limit?: number;
+					cursor?: string;
+				} = {},
+			) =>
+				this.requestPage<PromotionRedemptionRecord>(
+					pathWithQuery(`/v1/admin/promotions/${segment(promotionKey)}/redemptions`, query),
+					{ operator: true },
+				),
+			validate: (
+				billingAccountId: string,
+				input: { code: string; channel?: PromotionChannel; target?: PromotionTarget },
+			) =>
+				this.request<PromotionValidation>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/promotion-codes/validate`,
+					{ method: "POST", body: input },
+				),
 		};
 		this.admin = {
 			customer: (billingAccountId: string) =>

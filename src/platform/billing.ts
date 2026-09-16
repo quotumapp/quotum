@@ -24,6 +24,7 @@ const readPatterns = [
 	"admin/projection-jobs",
 	"admin/catalog(?:/(?:products|store-products))?",
 	`admin/billing-accounts/${account}/(?:billing-summary|billing-account|controls|usage/(?:events|series))`,
+	`admin/promotions(?:/${account}(?:/(?:codes|redemptions))?)?`,
 ];
 export function merchantBillingRoute(
 	method: string,
@@ -69,7 +70,7 @@ export function merchantBillingRoute(
 		return { path, capability: "operations.write", action: null, sensitive: false };
 	if (
 		(method === "POST" &&
-			/^(?:admin\/(?:contracts|catalog-migrations)\/publish|admin\/billing-accounts\/[^/]+\/(?:commercial-actions|usage\/events\/[^/]+\/corrections))$/.test(
+			/^(?:admin\/(?:contracts|catalog-migrations)\/publish|admin\/billing-accounts\/[^/]+\/(?:commercial-actions|usage\/events\/[^/]+\/corrections)|admin\/promotions(?:\/[^/]+\/(?:archive|codes|codes\/[^/]+\/deactivate))?)$/.test(
 				suffix,
 			)) ||
 		(method === "PUT" && /^admin\/billing-accounts\/[^/]+\/controls$/.test(suffix))
