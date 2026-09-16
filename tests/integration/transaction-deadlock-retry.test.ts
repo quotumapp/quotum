@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { sql as drizzleSql } from "drizzle-orm";
-import { RepositoryModule, sqlstateOf } from "../../src/db/repository/base";
+import { sqlstateOf } from "../../src/db/postgres-errors";
+import { RepositoryModule } from "../../src/db/repository/base";
 import type { QueryExecutor } from "../../src/db/repository/types";
+import { createDeferred } from "../helpers/deferred";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
@@ -39,13 +41,21 @@ localDescribe("transaction deadlock retry", () => {
 			INSERT INTO customers (project_id, billing_account_id)
 			VALUES (${projectId}, ${"deadlock-a"}), (${projectId}, ${"deadlock-b"})
 		`;
+		// Read the baseline from the database clock: the container's clock can drift from the host's.
+		// As text it keeps the microseconds a JS Date would drop.
+		const [clock] = await context.sql<Array<{ baseline: string }>>`
+			SELECT clock_timestamp()::text AS baseline
+		`;
+		if (clock === undefined) throw new Error("Expected the database clock");
 		const probe = new ProbeModule(context.db as never);
 		const attempts = { a: 0, b: 0 };
-		const testStartedAt = new Date();
+		const firstLockHeld = { a: createDeferred(), b: createDeferred() };
 
-		// Opposite lock orders on two rows: each transaction holds its first row and then blocks
-		// on the other, so Postgres aborts one loser with 40P01 after `deadlock_timeout` (1s,
-		// far under the pool's 30s statement timeout). The winner commits; the loser re-runs.
+		// Opposite lock orders on two rows. On the first attempt each transaction waits until both
+		// hold their first row before asking for the other one, so the deadlock happens however long
+		// either connection takes to open. Postgres aborts one loser with 40P01 after
+		// `deadlock_timeout` (1s, far under the pool's 30s statement timeout); the winner commits and
+		// the loser re-runs without waiting.
 		const conflictingTransaction = (first: string, second: string, key: "a" | "b") =>
 			probe.run(async (tx) => {
 				attempts[key] += 1;
@@ -53,7 +63,10 @@ localDescribe("transaction deadlock retry", () => {
 					drizzleSql`UPDATE customers SET updated_at = now()
 						WHERE project_id = ${projectId} AND billing_account_id = ${first}`,
 				);
-				await tx.execute(drizzleSql`SELECT pg_sleep(${0.2})`);
+				if (attempts[key] === 1) {
+					firstLockHeld[key].resolve();
+					await Promise.all([firstLockHeld.a.promise, firstLockHeld.b.promise]);
+				}
 				await tx.execute(
 					drizzleSql`UPDATE customers SET updated_at = now()
 						WHERE project_id = ${projectId} AND billing_account_id = ${second}`,
@@ -69,15 +82,14 @@ localDescribe("transaction deadlock retry", () => {
 		expect(Math.max(attempts.a, attempts.b)).toBe(2);
 		expect(Math.min(attempts.a, attempts.b)).toBe(1);
 
-		const rows = await context.sql<Array<{ billing_account_id: string; updated_at: Date }>>`
-			SELECT billing_account_id, updated_at FROM customers
-			WHERE project_id = ${projectId} AND billing_account_id IN (${"deadlock-a"}, ${"deadlock-b"})
+		const rows = await context.sql<Array<{ billing_account_id: string }>>`
+			SELECT billing_account_id FROM customers
+			WHERE project_id = ${projectId}
+				AND billing_account_id IN (${"deadlock-a"}, ${"deadlock-b"})
+				AND updated_at > ${clock.baseline}::timestamptz
 			ORDER BY billing_account_id
 		`;
 		expect(rows.map((row) => row.billing_account_id)).toEqual(["deadlock-a", "deadlock-b"]);
-		for (const row of rows) {
-			expect(row.updated_at.getTime()).toBeGreaterThanOrEqual(testStartedAt.getTime());
-		}
 	});
 
 	it("does not retry a unique violation and rolls its transaction back", async () => {

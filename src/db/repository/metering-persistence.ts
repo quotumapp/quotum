@@ -68,7 +68,7 @@ export interface MeterLimitDecision {
 	windowEndAt: Date;
 }
 
-export interface MeteredOveragePrice {
+interface MeteredOveragePrice {
 	priceComponentId: string;
 	pricingModel: "flat" | "graduated" | "volume";
 	billingUnits: string;
@@ -81,7 +81,7 @@ export interface MeteredOveragePrice {
 	}>;
 }
 
-export interface UsageWindowRow {
+interface UsageWindowRow {
 	id: string | number | bigint;
 	window_start_at: Date | string;
 	window_end_at: Date | string;
@@ -136,7 +136,7 @@ export interface ReservationRow {
 	expires_at: Date | string;
 }
 
-export interface ReservationAllocationRow {
+interface ReservationAllocationRow {
 	allocation_id: string | number | bigint;
 	held_quantity: unknown;
 	consumed_quantity: unknown;
@@ -171,7 +171,7 @@ export async function requireMeteredFeature(
 	return row;
 }
 
-export interface MeterLimitRow {
+interface MeterLimitRow {
 	plan_item_id: string | number | bigint;
 	subscription_id: string;
 	quantity: unknown;
@@ -303,7 +303,7 @@ export async function meterLimitDecision(
 	};
 }
 
-export async function resolveMeteredOveragePrice(
+async function resolveMeteredOveragePrice(
 	executor: QueryExecutor,
 	projectId: string,
 	planItemId: string,
@@ -348,7 +348,7 @@ export async function resolveMeteredOveragePrice(
 	};
 }
 
-export async function readMeteredPriceTiers(
+async function readMeteredPriceTiers(
 	executor: QueryExecutor,
 	projectId: string,
 	priceComponentId: string,
@@ -660,7 +660,7 @@ export async function reserveMeterLimit(
 	};
 }
 
-export async function checkMeterLimitFromBalance(
+async function checkMeterLimitFromBalance(
 	executor: QueryExecutor,
 	projectId: string,
 	meterLimit: MeterLimitDecision,
@@ -717,7 +717,7 @@ export async function readMeterLimitBalance(
 	return meterLimitBalance(meterLimit, row?.usage ?? "0", row?.held ?? "0");
 }
 
-export async function readActiveWindowHolds(
+async function readActiveWindowHolds(
 	executor: QueryExecutor,
 	projectId: string,
 	windowId: string,
@@ -738,7 +738,7 @@ export async function readActiveWindowHolds(
 	return databaseDecimal(row?.held ?? "0", "window holds");
 }
 
-export async function upsertUsageWindow(
+async function upsertUsageWindow(
 	executor: QueryExecutor,
 	input: {
 		projectId: string;
@@ -792,7 +792,7 @@ export async function upsertUsageWindow(
 	return row;
 }
 
-export function meterLimitBalance(
+function meterLimitBalance(
 	meterLimit: MeterLimitDecision,
 	rawUsage: unknown,
 	rawHeld: unknown = "0",
@@ -813,7 +813,7 @@ export function meterLimitBalance(
 	};
 }
 
-export function directRate(feature: FeatureRow): RateDecision {
+function directRate(feature: FeatureRow): RateDecision {
 	return {
 		meter: feature,
 		wallet: feature,
@@ -827,7 +827,7 @@ export function directRate(feature: FeatureRow): RateDecision {
 	};
 }
 
-export function rollWindowBounds(
+function rollWindowBounds(
 	start: Date,
 	end: Date,
 	interval: "month" | "year",
@@ -863,11 +863,11 @@ export function addUtcMonths(value: Date, months: number): Date {
 	return result;
 }
 
-export function startOfUtcMonth(value: Date): Date {
+function startOfUtcMonth(value: Date): Date {
 	return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
 }
 
-export interface RateCardRow {
+interface RateCardRow {
 	entry_id: string | number | bigint;
 	revision_id: string | number | bigint;
 	revision: number;
@@ -971,7 +971,7 @@ export function queryPurchasedRevision(
 	).then((row) => row !== null);
 }
 
-export function queryDirectPricing(
+function queryDirectPricing(
 	executor: QueryExecutor,
 	projectId: string,
 	meter: FeatureRow,
@@ -1069,7 +1069,7 @@ export async function rateDecision(
 	};
 }
 
-export async function rateDecisionFromRow(
+async function rateDecisionFromRow(
 	executor: QueryExecutor,
 	projectId: string,
 	meter: FeatureRow,
@@ -1111,7 +1111,7 @@ export async function rateDecisionFromRow(
 	};
 }
 
-export async function readRateCardTiers(
+async function readRateCardTiers(
 	executor: QueryExecutor,
 	projectId: string,
 	entryId: string,
@@ -1521,7 +1521,7 @@ export function deductedRows(
 	});
 }
 
-export function allocationDeduction(row: AllocationRow, quantity: string): AllocationDeduction {
+function allocationDeduction(row: AllocationRow, quantity: string): AllocationDeduction {
 	return {
 		allocationId: String(row.id),
 		quantity,
@@ -1567,7 +1567,7 @@ export function controlDeniedDecision(
 	};
 }
 
-export function rateReceipt(rate: RateDecision): RateCardReceipt {
+function rateReceipt(rate: RateDecision): RateCardReceipt {
 	return {
 		path: rate.path,
 		revision: rate.revision,
@@ -1581,7 +1581,7 @@ export function rateReceipt(rate: RateDecision): RateCardReceipt {
 	};
 }
 
-export async function purchaseActions(
+async function purchaseActions(
 	executor: QueryExecutor,
 	projectId: string,
 ): Promise<Array<{ provider: "apple" | "google" | "stripe"; action: "purchase_required" }>> {
@@ -2238,7 +2238,7 @@ export async function confirmMeterLimitReservation(
 	};
 }
 
-export async function insufficientMeterLimitConfirmation(
+async function insufficientMeterLimitConfirmation(
 	executor: QueryExecutor,
 	reservation: ReservationRow,
 	meterLimit: MeterLimitDecision,
