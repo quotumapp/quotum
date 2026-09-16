@@ -800,6 +800,12 @@
       ]
     },
     {
+      "code": "PROMOTION_CONFIGURATION_ERROR",
+      "sources": [
+        "src/db/repository/promotions.ts"
+      ]
+    },
+    {
       "code": "PROMOTION_CURRENCY_NOT_SUPPORTED",
       "sources": [
         "src/billing/promotions.ts"
@@ -830,7 +836,19 @@
       ]
     },
     {
+      "code": "PROMOTION_REDEMPTION_ALREADY_REVERSED",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
       "code": "PROMOTION_REDEMPTION_NOT_FOUND",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_REDEMPTION_NOT_REVOCABLE",
       "sources": [
         "src/billing/promotions.ts"
       ]

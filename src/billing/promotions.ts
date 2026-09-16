@@ -312,6 +312,74 @@ export interface PromotionServiceLike {
 		key: string,
 		actor: string,
 	): Promise<PromotionRecord>;
+	redeemPromotionCode(
+		project: ProjectInstanceContext,
+		input: PromotionRedeemInput,
+	): Promise<PromotionRedeemResult>;
+	listAccountRedemptions(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		input: { limit: number; cursor?: string | null },
+	): Promise<PromotionListResult<PromotionRedemptionRecord>>;
+	getAccountRedemption(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		redemptionId: string,
+	): Promise<PromotionRedemptionRecord>;
+	revokePromotionRedemption(
+		project: ProjectInstanceContext,
+		input: PromotionRevokeInput,
+	): Promise<PromotionRevokeResult>;
+}
+
+export interface PromotionRedeemInput {
+	billingAccountId: string;
+	code: string;
+	channel: PromotionChannel;
+	idempotencyKey: string;
+	actor: string | null;
+}
+
+export interface PromotionGrantedFeature {
+	featureKey: string;
+	quantity: string;
+	expiresAt: string | null;
+	allocationId: string;
+}
+
+export type PromotionRedeemResult =
+	| {
+			kind: "granted";
+			duplicate: boolean;
+			redemption: PromotionRedemptionRecord;
+			grant: { features: PromotionGrantedFeature[] };
+	  }
+	| {
+			kind: "requires_commercial_action";
+			duplicate: false;
+			redemption: null;
+			promotion: { key: string; effectKind: "discount" };
+			commercialAction: { promotionCode: string };
+	  };
+
+export interface PromotionRevokeInput {
+	redemptionId: string;
+	reason: string;
+	actor: string;
+	idempotencyKey: string;
+}
+
+export interface PromotionRevokeResult {
+	duplicate: boolean;
+	redemption: PromotionRedemptionRecord;
+	reversedAllocations: Array<{
+		allocationId: string;
+		featureKey: string;
+		reversedQuantity: string;
+		consumedQuantity: string;
+		heldQuantity: string;
+		expired: boolean;
+	}>;
 }
 
 /** The mutable state that decides whether a code can be used right now. */
@@ -402,6 +470,16 @@ const promotionErrorDefinitions = [
 		code: "PROMOTION_PROVIDER_NOT_READY",
 		status: 503,
 		message: "The provider discount for this promotion is not ready yet",
+	},
+	{
+		code: "PROMOTION_REDEMPTION_NOT_REVOCABLE",
+		status: 409,
+		message: "Only applied redemptions that Quotum granted can be revoked",
+	},
+	{
+		code: "PROMOTION_REDEMPTION_ALREADY_REVERSED",
+		status: 409,
+		message: "Promotion redemption was already reversed",
 	},
 	{
 		code: "PROMOTION_REDEMPTION_NOT_FOUND",

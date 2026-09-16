@@ -13,10 +13,12 @@ import {
 	addPromotionCodesBodySchema,
 	createPromotionBodySchema,
 	createPromotionInput,
+	listAccountRedemptionsQuerySchema,
 	listPromotionCodesQuerySchema,
 	listPromotionRedemptionsQuerySchema,
 	listPromotionsQuerySchema,
 	promotionCodeInputs,
+	revokePromotionRedemptionBodySchema,
 } from "../app/promotion-routes";
 import { requireStripeBillingService } from "../app/provider-services";
 import type { ProjectProviderServiceResolver } from "../app/types";
@@ -336,6 +338,26 @@ export function createMerchantBillingPort(input: {
 			}
 			case "promotions.archive":
 				return ok(await repo.promotions.archivePromotion(project, id, actor));
+			case "account.promotion-redemptions": {
+				const input = parse(listAccountRedemptionsQuerySchema, command.query);
+				return list(
+					await repo.promotions.listAccountRedemptions(project, account(), {
+						limit: input.limit,
+						cursor: input.cursor ?? null,
+					}),
+				);
+			}
+			case "promotions.redemptions.revoke": {
+				const body = parse(revokePromotionRedemptionBodySchema, command.body);
+				return ok(
+					await repo.promotions.revokePromotionRedemption(project, {
+						redemptionId: parse(z.string().uuid(), id),
+						reason: body.reason,
+						actor,
+						idempotencyKey: requireKey(command),
+					}),
+				);
+			}
 			case "promotions.sync":
 				return ok(await repo.promotions.requestPromotionProviderSync(project, id, actor));
 			case "promotions.codes.add":

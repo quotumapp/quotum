@@ -1448,6 +1448,311 @@ localDescribe("promotion subscription changes", () => {
 	});
 });
 
+localDescribe("promotion feature grants", () => {
+	beforeAll(async () => {
+		context = await createLocalPostgresContext();
+	});
+
+	beforeEach(async () => {
+		await resetAndSeedIntegrationData(context.sql);
+		await publishAiCreditsCatalog(context.repository);
+	});
+
+	afterAll(async () => {
+		await context.sql.close();
+	});
+
+	it("redeems a feature grant over HTTP, spends the reward first and replays by key", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		await context.repository.promotions.createPromotion(
+			project,
+			grantPromotion({ codes: [{ code: "WELCOME" }, { code: "WELCOME-2" }] }),
+		);
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({ codes: [{ code: "SPRING" }] }),
+		);
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "reader",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "reader-base",
+		});
+		const redeem = (billingAccountId: string, key: string, body: unknown) =>
+			testRequest(app, `/v1/billing-accounts/${billingAccountId}/promotion-redemptions`, {
+				method: "POST",
+				headers: {
+					...authHeaders("voysee"),
+					"content-type": "application/json",
+					"idempotency-key": key,
+				},
+				body: JSON.stringify(body),
+			});
+
+		const granted = await redeem("reader", "redeem-1", { code: "welcome", channel: "web" });
+		const replay = await redeem("reader", "redeem-1", { code: "WELCOME", channel: "web" });
+		const changed = await redeem("reader", "redeem-1", { code: "WELCOME-2", channel: "web" });
+		const again = await redeem("reader", "redeem-2", { code: "WELCOME", channel: "web" });
+		const ios = await redeem("ios-user", "redeem-1", { code: "WELCOME", channel: "ios" });
+		const discount = await redeem("shopper", "redeem-1", { code: "SPRING", channel: "web" });
+
+		expect(granted.status).toBe(200);
+		const grantedData = (await granted.json()).data;
+		expect(grantedData).toMatchObject({
+			kind: "granted",
+			duplicate: false,
+			redemption: {
+				promotionKey: "welcome-credits",
+				code: "WELCOME",
+				billingAccountId: "reader",
+				status: "applied",
+				provider: "quotum",
+				source: "api_redeem",
+				actor: "billing-account:reader",
+			},
+			grant: {
+				features: [{ featureKey: "ai_credits", quantity: "100.5", expiresAt: expect.any(String) }],
+			},
+		});
+		expect((await replay.json()).data).toEqual({ ...grantedData, duplicate: true });
+		expect(changed.status).toBe(409);
+		expect((await changed.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
+		expect(again.status).toBe(409);
+		expect((await again.json()).error.code).toBe("PROMOTION_CODE_ALREADY_REDEEMED");
+		expect(ios.status).toBe(409);
+		expect((await ios.json()).error.code).toBe("PROMOTION_CODE_CHANNEL_NOT_SUPPORTED");
+		expect((await discount.json()).data).toEqual({
+			kind: "requires_commercial_action",
+			duplicate: false,
+			redemption: null,
+			promotion: { key: "spring-sale", effectKind: "discount" },
+			commercialAction: { promotionCode: "SPRING" },
+		});
+		expect(
+			await context.sql`SELECT id FROM customers WHERE billing_account_id IN ('ios-user', 'shopper')`,
+		).toHaveLength(0);
+
+		const consumed = await context.repository.consumeUsage(project, {
+			billingAccountId: "reader",
+			featureKey: "ai_credits",
+			quantity: "5",
+			idempotencyKey: "reader-spend",
+		});
+		expect(consumed).toMatchObject({ allowed: true, balance: { available: "105.5" } });
+		const allocations = await context.sql<
+			Array<{ source_kind: string; consumed_quantity: string; promotion_redemption_id: string }>
+		>`
+			SELECT source_kind, consumed_quantity::text, promotion_redemption_id
+			FROM balance_allocations
+			ORDER BY id
+		`;
+		expect(allocations).toEqual([
+			{ source_kind: "operator", consumed_quantity: "0.000000000", promotion_redemption_id: null },
+			{
+				source_kind: "reward",
+				consumed_quantity: "5.000000000",
+				promotion_redemption_id: grantedData.redemption.id,
+			},
+		]);
+		const [code] = await context.sql<Array<{ redeemed_count: number; reserved_count: number }>>`
+			SELECT redeemed_count, reserved_count FROM promotion_codes WHERE normalized_code = 'WELCOME'
+		`;
+		expect(code).toEqual({ redeemed_count: 1, reserved_count: 0 });
+		expect(
+			await context.sql`
+				SELECT 1 FROM projection_sync_jobs j
+				JOIN customers c ON c.id = j.customer_id
+				WHERE c.billing_account_id = 'reader' AND j.reason = 'usage_changed'
+			`,
+		).toHaveLength(1);
+
+		const read = (path: string) => testRequest(app, path, { headers: authHeaders("voysee") });
+		const ledger = await read("/v1/billing-accounts/reader/promotion-redemptions");
+		const detail = await read(
+			`/v1/billing-accounts/reader/promotion-redemptions/${grantedData.redemption.id}`,
+		);
+		const otherAccount = await read(
+			`/v1/billing-accounts/shopper/promotion-redemptions/${grantedData.redemption.id}`,
+		);
+		const unknown = await read("/v1/billing-accounts/nobody/promotion-redemptions");
+		expect((await ledger.json()).data).toEqual([grantedData.redemption]);
+		expect((await detail.json()).data).toEqual(grantedData.redemption);
+		expect(otherAccount.status).toBe(404);
+		expect((await otherAccount.json()).error.code).toBe("PROMOTION_REDEMPTION_NOT_FOUND");
+		expect(await unknown.json()).toMatchObject({ data: [], pagination: { nextCursor: null } });
+	});
+
+	it("never grants more than the global cap under concurrent redemptions", async () => {
+		await context.repository.promotions.createPromotion(
+			project,
+			grantPromotion({ codes: [{ code: "FIRST-THREE", maxRedemptions: 3 }] }),
+		);
+
+		const results = await Promise.allSettled(
+			Array.from({ length: 12 }, (_, index) =>
+				context.repository.promotions.redeemPromotionCode(project, {
+					billingAccountId: `racer-${index}`,
+					code: "FIRST-THREE",
+					channel: "android",
+					idempotencyKey: "race",
+					actor: null,
+				}),
+			),
+		);
+
+		const codes = results.map((result) =>
+			result.status === "fulfilled" ? result.value.kind : (result.reason as { code?: string }).code,
+		);
+		expect(codes.filter((code) => code === "granted")).toHaveLength(3);
+		expect(codes.filter((code) => code === "PROMOTION_CODE_EXHAUSTED")).toHaveLength(9);
+		expect(await context.sql`SELECT id FROM balance_allocations`).toHaveLength(3);
+		const [code] = await context.sql<Array<{ redeemed_count: number }>>`
+			SELECT redeemed_count FROM promotion_codes
+		`;
+		expect(code?.redeemed_count).toBe(3);
+	});
+
+	it("revokes what is left of a grant, keeps consumed usage and replays the revocation", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		await context.repository.promotions.createPromotion(
+			project,
+			grantPromotion({
+				effect: {
+					kind: "feature_grant",
+					items: [
+						{ featureKey: "ai_credits", quantity: "100", expiresAfterSeconds: null },
+						{ featureKey: "model_tokens", quantity: "5", expiresAfterSeconds: 60 },
+					],
+				},
+				codes: [{ code: "WELCOME" }],
+			}),
+		);
+		const redeemed = await context.repository.promotions.redeemPromotionCode(project, {
+			billingAccountId: "reviewer",
+			code: "WELCOME",
+			channel: "web",
+			idempotencyKey: "redeem",
+			actor: "user:7",
+		});
+		if (redeemed.kind !== "granted") throw new Error("expected a granted redemption");
+		await context.repository.consumeUsage(project, {
+			billingAccountId: "reviewer",
+			featureKey: "ai_credits",
+			quantity: "30",
+			idempotencyKey: "reviewer-spend",
+		});
+		await context.sql`
+			UPDATE balance_allocations
+			SET created_at = now() - interval '2 minutes', expires_at = now() - interval '1 minute'
+			WHERE source_kind = 'reward' AND expires_at IS NOT NULL
+		`;
+		await context.sql`DELETE FROM projection_sync_jobs`;
+		const operator = (key: string, projectKey = "voysee") => ({
+			...authHeaders(projectKey),
+			"x-billing-operator-key": context.env.operatorApiKey ?? "",
+			"x-billing-actor": actor,
+			"content-type": "application/json",
+			"idempotency-key": key,
+		});
+		const revoke = (id: string, key: string, projectKey = "voysee") =>
+			testRequest(app, `/v1/admin/promotion-redemptions/${id}/revoke`, {
+				method: "POST",
+				headers: operator(key, projectKey),
+				body: JSON.stringify({ reason: "Abuse report" }),
+			});
+
+		const foreign = await revoke(redeemed.redemption.id, "revoke-1", "wiseley");
+		const revoked = await revoke(redeemed.redemption.id, "revoke-1");
+		const replay = await revoke(redeemed.redemption.id, "revoke-1");
+		const twice = await revoke(redeemed.redemption.id, "revoke-2");
+
+		expect(foreign.status).toBe(404);
+		expect((await foreign.json()).error.code).toBe("PROMOTION_REDEMPTION_NOT_FOUND");
+		expect(revoked.status).toBe(200);
+		const revokedData = (await revoked.json()).data;
+		expect(revokedData).toMatchObject({
+			duplicate: false,
+			redemption: {
+				id: redeemed.redemption.id,
+				status: "reversed",
+				reversedAt: expect.any(String),
+			},
+		});
+		expect(
+			revokedData.reversedAllocations.map(
+				({ allocationId: _id, ...allocation }: { allocationId: string }) => allocation,
+			),
+		).toEqual([
+			{
+				featureKey: "ai_credits",
+				reversedQuantity: "70",
+				consumedQuantity: "30",
+				heldQuantity: "0",
+				expired: false,
+			},
+			{
+				featureKey: "model_tokens",
+				reversedQuantity: "0",
+				consumedQuantity: "0",
+				heldQuantity: "0",
+				expired: true,
+			},
+		]);
+		expect((await replay.json()).data).toEqual({ ...revokedData, duplicate: true });
+		expect(twice.status).toBe(409);
+		expect((await twice.json()).error.code).toBe("PROMOTION_REDEMPTION_ALREADY_REVERSED");
+		expect(
+			await context.repository.getMeteringBalance(project, "reviewer", "ai_credits"),
+		).toMatchObject({ available: "0" });
+		const rows = await context.sql<
+			Array<{ reversed_quantity: string; consumed_quantity: string; reversed: boolean }>
+		>`
+			SELECT reversed_quantity::text, consumed_quantity::text, reversed_at IS NOT NULL AS reversed
+			FROM balance_allocations
+			ORDER BY id
+		`;
+		expect(rows).toEqual([
+			{ reversed_quantity: "70.000000000", consumed_quantity: "30.000000000", reversed: true },
+			{ reversed_quantity: "0.000000000", consumed_quantity: "0.000000000", reversed: false },
+		]);
+		const [state] = await context.sql<
+			Array<{ reversal_actor: string; reversal_reason: string; redeemed_count: number }>
+		>`
+			SELECT r.reversal_actor, r.reversal_reason, c.redeemed_count
+			FROM promotion_redemptions r
+			JOIN promotion_codes c ON c.id = r.promotion_code_id
+		`;
+		expect(state).toEqual({
+			reversal_actor: actor,
+			reversal_reason: "Abuse report",
+			redeemed_count: 1,
+		});
+		expect(await context.sql`SELECT 1 FROM projection_sync_jobs`).toHaveLength(1);
+
+		const codeId = await createCode({ code: "SPRING" });
+		const stripeReservation = await context.repository.promotions.reservePromotionRedemption(
+			project,
+			reservation({
+				customerId: await customerId("buyer"),
+				billingAccountId: "buyer",
+				promotionCodeId: codeId,
+			}),
+		);
+		const notRevocable = await revoke(stripeReservation.redemption.id, "revoke-3");
+		const missing = await revoke("00000000-0000-4000-8000-000000000000", "revoke-4");
+		expect(notRevocable.status).toBe(409);
+		expect((await notRevocable.json()).error.code).toBe("PROMOTION_REDEMPTION_NOT_REVOCABLE");
+		expect(missing.status).toBe(404);
+	});
+});
+
 async function postWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	eventId: string,
@@ -1468,6 +1773,19 @@ function discountPromotion(overrides: Partial<CreatePromotionInput> = {}): Creat
 			discount: { type: "percent", percentOffBps: 2000, duration: "once", durationMonths: null },
 		},
 		targets: [{ kind: "product", key: "echo_credits_10" }],
+		actor,
+		...overrides,
+	};
+}
+
+function grantPromotion(overrides: Partial<CreatePromotionInput> = {}): CreatePromotionInput {
+	return {
+		key: "welcome-credits",
+		name: "Welcome credits",
+		effect: {
+			kind: "feature_grant",
+			items: [{ featureKey: "ai_credits", quantity: "100.5", expiresAfterSeconds: 86_400 }],
+		},
 		actor,
 		...overrides,
 	};

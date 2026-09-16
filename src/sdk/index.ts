@@ -9,7 +9,9 @@ export type {
 	PromotionCodeRecord,
 	PromotionEffect,
 	PromotionRecord,
+	PromotionRedeemResult,
 	PromotionRedemptionRecord,
+	PromotionRevokeResult,
 	PromotionValidation,
 } from "../billing/promotions";
 export type {

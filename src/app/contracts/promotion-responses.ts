@@ -223,3 +223,64 @@ export const postV1BillingAccountsByBillingAccountIdPromotionCodesValidateRespon
 			]),
 		}),
 	});
+
+export const postV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse200Schema =
+	z.object({
+		success: z.literal(true),
+		data: z.discriminatedUnion("kind", [
+			z.object({
+				kind: z.literal("granted"),
+				duplicate: z.boolean(),
+				redemption: promotionRedemptionSchema,
+				grant: z.object({
+					features: z.array(
+						z.object({
+							featureKey: z.string(),
+							quantity: z.string(),
+							expiresAt: z.union([z.null(), z.string()]),
+							allocationId: z.string(),
+						}),
+					),
+				}),
+			}),
+			z.object({
+				kind: z.literal("requires_commercial_action"),
+				duplicate: z.literal(false),
+				redemption: z.null(),
+				promotion: z.object({ key: z.string(), effectKind: z.literal("discount") }),
+				commercialAction: z.object({ promotionCode: z.string() }),
+			}),
+		]),
+	});
+
+export const getV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse200Schema = z.object(
+	{
+		success: z.literal(true),
+		data: z.array(promotionRedemptionSchema),
+		pagination: paginationSchema,
+	},
+);
+
+export const getV1BillingAccountsByBillingAccountIdPromotionRedemptionsByRedemptionIdResponse200Schema =
+	z.object({
+		success: z.literal(true),
+		data: promotionRedemptionSchema,
+	});
+
+export const postV1AdminPromotionRedemptionsByRedemptionIdRevokeResponse200Schema = z.object({
+	success: z.literal(true),
+	data: z.object({
+		duplicate: z.boolean(),
+		redemption: promotionRedemptionSchema,
+		reversedAllocations: z.array(
+			z.object({
+				allocationId: z.string(),
+				featureKey: z.string(),
+				reversedQuantity: z.string(),
+				consumedQuantity: z.string(),
+				heldQuantity: z.string(),
+				expired: z.boolean(),
+			}),
+		),
+	}),
+});

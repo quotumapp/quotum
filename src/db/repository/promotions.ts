@@ -1,12 +1,13 @@
 import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import { decodeAdminCursor, encodeAdminCursor } from "../../admin/query";
-import { databaseDecimal, sha256Hex } from "../../billing/decimal";
+import { databaseDecimal, sha256Hex, stableJson } from "../../billing/decimal";
 import { PersistenceConflictError } from "../../billing/errors";
 import {
 	type CommercialPromotion,
 	type CreatePromotionInput,
 	type NormalizedPromotionCode,
 	normalizeCreatePromotionInput,
+	normalizePromotionCode,
 	normalizePromotionCodes,
 	type PromotionChannel,
 	type PromotionCodeAvailability,
@@ -18,10 +19,14 @@ import {
 	type PromotionListResult,
 	type PromotionProviderObjectRecord,
 	type PromotionRecord,
+	type PromotionRedeemInput,
+	type PromotionRedeemResult,
 	type PromotionRedemptionProvider,
 	type PromotionRedemptionRecord,
 	type PromotionRedemptionSource,
 	type PromotionRedemptionStatus,
+	type PromotionRevokeInput,
+	type PromotionRevokeResult,
 	type PromotionServiceLike,
 	type PromotionStatus,
 	type PromotionTarget,
@@ -35,6 +40,7 @@ import {
 import type { ProjectInstanceContext } from "../../projects/context";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
+import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
 import { lockCustomerRow } from "./invalidations";
 import {
@@ -738,6 +744,306 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 				`,
 			);
 			if (owned !== null) await releasePromotionRedemptionInTx(tx, projectId, owned.id);
+		});
+	}
+
+	/**
+	 * Redeems a code a customer entered outside a purchase. A feature grant takes one use and writes
+	 * one reward allocation per item in the same transaction; a discount tells the caller to use a
+	 * commercial action. Replays by idempotency key return the stored result.
+	 */
+	async redeemPromotionCode(
+		project: ProjectInstanceContext,
+		input: PromotionRedeemInput,
+	): Promise<PromotionRedeemResult> {
+		const normalizedCode = normalizePromotionCode(input.code);
+		const requestHash = sha256Hex(stableJson({ code: normalizedCode, channel: input.channel }));
+		// Namespaced so a caller's key can never replay a Checkout or webhook redemption.
+		const idempotencyKey = `api_redeem:${input.idempotencyKey}`;
+		return await this.transaction(async (tx) => {
+			const projectId = project.projectInstanceId;
+			const resolved = await resolvePromotionCodeInTx(tx, projectId, normalizedCode);
+			if (
+				resolved === null ||
+				(resolved.code.billingAccountId !== null &&
+					resolved.code.billingAccountId !== input.billingAccountId)
+			) {
+				throw promotionError("PROMOTION_CODE_NOT_FOUND");
+			}
+			if (resolved.promotion.effect.kind === "discount") {
+				return {
+					kind: "requires_commercial_action",
+					duplicate: false,
+					redemption: null,
+					promotion: { key: resolved.promotion.key, effectKind: "discount" },
+					commercialAction: { promotionCode: resolved.code.code },
+				};
+			}
+			if (resolved.promotion.effect.kind !== "feature_grant") {
+				throw promotionError("PROMOTION_CODE_NOT_APPLICABLE");
+			}
+			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
+			const replay = await executeOne<{
+				request_hash: string;
+				result: PromotionRedeemResult | null;
+			}>(
+				tx,
+				drizzleSql`
+					SELECT request_hash, result
+					FROM promotion_redemptions
+					WHERE project_id = ${projectId}
+						AND customer_id = ${customer.id}
+						AND idempotency_key = ${idempotencyKey}
+				`,
+			);
+			if (replay !== null) {
+				if (replay.request_hash !== requestHash || replay.result === null) {
+					throw new PersistenceConflictError(
+						"Idempotency key was reused with a different promotion redemption",
+						"IDEMPOTENCY_CONFLICT",
+					);
+				}
+				return { ...replay.result, duplicate: true } as PromotionRedeemResult;
+			}
+			// App Store rules forbid unlocking digital content in iOS apps with a developer's own codes.
+			if (input.channel === "ios") {
+				throw promotionError("PROMOTION_CODE_CHANNEL_NOT_SUPPORTED");
+			}
+			const { redemption } = await reservePromotionRedemptionInTx(tx, projectId, {
+				customerId: customer.id,
+				billingAccountId: input.billingAccountId,
+				promotionCodeId: resolved.code.id,
+				channel: input.channel,
+				provider: "quotum",
+				source: "api_redeem",
+				idempotencyKey,
+				requestHash,
+				reservedUntil: null,
+				effectSnapshot: resolved.promotion.effect,
+				actor: input.actor ?? `billing-account:${input.billingAccountId}`,
+			});
+			const granted = await executeRows<{
+				id: string | number;
+				feature_key: string;
+				quantity: string;
+				expires_at: Timestamp | null;
+			}>(
+				tx,
+				drizzleSql`
+					INSERT INTO balance_allocations (
+						project_id, customer_id, feature_id, promotion_redemption_id, source_kind,
+						source_key, quantity, expires_at
+					)
+					SELECT
+						item.project_id, ${customer.id}, item.feature_id, ${redemption.id}, 'reward',
+						concat('promotion:', ${redemption.id}::text, ':item:', item.id::text),
+						item.quantity,
+						CASE
+							WHEN item.expires_after_seconds IS NULL THEN NULL
+							ELSE now() + item.expires_after_seconds * interval '1 second'
+						END
+					FROM promotion_grant_items item
+					JOIN features feature
+						ON feature.project_id = item.project_id AND feature.id = item.feature_id AND feature.active
+					WHERE item.project_id = ${projectId} AND item.promotion_id = ${resolved.promotion.id}
+					ORDER BY item.id
+					ON CONFLICT (project_id, feature_id, source_kind, source_key) DO NOTHING
+					RETURNING id, (
+						SELECT key FROM features WHERE project_id = ${projectId} AND id = balance_allocations.feature_id
+					) AS feature_key, quantity::text, expires_at
+				`,
+			);
+			if (granted.length !== resolved.promotion.effect.items.length) {
+				throw new PersistenceConflictError(
+					"A granted feature is no longer active",
+					"PROMOTION_CONFIGURATION_ERROR",
+				);
+			}
+			await enqueueUsageProjection(tx, { projectId, customerId: customer.id });
+			const result: PromotionRedeemResult = {
+				kind: "granted",
+				duplicate: false,
+				redemption: toRedemptionRecord(
+					(
+						await redemptionRows(tx, projectId, drizzleSql`r.id = ${redemption.id}`, 1)
+					)[0] as RedemptionRow,
+				),
+				grant: {
+					features: granted
+						.map((row) => ({
+							featureKey: row.feature_key,
+							quantity: promotionQuantity(databaseDecimal(row.quantity, "quantity")),
+							expiresAt: row.expires_at === null ? null : toIso(row.expires_at),
+							allocationId: String(row.id),
+						}))
+						.sort((left, right) => left.featureKey.localeCompare(right.featureKey)),
+				},
+			};
+			await executeOne(
+				tx,
+				drizzleSql`
+					UPDATE promotion_redemptions SET result = ${jsonb(result)}, updated_at = now()
+					WHERE project_id = ${projectId} AND id = ${redemption.id}
+					RETURNING id
+				`,
+			);
+			return result;
+		});
+	}
+
+	async listAccountRedemptions(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		input: PromotionListInput,
+	): Promise<PromotionListResult<PromotionRedemptionRecord>> {
+		const conditions = [drizzleSql`cu.billing_account_id = ${billingAccountId}`];
+		const cursor = keysetCondition(input.cursor, "r");
+		if (cursor !== null) conditions.push(cursor);
+		const rows = await redemptionRows(
+			this.database,
+			project.projectInstanceId,
+			drizzleSql.join(conditions, drizzleSql` AND `),
+			input.limit + 1,
+		);
+		return paginate(rows, input.limit, toRedemptionRecord);
+	}
+
+	async getAccountRedemption(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		redemptionId: string,
+	): Promise<PromotionRedemptionRecord> {
+		const [row] = await redemptionRows(
+			this.database,
+			project.projectInstanceId,
+			drizzleSql`cu.billing_account_id = ${billingAccountId} AND r.id = ${redemptionId}`,
+			1,
+		);
+		if (row === undefined) throw promotionError("PROMOTION_REDEMPTION_NOT_FOUND");
+		return toRedemptionRecord(row);
+	}
+
+	/**
+	 * Takes back what a Quotum-granted redemption still gives: unconsumed, unheld quantity of
+	 * allocations that have not expired. Consumed usage stays consumed and the use stays counted.
+	 */
+	async revokePromotionRedemption(
+		project: ProjectInstanceContext,
+		input: PromotionRevokeInput,
+	): Promise<PromotionRevokeResult> {
+		const requestHash = sha256Hex(stableJson({ reason: input.reason }));
+		return await this.transaction(async (tx) => {
+			const projectId = project.projectInstanceId;
+			const current = await lockRedemption(tx, projectId, input.redemptionId);
+			const state = await executeOne<{
+				provider: string;
+				reversal_idempotency_key: string | null;
+				reversal_request_hash: string | null;
+				reversal_result: PromotionRevokeResult | null;
+			}>(
+				tx,
+				drizzleSql`
+					SELECT provider, reversal_idempotency_key, reversal_request_hash, reversal_result
+					FROM promotion_redemptions
+					WHERE project_id = ${projectId} AND id = ${current.id}
+				`,
+			);
+			if (current.status === "reversed") {
+				if (state?.reversal_idempotency_key !== input.idempotencyKey) {
+					throw promotionError("PROMOTION_REDEMPTION_ALREADY_REVERSED");
+				}
+				if (state.reversal_request_hash !== requestHash || state.reversal_result === null) {
+					throw new PersistenceConflictError(
+						"Idempotency key was reused with a different revocation",
+						"IDEMPOTENCY_CONFLICT",
+					);
+				}
+				return { ...state.reversal_result, duplicate: true };
+			}
+			if (current.status !== "applied" || state?.provider !== "quotum") {
+				throw promotionError("PROMOTION_REDEMPTION_NOT_REVOCABLE");
+			}
+			const allocations = await executeRows<{
+				id: string | number;
+				feature_key: string;
+				quantity: string;
+				consumed_quantity: string;
+				held_quantity: string;
+				expired: boolean;
+			}>(
+				tx,
+				drizzleSql`
+					SELECT a.id, f.key AS feature_key, a.quantity::text, a.consumed_quantity::text,
+						a.held_quantity::text, (a.expires_at IS NOT NULL AND a.expires_at <= now()) AS expired
+					FROM balance_allocations a
+					JOIN features f ON f.project_id = a.project_id AND f.id = a.feature_id
+					WHERE a.project_id = ${projectId}
+						AND a.promotion_redemption_id = ${current.id}
+						AND a.reversed_at IS NULL
+					ORDER BY a.feature_id, a.expires_at ASC NULLS LAST, a.created_at, a.id
+					FOR UPDATE OF a
+				`,
+			);
+			const reversedAllocations: PromotionRevokeResult["reversedAllocations"] = [];
+			for (const allocation of allocations) {
+				const reversed = allocation.expired
+					? null
+					: await executeOne<{ reversed_quantity: string }>(
+							tx,
+							drizzleSql`
+								UPDATE balance_allocations
+								SET reversed_quantity = GREATEST(quantity - consumed_quantity - held_quantity, 0),
+									reversed_at = now(), updated_at = now()
+								WHERE project_id = ${projectId} AND id = ${String(allocation.id)}::bigint
+								RETURNING reversed_quantity::text
+							`,
+						);
+				reversedAllocations.push({
+					allocationId: String(allocation.id),
+					featureKey: allocation.feature_key,
+					reversedQuantity: promotionQuantity(
+						databaseDecimal(reversed?.reversed_quantity ?? "0", "reversed quantity"),
+					),
+					consumedQuantity: promotionQuantity(
+						databaseDecimal(allocation.consumed_quantity, "consumed quantity"),
+					),
+					heldQuantity: promotionQuantity(
+						databaseDecimal(allocation.held_quantity, "held quantity"),
+					),
+					expired: allocation.expired,
+				});
+			}
+			await executeOne(
+				tx,
+				drizzleSql`
+					UPDATE promotion_redemptions
+					SET status = 'reversed', reversed_at = now(), reversal_actor = ${input.actor},
+						reversal_reason = ${input.reason}, reversal_idempotency_key = ${input.idempotencyKey},
+						reversal_request_hash = ${requestHash}, updated_at = now()
+					WHERE project_id = ${projectId} AND id = ${current.id}
+					RETURNING id
+				`,
+			);
+			const owner = await executeOne<{ customer_id: string }>(
+				tx,
+				drizzleSql`SELECT customer_id FROM promotion_redemptions WHERE project_id = ${projectId} AND id = ${current.id}`,
+			);
+			if (owner !== null)
+				await enqueueUsageProjection(tx, { projectId, customerId: owner.customer_id });
+			const result: PromotionRevokeResult = {
+				duplicate: false,
+				redemption: await requireRedemption(tx, projectId, current.id),
+				reversedAllocations,
+			};
+			await executeOne(
+				tx,
+				drizzleSql`
+					UPDATE promotion_redemptions SET reversal_result = ${jsonb(result)}, updated_at = now()
+					WHERE project_id = ${projectId} AND id = ${current.id}
+					RETURNING id
+				`,
+			);
+			return result;
 		});
 	}
 

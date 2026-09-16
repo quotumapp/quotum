@@ -324,10 +324,16 @@ function headerParameters(route: DocumentedRoute): ParameterObject[] {
 		const idempotent =
 			(tags.includes("metering") && !route.path.endsWith("/check")) ||
 			route.path.endsWith("/commercial-actions") ||
-			route.path.endsWith("/changes");
+			route.path.endsWith("/changes") ||
+			route.path.endsWith("/promotion-redemptions") ||
+			route.path.endsWith("/promotion-redemptions/:redemptionId/revoke");
 		if (actor)
 			headers.push(
 				header("X-Billing-Actor", true, { type: "string", minLength: 1, maxLength: 200 }),
+			);
+		if (route.path.endsWith("/promotion-redemptions"))
+			headers.push(
+				header("X-Billing-Actor", false, { type: "string", minLength: 1, maxLength: 200 }),
 			);
 		if (idempotent) headers.push(header("Idempotency-Key", true, { type: "string", minLength: 1 }));
 	}

@@ -7288,6 +7288,400 @@
         ],
         "type": "object"
       },
+      "getV1BillingAccountsByBillingAccountIdPromotionRedemptionsByRedemptionIdResponse200": {
+        "properties": {
+          "data": {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "amountDiscountMinor": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "amountSubtotalMinor": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "amountTotalMinor": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "appliedAt": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "billingAccountId": {
+                "type": "string"
+              },
+              "channel": {
+                "enum": [
+                  "web",
+                  "ios",
+                  "android"
+                ],
+                "type": "string"
+              },
+              "code": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "currency": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "externalSubscriptionId": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "limitViolation": {
+                "enum": [
+                  "global",
+                  "first_purchase",
+                  "not_applicable",
+                  "inactive",
+                  "expired",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "promotionCodeId": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "promotionKey": {
+                "type": "string"
+              },
+              "provider": {
+                "enum": [
+                  "quotum",
+                  "stripe",
+                  "apple",
+                  "google"
+                ],
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "releasedAt": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "reservedUntil": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "reversedAt": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "source": {
+                "enum": [
+                  "api_redeem",
+                  "commercial_action",
+                  "stripe_hosted_checkout",
+                  "apple_offer",
+                  "google_offer"
+                ],
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "reserved",
+                  "applied",
+                  "released",
+                  "reversed"
+                ],
+                "type": "string"
+              },
+              "stripeCheckoutSessionId": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "promotionKey",
+              "promotionCodeId",
+              "code",
+              "billingAccountId",
+              "channel",
+              "status",
+              "provider",
+              "source",
+              "stripeCheckoutSessionId",
+              "externalSubscriptionId",
+              "currency",
+              "amountSubtotalMinor",
+              "amountDiscountMinor",
+              "amountTotalMinor",
+              "limitViolation",
+              "actor",
+              "reason",
+              "reservedUntil",
+              "appliedAt",
+              "releasedAt",
+              "reversedAt",
+              "createdAt"
+            ],
+            "type": "object"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ],
+        "type": "object"
+      },
+      "getV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse200": {
+        "properties": {
+          "data": {
+            "items": {
+              "properties": {
+                "actor": {
+                  "type": "string"
+                },
+                "amountDiscountMinor": {
+                  "type": [
+                    "null",
+                    "number"
+                  ]
+                },
+                "amountSubtotalMinor": {
+                  "type": [
+                    "null",
+                    "number"
+                  ]
+                },
+                "amountTotalMinor": {
+                  "type": [
+                    "null",
+                    "number"
+                  ]
+                },
+                "appliedAt": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "billingAccountId": {
+                  "type": "string"
+                },
+                "channel": {
+                  "enum": [
+                    "web",
+                    "ios",
+                    "android"
+                  ],
+                  "type": "string"
+                },
+                "code": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "currency": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "externalSubscriptionId": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "limitViolation": {
+                  "enum": [
+                    "global",
+                    "first_purchase",
+                    "not_applicable",
+                    "inactive",
+                    "expired",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "promotionCodeId": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "promotionKey": {
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "quotum",
+                    "stripe",
+                    "apple",
+                    "google"
+                  ],
+                  "type": "string"
+                },
+                "reason": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "releasedAt": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "reservedUntil": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "reversedAt": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "source": {
+                  "enum": [
+                    "api_redeem",
+                    "commercial_action",
+                    "stripe_hosted_checkout",
+                    "apple_offer",
+                    "google_offer"
+                  ],
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "reserved",
+                    "applied",
+                    "released",
+                    "reversed"
+                  ],
+                  "type": "string"
+                },
+                "stripeCheckoutSessionId": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "promotionKey",
+                "promotionCodeId",
+                "code",
+                "billingAccountId",
+                "channel",
+                "status",
+                "provider",
+                "source",
+                "stripeCheckoutSessionId",
+                "externalSubscriptionId",
+                "currency",
+                "amountSubtotalMinor",
+                "amountDiscountMinor",
+                "amountTotalMinor",
+                "limitViolation",
+                "actor",
+                "reason",
+                "reservedUntil",
+                "appliedAt",
+                "releasedAt",
+                "reversedAt",
+                "createdAt"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "pagination": {
+            "properties": {
+              "nextCursor": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "nextCursor"
+            ],
+            "type": "object"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "pagination"
+        ],
+        "type": "object"
+      },
       "getV1BillingAccountsByBillingAccountIdProvidersAppleAccountTokenResponse200": {
         "properties": {
           "data": {
@@ -9603,6 +9997,241 @@
             "required": [
               "jobId",
               "status"
+            ],
+            "type": "object"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ],
+        "type": "object"
+      },
+      "postV1AdminPromotionRedemptionsByRedemptionIdRevokeResponse200": {
+        "properties": {
+          "data": {
+            "properties": {
+              "duplicate": {
+                "type": "boolean"
+              },
+              "redemption": {
+                "properties": {
+                  "actor": {
+                    "type": "string"
+                  },
+                  "amountDiscountMinor": {
+                    "type": [
+                      "null",
+                      "number"
+                    ]
+                  },
+                  "amountSubtotalMinor": {
+                    "type": [
+                      "null",
+                      "number"
+                    ]
+                  },
+                  "amountTotalMinor": {
+                    "type": [
+                      "null",
+                      "number"
+                    ]
+                  },
+                  "appliedAt": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "billingAccountId": {
+                    "type": "string"
+                  },
+                  "channel": {
+                    "enum": [
+                      "web",
+                      "ios",
+                      "android"
+                    ],
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "externalSubscriptionId": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "limitViolation": {
+                    "enum": [
+                      "global",
+                      "first_purchase",
+                      "not_applicable",
+                      "inactive",
+                      "expired",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "promotionCodeId": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "promotionKey": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "enum": [
+                      "quotum",
+                      "stripe",
+                      "apple",
+                      "google"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "releasedAt": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "reservedUntil": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "reversedAt": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "source": {
+                    "enum": [
+                      "api_redeem",
+                      "commercial_action",
+                      "stripe_hosted_checkout",
+                      "apple_offer",
+                      "google_offer"
+                    ],
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "reserved",
+                      "applied",
+                      "released",
+                      "reversed"
+                    ],
+                    "type": "string"
+                  },
+                  "stripeCheckoutSessionId": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "promotionKey",
+                  "promotionCodeId",
+                  "code",
+                  "billingAccountId",
+                  "channel",
+                  "status",
+                  "provider",
+                  "source",
+                  "stripeCheckoutSessionId",
+                  "externalSubscriptionId",
+                  "currency",
+                  "amountSubtotalMinor",
+                  "amountDiscountMinor",
+                  "amountTotalMinor",
+                  "limitViolation",
+                  "actor",
+                  "reason",
+                  "reservedUntil",
+                  "appliedAt",
+                  "releasedAt",
+                  "reversedAt",
+                  "createdAt"
+                ],
+                "type": "object"
+              },
+              "reversedAllocations": {
+                "items": {
+                  "properties": {
+                    "allocationId": {
+                      "type": "string"
+                    },
+                    "consumedQuantity": {
+                      "type": "string"
+                    },
+                    "expired": {
+                      "type": "boolean"
+                    },
+                    "featureKey": {
+                      "type": "string"
+                    },
+                    "heldQuantity": {
+                      "type": "string"
+                    },
+                    "reversedQuantity": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "allocationId",
+                    "featureKey",
+                    "reversedQuantity",
+                    "consumedQuantity",
+                    "heldQuantity",
+                    "expired"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "duplicate",
+              "redemption",
+              "reversedAllocations"
             ],
             "type": "object"
           },
@@ -12468,6 +13097,311 @@
               "code"
             ],
             "type": "object"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ],
+        "type": "object"
+      },
+      "postV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse200": {
+        "properties": {
+          "data": {
+            "oneOf": [
+              {
+                "properties": {
+                  "duplicate": {
+                    "type": "boolean"
+                  },
+                  "grant": {
+                    "properties": {
+                      "features": {
+                        "items": {
+                          "properties": {
+                            "allocationId": {
+                              "type": "string"
+                            },
+                            "expiresAt": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "featureKey": {
+                              "type": "string"
+                            },
+                            "quantity": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "featureKey",
+                            "quantity",
+                            "expiresAt",
+                            "allocationId"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "features"
+                    ],
+                    "type": "object"
+                  },
+                  "kind": {
+                    "enum": [
+                      "granted"
+                    ],
+                    "type": "string"
+                  },
+                  "redemption": {
+                    "properties": {
+                      "actor": {
+                        "type": "string"
+                      },
+                      "amountDiscountMinor": {
+                        "type": [
+                          "null",
+                          "number"
+                        ]
+                      },
+                      "amountSubtotalMinor": {
+                        "type": [
+                          "null",
+                          "number"
+                        ]
+                      },
+                      "amountTotalMinor": {
+                        "type": [
+                          "null",
+                          "number"
+                        ]
+                      },
+                      "appliedAt": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "billingAccountId": {
+                        "type": "string"
+                      },
+                      "channel": {
+                        "enum": [
+                          "web",
+                          "ios",
+                          "android"
+                        ],
+                        "type": "string"
+                      },
+                      "code": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "currency": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "externalSubscriptionId": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "limitViolation": {
+                        "enum": [
+                          "global",
+                          "first_purchase",
+                          "not_applicable",
+                          "inactive",
+                          "expired",
+                          null
+                        ],
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "promotionCodeId": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "promotionKey": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "enum": [
+                          "quotum",
+                          "stripe",
+                          "apple",
+                          "google"
+                        ],
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "releasedAt": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "reservedUntil": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "reversedAt": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "source": {
+                        "enum": [
+                          "api_redeem",
+                          "commercial_action",
+                          "stripe_hosted_checkout",
+                          "apple_offer",
+                          "google_offer"
+                        ],
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "reserved",
+                          "applied",
+                          "released",
+                          "reversed"
+                        ],
+                        "type": "string"
+                      },
+                      "stripeCheckoutSessionId": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "promotionKey",
+                      "promotionCodeId",
+                      "code",
+                      "billingAccountId",
+                      "channel",
+                      "status",
+                      "provider",
+                      "source",
+                      "stripeCheckoutSessionId",
+                      "externalSubscriptionId",
+                      "currency",
+                      "amountSubtotalMinor",
+                      "amountDiscountMinor",
+                      "amountTotalMinor",
+                      "limitViolation",
+                      "actor",
+                      "reason",
+                      "reservedUntil",
+                      "appliedAt",
+                      "releasedAt",
+                      "reversedAt",
+                      "createdAt"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "duplicate",
+                  "redemption",
+                  "grant"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "commercialAction": {
+                    "properties": {
+                      "promotionCode": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "promotionCode"
+                    ],
+                    "type": "object"
+                  },
+                  "duplicate": {
+                    "enum": [
+                      false
+                    ],
+                    "type": "boolean"
+                  },
+                  "kind": {
+                    "enum": [
+                      "requires_commercial_action"
+                    ],
+                    "type": "string"
+                  },
+                  "promotion": {
+                    "properties": {
+                      "effectKind": {
+                        "enum": [
+                          "discount"
+                        ],
+                        "type": "string"
+                      },
+                      "key": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "effectKind"
+                    ],
+                    "type": "object"
+                  },
+                  "redemption": {
+                    "type": "null"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "duplicate",
+                  "redemption",
+                  "promotion",
+                  "commercialAction"
+                ],
+                "type": "object"
+              }
+            ]
           },
           "success": {
             "enum": [
@@ -19506,6 +20440,232 @@
         ]
       }
     },
+    "/api/billing/admin/billing-accounts/{billingAccountId}/promotion-redemptions": {
+      "get": {
+        "description": "Requires billing.read in sandbox and billing.read in production.  ",
+        "operationId": "merchantGetV1BillingAccountsByBillingAccountIdPromotionRedemptions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Organization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Project",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Environment",
+            "required": true,
+            "schema": {
+              "enum": [
+                "sandbox",
+                "production"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Step-Up-Grant",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/getV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "GET /api/billing/admin/billing-accounts/{billingAccountId}/promotion-redemptions",
+        "tags": [
+          "merchant-billing"
+        ]
+      }
+    },
     "/api/billing/admin/billing-accounts/{billingAccountId}/usage/events": {
       "get": {
         "description": "Requires billing.read in sandbox and billing.read in production.  ",
@@ -26199,6 +27359,256 @@
           }
         ],
         "summary": "POST /api/billing/admin/projection-jobs/{jobId}/retry",
+        "tags": [
+          "merchant-billing"
+        ]
+      }
+    },
+    "/api/billing/admin/promotion-redemptions/{redemptionId}/revoke": {
+      "post": {
+        "description": "Requires operations.write in sandbox and operations.write in production. Production requires an action-bound step-up grant. ",
+        "operationId": "merchantPostV1AdminPromotionRedemptionsByRedemptionIdRevoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "redemptionId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Organization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Project",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Environment",
+            "required": true,
+            "schema": {
+              "enum": [
+                "sandbox",
+                "production"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Step-Up-Grant",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/postV1AdminPromotionRedemptionsByRedemptionIdRevokeResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "POST /api/billing/admin/promotion-redemptions/{redemptionId}/revoke",
         "tags": [
           "merchant-billing"
         ]
@@ -44407,6 +45817,218 @@
         ]
       }
     },
+    "/v1/admin/promotion-redemptions/{redemptionId}/revoke": {
+      "post": {
+        "operationId": "postV1AdminPromotionRedemptionsByRedemptionIdRevoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "redemptionId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Billing-Actor",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/postV1AdminPromotionRedemptionsByRedemptionIdRevokeResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "POST /v1/admin/promotion-redemptions/{redemptionId}/revoke",
+        "tags": [
+          "promotions"
+        ]
+      }
+    },
     "/v1/admin/promotions": {
       "get": {
         "operationId": "getV1AdminPromotions",
@@ -51157,6 +52779,594 @@
           }
         ],
         "summary": "POST /v1/billing-accounts/{billingAccountId}/promotion-codes/validate",
+        "tags": [
+          "promotions"
+        ]
+      }
+    },
+    "/v1/billing-accounts/{billingAccountId}/promotion-redemptions": {
+      "get": {
+        "operationId": "getV1BillingAccountsByBillingAccountIdPromotionRedemptions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/getV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/billing-accounts/{billingAccountId}/promotion-redemptions",
+        "tags": [
+          "promotions"
+        ]
+      },
+      "post": {
+        "operationId": "postV1BillingAccountsByBillingAccountIdPromotionRedemptions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Billing-Actor",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "channel": {
+                    "enum": [
+                      "web",
+                      "ios",
+                      "android"
+                    ],
+                    "type": "string"
+                  },
+                  "code": {
+                    "pattern": "^[A-Za-z0-9-]{3,64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "channel"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/postV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "POST /v1/billing-accounts/{billingAccountId}/promotion-redemptions",
+        "tags": [
+          "promotions"
+        ]
+      }
+    },
+    "/v1/billing-accounts/{billingAccountId}/promotion-redemptions/{redemptionId}": {
+      "get": {
+        "operationId": "getV1BillingAccountsByBillingAccountIdPromotionRedemptionsByRedemptionId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "redemptionId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/getV1BillingAccountsByBillingAccountIdPromotionRedemptionsByRedemptionIdResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/billing-accounts/{billingAccountId}/promotion-redemptions/{redemptionId}",
         "tags": [
           "promotions"
         ]

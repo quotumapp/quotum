@@ -155,7 +155,8 @@ export interface GrantAllocationInput {
 	entityId?: string | null;
 	featureKey: string;
 	quantity: string;
-	sourceKind: "subscription" | "purchase" | "credit_grant" | "topup" | "reward" | "operator";
+	/** Rewards are written only by promotion redemptions, which carry their provenance. */
+	sourceKind: "subscription" | "purchase" | "credit_grant" | "topup" | "operator";
 	sourceKey: string;
 	expiresAt?: Date | null;
 	periodStartAt?: Date | null;

@@ -87,7 +87,7 @@ function operatorRequiredPath(path: string): boolean {
 		path.startsWith("/v1/admin/contracts/") ||
 		path.startsWith("/v1/admin/catalog-migrations/") ||
 		path.startsWith("/v1/admin/auto-topups/") ||
-		path.startsWith("/v1/admin/promotions") ||
+		path.startsWith("/v1/admin/promotion") ||
 		operatorRequiredPathPattern.test(path)
 	);
 }

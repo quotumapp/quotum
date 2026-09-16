@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { InvalidRequestError } from "../billing/errors";
 import type {
 	CreatePromotionInput,
 	PromotionCodeInput,
@@ -161,6 +162,47 @@ export const validatePromotionCodeBodySchema = z
 	})
 	.strict();
 
+export const redeemPromotionCodeBodySchema = z
+	.object({ code: codeSchema, channel: channelSchema })
+	.strict();
+
+export const revokePromotionRedemptionBodySchema = z
+	.object({ reason: z.string().trim().min(1).max(500) })
+	.strict();
+
+export const listAccountRedemptionsQuerySchema = z
+	.object({
+		limit: z.coerce.number().int().positive().max(100).default(25),
+		cursor: z.string().trim().min(1).optional(),
+	})
+	.strict();
+
+const redemptionParams = z.object({ redemptionId: z.string().uuid() }).strict();
+const accountRedemptionParams = z
+	.object({ billingAccountId: z.string().trim().min(1).max(200), redemptionId: z.string().uuid() })
+	.strict();
+
+export function requirePromotionIdempotencyKey(value: string | null): string {
+	const key = value?.trim();
+	if (key === undefined || key === "" || key.length > 200) {
+		throw new InvalidRequestError(
+			"Idempotency-Key header must contain between 1 and 200 characters",
+		);
+	}
+	return key;
+}
+
+function optionalActor(headers: Headers): string | null {
+	const actor = headers.get("x-billing-actor")?.trim();
+	if (actor === undefined || actor === "") return null;
+	if (actor.length > 200) {
+		throw new InvalidRequestError(
+			"X-Billing-Actor header must contain between 1 and 200 characters",
+		);
+	}
+	return actor;
+}
+
 const promotionParams = z.object({ promotionKey: keySchema }).strict();
 const codeParams = promotionParams.extend({ codeId: z.string().uuid() }).strict();
 const accountParams = z.object({ billingAccountId: z.string().trim().min(1).max(200) }).strict();
@@ -216,15 +258,21 @@ export function registerPromotionRoutes({
 	registerPostAuthGuard,
 }: PromotionRoutesDependencies): void {
 	registerPostAuthGuard(
-		operatorApiKeyGuard(operatorApiKey, (path) => path.startsWith("/v1/admin/promotions")),
+		operatorApiKeyGuard(operatorApiKey, (path) => path.startsWith("/v1/admin/promotion")),
 	);
-	registerPostAuthGuard(
-		projectScopedRateLimitGuard({
-			limiter: validationLimiter,
-			matches: (path) => /^\/v1\/billing-accounts\/[^/]+\/promotion-codes\/validate$/.test(path),
-			trustProxyHeaders: rateLimitKeyOptions.trustProxyHeaders,
-		}),
-	);
+	// Code entry is limited like purchase verification so codes cannot be guessed; ledger reads are not.
+	const codeEntryLimit = projectScopedRateLimitGuard({
+		limiter: validationLimiter,
+		matches: (path) =>
+			/^\/v1\/billing-accounts\/[^/]+\/promotion-(?:codes\/validate|redemptions)$/.test(path),
+		trustProxyHeaders: rateLimitKeyOptions.trustProxyHeaders,
+	});
+	registerPostAuthGuard({
+		matches: codeEntryLimit.matches,
+		guard: (input) => {
+			if (input.request.method === "POST") codeEntryLimit.guard(input);
+		},
+	});
 
 	app.post(
 		"/v1/admin/promotions",
@@ -465,6 +513,108 @@ export function registerPromotionRoutes({
 				path: "/v1/billing-accounts/:billingAccountId/promotion-codes/validate",
 				responses: {
 					200: responses.postV1BillingAccountsByBillingAccountIdPromotionCodesValidateResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.post(
+		"/v1/billing-accounts/:billingAccountId/promotion-redemptions",
+		async ({ body, params, request, project }) => ({
+			success: true,
+			data: await service.redeemPromotionCode(privateProject(project), {
+				billingAccountId: params.billingAccountId,
+				code: body.code,
+				channel: body.channel,
+				idempotencyKey: requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+				actor: optionalActor(request.headers),
+			}),
+		}),
+		{
+			parse: [LENIENT_JSON_PARSE],
+			params: accountParams,
+			body: redeemPromotionCodeBodySchema,
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1BillingAccountsByBillingAccountIdPromotionRedemptions",
+				tags: ["promotions"],
+				path: "/v1/billing-accounts/:billingAccountId/promotion-redemptions",
+				responses: {
+					200: responses.postV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.get(
+		"/v1/billing-accounts/:billingAccountId/promotion-redemptions",
+		async ({ params, query, project }) => {
+			const result = await service.listAccountRedemptions(
+				privateProject(project),
+				params.billingAccountId,
+				{ limit: query.limit, cursor: query.cursor ?? null },
+			);
+			return { success: true, data: result.items, pagination: { nextCursor: result.nextCursor } };
+		},
+		{
+			params: accountParams,
+			query: listAccountRedemptionsQuerySchema,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdPromotionRedemptions",
+				tags: ["promotions"],
+				path: "/v1/billing-accounts/:billingAccountId/promotion-redemptions",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.get(
+		"/v1/billing-accounts/:billingAccountId/promotion-redemptions/:redemptionId",
+		async ({ params, project }) => ({
+			success: true,
+			data: await service.getAccountRedemption(
+				privateProject(project),
+				params.billingAccountId,
+				params.redemptionId,
+			),
+		}),
+		{
+			params: accountRedemptionParams,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdPromotionRedemptionsByRedemptionId",
+				tags: ["promotions"],
+				path: "/v1/billing-accounts/:billingAccountId/promotion-redemptions/:redemptionId",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdPromotionRedemptionsByRedemptionIdResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.post(
+		"/v1/admin/promotion-redemptions/:redemptionId/revoke",
+		async ({ body, params, request, project }) => ({
+			success: true,
+			data: await service.revokePromotionRedemption(privateProject(project), {
+				redemptionId: params.redemptionId,
+				reason: body.reason,
+				actor: requireActor(request.headers),
+				idempotencyKey: requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+			}),
+		}),
+		{
+			parse: [LENIENT_JSON_PARSE],
+			params: redemptionParams,
+			body: revokePromotionRedemptionBodySchema,
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1AdminPromotionRedemptionsByRedemptionIdRevoke",
+				tags: ["promotions"],
+				path: "/v1/admin/promotion-redemptions/:redemptionId/revoke",
+				responses: {
+					200: responses.postV1AdminPromotionRedemptionsByRedemptionIdRevokeResponse200Schema,
 				},
 			}),
 		},
