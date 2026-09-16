@@ -110,6 +110,16 @@ describe("billing database client", () => {
 		expect(client.getCallCount()).toBe(1);
 	});
 
+	it("does not retry a server_login_retryable near-match in an error message", async () => {
+		const client = createCountingSqlClient([
+			new Error("server login has been failing (server_login_retryable)"),
+			[{ "?column?": 1 }],
+		]);
+
+		expect(await checkPostgresHealth(asSqlClient(client), 0)).toBe(false);
+		expect(client.getCallCount()).toBe(1);
+	});
+
 	it("reports a non-transient SQLSTATE unhealthy without a second attempt", async () => {
 		const client = createCountingSqlClient([
 			new SQL.PostgresError("division by zero", {
