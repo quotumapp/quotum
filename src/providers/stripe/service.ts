@@ -1242,6 +1242,7 @@ function toStripeCreditPurchaseRepositoryInput(
 		stripeCustomerId: command.stripeCustomerId,
 		externalProductId: command.externalProductId,
 		externalPriceId: command.externalPriceId,
+		transactionId: command.transactionId,
 		paymentIntentId: command.paymentIntentId,
 		chargeId: command.chargeId,
 		checkoutSessionId: command.checkoutSessionId,

@@ -136,6 +136,8 @@ CREATE TABLE IF NOT EXISTS purchases (
 	invalidation_reason TEXT,
 	reversed_amount BIGINT NOT NULL DEFAULT 0,
 	reversed_credit_amount INTEGER NOT NULL DEFAULT 0,
+	amount_paid_minor BIGINT,
+	currency TEXT COLLATE "C",
 	raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -145,7 +147,9 @@ CREATE TABLE IF NOT EXISTS purchases (
 	CONSTRAINT purchases_project_store_product_fk FOREIGN KEY (project_id, store_product_id) REFERENCES store_products(project_id, id) ON DELETE SET NULL,
 	CONSTRAINT purchases_project_subscription_fk FOREIGN KEY (project_id, subscription_id) REFERENCES subscriptions(project_id, id) ON DELETE SET NULL,
 	CONSTRAINT purchases_reversed_amount_check CHECK (reversed_amount >= 0),
-	CONSTRAINT purchases_reversed_credit_amount_check CHECK (reversed_credit_amount >= 0)
+	CONSTRAINT purchases_reversed_credit_amount_check CHECK (reversed_credit_amount >= 0),
+	CONSTRAINT purchases_amount_paid_minor_check CHECK (amount_paid_minor IS NULL OR amount_paid_minor >= 0),
+	CONSTRAINT purchases_currency_check CHECK (currency IS NULL OR char_length(currency) = 3)
 );
 
 CREATE TABLE IF NOT EXISTS entitlements (

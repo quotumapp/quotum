@@ -233,6 +233,8 @@ export async function upsertPurchase(
 		identityError: string;
 		updateProductOnConflict?: boolean;
 		allowRestoration?: boolean;
+		amountPaidMinor?: number | null;
+		currency?: string | null;
 	},
 ): Promise<string> {
 	const allowRestoration = input.allowRestoration ?? false;
@@ -255,6 +257,8 @@ export async function upsertPurchase(
 			purchased_at,
 			invalidated_at,
 			invalidation_reason,
+			amount_paid_minor,
+			currency,
 			raw_payload
 		)
 		VALUES (
@@ -272,6 +276,8 @@ export async function upsertPurchase(
 			${input.purchasedAt.toISOString()},
 			${input.invalidatedAt?.toISOString() ?? null},
 			${input.invalidationReason},
+			${input.amountPaidMinor ?? null},
+			${input.currency ?? null},
 			${jsonb(input.rawPayload)}
 		)
 		ON CONFLICT (project_id, provider, transaction_id) DO UPDATE SET
@@ -308,6 +314,8 @@ export async function upsertPurchase(
 				WHEN ${updateIsMonotonic} THEN EXCLUDED.invalidation_reason
 				ELSE purchases.invalidation_reason
 			END,
+			amount_paid_minor = COALESCE(purchases.amount_paid_minor, EXCLUDED.amount_paid_minor),
+			currency = COALESCE(purchases.currency, EXCLUDED.currency),
 			raw_payload = CASE
 				WHEN ${updateIsMonotonic} THEN EXCLUDED.raw_payload
 				ELSE purchases.raw_payload

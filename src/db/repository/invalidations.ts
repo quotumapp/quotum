@@ -236,7 +236,7 @@ export async function findGoogleVoidedTarget(
 export async function findStripeCreditReversalTarget(
 	executor: QueryExecutor,
 	projectId: string,
-	paymentIntentId: string,
+	transactionId: string,
 ): Promise<StripeCreditReversalTargetRow | null> {
 	const identity = await executeOne<{ purchase_id: string; customer_id: string }>(
 		executor,
@@ -247,7 +247,7 @@ export async function findStripeCreditReversalTarget(
 				AND pu.provider = 'stripe'
 				AND pu.channel = 'web'
 				AND pu.purchase_kind IN ('consumable', 'non_consumable')
-				AND pu.transaction_id = ${paymentIntentId}
+				AND pu.transaction_id = ${transactionId}
 			LIMIT 1
 		`,
 	);
@@ -267,8 +267,8 @@ export async function findStripeCreditReversalTarget(
 				p.key AS product_key,
 				pu.purchase_kind,
 				p.credit_amount,
-				sp.price_amount,
-				sp.currency,
+				COALESCE(pu.amount_paid_minor, sp.price_amount) AS price_amount,
+				COALESCE(pu.currency, sp.currency) AS currency,
 				pu.reversed_amount,
 				pu.reversed_credit_amount
 			FROM purchases pu

@@ -569,6 +569,8 @@ export const purchases = pgTable(
 		invalidationReason: text("invalidation_reason"),
 		reversedAmount: bigint("reversed_amount", { mode: "number" }).notNull().default(0),
 		reversedCreditAmount: integer("reversed_credit_amount").notNull().default(0),
+		amountPaidMinor: bigint("amount_paid_minor", { mode: "number" }),
+		currency: text("currency"),
 		rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull().default({}),
 		...timestampColumns(),
 	},
@@ -616,6 +618,14 @@ export const purchases = pgTable(
 		),
 		check("purchases_reversed_amount_check", sql`${table.reversedAmount} >= 0`),
 		check("purchases_reversed_credit_amount_check", sql`${table.reversedCreditAmount} >= 0`),
+		check(
+			"purchases_amount_paid_minor_check",
+			sql`${table.amountPaidMinor} IS NULL OR ${table.amountPaidMinor} >= 0`,
+		),
+		check(
+			"purchases_currency_check",
+			sql`${table.currency} IS NULL OR char_length(${table.currency}) = 3`,
+		),
 	],
 );
 

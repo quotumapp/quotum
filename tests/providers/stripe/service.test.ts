@@ -1192,6 +1192,7 @@ describe("StripeBillingService", () => {
 			stripeCustomerId: "cus_123",
 			externalProductId: "prod_credits_100",
 			externalPriceId: "price_credits_100",
+			transactionId: "pi_123",
 			paymentIntentId: "pi_123",
 			chargeId: "ch_123",
 			checkoutSessionId: "cs_123",
