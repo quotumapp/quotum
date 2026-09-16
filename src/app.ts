@@ -38,6 +38,7 @@ import {
 	createInMemoryBillingMetrics,
 	safelyIncrementBillingMetric,
 } from "./observability/metrics";
+import { createPrometheusMetricsRenderer } from "./observability/prometheus-metrics";
 import {
 	isTenantTrafficEligible,
 	type ProjectInstanceContext,
@@ -101,6 +102,7 @@ export function createApp({
 	const app = new Elysia(HTTP_APP_CONFIG);
 	const billingLogger = logger ?? createNoopBillingLogger();
 	const billingMetrics = metrics ?? createInMemoryBillingMetrics();
+	const renderMetrics = createPrometheusMetricsRenderer(billingMetrics);
 	let repository: BillingRepository | null = null;
 	const getRepository = () => {
 		repository ??= new BillingRepository();
@@ -296,7 +298,7 @@ export function createApp({
 	registerOperationalRoutes({
 		app,
 		readinessCheck: checkReady,
-		renderMetrics: () => billingMetrics.renderPrometheus(),
+		renderMetrics,
 	});
 
 	registerWebhookRoutes({
@@ -395,7 +397,7 @@ export function createApp({
 		adminLimiter: createAdminLimiter(),
 		rateLimitKeyOptions,
 		operatorApiKey: env.operatorApiKey,
-		billingMetrics,
+		renderMetrics,
 		billingLogger,
 		getAdminBillingReader,
 		adminOperations: adminOperations ?? null,

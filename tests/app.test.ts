@@ -3030,7 +3030,34 @@ describe("billing app", () => {
 		});
 	});
 
-	it("protects and renders admin metrics", async () => {
+	it("exports runtime metrics by default on both metrics endpoints", async () => {
+		const app = createApp({ env });
+		const unauthorized = await testRequest(app, "/v1/admin/metrics");
+		expect(unauthorized.status).toBe(401);
+		const missingOperator = await testRequest(app, "/v1/admin/metrics", {
+			headers: { authorization: "Bearer secret" },
+		});
+		expect(missingOperator.status).toBe(401);
+		for (const path of ["/metrics", "/v1/admin/metrics"]) {
+			const response = await testRequest(app, path, {
+				headers:
+					path === "/metrics"
+						? {}
+						: {
+								authorization: "Bearer secret",
+								"x-billing-operator-key": "operator-secret-key",
+							},
+			});
+			expect(response.status).toBe(200);
+			expect(response.headers.get("content-type")).toBe("text/plain; version=0.0.4");
+			const text = await response.text();
+			expect(text).toContain("# TYPE process_cpu_seconds_total counter");
+			expect(text).toContain("process_resident_memory_bytes ");
+			expect(text).toContain(`bun_version_info{version="${Bun.version}"} 1`);
+		}
+	});
+
+	it("combines injected synchronous billing metrics with runtime metrics on both endpoints", async () => {
 		const metrics = createInMemoryBillingMetrics();
 		metrics.increment("billing_webhook_failures_total", {
 			provider: "apple",
@@ -3043,7 +3070,9 @@ describe("billing app", () => {
 		const publicResponse = await testRequest(app, "/metrics");
 		expect(publicResponse.status).toBe(200);
 		expect(publicResponse.headers.get("content-type")).toBe("text/plain; version=0.0.4");
-		expect(await publicResponse.text()).toBe(
+		const publicText = await publicResponse.text();
+		expect(publicText).toContain("# TYPE process_cpu_seconds_total counter");
+		expect(publicText).toContain(
 			'billing_webhook_failures_total{code="INVALID_REQUEST",provider="apple"} 1\n',
 		);
 
@@ -3056,7 +3085,9 @@ describe("billing app", () => {
 
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toBe("text/plain; version=0.0.4");
-		expect(await response.text()).toBe(
+		const adminText = await response.text();
+		expect(adminText).toContain("# TYPE process_cpu_seconds_total counter");
+		expect(adminText).toContain(
 			'billing_webhook_failures_total{code="INVALID_REQUEST",provider="apple"} 1\n',
 		);
 	});

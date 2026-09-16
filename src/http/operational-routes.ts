@@ -8,7 +8,7 @@ const unavailableSchema = z.object({ status: z.literal("unavailable") });
 export function registerOperationalRoutes(input: {
 	app: BillingElysia;
 	readinessCheck: () => boolean | Promise<boolean>;
-	renderMetrics: () => string;
+	renderMetrics: () => Promise<string>;
 }): void {
 	const { app, readinessCheck, renderMetrics } = input;
 
@@ -51,8 +51,10 @@ export function registerOperationalRoutes(input: {
 
 	app.get(
 		"/metrics",
-		() =>
-			new Response(renderMetrics(), { headers: { "content-type": "text/plain; version=0.0.4" } }),
+		async () =>
+			new Response(await renderMetrics(), {
+				headers: { "content-type": "text/plain; version=0.0.4" },
+			}),
 		{
 			detail: operationDetail({
 				operationId: "getMetrics",

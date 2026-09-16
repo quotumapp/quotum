@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { SQL } from "bun";
-import { e2eApiKey, e2eServiceEnv } from "./helpers/e2e-env";
+import { e2eApiKey, e2eOperatorKey, e2eServiceEnv } from "./helpers/e2e-env";
 import { describeE2e } from "./helpers/gating";
 import { type BillingServiceProcess, startBillingService } from "./helpers/service-process";
 
@@ -51,6 +51,29 @@ e2eDescribe("E2E HTTP surface", () => {
 		});
 		expect(wrong.status).toBe(401);
 		expect(wrong.headers.get("x-request-id")).toBe("e2e-wrong-key");
+	});
+
+	it("exposes runtime metrics over HTTP with the existing admin authorization", async () => {
+		const unauthorized = await service.request("/v1/admin/metrics");
+		expect(unauthorized.status).toBe(401);
+		for (const path of ["/metrics", "/v1/admin/metrics"]) {
+			const response = await service.request(path, {
+				headers:
+					path === "/metrics"
+						? {}
+						: {
+								authorization: `Bearer ${e2eApiKey}`,
+								"x-billing-operator-key": e2eOperatorKey,
+							},
+			});
+			expect(response.status).toBe(200);
+			expect(response.headers.get("content-type")).toBe("text/plain; version=0.0.4");
+			const text = await response.text();
+			expect(text).toContain("# TYPE process_cpu_seconds_total counter");
+			expect(text).toContain("process_resident_memory_bytes ");
+			expect(text).toContain("bun_version_info{");
+			expect(text).not.toContain("NaN");
+		}
 	});
 
 	it("rate limits verify requests over real HTTP", async () => {
