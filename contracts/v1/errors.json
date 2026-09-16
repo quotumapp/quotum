@@ -580,6 +580,7 @@
     {
       "code": "METERING_CONFIGURATION_ERROR",
       "sources": [
+        "src/db/repository/meter-limit-windows.ts",
         "src/db/repository/metering-persistence.ts"
       ]
     },
