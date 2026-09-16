@@ -421,6 +421,19 @@ localDescribe("promotion repository", () => {
 				),
 			),
 		).toBe("PROMOTION_CODE_FIRST_PURCHASE_ONLY");
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({
+				key: "web-only",
+				name: "Web only",
+				allowedChannels: ["web"],
+				codes: [{ code: "WEB-ONLY" }],
+			}),
+		);
+		const [webOnly] = (
+			await context.repository.promotions.listPromotionCodes(project, "web-only", { limit: 1 })
+		).items;
+		if (webOnly === undefined) throw new Error("missing WEB-ONLY");
 		expect(
 			await captureCode(
 				context.repository.promotions.reservePromotionRedemption(
@@ -428,12 +441,15 @@ localDescribe("promotion repository", () => {
 					reservation({
 						customerId: buyer,
 						billingAccountId: "buyer",
-						promotionCodeId: restricted,
+						promotionCodeId: webOnly.id,
 						channel: "ios",
 					}),
 				),
 			),
-		).toBe("PROMOTION_CODE_NOT_FOUND");
+		).toBe("PROMOTION_CODE_CHANNEL_NOT_SUPPORTED");
+		expect(
+			await context.repository.promotions.addPromotionCodes(project, "web-only", [], actor),
+		).toEqual({ codes: [], created: 0 });
 		const newcomer = await customerId("newcomer");
 		expect(
 			(
