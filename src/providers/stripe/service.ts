@@ -499,6 +499,7 @@ export class StripeBillingService {
 				email: current.intent.email,
 				successUrl: current.intent.successUrl,
 				cancelUrl: current.intent.cancelUrl,
+				...(current.intent.expiresAt === undefined ? {} : { expiresAt: current.intent.expiresAt }),
 				idempotencyKey: commercialExecutionKey(previewToken, idempotencyKey),
 				expectedTargetId: current.preview.targetId,
 			});
@@ -1482,6 +1483,7 @@ function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialAc
 		email: optionalNonBlankString(intent.email) ?? null,
 		successUrl: optionalNonBlankString(intent.successUrl) ?? null,
 		cancelUrl: optionalNonBlankString(intent.cancelUrl) ?? null,
+		...(intent.expiresAt === undefined ? {} : { expiresAt: intent.expiresAt }),
 	};
 	return intent.kind === "checkout_plan"
 		? {
