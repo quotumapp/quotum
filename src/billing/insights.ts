@@ -34,6 +34,28 @@ export interface UsageEventPage {
 	nextCursor: UsageEventCursor | null;
 }
 
+export interface ProjectUsageEventListInput {
+	billingAccountId?: string;
+	featureKey?: string;
+	entityId?: string;
+	operation?: "consume" | "confirm" | "correction";
+	from: Date;
+	to: Date;
+	limit: number;
+	cursor: UsageEventCursor | null;
+}
+
+export interface ProjectUsageEventItem extends UsageEventItem {
+	customerId: string;
+	billingAccountId: string;
+	customerEmail: string | null;
+}
+
+export interface ProjectUsageEventPage {
+	items: ProjectUsageEventItem[];
+	nextCursor: UsageEventCursor | null;
+}
+
 export interface UsageSeriesInput {
 	billingAccountId: string;
 	featureKey?: string;

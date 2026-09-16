@@ -217,6 +217,9 @@ Reads:
   `GET /v1/admin/customers/:customerId`, and per-customer `purchases`, `subscriptions`,
   `store-events`, and `projection-jobs`.
 - `GET /v1/admin/purchases`, `/subscriptions`, `/store-events`, `/projection-jobs`.
+- `GET /v1/admin/usage-events`: project-wide usage events with optional `billingAccountId`.
+  Same 30-day default, 90-day cap, and cursor paging (default 50, maximum 200) as the other
+  usage reads. Each row carries `customerId`, `billingAccountId`, and nullable `customerEmail`.
 - `GET /v1/admin/store-events/:eventId` with optional `includeRawPayload=true` (audit-logged, secrets
   redacted).
 - `GET /v1/admin/catalog/products`, `GET /v1/admin/catalog/store-products`,

@@ -3,6 +3,9 @@ import { databaseDecimal } from "../../billing/decimal";
 import { NotFoundBillingError } from "../../billing/errors";
 import type {
 	CustomerBillingSummary,
+	ProjectUsageEventItem,
+	ProjectUsageEventListInput,
+	ProjectUsageEventPage,
 	UsageEventItem,
 	UsageEventListInput,
 	UsageEventPage,
@@ -25,46 +28,7 @@ export class BillingInsightsRepository extends RepositoryModule {
 	): Promise<UsageEventPage> {
 		const projectId = project.projectInstanceId;
 		const customer = await requireCustomer(this.database, projectId, input.billingAccountId);
-		const rows = await executeRows<{
-			id: string;
-			recorded_at: Date | string;
-			occurred_at: Date | string | null;
-			effective_at: Date | string;
-			operation: "consume" | "confirm" | "correction";
-			feature_key: string;
-			feature_unit: string;
-			entity_external_id: string | null;
-			quantity: unknown;
-			wallet_quantity: unknown;
-			filter_key: string | null;
-			metadata: Record<string, unknown>;
-		}>(
-			this.database,
-			drizzleSql`
-				SELECT event.id, event.recorded_at, event.occurred_at, event.effective_at,
-					event.operation, feature.key AS feature_key, feature.unit AS feature_unit,
-					entity.external_id AS entity_external_id, event.quantity::text AS quantity,
-					event.wallet_quantity::text AS wallet_quantity, event.filter_key, event.metadata
-				FROM usage_events event
-				JOIN features feature
-					ON feature.project_id = event.project_id AND feature.id = event.meter_feature_id
-				LEFT JOIN entities entity
-					ON entity.project_id = event.project_id AND entity.id = event.entity_id
-				WHERE event.project_id = ${projectId} AND event.customer_id = ${customer.id}
-					AND event.recorded_at >= ${input.from.toISOString()}
-					AND event.recorded_at < ${input.to.toISOString()}
-					${input.featureKey === undefined ? drizzleSql`` : drizzleSql`AND feature.key = ${input.featureKey}`}
-					${input.entityId === undefined ? drizzleSql`` : drizzleSql`AND entity.external_id = ${input.entityId}`}
-					${input.operation === undefined ? drizzleSql`` : drizzleSql`AND event.operation = ${input.operation}`}
-					${
-						input.cursor === null
-							? drizzleSql``
-							: drizzleSql`AND (event.recorded_at, event.id) < (${input.cursor.recordedAt}, ${input.cursor.id}::uuid)`
-					}
-				ORDER BY event.recorded_at DESC, event.id DESC
-				LIMIT ${input.limit + 1}
-			`,
-		);
+		const rows = await queryUsageEventRows(this.database, projectId, input, customer.id);
 		const hasMore = rows.length > input.limit;
 		const pageRows = hasMore ? rows.slice(0, input.limit) : rows;
 		const items: UsageEventItem[] = pageRows.map((row) => ({
@@ -80,6 +44,53 @@ export class BillingInsightsRepository extends RepositoryModule {
 			walletQuantity: signedDecimal(row.wallet_quantity, "usage event wallet quantity"),
 			filterKey: row.filter_key,
 			metadata: row.metadata,
+		}));
+		const last = items.at(-1);
+		return {
+			items,
+			nextCursor:
+				hasMore && last !== undefined ? { recordedAt: last.recordedAt, id: last.id } : null,
+		};
+	}
+
+	async listProjectUsageEvents(
+		project: ProjectInstanceContext,
+		input: ProjectUsageEventListInput,
+	): Promise<ProjectUsageEventPage> {
+		const projectId = project.projectInstanceId;
+		let customerId: string | null = null;
+		if (input.billingAccountId !== undefined) {
+			const customer = await executeOne<CustomerRow>(
+				this.database,
+				drizzleSql`
+					SELECT id FROM customers
+					WHERE project_id = ${projectId} AND billing_account_id = ${input.billingAccountId}
+				`,
+			);
+			if (customer === null) {
+				return { items: [], nextCursor: null };
+			}
+			customerId = customer.id;
+		}
+		const rows = await queryUsageEventRows(this.database, projectId, input, customerId);
+		const hasMore = rows.length > input.limit;
+		const pageRows = hasMore ? rows.slice(0, input.limit) : rows;
+		const items: ProjectUsageEventItem[] = pageRows.map((row) => ({
+			id: row.id,
+			recordedAt: iso(row.recorded_at),
+			occurredAt: row.occurred_at === null ? null : iso(row.occurred_at),
+			effectiveAt: iso(row.effective_at),
+			operation: row.operation,
+			featureKey: row.feature_key,
+			featureUnit: row.feature_unit,
+			entityId: row.entity_external_id,
+			quantity: signedDecimal(row.quantity, "usage event quantity"),
+			walletQuantity: signedDecimal(row.wallet_quantity, "usage event wallet quantity"),
+			filterKey: row.filter_key,
+			metadata: row.metadata,
+			customerId: row.customer_id,
+			billingAccountId: row.billing_account_id,
+			customerEmail: row.customer_email,
 		}));
 		const last = items.at(-1);
 		return {
@@ -276,6 +287,71 @@ export class BillingInsightsRepository extends RepositoryModule {
 			})),
 		};
 	}
+}
+
+interface UsageEventRow {
+	id: string;
+	recorded_at: Date | string;
+	occurred_at: Date | string | null;
+	effective_at: Date | string;
+	operation: "consume" | "confirm" | "correction";
+	feature_key: string;
+	feature_unit: string;
+	entity_external_id: string | null;
+	quantity: unknown;
+	wallet_quantity: unknown;
+	filter_key: string | null;
+	metadata: Record<string, unknown>;
+	customer_id: string;
+	billing_account_id: string;
+	customer_email: string | null;
+}
+
+async function queryUsageEventRows(
+	executor: QueryExecutor,
+	projectId: string,
+	input: {
+		featureKey?: string;
+		entityId?: string;
+		operation?: "consume" | "confirm" | "correction";
+		from: Date;
+		to: Date;
+		limit: number;
+		cursor: { recordedAt: string; id: string } | null;
+	},
+	customerId: string | null,
+): Promise<UsageEventRow[]> {
+	return await executeRows<UsageEventRow>(
+		executor,
+		drizzleSql`
+			SELECT event.id, event.recorded_at, event.occurred_at, event.effective_at,
+				event.operation, feature.key AS feature_key, feature.unit AS feature_unit,
+				entity.external_id AS entity_external_id, event.quantity::text AS quantity,
+				event.wallet_quantity::text AS wallet_quantity, event.filter_key, event.metadata,
+				customer.id AS customer_id, customer.billing_account_id, customer.email AS customer_email
+			FROM usage_events event
+			JOIN features feature
+				ON feature.project_id = event.project_id AND feature.id = event.meter_feature_id
+			LEFT JOIN entities entity
+				ON entity.project_id = event.project_id AND entity.id = event.entity_id
+			JOIN customers customer
+				ON customer.project_id = event.project_id AND customer.id = event.customer_id
+			WHERE event.project_id = ${projectId}
+				${customerId === null ? drizzleSql`` : drizzleSql`AND event.customer_id = ${customerId}`}
+				AND event.recorded_at >= ${input.from.toISOString()}
+				AND event.recorded_at < ${input.to.toISOString()}
+				${input.featureKey === undefined ? drizzleSql`` : drizzleSql`AND feature.key = ${input.featureKey}`}
+				${input.entityId === undefined ? drizzleSql`` : drizzleSql`AND entity.external_id = ${input.entityId}`}
+				${input.operation === undefined ? drizzleSql`` : drizzleSql`AND event.operation = ${input.operation}`}
+				${
+					input.cursor === null
+						? drizzleSql``
+						: drizzleSql`AND (event.recorded_at, event.id) < (${input.cursor.recordedAt}, ${input.cursor.id}::uuid)`
+				}
+			ORDER BY event.recorded_at DESC, event.id DESC
+			LIMIT ${input.limit + 1}
+		`,
+	);
 }
 
 async function requireCustomer(

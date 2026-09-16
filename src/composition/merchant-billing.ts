@@ -7,7 +7,13 @@ import {
 	commercialActionExecuteBodySchema,
 	commercialActionPreviewBodySchema,
 } from "../app/customer-routes";
-import { dateRange, usageEventsQuerySchema, usageSeriesQuerySchema } from "../app/insights-routes";
+import {
+	dateRange,
+	parseUsageEventsRangeAndCursor,
+	projectUsageEventsQuerySchema,
+	usageEventsQuerySchema,
+	usageSeriesQuerySchema,
+} from "../app/insights-routes";
 import { correctionBodySchema } from "../app/metering-routes";
 import {
 	addPromotionCodesBodySchema,
@@ -23,7 +29,7 @@ import {
 import { requireStripeBillingService } from "../app/provider-services";
 import type { ProjectProviderServiceResolver } from "../app/types";
 import { BillingError, InvalidRequestError, isBillingError } from "../billing/errors";
-import { decodeUsageCursor, encodeUsageCursor } from "../billing/insights";
+import { encodeUsageCursor } from "../billing/insights";
 import { MeteringService } from "../billing/metering";
 import type { BillingRepository } from "../db/repository";
 import type { BillingAdminOperations } from "../operations/admin";
@@ -186,14 +192,32 @@ export function createMerchantBillingPort(input: {
 			}
 			case "usage.events": {
 				const body = parse(usageEventsQuerySchema, command.query);
-				const range = dateRange(body.from, body.to, 90);
-				const cursor = body.cursor === undefined ? null : decodeUsageCursor(body.cursor);
-				if (body.cursor !== undefined && cursor === null)
-					throw new InvalidRequestError("Invalid usage cursor");
+				const { from, to, cursor } = parseUsageEventsRangeAndCursor(body);
 				const page = await repo.listUsageEvents(project, {
 					...body,
-					...range,
+					from,
+					to,
 					billingAccountId: account(),
+					cursor,
+				});
+				return {
+					status: 200,
+					body: {
+						success: true,
+						data: page.items,
+						pagination: {
+							nextCursor: page.nextCursor === null ? null : encodeUsageCursor(page.nextCursor),
+						},
+					},
+				};
+			}
+			case "usage-events": {
+				const body = parse(projectUsageEventsQuerySchema, command.query);
+				const { from, to, cursor } = parseUsageEventsRangeAndCursor(body);
+				const page = await repo.listProjectUsageEvents(project, {
+					...body,
+					from,
+					to,
 					cursor,
 				});
 				return {

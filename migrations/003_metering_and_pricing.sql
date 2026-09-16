@@ -825,6 +825,9 @@ CREATE INDEX IF NOT EXISTS idx_billing_reservation_allocations_allocation
 CREATE INDEX IF NOT EXISTS idx_billing_usage_events_customer_time
 	ON usage_events (project_id, customer_id, recorded_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_billing_usage_events_project_time
+	ON usage_events (project_id, recorded_at DESC, id DESC);
+
 CREATE INDEX IF NOT EXISTS idx_billing_usage_events_feature_time
 	ON usage_events (project_id, meter_feature_id, recorded_at DESC);
 

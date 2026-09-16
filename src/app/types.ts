@@ -8,6 +8,8 @@ import type { ControlsEnterpriseRepositoryLike } from "../billing/controls";
 import type { EntitlementService } from "../billing/entitlements";
 import type {
 	CustomerBillingSummary,
+	ProjectUsageEventListInput,
+	ProjectUsageEventPage,
 	UsageEventListInput,
 	UsageEventPage,
 	UsageSeriesInput,
@@ -175,6 +177,10 @@ export interface BillingInsightsServiceLike {
 		project: ProjectInstanceContext,
 		input: UsageEventListInput,
 	): Promise<UsageEventPage>;
+	listProjectUsageEvents(
+		project: ProjectInstanceContext,
+		input: ProjectUsageEventListInput,
+	): Promise<ProjectUsageEventPage>;
 	getUsageSeries(
 		project: ProjectInstanceContext,
 		input: UsageSeriesInput,

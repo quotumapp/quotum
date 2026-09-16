@@ -200,6 +200,7 @@ export function createIntegrationApp({
 			promotionService: repository.promotions,
 			billingInsightsService: {
 				listUsageEvents: (...args) => repository.listUsageEvents(...args),
+				listProjectUsageEvents: (...args) => repository.listProjectUsageEvents(...args),
 				getUsageSeries: (...args) => repository.getUsageSeries(...args),
 				getCustomerBillingSummary: (...args) => repository.getCustomerBillingSummary(...args),
 			},

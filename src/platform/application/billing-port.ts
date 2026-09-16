@@ -13,6 +13,7 @@ export const merchantBillingOperations = [
 	["GET", "/admin/store-events", "events"],
 	["GET", "/admin/store-events/:eventId", "events.detail"],
 	["GET", "/admin/projection-jobs", "projections"],
+	["GET", "/admin/usage-events", "usage-events"],
 	["GET", "/admin/catalog", "catalog"],
 	["GET", "/admin/catalog/products", "catalog.products"],
 	["GET", "/admin/catalog/store-products", "catalog.store-products"],

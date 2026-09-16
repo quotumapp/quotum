@@ -7,15 +7,20 @@ import { privateProject } from "./request-context";
 import type { BillingElysia, BillingInsightsServiceLike } from "./types";
 
 const accountParamsSchema = z.object({ billingAccountId: z.string().trim().min(1) });
-export const usageEventsQuerySchema = z
+const usageEventsFilterFields = {
+	featureKey: z.string().trim().min(1).optional(),
+	entityId: z.string().trim().min(1).optional(),
+	operation: z.enum(["consume", "confirm", "correction"]).optional(),
+	from: z.iso.datetime({ offset: true }).optional(),
+	to: z.iso.datetime({ offset: true }).optional(),
+	limit: z.coerce.number().int().min(1).max(200).default(50),
+	cursor: z.string().trim().min(1).optional(),
+};
+export const usageEventsQuerySchema = z.object(usageEventsFilterFields).strict();
+export const projectUsageEventsQuerySchema = z
 	.object({
-		featureKey: z.string().trim().min(1).optional(),
-		entityId: z.string().trim().min(1).optional(),
-		operation: z.enum(["consume", "confirm", "correction"]).optional(),
-		from: z.iso.datetime({ offset: true }).optional(),
-		to: z.iso.datetime({ offset: true }).optional(),
-		limit: z.coerce.number().int().min(1).max(200).default(50),
-		cursor: z.string().trim().min(1).optional(),
+		billingAccountId: z.string().trim().min(1).optional(),
+		...usageEventsFilterFields,
 	})
 	.strict();
 export const usageSeriesQuerySchema = z
@@ -59,18 +64,14 @@ export function registerInsightsRoutes(input: {
 		"/v1/billing-accounts/:billingAccountId/usage/events",
 		async ({ params, query, project }) => {
 			const billingAccountId = params.billingAccountId;
-			const range = dateRange(query.from, query.to, 90);
-			const cursor = query.cursor === undefined ? null : decodeUsageCursor(query.cursor);
-			if (query.cursor !== undefined && cursor === null) {
-				throw invalidInsightsRequest("Invalid usage cursor");
-			}
+			const { from, to, cursor } = parseUsageEventsRangeAndCursor(query);
 			const page = await service.listUsageEvents(privateProject(project), {
 				billingAccountId,
 				featureKey: query.featureKey,
 				entityId: query.entityId,
 				operation: query.operation,
-				from: range.from,
-				to: range.to,
+				from,
+				to,
 				limit: query.limit,
 				cursor,
 			});
@@ -91,6 +92,41 @@ export function registerInsightsRoutes(input: {
 				path: "/v1/billing-accounts/:billingAccountId/usage/events",
 				responses: {
 					200: responses.getV1BillingAccountsByBillingAccountIdUsageEventsResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.get(
+		"/v1/admin/usage-events",
+		async ({ query, project }) => {
+			const { from, to, cursor } = parseUsageEventsRangeAndCursor(query);
+			const page = await service.listProjectUsageEvents(privateProject(project), {
+				billingAccountId: query.billingAccountId,
+				featureKey: query.featureKey,
+				entityId: query.entityId,
+				operation: query.operation,
+				from,
+				to,
+				limit: query.limit,
+				cursor,
+			});
+			return {
+				success: true,
+				data: page.items,
+				pagination: {
+					nextCursor: page.nextCursor === null ? null : encodeUsageCursor(page.nextCursor),
+				},
+			};
+		},
+		{
+			query: projectUsageEventsQuerySchema,
+			detail: operationDetail({
+				operationId: "getV1AdminUsageEvents",
+				tags: ["insights"],
+				path: "/v1/admin/usage-events",
+				responses: {
+					200: responses.getV1AdminUsageEventsResponse200Schema,
 				},
 			}),
 		},
@@ -145,6 +181,19 @@ export function dateRange(
 		throw invalidInsightsRequest(`Usage range must be positive and no longer than ${maxDays} days`);
 	}
 	return { from, to };
+}
+
+export function parseUsageEventsRangeAndCursor(query: {
+	from?: string;
+	to?: string;
+	cursor?: string;
+}) {
+	const range = dateRange(query.from, query.to, 90);
+	const cursor = query.cursor === undefined ? null : decodeUsageCursor(query.cursor);
+	if (query.cursor !== undefined && cursor === null) {
+		throw invalidInsightsRequest("Invalid usage cursor");
+	}
+	return { from: range.from, to: range.to, cursor };
 }
 
 function invalidInsightsRequest(message: string): BillingError {

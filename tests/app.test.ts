@@ -1815,6 +1815,9 @@ describe("billing app", () => {
 						nextCursor: null,
 					});
 				},
+				listProjectUsageEvents() {
+					throw new Error("Unexpected project usage events read");
+				},
 				getUsageSeries() {
 					return Promise.resolve([]);
 				},
@@ -1855,12 +1858,88 @@ describe("billing app", () => {
 		expect(calls).toEqual(["events:user_1:api_calls", "summary:user_1"]);
 	});
 
+	it("lists usage events across a project with customer identity", async () => {
+		const calls: unknown[] = [];
+		const app = createApp({
+			env,
+			billingInsightsService: {
+				listUsageEvents() {
+					throw new Error("Unexpected per-account usage events read");
+				},
+				listProjectUsageEvents(_project, input) {
+					calls.push(input);
+					return Promise.resolve({
+						items: [
+							{
+								id: "22222222-2222-4222-8222-222222222222",
+								recordedAt: "2026-08-28T10:00:00.000Z",
+								occurredAt: null,
+								effectiveAt: "2026-08-28T10:00:00.000Z",
+								operation: "consume",
+								featureKey: "api_calls",
+								featureUnit: "request",
+								entityId: null,
+								quantity: "4",
+								walletQuantity: "4",
+								filterKey: null,
+								metadata: {},
+								customerId: "33333333-3333-4333-8333-333333333333",
+								billingAccountId: "user_1",
+								customerEmail: "user_1@example.com",
+							},
+						],
+						nextCursor: null,
+					});
+				},
+				getUsageSeries() {
+					throw new Error("Unexpected usage series read");
+				},
+				getCustomerBillingSummary(_project, billingAccountId) {
+					return Promise.resolve({
+						schemaVersion: 1 as const,
+						billingAccountId,
+						customerExists: false,
+						generatedAt: "2026-08-30T00:00:00.000Z",
+						subscriptions: [],
+						balances: [],
+						usage: [],
+						recentInvoices: [],
+					});
+				},
+			},
+		});
+		const headers = { authorization: "Bearer secret" };
+		const response = await testRequest(
+			app,
+			"/v1/admin/usage-events?billingAccountId=user_1&operation=consume&limit=25",
+			{ headers },
+		);
+		expect(response.status).toBe(200);
+		const body = await response.json();
+		expect(body.data[0]).toMatchObject({
+			billingAccountId: "user_1",
+			customerId: "33333333-3333-4333-8333-333333333333",
+			customerEmail: "user_1@example.com",
+			operation: "consume",
+		});
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toMatchObject({
+			billingAccountId: "user_1",
+			operation: "consume",
+			limit: 25,
+		});
+	});
+
 	it("rejects malformed or unbounded usage insight queries before repository work", async () => {
 		let calls = 0;
 		const app = createApp({
 			env,
 			billingInsightsService: {
 				listUsageEvents() {
+					calls += 1;
+					return Promise.resolve({ items: [], nextCursor: null });
+				},
+				listProjectUsageEvents() {
 					calls += 1;
 					return Promise.resolve({ items: [], nextCursor: null });
 				},
@@ -1890,6 +1969,12 @@ describe("billing app", () => {
 			"/v1/billing-accounts/user_1/usage/events?from=2026-08-30T00:00:00.000Z&to=2026-08-30T00:00:00.000Z",
 			"/v1/billing-accounts/user_1/usage/events?from=2026-01-01T00:00:00.000Z&to=2026-08-30T00:00:00.000Z",
 			"/v1/billing-accounts/user_1/usage/events?unknown=true",
+			"/v1/admin/usage-events?limit=0",
+			"/v1/admin/usage-events?limit=201",
+			"/v1/admin/usage-events?cursor=not-json",
+			"/v1/admin/usage-events?from=2026-01-01T00:00:00.000Z&to=2026-08-30T00:00:00.000Z",
+			"/v1/admin/usage-events?unknown=true",
+			"/v1/admin/usage-events?billingAccountId=",
 			"/v1/billing-accounts/user_1/usage/series?interval=month",
 			"/v1/billing-accounts/user_1/usage/series?from=2026-01-01T00:00:00.000Z&to=2026-08-30T00:00:00.000Z",
 		];

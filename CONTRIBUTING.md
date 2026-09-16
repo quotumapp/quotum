@@ -84,6 +84,19 @@ characters and explain the why in the body when it is not obvious.
 
 ## Pull requests
 
+Push your feature or fix branch to GitHub and open a draft pull request targeting `main` early
+to get CI feedback. Pushing a branch without an open pull request does not trigger
+[GitHub CI](.github/workflows/ci.yml). Opening a pull request, including a draft, triggers CI;
+subsequent pushes to that pull request's branch rerun it. CI also runs after commits land on `main`.
+
+Pull requests run the shared [standalone validation](.github/workflows/validate.yml): static
+checks, unit tests and coverage, OpenAPI checks, Postgres integration tests, end-to-end tests,
+merchant integration tests, and a container build. They also run a bundle size check and an
+advisory dependency audit. Fix failing checks and wait for all required checks to pass on the
+latest revision before merging; a successful branch push alone is not validation. The release
+pull request follows the same process, and release tagging additionally requires successful CI
+on the exact merged `main` commit as described in the publishing checklist.
+
 Keep history linear and prepare one commit per feature branch before merging. Fold follow-up
 changes into the branch commit with `git commit --amend`; squash intermediate commits with an
 interactive rebase when needed. Rebase the branch onto current `main` instead of merging `main`
