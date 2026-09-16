@@ -6,6 +6,7 @@ import type {
 	ProjectionPayload,
 	ProjectionSyncReason,
 } from "../../billing/types";
+import { meterLimitWindowBounds } from "./meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import { requireNonBlank, toIsoStringOrNull } from "./validation";
@@ -459,97 +460,134 @@ export async function readProjectionBalances(
 	projectId: string,
 	customerId: string,
 ): Promise<ProjectionPayload["balances"]> {
-	const rows = await executeRows<{
-		feature_key: string;
-		unit: string;
-		credit_scale: number;
-		available: unknown;
-		held: unknown;
-		period_ends_at: unknown;
+	const allocations = await executeRows<ProjectionBalanceRow>(
+		executor,
+		drizzleSql`
+			SELECT
+				f.key AS feature_key,
+				f.unit,
+				f.credit_scale,
+				GREATEST(
+					SUM(
+						a.quantity - a.reversed_quantity - a.consumed_quantity - a.held_quantity
+					),
+					0::numeric
+				) AS available,
+				SUM(a.held_quantity) AS held,
+				MIN(COALESCE(a.expires_at, a.period_end_at)) AS period_ends_at
+			FROM balance_allocations a
+			JOIN features f
+				ON f.project_id = a.project_id
+				AND f.id = a.feature_id
+			WHERE a.project_id = ${projectId}
+				AND a.customer_id = ${customerId}
+				AND a.entity_id IS NULL
+				AND a.reversed_at IS NULL
+				AND (a.expires_at IS NULL OR a.expires_at > now())
+			GROUP BY f.id, f.key, f.unit, f.credit_scale
+		`,
+	);
+	const limits = await executeRows<{
+		feature_id: string | number | bigint;
+		limit_quantity: unknown;
+		reset_interval: "month" | "year";
+		period_start_at: Date | string;
+		period_end_at: Date | string | null;
 	}>(
 		executor,
 		drizzleSql`
-			WITH allocation_balances AS (
-				SELECT
-					f.key AS feature_key,
-					f.unit,
-					f.credit_scale,
-					GREATEST(
-						SUM(
-							a.quantity - a.reversed_quantity - a.consumed_quantity - a.held_quantity
-						),
-						0::numeric
-					) AS available,
-					SUM(a.held_quantity) AS held,
-					MIN(COALESCE(a.expires_at, a.period_end_at)) AS period_ends_at
-				FROM balance_allocations a
-				JOIN features f
-					ON f.project_id = a.project_id
-					AND f.id = a.feature_id
-				WHERE a.project_id = ${projectId}
-					AND a.customer_id = ${customerId}
-					AND a.entity_id IS NULL
-					AND a.reversed_at IS NULL
-					AND (a.expires_at IS NULL OR a.expires_at > now())
-				GROUP BY f.id, f.key, f.unit, f.credit_scale
-			),
-			active_limits AS (
-				SELECT DISTINCT ON (pi.feature_id)
-					pi.feature_id,
-					pi.quantity AS limit_quantity,
-					COALESCE(s.current_period_end, s.expires_at) AS period_ends_at
-				FROM subscriptions s
-				JOIN plan_items pi
-					ON pi.project_id = s.project_id AND pi.plan_version_id = s.plan_version_id
-				WHERE s.project_id = ${projectId}
-					AND s.customer_id = ${customerId}
-					AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-					AND (s.expires_at IS NULL OR s.expires_at > now())
-					AND pi.item_kind = 'meter_limit'
-				ORDER BY pi.feature_id, s.created_at, s.id
-			),
-			window_balances AS (
-				SELECT
-					f.key AS feature_key,
-					f.unit,
-					f.credit_scale,
-					GREATEST(
-						limits.limit_quantity - COALESCE(windows.usage, 0) - COALESCE(holds.held, 0),
-						0::numeric
-					) AS available,
-					COALESCE(holds.held, 0) AS held,
-					COALESCE(windows.window_end_at, limits.period_ends_at) AS period_ends_at
-				FROM active_limits limits
-				JOIN features f ON f.project_id = ${projectId} AND f.id = limits.feature_id
-				LEFT JOIN usage_windows windows
-					ON windows.project_id = ${projectId}
-					AND windows.customer_id = ${customerId}
-					AND windows.feature_id = limits.feature_id
-					AND windows.entity_id IS NULL
-					AND windows.filter_key IS NULL
-					AND windows.window_start_at <= now()
-					AND windows.window_end_at > now()
-				LEFT JOIN LATERAL (
-					SELECT sum(reservations.held_quantity) AS held
-					FROM reservations
-					WHERE reservations.project_id = ${projectId}
-						AND reservations.usage_window_id = windows.id
-						AND reservations.status = 'active'
-						AND reservations.expires_at > now()
-				) holds ON true
-			)
-			SELECT * FROM allocation_balances
-			UNION ALL
-			SELECT * FROM window_balances
-			ORDER BY feature_key
+			SELECT DISTINCT ON (pi.feature_id)
+				pi.feature_id,
+				pi.quantity AS limit_quantity,
+				pi.reset_interval,
+				COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
+				COALESCE(s.current_period_end, s.expires_at) AS period_end_at
+			FROM subscriptions s
+			JOIN plan_items pi
+				ON pi.project_id = s.project_id AND pi.plan_version_id = s.plan_version_id
+			WHERE s.project_id = ${projectId}
+				AND s.customer_id = ${customerId}
+				AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+				AND (s.expires_at IS NULL OR s.expires_at > now())
+				AND pi.item_kind = 'meter_limit'
+			ORDER BY pi.feature_id, s.created_at, s.id
 		`,
 	);
+	// Window bounds come from the same rule metering writes with, so only the current window counts.
+	const now = new Date();
+	const windows =
+		limits.length === 0
+			? []
+			: await executeRows<ProjectionBalanceRow>(
+					executor,
+					drizzleSql`
+						SELECT
+							f.key AS feature_key,
+							f.unit,
+							f.credit_scale,
+							GREATEST(
+								limits.limit_quantity - COALESCE(windows.usage, 0) - COALESCE(holds.held, 0),
+								0::numeric
+							) AS available,
+							COALESCE(holds.held, 0) AS held,
+							limits.window_end_at AS period_ends_at
+						FROM (
+							VALUES ${drizzleSql.join(
+								limits.map((limit) => {
+									const bounds = meterLimitWindowBounds(
+										limit.period_start_at,
+										limit.period_end_at,
+										limit.reset_interval,
+										now,
+									);
+									return drizzleSql`(
+										${String(limit.feature_id)}::bigint,
+										${String(limit.limit_quantity)}::numeric,
+										${bounds.start.toISOString()}::timestamptz,
+										${bounds.end.toISOString()}::timestamptz
+									)`;
+								}),
+								drizzleSql`, `,
+							)}
+						) AS limits(feature_id, limit_quantity, window_start_at, window_end_at)
+						JOIN features f ON f.project_id = ${projectId} AND f.id = limits.feature_id
+						LEFT JOIN usage_windows windows
+							ON windows.project_id = ${projectId}
+							AND windows.customer_id = ${customerId}
+							AND windows.feature_id = limits.feature_id
+							AND windows.entity_id IS NULL
+							AND windows.filter_key IS NULL
+							AND windows.window_start_at = limits.window_start_at
+							AND windows.window_end_at = limits.window_end_at
+						LEFT JOIN LATERAL (
+							SELECT sum(reservations.held_quantity) AS held
+							FROM reservations
+							WHERE reservations.project_id = ${projectId}
+								AND reservations.usage_window_id = windows.id
+								AND reservations.status = 'active'
+								AND reservations.expires_at > now()
+						) holds ON true
+					`,
+				);
 
-	return rows.map((row) => ({
-		featureKey: row.feature_key,
-		unit: row.unit,
-		available: databaseDecimal(row.available, "projection available", row.credit_scale),
-		held: databaseDecimal(row.held, "projection held", row.credit_scale),
-		periodEndsAt: toIsoStringOrNull(row.period_ends_at),
-	}));
+	return [...allocations, ...windows]
+		.sort((left, right) =>
+			left.feature_key < right.feature_key ? -1 : left.feature_key > right.feature_key ? 1 : 0,
+		)
+		.map((row) => ({
+			featureKey: row.feature_key,
+			unit: row.unit,
+			available: databaseDecimal(row.available, "projection available", row.credit_scale),
+			held: databaseDecimal(row.held, "projection held", row.credit_scale),
+			periodEndsAt: toIsoStringOrNull(row.period_ends_at),
+		}));
+}
+
+interface ProjectionBalanceRow {
+	feature_key: string;
+	unit: string;
+	credit_scale: number;
+	available: unknown;
+	held: unknown;
+	period_ends_at: unknown;
 }

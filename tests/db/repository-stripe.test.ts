@@ -152,6 +152,7 @@ describe("BillingRepository Stripe", () => {
 				[{ id: "customer-id" }],
 				[{ projection_sequence: 1, billing_account_id: "user-1" }],
 				[],
+				[],
 				[{ project_id: "project-id" }],
 			],
 			{ strict: true },
@@ -193,7 +194,7 @@ describe("BillingRepository Stripe", () => {
 		expect(customerLockIndex).toBeGreaterThan(-1);
 		expect(purchaseLockIndex).toBeGreaterThan(customerLockIndex);
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(12);
+		expect(database.queries).toHaveLength(13);
 	});
 
 	it("records Stripe subscription events without synthetic purchase rows", async () => {
@@ -229,6 +230,7 @@ describe("BillingRepository Stripe", () => {
 				[{ project_id: "project-id" }],
 				[{ projection_sequence: 1, billing_account_id: "user-1" }],
 				[],
+				[],
 				[{ id: "projection-job-id" }],
 			],
 			{ strict: true },
@@ -246,7 +248,7 @@ describe("BillingRepository Stripe", () => {
 		});
 
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(16);
+		expect(database.queries).toHaveLength(17);
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("INSERT INTO subscriptions");
 		expect(queries).not.toContain("INSERT INTO purchases");
@@ -276,6 +278,7 @@ describe("BillingRepository Stripe", () => {
 			[],
 			[{ project_id: "project-id" }],
 			[{ projection_sequence: 1, billing_account_id: "user-1" }],
+			[],
 			[],
 			[{ id: "projection-job-id" }],
 		]);

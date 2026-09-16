@@ -57,6 +57,7 @@ import {
 } from "./controls-runtime";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
+import { addUtcInterval, addUtcMonths } from "./meter-limit-windows";
 import type {
 	AllocationRow,
 	ConfirmationPlan,
@@ -65,8 +66,6 @@ import type {
 	RateDecision,
 } from "./metering-persistence";
 import {
-	addUtcInterval,
-	addUtcMonths,
 	applyConfirmation,
 	applyDeductions,
 	balanceFromRows,

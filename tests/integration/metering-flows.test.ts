@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
+import { readProjectionBalances } from "../../src/db/repository/entitlements";
+import type { QueryExecutor } from "../../src/db/repository/types";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -831,6 +833,57 @@ localDescribe("authoritative metering flows", () => {
 			{ usage: "140.000000000", external_id: "workspace_1", filter_key: expect.any(String) },
 		]);
 		expect(await countRows(context.sql, "usage_windows")).toBe(1);
+	});
+
+	it("counts only the meter-limit window with the current period bounds", async () => {
+		await seedMeterLimitSubscription(context.sql, "overlap_account", "workspace_overlap");
+		// A window with other bounds that still covers now, as an earlier period anchor leaves behind.
+		const [stale] = await context.sql<Array<{ customer_id: string; period_end: Date }>>`
+			INSERT INTO usage_windows (
+				project_id, customer_id, feature_id, window_start_at, window_end_at, usage
+			)
+			SELECT customer.project_id, customer.id, feature.id,
+				now() - INTERVAL '1 hour', now() + INTERVAL '40 days', 150
+			FROM customers customer
+			JOIN features feature ON feature.project_id = customer.project_id
+				AND feature.key = 'api_requests'
+			WHERE customer.billing_account_id = 'overlap_account'
+			RETURNING customer_id, date_trunc('month', now()) + INTERVAL '1 month' AS period_end
+		`;
+		if (stale === undefined) throw new Error("stale window was not seeded");
+		const project = integrationProjectContext();
+		const subject = { billingAccountId: "overlap_account", featureKey: "api_requests" };
+
+		const checked = await context.repository.checkUsage(project, { ...subject, quantity: "200" });
+		const consumed = await context.repository.consumeUsage(project, {
+			...subject,
+			quantity: "20",
+			idempotencyKey: "overlap:consume",
+		});
+		const balances = await readProjectionBalances(
+			context.db as unknown as QueryExecutor,
+			project.projectInstanceId,
+			stale.customer_id,
+		);
+
+		expect(checked).toMatchObject({
+			allowed: true,
+			balance: { granted: "200", consumed: "0", available: "200" },
+		});
+		expect(consumed).toMatchObject({
+			allowed: true,
+			balance: { granted: "200", consumed: "20", available: "180" },
+		});
+		expect(balances.filter((balance) => balance.featureKey === "api_requests")).toEqual([
+			{
+				featureKey: "api_requests",
+				unit: "request",
+				available: "180",
+				held: "0",
+				periodEndsAt: new Date(stale.period_end).toISOString(),
+			},
+		]);
+		expect(await countRows(context.sql, "usage_windows")).toBe(2);
 	});
 
 	it("rolls unused subscription allocations once with cap, expiry, and provenance", async () => {
