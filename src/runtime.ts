@@ -55,6 +55,10 @@ import type { AutoTopupWorkerProvider } from "./workers/auto-topup";
 import { AutoTopupWorker } from "./workers/auto-topup";
 import { MeteringMaintenanceWorker } from "./workers/metering-maintenance";
 import { ProjectionSyncWorker } from "./workers/projection-sync";
+import {
+	PromotionMaintenanceWorker,
+	type PromotionStripeProvider,
+} from "./workers/promotion-maintenance";
 import type { RecurringBillingWorkerProvider } from "./workers/recurring-billing";
 import { RecurringBillingWorker } from "./workers/recurring-billing";
 import { startPollingRuntime } from "./workers/runtime";
@@ -70,7 +74,8 @@ type WorkerProjectProviders = {
 		| (StoreEventReplayProvider &
 				SubscriptionReconciliationProvider &
 				RecurringBillingWorkerProvider &
-				AutoTopupWorkerProvider)
+				AutoTopupWorkerProvider &
+				PromotionStripeProvider)
 		| null;
 };
 
@@ -229,6 +234,32 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		logger,
 		metrics,
 	});
+	const promotionMaintenanceWorker = new PromotionMaintenanceWorker({
+		workerId: env.workerId,
+		repository: {
+			releaseExpiredPromotionReservations: (limit) =>
+				billingRepository.promotions.releaseExpiredPromotionReservations(limit),
+			reconcilePromotionCoupons: (limit) =>
+				billingRepository.promotionProviders.reconcilePromotionCoupons(limit),
+			ensureHostedPromotionCodeObjects: (limit) =>
+				billingRepository.promotionProviders.ensureHostedPromotionCodeObjects(limit),
+			claimStripeObjects: (workerId, limit, staleBefore) =>
+				billingRepository.promotionProviders.claimStripeObjects(workerId, limit, staleBefore),
+			markStripeObjectOutcome: (projectId, objectId, workerId, outcome) =>
+				billingRepository.promotionProviders.markStripeObjectOutcome(
+					projectId,
+					objectId,
+					workerId,
+					outcome,
+				),
+		},
+		projectContextResolver,
+		async stripeForProject(project) {
+			return (await providersForProject(project, "stripe")).stripe;
+		},
+		logger,
+		metrics,
+	});
 	const adminOperations = new BillingAdminOperations({
 		replayWorker: storeEventReplayWorker,
 		reconciliationWorker: subscriptionReconciliationWorker,
@@ -263,6 +294,11 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	jobs.push({
 		name: "auto_topup",
 		runOnce: () => autoTopupWorker.runOnce(),
+		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
+	});
+	jobs.push({
+		name: "promotion_maintenance",
+		runOnce: () => promotionMaintenanceWorker.runOnce(),
 		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
 	});
 

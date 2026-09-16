@@ -12,7 +12,9 @@ describe("PromotionRepository", () => {
 					{ project_id: "project-a", promotion_code_id: "code-1" },
 				],
 				[{ id: "code-1" }],
+				[],
 				[{ id: "code-2" }],
+				[],
 			],
 			{ strict: true },
 		);
@@ -25,6 +27,7 @@ describe("PromotionRepository", () => {
 		expect(database.queries[0]).toContain("sc.status IN ('pending', 'processing')");
 		expect(database.queries[1]).toContain("GREATEST(reserved_count - $1, 0)");
 		expect(database.params[1]).toEqual([2, "project-a", "code-1"]);
-		expect(database.params[2]).toEqual([1, "project-b", "code-2"]);
+		expect(database.queries[2]).toContain("SET desired_active = wanted.active");
+		expect(database.params[3]).toEqual([1, "project-b", "code-2"]);
 	});
 });

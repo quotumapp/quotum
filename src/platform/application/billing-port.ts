@@ -36,6 +36,7 @@ export const merchantBillingOperations = [
 	["POST", "/admin/catalog-migrations/publish", "migrations.publish"],
 	["POST", "/admin/promotions", "promotions.create"],
 	["POST", "/admin/promotions/:promotionKey/archive", "promotions.archive"],
+	["POST", "/admin/promotions/:promotionKey/provider-sync", "promotions.sync"],
 	["POST", "/admin/promotions/:promotionKey/codes", "promotions.codes.add"],
 	[
 		"POST",

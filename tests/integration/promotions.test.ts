@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { CreatePromotionInput, PromotionCodeInput } from "../../src/billing/promotions";
 import type { ReservePromotionRedemptionInput } from "../../src/db/repository/promotions";
+import { syncPromotionStripeObject } from "../../src/providers/stripe/promotions";
+import { createFakeStripePromotions } from "../../src/providers/stripe/testing/fake-promotions";
+import { PromotionMaintenanceWorker } from "../../src/workers/promotion-maintenance";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -11,6 +14,7 @@ import {
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 import { publishAiCreditsCatalog } from "./helpers/metering-catalog";
+import { integrationProjectContextResolver } from "./helpers/platform-fixture";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 const project = integrationProjectContext();
@@ -724,6 +728,158 @@ localDescribe("promotion HTTP API", () => {
 		expect((await listed.json()).data.map((item: { name: string }) => item.name)).toEqual([
 			"Wiseley spring",
 		]);
+	});
+});
+
+localDescribe("promotion Stripe provisioning", () => {
+	beforeAll(async () => {
+		context = await createLocalPostgresContext();
+	});
+
+	beforeEach(async () => {
+		await resetAndSeedIntegrationData(context.sql);
+		await publishAiCreditsCatalog(context.repository);
+	});
+
+	afterAll(async () => {
+		await context.sql.close();
+	});
+
+	it("provisions coupons and hosted codes, follows catalog product changes and deactivates codes", async () => {
+		const stripe = createFakeStripePromotions();
+		let failNext = false;
+		const worker = new PromotionMaintenanceWorker({
+			workerId: "promotion-worker",
+			repository: {
+				releaseExpiredPromotionReservations: (limit) =>
+					context.repository.promotions.releaseExpiredPromotionReservations(limit),
+				reconcilePromotionCoupons: (limit) =>
+					context.repository.promotionProviders.reconcilePromotionCoupons(limit),
+				ensureHostedPromotionCodeObjects: (limit) =>
+					context.repository.promotionProviders.ensureHostedPromotionCodeObjects(limit),
+				claimStripeObjects: (workerId, limit, staleBefore) =>
+					context.repository.promotionProviders.claimStripeObjects(workerId, limit, staleBefore),
+				markStripeObjectOutcome: (projectId, objectId, workerId, outcome) =>
+					context.repository.promotionProviders.markStripeObjectOutcome(
+						projectId,
+						objectId,
+						workerId,
+						outcome,
+					),
+			},
+			projectContextResolver: integrationProjectContextResolver(),
+			stripeForProject: () => ({
+				syncPromotionStripeObject: async (job) => {
+					if (failNext) {
+						failNext = false;
+						return {
+							kind: "failed",
+							error: "No such product: prod_stripe_premium",
+							terminal: true,
+						};
+					}
+					return await syncPromotionStripeObject(stripe, job);
+				},
+			}),
+			logger: { error() {} },
+		});
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({
+				key: "premium-launch",
+				name: "Premium launch",
+				targets: [{ kind: "plan", key: "premium" }],
+				codes: [
+					{ code: "HOSTED", hostedCheckoutEnabled: true, maxRedemptions: 10 },
+					{ code: "API" },
+				],
+			}),
+		);
+
+		expect(await worker.runOnce()).toMatchObject({
+			couponsCreated: 1,
+			promotionCodesCreated: 1,
+			claimed: 1,
+			ready: 1,
+		});
+		expect(await worker.runOnce()).toMatchObject({ couponsCreated: 0, claimed: 1, ready: 1 });
+		let promotion = await context.repository.promotions.getPromotion(project, "premium-launch");
+		const [coupon, hostedCode] = promotion.providerObjects;
+		expect(promotion.providerObjects).toMatchObject([
+			{ objectKind: "coupon", status: "ready", providerActive: true },
+			{ objectKind: "promotion_code", status: "ready", providerActive: true, desiredActive: true },
+		]);
+		expect(stripe.state.coupons.get(coupon?.externalId ?? "")?.params).toMatchObject({
+			percent_off: 20,
+			duration: "once",
+			applies_to: { products: ["prod_stripe_premium"] },
+		});
+		expect(stripe.state.promotionCodes.get(hostedCode?.externalId ?? "")?.params).toMatchObject({
+			code: "HOSTED",
+			active: true,
+			max_redemptions: 10,
+		});
+		expect(await worker.runOnce()).toMatchObject({ claimed: 0 });
+
+		await context.sql`
+			UPDATE store_products SET external_product_id = 'prod_stripe_premium_v2'
+			WHERE external_product_id = 'prod_stripe_premium'
+		`;
+		await context.sql`UPDATE promotion_provider_objects SET catalog_revision_id = NULL`;
+		expect(await worker.runOnce()).toMatchObject({ couponsCreated: 1, ready: 1, retired: 1 });
+		expect(await worker.runOnce()).toMatchObject({ promotionCodesCreated: 1, ready: 1 });
+		promotion = await context.repository.promotions.getPromotion(project, "premium-launch");
+		expect(promotion.providerObjects.map((object) => [object.objectKind, object.status])).toEqual([
+			["coupon", "ready"],
+			["promotion_code", "retired"],
+			["coupon", "ready"],
+			["promotion_code", "ready"],
+		]);
+		const replacement = promotion.providerObjects[3];
+		expect(stripe.state.promotionCodes.get(hostedCode?.externalId ?? "")?.active).toBe(false);
+		expect(stripe.state.promotionCodes.get(replacement?.externalId ?? "")?.coupon).toBe(
+			promotion.providerObjects[2]?.externalId ?? "missing coupon",
+		);
+		expect(
+			stripe.state.coupons.get(promotion.providerObjects[2]?.externalId ?? "")?.params.applies_to,
+		).toEqual({ products: ["prod_stripe_premium_v2"] });
+
+		const codes = await context.repository.promotions.listPromotionCodes(
+			project,
+			"premium-launch",
+			{
+				limit: 10,
+			},
+		);
+		const hosted = codes.items.find((item) => item.code === "HOSTED");
+		await context.repository.promotions.deactivatePromotionCode(
+			project,
+			"premium-launch",
+			hosted?.id ?? "",
+			actor,
+		);
+		expect(await worker.runOnce()).toMatchObject({ claimed: 1, ready: 1 });
+		expect(stripe.state.promotionCodes.get(replacement?.externalId ?? "")?.active).toBe(false);
+
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({ key: "broken", name: "Broken", targets: [] }),
+		);
+		failNext = true;
+		expect(await worker.runOnce()).toMatchObject({ couponsCreated: 1, failed: 1 });
+		const failed = await context.repository.promotions.getPromotion(project, "broken");
+		expect(failed.providerObjects).toMatchObject([
+			{ status: "failed", error: "No such product: prod_stripe_premium" },
+		]);
+		const resynced = await context.repository.promotions.requestPromotionProviderSync(
+			project,
+			"broken",
+			actor,
+		);
+		expect(resynced.providerObjects).toMatchObject([
+			{ status: "pending", error: null, attempts: 0 },
+		]);
+		expect(await worker.runOnce()).toMatchObject({ ready: 1 });
 	});
 });
 

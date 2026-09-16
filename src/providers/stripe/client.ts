@@ -78,6 +78,25 @@ interface StripeClientLike {
 			options?: Stripe.RequestOptions,
 		): Promise<Stripe.Invoice>;
 	};
+	coupons?: {
+		create(
+			params: Stripe.CouponCreateParams,
+			options?: Stripe.RequestOptions,
+		): Promise<Stripe.Coupon>;
+		retrieve(couponId: string): Promise<Stripe.Coupon>;
+	};
+	promotionCodes?: {
+		create(
+			params: Stripe.PromotionCodeCreateParams,
+			options?: Stripe.RequestOptions,
+		): Promise<Stripe.PromotionCode>;
+		update(
+			promotionCodeId: string,
+			params: Stripe.PromotionCodeUpdateParams,
+			options?: Stripe.RequestOptions,
+		): Promise<Stripe.PromotionCode>;
+		list(params: Stripe.PromotionCodeListParams): Promise<Stripe.ApiList<Stripe.PromotionCode>>;
+	};
 	webhooks: {
 		constructEvent(rawBody: string, signature: string, secret: string): Stripe.Event;
 		constructEventAsync?(rawBody: string, signature: string, secret: string): Promise<Stripe.Event>;
@@ -193,6 +212,46 @@ export class StripeBillingClient {
 			throw new Error("Stripe invoice voiding is unavailable");
 		}
 		return this.stripe.invoices.voidInvoice(invoiceId, {}, { idempotencyKey });
+	}
+
+	createCoupon(params: Stripe.CouponCreateParams, idempotencyKey: string) {
+		if (this.stripe.coupons === undefined) throw new Error("Stripe coupons are unavailable");
+		return this.stripe.coupons.create(params, { idempotencyKey });
+	}
+
+	retrieveCoupon(couponId: string) {
+		if (this.stripe.coupons === undefined) throw new Error("Stripe coupons are unavailable");
+		return this.stripe.coupons.retrieve(couponId);
+	}
+
+	createPromotionCode(params: Stripe.PromotionCodeCreateParams, idempotencyKey: string) {
+		if (this.stripe.promotionCodes === undefined) {
+			throw new Error("Stripe promotion codes are unavailable");
+		}
+		return this.stripe.promotionCodes.create(params, { idempotencyKey });
+	}
+
+	updatePromotionCode(
+		promotionCodeId: string,
+		params: Stripe.PromotionCodeUpdateParams,
+		idempotencyKey: string,
+	) {
+		if (this.stripe.promotionCodes === undefined) {
+			throw new Error("Stripe promotion codes are unavailable");
+		}
+		return this.stripe.promotionCodes.update(promotionCodeId, params, { idempotencyKey });
+	}
+
+	async findPromotionCodes(input: { code: string; coupon: string }) {
+		if (this.stripe.promotionCodes === undefined) {
+			throw new Error("Stripe promotion codes are unavailable");
+		}
+		const page = await this.stripe.promotionCodes.list({
+			code: input.code,
+			coupon: input.coupon,
+			limit: 10,
+		});
+		return page.data;
 	}
 
 	async constructWebhookEvent(rawBody: string, signature: string): Promise<Stripe.Event> {

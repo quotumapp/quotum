@@ -15,6 +15,7 @@ import {
 	type PromotionErrorCode,
 	type PromotionLimitViolation,
 	type PromotionListResult,
+	type PromotionProviderObjectRecord,
 	type PromotionRecord,
 	type PromotionRedemptionProvider,
 	type PromotionRedemptionRecord,
@@ -33,6 +34,10 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
 import { lockCustomerRow } from "./invalidations";
+import {
+	PromotionProviderObjectRepository,
+	refreshHostedCodeDesiredStateInTx,
+} from "./promotion-provider-objects";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -68,6 +73,19 @@ interface PromotionRow {
 	code_total: number;
 	code_active: number;
 	redemption_counts: Partial<Record<PromotionRedemptionStatus, number>> | null;
+	provider_objects: Array<{
+		id: string;
+		provider: "stripe" | "apple" | "google";
+		objectKind: PromotionProviderObjectRecord["objectKind"];
+		promotionCodeId: string | null;
+		externalId: string | null;
+		status: PromotionProviderObjectRecord["status"];
+		desiredActive: boolean;
+		providerActive: boolean | null;
+		error: string | null;
+		attempts: number;
+		updatedAt: string;
+	}>;
 	cursor_created_at: string;
 }
 
@@ -311,6 +329,7 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 				`,
 			);
 			if (archived !== null) {
+				await refreshHostedCodeDesiredStateInTx(tx, projectId, { promotionId: archived.id });
 				await insertAudit(tx, projectId, {
 					promotionId: archived.id,
 					action: "promotion_archived",
@@ -401,6 +420,7 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 				`,
 			);
 			if (deactivated !== null) {
+				await refreshHostedCodeDesiredStateInTx(tx, projectId, { promotionCodeId: codeId });
 				await insertAudit(tx, projectId, {
 					promotionId: promotion.id,
 					promotionCodeId: codeId,
@@ -518,6 +538,20 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 		};
 	}
 
+	/** Requeues failed Stripe objects of one promotion and returns the promotion with their state. */
+	async requestPromotionProviderSync(
+		project: ProjectInstanceContext,
+		key: string,
+		actor: string,
+	): Promise<PromotionRecord> {
+		await new PromotionProviderObjectRepository(this.database).requestPromotionProviderSync(
+			project,
+			key,
+			actor,
+		);
+		return await this.getPromotion(project, key);
+	}
+
 	/** Reads a code and its promotion by the code a customer typed. Never creates a customer. */
 	async resolvePromotionCode(
 		project: ProjectInstanceContext,
@@ -605,6 +639,9 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 						RETURNING id
 					`,
 				);
+				await refreshHostedCodeDesiredStateInTx(tx, entry.projectId, {
+					promotionCodeId: entry.codeId,
+				});
 			}
 			return released.length;
 		});
@@ -777,6 +814,9 @@ export async function reservePromotionRedemptionInTx(
 	if (row === null) {
 		throw new Error("Promotion redemption could not be persisted");
 	}
+	await refreshHostedCodeDesiredStateInTx(tx, projectId, {
+		promotionCodeId: input.promotionCodeId,
+	});
 	return { redemption: await requireRedemption(tx, projectId, row.id), duplicate: false };
 }
 
@@ -812,6 +852,9 @@ export async function applyPromotionRedemptionInTx(
 			`,
 		);
 		violation = current.status === "released" && counters?.over_cap === true ? "global" : null;
+		await refreshHostedCodeDesiredStateInTx(tx, projectId, {
+			promotionCodeId: current.promotion_code_id,
+		});
 	}
 	await executeOne(
 		tx,
@@ -864,6 +907,9 @@ export async function releasePromotionRedemptionInTx(
 				RETURNING id
 			`,
 		);
+		await refreshHostedCodeDesiredStateInTx(tx, projectId, {
+			promotionCodeId: current.promotion_code_id,
+		});
 	}
 	return await requireRedemption(tx, projectId, current.id);
 }
@@ -1408,6 +1454,26 @@ async function promotionRows(
 					FROM promotion_codes c
 					WHERE c.project_id = p.project_id AND c.promotion_id = p.id AND c.active
 				) AS code_active,
+				COALESCE((
+					SELECT jsonb_agg(
+						jsonb_build_object(
+							'id', o.id,
+							'provider', o.provider,
+							'objectKind', o.object_kind,
+							'promotionCodeId', o.promotion_code_id,
+							'externalId', o.external_id,
+							'status', o.status,
+							'desiredActive', o.desired_active,
+							'providerActive', o.provider_active,
+							'error', o.error,
+							'attempts', o.attempts,
+							'updatedAt', to_char(o.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+						)
+						ORDER BY o.created_at, o.id
+					)
+					FROM promotion_provider_objects o
+					WHERE o.project_id = p.project_id AND o.promotion_id = p.id
+				), '[]'::jsonb) AS provider_objects,
 				(
 					SELECT jsonb_object_agg(counts.status, counts.total)
 					FROM (
@@ -1518,6 +1584,7 @@ function toPromotionRecord(row: PromotionRow): PromotionRecord {
 			released: row.redemption_counts?.released ?? 0,
 			reversed: row.redemption_counts?.reversed ?? 0,
 		},
+		providerObjects: row.provider_objects,
 	};
 }
 

@@ -80,6 +80,17 @@ When the deployment enables Stripe Apps OAuth, merchants can authorize the Strip
 restricted key. OAuth tokens are encrypted per connection; the app's event signing secrets are
 configured by the service operator.
 
+Promotions need write access to Coupons and Promotion codes: grant both on a restricted key, or
+approve the app version that requests `coupon_write` and `promotion_code_write`. The promotion
+maintenance worker creates one coupon per discount promotion and product set, with id
+`quotum_<object id>`, and a Stripe promotion code for each code marked `hostedCheckoutEnabled`.
+It deactivates the Stripe code when Quotum's code is deactivated, archived, or exhausted. A changed
+plan version that alters the discounted Stripe products gets a new coupon; hosted codes are
+recreated on it. Objects that Stripe rejects stay `failed` with the error on
+`GET /v1/admin/promotions/:promotionKey`; fix the cause and call
+`POST /v1/admin/promotions/:promotionKey/provider-sync`. Stripe requires active promotion codes to
+be unique in the account, so a code created in the Stripe Dashboard blocks the hosted copy.
+
 Checkout flow:
 
 1. The backend reads `GET /v1/catalog?provider=stripe&channel=web` and calls

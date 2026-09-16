@@ -70,7 +70,7 @@ export function merchantBillingRoute(
 		return { path, capability: "operations.write", action: null, sensitive: false };
 	if (
 		(method === "POST" &&
-			/^(?:admin\/(?:contracts|catalog-migrations)\/publish|admin\/billing-accounts\/[^/]+\/(?:commercial-actions|usage\/events\/[^/]+\/corrections)|admin\/promotions(?:\/[^/]+\/(?:archive|codes|codes\/[^/]+\/deactivate))?)$/.test(
+			/^(?:admin\/(?:contracts|catalog-migrations)\/publish|admin\/billing-accounts\/[^/]+\/(?:commercial-actions|usage\/events\/[^/]+\/corrections)|admin\/promotions(?:\/[^/]+\/(?:archive|provider-sync|codes|codes\/[^/]+\/deactivate))?)$/.test(
 				suffix,
 			)) ||
 		(method === "PUT" && /^admin\/billing-accounts\/[^/]+\/controls$/.test(suffix))

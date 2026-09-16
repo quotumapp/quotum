@@ -4,6 +4,7 @@ import type {
 	AppleDecodedRenewalInfoPayload,
 	AppleDecodedTransactionPayload,
 } from "../../../src/providers/apple/types";
+import { createFakeStripePromotions } from "../../../src/providers/stripe/testing/fake-promotions";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -245,13 +246,20 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 		}
 	>();
 	let checkoutSessionFailuresRemaining = options.createCheckoutSessionFailures ?? 0;
+	const promotions = createFakeStripePromotions();
 	const event =
 		options.event ?? stripeEvent("customer.subscription.updated", stripeSubscriptionObject());
 
 	return attachFailNext({
 		calls,
 		checkoutSessionParams,
+		promotions: promotions.state,
 		client: {
+			createCoupon: promotions.createCoupon,
+			retrieveCoupon: promotions.retrieveCoupon,
+			createPromotionCode: promotions.createPromotionCode,
+			updatePromotionCode: promotions.updatePromotionCode,
+			findPromotionCodes: promotions.findPromotionCodes,
 			async createCheckoutSession(params: Stripe.Checkout.SessionCreateParams) {
 				calls.push("createCheckoutSession");
 				checkoutSessionParams.push(params);

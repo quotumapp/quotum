@@ -315,6 +315,30 @@ export function registerPromotionRoutes({
 	);
 
 	app.post(
+		"/v1/admin/promotions/:promotionKey/provider-sync",
+		async ({ params, request, project }) => ({
+			success: true,
+			data: await service.requestPromotionProviderSync(
+				privateProject(project),
+				params.promotionKey,
+				requireActor(request.headers),
+			),
+		}),
+		{
+			parse: "none",
+			params: promotionParams,
+			detail: operationDetail({
+				operationId: "postV1AdminPromotionsByPromotionKeyProviderSync",
+				tags: ["promotions"],
+				path: "/v1/admin/promotions/:promotionKey/provider-sync",
+				responses: {
+					200: responses.postV1AdminPromotionsByPromotionKeyProviderSyncResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.post(
 		"/v1/admin/promotions/:promotionKey/codes",
 		async ({ body, params, request, project }) => ({
 			success: true,

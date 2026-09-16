@@ -50,6 +50,14 @@
 		{
 			"permission": "payment_intent_read",
 			"purpose": "Resolve invoice payment state."
+		},
+		{
+			"permission": "coupon_write",
+			"purpose": "Create coupons for merchant promotions."
+		},
+		{
+			"permission": "promotion_code_write",
+			"purpose": "Create and deactivate promotion codes for merchant promotions."
 		}
 	]
 }
