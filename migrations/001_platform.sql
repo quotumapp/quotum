@@ -114,6 +114,9 @@ CREATE TABLE platform_project_api_credentials (
 	)
 );
 
+CREATE UNIQUE INDEX idx_platform_project_api_credentials_secret_verifier
+	ON platform_project_api_credentials (secret_verifier);
+
 CREATE INDEX idx_platform_project_api_credentials_instance
 	ON platform_project_api_credentials (project_instance_id);
 

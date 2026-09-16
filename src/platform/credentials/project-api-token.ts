@@ -1,31 +1,47 @@
 import { createHash, randomBytes } from "node:crypto";
 
-const credentialPattern =
-	/^qpk_v1\.([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43})$/u;
+export type ProjectApiCredentialEnvironment = "sandbox" | "production";
+
+const prefixes: Readonly<Record<ProjectApiCredentialEnvironment, string>> = {
+	sandbox: "sqpk_",
+	production: "pqpk_",
+};
+const credentialPattern = /^([sp])qpk_[A-Za-z0-9_-]{43}$/u;
 
 export interface GeneratedProjectApiCredential {
+	/** Internal row identity. It is not part of the token and cannot be derived from it. */
 	credentialId: string;
+	environment: ProjectApiCredentialEnvironment;
 	token: string;
 	secretVerifier: Uint8Array;
 }
 
 export interface ParsedProjectApiCredential {
-	credentialId: string;
+	environment: ProjectApiCredentialEnvironment;
 	secretVerifier: Uint8Array;
 }
 
-export function generateProjectApiCredential(): GeneratedProjectApiCredential {
-	const credentialId = crypto.randomUUID();
+export function generateProjectApiCredential(
+	environment: ProjectApiCredentialEnvironment,
+): GeneratedProjectApiCredential {
+	if (environment !== "sandbox" && environment !== "production") {
+		throw new Error("Project API credentials are issued only for sandbox or production instances");
+	}
 	const secret = randomBytes(32).toString("base64url");
-	const token = `qpk_v1.${credentialId}.${secret}`;
-	return { credentialId, token, secretVerifier: hashProjectApiCredential(token) };
+	const token = `${prefixes[environment]}${secret}`;
+	return {
+		credentialId: crypto.randomUUID(),
+		environment,
+		token,
+		secretVerifier: hashProjectApiCredential(token),
+	};
 }
 
 export function parseProjectApiCredential(token: string): ParsedProjectApiCredential | null {
 	const match = credentialPattern.exec(token);
 	if (match === null) return null;
 	return {
-		credentialId: match[1],
+		environment: match[1] === "s" ? "sandbox" : "production",
 		secretVerifier: hashProjectApiCredential(token),
 	};
 }

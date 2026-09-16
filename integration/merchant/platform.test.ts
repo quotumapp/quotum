@@ -55,6 +55,7 @@ describe("merchant platform transactions", () => {
 			`/api/platform/provisioning/${operation.id}/credential`,
 			{},
 		);
+		expect(issued.credential).toMatch(/^sqpk_[A-Za-z0-9_-]{43}$/u);
 		const resolver = new PostgresProjectInstanceContextResolver(f.client);
 		const resolved = await resolver.resolveCredential(issued.credential);
 		expect(resolved.kind).toBe("resolved");
@@ -114,7 +115,7 @@ describe("merchant platform transactions", () => {
 			{},
 			{ key: "deliver-once" },
 		);
-		expect(credential.credential.startsWith("qpk_v1.")).toBe(true);
+		expect(credential.credential).toMatch(/^sqpk_[A-Za-z0-9_-]{43}$/u);
 		expect(
 			(
 				await browser.json<{ credential: string | null }>(
@@ -131,6 +132,7 @@ describe("merchant platform transactions", () => {
 			{},
 			{ key: "rotate-once" },
 		);
+		expect(rotated.credential).toMatch(/^sqpk_[A-Za-z0-9_-]{43}$/u);
 		expect(rotated.credential !== credential.credential).toBe(true);
 		await browser.json(
 			`/api/platform/provisioning/${operation.id}/rotate`,
@@ -141,6 +143,14 @@ describe("merchant platform transactions", () => {
 		expect(
 			await f.sql`SELECT id FROM platform_project_api_credentials WHERE revoked_at IS NULL`,
 		).toHaveLength(1);
+		const resolver = new PostgresProjectInstanceContextResolver(f.client);
+		expect(await resolver.resolveCredential(credential.credential)).toEqual({
+			kind: "ineligible",
+		});
+		expect(await resolver.resolveCredential(rotated.credential)).toMatchObject({
+			kind: "resolved",
+			context: { environment: "sandbox" },
+		});
 	});
 	it("rejects stale drafts, changed idempotency requests, and cross-organization reads", async () => {
 		const browser = new MerchantBrowser(f);

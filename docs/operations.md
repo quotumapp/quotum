@@ -79,6 +79,39 @@ and do not advance contract, migration, top-up, or subscription-change job state
 replay, reconciliation, and retry admin routes described in the [API guide](api.md#admin-operations)
 so idempotency is preserved.
 
+## Project credentials
+
+Sandbox and production instances receive separate project credentials: `sqpk_<secret>` for
+sandbox, `pqpk_<secret>` for production (see [authentication](deployment.md#authentication)). The
+plaintext is disclosed once: at sandbox provisioning, production activation, rotation, or into a
+`platform:bootstrap --credentials-out` file. Replaying the same request returns no credential. A
+lost response cannot be recovered; rotate instead.
+
+Rotate through merchant management: `POST /api/platform/provisioning/{id}/rotate` for onboarding
+sandbox credentials, or `POST /api/platform/environments/credentials/rotate` for either environment.
+Production rotation requires a fresh step-up grant. Rotation revokes the previous credential in the
+same transaction, so the replaced key is rejected from the next request. Write the replacement to
+every integration's secret store and redeploy those backends. `platform:bootstrap` issues only for
+instances that have never had a credential, so it does not rotate.
+
+### Replacing retired `qpk_v1` credentials
+
+Earlier releases issued `qpk_v1.<uuid>.<secret>` credentials. They no longer authenticate and are
+rejected like any unknown credential. Stored hashes cannot be converted into new keys because the
+plaintext is never retained, so every integration needs a replacement:
+
+1. Take a backup. Establish schema compatibility under the
+   [schema policy](#schema-and-upgrade-policy); the platform baseline adds a unique index on
+   `platform_project_api_credentials.secret_verifier`. Recreate disposable databases, including
+   operator bootstrap fixtures, which then issue new-format credentials.
+2. Deploy the new runtime. Integrations using `qpk_v1` credentials receive `401 UNAUTHORIZED` from
+   this point, and only the new runtime can issue replacements, so schedule the cutover with each
+   integration owner.
+3. Rotate every active sandbox and production credential through merchant management and confirm
+   each replacement starts with the prefix of its environment.
+4. Update each integration's secret store, redeploy it, and confirm an authenticated request
+   succeeds. Remove the retired credential from secret stores.
+
 ## Health, readiness, and metrics
 
 - `GET /livez` is a static liveness check; `/health` is a public alias.

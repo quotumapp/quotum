@@ -202,13 +202,18 @@ export class PostgresProjectInstanceContextResolver implements ProjectInstanceCo
 						ON logical_projects.id = instances.platform_project_id
 					JOIN platform_organizations organizations
 						ON organizations.id = logical_projects.organization_id
-					WHERE credentials.id = $1
+					WHERE credentials.secret_verifier = $1
 						AND credentials.audience = 'billing_api'
 				`,
-				values: [parsed.credentialId],
+				values: [parsed.secretVerifier],
 			});
 			const row = rows[0];
-			if (row === undefined || !verifierMatches(parsed.secretVerifier, row.secret_verifier)) {
+			// The prefix is covered by the hash; a stored environment mismatch is an inconsistent issuance.
+			if (
+				row === undefined ||
+				!verifierMatches(parsed.secretVerifier, row.secret_verifier) ||
+				row.environment !== parsed.environment
+			) {
 				return { kind: "not_found" };
 			}
 			if (

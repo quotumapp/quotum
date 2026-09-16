@@ -400,7 +400,7 @@ export class MerchantConnections {
 					"Production capacity or catalog state changed. Refresh readiness.",
 					409,
 				);
-			const generated = generateProjectApiCredential();
+			const generated = generateProjectApiCredential("production");
 			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,secret_verifier) VALUES(${generated.credentialId},${instance.id},'billing_api',${generated.secretVerifier})`;
 			await this.store.audit(
 				tx,
@@ -443,7 +443,7 @@ export class MerchantConnections {
 			if (instance.lifecycleStatus !== "active")
 				throw new MerchantError("ENVIRONMENT_INACTIVE", "Activate the environment first.", 409);
 			await this.confirm(tx, identity, scope, "credentials.rotate", key, grant);
-			const generated = generateProjectApiCredential();
+			const generated = generateProjectApiCredential(scope.environment);
 			await tx`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND revoked_at IS NULL`;
 			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,secret_verifier) VALUES(${generated.credentialId},${instance.id},'billing_api',${generated.secretVerifier})`;
 			const member = await this.store.membership(tx, identity.principalId, scope.organizationSlug);

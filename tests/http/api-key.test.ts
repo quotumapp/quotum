@@ -2,7 +2,12 @@ import { describe, expect, it } from "bun:test";
 import { createApp as createBillingApp } from "../../src/app";
 import type { AppDependencies } from "../../src/app/types";
 import { EntitlementService } from "../../src/billing/entitlements";
+import { PostgresProjectInstanceContextResolver } from "../../src/composition/project-instance-persistence";
 import type { BillingEnv } from "../../src/env";
+import {
+	generateProjectApiCredential,
+	hashProjectApiCredential,
+} from "../../src/platform/credentials/project-api-token";
 import { testRequest, withOpenApiAssertions } from "../helpers/openapi";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
@@ -222,4 +227,118 @@ describe("api key authentication", () => {
 			});
 		}
 	});
+
+	it("authenticates environment-prefixed keys against the database-issued credential", async () => {
+		const projects: string[] = [];
+		const lookups: string[] = [];
+		const rows: CredentialRow[] = [];
+		const issue = (
+			environment: "sandbox" | "production",
+			instance: Partial<ReturnType<typeof credentialRow>> = {},
+		) => {
+			const generated = generateProjectApiCredential(environment);
+			rows.push(credentialRow(generated.secretVerifier, { environment, ...instance }));
+			return generated.token;
+		};
+		const sandbox = issue("sandbox", { project_instance_key: "voysee-sandbox" });
+		const production = issue("production");
+		const mismatched = generateProjectApiCredential("sandbox").token;
+		rows.push(credentialRow(hashProjectApiCredential(mismatched), { environment: "production" }));
+		const expired = issue("production", { expires_at: new Date(Date.now() - 1_000) });
+		const revoked = issue("production", { revoked_at: new Date() });
+		const inactive = issue("production", { lifecycle_status: "inactive" });
+		const suspendedOrganization = issue("production", { organization_status: "suspended" });
+		const internal = generateProjectApiCredential("production").token;
+		rows.push(
+			credentialRow(hashProjectApiCredential(internal), {
+				environment: "internal",
+				internal_project: true,
+			}),
+		);
+		const app = createApp({
+			env,
+			entitlementService: entitlementServiceRecording(projects),
+			projectContextResolver: new PostgresProjectInstanceContextResolver({
+				async unsafe(_text: string, values: readonly unknown[] = []) {
+					const verifier = Buffer.from(values[0] as Uint8Array).toString("hex");
+					lookups.push(verifier);
+					return rows.filter(
+						(row) => Buffer.from(row.secret_verifier).toString("hex") === verifier,
+					);
+				},
+			} as never),
+		});
+		const request = (token: string) =>
+			testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
+				headers: { authorization: `Bearer ${token}` },
+			});
+
+		expect((await request(sandbox)).status).toBe(200);
+		expect((await request(production)).status).toBe(200);
+		expect(projects).toEqual(["voysee-sandbox", "voysee"]);
+
+		const secret = sandbox.slice("sqpk_".length);
+		const altered = `${sandbox.slice(0, -1)}${sandbox.endsWith("A") ? "B" : "A"}`;
+		for (const token of [
+			`pqpk_${secret}`,
+			altered,
+			mismatched,
+			generateProjectApiCredential("production").token,
+			expired,
+			revoked,
+			inactive,
+			suspendedOrganization,
+			internal,
+		]) {
+			const response = await request(token);
+			expect(response.status).toBe(401);
+			expect(await response.json()).toEqual({
+				success: false,
+				error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+			});
+		}
+		expect(lookups).toHaveLength(11);
+
+		const legacy = await request(`qpk_v1.00000000-0000-4000-8000-000000000001.${secret}`);
+		expect(legacy.status).toBe(401);
+		expect(await legacy.json()).toEqual({
+			success: false,
+			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+		});
+		expect(lookups).toHaveLength(11);
+		expect(projects).toEqual(["voysee-sandbox", "voysee"]);
+	});
 });
+
+type CredentialRow = ReturnType<typeof credentialRow>;
+
+function credentialRow(
+	secretVerifier: Uint8Array,
+	overrides: Partial<{
+		environment: string;
+		project_instance_key: string;
+		lifecycle_status: string;
+		internal_project: boolean;
+		organization_status: string;
+		expires_at: Date | null;
+		revoked_at: Date | null;
+	}> = {},
+) {
+	const context = projectInstanceContext();
+	return {
+		secret_verifier: secretVerifier,
+		expires_at: null as Date | null,
+		revoked_at: null as Date | null,
+		organization_id: context.organizationId,
+		organization_slug: context.organizationSlug,
+		organization_status: "active",
+		logical_project_id: context.logicalProjectId,
+		logical_project_key: context.logicalProjectKey,
+		project_instance_id: context.projectInstanceId,
+		project_instance_key: context.projectInstanceKey,
+		environment: context.environment as string,
+		lifecycle_status: context.lifecycleStatus as string,
+		internal_project: context.internalProject,
+		...overrides,
+	};
+}

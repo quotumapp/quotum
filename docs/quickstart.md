@@ -35,6 +35,9 @@ bun run platform:bootstrap -- --check
 export TOKEN="$(jq -r '.credentials[] | select(.projectInstanceKey=="acme") | .credential' quickstart-credentials.json)"
 ```
 
+The `acme` instance is a sandbox, so its credential starts with `sqpk_`; production credentials
+start with `pqpk_`.
+
 ## 3. Import the store product the catalog will bind to
 
 Provider bindings in a published catalog adopt pre-provisioned store products. The development import

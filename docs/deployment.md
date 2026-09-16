@@ -181,7 +181,13 @@ recovery secret storage. Rotation is restartable; missing or wrong keys fail clo
 ## Authentication
 
 In `api_key` mode, trusted backends send a database-issued project credential as
-`Authorization: Bearer <credential>`. Operator routes additionally require `X-Billing-Operator-Key`,
+`Authorization: Bearer <credential>`. Credentials are 48 characters: `sqpk_` for a sandbox instance
+or `pqpk_` for a production instance, followed by 43 base64url characters of random secret. The
+database stores only the SHA-256 hash of the whole token under a unique index; authentication looks
+the hash up and requires the prefix to match the instance's environment. Internal instances never
+receive credentials. Every rejected credential returns the same `401 UNAUTHORIZED` error. See
+[replacing project credentials](operations.md#project-credentials) for rotation and the retired
+`qpk_v1` format. Operator routes additionally require `X-Billing-Operator-Key`,
 and audited mutations require `X-Billing-Actor`. Provider webhooks are outside project
 authentication and rely on provider signature or token verification.
 
