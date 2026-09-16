@@ -1,19 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { SQL } from "bun";
 import { BillingRepository } from "../../src/db/repository";
+import { driverError } from "../helpers/postgres-errors";
 import { projectInstanceContext } from "../helpers/project-context";
 import { FakeDatabase } from "./repository-fixture";
-
-/**
- * Models the error shape production sees: drizzle rethrows a `DrizzleQueryError` wrapper whose
- * `cause` is Bun's `SQL.PostgresError`, which carries the driver code plus the SQLSTATE on
- * `errno`.
- */
-function driverError(errno: string, message: string): Error {
-	return new Error(message, {
-		cause: new SQL.PostgresError(message, { code: "ERR_POSTGRES_SERVER_ERROR", errno }),
-	});
-}
 
 describe("BillingRepository core", () => {
 	it("reads entitlement snapshots from billing tables", async () => {
@@ -106,21 +95,29 @@ describe("BillingRepository core", () => {
 	});
 
 	it("retries rolled-back billing transactions after PostgreSQL deadlocks", async () => {
-		const database = new FakeDatabase([[{ id: "customer-id" }], [], [{ id: "customer-id" }], []]);
-		const runTransaction = database.transaction.bind(database);
-		let attempts = 0;
-		database.transaction = async (callback) => {
-			attempts += 1;
-			if (attempts < 3) {
-				throw driverError("40P01", "deadlock detected");
-			}
-			return await runTransaction(callback);
-		};
-		const repository = new BillingRepository(database as never);
+		// Bun's driver reports the SQLSTATE on the wrapped cause's `errno`; other executors put it on
+		// the top-level `code`. Both shapes must trigger the retry.
+		const deadlocks = [
+			() => driverError("40P01", "deadlock detected"),
+			() => Object.assign(new Error("deadlock detected"), { code: "40P01" }),
+		];
+		for (const deadlock of deadlocks) {
+			const database = new FakeDatabase([[{ id: "customer-id" }], [], [{ id: "customer-id" }], []]);
+			const runTransaction = database.transaction.bind(database);
+			let attempts = 0;
+			database.transaction = async (callback) => {
+				attempts += 1;
+				if (attempts < 3) {
+					throw deadlock();
+				}
+				return await runTransaction(callback);
+			};
+			const repository = new BillingRepository(database as never);
 
-		await repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1");
+			await repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1");
 
-		expect(attempts).toBe(3);
+			expect(attempts).toBe(3);
+		}
 	});
 
 	it("exhausts deadlock retries then rethrows", async () => {
@@ -153,23 +150,5 @@ describe("BillingRepository core", () => {
 			).rejects.toMatchObject({ cause: { errno: code } });
 			expect(attempts).toBe(1);
 		}
-	});
-
-	it("retries executors that surface the SQLSTATE as the top-level code", async () => {
-		const database = new FakeDatabase([[{ id: "customer-id" }], [], [{ id: "customer-id" }], []]);
-		const runTransaction = database.transaction.bind(database);
-		let attempts = 0;
-		database.transaction = async (callback) => {
-			attempts += 1;
-			if (attempts < 3) {
-				throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
-			}
-			return await runTransaction(callback);
-		};
-		const repository = new BillingRepository(database as never);
-
-		await repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1");
-
-		expect(attempts).toBe(3);
 	});
 });

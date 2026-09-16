@@ -1,12 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { SQL } from "bun";
-import { sqlstateOf } from "../../../src/db/repository/base";
-
-function driverError(errno: string, message: string): Error {
-	return new Error(message, {
-		cause: new SQL.PostgresError(message, { code: "ERR_POSTGRES_SERVER_ERROR", errno }),
-	});
-}
+import { sqlstateOf } from "../../src/db/postgres-errors";
+import { driverError } from "../helpers/postgres-errors";
 
 describe("sqlstateOf", () => {
 	it("reads the SQLSTATE from Bun's wrapped driver error", () => {
@@ -46,6 +41,21 @@ describe("sqlstateOf", () => {
 		const error = Object.assign(new Error("no such file"), { errno: -2, code: "ENOENT" });
 
 		expect(sqlstateOf(error)).toBeNull();
+	});
+
+	it("ignores five-letter system codes, which contain no digit", () => {
+		const error = Object.assign(new Error("broken pipe"), { errno: -32, code: "EPIPE" });
+
+		expect(sqlstateOf(error)).toBeNull();
+	});
+
+	it("keeps walking past a five-letter system code to the SQLSTATE beneath it", () => {
+		const error = Object.assign(
+			new Error("write failed", { cause: driverError("40P01", "deadlock detected") }),
+			{ code: "EPIPE" },
+		);
+
+		expect(sqlstateOf(error)).toBe("40P01");
 	});
 
 	it("returns null for null, strings and undefined", () => {

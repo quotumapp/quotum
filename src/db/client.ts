@@ -2,7 +2,7 @@ import { SQL } from "bun";
 import { type BunSQLDatabase, drizzle } from "drizzle-orm/bun-sql";
 import type { BillingEnv } from "../env";
 import { loadEnv } from "../env";
-import { sqlstateOf } from "./repository/base";
+import { sqlstateOf } from "./postgres-errors";
 import * as schema from "./schema";
 
 export type BillingSchema = typeof schema;
@@ -94,33 +94,25 @@ export const db = new Proxy(
 	},
 ) as BillingDatabase;
 
-const transientConnectionErrors = new Set(["ERR_POSTGRES_LIFETIME_TIMEOUT"]);
-
 let postgresStartupHealth: PostgresHealthSnapshot = {
 	healthy: false,
 	error: "Postgres not initialized",
 };
 
+// A protocol violation can clear shortly, so the check waits before its one retry instead of
+// repeating the query immediately. PgBouncer reports its own failures, including
+// `server_login_retry`, with this SQLSTATE, and Bun surfaces it on `errno` even during login, so
+// the code identifies them without matching message text.
+const transientConnectionRetryDelayMs = 250;
+
 function isTransientConnectionError(error: unknown): boolean {
-	if (!(error instanceof Error)) {
-		return false;
-	}
-
-	// Server SQLSTATEs arrive on `errno` (see `sqlstateOf`), so `error.code` alone only ever
-	// matched driver-level names.
-	if (
-		(error instanceof SQL.PostgresError && transientConnectionErrors.has(error.code)) ||
-		sqlstateOf(error) === "08P01"
-	) {
-		return true;
-	}
-
-	return (
-		error.message.includes("Max lifetime timeout") || error.message.includes("server_login_retry")
-	);
+	return sqlstateOf(error) === "08P01";
 }
 
-export async function checkPostgresHealth(queryClient: SQL = sql): Promise<boolean> {
+export async function checkPostgresHealth(
+	queryClient: SQL = sql,
+	retryDelayMs = transientConnectionRetryDelayMs,
+): Promise<boolean> {
 	try {
 		await queryClient`SELECT 1`;
 		return true;
@@ -129,6 +121,7 @@ export async function checkPostgresHealth(queryClient: SQL = sql): Promise<boole
 			return false;
 		}
 
+		await Bun.sleep(retryDelayMs);
 		try {
 			await queryClient`SELECT 1`;
 			return true;

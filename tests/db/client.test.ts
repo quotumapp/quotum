@@ -70,7 +70,7 @@ describe("billing database client", () => {
 		expect(client.getCallCount()).toBe(1);
 	});
 
-	it("retries a transient SQLSTATE error reported on errno and returns healthy", async () => {
+	it("waits, then retries a transient SQLSTATE error reported on errno and returns healthy", async () => {
 		const client = createCountingSqlClient([
 			new SQL.PostgresError("protocol violation", {
 				code: "ERR_POSTGRES_SERVER_ERROR",
@@ -78,9 +78,46 @@ describe("billing database client", () => {
 			}),
 			[{ "?column?": 1 }],
 		]);
+		const startedAt = performance.now();
 
-		expect(await checkPostgresHealth(asSqlClient(client))).toBe(true);
+		expect(await checkPostgresHealth(asSqlClient(client), 30)).toBe(true);
+		expect(performance.now() - startedAt).toBeGreaterThanOrEqual(25);
 		expect(client.getCallCount()).toBe(2);
+	});
+
+	it("retries a pooler login failure by its SQLSTATE, whatever the message says", async () => {
+		// PgBouncer truncates this message to 128 bytes, which can cut off the
+		// `(server_login_retry)` suffix, so only the SQLSTATE is reliable.
+		const client = createCountingSqlClient([
+			new SQL.PostgresError("server login has been failing, cached error: connection refus", {
+				code: "ERR_POSTGRES_SERVER_ERROR",
+				errno: "08P01",
+			}),
+			[{ "?column?": 1 }],
+		]);
+
+		expect(await checkPostgresHealth(asSqlClient(client), 0)).toBe(true);
+		expect(client.getCallCount()).toBe(2);
+	});
+
+	it("does not retry an error that only mentions server_login_retry in its message", async () => {
+		const client = createCountingSqlClient([
+			new Error("server login has been failing (server_login_retry)"),
+			[{ "?column?": 1 }],
+		]);
+
+		expect(await checkPostgresHealth(asSqlClient(client), 0)).toBe(false);
+		expect(client.getCallCount()).toBe(1);
+	});
+
+	it("does not retry a server_login_retryable near-match in an error message", async () => {
+		const client = createCountingSqlClient([
+			new Error("server login has been failing (server_login_retryable)"),
+			[{ "?column?": 1 }],
+		]);
+
+		expect(await checkPostgresHealth(asSqlClient(client), 0)).toBe(false);
+		expect(client.getCallCount()).toBe(1);
 	});
 
 	it("reports a non-transient SQLSTATE unhealthy without a second attempt", async () => {

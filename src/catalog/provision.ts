@@ -1,5 +1,6 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { type BillingDatabase, db as defaultDb } from "../db/client";
+import { withDeadlockRetry } from "../db/repository/base";
 import type { ProjectInstanceContextResolver } from "../projects/context";
 import type { BillingCatalogDeclaration, ProjectCatalogImport } from "./import-config";
 
@@ -20,31 +21,39 @@ export async function syncConfiguredCatalog(
 		}),
 	);
 
-	await database.transaction(async (tx) => {
-		for (const { project, context } of resolvedImports) {
-			const rows = await tx.execute<{
-				published_catalog_revision_id: string | number | bigint | null;
-			}>(drizzleSql`
-				SELECT published_catalog_revision_id
-				FROM projects
-				WHERE id = ${context.projectInstanceId}
-			`);
-			if (rows[0] === undefined) {
-				throw new Error(`Billing project instance ${project.projectInstanceKey} was not found`);
-			}
+	// Re-running is safe: the callback only writes through `tx`, and the imports resolved above
+	// do not change between attempts.
+	await withDeadlockRetry(() =>
+		database.transaction(async (tx) => {
+			for (const { project, context } of resolvedImports) {
+				const rows = await tx.execute<{
+					published_catalog_revision_id: string | number | bigint | null;
+				}>(drizzleSql`
+					SELECT published_catalog_revision_id
+					FROM projects
+					WHERE id = ${context.projectInstanceId}
+				`);
+				if (rows[0] === undefined) {
+					throw new Error(`Billing project instance ${project.projectInstanceKey} was not found`);
+				}
 
-			// This command is an explicit development import. Once the versioned control plane has
-			// published a revision, the database catalog is authoritative and bootstrap input cannot
-			// rewrite or reactivate its provider rows.
-			if (rows[0]?.published_catalog_revision_id !== null) {
-				continue;
-			}
+				// This command is an explicit development import. Once the versioned control plane has
+				// published a revision, the database catalog is authoritative and bootstrap input cannot
+				// rewrite or reactivate its provider rows.
+				if (rows[0]?.published_catalog_revision_id !== null) {
+					continue;
+				}
 
-			for (const declaration of project.catalog) {
-				await syncCatalogDeclaration(tx as BillingDatabase, context.projectInstanceId, declaration);
+				for (const declaration of project.catalog) {
+					await syncCatalogDeclaration(
+						tx as BillingDatabase,
+						context.projectInstanceId,
+						declaration,
+					);
+				}
 			}
-		}
-	});
+		}),
+	);
 }
 
 async function syncCatalogDeclaration(
