@@ -2916,23 +2916,21 @@ export const promotionRedemptions = pgTable(
 			columns: [table.projectId, table.customerId],
 			foreignColumns: [customers.projectId, customers.id],
 		}).onDelete("cascade"),
-		// The SQL nulls only the referencing column (ON DELETE SET NULL (column)); Drizzle cannot
-		// express a column list, so these mirror the relationship without the delete action.
 		foreignKey({
 			name: "promotion_redemptions_project_preview_fk",
 			columns: [table.projectId, table.commercialActionPreviewId],
 			foreignColumns: [commercialActionPreviews.projectId, commercialActionPreviews.id],
-		}),
+		}).onDelete("restrict"),
 		foreignKey({
 			name: "promotion_redemptions_project_change_fk",
 			columns: [table.projectId, table.subscriptionChangeId],
 			foreignColumns: [subscriptionChanges.projectId, subscriptionChanges.id],
-		}),
+		}).onDelete("restrict"),
 		foreignKey({
 			name: "promotion_redemptions_project_purchase_fk",
 			columns: [table.projectId, table.purchaseId],
 			foreignColumns: [purchases.projectId, purchases.id],
-		}),
+		}).onDelete("restrict"),
 		foreignKey({
 			name: "promotion_redemptions_project_provider_object_fk",
 			columns: [table.projectId, table.providerObjectId],
