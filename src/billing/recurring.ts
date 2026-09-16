@@ -9,6 +9,13 @@ export interface SubscriptionChangeInput {
 	prorationBehavior?: StripeProrationBehavior;
 	idempotencyKey: string;
 	expectedStateFingerprint?: string;
+	/** A validated discount to reserve with the change and apply to the Stripe subscription. */
+	promotion?: {
+		promotionCodeId: string;
+		idempotencyKey: string;
+		effectSnapshot: Record<string, unknown>;
+		stripeCouponId: string;
+	};
 }
 
 export interface SubscriptionChangePreview {
@@ -41,6 +48,9 @@ export interface SubscriptionChangeOperation {
 	prorationBehavior: StripeProrationBehavior;
 	externalSubscriptionId: string;
 	targetPlanVersionId: string;
+	/** Stripe coupon reserved with this change, added to the subscription's existing discounts. */
+	discountCouponId: string | null;
+	promotionRedemption: { id: string; status: "reserved" | "applied" } | null;
 	items: Array<{
 		providerSubscriptionItemId?: string;
 		externalPriceId?: string;

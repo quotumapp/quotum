@@ -247,6 +247,12 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 	>();
 	let checkoutSessionFailuresRemaining = options.createCheckoutSessionFailures ?? 0;
 	const promotions = createFakeStripePromotions();
+	const subscriptionUpdates: Array<{
+		subscriptionId: string;
+		params: Stripe.SubscriptionUpdateParams;
+		idempotencyKey: string;
+	}> = [];
+	const subscriptionDiscounts = new Map<string, Array<{ id: string; couponId: string | null }>>();
 	const event =
 		options.event ?? stripeEvent("customer.subscription.updated", stripeSubscriptionObject());
 
@@ -254,7 +260,22 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 		calls,
 		checkoutSessionParams,
 		promotions: promotions.state,
+		subscriptionUpdates,
+		subscriptionDiscounts,
 		client: {
+			async retrieveSubscriptionDiscounts(subscriptionId: string) {
+				calls.push(`retrieveSubscriptionDiscounts:${subscriptionId}`);
+				return subscriptionDiscounts.get(subscriptionId) ?? [];
+			},
+			async updateSubscription(
+				subscriptionId: string,
+				params: Stripe.SubscriptionUpdateParams,
+				idempotencyKey: string,
+			) {
+				calls.push(`updateSubscription:${idempotencyKey}`);
+				subscriptionUpdates.push({ subscriptionId, params, idempotencyKey });
+				return { id: subscriptionId };
+			},
 			createCoupon: promotions.createCoupon,
 			retrieveCoupon: promotions.retrieveCoupon,
 			createPromotionCode: promotions.createPromotionCode,

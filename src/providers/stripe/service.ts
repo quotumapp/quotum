@@ -104,6 +104,9 @@ export interface StripeBillingClientDependency {
 		params: Stripe.SubscriptionUpdateParams,
 		idempotencyKey: string,
 	): Promise<{ id: string }>;
+	retrieveSubscriptionDiscounts?(
+		subscriptionId: string,
+	): Promise<Array<{ id: string; couponId: string | null }>>;
 	createInvoice?(
 		params: Stripe.InvoiceCreateParams,
 		idempotencyKey: string,
@@ -178,6 +181,7 @@ interface StripeBillingRepositoryDependency {
 		checkoutSessionId: string;
 		redemptionId: string | null;
 	}): Promise<void>;
+	ensureSubscriptionDiscountAvailable?(externalSubscriptionId: string): Promise<void>;
 	reserveCommercialPromotion?(input: {
 		billingAccountId: string;
 		promotionCodeId: string;
@@ -644,6 +648,8 @@ export class StripeBillingService {
 
 		let result: CommercialActionExecutionResult;
 		if (current.intent.kind === "subscription_change") {
+			const executionKey = commercialExecutionKey(previewToken, idempotencyKey);
+			const promotion = current.promotion ?? null;
 			const operation = await this.requestSubscriptionChange({
 				billingAccountId,
 				externalSubscriptionId: current.intent.externalSubscriptionId,
@@ -651,8 +657,22 @@ export class StripeBillingService {
 				quantities: current.intent.quantities,
 				effectiveMode: current.intent.effectiveMode,
 				prorationBehavior: current.intent.prorationBehavior,
-				idempotencyKey: commercialExecutionKey(previewToken, idempotencyKey),
-				expectedStateFingerprint: current.stateFingerprint,
+				idempotencyKey: executionKey,
+				expectedStateFingerprint: current.providerStateFingerprint ?? current.stateFingerprint,
+				...(promotion === null
+					? {}
+					: {
+							promotion: {
+								promotionCodeId: promotion.promotionCodeId,
+								idempotencyKey: `promotion:${executionKey}`,
+								effectSnapshot: {
+									kind: "discount",
+									promotionKey: promotion.promotionKey,
+									discount: promotion.discount,
+								},
+								stripeCouponId: await this.ensureStripeCoupon(promotion.promotionId),
+							},
+						}),
 			});
 			result = {
 				kind: "subscription_change",
@@ -660,6 +680,7 @@ export class StripeBillingService {
 				status: operation.status,
 				effectiveMode: operation.effectiveMode,
 				effectiveAt: operation.effectiveAt,
+				promotionRedemption: operation.promotionRedemption,
 			};
 		} else {
 			const executionKey = commercialExecutionKey(previewToken, idempotencyKey);
@@ -732,16 +753,37 @@ export class StripeBillingService {
 				effectiveMode: normalized.effectiveMode,
 				prorationBehavior: normalized.prorationBehavior,
 			});
+			const promotion = await this.commercialPromotion(billingAccountId, normalized.promotionCode, {
+				kind: "plan",
+				key: normalized.targetPlanKey,
+			});
+			if (promotion !== null) {
+				if (repository.ensureSubscriptionDiscountAvailable === undefined) {
+					throw promotionError("PROMOTION_PROVIDER_NOT_READY");
+				}
+				await repository.ensureSubscriptionDiscountAvailable(normalized.externalSubscriptionId);
+			}
+			const currency = oneCurrency(change.lineItems);
+			const interval = change.lineItems[0]?.interval ?? "month";
+			const renewal = priceCommercialLines({
+				lines: change.lineItems,
+				currency,
+				recurringInterval: interval,
+				promotion,
+				hostedEntry: false,
+			});
+			const stateFingerprint = promotionFingerprint(change.stateFingerprint, promotion);
 			return {
 				billingAccountId,
 				intent: normalized,
 				intentHash,
-				stateFingerprint: change.stateFingerprint,
-				promotion: null,
+				stateFingerprint,
+				providerStateFingerprint: change.stateFingerprint,
+				promotion,
 				preview: {
 					schemaVersion: 1,
 					intentHash,
-					stateFingerprint: change.stateFingerprint,
+					stateFingerprint,
 					billingAccountId,
 					action: normalized.kind,
 					provider: "stripe",
@@ -754,11 +796,21 @@ export class StripeBillingService {
 					estimatedTotalMinor: null,
 					subtotalMinor: null,
 					discountTotalMinor: null,
-					currency: oneCurrency(change.lineItems),
+					currency,
 					amountStatus: "provider_calculated",
-					promotionCodeEntry: "none",
-					promotion: null,
-					nextCycle: null,
+					promotionCodeEntry: renewal.promotionCodeEntry,
+					promotion: renewal.promotion,
+					nextCycle:
+						promotion !== null && promotion.discount.duration === "once"
+							? {
+									interval,
+									currency,
+									subtotalMinor: null,
+									discountMinor: null,
+									totalMinor: null,
+									discountStatus: "provider_calculated",
+								}
+							: renewal.nextCycle,
 					effectiveMode: change.effectiveMode,
 					effectiveAt: change.effectiveAt,
 					prorationBehavior: change.prorationBehavior,
@@ -914,6 +966,22 @@ export class StripeBillingService {
 						quantity: item.quantity,
 					},
 		);
+		let discounts: Stripe.SubscriptionUpdateParams.Discount[] | undefined;
+		if (operation.discountCouponId !== null) {
+			if (this.dependencies.client.retrieveSubscriptionDiscounts === undefined) {
+				throw new Error("Stripe subscription discounts are unavailable");
+			}
+			// Stripe replaces the whole discount list on update, so existing discounts are resent.
+			const existing = await this.dependencies.client.retrieveSubscriptionDiscounts(
+				operation.externalSubscriptionId,
+			);
+			discounts = [
+				...existing.map((discount) => ({ discount: discount.id })),
+				...(existing.some((discount) => discount.couponId === operation.discountCouponId)
+					? []
+					: [{ coupon: operation.discountCouponId }]),
+			];
+		}
 		const subscription = await this.dependencies.client.updateSubscription(
 			operation.externalSubscriptionId,
 			{
@@ -923,8 +991,11 @@ export class StripeBillingService {
 					planVersionId: operation.targetPlanVersionId,
 					billingChangeId: operation.changeId,
 				},
+				...(discounts === undefined ? {} : { discounts }),
 			},
-			`billing:subscription-change:${operation.changeId}`,
+			discounts === undefined
+				? `billing:subscription-change:${operation.changeId}`
+				: `billing:subscription-change:${operation.changeId}:discounts:${sha256Hex(stableJson(discounts)).slice(0, 16)}`,
 		);
 		return subscription.id;
 	}
@@ -1743,6 +1814,9 @@ function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialAc
 			...(intent.prorationBehavior === undefined
 				? {}
 				: { prorationBehavior: intent.prorationBehavior }),
+			...(intent.promotionCode === undefined || intent.promotionCode === null
+				? {}
+				: { promotionCode: normalizePromotionCode(intent.promotionCode) }),
 		};
 	}
 	const promotionCode =

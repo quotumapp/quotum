@@ -606,6 +606,42 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 		};
 	}
 
+	/**
+	 * Rejects a second Quotum discount on a subscription while an earlier one can still apply. A
+	 * merchant's own Stripe discounts are not counted; execution keeps them on the subscription.
+	 */
+	async ensureSubscriptionDiscountAvailable(
+		project: ProjectInstanceContext,
+		externalSubscriptionId: string,
+	): Promise<void> {
+		const active = await executeOne<{ id: string }>(
+			this.database,
+			drizzleSql`
+				SELECT r.id
+				FROM promotion_redemptions r
+				JOIN promotions p ON p.project_id = r.project_id AND p.id = r.promotion_id
+				WHERE r.project_id = ${project.projectInstanceId}
+					AND r.external_subscription_id = ${externalSubscriptionId}
+					AND p.effect_kind = 'discount'
+					AND (
+						r.status = 'reserved'
+						OR (
+							r.status = 'applied'
+							AND (
+								p.discount_duration = 'forever'
+								OR (
+									p.discount_duration = 'repeating'
+									AND r.applied_at + make_interval(months => p.duration_months) > now()
+								)
+							)
+						)
+					)
+				LIMIT 1
+			`,
+		);
+		if (active !== null) throw promotionError("PROMOTION_STACKING_NOT_ALLOWED");
+	}
+
 	/** Reserves one use of a discount code for a commercial action, creating the customer if needed. */
 	async reserveCommercialPromotion(
 		project: ProjectInstanceContext,

@@ -181,6 +181,9 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse200
 			status: z.enum(["pending", "failed", "cancelled", "processing", "applied"]),
 			effectiveMode: z.enum(["immediate", "period_end"]),
 			effectiveAt: z.string(),
+			promotionRedemption: z
+				.union([z.null(), z.object({ id: z.string(), status: z.enum(["reserved", "applied"]) })])
+				.optional(),
 		}),
 	]),
 });
@@ -203,6 +206,9 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse202
 			status: z.enum(["pending", "failed", "cancelled", "processing", "applied"]),
 			effectiveMode: z.enum(["immediate", "period_end"]),
 			effectiveAt: z.string(),
+			promotionRedemption: z
+				.union([z.null(), z.object({ id: z.string(), status: z.enum(["reserved", "applied"]) })])
+				.optional(),
 		}),
 	]),
 });

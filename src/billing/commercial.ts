@@ -30,6 +30,7 @@ export type CommercialActionIntent =
 			quantities: Record<string, number>;
 			effectiveMode?: "immediate" | "period_end";
 			prorationBehavior?: StripeProrationBehavior;
+			promotionCode?: string | null;
 	  };
 
 export interface CommercialLineItem {
@@ -120,6 +121,7 @@ export type CommercialActionExecutionResult =
 			status: "pending" | "processing" | "applied" | "failed" | "cancelled";
 			effectiveMode: "immediate" | "period_end";
 			effectiveAt: string;
+			promotionRedemption?: { id: string; status: "reserved" | "applied" } | null;
 	  };
 
 export interface CommercialPreviewDraft {
@@ -130,4 +132,6 @@ export interface CommercialPreviewDraft {
 	preview: Omit<CommercialActionPreview, "previewToken" | "expiresAt">;
 	/** Server-side only: the validated code behind the preview, never stored or returned. */
 	promotion?: CommercialPromotion | null;
+	/** Server-side only: the provider-state fingerprint before promotion state is folded in. */
+	providerStateFingerprint?: string;
 }

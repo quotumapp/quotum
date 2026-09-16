@@ -118,6 +118,13 @@ export class ProjectScopedBillingRepository {
 		return await this.repository.promotions.resolveCommercialPromotion(this.project, input);
 	}
 
+	async ensureSubscriptionDiscountAvailable(externalSubscriptionId: string): Promise<void> {
+		await this.repository.promotions.ensureSubscriptionDiscountAvailable(
+			this.project,
+			externalSubscriptionId,
+		);
+	}
+
 	async reserveCommercialPromotion(
 		input: Parameters<BillingRepository["promotions"]["reserveCommercialPromotion"]>[1],
 	): Promise<{ id: string; status: PromotionRedemptionStatus }> {

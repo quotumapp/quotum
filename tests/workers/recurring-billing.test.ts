@@ -19,6 +19,8 @@ it("applies due changes and invoices closed overage periods", async () => {
 		prorationBehavior: "always_invoice",
 		externalSubscriptionId: "sub_1",
 		targetPlanVersionId: "2",
+		discountCouponId: null,
+		promotionRedemption: null,
 		items: [],
 	} satisfies SubscriptionChangeOperation;
 	const usage = {
@@ -103,6 +105,8 @@ it("fails claimed recurring-billing work when its project id and key disagree", 
 		prorationBehavior: "always_invoice",
 		externalSubscriptionId: "sub_mismatch",
 		targetPlanVersionId: "2",
+		discountCouponId: null,
+		promotionRedemption: null,
 		items: [],
 	} satisfies SubscriptionChangeOperation;
 	const worker = new RecurringBillingWorker({

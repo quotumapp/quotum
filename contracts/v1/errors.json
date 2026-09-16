@@ -836,6 +836,12 @@
       ]
     },
     {
+      "code": "PROMOTION_STACKING_NOT_ALLOWED",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
       "code": "PROMOTION_TARGET_NOT_FOUND",
       "sources": [
         "src/billing/promotions.ts"

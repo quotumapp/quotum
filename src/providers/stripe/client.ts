@@ -173,6 +173,28 @@ export class StripeBillingClient {
 		});
 	}
 
+	/** The subscription's current discounts, so an update can keep them when adding a coupon. */
+	async retrieveSubscriptionDiscounts(
+		subscriptionId: string,
+	): Promise<Array<{ id: string; couponId: string | null }>> {
+		const subscription = await this.stripe.subscriptions.retrieve(subscriptionId, {
+			expand: ["discounts"],
+		});
+		return subscription.discounts.flatMap((discount) =>
+			typeof discount === "string"
+				? [{ id: discount, couponId: null }]
+				: [
+						{
+							id: discount.id,
+							couponId:
+								typeof discount.source.coupon === "string"
+									? discount.source.coupon
+									: (discount.source.coupon?.id ?? null),
+						},
+					],
+		);
+	}
+
 	updateSubscription(
 		subscriptionId: string,
 		params: Stripe.SubscriptionUpdateParams,
