@@ -5,7 +5,10 @@
  */
 
 export const billingProviders = ["apple", "google", "stripe"] as const;
-/** Declared ahead of implementation; never admitted by runtime enums, SQL CHECKs or OpenAPI. */
+/**
+ * Declared ahead of implementation; never admitted by runtime enums, SQL CHECKs or any request or
+ * response enum. Only the capability contract lists them, including its OpenAPI components.
+ */
 export const plannedProviders = ["paddle"] as const;
 export const declaredProviders = [...billingProviders, ...plannedProviders] as const;
 export const billingChannels = ["ios", "android", "web"] as const;

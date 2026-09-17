@@ -21,4 +21,13 @@ describe("billingProviderValues", () => {
 		expect(new Set(values).size).toBe(values.length);
 		expect([...values].sort()).toEqual([...billingProviders].sort());
 	});
+
+	it("lists a repeated leading provider once, keeping the order of first appearance", () => {
+		expect(billingProviderValues("stripe", "stripe")).toEqual(["stripe", "apple", "google"]);
+		expect(billingProviderValues("google", "stripe", "google")).toEqual([
+			"google",
+			"stripe",
+			"apple",
+		]);
+	});
 });
