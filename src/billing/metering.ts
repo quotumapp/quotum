@@ -1,4 +1,5 @@
 import type { ProjectInstanceContext } from "../projects/context";
+import type { BillingProvider } from "./types";
 import type { UsageOperationLookupInput, UsageOperationLookupResult } from "./usage-operations";
 
 export type RateCardPath = "direct" | "pinned" | "additive";
@@ -120,7 +121,7 @@ export interface MeteringDecision {
 	balance: MeteringBalance;
 	rateCard: RateCardReceipt;
 	eligiblePurchaseActions: Array<{
-		provider: "apple" | "google" | "stripe";
+		provider: BillingProvider;
 		action: "purchase_required" | "provider_action_required";
 	}>;
 	control: {

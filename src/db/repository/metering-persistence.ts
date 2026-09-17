@@ -23,6 +23,7 @@ import {
 	calculateTieredUsageCharge,
 	calculateUsageCharge,
 } from "../../billing/pricing";
+import type { BillingProvider } from "../../billing/types";
 import { toIso } from "../../shared/date";
 import type { ControlDenial } from "./controls-runtime";
 import {
@@ -1544,9 +1545,9 @@ function rateReceipt(rate: RateDecision): RateCardReceipt {
 async function purchaseActions(
 	executor: QueryExecutor,
 	projectId: string,
-): Promise<Array<{ provider: "apple" | "google" | "stripe"; action: "purchase_required" }>> {
+): Promise<Array<{ provider: BillingProvider; action: "purchase_required" }>> {
 	return await executeRows<{
-		provider: "apple" | "google" | "stripe";
+		provider: BillingProvider;
 		action: "purchase_required";
 	}>(
 		executor,

@@ -1,6 +1,7 @@
 import type { Integration, Log } from "@sentry/core";
 import type { Elysia } from "elysia";
 import { BillingError, isBillingError } from "../billing/errors";
+import { isBillingProvider } from "../billing/types";
 import type { SentryEnv } from "../env";
 import type { BillingLogger } from "./logger";
 import { stringifyUnknown } from "./stringify-unknown";
@@ -279,7 +280,7 @@ function classifyLogCategory(message: string, context?: Record<string, unknown>)
 	}
 
 	const provider = context?.provider;
-	if (provider === "apple" || provider === "google" || provider === "stripe") {
+	if (isBillingProvider(provider)) {
 		return message.toLowerCase().includes("webhook") ? "webhook" : "purchase";
 	}
 

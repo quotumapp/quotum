@@ -37,6 +37,7 @@ import {
 	promotionQuantity,
 	type StripeCheckoutPromotionFacts,
 } from "../../billing/promotions";
+import type { BillingProvider } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
@@ -84,7 +85,7 @@ interface PromotionRow {
 	redemption_counts: Partial<Record<PromotionRedemptionStatus, number>> | null;
 	provider_objects: Array<{
 		id: string;
-		provider: "stripe" | "apple" | "google";
+		provider: BillingProvider;
 		objectKind: PromotionProviderObjectRecord["objectKind"];
 		promotionCodeId: string | null;
 		externalId: string | null;

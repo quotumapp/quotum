@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { billingProviderValues } from "./provider-enum";
 
 /** Authored HTTP wire schemas. Update these with the handlers; OpenAPI is generated from them. */
 export const postV1BillingAccountsByBillingAccountIdEntitiesResponse201Schema = z.object({
@@ -121,7 +122,7 @@ export const putV1BillingAccountsByBillingAccountIdAutoTopupResponse200Schema = 
 		entityId: z.union([z.null(), z.string()]),
 		featureKey: z.string(),
 		topupKey: z.string(),
-		provider: z.enum(["google", "apple", "stripe"]),
+		provider: z.enum(billingProviderValues("google")),
 		thresholdQuantity: z.string(),
 		status: z.enum(["ready", "suspended", "cooldown"]),
 		cooldownUntil: z.union([z.null(), z.string()]),
@@ -139,7 +140,7 @@ export const getV1BillingAccountsByBillingAccountIdAutoTopupResponse200Schema = 
 			entityId: z.union([z.null(), z.string()]),
 			featureKey: z.string(),
 			topupKey: z.string(),
-			provider: z.enum(["google", "apple", "stripe"]),
+			provider: z.enum(billingProviderValues("google")),
 			thresholdQuantity: z.string(),
 			status: z.enum(["ready", "suspended", "cooldown"]),
 			cooldownUntil: z.union([z.null(), z.string()]),
@@ -156,7 +157,7 @@ export const postV1AdminAutoTopupsByBillingAccountIdByPolicyIdResetResponse200Sc
 		entityId: z.union([z.null(), z.string()]),
 		featureKey: z.string(),
 		topupKey: z.string(),
-		provider: z.enum(["google", "apple", "stripe"]),
+		provider: z.enum(billingProviderValues("google")),
 		thresholdQuantity: z.string(),
 		status: z.enum(["ready", "suspended", "cooldown"]),
 		cooldownUntil: z.union([z.null(), z.string()]),

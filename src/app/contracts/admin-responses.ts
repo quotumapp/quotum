@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { billingProviderValues } from "./provider-enum";
 
 /** Authored HTTP wire schemas. Update these with the handlers; OpenAPI is generated from them. */
 export const getV1AdminCustomersSearchResponse200Schema = z.object({
@@ -55,7 +56,7 @@ export const getV1AdminCustomersByBillingAccountByBillingAccountIdResponse200Sch
 		}),
 		providerCustomers: z.array(
 			z.object({
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				externalCustomerId: z.string(),
 				createdAt: z.string(),
 			}),
@@ -65,7 +66,7 @@ export const getV1AdminCustomersByBillingAccountByBillingAccountIdResponse200Sch
 				id: z.string(),
 				customerId: z.string(),
 				billingAccountId: z.string(),
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				channel: z.enum(["ios", "android", "web"]),
 				status: z.enum([
 					"active",
@@ -99,7 +100,7 @@ export const getV1AdminCustomersByBillingAccountByBillingAccountIdResponse200Sch
 				id: z.string(),
 				customerId: z.string(),
 				billingAccountId: z.string(),
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				channel: z.enum(["ios", "android", "web"]),
 				purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
 				status: z.enum(["revoked", "refunded", "completed", "voided"]),
@@ -118,7 +119,7 @@ export const getV1AdminCustomersByBillingAccountByBillingAccountIdResponse200Sch
 		recentStoreEvents: z.array(
 			z.object({
 				id: z.string(),
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				channel: z.enum(["ios", "android", "web"]),
 				externalEventId: z.union([z.null(), z.string()]),
 				eventType: z.string(),
@@ -197,7 +198,7 @@ export const getV1AdminCustomersByBillingAccountByBillingAccountIdResponse200Sch
 						sequence: z.number().optional(),
 						purchase: z
 							.object({
-								provider: z.enum(["google", "apple", "stripe"]),
+								provider: z.enum(billingProviderValues("google")),
 								channel: z.enum(["ios", "android", "web"]),
 								purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
 								transactionId: z.string(),
@@ -211,7 +212,7 @@ export const getV1AdminCustomersByBillingAccountByBillingAccountIdResponse200Sch
 							.optional(),
 						reversal: z
 							.object({
-								provider: z.enum(["google", "apple", "stripe"]),
+								provider: z.enum(billingProviderValues("google")),
 								channel: z.enum(["ios", "android", "web"]),
 								reason: z.enum(["refund", "dispute"]),
 								transactionId: z.string(),
@@ -239,7 +240,7 @@ export const getV1AdminCustomersByCustomerIdPurchasesResponse200Schema = z.objec
 			id: z.string(),
 			customerId: z.string(),
 			billingAccountId: z.string(),
-			provider: z.enum(["google", "apple", "stripe"]),
+			provider: z.enum(billingProviderValues("google")),
 			channel: z.enum(["ios", "android", "web"]),
 			purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
 			status: z.enum(["revoked", "refunded", "completed", "voided"]),
@@ -265,7 +266,7 @@ export const getV1AdminCustomersByCustomerIdSubscriptionsResponse200Schema = z.o
 			id: z.string(),
 			customerId: z.string(),
 			billingAccountId: z.string(),
-			provider: z.enum(["google", "apple", "stripe"]),
+			provider: z.enum(billingProviderValues("google")),
 			channel: z.enum(["ios", "android", "web"]),
 			status: z.enum([
 				"active",
@@ -302,7 +303,7 @@ export const getV1AdminCustomersByCustomerIdStoreEventsResponse200Schema = z.obj
 	data: z.array(
 		z.object({
 			id: z.string(),
-			provider: z.enum(["google", "apple", "stripe"]),
+			provider: z.enum(billingProviderValues("google")),
 			channel: z.enum(["ios", "android", "web"]),
 			externalEventId: z.union([z.null(), z.string()]),
 			eventType: z.string(),
@@ -386,7 +387,7 @@ export const getV1AdminCustomersByCustomerIdProjectionJobsResponse200Schema = z.
 					sequence: z.number().optional(),
 					purchase: z
 						.object({
-							provider: z.enum(["google", "apple", "stripe"]),
+							provider: z.enum(billingProviderValues("google")),
 							channel: z.enum(["ios", "android", "web"]),
 							purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
 							transactionId: z.string(),
@@ -400,7 +401,7 @@ export const getV1AdminCustomersByCustomerIdProjectionJobsResponse200Schema = z.
 						.optional(),
 					reversal: z
 						.object({
-							provider: z.enum(["google", "apple", "stripe"]),
+							provider: z.enum(billingProviderValues("google")),
 							channel: z.enum(["ios", "android", "web"]),
 							reason: z.enum(["refund", "dispute"]),
 							transactionId: z.string(),
@@ -447,7 +448,7 @@ export const getV1AdminCustomersByCustomerIdResponse200Schema = z.object({
 		}),
 		providerCustomers: z.array(
 			z.object({
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				externalCustomerId: z.string(),
 				createdAt: z.string(),
 			}),
@@ -457,7 +458,7 @@ export const getV1AdminCustomersByCustomerIdResponse200Schema = z.object({
 				id: z.string(),
 				customerId: z.string(),
 				billingAccountId: z.string(),
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				channel: z.enum(["ios", "android", "web"]),
 				status: z.enum([
 					"active",
@@ -491,7 +492,7 @@ export const getV1AdminCustomersByCustomerIdResponse200Schema = z.object({
 				id: z.string(),
 				customerId: z.string(),
 				billingAccountId: z.string(),
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				channel: z.enum(["ios", "android", "web"]),
 				purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
 				status: z.enum(["revoked", "refunded", "completed", "voided"]),
@@ -510,7 +511,7 @@ export const getV1AdminCustomersByCustomerIdResponse200Schema = z.object({
 		recentStoreEvents: z.array(
 			z.object({
 				id: z.string(),
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				channel: z.enum(["ios", "android", "web"]),
 				externalEventId: z.union([z.null(), z.string()]),
 				eventType: z.string(),
@@ -589,7 +590,7 @@ export const getV1AdminCustomersByCustomerIdResponse200Schema = z.object({
 						sequence: z.number().optional(),
 						purchase: z
 							.object({
-								provider: z.enum(["google", "apple", "stripe"]),
+								provider: z.enum(billingProviderValues("google")),
 								channel: z.enum(["ios", "android", "web"]),
 								purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
 								transactionId: z.string(),
@@ -603,7 +604,7 @@ export const getV1AdminCustomersByCustomerIdResponse200Schema = z.object({
 							.optional(),
 						reversal: z
 							.object({
-								provider: z.enum(["google", "apple", "stripe"]),
+								provider: z.enum(billingProviderValues("google")),
 								channel: z.enum(["ios", "android", "web"]),
 								reason: z.enum(["refund", "dispute"]),
 								transactionId: z.string(),
@@ -631,7 +632,7 @@ export const getV1AdminPurchasesResponse200Schema = z.object({
 			id: z.string(),
 			customerId: z.string(),
 			billingAccountId: z.string(),
-			provider: z.enum(["google", "apple", "stripe"]),
+			provider: z.enum(billingProviderValues("google")),
 			channel: z.enum(["ios", "android", "web"]),
 			purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
 			status: z.enum(["revoked", "refunded", "completed", "voided"]),
@@ -657,7 +658,7 @@ export const getV1AdminSubscriptionsResponse200Schema = z.object({
 			id: z.string(),
 			customerId: z.string(),
 			billingAccountId: z.string(),
-			provider: z.enum(["google", "apple", "stripe"]),
+			provider: z.enum(billingProviderValues("google")),
 			channel: z.enum(["ios", "android", "web"]),
 			status: z.enum([
 				"active",
@@ -694,7 +695,7 @@ export const getV1AdminStoreEventsResponse200Schema = z.object({
 	data: z.array(
 		z.object({
 			id: z.string(),
-			provider: z.enum(["google", "apple", "stripe"]),
+			provider: z.enum(billingProviderValues("google")),
 			channel: z.enum(["ios", "android", "web"]),
 			externalEventId: z.union([z.null(), z.string()]),
 			eventType: z.string(),
@@ -725,7 +726,7 @@ export const getV1AdminStoreEventsByEventIdResponse200Schema = z.object({
 	success: z.literal(true),
 	data: z.object({
 		id: z.string(),
-		provider: z.enum(["google", "apple", "stripe"]),
+		provider: z.enum(billingProviderValues("google")),
 		channel: z.enum(["ios", "android", "web"]),
 		externalEventId: z.union([z.null(), z.string()]),
 		eventType: z.string(),
@@ -807,7 +808,7 @@ export const getV1AdminProjectionJobsResponse200Schema = z.object({
 					sequence: z.number().optional(),
 					purchase: z
 						.object({
-							provider: z.enum(["google", "apple", "stripe"]),
+							provider: z.enum(billingProviderValues("google")),
 							channel: z.enum(["ios", "android", "web"]),
 							purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
 							transactionId: z.string(),
@@ -821,7 +822,7 @@ export const getV1AdminProjectionJobsResponse200Schema = z.object({
 						.optional(),
 					reversal: z
 						.object({
-							provider: z.enum(["google", "apple", "stripe"]),
+							provider: z.enum(billingProviderValues("google")),
 							channel: z.enum(["ios", "android", "web"]),
 							reason: z.enum(["refund", "dispute"]),
 							transactionId: z.string(),
@@ -891,7 +892,7 @@ export const getV1AdminStatsSummaryResponse200Schema = z.object({
 		recentStoreEvents: z.array(
 			z.object({
 				id: z.string(),
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				channel: z.enum(["ios", "android", "web"]),
 				externalEventId: z.union([z.null(), z.string()]),
 				eventType: z.string(),
@@ -925,7 +926,7 @@ export const getV1AdminCatalogStoreProductsResponse200Schema = z.object({
 			id: z.string(),
 			productId: z.string(),
 			productKey: z.string(),
-			provider: z.enum(["google", "apple", "stripe"]),
+			provider: z.enum(billingProviderValues("google")),
 			channel: z.enum(["ios", "android", "web"]),
 			externalProductId: z.string(),
 			active: z.boolean(),

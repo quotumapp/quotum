@@ -18,6 +18,7 @@ import type {
 	SubscriptionChangePreview,
 	UsageInvoiceJob,
 } from "../../billing/recurring";
+import type { BillingProvider } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import {
@@ -562,7 +563,7 @@ interface CatalogMigrationJobContext {
 	project_id: string;
 	customer_id: string;
 	subscription_id: string;
-	provider: "apple" | "google" | "stripe";
+	provider: BillingProvider;
 	subscription_status: string;
 	current_plan_version_id: string | number | bigint;
 	from_plan_version_id: string | number | bigint;

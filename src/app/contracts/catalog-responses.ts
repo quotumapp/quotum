@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { billingProviderValues } from "./provider-enum";
 
 /** Authored HTTP wire schemas. Update these with the handlers; OpenAPI is generated from them. */
 export const getV1AdminCatalogResponse200Schema = z.object({
@@ -68,7 +69,7 @@ export const getV1AdminCatalogResponse200Schema = z.object({
 									providerBindings: z.array(
 										z.object({
 											productKey: z.string(),
-											provider: z.enum(["google", "apple", "stripe"]),
+											provider: z.enum(billingProviderValues("google")),
 											channel: z.enum(["ios", "android", "web"]),
 										}),
 									),
@@ -121,7 +122,7 @@ export const getV1AdminCatalogResponse200Schema = z.object({
 											providerBindings: z.array(
 												z.object({
 													productKey: z.string(),
-													provider: z.enum(["google", "apple", "stripe"]),
+													provider: z.enum(billingProviderValues("google")),
 													channel: z.enum(["ios", "android", "web"]),
 												}),
 											),
@@ -144,7 +145,7 @@ export const getV1AdminCatalogResponse200Schema = z.object({
 						providerBindings: z.array(
 							z.object({
 								productKey: z.string(),
-								provider: z.enum(["google", "apple", "stripe"]),
+								provider: z.enum(billingProviderValues("google")),
 								channel: z.enum(["ios", "android", "web"]),
 							}),
 						),
@@ -159,7 +160,7 @@ export const getV1AdminCatalogResponse200Schema = z.object({
 						providerBindings: z.array(
 							z.object({
 								productKey: z.string(),
-								provider: z.enum(["google", "apple", "stripe"]),
+								provider: z.enum(billingProviderValues("google")),
 								channel: z.enum(["ios", "android", "web"]),
 							}),
 						),

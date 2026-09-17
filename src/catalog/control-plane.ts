@@ -7,10 +7,12 @@ import {
 	stableJson,
 } from "../billing/decimal";
 import { BillingError, InvalidRequestError, PersistenceConflictError } from "../billing/errors";
+import { type BillingProvider, isBillingProvider } from "../billing/types";
 import { RepositoryModule } from "../db/repository/base";
 import { executeOne, executeRows, jsonb } from "../db/repository/query";
 import type { QueryExecutor } from "../db/repository/types";
 import type { ProjectInstanceContext } from "../projects/context";
+import { providerCapabilityCatalog } from "../providers/capabilities";
 import { toIso } from "../shared/date";
 import type {
 	CatalogControlIntent,
@@ -721,7 +723,9 @@ function assertNoActiveRetirementOverlap(
 function normalizeProviderBinding(
 	binding: CatalogProviderBindingIntent,
 ): CatalogProviderBindingIntent {
-	const expectedChannel = { apple: "ios", google: "android", stripe: "web" }[binding.provider];
+	const expectedChannel = isBillingProvider(binding.provider)
+		? providerCapabilityCatalog.get(binding.provider)?.channel
+		: undefined;
 	if (binding.channel !== expectedChannel) {
 		throw new InvalidRequestError(
 			`${binding.provider} catalog bindings must use the ${expectedChannel} channel`,
@@ -1617,7 +1621,7 @@ async function recordProviderAdoption(
 	input: {
 		projectId: string;
 		revisionId: string;
-		provider: "apple" | "google" | "stripe";
+		provider: BillingProvider;
 		channel: "ios" | "android" | "web";
 		action: "adopt_plan" | "adopt_topup" | "adopt_price";
 		storeProductId: string;

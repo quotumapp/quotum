@@ -12,6 +12,7 @@ import type {
 	UsageSeriesInput,
 	UsageSeriesPoint,
 } from "../../billing/insights";
+import type { BillingProvider } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import { executeOne, executeRows } from "./query";
@@ -161,7 +162,7 @@ export class BillingInsightsRepository extends RepositoryModule {
 		const [subscriptions, balances, usage, invoices] = await Promise.all([
 			executeRows<{
 				id: string;
-				provider: "apple" | "google" | "stripe";
+				provider: BillingProvider;
 				plan_key: string | null;
 				status: string;
 				current_period_start: Date | string | null;

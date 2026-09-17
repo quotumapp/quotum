@@ -1,3 +1,4 @@
+import type { BillingProvider } from "../billing/types";
 import type {
 	ExpiredSubscriptionReconciliationResult,
 	ProviderSubscriptionReconciliationRow,
@@ -32,7 +33,7 @@ export interface SubscriptionReconciliationProviders {
 
 export type SubscriptionReconciliationProviderSelector = (
 	project: ProjectInstanceContext,
-	provider: "apple" | "google" | "stripe",
+	provider: BillingProvider,
 ) => SubscriptionReconciliationProviders | Promise<SubscriptionReconciliationProviders>;
 
 export interface SubscriptionReconciliationRepository {
@@ -278,7 +279,7 @@ export class SubscriptionReconciliationWorker {
 
 	private async providersFor(
 		project: ProjectInstanceContext,
-		provider: "apple" | "google" | "stripe",
+		provider: BillingProvider,
 	): Promise<SubscriptionReconciliationProviders> {
 		return typeof this.providers === "function"
 			? this.providers(project, provider)

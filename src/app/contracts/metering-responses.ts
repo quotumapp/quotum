@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { billingProviderValues } from "./provider-enum";
 
 /** Authored HTTP wire schemas. Update these with the handlers; OpenAPI is generated from them. */
 export const getV1BillingAccountsByBillingAccountIdBalancesByFeatureKeyResponse200Schema = z.object(
@@ -129,7 +130,7 @@ export const postV1BillingAccountsByBillingAccountIdUsageCheckResponse200Schema 
 		}),
 		eligiblePurchaseActions: z.array(
 			z.object({
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				action: z.enum(["purchase_required", "provider_action_required"]),
 			}),
 		),
@@ -215,7 +216,7 @@ export const postV1BillingAccountsByBillingAccountIdUsageConsumeResponse200Schem
 		}),
 		eligiblePurchaseActions: z.array(
 			z.object({
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				action: z.enum(["purchase_required", "provider_action_required"]),
 			}),
 		),
@@ -308,7 +309,7 @@ export const postV1BillingAccountsByBillingAccountIdUsageReservationsResponse200
 		}),
 		eligiblePurchaseActions: z.array(
 			z.object({
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				action: z.enum(["purchase_required", "provider_action_required"]),
 			}),
 		),
