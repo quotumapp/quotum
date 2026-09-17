@@ -57,6 +57,8 @@ function documentEnv(): BillingEnv {
 		},
 		sentry: {
 			dsn: null,
+			environment: "test",
+			release: null,
 			enableLogs: false,
 			tracesSampleRate: 0,
 			logLevel: "error",

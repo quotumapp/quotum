@@ -2,7 +2,7 @@ import type { BetterAuthOptions } from "better-auth";
 import { Elysia } from "elysia";
 import { sql } from "../db/client";
 import { attachRequestServer } from "../http/server";
-import { createMerchantApp } from "../platform/app";
+import { createMerchantApp, type MerchantUnexpectedErrorReport } from "../platform/app";
 import type { MerchantBillingPort } from "../platform/application/billing-port";
 import { createMerchantAuth, type MerchantAuth } from "../platform/auth";
 import { createMerchantBilling } from "../platform/billing";
@@ -11,7 +11,7 @@ import { MerchantStripeOAuth } from "../platform/connections/oauth";
 import { MerchantConnections } from "../platform/connections/service";
 import { createMerchantMailer, type MerchantMailer } from "../platform/email";
 import { MerchantStore } from "../platform/store";
-import { type AppElysia, HTTP_APP_CONFIG } from "../shared/http";
+import { type AppElysia, type ElysiaPluginLike, HTTP_APP_CONFIG } from "../shared/http";
 import { createConnectionEventApp } from "./connection-events";
 import { createConnectionValidation } from "./connection-validation";
 import { createConnectionRepository } from "./connections";
@@ -21,9 +21,16 @@ import type { QuotumApp } from "./runtime-lifecycle";
 import { createStripeAppEvents } from "./stripe-app-events";
 import { createStripeOAuthPort } from "./stripe-oauth";
 
-/** Wraps one staff dispatch, e.g. in the Sentry isolation scope the staff app's hooks tag. */
-export interface StaffRequestScope {
+/** Wraps one dispatch, e.g. in the Sentry isolation scope the app's hooks tag. */
+export interface RequestScope {
 	run<T>(request: Request, dispatch: () => T): T;
+}
+
+/** @deprecated Use RequestScope; kept for backwards compatibility. */
+export type StaffRequestScope = RequestScope;
+
+export interface MerchantRequestScope extends RequestScope {
+	plugin?: ElysiaPluginLike;
 }
 
 export interface MerchantRuntimeOptions {
@@ -41,7 +48,9 @@ export function attachMerchantRuntime(
 	billing: MerchantBillingPort,
 	options: MerchantRuntimeOptions & {
 		config: MerchantConfig;
-		staffRequestScope?: StaffRequestScope;
+		staffRequestScope?: RequestScope;
+		merchantRequestScope?: MerchantRequestScope;
+		onMerchantUnexpectedError?: (error: unknown, report: MerchantUnexpectedErrorReport) => void;
 	},
 ): QuotumApp {
 	const { config } = options;
@@ -69,6 +78,8 @@ export function attachMerchantRuntime(
 		mailer,
 		auth: (options.createAuth ?? createMerchantAuth)(store, mailer, database),
 		billing: createMerchantBilling(store, billing),
+		requestObservabilityMiddleware: options.merchantRequestScope?.plugin,
+		onUnexpectedError: options.onMerchantUnexpectedError,
 	});
 	const ingress = [createConnectionEventApp(repository)];
 	if (oauth) {
@@ -81,6 +92,7 @@ export function attachMerchantRuntime(
 		merchant,
 		ingress,
 		staffRequestScope: options.staffRequestScope,
+		merchantRequestScope: options.merchantRequestScope,
 	});
 }
 
@@ -100,9 +112,10 @@ export function composeRuntimeApp(input: {
 	staff: DispatchTarget;
 	merchant: DispatchTarget;
 	ingress?: readonly AppElysia[];
-	staffRequestScope?: StaffRequestScope;
+	staffRequestScope?: RequestScope;
+	merchantRequestScope?: RequestScope;
 }): QuotumApp {
-	const { staff, merchant, staffRequestScope } = input;
+	const { staff, merchant, staffRequestScope, merchantRequestScope } = input;
 	const app = new Elysia(HTTP_APP_CONFIG);
 	for (const ingress of input.ingress ?? []) app.use(ingress);
 	// /api/* precedence over the staff fallback is load-bearing and router-level specific.
@@ -110,7 +123,9 @@ export function composeRuntimeApp(input: {
 		"/api/*",
 		({ request, server }) => {
 			attachRequestServer(merchant, server);
-			return merchant.fetch(request);
+			return merchantRequestScope === undefined
+				? merchant.fetch(request)
+				: merchantRequestScope.run(request, () => merchant.fetch(request));
 		},
 		{ parse: "none" },
 	);

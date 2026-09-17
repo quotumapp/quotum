@@ -58,6 +58,8 @@ const env: BillingEnv = {
 	},
 	sentry: {
 		dsn: null,
+		environment: "test",
+		release: null,
 		enableLogs: true,
 		tracesSampleRate: 0.01,
 		logLevel: "warn",

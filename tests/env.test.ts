@@ -55,6 +55,8 @@ describe("loadEnv", () => {
 			},
 			sentry: {
 				dsn: null,
+				environment: "development",
+				release: null,
 				enableLogs: true,
 				tracesSampleRate: 0.01,
 				logLevel: "warn",
@@ -85,6 +87,8 @@ describe("loadEnv", () => {
 		});
 		expect(env.sentry).toEqual({
 			dsn: null,
+			environment: "development",
+			release: null,
 			enableLogs: true,
 			tracesSampleRate: 0.01,
 			logLevel: "warn",
@@ -118,6 +122,8 @@ describe("loadEnv", () => {
 
 		expect(env.sentry).toEqual({
 			dsn: "https://sentry.example/123",
+			environment: "development",
+			release: null,
 			enableLogs: false,
 			tracesSampleRate: 0.25,
 			logLevel: "info",
@@ -129,6 +135,27 @@ describe("loadEnv", () => {
 		const env = loadEnv({ ...developmentSource, SENTRY_DSN: "" });
 
 		expect(env.sentry.dsn).toBeNull();
+	});
+
+	it("parses Sentry environment and release", () => {
+		expect(loadEnv(developmentSource).sentry.environment).toBe("development");
+		expect(
+			loadEnv({ ...developmentSource, SENTRY_ENVIRONMENT: "staging" }).sentry.environment,
+		).toBe("staging");
+		expect(loadEnv({ ...developmentSource, SENTRY_ENVIRONMENT: "  " }).sentry.environment).toBe(
+			"development",
+		);
+		expect(() => loadEnv({ ...developmentSource, SENTRY_ENVIRONMENT: "bad/env" })).toThrow(
+			"SENTRY_ENVIRONMENT",
+		);
+		expect(loadEnv(developmentSource).sentry.release).toBeNull();
+		expect(
+			loadEnv({ ...developmentSource, SENTRY_RELEASE: "quotum-api@9.9.9" }).sentry.release,
+		).toBe("quotum-api@9.9.9");
+		expect(loadEnv({ ...developmentSource, BUILD_VERSION: "1.2.3" }).sentry.release).toBe(
+			"quotum-api@1.2.3",
+		);
+		expect(loadEnv({ ...developmentSource, BUILD_VERSION: "  " }).sentry.release).toBeNull();
 	});
 
 	it("parses explicit trusted proxy header configuration", () => {

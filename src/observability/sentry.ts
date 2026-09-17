@@ -1,20 +1,60 @@
-import type { Integration, Log } from "@sentry/core";
+import type {
+	Breadcrumb,
+	BreadcrumbHint,
+	DataCollection,
+	ErrorEvent,
+	EventHint,
+	Integration,
+	Log,
+	SpanJSON,
+	TransactionEvent,
+} from "@sentry/core";
 import type { Elysia } from "elysia";
 import { BillingError, isBillingError } from "../billing/errors";
 import { isBillingProvider } from "../billing/types";
 import type { SentryEnv } from "../env";
 import type { BillingLogger } from "./logger";
-import { stringifyUnknown } from "./stringify-unknown";
+import {
+	describeThrown,
+	FILTERED,
+	maskPath,
+	scrubBreadcrumb,
+	scrubEvent,
+	scrubLog,
+	scrubRecord,
+	scrubSpan,
+	scrubString,
+	stripUndefined,
+} from "./sentry-scrub";
 
 type SentryLogLevel = "info" | "warn" | "error";
 type SentryBreadcrumbLevel = "info" | "warning" | "error";
 
+export const SENTRY_DATA_COLLECTION: DataCollection = {
+	userInfo: false,
+	cookies: false,
+	httpHeaders: { request: false, response: false },
+	httpBodies: [],
+	urlQueryParams: false,
+	databaseQueryData: false,
+	stackFrameVariables: false,
+};
+
 export interface SentryInitOptions {
 	dsn: string;
+	environment: string;
+	release?: string;
 	enableLogs: boolean;
 	tracesSampleRate: number;
+	dataCollection: DataCollection;
+	maxValueLength: number;
+	normalizeDepth: number;
+	integrations(defaults: Integration[]): Integration[];
+	beforeSend(event: ErrorEvent, hint: EventHint): ErrorEvent | null;
+	beforeSendTransaction(event: TransactionEvent, hint: EventHint): TransactionEvent | null;
+	beforeSendSpan(span: SpanJSON): SpanJSON;
+	beforeBreadcrumb(breadcrumb: Breadcrumb, hint?: BreadcrumbHint): Breadcrumb | null;
 	beforeSendLog(log: Log): Log | null;
-	integrations?: Integration[];
 }
 
 export interface SentryClientLike {
@@ -66,9 +106,44 @@ export function initializeSentry(sentry: SentryClientLike, config: SentryEnv): v
 
 	sentry.init({
 		dsn: config.dsn,
+		environment: config.environment,
+		...(config.release === null ? {} : { release: config.release }),
 		enableLogs: config.enableLogs,
 		tracesSampleRate: config.tracesSampleRate,
-		beforeSendLog: (log) => (shouldSendSentryLog(log, config) ? log : null),
+		dataCollection: SENTRY_DATA_COLLECTION,
+		maxValueLength: 1024,
+		normalizeDepth: 5,
+		integrations: (defaults) => defaults.filter((integration) => integration.name !== "Console"),
+		beforeSend: guarded((event) => scrubEvent(event)),
+		beforeSendTransaction: guarded((event) => scrubEvent(event)),
+		beforeSendSpan: (span) => {
+			try {
+				return scrubSpan(span);
+			} catch {
+				try {
+					return { ...span, description: FILTERED, data: {} };
+				} catch {
+					return {
+						span_id: "filtered",
+						trace_id: "filtered",
+						start_timestamp: 0,
+						description: FILTERED,
+						data: {},
+					};
+				}
+			}
+		},
+		beforeBreadcrumb: guarded((breadcrumb) => scrubBreadcrumb(breadcrumb)),
+		beforeSendLog: (log) => {
+			try {
+				if (!shouldSendSentryLog(log, config)) {
+					return null;
+				}
+				return scrubLog(log);
+			} catch {
+				return null;
+			}
+		},
 	});
 }
 
@@ -117,9 +192,12 @@ export function createSentryRequestScope(
 	const contexts = new WeakMap<Request, Record<string, unknown>>();
 	const tag = (request: Request, extra: Record<string, unknown>) => {
 		const scope = scopes.get(request);
-		const requestContext = contexts.get(request);
-		if (scope !== undefined && requestContext !== undefined)
-			applyScopeContext(scope, "billing.request", { ...requestContext, ...extra });
+		const previous = contexts.get(request);
+		if (scope !== undefined && previous !== undefined) {
+			const merged = { ...previous, ...extra };
+			contexts.set(request, merged);
+			applyScopeContext(scope, "billing.request", merged);
+		}
 	};
 
 	return {
@@ -129,11 +207,14 @@ export function createSentryRequestScope(
 					contexts.set(request, inferRequestContext(request, service));
 					tag(request, {});
 				})
-				.onAfterHandle(({ request, set }) => {
-					tag(request, { status: set.status ?? 200 });
+				.onBeforeHandle(({ request, route }) => {
+					tag(request, routeTag(route));
 				})
-				.onError(({ request, error }) => {
-					tag(request, normalizeErrorAttributes(error));
+				.onAfterHandle(({ request, set, route }) => {
+					tag(request, { ...routeTag(route), status: set.status ?? 200 });
+				})
+				.onError(({ request, error, route }) => {
+					tag(request, { ...routeTag(route), ...normalizeErrorAttributes(error) });
 				}),
 		run(request, dispatch) {
 			const isolate = sentry.withIsolationScope ?? sentry.withScope;
@@ -152,6 +233,23 @@ export function createSentryRequestScope(
 			}
 		},
 	};
+}
+
+function routeTag(route: string | undefined): Record<string, unknown> {
+	if (route === undefined || route === "") {
+		return {};
+	}
+	return { route };
+}
+
+function guarded<T extends (...args: never[]) => unknown>(fn: T): T {
+	return ((...args: Parameters<T>) => {
+		try {
+			return (fn as unknown as (...parameters: Parameters<T>) => unknown)(...args);
+		} catch {
+			return null;
+		}
+	}) as T;
 }
 
 function recordSentryLog(
@@ -268,7 +366,7 @@ function createSentryAttributes(
 ): Record<string, unknown> {
 	return stripUndefined({
 		"billing.category": classifyLogCategory(message, context),
-		...sanitizeRecord(context),
+		...scrubRecord(context),
 		...normalizeErrorAttributes(error),
 	});
 }
@@ -295,22 +393,27 @@ function normalizeErrorAttributes(error: unknown): Record<string, unknown> {
 	if (error instanceof BillingError) {
 		return {
 			"error.name": error.name,
-			"error.message": sanitizeString(error.message),
+			"error.message": scrubString(error.message),
 			"error.code": error.code,
 			"error.status": error.status,
 		};
 	}
 
 	if (error instanceof Error) {
-		return {
+		const attributes: Record<string, unknown> = {
 			"error.name": error.name || "Error",
-			"error.message": sanitizeString(error.message),
+			"error.message": scrubString(error.message),
 		};
+		const code = (error as { code?: unknown }).code;
+		if (typeof code === "string" || typeof code === "number") {
+			attributes["error.code"] = code;
+		}
+		return attributes;
 	}
 
 	return {
 		"error.name": "Error",
-		"error.message": sanitizeString(stringifyUnknown(error)),
+		"error.message": describeThrown(error),
 	};
 }
 
@@ -319,7 +422,7 @@ function applyScopeContext(
 	contextName: string,
 	context: Record<string, unknown>,
 ): void {
-	const sanitized = sanitizeRecord(context);
+	const sanitized = scrubRecord(context);
 	for (const [key, value] of Object.entries(createTags(sanitized))) {
 		callSafely(() => scope.setTag(key, value));
 	}
@@ -346,7 +449,7 @@ function stringTag(value: unknown): string | undefined {
 function inferRequestContext(request: Request, service: string): Record<string, unknown> {
 	const url = new URL(request.url);
 	const path = url.pathname;
-	const route = parameterizeBillingPath(path);
+	const route = maskPath(path);
 	const projectKey = inferProjectKey(path);
 	const provider = inferProvider(path);
 
@@ -357,25 +460,6 @@ function inferRequestContext(request: Request, service: string): Record<string, 
 		projectKey,
 		provider,
 	});
-}
-
-function parameterizeBillingPath(path: string): string {
-	const projectWebhook = path.match(/^\/v1\/projects\/[^/]+\/webhooks\/(apple|google|stripe)$/);
-	if (projectWebhook !== null) {
-		return `/v1/projects/:projectKey/webhooks/${projectWebhook[1]}`;
-	}
-
-	if (/^\/v1\/webhooks\/(apple|google|stripe)$/.test(path)) {
-		return path;
-	}
-
-	if (path === "/v1/purchases/verify") {
-		return path;
-	}
-
-	return path
-		.replace(/^\/v1\/billing-accounts\/[^/]+/, "/v1/billing-accounts/:billingAccountId")
-		.replace(/^\/v1\/admin\/customers\/[^/]+/, "/v1/admin/customers/:customerId");
 }
 
 function inferProjectKey(path: string): string | undefined {
@@ -395,104 +479,6 @@ function breadcrumbCategory(attributes: Record<string, unknown>): string {
 
 function addBreadcrumbSafely(sentry: SentryClientLike, breadcrumb: SentryBreadcrumb): void {
 	callSafely(() => sentry.addBreadcrumb?.(breadcrumb));
-}
-
-function sanitizeRecord(record?: Record<string, unknown>): Record<string, unknown> {
-	if (record === undefined) {
-		return {};
-	}
-	const seen = new WeakSet<object>();
-	const sanitized: Record<string, unknown> = {};
-
-	for (const [key, value] of Object.entries(record)) {
-		if (isSensitiveKey(key)) {
-			continue;
-		}
-
-		sanitized[key] = sanitizeValue(value, seen);
-	}
-
-	return stripUndefined(sanitized);
-}
-
-function sanitizeValue(value: unknown, seen: WeakSet<object>): unknown {
-	if (value === undefined) {
-		return undefined;
-	}
-	if (typeof value === "bigint") {
-		return value.toString();
-	}
-	if (typeof value === "string") {
-		return sanitizeString(value);
-	}
-	if (typeof value !== "object" || value === null) {
-		return value;
-	}
-	if (seen.has(value)) {
-		return "[Circular]";
-	}
-	seen.add(value);
-
-	if (Array.isArray(value)) {
-		return value.map((entry) => sanitizeValue(entry, seen));
-	}
-
-	const output: Record<string, unknown> = {};
-	for (const [key, entry] of Object.entries(value)) {
-		if (!isSensitiveKey(key)) {
-			output[key] = sanitizeValue(entry, seen);
-		}
-	}
-	return stripUndefined(output);
-}
-
-function isSensitiveKey(key: string): boolean {
-	const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-	return (
-		normalized === "authorization" ||
-		normalized === "authorizationheader" ||
-		normalized === "signatureheader" ||
-		normalized === "stripesignature" ||
-		normalized === "signedpayload" ||
-		normalized === "purchasetoken" ||
-		normalized === "appaccounttoken" ||
-		normalized === "obfuscatedaccountid" ||
-		normalized === "rawbody" ||
-		normalized === "rawpayload" ||
-		normalized === "rawstate" ||
-		normalized === "body" ||
-		normalized === "apikey" ||
-		normalized === "billingapikey" ||
-		normalized === "billingaccountid" ||
-		normalized === "customerid" ||
-		normalized === "providercustomerid" ||
-		normalized === "externalcustomerid" ||
-		normalized === "transactionid" ||
-		normalized === "originaltransactionid" ||
-		normalized === "externaleventid" ||
-		normalized === "eventid" ||
-		normalized === "storeeventid" ||
-		normalized === "sessionid" ||
-		normalized === "paymentintentid" ||
-		normalized === "subscriptionid" ||
-		normalized === "idempotencykey" ||
-		normalized.includes("password") ||
-		normalized.includes("secret") ||
-		normalized.includes("credential")
-	);
-}
-
-function sanitizeString(value: string): string {
-	return value.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [Filtered]");
-}
-
-function stripUndefined<T extends Record<string, unknown>>(record: T): T {
-	for (const key of Object.keys(record)) {
-		if (record[key] === undefined) {
-			delete record[key];
-		}
-	}
-	return record;
 }
 
 function callSafely(callback: () => void): void {

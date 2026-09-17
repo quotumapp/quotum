@@ -121,6 +121,8 @@ plaintext is never retained, so every integration needs a replacement:
   ingress restrictions if this endpoint should be private in a deployment.
 - `GET /v1/admin/metrics` returns the registry through the project-authenticated admin boundary
   and requires `X-Billing-Operator-Key`. Health routes are public.
+- Error reporting is optional via `SENTRY_DSN`, covers staff and merchant 5xx plus worker
+  failures, payloads scrubbed; see [Sentry (optional)](deployment.md#sentry-optional).
 
 Both metrics endpoints return Prometheus text (`text/plain; version=0.0.4`) containing process
 metrics by default, even before billing activity. Existing `billing_*` counters and metering

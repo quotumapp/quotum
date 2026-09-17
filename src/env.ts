@@ -17,6 +17,8 @@ export interface BillingRateLimitEnv {
 
 export interface SentryEnv {
 	dsn: string | null;
+	environment: string;
+	release: string | null;
 	enableLogs: boolean;
 	tracesSampleRate: number;
 	logLevel: "info" | "warn" | "error";
@@ -130,6 +132,21 @@ const envSchema = z.object({
 	).default("6000"),
 	BILLING_TRUST_PROXY_HEADERS: z.enum(["true", "false"]).default("false"),
 	SENTRY_DSN: z.string().optional(),
+	SENTRY_ENVIRONMENT: z.preprocess(
+		(value) => {
+			if (typeof value !== "string") {
+				return undefined;
+			}
+			const trimmed = value.trim();
+			return trimmed === "" ? undefined : trimmed;
+		},
+		z
+			.string()
+			.regex(/^[^\s/]{1,64}$/)
+			.optional(),
+	),
+	SENTRY_RELEASE: optionalString(),
+	BUILD_VERSION: optionalString(),
 	SENTRY_ENABLE_LOGS: z.enum(["true", "false"]).default("true"),
 	SENTRY_TRACES_SAMPLE_RATE: sampleRateString("SENTRY_TRACES_SAMPLE_RATE").default("0.01"),
 	SENTRY_LOG_LEVEL: z.enum(["info", "warn", "error"]).default("warn"),
@@ -320,6 +337,9 @@ function parseSentryEnv(
 
 	return {
 		dsn,
+		environment: parsed.SENTRY_ENVIRONMENT ?? parsed.BILLING_ENV,
+		release:
+			parsed.SENTRY_RELEASE ?? (parsed.BUILD_VERSION ? `quotum-api@${parsed.BUILD_VERSION}` : null),
 		enableLogs: parsed.SENTRY_ENABLE_LOGS !== "false",
 		tracesSampleRate: Number.parseFloat(parsed.SENTRY_TRACES_SAMPLE_RATE),
 		logLevel: parsed.SENTRY_LOG_LEVEL,

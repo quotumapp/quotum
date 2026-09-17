@@ -168,13 +168,33 @@ Defaults in parentheses.
   (`6000`), `BILLING_ADMIN_RATE_LIMIT_PER_WINDOW` (`60`).
 - `BILLING_LOG_LEVEL` (`info`): `trace`, `debug`, `info`, `warn`, `error`, `fatal`, or `silent`.
   Controls local Pino diagnostics independently of Sentry; invalid or blank values are rejected.
-- `SENTRY_DSN` (unset disables Sentry), `SENTRY_ENABLE_LOGS` (`true`),
-  `SENTRY_TRACES_SAMPLE_RATE` (`0.01`), `SENTRY_LOG_LEVEL` (`warn`),
-  `SENTRY_CAPTURE_EXPECTED_ERRORS` (`false`).
+- Sentry error reporting is optional; see [Sentry (optional)](#sentry-optional).
 
 Removed and rejected when supplied: `BILLING_PROJECT_RUNTIME_JSON`, `BILLING_PROJECTS_JSON`, and
 `BILLING_PROJECTION_ADAPTER`. Provider and projection settings live in encrypted, versioned
 connections owned by the merchant platform.
+
+### Sentry (optional)
+
+Leave `SENTRY_DSN` unset or blank to disable Sentry. When set, the service reports staff and
+merchant 5xx plus worker failures; without a DSN the SDK is never initialized.
+
+Variables (`SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_ENABLE_LOGS`,
+`SENTRY_TRACES_SAMPLE_RATE` with `0` disabling tracing, `SENTRY_LOG_LEVEL`,
+`SENTRY_CAPTURE_EXPECTED_ERRORS`):
+
+- `SENTRY_ENVIRONMENT` defaults to `BILLING_ENV`.
+- `SENTRY_RELEASE` defaults to `quotum-api@$BUILD_VERSION` when `BUILD_VERSION` is set
+  (the image sets it), else unset.
+
+What is sent: scrubbed messages and stacks, route patterns, method, status, error codes,
+project key, provider, worker names, hostname, runtime/OS/module versions, sampled
+transactions.
+
+Never sent: headers, cookies, query strings, bodies, client IPs, raw paths with identifiers,
+billing/customer/transaction ids, provider tokens and keys, emails, local variables, SQL
+parameters, console output. Opaque values of 32+ characters and emails inside messages are
+replaced; the local log line is untouched.
 
 ## Encryption-key rotation
 

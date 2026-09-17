@@ -22,7 +22,7 @@ const unavailable = async (): Promise<never> => {
 };
 
 /** Only the service-principal lookup is answered; any other query fails the test loudly. */
-function merchantApp() {
+function merchantApp(options: Partial<Parameters<typeof createMerchantApp>[0]> = {}) {
 	const sql = Object.assign(
 		(strings: TemplateStringsArray) =>
 			strings.join("?").includes("platform_service_principals")
@@ -32,7 +32,21 @@ function merchantApp() {
 	);
 	const store = new MerchantStore(sql as never, config);
 	const mailer = { send: unavailable };
-	return createMerchantApp({ store, mailer, auth: createMerchantAuth(store, mailer, undefined) });
+	return createMerchantApp({
+		store,
+		mailer,
+		auth: createMerchantAuth(store, mailer, undefined),
+		...options,
+	});
+}
+
+function getRequest(path: string, headers: Record<string, string> = {}) {
+	return new Request(`http://localhost${path}`, {
+		headers: {
+			"x-quotum-service-token": "service-token",
+			...headers,
+		},
+	});
 }
 
 const csrf = "c".repeat(43);
@@ -98,5 +112,98 @@ describe("merchant request bodies", () => {
 			expect(response.status, path).toBe(401);
 			expect(await response.json(), path).toMatchObject({ error: { code: "SESSION_REQUIRED" } });
 		}
+	});
+});
+
+describe("merchant observability hooks", () => {
+	it("runs request observability middleware for merchant routes", async () => {
+		let middlewareRan = false;
+		const app = merchantApp({
+			requestObservabilityMiddleware: (inner) =>
+				inner.onRequest(() => {
+					middlewareRan = true;
+				}),
+		});
+
+		const response = await app.handle(getRequest("/api/platform/config"));
+
+		expect(response.status).toBe(200);
+		expect(middlewareRan).toBe(true);
+	});
+
+	it("reports merchant 5xx with route pattern and request id", async () => {
+		const reports: Array<{ error: unknown; report: Record<string, unknown> }> = [];
+		const app = merchantApp({
+			onUnexpectedError: (error, report) => {
+				reports.push({ error, report: report as unknown as Record<string, unknown> });
+			},
+		});
+
+		const response = await app.handle(
+			getRequest("/api/platform/session", {
+				cookie: "__Host-quotum_session=session-token-for-503",
+			}),
+		);
+		const body = (await response.json()) as {
+			error: { code: string; requestId?: string };
+		};
+
+		expect(response.status).toBe(503);
+		expect(body.error.code).toBe("SERVICE_UNAVAILABLE");
+		expect(reports).toHaveLength(1);
+		const report = reports[0]?.report as {
+			route: string;
+			status: number;
+			code: string;
+			requestId: string | undefined;
+		};
+		expect(report.route).toBe("/api/platform/session");
+		expect(report.status).toBe(503);
+		expect(report.code).toBe("SERVICE_UNAVAILABLE");
+		expect(report.requestId).toBe(body.error.requestId);
+		expect(response.headers.get("x-request-id")).toBe(body.error.requestId ?? null);
+	});
+
+	it("does not report 401 404 or 415", async () => {
+		const reports: unknown[] = [];
+		const app = merchantApp({
+			onUnexpectedError: (error, report) => {
+				reports.push({ error, report });
+			},
+		});
+
+		const unauthorized = await app.handle(new Request("http://localhost/api/platform/session"));
+		expect(unauthorized.status).toBe(401);
+
+		const notFound = await app.handle(getRequest("/api/platform/does-not-exist"));
+		expect(notFound.status).toBe(404);
+
+		const unsupported = await app.handle(
+			mutation("/api/platform/signup-intent", {
+				headers: { "content-type": "text/plain" },
+				body: "{}",
+			}),
+		);
+		expect(unsupported.status).toBe(415);
+
+		expect(reports).toEqual([]);
+	});
+
+	it("keeps the 503 envelope when the reporter throws", async () => {
+		const app = merchantApp({
+			onUnexpectedError: () => {
+				throw new Error("reporter boom");
+			},
+		});
+
+		const response = await app.handle(
+			getRequest("/api/platform/session", {
+				cookie: "__Host-quotum_session=session-token-for-503",
+			}),
+		);
+		const body = (await response.json()) as { error: { code: string } };
+
+		expect(response.status).toBe(503);
+		expect(body.error.code).toBe("SERVICE_UNAVAILABLE");
 	});
 });
