@@ -18,6 +18,7 @@ export async function upsertSubscription(
 		storeProductId: string;
 		provider: BillingProvider;
 		channel: BillingChannel;
+		providerAccountId?: string | null;
 		externalSubscriptionId: string;
 		externalProductId: string;
 		externalPriceId: string | null;
@@ -53,6 +54,7 @@ export async function upsertSubscription(
 			store_product_id,
 			provider,
 			channel,
+			provider_account_id,
 			external_subscription_id,
 			external_product_id,
 			external_price_id,
@@ -76,6 +78,7 @@ export async function upsertSubscription(
 			${input.storeProductId},
 			${input.provider},
 			${input.channel},
+			${input.providerAccountId ?? null},
 			${input.externalSubscriptionId},
 			${input.externalProductId},
 			${input.externalPriceId},
@@ -93,6 +96,10 @@ export async function upsertSubscription(
 			${jsonb(input.rawState)}
 		)
 		ON CONFLICT (project_id, provider, external_subscription_id) DO UPDATE SET
+			provider_account_id = COALESCE(
+				subscriptions.provider_account_id,
+				EXCLUDED.provider_account_id
+			),
 			product_id = CASE
 				WHEN ${input.updateProduct} AND ${updateIsMonotonic} THEN EXCLUDED.product_id
 				ELSE subscriptions.product_id

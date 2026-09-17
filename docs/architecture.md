@@ -39,9 +39,15 @@ The policy is deny-by-default:
 - `src/platform/`: organizations, identity, onboarding, connections, and audit.
 - `src/providers/`, `src/workers/`, `src/projections/`: external providers and durable delivery.
   Each provider declares its operation support in `src/providers/<provider>/capabilities.ts`,
-  collected by `src/providers/capabilities.ts`. The provider registry (`src/providers/registry.ts`)
-  resolves provider services for request handlers and builds the `ProviderAdapter` wrappers
-  defined in `src/providers/contract.ts`, checked against each declaration.
+  collected by `src/providers/capabilities.ts`. The runtime builds one provider registry
+  (`src/providers/registry.ts`) and shares it between request handlers, merchant billing and the
+  workers. The registry resolves provider services and builds the `ProviderAdapter` wrappers
+  defined in `src/providers/contract.ts`, checked against each declaration. Subscription changes,
+  usage invoice periods and auto top-up jobs store their provider and provider account, copied
+  from the subscription or provider customer they bill, never from the live connection.
+  `src/composition/worker-providers.ts` selects each job's adapter by that stored provider and
+  resolves connections for recovery, so queued work still drains after a connection stops
+  accepting new work. Stripe App events are handled outside the registry.
 - `migrations/`: ordered schema authority.
 - `tests/`: unit, integration, and end-to-end coverage mirroring the source layout.
 - `contracts/v1/`: generated OpenAPI contract, error inventory and provider capability declarations.

@@ -775,17 +775,19 @@ localDescribe("promotion Stripe provisioning", () => {
 					),
 			},
 			projectContextResolver: integrationProjectContextResolver(),
-			stripeForProject: () => ({
-				syncPromotionStripeObject: async (job) => {
-					if (failNext) {
-						failNext = false;
-						return {
-							kind: "failed",
-							error: "No such product: prod_stripe_premium",
-							terminal: true,
-						};
-					}
-					return await syncPromotionStripeObject(stripe, job);
+			adapterForJob: () => ({
+				promotions: {
+					syncObject: async (job) => {
+						if (failNext) {
+							failNext = false;
+							return {
+								kind: "failed",
+								error: "No such product: prod_stripe_premium",
+								terminal: true,
+							};
+						}
+						return await syncPromotionStripeObject(stripe, job);
+					},
 				},
 			}),
 			logger: { error() {} },
@@ -1180,8 +1182,10 @@ localDescribe("promotion Checkout", () => {
 					),
 			},
 			projectContextResolver: integrationProjectContextResolver(),
-			stripeForProject: () => ({
-				syncPromotionStripeObject: (job) => syncPromotionStripeObject(fixture.stripe.client, job),
+			adapterForJob: () => ({
+				promotions: {
+					syncObject: (job) => syncPromotionStripeObject(fixture.stripe.client, job),
+				},
 			}),
 			logger: { error() {} },
 		});

@@ -70,6 +70,7 @@ const reconciliationSubscription = (
 	project_key: "voysee",
 	provider: "google",
 	channel: "android",
+	provider_account_id: null,
 	external_subscription_id: "purchase_token_1",
 	external_product_id: "premium_monthly",
 	external_price_id: "monthly-base",

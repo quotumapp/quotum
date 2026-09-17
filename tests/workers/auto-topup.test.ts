@@ -1,12 +1,15 @@
 import { describe, expect, it } from "bun:test";
 import type { AutoTopupJob } from "../../src/billing/auto-topup";
-import { AutoTopupWorker } from "../../src/workers/auto-topup";
+import type { OperationTiming } from "../../src/providers/contract";
+import { AutoTopupWorker, type AutoTopupWorkerAdapter } from "../../src/workers/auto-topup";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const job: AutoTopupJob = {
 	jobId: "job-1",
 	projectId: "project-1",
 	projectKey: "voysee",
+	provider: "stripe",
+	providerAccountId: null,
 	policyId: "7",
 	customerId: "customer-1",
 	billingAccountId: "account-1",
@@ -19,6 +22,10 @@ const job: AutoTopupJob = {
 	attempts: 1,
 	consecutiveFailures: 0,
 	maxConsecutiveFailures: 3,
+};
+const timing: OperationTiming = {
+	payment: { kind: "collected" },
+	entitlement: { kind: "unchanged" },
 };
 const workerProjectResolver = projectContextResolver({
 	contexts: [projectInstanceContext("voysee", { projectInstanceId: job.projectId })],
@@ -43,16 +50,19 @@ describe("AutoTopupWorker", () => {
 					throw new Error("unexpected failure");
 				},
 			},
-			providerForProject() {
+			adapterForJob() {
 				return {
-					async createAutoTopupCharge() {
-						return {
-							status: "succeeded" as const,
-							externalInvoiceId: "in_1",
-							externalPaymentId: "pi_1",
-							amountPaidMinor: 550,
-							currency: "USD",
-						};
+					topups: {
+						async chargeAutomatic() {
+							return {
+								status: "succeeded" as const,
+								externalInvoiceId: "in_1",
+								externalPaymentId: "pi_1",
+								amountPaidMinor: 550,
+								currency: "USD",
+								timing,
+							};
+						},
 					},
 				};
 			},
@@ -101,15 +111,21 @@ describe("AutoTopupWorker", () => {
 					return { retryScheduled: false, circuitOpened: true };
 				},
 			},
-			providerForProject() {
+			adapterForJob() {
 				return {
-					async createAutoTopupCharge() {
-						return {
-							status: "action_required" as const,
-							externalInvoiceId: "in_1",
-							externalPaymentId: "pi_1",
-							reason: "authentication required",
-						};
+					topups: {
+						async chargeAutomatic() {
+							return {
+								status: "action_required" as const,
+								externalInvoiceId: "in_1",
+								externalPaymentId: "pi_1",
+								reason: "authentication required",
+								timing: {
+									payment: { kind: "pending_customer" as const },
+									entitlement: { kind: "unchanged" as const },
+								},
+							};
+						},
 					},
 				};
 			},
@@ -152,10 +168,12 @@ describe("AutoTopupWorker", () => {
 					return { retryScheduled: input.nextAttemptAt !== null, circuitOpened: false };
 				},
 			},
-			providerForProject() {
+			adapterForJob() {
 				return {
-					async createAutoTopupCharge() {
-						throw new Error("network unavailable");
+					topups: {
+						async chargeAutomatic() {
+							throw new Error("network unavailable");
+						},
 					},
 				};
 			},
@@ -182,15 +200,49 @@ describe("AutoTopupWorker", () => {
 					return { retryScheduled: false, circuitOpened: true };
 				},
 			},
-			providerForProject() {
+			adapterForJob() {
 				return {
-					async createAutoTopupCharge() {
-						throw new Error("network unavailable");
+					topups: {
+						async chargeAutomatic() {
+							throw new Error("network unavailable");
+						},
 					},
 				};
 			},
 			logger: { error() {} },
 		});
 		expect((await finalWorker.runOnce()).circuitOpened).toBe(1);
+	});
+
+	it("selects the adapter by the job's provider and retries when it cannot charge", async () => {
+		const selected: string[] = [];
+		const failures: unknown[] = [];
+		const worker = new AutoTopupWorker({
+			projectContextResolver: workerProjectResolver,
+			workerId: "worker-1",
+			repository: {
+				async claimAutoTopupJobs() {
+					return [{ ...job, provider: "google", providerAccountId: "play-account" }];
+				},
+				async markAutoTopupSucceeded() {
+					throw new Error("unexpected success");
+				},
+				async markAutoTopupFailed(_projectId, _jobId, _workerId, input) {
+					failures.push({ kind: input.kind, error: input.error });
+					return { retryScheduled: true, circuitOpened: false };
+				},
+			},
+			adapterForJob(project, provider): AutoTopupWorkerAdapter {
+				selected.push(`${project.projectInstanceKey}:${provider}`);
+				return {};
+			},
+			logger: { error() {} },
+		});
+
+		expect(await worker.runOnce()).toMatchObject({ claimed: 1, failed: 1, retryScheduled: 1 });
+		expect(selected).toEqual(["voysee:google"]);
+		expect(failures).toEqual([
+			{ kind: "retryable", error: "google provider does not serve topup.automatic" },
+		]);
 	});
 });

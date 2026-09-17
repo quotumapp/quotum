@@ -1,10 +1,12 @@
 import type { PromotionStripeSyncJob, PromotionStripeSyncOutcome } from "../billing/promotions";
+import type { BillingProvider } from "../billing/types";
 import {
 	type BillingMetrics,
 	createNoopBillingMetrics,
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
+import type { ProviderAdapter } from "../providers/contract";
 import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
 import { resolveClaimedProjectInstance } from "./project-context";
 
@@ -32,6 +34,9 @@ export interface PromotionMaintenanceRepository {
 export interface PromotionStripeProvider {
 	syncPromotionStripeObject(job: PromotionStripeSyncJob): Promise<PromotionStripeSyncOutcome>;
 }
+
+/** The adapter group a promotion object sync needs from its own provider. */
+export type PromotionMaintenanceAdapter = Pick<ProviderAdapter, "promotions">;
 
 export interface PromotionMaintenanceRunResult {
 	reservationsReleased: number;
@@ -61,9 +66,11 @@ export class PromotionMaintenanceWorker {
 			maxAttempts?: number;
 			repository: PromotionMaintenanceRepository;
 			projectContextResolver: ProjectInstanceContextResolver;
-			stripeForProject(
+			/** Null when the project has no connection for the provider; the job is deferred. */
+			adapterForJob(
 				project: ProjectInstanceContext,
-			): PromotionStripeProvider | null | Promise<PromotionStripeProvider | null>;
+				provider: BillingProvider,
+			): PromotionMaintenanceAdapter | null | Promise<PromotionMaintenanceAdapter | null>;
 			logger: { error(message: string, error: unknown, context?: Record<string, unknown>): void };
 			metrics?: BillingMetrics;
 		},
@@ -110,8 +117,8 @@ export class PromotionMaintenanceWorker {
 					projectInstanceKey: job.projectKey,
 				},
 			);
-			const stripe = await this.dependencies.stripeForProject(project);
-			if (stripe === null) {
+			const adapter = await this.dependencies.adapterForJob(project, job.provider);
+			if (adapter === null) {
 				await repository.markStripeObjectOutcome(job.projectId, job.objectId, workerId, {
 					kind: "deferred",
 					error: "Stripe is not configured for this environment",
@@ -119,7 +126,10 @@ export class PromotionMaintenanceWorker {
 				});
 				return "deferred";
 			}
-			const outcome = await stripe.syncPromotionStripeObject(job);
+			if (adapter.promotions === undefined) {
+				throw new Error(`${job.provider} provider does not serve promotion.hosted_code`);
+			}
+			const outcome = await adapter.promotions.syncObject(job);
 			if (outcome.kind === "ready" || outcome.kind === "retired") {
 				await repository.markStripeObjectOutcome(job.projectId, job.objectId, workerId, outcome);
 				return outcome.kind;

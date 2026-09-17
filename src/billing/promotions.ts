@@ -155,6 +155,7 @@ export interface PromotionProviderObjectRecord {
 export type PromotionStripeSyncJob = {
 	projectId: string;
 	projectKey: string;
+	provider: BillingProvider;
 	objectId: string;
 	promotionKey: string;
 	promotionName: string;

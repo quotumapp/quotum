@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
-	createProjectProviderServiceResolver,
+	projectProviderServiceResolver,
 	requireAppleStoreKitService,
 	requireGooglePlayBillingService,
 	requireStripeBillingService,
@@ -17,6 +17,8 @@ import type {
 	RuntimeConnectionKind,
 	RuntimeConnectionResolver,
 } from "../../src/projects/connections";
+import { appleRegistryEntry } from "../../src/providers/apple/adapter";
+import { appleCapabilities } from "../../src/providers/apple/capabilities";
 import { AppleStoreKitService } from "../../src/providers/apple/service";
 import { admittedProviders } from "../../src/providers/capabilities";
 import {
@@ -37,6 +39,7 @@ import {
 	type ProviderRegistryDependencies,
 } from "../../src/providers/registry";
 import { stripeRegistryEntry, wrapStripeService } from "../../src/providers/stripe/adapter";
+import { stripeCapabilities } from "../../src/providers/stripe/capabilities";
 import { StripeBillingService } from "../../src/providers/stripe/service";
 import { FakeStripeBillingClient } from "../../src/providers/stripe/testing/fake-client";
 import {
@@ -272,6 +275,82 @@ describe("provider registry", () => {
 				entries: [stripeRegistryEntry, stripeRegistryEntry],
 			}),
 		).toThrow("Provider stripe is registered twice");
+	});
+
+	it("labels admitted providers with their entry names", () => {
+		const registry = realRegistry();
+
+		expect(billingProviders.map((provider) => registry.label(provider))).toEqual([
+			"Apple StoreKit",
+			"Google Play",
+			"Stripe",
+		]);
+		expect(() => registry.label("paddle" as unknown as BillingProvider)).toThrow(
+			"Provider paddle is not admitted by the runtime",
+		);
+	});
+
+	it("refuses reconcile-required declarations that implement money-moving worker writes", () => {
+		const { getRepository } = fakeRepository();
+		const withAutomaticTopups = {
+			...appleRegistryEntry,
+			declaration: {
+				...appleCapabilities,
+				operations: {
+					...appleCapabilities.operations,
+					"topup.automatic": stripeCapabilities.operations["topup.automatic"],
+				},
+			},
+		} as unknown as AnyProviderRegistryEntry;
+		const reconcilingStripe = {
+			...stripeRegistryEntry,
+			declaration: {
+				...stripeCapabilities,
+				writeSemantics: { clientIdempotencyKeys: false, uncertainWrite: "reconcile_required" },
+			},
+		} as unknown as AnyProviderRegistryEntry;
+
+		expect(appleCapabilities.writeSemantics.uncertainWrite).toBe("reconcile_required");
+		expect(() => realRegistry()).not.toThrow();
+		expect(() => createProviderRegistry({ getRepository, entries: [withAutomaticTopups] })).toThrow(
+			new Error(
+				"Provider apple requires reconciliation of uncertain writes and cannot implement topup.automatic until an uncertain-write ledger exists",
+			),
+		);
+		expect(() => createProviderRegistry({ getRepository, entries: [reconcilingStripe] })).toThrow(
+			new Error(
+				"Provider stripe requires reconciliation of uncertain writes and cannot implement subscription.change.apply, subscription.change.period_end, settlement.collect_finalized_charge, adjustment.issue, topup.automatic until an uncertain-write ledger exists",
+			),
+		);
+	});
+
+	it("reads adapter account identity from the connection before the connected account", async () => {
+		const { connectedAccountId: _, ...apiKeyStripe } = stripeConfig;
+		const identities = async (configured: typeof configs) => {
+			const registry = realRegistry({ connections: recordingConnections(configured).connections });
+			const adapters = await Promise.all(
+				billingProviders.map((provider) => registry.adapter(project, provider)),
+			);
+			return adapters.map((adapter) => adapter?.accountIdentity);
+		};
+
+		expect(
+			await identities({
+				apple: { ...appleConfig, accountIdentity: "com.voysee.app" },
+				google: { ...googleConfig, accountIdentity: "com.voysee.android" },
+				stripe: { ...stripeConfig, accountIdentity: "acct_identity" },
+			}),
+		).toEqual(["com.voysee.app", "com.voysee.android", "acct_identity"]);
+		expect(
+			await identities({ ...configs, stripe: { ...stripeConfig, accountIdentity: null } }),
+		).toEqual([null, null, "acct_voysee"]);
+		expect(
+			await identities({
+				...configs,
+				stripe: { ...apiKeyStripe, accountIdentity: "acct_api_key" },
+			}),
+		).toEqual([null, null, "acct_api_key"]);
+		expect(await identities({ ...configs, stripe: apiKeyStripe })).toEqual([null, null, null]);
 	});
 
 	it("builds real services from connections with the requested purpose", async () => {
@@ -553,16 +632,13 @@ describe("provider registry", () => {
 
 	it("keeps the request-path resolver a facade over the registry", async () => {
 		const { connections, resolved } = recordingConnections();
-		const resolver = createProjectProviderServiceResolver({
-			connections,
-			getRepository: fakeRepository().getRepository,
-			projectProviderServices: { wiseley: { stripeBillingService: stripeFake } },
-			legacyServices: {
-				appleStoreKitService: undefined,
-				googlePlayBillingService: undefined,
-				stripeBillingService: undefined,
-			},
-		});
+		const resolver = projectProviderServiceResolver(
+			createProviderRegistry({
+				connections,
+				getRepository: fakeRepository().getRepository,
+				overrides: { wiseley: { stripeBillingService: stripeFake } },
+			}),
+		);
 
 		expect(await resolver.stripeBillingService(otherProject)).toBe(stripeFake);
 		expect(await resolver.appleStoreKitService(project)).toBeInstanceOf(AppleStoreKitService);

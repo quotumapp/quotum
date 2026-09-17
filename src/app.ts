@@ -92,6 +92,7 @@ export function createApp({
 	googlePlayBillingService,
 	stripeBillingService,
 	projectProviderServices,
+	providerRegistry: sharedProviderRegistry,
 	adminBillingReader,
 	adminOperations,
 	logger,
@@ -100,6 +101,15 @@ export function createApp({
 	requestObservabilityMiddleware,
 	projectContextResolver,
 }: CreateAppDependencies) {
+	if (
+		sharedProviderRegistry !== undefined &&
+		(appleStoreKitService !== undefined ||
+			googlePlayBillingService !== undefined ||
+			stripeBillingService !== undefined ||
+			projectProviderServices !== undefined)
+	) {
+		throw new Error("createApp accepts either a provider registry or provider services, not both");
+	}
 	const app = new Elysia(HTTP_APP_CONFIG);
 	const billingLogger = logger ?? createNoopBillingLogger();
 	const billingMetrics = metrics ?? createInMemoryBillingMetrics();
@@ -127,16 +137,18 @@ export function createApp({
 			getRepository().publishCatalog(...args),
 	};
 	const controlsService = controlsEnterpriseService ?? getRepository().controlsEnterprise;
-	const providerRegistry = createProviderRegistry({
-		connections,
-		getRepository,
-		overrides: projectProviderServices,
-		legacyServices: {
-			appleStoreKitService,
-			googlePlayBillingService,
-			stripeBillingService,
-		},
-	});
+	const providerRegistry =
+		sharedProviderRegistry ??
+		createProviderRegistry({
+			connections,
+			getRepository,
+			overrides: projectProviderServices,
+			legacyServices: {
+				appleStoreKitService,
+				googlePlayBillingService,
+				stripeBillingService,
+			},
+		});
 	const providerServices = projectProviderServiceResolver(providerRegistry);
 	let adminRepository: AdminBillingRepository | null = null;
 	const getAdminBillingReader = (): AdminBillingReader | null => {

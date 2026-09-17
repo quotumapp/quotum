@@ -5,12 +5,14 @@ import type {
 	AutoTopupJob,
 	AutoTopupRunResult,
 } from "../billing/auto-topup";
+import type { BillingProvider } from "../billing/types";
 import {
 	type BillingMetrics,
 	createNoopBillingMetrics,
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
+import type { ProviderAdapter } from "../providers/contract";
 import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
 import { resolveClaimedProjectInstance } from "./project-context";
 
@@ -40,6 +42,9 @@ export interface AutoTopupWorkerProvider {
 	createAutoTopupCharge(job: AutoTopupJob): Promise<AutoTopupChargeResult>;
 }
 
+/** The adapter group an automatic top-up job needs from its own provider. */
+export type AutoTopupWorkerAdapter = Pick<ProviderAdapter, "topups">;
+
 export interface AutoTopupWorkerLogger {
 	error(message: string, error: unknown, context?: Record<string, unknown>): void;
 }
@@ -52,9 +57,10 @@ export class AutoTopupWorker {
 			staleAfterMs?: number;
 			repository: AutoTopupWorkerRepository;
 			projectContextResolver: ProjectInstanceContextResolver;
-			providerForProject(
+			adapterForJob(
 				project: ProjectInstanceContext,
-			): AutoTopupWorkerProvider | Promise<AutoTopupWorkerProvider>;
+				provider: BillingProvider,
+			): AutoTopupWorkerAdapter | Promise<AutoTopupWorkerAdapter>;
 			logger: AutoTopupWorkerLogger;
 			metrics?: BillingMetrics;
 		},
@@ -84,9 +90,11 @@ export class AutoTopupWorker {
 						projectInstanceKey: job.projectKey,
 					},
 				);
-				const charge = await (
-					await this.dependencies.providerForProject(project)
-				).createAutoTopupCharge(job);
+				const { topups } = await this.dependencies.adapterForJob(project, job.provider);
+				if (topups === undefined) {
+					throw new Error(`${job.provider} provider does not serve topup.automatic`);
+				}
+				const { timing: _timing, ...charge } = await topups.chargeAutomatic(job);
 				if (charge.status === "succeeded") {
 					const completion = await this.dependencies.repository.markAutoTopupSucceeded(
 						job.projectId,

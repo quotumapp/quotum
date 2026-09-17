@@ -378,6 +378,7 @@ export class StripeBillingRepository extends RepositoryModule {
 						plan_version_id,
 						requested_quantities,
 						provider,
+						provider_account_id,
 						idempotency_key,
 						request_hash,
 						status
@@ -389,6 +390,7 @@ export class StripeBillingRepository extends RepositoryModule {
 						${planVersionId}::bigint,
 						${jsonb(input.requestedQuantities ?? {})},
 						'stripe',
+						${input.providerAccountId ?? null},
 						${input.idempotencyKey},
 						${input.requestHash},
 						'creating'
@@ -733,9 +735,16 @@ export class StripeBillingRepository extends RepositoryModule {
 					project_id,
 					customer_id,
 					provider,
+					provider_account_id,
 					external_customer_id
 				)
-				VALUES (${projectId}, ${customer.id}, 'stripe', ${input.stripeCustomerId})
+				VALUES (
+					${projectId},
+					${customer.id},
+					'stripe',
+					${input.providerAccountId ?? null},
+					${input.stripeCustomerId}
+				)
 				ON CONFLICT DO NOTHING
 			`,
 			);
@@ -789,6 +798,7 @@ export class StripeBillingRepository extends RepositoryModule {
 					customerId: resolved.id,
 					provider: "stripe",
 					externalCustomerId: input.stripeCustomerId,
+					providerAccountId: input.providerAccountId ?? null,
 					identityError: `provider customer identity mismatch for Stripe customer id ${input.stripeCustomerId}`,
 				});
 			}
@@ -971,6 +981,7 @@ export class StripeBillingRepository extends RepositoryModule {
 					customerId: resolved.id,
 					provider: "stripe",
 					externalCustomerId: input.stripeCustomerId,
+					providerAccountId: input.providerAccountId ?? null,
 					identityError: `provider customer identity mismatch for Stripe customer id ${input.stripeCustomerId}`,
 				});
 			}
@@ -1088,6 +1099,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				storeProductId: effectiveProduct.store_product_id,
 				provider: "stripe",
 				channel: "web",
+				providerAccountId: input.providerAccountId ?? null,
 				externalSubscriptionId: input.stripeSubscriptionId,
 				externalProductId: effectiveProduct.external_product_id,
 				externalPriceId: effectiveProduct.external_price_id,

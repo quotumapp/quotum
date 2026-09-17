@@ -38,7 +38,7 @@ export const googleRegistryEntry: ProviderRegistryEntry<"google"> = {
 	overrideKey: "googlePlayBillingService",
 	label: "Google Play",
 	notConfiguredStatus: 501,
-	accountIdentity: () => null,
+	accountIdentity: (config) => config.accountIdentity ?? null,
 	build({ project, config, repository, clientFactories }) {
 		const clientConfig = buildGooglePlayConfig(config);
 		return new GooglePlayBillingService({

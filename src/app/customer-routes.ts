@@ -487,7 +487,7 @@ export function registerCustomerRoutes({
 				idempotencyKey,
 			});
 			set.status = 202;
-			return { success: true, data: change };
+			return { success: true, data: withoutJobProviderIdentity(change) };
 		},
 		{
 			parse: [LENIENT_JSON_PARSE],
@@ -614,6 +614,17 @@ export function registerCustomerRoutes({
 			}),
 		},
 	);
+}
+
+/** The queued change keeps its provider identity internally; the response never included it. */
+function withoutJobProviderIdentity(change: unknown): unknown {
+	if (typeof change !== "object" || change === null) return change;
+	const {
+		provider: _provider,
+		providerAccountId: _providerAccountId,
+		...data
+	} = change as Record<string, unknown>;
+	return data;
 }
 
 function requireRecurringCheckout(

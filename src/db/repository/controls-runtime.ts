@@ -692,6 +692,7 @@ export async function recordUsageAlertDelta(
 export interface AutoTopupPolicyRow {
 	id: string | number | bigint;
 	provider: BillingProvider;
+	provider_account_id: string | null;
 	threshold_quantity: unknown;
 	cooldown_seconds: number;
 	limit_interval_seconds: number;
@@ -710,7 +711,17 @@ export function queryAutoTopupPolicy(
 	return executeOne<AutoTopupPolicyRow>(
 		executor,
 		drizzleSql`
-		SELECT policy.id, policy.provider, policy.threshold_quantity::text AS threshold_quantity,
+		SELECT policy.id, policy.provider,
+			(
+				SELECT provider_customer.provider_account_id
+				FROM provider_customers provider_customer
+				WHERE provider_customer.project_id = policy.project_id
+					AND provider_customer.customer_id = policy.customer_id
+					AND provider_customer.provider = policy.provider
+				ORDER BY provider_customer.created_at, provider_customer.id
+				LIMIT 1
+			) AS provider_account_id,
+			policy.threshold_quantity::text AS threshold_quantity,
 			policy.cooldown_seconds, policy.limit_interval_seconds, policy.max_purchases_per_interval,
 			policy.max_spend_minor, store.price_amount AS amount_minor, store.currency,
 			store.id AS store_product_id
@@ -804,12 +815,13 @@ export async function scheduleAutoTopupIfNeeded(
 		executor,
 		drizzleSql`
 		INSERT INTO auto_topup_jobs (
-			project_id, policy_id, customer_id, store_product_id, trigger_key, provider, status,
-			amount_minor, currency, last_error, completed_at
+			project_id, policy_id, customer_id, store_product_id, trigger_key, provider,
+			provider_account_id, status, amount_minor, currency, last_error, completed_at
 		) VALUES (
 			${input.projectId}, ${String(policy.id)}::bigint, ${input.customerId},
 			${policy.store_product_id}, ${input.triggerKey},
-			${policy.provider}, ${supported ? "pending" : "provider_action_required"},
+			${policy.provider}, ${policy.provider_account_id},
+			${supported ? "pending" : "provider_action_required"},
 			${amount}, ${policy.currency?.toUpperCase() ?? null},
 			${supported ? null : "Provider-native purchase action is required"},
 			${supported ? null : now.toISOString()}

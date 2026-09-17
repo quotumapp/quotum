@@ -54,6 +54,8 @@ export interface ProviderRegistry {
 	declarations(): readonly ProviderCapabilityDeclaration[];
 	/** Providers the runtime can build, in `billingProviders` order. */
 	admitted(): BillingProvider[];
+	/** The entry's human-readable name, as used in not-configured messages. */
+	label(provider: BillingProvider): string;
 	/** The provider service for the request path, or null when the project has none. */
 	service<P extends BillingProvider>(
 		project: ProjectInstanceContext,
@@ -89,6 +91,26 @@ type ResolvedService<P extends BillingProvider> =
 			accountIdentity: string | null;
 	  };
 
+/** Worker writes that move money and would need an uncertain-write ledger to recover. */
+const uncertainWriteGuardedOperations = [
+	"subscription.change.apply",
+	"subscription.change.period_end",
+	"settlement.collect_finalized_charge",
+	"adjustment.issue",
+	"topup.automatic",
+] as const satisfies readonly ProviderOperation[];
+
+function declaresImplementation(
+	declaration: ProviderCapabilityDeclaration,
+	operation: ProviderOperation,
+): boolean {
+	const support = declaration.operations[operation];
+	return (
+		(support.level === "native" || support.level === "quotum_composed") &&
+		(support.verification.status === "verified" || support.verification.status === "conditional")
+	);
+}
+
 export function createProviderRegistry({
 	connections = noRuntimeConnections,
 	getRepository,
@@ -104,6 +126,16 @@ export function createProviderRegistry({
 		}
 		if (entry.declaration.availability !== "available") {
 			throw new Error(`Provider ${entry.provider} is not available and cannot be registered`);
+		}
+		if (entry.declaration.writeSemantics.uncertainWrite === "reconcile_required") {
+			const guarded = uncertainWriteGuardedOperations.filter((operation) =>
+				declaresImplementation(entry.declaration, operation),
+			);
+			if (guarded.length > 0) {
+				throw new Error(
+					`Provider ${entry.provider} requires reconciliation of uncertain writes and cannot implement ${guarded.join(", ")} until an uncertain-write ledger exists`,
+				);
+			}
 		}
 		if (entriesByProvider.has(entry.provider)) {
 			throw new Error(`Provider ${entry.provider} is registered twice`);
@@ -175,6 +207,7 @@ export function createProviderRegistry({
 	return {
 		declarations: () => providerCapabilityDeclarations,
 		admitted: () => billingProviders.filter((provider) => entriesByProvider.has(provider)),
+		label: (provider) => entryFor(provider).label,
 		async service(project, provider, purpose = "new") {
 			return (await resolve(project, provider, purpose)).service;
 		},

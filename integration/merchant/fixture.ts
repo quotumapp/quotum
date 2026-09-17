@@ -1,5 +1,5 @@
 import { SQL } from "bun";
-import { createProjectProviderServiceResolver } from "../../src/app/provider-services";
+import { projectProviderServiceResolver } from "../../src/app/provider-services";
 import { createMerchantBillingPort } from "../../src/composition/merchant-billing";
 import { merchantAuthDatabase, merchantSql } from "../../src/composition/merchant-persistence";
 import { PostgresProjectInstanceContextResolver } from "../../src/composition/project-instance-persistence";
@@ -27,6 +27,7 @@ import type { MerchantEmail, MerchantMailer } from "../../src/platform/email";
 import { MerchantOnboarding } from "../../src/platform/onboarding";
 import { CSRF_COOKIE } from "../../src/platform/security";
 import { MerchantStore } from "../../src/platform/store";
+import { createProviderRegistry } from "../../src/providers/registry";
 import { fixtureConnections } from "../../src/testing/connection-fixtures";
 import { assertOpenApiResponse } from "../../tests/helpers/openapi";
 import { createIntegrationBillingEnv } from "../../tests/integration/helpers/local-postgres";
@@ -102,16 +103,12 @@ export function merchantFixture(
 				providerReconciliationStaleAfterMs: env.providerReconciliationStaleAfterMs,
 			}),
 			resolver,
-			providers: createProjectProviderServiceResolver({
-				connections: fixtureConnections(env.connectionFixtures),
-				getRepository: () => repository,
-				projectProviderServices: undefined,
-				legacyServices: {
-					appleStoreKitService: undefined,
-					googlePlayBillingService: undefined,
-					stripeBillingService: undefined,
-				},
-			}),
+			providers: projectProviderServiceResolver(
+				createProviderRegistry({
+					connections: fixtureConnections(env.connectionFixtures),
+					getRepository: () => repository,
+				}),
+			),
 		}),
 	);
 	const connectionRepository = new ConnectionRepository(

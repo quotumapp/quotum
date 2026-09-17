@@ -1,39 +1,11 @@
 import { NotConfiguredError } from "../billing/errors";
-import type { BillingRepository } from "../db/repository";
-import type { RuntimeConnectionResolver } from "../projects/connections";
-import { createProviderRegistry, type ProviderRegistry } from "../providers/registry";
+import type { ProviderRegistry } from "../providers/registry";
 import type {
 	AppleStoreKitServiceLike,
 	GooglePlayBillingServiceLike,
 	ProjectProviderServiceResolver,
-	ProjectProviderServiceSet,
 	StripeBillingServiceLike,
 } from "./types";
-
-export function createProjectProviderServiceResolver({
-	connections,
-	getRepository,
-	projectProviderServices,
-	legacyServices,
-}: {
-	connections?: RuntimeConnectionResolver;
-	getRepository: () => BillingRepository;
-	projectProviderServices: Partial<Record<string, Partial<ProjectProviderServiceSet>>> | undefined;
-	legacyServices: {
-		appleStoreKitService: AppleStoreKitServiceLike | null | undefined;
-		googlePlayBillingService: GooglePlayBillingServiceLike | null | undefined;
-		stripeBillingService: StripeBillingServiceLike | null | undefined;
-	};
-}): ProjectProviderServiceResolver {
-	return projectProviderServiceResolver(
-		createProviderRegistry({
-			connections,
-			getRepository,
-			overrides: projectProviderServices,
-			legacyServices,
-		}),
-	);
-}
 
 /** The request path's per-provider service lookups, answered by the provider registry. */
 export function projectProviderServiceResolver(

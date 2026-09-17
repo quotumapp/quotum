@@ -37,6 +37,7 @@ export function createRuntimeConnectionResolver(
 				);
 				if (!current) return null;
 				const value = { ...current.version.settings, ...current.secrets };
+				const accountIdentity = current.version.external_identity ?? null;
 				let parsed: unknown;
 				if (kind === "stripe") {
 					if (current.version.settings.authMethod === "oauth") {
@@ -60,12 +61,19 @@ export function createRuntimeConnectionResolver(
 							...tokens,
 							connectedAccountId: current.version.external_identity,
 							connectedAccountLivemode: project.environment === "production",
+							accountIdentity,
 						};
-					} else parsed = stripeProjectConfigSchema.parse(value);
+					} else parsed = { ...stripeProjectConfigSchema.parse(value), accountIdentity };
 				} else if (kind === "apple")
-					parsed = appleProjectConfigSchema.parse({ ...value, rootCertificatesDir: null });
+					parsed = {
+						...appleProjectConfigSchema.parse({ ...value, rootCertificatesDir: null }),
+						accountIdentity,
+					};
 				else if (kind === "google")
-					parsed = googlePlayProjectConfigSchema.parse({ ...value, serviceAccountKeyFile: null });
+					parsed = {
+						...googlePlayProjectConfigSchema.parse({ ...value, serviceAccountKeyFile: null }),
+						accountIdentity,
+					};
 				else
 					parsed = {
 						projectionUrl: value.projectionUrl,

@@ -3,12 +3,15 @@ import type {
 	SubscriptionChangeOperation,
 	UsageInvoiceJob,
 } from "../billing/recurring";
+import type { BillingProvider } from "../billing/types";
 import {
 	type BillingMetrics,
 	createNoopBillingMetrics,
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
+import type { ProviderAdapter } from "../providers/contract";
+import type { ProviderOperation } from "../shared/provider-capabilities";
 import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface RecurringBillingWorkerRepository {
@@ -50,6 +53,9 @@ export interface RecurringBillingWorkerProvider {
 	createUsageInvoice(job: UsageInvoiceJob): Promise<string>;
 }
 
+/** The adapter groups a recurring billing job needs from its own provider. */
+export type RecurringBillingWorkerAdapter = Pick<ProviderAdapter, "changes" | "settlement">;
+
 export interface RecurringBillingWorkerLogger {
 	error(message: string, error: unknown, context?: Record<string, unknown>): void;
 }
@@ -61,9 +67,10 @@ export class RecurringBillingWorker {
 			batchSize?: number;
 			repository: RecurringBillingWorkerRepository;
 			projectContextResolver: ProjectInstanceContextResolver;
-			providerForProject(
+			adapterForJob(
 				project: ProjectInstanceContext,
-			): RecurringBillingWorkerProvider | Promise<RecurringBillingWorkerProvider>;
+				provider: BillingProvider,
+			): RecurringBillingWorkerAdapter | Promise<RecurringBillingWorkerAdapter>;
 			logger: RecurringBillingWorkerLogger;
 			metrics?: BillingMetrics;
 		},
@@ -88,13 +95,23 @@ export class RecurringBillingWorker {
 						projectInstanceKey: change.projectKey,
 					},
 				);
-				const providerRequestId = await (
-					await this.dependencies.providerForProject(project)
-				).applySubscriptionChange(change);
+				const { changes } = await this.dependencies.adapterForJob(project, change.provider);
+				if (changes === undefined) {
+					throw unservedOperation(
+						change.provider,
+						change.effectiveMode === "period_end"
+							? "subscription.change.period_end"
+							: "subscription.change.apply",
+					);
+				}
+				const applied = await changes.apply(change);
+				if (applied.outcome === "uncertain") {
+					throw new UncertainProviderWriteError(applied.correlation);
+				}
 				await this.dependencies.repository.markSubscriptionChangeApplied(
 					change.projectInstanceId,
 					change.changeId,
-					providerRequestId,
+					applied.providerRequestId,
 					this.dependencies.workerId,
 				);
 				subscriptionChangesApplied += 1;
@@ -102,16 +119,18 @@ export class RecurringBillingWorker {
 			} catch (error) {
 				failed += 1;
 				this.recordJob("subscription_change", "failed");
+				// Log first: an uncertain write's correlation must survive a failing mark.
+				this.dependencies.logger.error("Subscription change failed", error, {
+					projectKey: change.projectKey,
+					changeId: change.changeId,
+					...uncertainWriteContext(error),
+				});
 				await this.dependencies.repository.markSubscriptionChangeFailed(
 					change.projectInstanceId,
 					change.changeId,
 					errorMessage(error),
 					this.dependencies.workerId,
 				);
-				this.dependencies.logger.error("Subscription change failed", error, {
-					projectKey: change.projectKey,
-					changeId: change.changeId,
-				});
 			}
 		}
 
@@ -128,14 +147,24 @@ export class RecurringBillingWorker {
 						projectInstanceKey: job.projectKey,
 					},
 				);
-				const externalInvoiceId = await (
-					await this.dependencies.providerForProject(project)
-				).createUsageInvoice(job);
+				const { settlement } = await this.dependencies.adapterForJob(project, job.provider);
+				if (settlement === undefined) {
+					throw unservedOperation(
+						job.provider,
+						job.jobKind === "adjustment"
+							? "adjustment.issue"
+							: "settlement.collect_finalized_charge",
+					);
+				}
+				const charged = await settlement.collectFinalizedCharge(job);
+				if (charged.outcome === "uncertain") {
+					throw new UncertainProviderWriteError(charged.correlation);
+				}
 				await this.dependencies.repository.markUsageInvoiceSucceeded(
 					job.projectInstanceId,
 					job.jobKind,
 					job.jobId,
-					externalInvoiceId,
+					charged.externalChargeId,
 					this.dependencies.workerId,
 				);
 				if (job.jobKind === "period") usageInvoicesCreated += 1;
@@ -144,6 +173,11 @@ export class RecurringBillingWorker {
 			} catch (error) {
 				failed += 1;
 				this.recordJob(`usage_${job.jobKind}`, "failed");
+				this.dependencies.logger.error("Stripe usage invoice failed", error, {
+					projectKey: job.projectKey,
+					periodId: job.periodId,
+					...uncertainWriteContext(error),
+				});
 				await this.dependencies.repository.markUsageInvoiceFailed(
 					job.projectInstanceId,
 					job.jobKind,
@@ -151,10 +185,6 @@ export class RecurringBillingWorker {
 					errorMessage(error),
 					this.dependencies.workerId,
 				);
-				this.dependencies.logger.error("Stripe usage invoice failed", error, {
-					projectKey: job.projectKey,
-					periodId: job.periodId,
-				});
 			}
 		}
 		return {
@@ -173,6 +203,24 @@ export class RecurringBillingWorker {
 			{ worker: "recurring_billing", operation, result },
 		);
 	}
+}
+
+/**
+ * The provider may or may not have performed the write, so the job must never be finalized. It
+ * fails through the normal retry path and the correlation is logged for reconciliation.
+ */
+class UncertainProviderWriteError extends Error {
+	constructor(readonly correlation: Record<string, string>) {
+		super("Provider write outcome is uncertain; reconciliation is required");
+	}
+}
+
+function unservedOperation(provider: BillingProvider, operation: ProviderOperation): Error {
+	return new Error(`${provider} provider does not serve ${operation}`);
+}
+
+function uncertainWriteContext(error: unknown): { correlation?: Record<string, string> } {
+	return error instanceof UncertainProviderWriteError ? { correlation: error.correlation } : {};
 }
 
 function errorMessage(error: unknown): string {

@@ -1,8 +1,7 @@
 import { createApp } from "./app";
-import { createProjectProviderServiceResolver } from "./app/provider-services";
+import { projectProviderServiceResolver } from "./app/provider-services";
 import type { AppDependencies } from "./app/types";
 import { EntitlementService } from "./billing/entitlements";
-import type { BillingProvider } from "./billing/types";
 import {
 	createConnectionRepository,
 	createRuntimeConnectionResolver,
@@ -15,6 +14,7 @@ import {
 	type QuotumRuntimeScheduler,
 	type QuotumScheduledJob,
 } from "./composition/runtime-lifecycle";
+import { createWorkerProviderSelectors } from "./composition/worker-providers";
 import { AdminBillingRepository } from "./db/admin-repository";
 import { closePool, configureDefaultConnection, initializePostgresHealth } from "./db/client";
 import { BillingRepository } from "./db/repository";
@@ -37,48 +37,18 @@ import { loadMerchantConfig } from "./platform/config";
 import { ProjectionHttpClient } from "./projections/http-client";
 import type { ApiProjectProjectionFetch } from "./projections/http-types";
 import type { RuntimeConnectionResolver } from "./projects/connections";
-import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "./projects/context";
-import { AppleStoreKitClient, buildAppleStoreKitConfig } from "./providers/apple/client";
-import { AppleStoreKitService } from "./providers/apple/service";
-import { GooglePlayDeveloperClient } from "./providers/google/client";
-import { buildGooglePlayConfig } from "./providers/google/config";
-import { GooglePlayBillingService } from "./providers/google/service";
-import {
-	buildStripeConfig,
-	StripeBillingClient,
-	type StripeBillingConfig,
-} from "./providers/stripe/client";
-import {
-	type StripeBillingClientDependency,
-	StripeBillingService,
-} from "./providers/stripe/service";
-import type { AutoTopupWorkerProvider } from "./workers/auto-topup";
+import type { ProjectInstanceContextResolver } from "./projects/context";
+import { createProviderRegistry } from "./providers/registry";
+import type { StripeBillingConfig } from "./providers/stripe/client";
+import type { StripeBillingClientDependency } from "./providers/stripe/service";
 import { AutoTopupWorker } from "./workers/auto-topup";
 import { MeteringMaintenanceWorker } from "./workers/metering-maintenance";
 import { ProjectionSyncWorker } from "./workers/projection-sync";
-import {
-	PromotionMaintenanceWorker,
-	type PromotionStripeProvider,
-} from "./workers/promotion-maintenance";
-import type { RecurringBillingWorkerProvider } from "./workers/recurring-billing";
+import { PromotionMaintenanceWorker } from "./workers/promotion-maintenance";
 import { RecurringBillingWorker } from "./workers/recurring-billing";
 import { startPollingRuntime } from "./workers/runtime";
-import type { StoreEventReplayProvider } from "./workers/store-event-replay";
 import { StoreEventReplayWorker } from "./workers/store-event-replay";
-import type { SubscriptionReconciliationProvider } from "./workers/subscription-reconciliation";
 import { SubscriptionReconciliationWorker } from "./workers/subscription-reconciliation";
-
-type WorkerProjectProviders = {
-	apple: (StoreEventReplayProvider & SubscriptionReconciliationProvider) | null;
-	google: (StoreEventReplayProvider & SubscriptionReconciliationProvider) | null;
-	stripe:
-		| (StoreEventReplayProvider &
-				SubscriptionReconciliationProvider &
-				RecurringBillingWorkerProvider &
-				AutoTopupWorkerProvider &
-				PromotionStripeProvider)
-		| null;
-};
 
 export interface BillingRuntimeDependencies {
 	scheduler?: QuotumRuntimeScheduler;
@@ -128,48 +98,16 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const subscriptionReconciliationRepository = new ProviderSubscriptionReconciliationRepository(
 		billingRepository,
 	);
-	const projectProviderServices = dependencies.projectProviderServices;
-	const providersForProject = async (
-		project: ProjectInstanceContext,
-		kind: BillingProvider,
-	): Promise<WorkerProjectProviders> => {
-		const [apple, googlePlay, stripe] = await Promise.all([
-			kind === "apple" ? connections.resolve(project, "apple", "recovery") : null,
-			kind === "google" ? connections.resolve(project, "google", "recovery") : null,
-			kind === "stripe" ? connections.resolve(project, "stripe", "recovery") : null,
-		]);
-		const stripeConfig = stripe ? buildStripeConfig(stripe) : null;
-		return {
-			apple: apple
-				? new AppleStoreKitService({
-						bundleId: apple.bundleId,
-						environment: apple.environment,
-						client: new AppleStoreKitClient(buildAppleStoreKitConfig(apple)),
-						repository: billingRepository.forProject(project),
-					})
-				: null,
-			google: googlePlay
-				? new GooglePlayBillingService({
-						config: buildGooglePlayConfig(googlePlay),
-						client: new GooglePlayDeveloperClient(buildGooglePlayConfig(googlePlay)),
-						repository: billingRepository.forProject(project),
-					})
-				: null,
-			stripe: stripeConfig
-				? new StripeBillingService({
-						config: {
-							...stripeConfig,
-							projectKey: project.projectInstanceKey,
-							projectionContract: "billing_state_v1",
-						},
-						client:
-							dependencies.stripeClientFactory?.(stripeConfig, project.projectInstanceKey) ??
-							new StripeBillingClient(stripeConfig),
-						repository: billingRepository.forProject(project),
-					})
-				: null,
-		};
-	};
+	const providerRegistry = createProviderRegistry({
+		connections,
+		getRepository: () => billingRepository,
+		overrides: dependencies.projectProviderServices,
+		clientFactories:
+			dependencies.stripeClientFactory === undefined
+				? {}
+				: { stripe: dependencies.stripeClientFactory },
+	});
+	const workerProviders = createWorkerProviderSelectors(providerRegistry);
 	const projectionSyncWorker = new ProjectionSyncWorker({
 		workerId: env.workerId,
 		maxAttempts: env.projectionSyncMaxAttempts,
@@ -186,7 +124,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		maxAttempts: env.storeEventReplayMaxAttempts,
 		batchSize: 25,
 		repository: storeEventReplayRepository,
-		providers: providersForProject,
+		providers: workerProviders.storeEventReplay,
 		projectContextResolver,
 		logger,
 		metrics,
@@ -197,7 +135,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		batchSize: 25,
 		staleAfterMs: env.providerReconciliationStaleAfterMs,
 		repository: subscriptionReconciliationRepository,
-		providers: providersForProject,
+		providers: workerProviders.subscriptionReconciliation,
 		projectContextResolver,
 		logger,
 		metrics,
@@ -211,13 +149,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		workerId: env.workerId,
 		repository: billingRepository,
 		projectContextResolver,
-		async providerForProject(project) {
-			const stripe = (await providersForProject(project, "stripe")).stripe;
-			if (stripe === null) {
-				throw new Error(`Stripe is not configured for ${project.projectInstanceKey}`);
-			}
-			return stripe;
-		},
+		adapterForJob: workerProviders.recurringBilling,
 		logger,
 		metrics,
 	});
@@ -225,13 +157,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		workerId: env.workerId,
 		repository: billingRepository,
 		projectContextResolver,
-		async providerForProject(project) {
-			const stripe = (await providersForProject(project, "stripe")).stripe;
-			if (stripe === null) {
-				throw new Error(`Stripe is not configured for ${project.projectInstanceKey}`);
-			}
-			return stripe;
-		},
+		adapterForJob: workerProviders.autoTopup,
 		logger,
 		metrics,
 	});
@@ -255,9 +181,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 				),
 		},
 		projectContextResolver,
-		async stripeForProject(project) {
-			return (await providersForProject(project, "stripe")).stripe;
-		},
+		adapterForJob: workerProviders.promotionMaintenance,
 		logger,
 		metrics,
 	});
@@ -309,10 +233,9 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 			: createSentryRequestScope(dependencies.sentry);
 	const staff = createApp({
 		env,
-		connections,
 		entitlementService: new EntitlementService(billingRepository),
 		projectContextResolver,
-		projectProviderServices,
+		providerRegistry,
 		adminOperations,
 		logger,
 		metrics,
@@ -325,16 +248,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 			providerReconciliationStaleAfterMs: env.providerReconciliationStaleAfterMs,
 		}),
 		resolver: projectContextResolver,
-		providers: createProjectProviderServiceResolver({
-			connections,
-			getRepository: () => billingRepository,
-			projectProviderServices,
-			legacyServices: {
-				appleStoreKitService: undefined,
-				googlePlayBillingService: undefined,
-				stripeBillingService: undefined,
-			},
-		}),
+		providers: projectProviderServiceResolver(providerRegistry),
 		operations: adminOperations,
 	});
 	const app = attachMerchantRuntime(staff, merchantBilling, {

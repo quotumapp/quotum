@@ -7,6 +7,7 @@ import type {
 	ProjectionSyncStatus,
 } from "../../src/billing/types";
 import type { RecordStripeCreditReversalProjectionInput } from "../../src/db/repository";
+import { wrapStripeService } from "../../src/providers/stripe/adapter";
 import { StripeBillingService } from "../../src/providers/stripe/service";
 import { RecurringBillingWorker } from "../../src/workers/recurring-billing";
 import { testRequest } from "../helpers/openapi";
@@ -393,23 +394,27 @@ localDescribe("Stripe route flows integration", () => {
 			externalSubscriptionId: "sub_migrate_stripe",
 		});
 		expect(new Date(change.effectiveAt).toISOString()).toBe(periodEnd.toISOString());
+		expect(change).not.toHaveProperty("provider");
+		expect(change).not.toHaveProperty("providerAccountId");
 
 		const worker = new RecurringBillingWorker({
 			projectContextResolver: context.projectContextResolver,
 			workerId: "period-end-worker",
 			repository: context.repository,
-			providerForProject: () =>
-				new StripeBillingService({
-					config: {
-						projectKey: "voysee",
-						checkoutSuccessUrl:
-							"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
-						checkoutCancelUrl: "https://app.integration.test/billing",
-						portalReturnUrl: "https://app.integration.test/account/billing",
-					},
-					client: stripe.client,
-					repository: context.repository.forProject(project),
-				}),
+			adapterForJob: () =>
+				wrapStripeService(
+					new StripeBillingService({
+						config: {
+							projectKey: "voysee",
+							checkoutSuccessUrl:
+								"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
+							checkoutCancelUrl: "https://app.integration.test/billing",
+							portalReturnUrl: "https://app.integration.test/account/billing",
+						},
+						client: stripe.client,
+						repository: context.repository.forProject(project),
+					}),
+				),
 			logger: {
 				error(_message, error) {
 					throw error;

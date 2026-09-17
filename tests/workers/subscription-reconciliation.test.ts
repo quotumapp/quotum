@@ -24,6 +24,7 @@ const subscription = (
 	project_key: "voysee",
 	provider: "apple",
 	channel: "ios",
+	provider_account_id: null,
 	external_subscription_id: "100000000000001",
 	external_product_id: "premium_monthly",
 	external_price_id: null,

@@ -6,6 +6,7 @@ import {
 	type PromotionStripeSyncJob,
 	promotionError,
 } from "../../billing/promotions";
+import type { BillingProvider } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
@@ -18,6 +19,7 @@ interface ClaimedObjectRow {
 	project_id: string;
 	project_key: string;
 	id: string;
+	provider: BillingProvider;
 	object_kind: "coupon" | "promotion_code";
 	status: PromotionProviderObjectStatus;
 	external_id: string | null;
@@ -572,7 +574,7 @@ async function loadSyncJob(
 		tx,
 		drizzleSql`
 			SELECT
-				o.project_id, project.key AS project_key, o.id, o.object_kind, o.status,
+				o.project_id, project.key AS project_key, o.id, o.provider, o.object_kind, o.status,
 				o.external_id, o.desired_active, o.desired_generation, o.provider_active,
 				o.retire_requested, o.attempts, o.applies_to,
 				p.key AS promotion_key, p.name AS promotion_name, p.discount_type,
@@ -604,6 +606,7 @@ function toSyncJob(row: ClaimedObjectRow): PromotionStripeSyncJob {
 	const base = {
 		projectId: row.project_id,
 		projectKey: row.project_key,
+		provider: row.provider,
 		objectId: row.id,
 		promotionKey: row.promotion_key,
 		promotionName: row.promotion_name,

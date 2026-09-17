@@ -15,6 +15,7 @@ function couponJob(
 	return {
 		projectId: "project-1",
 		projectKey: "voysee",
+		provider: "stripe",
 		objectId,
 		promotionKey: "spring-sale",
 		promotionName: "Spring sale for returning customers who upgrade",
@@ -46,6 +47,7 @@ function codeJob(
 	return {
 		projectId: "project-1",
 		projectKey: "voysee",
+		provider: "stripe",
 		objectId: "11111111-2222-4333-8444-555555555555",
 		promotionKey: "spring-sale",
 		promotionName: "Spring sale",

@@ -28,6 +28,7 @@ import type {
 	ProjectProviderServiceOverrides,
 	ProjectProviderServices,
 } from "../projects/providers";
+import type { ProviderRegistry } from "../providers/registry";
 import type { StripeCheckoutSessionStatus } from "../providers/stripe/service";
 import type { StripeCatalog } from "../providers/stripe/types";
 import type { AppElysia, ElysiaPluginLike } from "../shared/http";
@@ -210,6 +211,8 @@ export interface AppDependencies {
 		GooglePlayBillingServiceLike,
 		StripeBillingServiceLike
 	>;
+	/** A registry shared with other runtime parts; cannot be combined with provider services. */
+	providerRegistry?: ProviderRegistry;
 	adminBillingReader?: AdminBillingReader | null;
 	adminOperations?: BillingAdminOperations | null;
 	logger?: BillingLogger;

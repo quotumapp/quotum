@@ -71,6 +71,8 @@ import type {
 } from "./types";
 
 export interface StripeBillingServiceConfig {
+	/** Non-secret connection identity stored on provider rows; never used for event matching. */
+	accountIdentity?: string | null;
 	connectedAccountId?: string;
 	connectedAccountLivemode?: boolean;
 	projectKey?: string;
@@ -407,6 +409,7 @@ export class StripeBillingService
 				requestedQuantities: quantities,
 				idempotencyKey,
 				requestHash,
+				...this.providerAccount(),
 			});
 			if (
 				receipt.status === "created" &&
@@ -1382,12 +1385,13 @@ export class StripeBillingService
 			subscription: requireRecord(providerSubscription, "Stripe subscription"),
 			projectionReason: "provider_reconciliation",
 		});
-		const result = await this.dependencies.repository.recordStripeSubscriptionAndEnqueueProjection(
-			toStripeSubscriptionRepositoryInput(command, {
+		const result = await this.dependencies.repository.recordStripeSubscriptionAndEnqueueProjection({
+			...toStripeSubscriptionRepositoryInput(command, {
 				externalEventId: null,
 				projectionContract: this.projectionContract(),
 			}),
-		);
+			...this.providerAccount(),
+		});
 
 		return { status: result.processingStatus === "processed" ? "processed" : "skipped" };
 	}
@@ -1409,6 +1413,7 @@ export class StripeBillingService
 			billingAccountId,
 			stripeCustomerId: customer.id,
 			email,
+			...this.providerAccount(),
 		});
 	}
 
@@ -1444,6 +1449,7 @@ export class StripeBillingService
 					billingAccountId: command.billingAccountId,
 					stripeCustomerId: command.stripeCustomerId,
 					email: null,
+					...this.providerAccount(),
 				});
 				if (command.promotion !== undefined && command.promotion !== null) {
 					await this.dependencies.repository.recordStripeCheckoutPromotion?.({
@@ -1461,23 +1467,25 @@ export class StripeBillingService
 			case "credit_purchase":
 				return recordingResultToWebhookResult(
 					command.eventType,
-					await this.dependencies.repository.recordStripeCreditPurchaseAndEnqueueProjection(
-						toStripeCreditPurchaseRepositoryInput(
+					await this.dependencies.repository.recordStripeCreditPurchaseAndEnqueueProjection({
+						...toStripeCreditPurchaseRepositoryInput(
 							command,
 							this.projectionContract(),
 							replayStoreEventId,
 						),
-					),
+						...this.providerAccount(),
+					}),
 				);
 			case "subscription":
 				return recordingResultToWebhookResult(
 					command.eventType,
-					await this.dependencies.repository.recordStripeSubscriptionAndEnqueueProjection(
-						toStripeSubscriptionRepositoryInput(command, {
+					await this.dependencies.repository.recordStripeSubscriptionAndEnqueueProjection({
+						...toStripeSubscriptionRepositoryInput(command, {
 							replayStoreEventId,
 							projectionContract: this.projectionContract(),
 						}),
-					),
+						...this.providerAccount(),
+					}),
 				);
 			case "credit_reversal":
 				return recordingResultToWebhookResult(
@@ -1513,6 +1521,12 @@ export class StripeBillingService
 
 	private projectionContract(): ProjectionContract {
 		return this.dependencies.config.projectionContract ?? "billing_state_v1";
+	}
+
+	/** Omitted without an identity, so writes keep their exact shape. */
+	private providerAccount(): { providerAccountId?: string } {
+		const identity = this.dependencies.config.accountIdentity;
+		return identity == null ? {} : { providerAccountId: identity };
 	}
 }
 

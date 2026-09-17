@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
+import { wrapStripeService } from "../../src/providers/stripe/adapter";
 import { STRIPE_API_VERSION, type StripeBillingConfig } from "../../src/providers/stripe/client";
 import { StripeBillingService } from "../../src/providers/stripe/service";
 import {
@@ -182,7 +183,7 @@ localDescribe("Phase 3 release journeys", () => {
 				projectContextResolver: context.projectContextResolver,
 				workerId,
 				repository: context.repository,
-				providerForProject: () => provider,
+				adapterForJob: () => wrapStripeService(provider),
 				logger: { error() {} },
 			});
 		const runs = await Promise.all([worker("topup-a").runOnce(), worker("topup-b").runOnce()]);
@@ -248,7 +249,7 @@ localDescribe("Phase 3 release journeys", () => {
 			projectContextResolver: context.projectContextResolver,
 			workerId: "topup-action",
 			repository: context.repository,
-			providerForProject: () => actionProvider,
+			adapterForJob: () => wrapStripeService(actionProvider),
 			logger: { error() {} },
 		}).runOnce();
 		expect(actionRun).toMatchObject({ claimed: 1, actionRequired: 1, circuitOpened: 1 });
@@ -348,7 +349,7 @@ localDescribe("Phase 3 release journeys", () => {
 			projectContextResolver: context.projectContextResolver,
 			workerId: "tier-worker",
 			repository: context.repository,
-			providerForProject: () => stripeService(),
+			adapterForJob: () => wrapStripeService(stripeService()),
 			logger: { error() {} },
 		});
 		expect(await worker.runOnce()).toMatchObject({
@@ -509,7 +510,7 @@ localDescribe("Phase 3 release journeys", () => {
 			projectContextResolver: context.projectContextResolver,
 			workerId: "migration-worker",
 			repository: context.repository,
-			providerForProject: () => stripeService(),
+			adapterForJob: () => wrapStripeService(stripeService()),
 			logger: { error() {} },
 		});
 		expect(await worker.runOnce()).toMatchObject({ subscriptionChangesApplied: 1, failed: 0 });

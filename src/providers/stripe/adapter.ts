@@ -140,7 +140,7 @@ export const stripeRegistryEntry: ProviderRegistryEntry<"stripe"> = {
 	overrideKey: "stripeBillingService",
 	label: "Stripe",
 	notConfiguredStatus: 503,
-	accountIdentity: (config) => config.connectedAccountId ?? null,
+	accountIdentity: (config) => config.accountIdentity ?? config.connectedAccountId ?? null,
 	build({ project, config, repository, clientFactories }) {
 		const clientConfig = buildStripeConfig(config);
 		return new StripeBillingService({
