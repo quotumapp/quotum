@@ -249,7 +249,10 @@ describe("Stripe adapter wrapper", () => {
 		expect(result).toEqual({
 			outcome: "committed",
 			providerRequestId: "sub_123",
-			timing: { payment: { kind: "uncertain" }, entitlement: { kind: "effective_now" } },
+			timing: {
+				payment: { kind: "uncertain" },
+				entitlement: { kind: "awaiting_provider_event" },
+			},
 		});
 	});
 
@@ -268,7 +271,7 @@ describe("Stripe adapter wrapper", () => {
 		expect(result).toEqual({
 			outcome: "committed",
 			externalChargeId: "in_123",
-			timing: { payment: { kind: "collected" }, entitlement: { kind: "unchanged" } },
+			timing: { payment: { kind: "uncertain" }, entitlement: { kind: "unchanged" } },
 		});
 	});
 
@@ -292,31 +295,38 @@ describe("Stripe adapter wrapper", () => {
 		});
 	});
 
-	it("maps change timing from the proration behavior and effective mode", () => {
+	it("maps change timing from the change kind and proration behavior", () => {
 		const cases: Array<
-			[StripeProrationBehavior, "immediate" | "period_end", OperationTiming["payment"]["kind"]]
+			[
+				SubscriptionChangeOperation["changeKind"],
+				StripeProrationBehavior,
+				OperationTiming["payment"]["kind"],
+			]
 		> = [
-			["always_invoice", "immediate", "uncertain"],
-			["create_prorations", "immediate", "scheduled_next_renewal"],
-			["none", "immediate", "scheduled_next_renewal"],
-			["always_invoice", "period_end", "uncertain"],
-			["create_prorations", "period_end", "scheduled_next_renewal"],
-			["none", "period_end", "scheduled_next_renewal"],
+			["upgrade", "always_invoice", "uncertain"],
+			["upgrade", "create_prorations", "uncertain"],
+			["upgrade", "none", "uncertain"],
+			["downgrade", "always_invoice", "uncertain"],
+			["downgrade", "create_prorations", "uncertain"],
+			["downgrade", "none", "uncertain"],
+			["quantity", "always_invoice", "uncertain"],
+			["quantity", "create_prorations", "scheduled_next_renewal"],
+			["quantity", "none", "scheduled_next_renewal"],
 		];
 
-		for (const [prorationBehavior, effectiveMode, payment] of cases) {
-			const operation = subscriptionChange({
-				prorationBehavior,
-				effectiveMode,
-				effectiveAt: "2026-10-01T00:00:00.000Z",
-			});
-			expect(stripeChangeTiming(operation)).toEqual({
-				payment: { kind: payment },
-				entitlement:
-					effectiveMode === "immediate"
-						? { kind: "effective_now" }
-						: { kind: "effective_at", at: "2026-10-01T00:00:00.000Z" },
-			});
+		for (const [changeKind, prorationBehavior, payment] of cases) {
+			for (const effectiveMode of ["immediate", "period_end"] as const) {
+				const operation = subscriptionChange({
+					changeKind,
+					prorationBehavior,
+					effectiveMode,
+					effectiveAt: "2026-10-01T00:00:00.000Z",
+				});
+				expect(stripeChangeTiming(operation)).toEqual({
+					payment: { kind: payment },
+					entitlement: { kind: "awaiting_provider_event" },
+				});
+			}
 		}
 	});
 
@@ -330,10 +340,33 @@ describe("Stripe adapter wrapper", () => {
 		}
 	});
 
+	it("never schedules a plan change for the next renewal, because a new billing interval bills now", () => {
+		// Stripe invoices a switch to a price with another interval immediately under every proration behavior.
+		for (const changeKind of ["upgrade", "downgrade"] as const) {
+			for (const prorationBehavior of ["create_prorations", "none"] as const) {
+				expect(
+					stripeChangeTiming(subscriptionChange({ changeKind, prorationBehavior })).payment,
+				).toEqual({ kind: "uncertain" });
+			}
+		}
+	});
+
+	it("never reports a change as effective before the subscription update event arrives", () => {
+		// markSubscriptionChangeApplied keeps the plan version; customer.subscription.updated moves it.
+		for (const effectiveMode of ["immediate", "period_end"] as const) {
+			expect(
+				stripeChangeTiming(subscriptionChange({ effectiveMode, changeKind: "quantity" }))
+					.entitlement,
+			).toEqual({ kind: "awaiting_provider_event" });
+		}
+	});
+
 	it("maps settlement timing from the invoice amount", () => {
-		expect(stripeSettlementTiming(usageInvoiceJob({ amountMinor: 1 })).payment.kind).toBe(
-			"collected",
-		);
+		// createUsageInvoice keeps only the invoice id, and Stripe can return an open invoice whose payment is processing.
+		expect(stripeSettlementTiming(usageInvoiceJob({ amountMinor: 1 }))).toEqual({
+			payment: { kind: "uncertain" },
+			entitlement: { kind: "unchanged" },
+		});
 		for (const amountMinor of [0, -250]) {
 			expect(
 				stripeSettlementTiming(usageInvoiceJob({ jobKind: "adjustment", amountMinor })),
@@ -350,7 +383,8 @@ describe("Stripe adapter wrapper", () => {
 				amountPaidMinor: 1000,
 				currency: "USD",
 			}),
-		).toEqual({ payment: { kind: "collected" }, entitlement: { kind: "effective_now" } });
+			// The worker credits the balance after the charge, in markAutoTopupSucceeded.
+		).toEqual({ payment: { kind: "collected" }, entitlement: { kind: "unchanged" } });
 		expect(
 			stripeAutoTopupTiming({
 				status: "action_required",

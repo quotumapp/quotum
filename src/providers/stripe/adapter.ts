@@ -85,42 +85,47 @@ export function wrapStripeService(
 
 /**
  * An immediately invoiced change only attempts collection: the subscription update succeeds even
- * when Stripe cannot charge the proration invoice or the proration is a credit, so payment stays
- * uncertain until the invoice events confirm it. Other proration behaviors bill at the next
- * renewal. Immediate changes take effect now and period-end changes at their effective time.
+ * when Stripe cannot charge the proration invoice or the proration is a credit. A plan change can
+ * also move the subscription to a price with another billing interval, which Stripe invoices
+ * immediately whatever the proration behavior, and the operation does not carry the intervals.
+ * Payment is therefore uncertain until invoice events confirm it, except for a quantity change on
+ * the same plan version without an immediate invoice, which bills at the next renewal. The plan
+ * version and entitlements follow the resulting customer.subscription.updated event, not the
+ * update call.
  */
 export function stripeChangeTiming(operation: SubscriptionChangeOperation): OperationTiming {
+	const billsAtRenewal =
+		operation.changeKind === "quantity" &&
+		changeBillingPolicyFromStripe(operation.prorationBehavior).collection === "next_renewal";
 	return {
-		payment: {
-			kind:
-				changeBillingPolicyFromStripe(operation.prorationBehavior).collection === "immediate"
-					? "uncertain"
-					: "scheduled_next_renewal",
-		},
-		entitlement:
-			operation.effectiveMode === "period_end"
-				? { kind: "effective_at", at: operation.effectiveAt }
-				: { kind: "effective_now" },
+		payment: { kind: billsAtRenewal ? "scheduled_next_renewal" : "uncertain" },
+		entitlement: { kind: "awaiting_provider_event" },
 	};
 }
 
-/** The service pays a positive usage invoice; a zero or negative one finalizes without payment. */
+/**
+ * The service asks Stripe to pay a positive usage invoice but keeps only the invoice id, and the
+ * pay call can return an open invoice whose payment is still processing, so collection stays
+ * uncertain until invoice events confirm it. A zero or negative invoice finalizes without payment.
+ */
 export function stripeSettlementTiming(job: UsageInvoiceJob): OperationTiming {
 	return {
-		payment: { kind: job.amountMinor > 0 ? "collected" : "not_required" },
+		payment: { kind: job.amountMinor > 0 ? "uncertain" : "not_required" },
 		entitlement: { kind: "unchanged" },
 	};
 }
 
 /**
- * A paid top-up credits the balance now. A customer action (a saved payment method or
- * authentication) leaves the charge pending on the customer, and a voided over-budget invoice
- * takes no payment.
+ * The service returns `succeeded` only for a paid invoice, but the charge credits nothing: the
+ * worker allocates the balance and recomputes entitlements afterwards, in its own transaction, so
+ * entitlements stay unchanged here and a paid but uncredited top-up remains distinguishable. A
+ * customer action (a saved payment method or authentication) leaves the charge pending on the
+ * customer, and a voided over-budget invoice takes no payment.
  */
 export function stripeAutoTopupTiming(result: AutoTopupChargeResult): OperationTiming {
 	switch (result.status) {
 		case "succeeded":
-			return { payment: { kind: "collected" }, entitlement: { kind: "effective_now" } };
+			return { payment: { kind: "collected" }, entitlement: { kind: "unchanged" } };
 		case "action_required":
 			return { payment: { kind: "pending_customer" }, entitlement: { kind: "unchanged" } };
 		case "safety_limit_exceeded":
