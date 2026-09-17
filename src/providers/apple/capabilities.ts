@@ -100,8 +100,8 @@ export const appleCapabilities: ProviderCapabilityDeclaration = {
 		"webhook.ingest": verified([appleFlows, appleService]),
 		"event.replay": verified([appleService]),
 		"subscription.reconcile": verified([appleService]),
-		"subscription.change.preview": providerManaged(
-			"Upgrades, downgrades and crossgrades are chosen in the App Store; Quotum has no preview for them.",
+		"subscription.change.preview": unsupported(
+			"Upgrades, downgrades and crossgrades are priced in the App Store purchase sheet; Quotum has no preview for them and records no preview outcome.",
 		),
 		"subscription.change.apply": providerManaged(
 			"Upgrades and crossgrades happen in the App Store; Quotum records the resulting subscription notifications.",

@@ -495,8 +495,8 @@
         },
         "subscription.change.preview": {
           "conditions": [],
-          "level": "provider_managed",
-          "notes": "Upgrades, downgrades and crossgrades are chosen in the App Store; Quotum has no preview for them.",
+          "level": "unsupported",
+          "notes": "Upgrades, downgrades and crossgrades are priced in the App Store purchase sheet; Quotum has no preview for them and records no preview outcome.",
           "verification": {
             "status": "not_applicable"
           }
@@ -798,8 +798,8 @@
         },
         "subscription.change.preview": {
           "conditions": [],
-          "level": "provider_managed",
-          "notes": "Plan changes are chosen in Google Play; Quotum has no preview for them.",
+          "level": "unsupported",
+          "notes": "Plan changes are priced in the Google Play purchase sheet; Quotum has no preview for them and records no preview outcome.",
           "verification": {
             "status": "not_applicable"
           }
@@ -1273,8 +1273,8 @@
               "questions": [],
               "scenarios": [],
               "tests": [
-                "tests/billing/pricing.test.ts",
-                "tests/workers/recurring-billing.test.ts"
+                "tests/integration/stripe-flows.test.ts",
+                "tests/billing/pricing.test.ts"
               ]
             },
             "status": "conditional",
@@ -1323,6 +1323,7 @@
           }
         },
         "topup.automatic": {
+          "composedVia": "Stripe invoices with a top-up price line",
           "conditions": [
             {
               "kind": "saved_payment_method",
@@ -1330,7 +1331,7 @@
               "resolveWith": "topup.customer_initiated"
             }
           ],
-          "level": "native",
+          "level": "quotum_composed",
           "notes": "Quotum pays a Stripe invoice with the customer's default payment method; a missing method or an authentication request ends the job as action required.",
           "verification": {
             "evidence": {

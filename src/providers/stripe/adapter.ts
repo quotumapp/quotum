@@ -84,7 +84,9 @@ export function wrapStripeService(
 }
 
 /**
- * An immediately invoiced change collects payment now; other proration behaviors bill at the next
+ * An immediately invoiced change only attempts collection: the subscription update succeeds even
+ * when Stripe cannot charge the proration invoice or the proration is a credit, so payment stays
+ * uncertain until the invoice events confirm it. Other proration behaviors bill at the next
  * renewal. Immediate changes take effect now and period-end changes at their effective time.
  */
 export function stripeChangeTiming(operation: SubscriptionChangeOperation): OperationTiming {
@@ -92,7 +94,7 @@ export function stripeChangeTiming(operation: SubscriptionChangeOperation): Oper
 		payment: {
 			kind:
 				changeBillingPolicyFromStripe(operation.prorationBehavior).collection === "immediate"
-					? "collected"
+					? "uncertain"
 					: "scheduled_next_renewal",
 		},
 		entitlement:

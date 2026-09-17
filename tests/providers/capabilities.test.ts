@@ -64,6 +64,22 @@ function capabilityTag(operation: ProviderOperation): RegExp {
 	return new RegExp(`^\\s*// capability: ${operation.replaceAll(".", "\\.")}\\s*$`, "m");
 }
 
+/** The source of each test a capability tag annotates, up to the start of the next test. */
+function taggedTestBlocks(source: string, operation: ProviderOperation): string[] {
+	const lines = source.split("\n");
+	const tag = new RegExp(capabilityTag(operation).source);
+	const testStart = /^\s*(it|test)(\.each\(.*\))?\(/;
+	const blocks: string[] = [];
+	lines.forEach((line, index) => {
+		if (!tag.test(line)) return;
+		const start = lines.findIndex((candidate, at) => at > index && testStart.test(candidate));
+		if (start === -1) return;
+		const next = lines.findIndex((candidate, at) => at > start && testStart.test(candidate));
+		blocks.push(lines.slice(start, next === -1 ? undefined : next).join("\n"));
+	});
+	return blocks;
+}
+
 describe("provider capability declarations", () => {
 	it("declares every provider once, in contract order", () => {
 		expect(providerCapabilityDeclarations.map(({ provider }) => provider)).toEqual([
@@ -108,6 +124,23 @@ describe("provider capability declarations", () => {
 			}
 		}
 		expect(missing).toEqual([]);
+	});
+
+	it("cites period-end change evidence whose tagged tests use a period-end change", () => {
+		const blocks: string[] = [];
+		for (const declaration of providerCapabilityDeclarations) {
+			const support = declaration.operations["subscription.change.period_end"];
+			const verification = support.verification;
+			if (verification.status !== "verified" && verification.status !== "conditional") continue;
+			for (const path of verification.evidence.tests) {
+				const source = readFileSync(join(repositoryRoot, path), "utf8");
+				for (const block of taggedTestBlocks(source, "subscription.change.period_end")) {
+					blocks.push(`${declaration.provider} ${path}: ${block.includes("period_end")}`);
+				}
+			}
+		}
+		expect(blocks.length).toBeGreaterThan(0);
+		expect(blocks.filter((block) => block.endsWith("false"))).toEqual([]);
 	});
 
 	it("admits exactly the billing providers", () => {

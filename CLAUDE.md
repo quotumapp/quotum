@@ -29,7 +29,7 @@ bun run test:integration tests/integration/metering-flows.test.ts   # one integr
 bun run test:e2e                 # boots the real service process against a container
 bun run test:merchant:integration   # integration/merchant against a container
 
-bun run openapi:generate && bun run openapi:check && bun run openapi:lint   # after any route change
+bun run openapi:generate && bun run openapi:check && bun run openapi:lint   # after any route or capability change
 ```
 
 Postgres-backed test files are wrapped in `describeLocalPostgres` / `describeE2e` and silently
@@ -38,8 +38,11 @@ is set. Always use the `test:*` runner scripts for those lanes; they start the c
 migration checksums, apply migrations, bootstrap test projects, and export the required
 `BILLING_TEST_*` JSON env vars.
 
-`bun run openapi:check` fails CI if `contracts/v1/openapi.json` or `contracts/v1/errors.json` is
-stale, so regenerate and commit them with any HTTP change.
+`bun run openapi:check` fails CI if `contracts/v1/openapi.json`, `contracts/v1/errors.json`,
+`contracts/v1/provider-capabilities.json` or the generated capability table in `docs/providers.md`
+is stale, so regenerate and commit them with any HTTP change and any change to a provider
+capability declaration (`src/providers/*/capabilities.ts`) or the capability vocabulary
+(`src/shared/provider-capabilities.ts`).
 
 ## Architecture
 

@@ -7,6 +7,8 @@ import type {
 	ProjectionSyncStatus,
 } from "../../src/billing/types";
 import type { RecordStripeCreditReversalProjectionInput } from "../../src/db/repository";
+import { StripeBillingService } from "../../src/providers/stripe/service";
+import { RecurringBillingWorker } from "../../src/workers/recurring-billing";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -329,6 +331,117 @@ localDescribe("Stripe route flows integration", () => {
 				billingAccountId: "migration-stripe",
 				effectiveMode: "immediate",
 			},
+		});
+	});
+
+	// capability: subscription.change.period_end
+	it("keeps a Stripe downgrade pending until period end, then the worker applies it", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		// Rank the published target version below the subscribed one, so the change is a downgrade.
+		await context.sql`
+			UPDATE plan_versions version
+			SET tier_rank = 5
+			FROM plans plan, projects project
+			WHERE version.project_id = plan.project_id AND version.plan_id = plan.id
+				AND plan.project_id = project.id AND project.key = 'voysee'
+				AND plan.key = 'migration-plan' AND version.version = 2
+		`;
+		const project = integrationProjectContext();
+		const { app, stripe, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const requestDowngrade = (idempotencyKey: string) =>
+			testRequest(
+				app,
+				"/v1/billing-accounts/migration-stripe/subscriptions/sub_migrate_stripe/changes",
+				{
+					method: "POST",
+					headers: {
+						...authHeaders("voysee"),
+						"content-type": "application/json",
+						"idempotency-key": idempotencyKey,
+					},
+					body: JSON.stringify({
+						targetPlanKey: "migration-plan",
+						quantities: { licensed_seats: 7 },
+					}),
+				},
+			);
+		const setPeriodEnd = (periodEnd: string | null) => context.sql`
+			UPDATE subscriptions SET current_period_end = ${periodEnd}::timestamptz
+			WHERE project_id = ${project.projectInstanceId}::uuid
+				AND external_subscription_id = 'sub_migrate_stripe'
+		`;
+
+		await setPeriodEnd(null);
+		const withoutPeriod = await requestDowngrade("period-end-downgrade:no-period");
+		expect(withoutPeriod.status).toBe(409);
+		expect((await withoutPeriod.json()).error.code).toBe("SUBSCRIPTION_PERIOD_MISSING");
+
+		const periodEnd = new Date(Math.floor(Date.now() / 1000) * 1000 + 29 * 24 * 60 * 60 * 1000);
+		await setPeriodEnd(periodEnd.toISOString());
+		const requested = await requestDowngrade("period-end-downgrade");
+		expect(requested.status).toBe(202);
+		const change = (await requested.json()).data;
+		expect(change).toMatchObject({
+			status: "pending",
+			changeKind: "downgrade",
+			effectiveMode: "period_end",
+			prorationBehavior: "none",
+			externalSubscriptionId: "sub_migrate_stripe",
+		});
+		expect(new Date(change.effectiveAt).toISOString()).toBe(periodEnd.toISOString());
+
+		const worker = new RecurringBillingWorker({
+			projectContextResolver: context.projectContextResolver,
+			workerId: "period-end-worker",
+			repository: context.repository,
+			providerForProject: () =>
+				new StripeBillingService({
+					config: {
+						projectKey: "voysee",
+						checkoutSuccessUrl:
+							"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
+						checkoutCancelUrl: "https://app.integration.test/billing",
+						portalReturnUrl: "https://app.integration.test/account/billing",
+					},
+					client: stripe.client,
+					repository: context.repository.forProject(project),
+				}),
+			logger: {
+				error(_message, error) {
+					throw error;
+				},
+			},
+		});
+		const changeStatus = async () => {
+			const [row] = await context.sql<Array<{ status: string }>>`
+				SELECT status FROM subscription_changes WHERE id = ${change.changeId}::uuid
+			`;
+			return row?.status;
+		};
+
+		expect(await worker.runOnce()).toMatchObject({ subscriptionChangesApplied: 0, failed: 0 });
+		expect(await changeStatus()).toBe("pending");
+		expect(stripe.subscriptionUpdates).toEqual([]);
+
+		// Move the stored change's period end into the past, as if the period had ended.
+		await context.sql`
+			UPDATE subscription_changes SET effective_at = now() - interval '1 second'
+			WHERE id = ${change.changeId}::uuid
+		`;
+		expect(await worker.runOnce()).toMatchObject({ subscriptionChangesApplied: 1, failed: 0 });
+		expect(await changeStatus()).toBe("applied");
+		expect(stripe.subscriptionUpdates).toHaveLength(1);
+		expect(stripe.subscriptionUpdates[0]).toMatchObject({
+			subscriptionId: "sub_migrate_stripe",
+			params: {
+				proration_behavior: "none",
+				metadata: { billingChangeId: change.changeId },
+			},
+			idempotencyKey: `billing:subscription-change:${change.changeId}`,
 		});
 	});
 

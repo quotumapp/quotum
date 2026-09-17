@@ -94,7 +94,7 @@ describe("renderProviderCapabilityBlock", () => {
 		const [, apple, , stripe, paddle] = row("topup.automatic");
 		expect(apple?.trim()).toBe("Unsupported");
 		expect(stripe).toContain(
-			"Conditional · Native<br>The customer must have a saved payment method",
+			"Conditional · Quotum-composed via Stripe invoices with a top-up price line<br>The customer must have a saved payment method",
 		);
 		expect(stripe).toContain("[workers/auto-topup](../tests/workers/auto-topup.test.ts)");
 		expect(paddle).toContain(
@@ -103,9 +103,9 @@ describe("renderProviderCapabilityBlock", () => {
 		expect(paddle).toContain('The connection setting "spmConsent" must be true.');
 		expect(paddle).toContain("Questions: Q-SET-02");
 		expect(row("catalog.trial")[1]?.trim()).toBe("Managed by provider, mirrored by Quotum");
-		expect(row("subscription.change.preview")[3]).toContain(
-			"active, grace_period, billing_retry or cancelled.",
-		);
+		const [, applePreview, googlePreview, stripePreview] = row("subscription.change.preview");
+		expect([applePreview?.trim(), googlePreview?.trim()]).toEqual(["Unsupported", "Unsupported"]);
+		expect(stripePreview).toContain("active, grace_period, billing_retry or cancelled.");
 
 		for (const label of capabilityStatusLabels) {
 			expect(block).toContain(`- **${label.label}**: `);

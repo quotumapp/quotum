@@ -249,7 +249,7 @@ describe("Stripe adapter wrapper", () => {
 		expect(result).toEqual({
 			outcome: "committed",
 			providerRequestId: "sub_123",
-			timing: { payment: { kind: "collected" }, entitlement: { kind: "effective_now" } },
+			timing: { payment: { kind: "uncertain" }, entitlement: { kind: "effective_now" } },
 		});
 	});
 
@@ -296,10 +296,10 @@ describe("Stripe adapter wrapper", () => {
 		const cases: Array<
 			[StripeProrationBehavior, "immediate" | "period_end", OperationTiming["payment"]["kind"]]
 		> = [
-			["always_invoice", "immediate", "collected"],
+			["always_invoice", "immediate", "uncertain"],
 			["create_prorations", "immediate", "scheduled_next_renewal"],
 			["none", "immediate", "scheduled_next_renewal"],
-			["always_invoice", "period_end", "collected"],
+			["always_invoice", "period_end", "uncertain"],
 			["create_prorations", "period_end", "scheduled_next_renewal"],
 			["none", "period_end", "scheduled_next_renewal"],
 		];
@@ -317,6 +317,16 @@ describe("Stripe adapter wrapper", () => {
 						? { kind: "effective_now" }
 						: { kind: "effective_at", at: "2026-10-01T00:00:00.000Z" },
 			});
+		}
+	});
+
+	it("never reports an immediately invoiced change as collected, whatever its direction", () => {
+		// The update succeeds with a declined or credit proration invoice; only invoice events confirm payment.
+		for (const changeKind of ["upgrade", "downgrade", "quantity"] as const) {
+			expect(
+				stripeChangeTiming(subscriptionChange({ changeKind, prorationBehavior: "always_invoice" }))
+					.payment,
+			).toEqual({ kind: "uncertain" });
 		}
 	});
 

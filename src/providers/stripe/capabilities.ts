@@ -40,12 +40,17 @@ function native(
 	};
 }
 
-function composed(composedVia: string, tests: string[], notes: string): OperationSupport {
+function composed(
+	composedVia: string,
+	tests: string[],
+	notes: string,
+	conditions: CapabilityCondition[] = [],
+): OperationSupport {
 	return {
 		level: "quotum_composed",
 		composedVia,
-		verification: verification(tests, []),
-		conditions: [],
+		verification: verification(tests, conditions),
+		conditions,
 		notes,
 	};
 }
@@ -118,7 +123,7 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 				notes: `${changeTargets} The recurring billing worker applies the change with its Stripe proration behavior.`,
 			},
 		),
-		"subscription.change.period_end": native([pricingTest, recurringBillingWorkerTest], {
+		"subscription.change.period_end": native([stripeFlowsTest, pricingTest], {
 			conditions: [changeableSubscription],
 			notes: `${changeTargets} Downgrades default to the end of the current period, when the recurring billing worker applies them.`,
 		}),
@@ -137,13 +142,12 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 				"Refunds and disputes reverse the purchase they paid for in proportion to the cumulative amount reversed, deduplicated by refund id.",
 		}),
 		"topup.customer_initiated": native([stripeFlowsTest]),
-		"topup.automatic": native([serviceTest, autoTopupWorkerTest, phase3JourneysTest], {
-			conditions: [
-				{ kind: "saved_payment_method", required: true, resolveWith: "topup.customer_initiated" },
-			],
-			notes:
-				"Quotum pays a Stripe invoice with the customer's default payment method; a missing method or an authentication request ends the job as action required.",
-		}),
+		"topup.automatic": composed(
+			"Stripe invoices with a top-up price line",
+			[serviceTest, autoTopupWorkerTest, phase3JourneysTest],
+			"Quotum pays a Stripe invoice with the customer's default payment method; a missing method or an authentication request ends the job as action required.",
+			[{ kind: "saved_payment_method", required: true, resolveWith: "topup.customer_initiated" }],
+		),
 		"promotion.code_entry": composed(
 			"Stripe coupons applied as Checkout and subscription discounts",
 			[promotionsTest, promotionProvisioningTest, normalizerTest],

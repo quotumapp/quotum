@@ -100,8 +100,8 @@ export const googleCapabilities: ProviderCapabilityDeclaration = {
 		"webhook.ingest": verified([googleFlows, googleService]),
 		"event.replay": verified([googleService]),
 		"subscription.reconcile": verified([googleService, workerFlows]),
-		"subscription.change.preview": providerManaged(
-			"Plan changes are chosen in Google Play; Quotum has no preview for them.",
+		"subscription.change.preview": unsupported(
+			"Plan changes are priced in the Google Play purchase sheet; Quotum has no preview for them and records no preview outcome.",
 		),
 		"subscription.change.apply": providerManaged(
 			"Plan changes happen in Google Play and arrive as a new purchase token linked to the replaced one.",
