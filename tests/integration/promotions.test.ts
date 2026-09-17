@@ -1367,8 +1367,14 @@ localDescribe("promotion subscription changes", () => {
 		expect(stacked.status).toBe(409);
 		expect((await stacked.json()).error.code).toBe("PROMOTION_STACKING_NOT_ALLOWED");
 
-		const [operation] = await context.repository.claimSubscriptionChanges("change-worker", 10);
-		if (operation === undefined) throw new Error("change was not claimed");
+		const [claimed] = await context.repository.claimSubscriptionChanges("change-worker", 10);
+		if (claimed === undefined) throw new Error("change was not claimed");
+		const operation = await context.repository.loadClaimedSubscriptionChange(
+			claimed.projectInstanceId,
+			claimed.changeId,
+			"change-worker",
+		);
+		if (operation === null) throw new Error("the claimed change could not be loaded");
 		const coupon = [...fixture.stripe.promotions.coupons.values()][0];
 		expect(operation).toMatchObject({
 			changeId: result.changeId,

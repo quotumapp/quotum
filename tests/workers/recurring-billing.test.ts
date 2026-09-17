@@ -1,5 +1,6 @@
 import { expect, it } from "bun:test";
 import type { SubscriptionChangeOperation, UsageInvoiceJob } from "../../src/billing/recurring";
+import type { ClaimedSubscriptionChange, ClaimedUsageInvoiceJob } from "../../src/db/repository";
 import type { OperationTiming } from "../../src/providers/contract";
 import {
 	RecurringBillingWorker,
@@ -62,6 +63,24 @@ function usageFixture(overrides: Partial<UsageInvoiceJob> = {}) {
 	} satisfies UsageInvoiceJob;
 }
 
+function claimedChange(change: SubscriptionChangeOperation): ClaimedSubscriptionChange {
+	return {
+		projectInstanceId: change.projectInstanceId,
+		projectKey: change.projectKey,
+		changeId: change.changeId,
+	};
+}
+
+function claimedUsageJob(job: UsageInvoiceJob): ClaimedUsageInvoiceJob {
+	return {
+		projectInstanceId: job.projectInstanceId,
+		projectKey: job.projectKey,
+		jobKind: job.jobKind,
+		jobId: job.jobId,
+		periodId: job.periodId,
+	};
+}
+
 function recordingRepository({
 	changes = [],
 	usage = [],
@@ -72,7 +91,10 @@ function recordingRepository({
 	const calls: Array<Record<string, unknown>> = [];
 	const repository: RecurringBillingWorkerRepository = {
 		async claimSubscriptionChanges() {
-			return changes;
+			return changes.map(claimedChange);
+		},
+		async loadClaimedSubscriptionChange(_projectInstanceId, changeId) {
+			return changes.find((change) => change.changeId === changeId) ?? null;
 		},
 		async markSubscriptionChangeApplied(projectInstanceId, changeId, providerRequestId, workerId) {
 			calls.push({
@@ -87,7 +109,10 @@ function recordingRepository({
 			calls.push({ kind: "change_failed", projectInstanceId, changeId, error, workerId });
 		},
 		async materializeAndClaimUsageInvoicePeriods() {
-			return { materialized: usage.length, jobs: usage };
+			return { materialized: usage.length, jobs: usage.map(claimedUsageJob) };
+		},
+		async loadClaimedUsageInvoiceJob(_projectInstanceId, jobKind, jobId) {
+			return usage.find((job) => job.jobKind === jobKind && job.jobId === jobId) ?? null;
 		},
 		async markUsageInvoiceSucceeded(
 			projectInstanceId,
@@ -112,6 +137,21 @@ function recordingRepository({
 	return { repository, calls };
 }
 
+function committedAdapter(): RecurringBillingWorkerAdapter {
+	return {
+		changes: {
+			async apply() {
+				return { outcome: "committed", providerRequestId: "sub_1", timing };
+			},
+		},
+		settlement: {
+			async collectFinalizedCharge() {
+				return { outcome: "committed", externalChargeId: "in_1", timing };
+			},
+		},
+	};
+}
+
 // capability: subscription.change.apply
 // capability: settlement.collect_finalized_charge
 it("applies due changes and invoices closed overage periods", async () => {
@@ -124,7 +164,13 @@ it("applies due changes and invoices closed overage periods", async () => {
 		workerId: "worker-1",
 		repository: {
 			async claimSubscriptionChanges() {
-				return [change];
+				return [claimedChange(change)];
+			},
+			async loadClaimedSubscriptionChange(projectInstanceId, changeId, workerId) {
+				expect(projectInstanceId).toBe(change.projectInstanceId);
+				expect(changeId).toBe(change.changeId);
+				expect(workerId).toBe("worker-1");
+				return change;
 			},
 			async markSubscriptionChangeApplied(projectInstanceId, id, _providerRequestId, workerId) {
 				expect(projectInstanceId).toBe(change.projectInstanceId);
@@ -133,7 +179,14 @@ it("applies due changes and invoices closed overage periods", async () => {
 			},
 			async markSubscriptionChangeFailed() {},
 			async materializeAndClaimUsageInvoicePeriods() {
-				return { materialized: 1, jobs: [usage] };
+				return { materialized: 1, jobs: [claimedUsageJob(usage)] };
+			},
+			async loadClaimedUsageInvoiceJob(projectInstanceId, jobKind, jobId, workerId) {
+				expect(projectInstanceId).toBe(usage.projectInstanceId);
+				expect(jobKind).toBe("period");
+				expect(jobId).toBe(usage.jobId);
+				expect(workerId).toBe("worker-1");
+				return usage;
 			},
 			async markUsageInvoiceSucceeded(projectInstanceId, _kind, id, _externalInvoiceId, workerId) {
 				expect(projectInstanceId).toBe(usage.projectInstanceId);
@@ -142,20 +195,7 @@ it("applies due changes and invoices closed overage periods", async () => {
 			},
 			async markUsageInvoiceFailed() {},
 		},
-		adapterForJob() {
-			return {
-				changes: {
-					async apply() {
-						return { outcome: "committed", providerRequestId: "sub_1", timing };
-					},
-				},
-				settlement: {
-					async collectFinalizedCharge() {
-						return { outcome: "committed", externalChargeId: "in_1", timing };
-					},
-				},
-			};
-		},
+		adapterForJob: committedAdapter,
 		logger: { error() {} },
 	});
 
@@ -183,7 +223,10 @@ it("fails claimed recurring-billing work when its project id and key disagree", 
 		workerId: "worker-1",
 		repository: {
 			async claimSubscriptionChanges() {
-				return [change];
+				return [claimedChange(change)];
+			},
+			async loadClaimedSubscriptionChange() {
+				return change;
 			},
 			async markSubscriptionChangeApplied() {},
 			async markSubscriptionChangeFailed(projectInstanceId, _id, error, workerId) {
@@ -193,6 +236,9 @@ it("fails claimed recurring-billing work when its project id and key disagree", 
 			},
 			async materializeAndClaimUsageInvoicePeriods() {
 				return { materialized: 0, jobs: [] };
+			},
+			async loadClaimedUsageInvoiceJob() {
+				return null;
 			},
 			async markUsageInvoiceSucceeded() {},
 			async markUsageInvoiceFailed() {},
@@ -346,57 +392,373 @@ it("never finalizes an uncertain provider write and fails it for reconciliation"
 	]);
 });
 
-it("logs an uncertain write's correlation even when marking the job failed throws", async () => {
-	const logged: Array<Record<string, unknown> | undefined> = [];
-	const workerFor = (repository: RecurringBillingWorkerRepository) =>
-		new RecurringBillingWorker({
-			projectContextResolver: workerProjectResolver,
-			workerId: "worker-1",
-			repository,
-			adapterForJob: () => ({
-				changes: {
-					async apply() {
-						return { outcome: "uncertain", correlation: { requestKey: "change-1" }, timing };
-					},
-				},
-				settlement: {
-					async collectFinalizedCharge() {
-						return { outcome: "uncertain", correlation: { requestKey: "period-1" }, timing };
-					},
-				},
-			}),
-			logger: {
-				error(_message, _error, context) {
-					logged.push(context);
+it("logs a failing failure marker and still finishes the batch", async () => {
+	const logged: Array<{ message: string; context?: Record<string, unknown> }> = [];
+	const poisonChange = changeFixture({ changeId: "poison-change" });
+	const poisonUsage = usageFixture({ jobId: "poison-period", periodId: "poison-period" });
+	const healthyChange = changeFixture({ changeId: "healthy-change" });
+	const healthyUsage = usageFixture({ jobId: "healthy-period", periodId: "healthy-period" });
+	const { repository, calls } = recordingRepository({
+		changes: [poisonChange, healthyChange],
+		usage: [poisonUsage, healthyUsage],
+	});
+	const changeLost = "Subscription change poison-change was not owned by worker";
+	const usageLost = "Usage invoice period poison-period was not owned by worker";
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository: {
+			...repository,
+			async markSubscriptionChangeFailed(projectInstanceId, changeId, error, workerId) {
+				if (changeId === "poison-change") throw new Error(changeLost);
+				await repository.markSubscriptionChangeFailed(projectInstanceId, changeId, error, workerId);
+			},
+			async markUsageInvoiceFailed(projectInstanceId, jobKind, jobId, error, workerId) {
+				if (jobId === "poison-period") throw new Error(usageLost);
+				await repository.markUsageInvoiceFailed(projectInstanceId, jobKind, jobId, error, workerId);
+			},
+		},
+		adapterForJob: () => ({
+			changes: {
+				async apply(operation) {
+					if (operation.changeId === "poison-change") {
+						return { outcome: "uncertain", correlation: { requestKey: "poison-change" }, timing };
+					}
+					return { outcome: "committed", providerRequestId: "sub_1", timing };
 				},
 			},
-		});
-	const changeLost = "Subscription change change-1 was not owned by worker";
-	const usageLost = "Usage invoice period period-1 was not owned by worker";
+			settlement: {
+				async collectFinalizedCharge(job) {
+					if (job.jobId === "poison-period") {
+						return { outcome: "uncertain", correlation: { requestKey: "poison-period" }, timing };
+					}
+					return { outcome: "committed", externalChargeId: "in_1", timing };
+				},
+			},
+		}),
+		logger: {
+			error(message, _error, context) {
+				logged.push({ message, context });
+			},
+		},
+	});
 
-	await expect(
-		workerFor({
-			...recordingRepository({ changes: [changeFixture()] }).repository,
-			async markSubscriptionChangeFailed() {
-				throw new Error(changeLost);
-			},
-		}).runOnce(),
-	).rejects.toThrow(changeLost);
-	await expect(
-		workerFor({
-			...recordingRepository({ usage: [usageFixture()] }).repository,
-			async markUsageInvoiceFailed() {
-				throw new Error(usageLost);
-			},
-		}).runOnce(),
-	).rejects.toThrow(usageLost);
+	expect(await worker.runOnce()).toEqual({
+		materializedUsagePeriods: 2,
+		subscriptionChangesApplied: 1,
+		usageInvoicesCreated: 1,
+		usageAdjustmentsCreated: 0,
+		failed: 2,
+	});
+	// The healthy jobs of both batches still finalize after the markers throw.
+	expect(calls.map(({ kind, changeId, jobId }) => ({ kind, changeId, jobId }))).toEqual([
+		{ kind: "change_applied", changeId: "healthy-change", jobId: undefined },
+		{ kind: "usage_succeeded", changeId: undefined, jobId: "healthy-period" },
+	]);
+	// The correlation is logged before the marker, and the marker failure is logged in its place.
 	expect(logged).toEqual([
-		{ projectKey: "voysee", changeId: "change-1", correlation: { requestKey: "change-1" } },
 		{
-			projectKey: "voysee",
-			provider: "stripe",
-			periodId: "period-1",
-			correlation: { requestKey: "period-1" },
+			message: "Subscription change failed",
+			context: {
+				projectKey: "voysee",
+				changeId: "poison-change",
+				correlation: { requestKey: "poison-change" },
+			},
+		},
+		{
+			message: "Subscription change failure marker failed",
+			context: { projectKey: "voysee", changeId: "poison-change", workerId: "worker-1" },
+		},
+		{
+			message: "Usage invoice failed",
+			context: {
+				projectKey: "voysee",
+				provider: "stripe",
+				periodId: "poison-period",
+				correlation: { requestKey: "poison-period" },
+			},
+		},
+		{
+			message: "Usage invoice failure marker failed",
+			context: {
+				projectKey: "voysee",
+				jobKind: "period",
+				jobId: "poison-period",
+				workerId: "worker-1",
+			},
+		},
+	]);
+});
+
+it("fails only the claimed job that cannot be loaded", async () => {
+	const healthyChange = changeFixture({ changeId: "healthy-change" });
+	const healthyUsage = usageFixture({ jobId: "healthy-period", periodId: "healthy-period" });
+	const { repository, calls } = recordingRepository({
+		changes: [healthyChange],
+		usage: [healthyUsage],
+	});
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository: {
+			...repository,
+			async claimSubscriptionChanges() {
+				return [
+					claimedChange(changeFixture({ changeId: "poison-change" })),
+					claimedChange(healthyChange),
+				];
+			},
+			async loadClaimedSubscriptionChange(projectInstanceId, changeId, workerId) {
+				if (changeId === "poison-change") {
+					throw new Error("Target plan has no Stripe recurring prices");
+				}
+				return await repository.loadClaimedSubscriptionChange(
+					projectInstanceId,
+					changeId,
+					workerId,
+				);
+			},
+			async materializeAndClaimUsageInvoicePeriods() {
+				return {
+					materialized: 2,
+					jobs: [
+						claimedUsageJob(usageFixture({ jobId: "poison-period", periodId: "poison-period" })),
+						claimedUsageJob(healthyUsage),
+					],
+				};
+			},
+			async loadClaimedUsageInvoiceJob(projectInstanceId, jobKind, jobId, workerId) {
+				if (jobId === "poison-period") {
+					throw new Error("Usage invoice period poison-period cannot be invoiced");
+				}
+				return await repository.loadClaimedUsageInvoiceJob(
+					projectInstanceId,
+					jobKind,
+					jobId,
+					workerId,
+				);
+			},
+		},
+		adapterForJob: committedAdapter,
+		logger: { error() {} },
+	});
+
+	expect(await worker.runOnce()).toEqual({
+		materializedUsagePeriods: 2,
+		subscriptionChangesApplied: 1,
+		usageInvoicesCreated: 1,
+		usageAdjustmentsCreated: 0,
+		failed: 2,
+	});
+	expect(
+		calls.map(({ kind, changeId, jobId, error }) => ({ kind, changeId, jobId, error })),
+	).toEqual([
+		{
+			kind: "change_failed",
+			changeId: "poison-change",
+			jobId: undefined,
+			error: "Target plan has no Stripe recurring prices",
+		},
+		{
+			kind: "change_applied",
+			changeId: "healthy-change",
+			jobId: undefined,
+			error: undefined,
+		},
+		{
+			kind: "usage_failed",
+			changeId: undefined,
+			jobId: "poison-period",
+			error: "Usage invoice period poison-period cannot be invoiced",
+		},
+		{
+			kind: "usage_succeeded",
+			changeId: undefined,
+			jobId: "healthy-period",
+			error: undefined,
+		},
+	]);
+});
+
+it("skips a claimed job whose lease was lost without marking it", async () => {
+	const warned: Array<{ message: string; context?: Record<string, unknown> }> = [];
+	const { repository, calls } = recordingRepository({});
+	let adapterCalls = 0;
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository: {
+			...repository,
+			async claimSubscriptionChanges() {
+				return [claimedChange(changeFixture({ changeId: "reclaimed-change" }))];
+			},
+			async materializeAndClaimUsageInvoicePeriods() {
+				return {
+					materialized: 0,
+					jobs: [
+						claimedUsageJob(
+							usageFixture({ jobId: "reclaimed-period", periodId: "reclaimed-period" }),
+						),
+					],
+				};
+			},
+		},
+		adapterForJob() {
+			adapterCalls += 1;
+			return committedAdapter();
+		},
+		logger: {
+			error() {},
+			warn(message, context) {
+				warned.push({ message, context });
+			},
+		},
+	});
+
+	expect(await worker.runOnce()).toEqual({
+		materializedUsagePeriods: 0,
+		subscriptionChangesApplied: 0,
+		usageInvoicesCreated: 0,
+		usageAdjustmentsCreated: 0,
+		failed: 0,
+	});
+	expect(calls).toEqual([]);
+	expect(adapterCalls).toBe(0);
+	expect(warned).toEqual([
+		{
+			message: "Subscription change lease lost",
+			context: {
+				projectKey: "voysee",
+				changeId: "reclaimed-change",
+				workerId: "worker-1",
+			},
+		},
+		{
+			message: "Usage invoice lease lost",
+			context: {
+				projectKey: "voysee",
+				jobKind: "period",
+				jobId: "reclaimed-period",
+				workerId: "worker-1",
+			},
+		},
+	]);
+});
+
+it("still invoices usage when the subscription change claim throws", async () => {
+	const logged: Array<{ message: string; context?: Record<string, unknown> }> = [];
+	const usage = usageFixture();
+	const { repository, calls } = recordingRepository({ usage: [usage] });
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository: {
+			...repository,
+			async claimSubscriptionChanges() {
+				throw new Error("deadlock detected");
+			},
+		},
+		adapterForJob: committedAdapter,
+		logger: {
+			error(message, _error, context) {
+				logged.push({ message, context });
+			},
+		},
+	});
+
+	expect(await worker.runOnce()).toEqual({
+		materializedUsagePeriods: 1,
+		subscriptionChangesApplied: 0,
+		usageInvoicesCreated: 1,
+		usageAdjustmentsCreated: 0,
+		failed: 1,
+	});
+	expect(calls.map(({ kind, jobId }) => ({ kind, jobId }))).toEqual([
+		{ kind: "usage_succeeded", jobId: "period-1" },
+	]);
+	expect(logged).toEqual([
+		{ message: "Subscription change claim failed", context: { workerId: "worker-1" } },
+	]);
+});
+
+it("still applies changes when the usage invoice claim throws", async () => {
+	const logged: Array<{ message: string; context?: Record<string, unknown> }> = [];
+	const change = changeFixture();
+	const { repository, calls } = recordingRepository({ changes: [change] });
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository: {
+			...repository,
+			async materializeAndClaimUsageInvoicePeriods() {
+				throw new Error("deadlock detected");
+			},
+		},
+		adapterForJob: committedAdapter,
+		logger: {
+			error(message, _error, context) {
+				logged.push({ message, context });
+			},
+		},
+	});
+
+	expect(await worker.runOnce()).toEqual({
+		materializedUsagePeriods: 0,
+		subscriptionChangesApplied: 1,
+		usageInvoicesCreated: 0,
+		usageAdjustmentsCreated: 0,
+		failed: 1,
+	});
+	expect(calls.map(({ kind }) => kind)).toEqual(["change_applied"]);
+	expect(logged).toEqual([
+		{ message: "Usage invoice claim failed", context: { workerId: "worker-1" } },
+	]);
+});
+
+it("reports staging and materialization failures without abandoning the poll", async () => {
+	const logged: Array<{ message: string; context?: Record<string, unknown> }> = [];
+	const { repository } = recordingRepository({});
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository: {
+			...repository,
+			async claimSubscriptionChanges(_workerId, _limit, options) {
+				options?.onStagingError?.(new Error("staging deadlock"));
+				return [];
+			},
+			async materializeAndClaimUsageInvoicePeriods(_workerId, _limit, options) {
+				options?.onMaterializationError?.(new Error("Tiered pricing requires at least one tier"), {
+					projectInstanceId: projectInstanceContext().projectInstanceId,
+					subscriptionId: "sub_broken",
+				});
+				return { materialized: 1, jobs: [] };
+			},
+		},
+		adapterForJob: committedAdapter,
+		logger: {
+			error(message, _error, context) {
+				logged.push({ message, context });
+			},
+		},
+	});
+
+	expect(await worker.runOnce()).toEqual({
+		materializedUsagePeriods: 1,
+		subscriptionChangesApplied: 0,
+		usageInvoicesCreated: 0,
+		usageAdjustmentsCreated: 0,
+		failed: 0,
+	});
+	expect(logged).toEqual([
+		{ message: "Catalog migration staging failed", context: { workerId: "worker-1" } },
+		{
+			message: "Usage invoice materialization failed",
+			context: {
+				projectInstanceId: projectInstanceContext().projectInstanceId,
+				subscriptionId: "sub_broken",
+				workerId: "worker-1",
+			},
 		},
 	]);
 });

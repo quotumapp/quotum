@@ -175,6 +175,21 @@ localDescribe("Worker queue concurrency", () => {
 		await expireSubscriptionChangeLock(context.sql, changeId);
 		const [reclaimed] = await context.repository.claimSubscriptionChanges("worker-b", 1);
 		expect(reclaimed.changeId).toBe(changeId);
+		// The load is lease-checked, so the fenced worker never builds the job it lost.
+		expect(
+			await context.repository.loadClaimedSubscriptionChange(
+				claimed.projectInstanceId,
+				changeId,
+				"worker-a",
+			),
+		).toBeNull();
+		expect(
+			await context.repository.loadClaimedSubscriptionChange(
+				reclaimed.projectInstanceId,
+				changeId,
+				"worker-b",
+			),
+		).toMatchObject({ changeId, status: "processing" });
 		await expect(
 			context.repository.markSubscriptionChangeApplied(
 				claimed.projectInstanceId,
@@ -239,6 +254,22 @@ localDescribe("Worker queue concurrency", () => {
 			1,
 		);
 		expect(reclaimed.jobs[0]?.jobId).toBe(periodId);
+		expect(
+			await context.repository.loadClaimedUsageInvoiceJob(
+				claimed.jobs[0].projectInstanceId,
+				"period",
+				periodId,
+				"worker-a",
+			),
+		).toBeNull();
+		expect(
+			await context.repository.loadClaimedUsageInvoiceJob(
+				reclaimed.jobs[0].projectInstanceId,
+				"period",
+				periodId,
+				"worker-b",
+			),
+		).toMatchObject({ jobKind: "period", jobId: periodId });
 		await expect(
 			context.repository.markUsageInvoiceSucceeded(
 				claimed.jobs[0].projectInstanceId,

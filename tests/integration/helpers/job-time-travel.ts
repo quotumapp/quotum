@@ -69,12 +69,48 @@ export async function expireSubscriptionChangeLock(sql: SQL, changeId: string): 
 	`;
 }
 
+export async function setSubscriptionChangeAttempts(
+	sql: SQL,
+	changeId: string,
+	attempts: number,
+): Promise<void> {
+	await sql`
+		UPDATE subscription_changes
+		SET attempts = ${attempts}
+		WHERE id = ${changeId}
+	`;
+}
+
 export async function expireUsageInvoicePeriodLock(sql: SQL, periodId: string): Promise<void> {
 	await sql`
 		UPDATE usage_invoice_periods
 		SET locked_at = now() - INTERVAL '6 minutes'
 		WHERE id = ${periodId}
 			AND status = 'processing'
+	`;
+}
+
+export async function setUsageInvoicePeriodAttempts(
+	sql: SQL,
+	periodId: string,
+	attempts: number,
+): Promise<void> {
+	await sql`
+		UPDATE usage_invoice_periods
+		SET attempts = ${attempts}
+		WHERE id = ${periodId}
+	`;
+}
+
+export async function setUsageInvoiceAdjustmentAttempts(
+	sql: SQL,
+	adjustmentId: string,
+	attempts: number,
+): Promise<void> {
+	await sql`
+		UPDATE usage_invoice_adjustments
+		SET attempts = ${attempts}
+		WHERE id = ${adjustmentId}::bigint
 	`;
 }
 

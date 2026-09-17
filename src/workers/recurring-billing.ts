@@ -4,6 +4,12 @@ import type {
 	UsageInvoiceJob,
 } from "../billing/recurring";
 import type { BillingProvider } from "../billing/types";
+import type {
+	ClaimedSubscriptionChange,
+	ClaimedUsageInvoiceJob,
+	SubscriptionChangeClaimOptions,
+	UsageInvoiceClaimOptions,
+} from "../db/repository";
 import {
 	type BillingMetrics,
 	createNoopBillingMetrics,
@@ -15,7 +21,16 @@ import type { ProviderOperation } from "../shared/provider-capabilities";
 import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface RecurringBillingWorkerRepository {
-	claimSubscriptionChanges(workerId: string, limit: number): Promise<SubscriptionChangeOperation[]>;
+	claimSubscriptionChanges(
+		workerId: string,
+		limit: number,
+		options?: SubscriptionChangeClaimOptions,
+	): Promise<ClaimedSubscriptionChange[]>;
+	loadClaimedSubscriptionChange(
+		projectInstanceId: string,
+		changeId: string,
+		workerId: string,
+	): Promise<SubscriptionChangeOperation | null>;
 	markSubscriptionChangeApplied(
 		projectInstanceId: string,
 		changeId: string,
@@ -31,7 +46,14 @@ export interface RecurringBillingWorkerRepository {
 	materializeAndClaimUsageInvoicePeriods(
 		workerId: string,
 		limit: number,
-	): Promise<{ materialized: number; jobs: UsageInvoiceJob[] }>;
+		options?: UsageInvoiceClaimOptions,
+	): Promise<{ materialized: number; jobs: ClaimedUsageInvoiceJob[] }>;
+	loadClaimedUsageInvoiceJob(
+		projectInstanceId: string,
+		jobKind: UsageInvoiceJob["jobKind"],
+		jobId: string,
+		workerId: string,
+	): Promise<UsageInvoiceJob | null>;
 	markUsageInvoiceSucceeded(
 		projectInstanceId: string,
 		jobKind: UsageInvoiceJob["jobKind"],
@@ -58,6 +80,8 @@ export type RecurringBillingWorkerAdapter = Pick<ProviderAdapter, "changes" | "s
 
 export interface RecurringBillingWorkerLogger {
 	error(message: string, error: unknown, context?: Record<string, unknown>): void;
+	/** A lost lease is normal concurrency, not a failure, so it is reported below error level. */
+	warn?(message: string, context?: Record<string, unknown>): void;
 }
 
 export class RecurringBillingWorker {
@@ -82,17 +106,47 @@ export class RecurringBillingWorker {
 		let usageInvoicesCreated = 0;
 		let usageAdjustmentsCreated = 0;
 		let failed = 0;
-		const changes = await this.dependencies.repository.claimSubscriptionChanges(
-			this.dependencies.workerId,
-			limit,
-		);
-		for (const change of changes) {
+
+		// Each claim is guarded on its own, so a failing change claim still invoices usage.
+		let claimedChanges: ClaimedSubscriptionChange[] = [];
+		try {
+			claimedChanges = await this.dependencies.repository.claimSubscriptionChanges(
+				this.dependencies.workerId,
+				limit,
+				{
+					onStagingError: (error) =>
+						this.dependencies.logger.error("Catalog migration staging failed", error, {
+							workerId: this.dependencies.workerId,
+						}),
+				},
+			);
+		} catch (error) {
+			failed += 1;
+			this.dependencies.logger.error("Subscription change claim failed", error, {
+				workerId: this.dependencies.workerId,
+			});
+		}
+
+		for (const claimed of claimedChanges) {
 			try {
+				const change = await this.dependencies.repository.loadClaimedSubscriptionChange(
+					claimed.projectInstanceId,
+					claimed.changeId,
+					this.dependencies.workerId,
+				);
+				if (change === null) {
+					this.dependencies.logger.warn?.("Subscription change lease lost", {
+						projectKey: claimed.projectKey,
+						changeId: claimed.changeId,
+						workerId: this.dependencies.workerId,
+					});
+					continue;
+				}
 				const project = await resolveClaimedProjectInstance(
 					this.dependencies.projectContextResolver,
 					{
-						projectInstanceId: change.projectInstanceId,
-						projectInstanceKey: change.projectKey,
+						projectInstanceId: claimed.projectInstanceId,
+						projectInstanceKey: claimed.projectKey,
 					},
 				);
 				const { changes } = await this.dependencies.adapterForJob(project, change.provider);
@@ -109,8 +163,8 @@ export class RecurringBillingWorker {
 					throw new UncertainProviderWriteError(applied.correlation);
 				}
 				await this.dependencies.repository.markSubscriptionChangeApplied(
-					change.projectInstanceId,
-					change.changeId,
+					claimed.projectInstanceId,
+					claimed.changeId,
 					applied.providerRequestId,
 					this.dependencies.workerId,
 				);
@@ -121,30 +175,60 @@ export class RecurringBillingWorker {
 				this.recordJob("subscription_change", "failed");
 				// Log first: an uncertain write's correlation must survive a failing mark.
 				this.dependencies.logger.error("Subscription change failed", error, {
-					projectKey: change.projectKey,
-					changeId: change.changeId,
+					projectKey: claimed.projectKey,
+					changeId: claimed.changeId,
 					...uncertainWriteContext(error),
 				});
-				await this.dependencies.repository.markSubscriptionChangeFailed(
-					change.projectInstanceId,
-					change.changeId,
-					errorMessage(error),
-					this.dependencies.workerId,
-				);
+				await this.markSubscriptionChangeFailedSafely(claimed, error);
 			}
 		}
 
-		const usage = await this.dependencies.repository.materializeAndClaimUsageInvoicePeriods(
-			this.dependencies.workerId,
-			limit,
-		);
-		for (const job of usage.jobs) {
+		let usage: { materialized: number; jobs: ClaimedUsageInvoiceJob[] } = {
+			materialized: 0,
+			jobs: [],
+		};
+		try {
+			usage = await this.dependencies.repository.materializeAndClaimUsageInvoicePeriods(
+				this.dependencies.workerId,
+				limit,
+				{
+					onMaterializationError: (error, context) =>
+						this.dependencies.logger.error("Usage invoice materialization failed", error, {
+							...context,
+							workerId: this.dependencies.workerId,
+						}),
+				},
+			);
+		} catch (error) {
+			failed += 1;
+			this.dependencies.logger.error("Usage invoice claim failed", error, {
+				workerId: this.dependencies.workerId,
+			});
+		}
+
+		for (const claimed of usage.jobs) {
+			let job: UsageInvoiceJob | null = null;
 			try {
+				job = await this.dependencies.repository.loadClaimedUsageInvoiceJob(
+					claimed.projectInstanceId,
+					claimed.jobKind,
+					claimed.jobId,
+					this.dependencies.workerId,
+				);
+				if (job === null) {
+					this.dependencies.logger.warn?.("Usage invoice lease lost", {
+						projectKey: claimed.projectKey,
+						jobKind: claimed.jobKind,
+						jobId: claimed.jobId,
+						workerId: this.dependencies.workerId,
+					});
+					continue;
+				}
 				const project = await resolveClaimedProjectInstance(
 					this.dependencies.projectContextResolver,
 					{
-						projectInstanceId: job.projectInstanceId,
-						projectInstanceKey: job.projectKey,
+						projectInstanceId: claimed.projectInstanceId,
+						projectInstanceKey: claimed.projectKey,
 					},
 				);
 				const { settlement } = await this.dependencies.adapterForJob(project, job.provider);
@@ -161,33 +245,28 @@ export class RecurringBillingWorker {
 					throw new UncertainProviderWriteError(charged.correlation);
 				}
 				await this.dependencies.repository.markUsageInvoiceSucceeded(
-					job.projectInstanceId,
-					job.jobKind,
-					job.jobId,
+					claimed.projectInstanceId,
+					claimed.jobKind,
+					claimed.jobId,
 					charged.externalChargeId,
 					this.dependencies.workerId,
 				);
-				if (job.jobKind === "period") usageInvoicesCreated += 1;
+				if (claimed.jobKind === "period") usageInvoicesCreated += 1;
 				else usageAdjustmentsCreated += 1;
-				this.recordJob(`usage_${job.jobKind}`, "succeeded");
+				this.recordJob(`usage_${claimed.jobKind}`, "succeeded");
 			} catch (error) {
 				failed += 1;
-				this.recordJob(`usage_${job.jobKind}`, "failed");
+				this.recordJob(`usage_${claimed.jobKind}`, "failed");
 				this.dependencies.logger.error("Usage invoice failed", error, {
-					projectKey: job.projectKey,
-					provider: job.provider,
-					periodId: job.periodId,
+					projectKey: claimed.projectKey,
+					...(job === null ? {} : { provider: job.provider }),
+					periodId: claimed.periodId,
 					...uncertainWriteContext(error),
 				});
-				await this.dependencies.repository.markUsageInvoiceFailed(
-					job.projectInstanceId,
-					job.jobKind,
-					job.jobId,
-					errorMessage(error),
-					this.dependencies.workerId,
-				);
+				await this.markUsageInvoiceFailedSafely(claimed, error);
 			}
 		}
+
 		return {
 			materializedUsagePeriods: usage.materialized,
 			subscriptionChangesApplied,
@@ -195,6 +274,49 @@ export class RecurringBillingWorker {
 			usageAdjustmentsCreated,
 			failed,
 		};
+	}
+
+	/** A failing mark must not abandon the rest of the batch; the job is retried from its lease. */
+	private async markSubscriptionChangeFailedSafely(
+		claimed: ClaimedSubscriptionChange,
+		error: unknown,
+	): Promise<void> {
+		try {
+			await this.dependencies.repository.markSubscriptionChangeFailed(
+				claimed.projectInstanceId,
+				claimed.changeId,
+				errorMessage(error),
+				this.dependencies.workerId,
+			);
+		} catch (markerError) {
+			this.dependencies.logger.error("Subscription change failure marker failed", markerError, {
+				projectKey: claimed.projectKey,
+				changeId: claimed.changeId,
+				workerId: this.dependencies.workerId,
+			});
+		}
+	}
+
+	private async markUsageInvoiceFailedSafely(
+		claimed: ClaimedUsageInvoiceJob,
+		error: unknown,
+	): Promise<void> {
+		try {
+			await this.dependencies.repository.markUsageInvoiceFailed(
+				claimed.projectInstanceId,
+				claimed.jobKind,
+				claimed.jobId,
+				errorMessage(error),
+				this.dependencies.workerId,
+			);
+		} catch (markerError) {
+			this.dependencies.logger.error("Usage invoice failure marker failed", markerError, {
+				projectKey: claimed.projectKey,
+				jobKind: claimed.jobKind,
+				jobId: claimed.jobId,
+				workerId: this.dependencies.workerId,
+			});
+		}
 	}
 
 	private recordJob(operation: string, result: "succeeded" | "failed"): void {

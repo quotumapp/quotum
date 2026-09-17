@@ -68,7 +68,13 @@ import { ProjectScopedBillingRepository } from "./repository/project-scoped";
 import { ProjectionJobBillingRepository } from "./repository/projection-jobs";
 import { PromotionProviderObjectRepository } from "./repository/promotion-provider-objects";
 import { PromotionRepository } from "./repository/promotions";
-import { RecurringPricingRepository } from "./repository/recurring-pricing";
+import {
+	type ClaimedSubscriptionChange,
+	type ClaimedUsageInvoiceJob,
+	RecurringPricingRepository,
+	type SubscriptionChangeClaimOptions,
+	type UsageInvoiceClaimOptions,
+} from "./repository/recurring-pricing";
 import { StoreEventReplayBillingRepository } from "./repository/store-event-replay";
 import { StripeBillingRepository } from "./repository/stripe";
 import { SubscriptionReconciliationBillingRepository } from "./repository/subscription-reconciliation";
@@ -101,6 +107,12 @@ import type {
 
 export type { GrantAllocationInput } from "./repository/metering";
 export { ProjectScopedBillingRepository } from "./repository/project-scoped";
+export type {
+	ClaimedSubscriptionChange,
+	ClaimedUsageInvoiceJob,
+	SubscriptionChangeClaimOptions,
+	UsageInvoiceClaimOptions,
+} from "./repository/recurring-pricing";
 export type {
 	CompleteStripeCheckoutRequestInput,
 	ExpiredSubscriptionReconciliationResult,
@@ -490,8 +502,21 @@ export class BillingRepository {
 	async claimSubscriptionChanges(
 		workerId: string,
 		limit: number,
-	): Promise<SubscriptionChangeOperation[]> {
-		return await this.recurringPricing.claimSubscriptionChanges(workerId, limit);
+		options?: SubscriptionChangeClaimOptions,
+	): Promise<ClaimedSubscriptionChange[]> {
+		return await this.recurringPricing.claimSubscriptionChanges(workerId, limit, options);
+	}
+
+	async loadClaimedSubscriptionChange(
+		projectInstanceId: string,
+		changeId: string,
+		workerId: string,
+	): Promise<SubscriptionChangeOperation | null> {
+		return await this.recurringPricing.loadClaimedSubscriptionChange(
+			projectInstanceId,
+			changeId,
+			workerId,
+		);
 	}
 
 	async markSubscriptionChangeApplied(
@@ -525,8 +550,27 @@ export class BillingRepository {
 	async materializeAndClaimUsageInvoicePeriods(
 		workerId: string,
 		limit: number,
-	): Promise<{ materialized: number; jobs: UsageInvoiceJob[] }> {
-		return await this.recurringPricing.materializeAndClaimUsageInvoicePeriods(workerId, limit);
+		options?: UsageInvoiceClaimOptions,
+	): Promise<{ materialized: number; jobs: ClaimedUsageInvoiceJob[] }> {
+		return await this.recurringPricing.materializeAndClaimUsageInvoicePeriods(
+			workerId,
+			limit,
+			options,
+		);
+	}
+
+	async loadClaimedUsageInvoiceJob(
+		projectInstanceId: string,
+		jobKind: UsageInvoiceJob["jobKind"],
+		jobId: string,
+		workerId: string,
+	): Promise<UsageInvoiceJob | null> {
+		return await this.recurringPricing.loadClaimedUsageInvoiceJob(
+			projectInstanceId,
+			jobKind,
+			jobId,
+			workerId,
+		);
 	}
 
 	async markUsageInvoiceSucceeded(
