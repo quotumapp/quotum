@@ -251,6 +251,16 @@ localDescribe("catalog control plane", () => {
 		expect((await publicCatalog.json()).data.plans).toEqual([]);
 	});
 
+	// capability: catalog.product.subscription
+	// capability: catalog.trial
+	// capability: catalog.addon
+	// capability: catalog.price.flat
+	// capability: catalog.price.licensed
+	// capability: catalog.price.hybrid
+	// capability: catalog.price.postpaid_usage
+	// capability: checkout.plan
+	// capability: subscription.change.apply
+	// capability: settlement.collect_finalized_charge
 	it("publishes fixed, licensed-seat, and metered-overage prices as immutable components", async () => {
 		await seedPhaseTwoStripePrices();
 		const { app, authHeaders, stripe } = createIntegrationApp({

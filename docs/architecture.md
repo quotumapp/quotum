@@ -38,9 +38,13 @@ The policy is deny-by-default:
 - `src/billing/`, `src/catalog/`, `src/db/`: billing domain, catalog, and persistence.
 - `src/platform/`: organizations, identity, onboarding, connections, and audit.
 - `src/providers/`, `src/workers/`, `src/projections/`: external providers and durable delivery.
+  Each provider declares its operation support in `src/providers/<provider>/capabilities.ts`,
+  collected by `src/providers/capabilities.ts`. The provider registry (`src/providers/registry.ts`)
+  resolves provider services for request handlers and builds the `ProviderAdapter` wrappers
+  defined in `src/providers/contract.ts`, checked against each declaration.
 - `migrations/`: ordered schema authority.
 - `tests/`: unit, integration, and end-to-end coverage mirroring the source layout.
-- `contracts/v1/`: generated OpenAPI contract and error inventory.
+- `contracts/v1/`: generated OpenAPI contract, error inventory and provider capability declarations.
 
 ## Distributions and public runtime interfaces
 

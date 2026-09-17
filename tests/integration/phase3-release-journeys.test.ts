@@ -145,6 +145,7 @@ localDescribe("Phase 3 release journeys", () => {
 		});
 	});
 
+	// capability: topup.automatic
 	it("runs automatic top-ups through the real repository, worker, and Stripe service", async () => {
 		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
 		const account = "worker-topup";
@@ -262,6 +263,9 @@ localDescribe("Phase 3 release journeys", () => {
 		expect((await reset.json()).data).toMatchObject({ active: true, status: "ready" });
 	});
 
+	// capability: catalog.price.tiered
+	// capability: settlement.collect_finalized_charge
+	// capability: adjustment.issue
 	it("invoices graduated and volume tiers and a late correction through the recurring billing worker", async () => {
 		await seedTieredUsageSubscription(context.sql, "graduated-account", "graduated");
 		await seedTieredUsageSubscription(context.sql, "volume-account", "volume");

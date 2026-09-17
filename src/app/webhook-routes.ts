@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BillingError, isBillingError } from "../billing/errors";
+import type { BillingProvider } from "../billing/types";
 import {
 	type RateLimiter,
 	rateLimitHeaders,
@@ -131,7 +132,7 @@ export function registerWebhookRoutes(input: {
 		return resolution.context;
 	};
 	const withWebhookFailureRecording = async <T>(
-		provider: "apple" | "google" | "stripe",
+		provider: BillingProvider,
 		message: string,
 		project: ProjectInstanceContext,
 		run: () => Promise<T>,
@@ -276,7 +277,7 @@ export function registerWebhookRoutes(input: {
 function recordWebhookFailure(
 	metrics: BillingMetrics,
 	logger: BillingLogger,
-	provider: "apple" | "google" | "stripe",
+	provider: BillingProvider,
 	error: unknown,
 	message: string,
 	projectKey: string,

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ControlsEnterpriseRepositoryLike } from "../billing/controls";
+import { billingProviders } from "../billing/types";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/controls-responses";
@@ -57,7 +58,7 @@ const autoTopupBody = z
 		entityId: z.string().trim().min(1).max(200).nullable().optional(),
 		featureKey: z.string().trim().min(1).max(120),
 		topupKey: z.string().trim().min(1).max(120),
-		provider: z.enum(["apple", "google", "stripe"]),
+		provider: z.enum(billingProviders),
 		thresholdQuantity: z.string().trim().min(1).max(80),
 		cooldownSeconds: z.number().int().min(30).max(86_400).optional(),
 		limitIntervalSeconds: z.number().int().min(60).max(31_536_000).optional(),

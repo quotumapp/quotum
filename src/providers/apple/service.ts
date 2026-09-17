@@ -6,7 +6,11 @@ import type {
 	StoreEventReplayJobRow,
 	StoreKitRecordingResult,
 } from "../../db/repository";
-import type { StoreEventReplayProviderResult } from "../../workers/store-event-replay";
+import type {
+	StoreEventReplayProvider,
+	StoreEventReplayProviderResult,
+} from "../../workers/store-event-replay";
+import type { SubscriptionReconciliationProvider } from "../../workers/subscription-reconciliation";
 import { requireNonBlank } from "../validation";
 import {
 	normalizeStoredStoreKitEvent,
@@ -58,7 +62,9 @@ export interface AppleStoreKitServiceDependencies {
 	repository: AppleStoreKitRepositoryDependency;
 }
 
-export class AppleStoreKitService {
+export class AppleStoreKitService
+	implements StoreEventReplayProvider, SubscriptionReconciliationProvider
+{
 	constructor(private readonly dependencies: AppleStoreKitServiceDependencies) {}
 
 	async getOrCreateAppAccountToken(billingAccountId: string): Promise<string> {

@@ -66,6 +66,7 @@ describe("commercial preview pricing", () => {
 		]);
 	});
 
+	// capability: catalog.price.tiered
 	it("leaves tiered totals to Stripe and ends a once discount before the next invoice", () => {
 		const tiered = priceCommercialLines({
 			lines: [line(), line({ key: "usage", pricingModel: "graduated" })],

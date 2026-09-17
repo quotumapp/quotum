@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BillingError } from "../billing/errors";
+import { billingProviders } from "../billing/types";
 import type { CatalogControlPlaneLike } from "../catalog/types";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { operatorApiKeyGuard } from "./admin-routes";
@@ -29,7 +30,7 @@ const featureSchema = z
 const providerBindingSchema = z
 	.object({
 		productKey: z.string().trim().min(1).max(120),
-		provider: z.enum(["apple", "google", "stripe"]),
+		provider: z.enum(billingProviders),
 		channel: z.enum(["ios", "android", "web"]),
 	})
 	.strict();

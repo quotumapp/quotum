@@ -541,6 +541,7 @@ localDescribe("Worker flows integration", () => {
 		await expectTableCounts(context.sql, { projection_sync_jobs: 3 });
 	});
 
+	// capability: subscription.reconcile
 	it("restores a locally expired subscription when the provider reports a missed renewal", async () => {
 		const fixture = createIntegrationApp({
 			env: context.env,

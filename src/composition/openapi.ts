@@ -418,9 +418,11 @@ export async function generateOpenApi(version: string) {
 			throw new Error(`Duplicate operation: ${route.method.toUpperCase()} ${path}`);
 		item[route.method] = operationObject(renderer, route);
 	}
-	// Merchant views are part of the published vocabulary even where no operation embeds them.
-	for (const [name, schema] of Object.entries(platformSchemas))
-		if (schema instanceof z.ZodType) renderer.include(schema, name.replace(/Schema$/, ""));
+	// Merchant views and provider capability schemas are part of the published vocabulary even
+	// where no operation embeds them.
+	for (const module of [platformSchemas, providerResponses])
+		for (const [name, schema] of Object.entries(module))
+			if (schema instanceof z.ZodType) renderer.include(schema, name.replace(/Schema$/, ""));
 
 	const document = {
 		openapi: "3.1.2",

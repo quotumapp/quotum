@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { billingProviderValues } from "./provider-enum";
 
 /** Authored HTTP wire schemas. Update these with the handlers; OpenAPI is generated from them. */
 export const getV1BillingAccountsByBillingAccountIdBillingSummaryResponse200Schema = z.object({
@@ -11,7 +12,7 @@ export const getV1BillingAccountsByBillingAccountIdBillingSummaryResponse200Sche
 		subscriptions: z.array(
 			z.object({
 				id: z.string(),
-				provider: z.enum(["google", "apple", "stripe"]),
+				provider: z.enum(billingProviderValues("google")),
 				planKey: z.union([z.null(), z.string()]),
 				status: z.string(),
 				currentPeriodStart: z.union([z.null(), z.string()]),

@@ -60,6 +60,13 @@ bun run openapi:lint
 CI diffs `contracts/v1/openapi.json` against the base branch; a compatible patch release must not
 introduce breaking changes.
 
+`openapi:generate` writes `contracts/v1/openapi.json`, the error inventory
+`contracts/v1/errors.json` and the provider capability contract
+`contracts/v1/provider-capabilities.json`, and rewrites the generated capability table in
+[`docs/providers.md`](docs/providers.md#provider-capabilities). `openapi:check` fails when any of
+them is stale. Change provider support in the declarations under `src/providers/`, never in the
+generated files.
+
 ## Coding conventions
 
 - Strict TypeScript, small purpose-specific modules, kebab-case file names.

@@ -1,4 +1,5 @@
 import type { ProjectInstanceContext } from "../projects/context";
+import type { BillingProvider } from "./types";
 
 export type ControlKind = "spend_limit" | "usage_limit";
 export type ControlInterval = "month" | "year" | "lifetime";
@@ -79,7 +80,7 @@ export interface AutoTopupPolicyInput {
 	entityId?: string | null;
 	featureKey: string;
 	topupKey: string;
-	provider: "apple" | "google" | "stripe";
+	provider: BillingProvider;
 	thresholdQuantity: string;
 	cooldownSeconds?: number;
 	limitIntervalSeconds?: number;
@@ -94,7 +95,7 @@ export interface AutoTopupPolicyRecord {
 	entityId: string | null;
 	featureKey: string;
 	topupKey: string;
-	provider: "apple" | "google" | "stripe";
+	provider: BillingProvider;
 	thresholdQuantity: string;
 	status: "ready" | "cooldown" | "suspended";
 	cooldownUntil: string | null;

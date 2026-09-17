@@ -507,6 +507,8 @@ describe("StripeBillingService", () => {
 		expect(await service.getCatalog()).toEqual(catalog);
 	});
 
+	// capability: catalog.product.consumable
+	// capability: checkout.hosted
 	it("creates payment Checkout Sessions for consumables with session and PaymentIntent metadata", async () => {
 		const product = stripeProduct();
 		const { calls, service } = serviceFixture({ products: { credits_100: product } });
@@ -554,6 +556,7 @@ describe("StripeBillingService", () => {
 		]);
 	});
 
+	// capability: checkout.hosted
 	it("creates subscription Checkout Sessions with subscription metadata only", async () => {
 		const product = stripeProduct({
 			storeProductId: "store_product_premium_monthly",
@@ -596,6 +599,11 @@ describe("StripeBillingService", () => {
 		expect("payment_intent_data" in checkoutCall.params).toBe(false);
 	});
 
+	// capability: catalog.trial
+	// capability: catalog.price.flat
+	// capability: catalog.price.licensed
+	// capability: catalog.price.hybrid
+	// capability: checkout.plan
 	it("creates hybrid recurring Checkout with explicit seats and trial behavior", async () => {
 		const { calls, service } = serviceFixture({
 			recurringPlan: {
@@ -660,6 +668,7 @@ describe("StripeBillingService", () => {
 		});
 	});
 
+	// capability: settlement.collect_finalized_charge
 	it("creates, lines, finalizes, and pays one idempotent usage invoice", async () => {
 		const { calls, service } = serviceFixture();
 		expect(
@@ -703,6 +712,7 @@ describe("StripeBillingService", () => {
 		});
 	});
 
+	// capability: adjustment.issue
 	it("creates a negative late-correction line without attempting payment", async () => {
 		const { calls, service } = serviceFixture();
 		expect(
@@ -738,6 +748,7 @@ describe("StripeBillingService", () => {
 		});
 	});
 
+	// capability: topup.automatic
 	it("charges a saved Stripe payment method for one idempotent automatic top-up", async () => {
 		const { calls, service } = serviceFixture();
 		expect(await service.createAutoTopupCharge(autoTopupJob())).toEqual({
@@ -769,6 +780,7 @@ describe("StripeBillingService", () => {
 		});
 	});
 
+	// capability: topup.automatic
 	it("requires a saved default payment method before an automatic top-up", async () => {
 		const { calls, service } = serviceFixture({ defaultPaymentMethod: null });
 		expect(await service.createAutoTopupCharge(autoTopupJob())).toEqual({
@@ -806,6 +818,7 @@ describe("StripeBillingService", () => {
 		]);
 	});
 
+	// capability: topup.automatic
 	it("returns action-required when Stripe requests off-session authentication", async () => {
 		const paymentError = Object.assign(new Error("Customer authentication is required"), {
 			code: "invoice_payment_intent_requires_action",
@@ -896,6 +909,7 @@ describe("StripeBillingService", () => {
 		]);
 	});
 
+	// capability: portal.session
 	it("creates and links Stripe customers for Portal Sessions when none exists", async () => {
 		const { calls, service } = serviceFixture();
 
@@ -1110,6 +1124,8 @@ describe("StripeBillingService", () => {
 		});
 	});
 
+	// capability: catalog.product.non_consumable
+	// capability: checkout.hosted
 	it("creates payment Checkout Sessions for non-consumable one-time purchases", async () => {
 		const { calls, service } = serviceFixture({
 			products: {
@@ -1164,6 +1180,7 @@ describe("StripeBillingService", () => {
 		expect(calls).toEqual([]);
 	});
 
+	// capability: webhook.ingest
 	it("verifies webhook signatures and records Stripe credit purchases from Checkout events", async () => {
 		const { calls, repositoryInputs, service } = serviceFixture({
 			webhookEvent: stripeEvent("checkout.session.completed", checkoutSessionObject()),
@@ -1363,6 +1380,7 @@ describe("StripeBillingService", () => {
 		});
 	});
 
+	// capability: refund.sync
 	it("records refund and dispute reversals while ignoring charge.refunded", async () => {
 		const refund = serviceFixture({
 			webhookEvent: stripeEvent("refund.created", refundObject(), "evt_refund"),
@@ -1621,6 +1639,7 @@ describe("StripeBillingService", () => {
 		);
 	});
 
+	// capability: event.replay
 	it("validates Stripe replay provider/channel and processes stored raw payload without signatures", async () => {
 		const { calls, repositoryInputs, service } = serviceFixture();
 
@@ -1704,6 +1723,7 @@ describe("StripeBillingService", () => {
 		expect(repositoryInputs).toEqual([]);
 	});
 
+	// capability: subscription.reconcile
 	it("retrieves provider subscriptions and records provider reconciliation commands", async () => {
 		const { calls, repositoryInputs, service } = serviceFixture({
 			retrievedSubscription: subscriptionObject(),

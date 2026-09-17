@@ -1,3 +1,5 @@
+import type { BillingProvider } from "./types";
+
 export interface UsageEventCursor {
 	recordedAt: string;
 	id: string;
@@ -80,7 +82,7 @@ export interface CustomerBillingSummary {
 	generatedAt: string;
 	subscriptions: Array<{
 		id: string;
-		provider: "apple" | "google" | "stripe";
+		provider: BillingProvider;
 		planKey: string | null;
 		status: string;
 		currentPeriodStart: string | null;

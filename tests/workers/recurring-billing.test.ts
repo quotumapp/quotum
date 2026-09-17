@@ -5,6 +5,8 @@ import { projectContextResolver, projectInstanceContext } from "../helpers/proje
 
 const workerProjectResolver = projectContextResolver();
 
+// capability: subscription.change.apply
+// capability: settlement.collect_finalized_charge
 it("applies due changes and invoices closed overage periods", async () => {
 	const applied: string[] = [];
 	const invoiced: string[] = [];

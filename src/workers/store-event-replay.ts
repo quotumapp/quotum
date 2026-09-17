@@ -1,3 +1,4 @@
+import { type BillingProvider, isBillingProvider } from "../billing/types";
 import type { StoreEventReplayJobRow } from "../db/repository";
 import {
 	type BillingLogger,
@@ -32,7 +33,7 @@ export interface StoreEventReplayProviders {
 
 export type StoreEventReplayProviderSelector = (
 	project: ProjectInstanceContext,
-	provider: "apple" | "google" | "stripe",
+	provider: BillingProvider,
 ) => StoreEventReplayProviders | Promise<StoreEventReplayProviders>;
 
 export interface StoreEventReplayRunResult {
@@ -278,7 +279,7 @@ export class StoreEventReplayWorker {
 		project: ProjectInstanceContext,
 	): Promise<StoreEventReplayProvider> {
 		const provider = event.provider;
-		if (provider !== "apple" && provider !== "google" && provider !== "stripe") {
+		if (!isBillingProvider(provider)) {
 			throw new Error(`Unsupported store event replay provider: ${provider}`);
 		}
 
@@ -292,7 +293,7 @@ export class StoreEventReplayWorker {
 
 	private async providersFor(
 		project: ProjectInstanceContext,
-		provider: "apple" | "google" | "stripe",
+		provider: BillingProvider,
 	): Promise<StoreEventReplayProviders> {
 		return typeof this.providers === "function"
 			? this.providers(project, provider)

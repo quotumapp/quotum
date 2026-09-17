@@ -1,7 +1,11 @@
 import { z } from "zod";
+import {
+	billingChannels,
+	billingProviders,
+	isBillingProvider,
+} from "../shared/provider-capabilities";
 
-export const billingProviders = ["apple", "google", "stripe"] as const;
-export const billingChannels = ["ios", "android", "web"] as const;
+export { billingChannels, billingProviders, isBillingProvider };
 export const productTypes = ["subscription", "consumable", "non_consumable"] as const;
 export const purchaseStatuses = ["completed", "refunded", "revoked", "voided"] as const;
 export const subscriptionStatuses = [
@@ -29,8 +33,8 @@ export const projectionSyncReasons = [
 	"usage_changed",
 ] as const;
 
-export type BillingProvider = "apple" | "google" | "stripe";
-export type BillingChannel = "ios" | "android" | "web";
+export type BillingProvider = (typeof billingProviders)[number];
+export type BillingChannel = (typeof billingChannels)[number];
 export type ProductType = "subscription" | "consumable" | "non_consumable";
 export type PurchaseKind = ProductType;
 export type PurchaseStatus = "completed" | "refunded" | "revoked" | "voided";

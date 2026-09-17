@@ -6,6 +6,7 @@ import {
 	signedDecimalToUnits,
 	unitsToDecimal,
 } from "../../billing/decimal";
+import type { BillingProvider } from "../../billing/types";
 import { controlWindowBounds, resolveEffectiveControls } from "./controls-enterprise";
 import { executeOne, executeRows } from "./query";
 import type { QueryExecutor } from "./types";
@@ -690,7 +691,7 @@ export async function recordUsageAlertDelta(
 
 export interface AutoTopupPolicyRow {
 	id: string | number | bigint;
-	provider: "apple" | "google" | "stripe";
+	provider: BillingProvider;
 	threshold_quantity: unknown;
 	cooldown_seconds: number;
 	limit_interval_seconds: number;

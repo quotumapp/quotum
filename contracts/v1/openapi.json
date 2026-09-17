@@ -112,6 +112,630 @@
         ],
         "type": "object"
       },
+      "CapabilityCondition": {
+        "oneOf": [
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "connection_enabled"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "connection_validated"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "expected": {
+                "items": {
+                  "type": [
+                    "string",
+                    "boolean"
+                  ]
+                },
+                "type": "array"
+              },
+              "flag": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "account_flag"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "flag",
+              "expected"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "allowed": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "enum": [
+                  "currency"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowed"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "catalog_bound"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "allowed": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "enum": [
+                  "subscription_state"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowed"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "allowed": {
+                "items": {
+                  "enum": [
+                    "automatic",
+                    "manual"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "enum": [
+                  "collection_method"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowed"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "allowed": {
+                "items": {
+                  "enum": [
+                    "month",
+                    "year"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "enum": [
+                  "billing_interval"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowed"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "uniform_billing_interval"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "saved_payment_method"
+                ],
+                "type": "string"
+              },
+              "required": {
+                "enum": [
+                  true
+                ],
+                "type": "boolean"
+              },
+              "resolveWith": {
+                "$ref": "#/components/schemas/ProviderOperation"
+              }
+            },
+            "required": [
+              "kind",
+              "required"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "renewal_exclusion_window"
+                ],
+                "type": "string"
+              },
+              "minutes": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "minutes"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "requires_prior"
+                ],
+                "type": "string"
+              },
+              "operation": {
+                "$ref": "#/components/schemas/ProviderOperation"
+              }
+            },
+            "required": [
+              "kind",
+              "operation"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "amount_bounds"
+                ],
+                "type": "string"
+              },
+              "maxMinor": {
+                "type": "number"
+              },
+              "minMinor": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "quantity_integer"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "CapabilityEvidence": {
+        "properties": {
+          "questions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scenarios": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tests",
+          "scenarios",
+          "questions"
+        ],
+        "type": "object"
+      },
+      "CapabilityReason": {
+        "properties": {
+          "code": {
+            "enum": [
+              "PROVIDER_UNSUPPORTED",
+              "CAPABILITY_NOT_EVALUATED",
+              "PROVIDER_MANAGED",
+              "IMPLEMENTATION_PLANNED",
+              "CONNECTION_DISABLED",
+              "CONNECTION_VALIDATION_REQUIRED",
+              "ACCOUNT_FLAG_REQUIRED",
+              "CURRENCY_UNSUPPORTED",
+              "CATALOG_BINDING_REQUIRED",
+              "SUBSCRIPTION_STATE",
+              "COLLECTION_METHOD",
+              "BILLING_INTERVAL",
+              "SAVED_PAYMENT_METHOD_REQUIRED",
+              "RENEWAL_EXCLUSION_WINDOW",
+              "PRIOR_OPERATION_REQUIRED",
+              "AMOUNT_OUT_OF_BOUNDS",
+              "QUANTITY_NOT_INTEGER",
+              "FACT_UNAVAILABLE"
+            ],
+            "type": "string"
+          },
+          "condition": {
+            "$ref": "#/components/schemas/CapabilityCondition"
+          },
+          "layer": {
+            "enum": [
+              "provider",
+              "implementation",
+              "configuration",
+              "operation"
+            ],
+            "type": "string"
+          },
+          "observed": {
+            "additionalProperties": {
+              "type": [
+                "null",
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "type": "object"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/CapabilityResolution"
+          }
+        },
+        "required": [
+          "code",
+          "layer"
+        ],
+        "type": "object"
+      },
+      "CapabilityResolution": {
+        "oneOf": [
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "customer_action"
+                ],
+                "type": "string"
+              },
+              "operation": {
+                "$ref": "#/components/schemas/ProviderOperation"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "connectionKind": {
+                "type": "string"
+              },
+              "flag": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "merchant_configuration"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "connectionKind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "at": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "wait_until"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "at"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "checked_at_execution"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "none"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "CapabilityVerdict": {
+        "properties": {
+          "blockingLayer": {
+            "enum": [
+              "provider",
+              "implementation",
+              "configuration",
+              "operation",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "composedVia": {
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "native",
+              "quotum_composed",
+              "provider_managed",
+              "unsupported",
+              "not_evaluated"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/ProviderOperation"
+          },
+          "outcome": {
+            "enum": [
+              "available",
+              "blocked",
+              "undetermined"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "apple",
+              "google",
+              "stripe",
+              "paddle"
+            ],
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityReason"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider",
+          "operation",
+          "outcome",
+          "level",
+          "blockingLayer",
+          "reasons"
+        ],
+        "type": "object"
+      },
+      "CapabilityVerification": {
+        "oneOf": [
+          {
+            "properties": {
+              "evidence": {
+                "$ref": "#/components/schemas/CapabilityEvidence"
+              },
+              "note": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "verified"
+                ],
+                "type": "string"
+              },
+              "verifiedOn": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "verifiedOn",
+              "evidence"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "evidence": {
+                "$ref": "#/components/schemas/CapabilityEvidence"
+              },
+              "note": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "conditional"
+                ],
+                "type": "string"
+              },
+              "verifiedOn": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "verifiedOn",
+              "evidence"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "blockedBy": {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "decision",
+                      "scenario",
+                      "question"
+                    ],
+                    "type": "string"
+                  },
+                  "ref": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ref"
+                ],
+                "type": "object"
+              },
+              "evidence": {
+                "$ref": "#/components/schemas/CapabilityEvidence"
+              },
+              "status": {
+                "enum": [
+                  "planned"
+                ],
+                "type": "string"
+              },
+              "trackedBy": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "evidence": {
+                "$ref": "#/components/schemas/CapabilityEvidence"
+              },
+              "status": {
+                "enum": [
+                  "not_applicable"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "deleteV1AdminContractsByBillingAccountIdByContractIdResponse200": {
         "properties": {
           "data": {
@@ -15573,6 +16197,460 @@
         "required": [
           "success",
           "data"
+        ],
+        "type": "object"
+      },
+      "ProviderCapabilityDeclaration": {
+        "properties": {
+          "availability": {
+            "enum": [
+              "available",
+              "planned"
+            ],
+            "type": "string"
+          },
+          "changeBillingPolicies": {
+            "items": {
+              "properties": {
+                "billing": {
+                  "enum": [
+                    "prorated",
+                    "full",
+                    "none"
+                  ],
+                  "type": "string"
+                },
+                "collection": {
+                  "enum": [
+                    "immediate",
+                    "next_renewal"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "billing",
+                "collection"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "channel": {
+            "enum": [
+              "ios",
+              "android",
+              "web"
+            ],
+            "type": "string"
+          },
+          "connectionKind": {
+            "type": "string"
+          },
+          "limits": {
+            "properties": {
+              "requestsPerMinute": {
+                "type": "number"
+              },
+              "webhookOrdering": {
+                "enum": [
+                  "ordered",
+                  "unordered"
+                ],
+                "type": "string"
+              },
+              "webhookRetries": {
+                "properties": {
+                  "attempts": {
+                    "type": "number"
+                  },
+                  "windowHours": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "attempts",
+                  "windowHours"
+                ],
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "operations": {
+            "properties": {
+              "adjustment.issue": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "catalog.addon": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "catalog.price.flat": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "catalog.price.hybrid": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "catalog.price.licensed": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "catalog.price.postpaid_usage": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "catalog.price.tiered": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "catalog.product.consumable": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "catalog.product.non_consumable": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "catalog.product.subscription": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "catalog.topup": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "catalog.trial": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "checkout.hosted": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "checkout.plan": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "event.replay": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "portal.session": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "promotion.code_entry": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "promotion.hosted_code": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "purchase.verify": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "refund.sync": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "settlement.collect_finalized_charge": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "subscription.change.apply": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "subscription.change.period_end": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "subscription.change.preview": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "subscription.reconcile": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "topup.automatic": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "topup.customer_initiated": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "webhook.ingest": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              }
+            },
+            "required": [
+              "catalog.product.subscription",
+              "catalog.product.consumable",
+              "catalog.product.non_consumable",
+              "catalog.trial",
+              "catalog.addon",
+              "catalog.topup",
+              "catalog.price.flat",
+              "catalog.price.licensed",
+              "catalog.price.tiered",
+              "catalog.price.hybrid",
+              "catalog.price.postpaid_usage",
+              "checkout.hosted",
+              "checkout.plan",
+              "purchase.verify",
+              "portal.session",
+              "webhook.ingest",
+              "event.replay",
+              "subscription.reconcile",
+              "subscription.change.preview",
+              "subscription.change.apply",
+              "subscription.change.period_end",
+              "settlement.collect_finalized_charge",
+              "adjustment.issue",
+              "refund.sync",
+              "topup.customer_initiated",
+              "topup.automatic",
+              "promotion.code_entry",
+              "promotion.hosted_code"
+            ],
+            "type": "object"
+          },
+          "provider": {
+            "enum": [
+              "apple",
+              "google",
+              "stripe",
+              "paddle"
+            ],
+            "type": "string"
+          },
+          "writeSemantics": {
+            "properties": {
+              "clientIdempotencyKeys": {
+                "type": "boolean"
+              },
+              "uncertainWrite": {
+                "enum": [
+                  "provider_idempotency",
+                  "reconcile_required"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "clientIdempotencyKeys",
+              "uncertainWrite"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "provider",
+          "channel",
+          "connectionKind",
+          "availability",
+          "writeSemantics",
+          "operations"
+        ],
+        "type": "object"
+      },
+      "ProviderCapabilityMatrix": {
+        "properties": {
+          "domains": {
+            "items": {
+              "properties": {
+                "id": {
+                  "enum": [
+                    "catalog",
+                    "checkout",
+                    "purchases",
+                    "portal",
+                    "events",
+                    "subscription_changes",
+                    "settlement",
+                    "refunds",
+                    "topups",
+                    "promotions"
+                  ],
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "title"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "labels": {
+            "items": {
+              "properties": {
+                "id": {
+                  "enum": [
+                    "supported",
+                    "conditional",
+                    "conditional_not_implemented",
+                    "planned",
+                    "requires_policy_decision",
+                    "requires_semantic_validation",
+                    "managed_by_provider",
+                    "unsupported",
+                    "not_evaluated"
+                  ],
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "rule": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "rule"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "operations": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "domain": {
+                  "enum": [
+                    "catalog",
+                    "checkout",
+                    "purchases",
+                    "portal",
+                    "events",
+                    "subscription_changes",
+                    "settlement",
+                    "refunds",
+                    "topups",
+                    "promotions"
+                  ],
+                  "type": "string"
+                },
+                "id": {
+                  "$ref": "#/components/schemas/ProviderOperation"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "domain",
+                "title",
+                "description"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCapabilityDeclaration"
+            },
+            "type": "array"
+          },
+          "schemaVersion": {
+            "enum": [
+              1
+            ],
+            "type": "number"
+          },
+          "supportLevels": {
+            "items": {
+              "properties": {
+                "id": {
+                  "enum": [
+                    "native",
+                    "quotum_composed",
+                    "provider_managed",
+                    "unsupported",
+                    "not_evaluated"
+                  ],
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "domains",
+          "operations",
+          "labels",
+          "supportLevels",
+          "providers"
+        ],
+        "type": "object"
+      },
+      "ProviderOperation": {
+        "enum": [
+          "catalog.product.subscription",
+          "catalog.product.consumable",
+          "catalog.product.non_consumable",
+          "catalog.trial",
+          "catalog.addon",
+          "catalog.topup",
+          "catalog.price.flat",
+          "catalog.price.licensed",
+          "catalog.price.tiered",
+          "catalog.price.hybrid",
+          "catalog.price.postpaid_usage",
+          "checkout.hosted",
+          "checkout.plan",
+          "purchase.verify",
+          "portal.session",
+          "webhook.ingest",
+          "event.replay",
+          "subscription.reconcile",
+          "subscription.change.preview",
+          "subscription.change.apply",
+          "subscription.change.period_end",
+          "settlement.collect_finalized_charge",
+          "adjustment.issue",
+          "refund.sync",
+          "topup.customer_initiated",
+          "topup.automatic",
+          "promotion.code_entry",
+          "promotion.hosted_code"
+        ],
+        "type": "string"
+      },
+      "ProviderOperationSupport": {
+        "properties": {
+          "composedVia": {
+            "type": "string"
+          },
+          "conditions": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityCondition"
+            },
+            "type": "array"
+          },
+          "level": {
+            "enum": [
+              "native",
+              "quotum_composed",
+              "provider_managed",
+              "unsupported",
+              "not_evaluated"
+            ],
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/CapabilityVerification"
+          }
+        },
+        "required": [
+          "level",
+          "verification",
+          "conditions"
         ],
         "type": "object"
       },

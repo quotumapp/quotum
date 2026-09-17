@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { billingProviderValues } from "./provider-enum";
 
 /** Authored HTTP wire schemas. Update these with the handlers; OpenAPI is generated from them. */
 const channelSchema = z.enum(["web", "ios", "android"]);
@@ -64,7 +65,7 @@ const promotionSchema = z.object({
 	providerObjects: z.array(
 		z.object({
 			id: z.string(),
-			provider: z.enum(["stripe", "apple", "google"]),
+			provider: z.enum(billingProviderValues("stripe")),
 			objectKind: z.enum([
 				"coupon",
 				"promotion_code",
@@ -113,7 +114,7 @@ const promotionRedemptionSchema = z.object({
 	billingAccountId: z.string(),
 	channel: channelSchema,
 	status: z.enum(["reserved", "applied", "released", "reversed"]),
-	provider: z.enum(["quotum", "stripe", "apple", "google"]),
+	provider: z.enum(["quotum", ...billingProviderValues("stripe")]),
 	source: z.enum([
 		"api_redeem",
 		"commercial_action",

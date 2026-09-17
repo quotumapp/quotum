@@ -7,7 +7,11 @@ import type {
 	RecordGoogleVoidedPurchaseProjectionInput,
 	StoreEventReplayJobRow,
 } from "../../db/repository";
-import type { StoreEventReplayProviderResult } from "../../workers/store-event-replay";
+import type {
+	StoreEventReplayProvider,
+	StoreEventReplayProviderResult,
+} from "../../workers/store-event-replay";
+import type { SubscriptionReconciliationProvider } from "../../workers/subscription-reconciliation";
 import { requireNonBlank } from "../validation";
 import { createGoogleObfuscatedAccountId } from "./account-link";
 import type { GooglePlayConfig } from "./config";
@@ -78,7 +82,9 @@ export interface GooglePlayBillingServiceDependencies {
 	verifyOidcToken?: import("./pubsub").GoogleOidcVerifier;
 }
 
-export class GooglePlayBillingService {
+export class GooglePlayBillingService
+	implements StoreEventReplayProvider, SubscriptionReconciliationProvider
+{
 	constructor(private readonly dependencies: GooglePlayBillingServiceDependencies) {}
 
 	async getAccountLink(billingAccountId: string): Promise<GoogleAccountLink> {

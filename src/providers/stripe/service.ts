@@ -43,7 +43,14 @@ import type {
 	StripeRecurringCheckoutPlan,
 	StripeWebStoreProductRow,
 } from "../../db/repository";
-import type { StoreEventReplayProviderResult } from "../../workers/store-event-replay";
+import type { AutoTopupWorkerProvider } from "../../workers/auto-topup";
+import type { PromotionStripeProvider } from "../../workers/promotion-maintenance";
+import type { RecurringBillingWorkerProvider } from "../../workers/recurring-billing";
+import type {
+	StoreEventReplayProvider,
+	StoreEventReplayProviderResult,
+} from "../../workers/store-event-replay";
+import type { SubscriptionReconciliationProvider } from "../../workers/subscription-reconciliation";
 import { requireNonBlank } from "../validation";
 import {
 	normalizeStripeCheckoutSession,
@@ -289,7 +296,14 @@ interface ParsedStripeEvent {
 	object: Record<string, unknown>;
 }
 
-export class StripeBillingService {
+export class StripeBillingService
+	implements
+		StoreEventReplayProvider,
+		SubscriptionReconciliationProvider,
+		RecurringBillingWorkerProvider,
+		AutoTopupWorkerProvider,
+		PromotionStripeProvider
+{
 	constructor(private readonly dependencies: StripeBillingServiceDependencies) {}
 
 	async getCatalog(): Promise<StripeCatalog> {

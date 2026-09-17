@@ -7,7 +7,7 @@ import { registerCustomerRoutes } from "./app/customer-routes";
 import { registerInsightsRoutes } from "./app/insights-routes";
 import { registerMeteringRoutes } from "./app/metering-routes";
 import { registerPromotionRoutes } from "./app/promotion-routes";
-import { createProjectProviderServiceResolver } from "./app/provider-services";
+import { projectProviderServiceResolver } from "./app/provider-services";
 import { projectSelectorRejectedError, queryHasCallerProjectSelector } from "./app/request-context";
 import type {
 	AppDependencies as CreateAppDependencies,
@@ -44,6 +44,7 @@ import {
 	type ProjectInstanceContext,
 	type ProjectInstanceContextResolver,
 } from "./projects/context";
+import { createProviderRegistry } from "./providers/registry";
 import { DEFAULT_BODY_LIMIT_BYTES, isBodyTooLarge } from "./shared/body-limit";
 import {
 	type ErrorEnvelopeBody,
@@ -126,16 +127,17 @@ export function createApp({
 			getRepository().publishCatalog(...args),
 	};
 	const controlsService = controlsEnterpriseService ?? getRepository().controlsEnterprise;
-	const providerServices = createProjectProviderServiceResolver({
+	const providerRegistry = createProviderRegistry({
 		connections,
 		getRepository,
-		projectProviderServices,
+		overrides: projectProviderServices,
 		legacyServices: {
 			appleStoreKitService,
 			googlePlayBillingService,
 			stripeBillingService,
 		},
 	});
+	const providerServices = projectProviderServiceResolver(providerRegistry);
 	let adminRepository: AdminBillingRepository | null = null;
 	const getAdminBillingReader = (): AdminBillingReader | null => {
 		if (adminBillingReader !== undefined) {

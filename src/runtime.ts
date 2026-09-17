@@ -2,6 +2,7 @@ import { createApp } from "./app";
 import { createProjectProviderServiceResolver } from "./app/provider-services";
 import type { AppDependencies } from "./app/types";
 import { EntitlementService } from "./billing/entitlements";
+import type { BillingProvider } from "./billing/types";
 import {
 	createConnectionRepository,
 	createRuntimeConnectionResolver,
@@ -130,7 +131,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const projectProviderServices = dependencies.projectProviderServices;
 	const providersForProject = async (
 		project: ProjectInstanceContext,
-		kind: "apple" | "google" | "stripe",
+		kind: BillingProvider,
 	): Promise<WorkerProjectProviders> => {
 		const [apple, googlePlay, stripe] = await Promise.all([
 			kind === "apple" ? connections.resolve(project, "apple", "recovery") : null,

@@ -79,6 +79,8 @@ localDescribe("Google route flows integration", () => {
 		});
 	});
 
+	// capability: catalog.product.subscription
+	// capability: purchase.verify
 	it("verifies Google subscriptions and acknowledges them", async () => {
 		const { app, google, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -126,6 +128,8 @@ localDescribe("Google route flows integration", () => {
 		expect(projectionJob.payload.purchase).toBeUndefined();
 	});
 
+	// capability: catalog.product.consumable
+	// capability: purchase.verify
 	it("verifies Google consumables and consumes them", async () => {
 		const { app, google, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -165,6 +169,9 @@ localDescribe("Google route flows integration", () => {
 		});
 	});
 
+	// capability: catalog.product.consumable
+	// capability: catalog.topup
+	// capability: topup.customer_initiated
 	it("maps a Google consumable to the published top-up allocation", async () => {
 		await publishAiCreditsCatalog(context.repository);
 		const { app, authHeaders } = createIntegrationApp({
@@ -225,6 +232,7 @@ localDescribe("Google route flows integration", () => {
 		expect(projectionJob.payload.reversal).toBeUndefined();
 	});
 
+	// capability: webhook.ingest
 	it("handles Google RTDN subscription notifications without billing API-key auth", async () => {
 		const { app, google, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -314,6 +322,7 @@ localDescribe("Google route flows integration", () => {
 		});
 	});
 
+	// capability: refund.sync
 	it("records Google voided purchase RTDNs after an earlier purchase", async () => {
 		const { app, google, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -375,6 +384,7 @@ localDescribe("Google route flows integration", () => {
 		await expectGoogleVoidedPurchaseRows(context.sql);
 	});
 
+	// capability: refund.sync
 	it("reverses Google multi-quantity consumables incrementally across partial and full refunds", async () => {
 		await publishAiCreditsCatalog(context.repository);
 		const first = createIntegrationApp({
@@ -573,6 +583,7 @@ localDescribe("Google route flows integration", () => {
 		});
 	});
 
+	// capability: webhook.ingest
 	it("accepts a real signed Google RTDN and rejects forged tokens without Play calls", async () => {
 		const { app, google, authHeaders } = createIntegrationApp({
 			env: context.env,

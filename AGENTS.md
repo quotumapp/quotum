@@ -23,7 +23,9 @@ projection delivery; `composition/` wires modules together. Ordered SQL migratio
   lint and format fixes.
 - `bun run test` for unit tests; `bun run test:integration`, `bun run test:e2e`, and
   `bun run test:merchant:integration` for the Docker-backed lanes.
-- `bun run openapi:generate`, `openapi:check`, and `openapi:lint` after changing any route.
+- `bun run openapi:generate`, `openapi:check`, and `openapi:lint` after changing any route, a
+  provider capability declaration (`src/providers/*/capabilities.ts`), or the capability
+  vocabulary (`src/shared/provider-capabilities.ts`).
 - `bun run platform:bootstrap`, `catalog:provision`, and `catalog` for operator workflows; see
   [docs/quickstart.md](docs/quickstart.md).
 

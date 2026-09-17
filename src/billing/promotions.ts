@@ -1,6 +1,7 @@
 import type { ProjectInstanceContext } from "../projects/context";
 import { canonicalDecimal, positiveDecimal, sha256Hex, stableJson } from "./decimal";
 import { BillingError } from "./errors";
+import type { BillingProvider } from "./types";
 
 export const promotionChannels = ["web", "ios", "android"] as const;
 export type PromotionChannel = (typeof promotionChannels)[number];
@@ -8,7 +9,7 @@ export type PromotionEffectKind = "discount" | "feature_grant" | "plan_grant";
 export type PromotionStatus = "active" | "archived";
 export type PromotionDiscountDuration = "once" | "repeating" | "forever";
 export type PromotionRedemptionStatus = "reserved" | "applied" | "released" | "reversed";
-export type PromotionRedemptionProvider = "quotum" | "stripe" | "apple" | "google";
+export type PromotionRedemptionProvider = "quotum" | BillingProvider;
 export type PromotionRedemptionSource =
 	| "api_redeem"
 	| "commercial_action"
@@ -138,7 +139,7 @@ export type PromotionProviderObjectStatus = "pending" | "ready" | "failed" | "re
 
 export interface PromotionProviderObjectRecord {
 	id: string;
-	provider: "stripe" | "apple" | "google";
+	provider: BillingProvider;
 	objectKind: PromotionProviderObjectKind;
 	promotionCodeId: string | null;
 	externalId: string | null;

@@ -904,6 +904,7 @@ localDescribe("promotion Checkout", () => {
 		await context.sql.close();
 	});
 
+	// capability: promotion.code_entry
 	it("previews, executes, applies and reverses a discount code on a credit pack", async () => {
 		await context.repository.promotions.createPromotion(
 			project,
@@ -1148,6 +1149,7 @@ localDescribe("promotion Checkout", () => {
 		expect(released).toEqual({ status: "released", reserved_count: 0 });
 	});
 
+	// capability: promotion.hosted_code
 	it("opens hosted code entry and records a code the customer typed on Stripe", async () => {
 		await context.repository.promotions.createPromotion(
 			project,
@@ -1312,6 +1314,8 @@ localDescribe("promotion subscription changes", () => {
 		promotionCode,
 	});
 
+	// capability: subscription.change.apply
+	// capability: promotion.code_entry
 	it("reserves with the change, keeps merchant discounts on Stripe and applies with the change", async () => {
 		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
 		const headers = { ...fixture.authHeaders("voysee"), "content-type": "application/json" };

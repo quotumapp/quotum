@@ -25,6 +25,7 @@ const workerProjectResolver = projectContextResolver({
 });
 
 describe("AutoTopupWorker", () => {
+	// capability: topup.automatic
 	it("records a successful off-session top-up", async () => {
 		const calls: unknown[] = [];
 		const worker = new AutoTopupWorker({
@@ -82,6 +83,7 @@ describe("AutoTopupWorker", () => {
 		]);
 	});
 
+	// capability: topup.automatic
 	it("opens the circuit when Stripe requires customer action", async () => {
 		const failures: unknown[] = [];
 		const worker = new AutoTopupWorker({
