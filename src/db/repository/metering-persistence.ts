@@ -24,6 +24,7 @@ import {
 	calculateUsageCharge,
 } from "../../billing/pricing";
 import type { BillingProvider } from "../../billing/types";
+import { purchaseActionFor } from "../../providers/capabilities";
 import { toIso } from "../../shared/date";
 import type { ControlDenial } from "./controls-runtime";
 import {
@@ -1545,14 +1546,11 @@ function rateReceipt(rate: RateDecision): RateCardReceipt {
 async function purchaseActions(
 	executor: QueryExecutor,
 	projectId: string,
-): Promise<Array<{ provider: BillingProvider; action: "purchase_required" }>> {
-	return await executeRows<{
-		provider: BillingProvider;
-		action: "purchase_required";
-	}>(
+): Promise<MeteringDecision["eligiblePurchaseActions"]> {
+	const rows = await executeRows<{ provider: BillingProvider }>(
 		executor,
 		drizzleSql`
-			SELECT DISTINCT sp.provider, 'purchase_required'::text AS action
+			SELECT DISTINCT sp.provider
 			FROM store_products sp
 			JOIN products p ON p.project_id = sp.project_id AND p.id = sp.product_id
 			WHERE sp.project_id = ${projectId}
@@ -1562,6 +1560,7 @@ async function purchaseActions(
 			ORDER BY sp.provider
 		`,
 	);
+	return rows.map((row) => ({ provider: row.provider, action: purchaseActionFor(row.provider) }));
 }
 
 export async function claimWorkerDelivery(

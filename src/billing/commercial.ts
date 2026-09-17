@@ -1,5 +1,6 @@
 import type { StripeProrationBehavior } from "./pricing";
 import type { CommercialPromotion, PromotionDiscountDuration } from "./promotions";
+import type { BillingProvider } from "./types";
 
 export type CommercialActionIntent =
 	| {
@@ -79,7 +80,7 @@ export interface CommercialActionPreview {
 	expiresAt: string;
 	billingAccountId: string;
 	action: CommercialActionIntent["kind"];
-	provider: "stripe";
+	provider: BillingProvider;
 	lineItems: CommercialLineItem[];
 	estimatedTotalMinor: number | null;
 	subtotalMinor: number | null;

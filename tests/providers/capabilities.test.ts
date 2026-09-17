@@ -10,17 +10,25 @@ import type {
 } from "../../src/catalog/types";
 import {
 	admittedProviders,
+	bindingImplementsCatalogTarget,
 	type CatalogCapabilityTarget,
+	catalogConstructOperations,
+	commercialActionOperations,
+	commercialPreviewProvider,
+	implementsOperation,
+	type ProviderCapabilityLookup,
 	providerCapabilityCatalog,
 	providerCapabilityDeclaration,
 	providerCapabilityDeclarations,
+	providersImplementing,
+	purchaseActionFor,
 	requiredOperationsFor,
 } from "../../src/providers/capabilities";
 import { stripeCapabilities } from "../../src/providers/stripe/capabilities";
 import {
 	billingProviders,
+	type DeclaredProvider,
 	declaredProviders,
-	evaluateCapability,
 	type OperationSupport,
 	type ProviderCapabilityDeclaration,
 	type ProviderOperation,
@@ -385,8 +393,10 @@ describe("catalog capability requirements", () => {
 			},
 			{ name: "hybrid base price", target: { kind: "price", plan: hybridPlan, item: null } },
 		];
-		// The string rules in src/catalog/control-plane.ts: trials and add-ons require every plan
-		// binding to be Stripe, and explicit price components require Stripe price bindings.
+		// The string rules src/catalog/control-plane.ts applied before it consulted declarations:
+		// trials and add-ons required every plan binding to be Stripe, and explicit price components
+		// required Stripe price bindings. tests/catalog/provider-gates-equivalence.test.ts pins the
+		// resulting messages and their order through the control plane itself.
 		const rejectedForNonStripe = ({ target }: (typeof corpus)[number]) =>
 			(target.kind === "plan" &&
 				((target.plan.trialDays ?? 0) > 0 || target.plan.kind === "addon")) ||
@@ -396,10 +406,14 @@ describe("catalog capability requirements", () => {
 			const declaration = providerCapabilityDeclaration(provider);
 			const outcomes = corpus.map((entry) => ({
 				name: entry.name,
-				compatible: requiredOperationsFor(entry.target).every(
-					(operation) =>
-						evaluateCapability(declaration, operation, {}, { through: "implementation" })
-							.outcome === "available",
+				compatible: catalogConstructOperations(entry.target).every((operation) =>
+					implementsOperation(declaration, operation),
+				),
+				// The control plane asks through this helper, so the two must never disagree.
+				throughBinding: bindingImplementsCatalogTarget(
+					providerCapabilityCatalog,
+					provider,
+					entry.target,
 				),
 			}));
 
@@ -408,8 +422,179 @@ describe("catalog capability requirements", () => {
 				outcomes: corpus.map((entry) => ({
 					name: entry.name,
 					compatible: provider === "stripe" || !rejectedForNonStripe(entry),
+					throughBinding: provider === "stripe" || !rejectedForNonStripe(entry),
 				})),
 			});
 		}
+	});
+});
+
+/** One provider's support for one operation replaced, leaving every other declaration alone. */
+function catalogDeclaring(
+	provider: DeclaredProvider,
+	patch: Partial<ProviderCapabilityDeclaration>,
+): ProviderCapabilityLookup {
+	return new Map(providerCapabilityCatalog).set(provider, {
+		...providerCapabilityDeclaration(provider),
+		...patch,
+	});
+}
+
+function withSupport(
+	provider: DeclaredProvider,
+	operation: ProviderOperation,
+	support: OperationSupport,
+): ProviderCapabilityLookup {
+	const declaration = providerCapabilityDeclaration(provider);
+	return catalogDeclaring(provider, {
+		operations: { ...declaration.operations, [operation]: support },
+	});
+}
+
+const nativelyVerified: OperationSupport = {
+	level: "native",
+	verification: {
+		status: "verified",
+		verifiedOn: "2026-09-17",
+		evidence: { tests: [], scenarios: [], questions: [] },
+	},
+	conditions: [],
+};
+
+const unsupported: OperationSupport = {
+	level: "unsupported",
+	verification: { status: "not_applicable" },
+	conditions: [],
+};
+
+describe("declaration helpers the runtime gates read", () => {
+	it("calls an operation implemented only when its provider and implementation layers pass", () => {
+		expect(implementsOperation(stripeCapabilities, "checkout.plan")).toBe(true);
+		const apple = providerCapabilityDeclaration("apple");
+		expect(implementsOperation(apple, "topup.customer_initiated")).toBe(true);
+		// Provider-managed and not-evaluated both block the implementation layer.
+		expect(implementsOperation(apple, "catalog.trial")).toBe(false);
+		expect(implementsOperation(apple, "catalog.price.flat")).toBe(false);
+		// A planned declaration is blocked one layer earlier, whatever it says per operation.
+		expect(implementsOperation(providerCapabilityDeclaration("paddle"), "checkout.hosted")).toBe(
+			false,
+		);
+		// A hand-built declaration must still declare every operation; a gap throws rather than
+		// silently reading as unimplemented.
+		expect(() =>
+			implementsOperation({ ...apple, operations: {} as never }, "catalog.topup"),
+		).toThrow("Capability declaration for apple does not declare catalog.topup");
+	});
+
+	it("lists the admitted providers implementing an operation, in contract order", () => {
+		expect(providersImplementing("topup.customer_initiated")).toEqual([
+			"apple",
+			"google",
+			"stripe",
+		]);
+		expect(providersImplementing("topup.automatic")).toEqual(["stripe"]);
+		expect(providersImplementing("checkout.plan")).toEqual(["stripe"]);
+		for (const operation of providerOperations) {
+			expect(providersImplementing(operation)).not.toContain("paddle");
+		}
+	});
+
+	it("honours an injected lookup, including a declaration that is no longer available", () => {
+		expect(
+			providersImplementing(
+				"topup.automatic",
+				withSupport("apple", "topup.automatic", nativelyVerified),
+			),
+		).toEqual(["apple", "stripe"]);
+		expect(
+			providersImplementing(
+				"topup.automatic",
+				catalogDeclaring("stripe", { availability: "planned" }),
+			),
+		).toEqual([]);
+	});
+
+	it("drops product types from the operations a catalog construct needs", () => {
+		expect(catalogConstructOperations({ kind: "product", productType: "consumable" })).toEqual([]);
+		expect(catalogConstructOperations({ kind: "plan", plan: { trialDays: null } })).toEqual([]);
+		expect(
+			catalogConstructOperations({ kind: "plan", plan: { kind: "addon", trialDays: 14 } }),
+		).toEqual(["catalog.trial", "catalog.addon"]);
+		expect(catalogConstructOperations({ kind: "topup" })).toEqual(["catalog.topup"]);
+		expect(
+			catalogConstructOperations({ kind: "price", plan: seatsOnlyPlan, item: seatItem }),
+		).toEqual(["catalog.price.flat", "catalog.price.licensed"]);
+	});
+
+	it("never admits a binding whose provider has no declaration", () => {
+		const trialPlan: CatalogCapabilityTarget = { kind: "plan", plan: { trialDays: 7 } };
+		expect(bindingImplementsCatalogTarget(providerCapabilityCatalog, "stripe", trialPlan)).toBe(
+			true,
+		);
+		expect(bindingImplementsCatalogTarget(providerCapabilityCatalog, "apple", trialPlan)).toBe(
+			false,
+		);
+		expect(bindingImplementsCatalogTarget(providerCapabilityCatalog, "paddle", trialPlan)).toBe(
+			false,
+		);
+		expect(bindingImplementsCatalogTarget(providerCapabilityCatalog, "quotum", trialPlan)).toBe(
+			false,
+		);
+		expect(bindingImplementsCatalogTarget(new Map(), "stripe", trialPlan)).toBe(false);
+	});
+
+	it("never admits a planned declaration, even for a target that requires no operation", () => {
+		const plainPlan: CatalogCapabilityTarget = { kind: "plan", plan: { trialDays: null } };
+		expect(catalogConstructOperations(plainPlan)).toEqual([]);
+		expect(bindingImplementsCatalogTarget(providerCapabilityCatalog, "stripe", plainPlan)).toBe(
+			true,
+		);
+		expect(bindingImplementsCatalogTarget(providerCapabilityCatalog, "paddle", plainPlan)).toBe(
+			false,
+		);
+	});
+
+	it("asks every admitted provider for a customer-initiated top-up purchase", () => {
+		for (const provider of admittedProviders()) {
+			expect(purchaseActionFor(provider)).toBe("purchase_required");
+		}
+		expect(
+			purchaseActionFor("apple", withSupport("apple", "topup.customer_initiated", unsupported)),
+		).toBe("provider_action_required");
+		expect(purchaseActionFor("apple", new Map())).toBe("provider_action_required");
+	});
+
+	it("reports the commercial preview provider only for an admitted implementer", () => {
+		// Pinned literally rather than read back from the map: Stripe implements both checkout
+		// operations, so swapping the pair stays invisible until a provider builds only one.
+		const expected = {
+			checkout_plan: "checkout.plan",
+			checkout_product: "checkout.hosted",
+			subscription_change: "subscription.change.preview",
+		} as const satisfies typeof commercialActionOperations;
+		expect(commercialActionOperations).toEqual(expected);
+
+		for (const [action, operation] of Object.entries(expected) as Array<
+			[keyof typeof expected, ProviderOperation]
+		>) {
+			expect(commercialPreviewProvider(stripeCapabilities, action)).toBe("stripe");
+			expect(() =>
+				commercialPreviewProvider(providerCapabilityDeclaration("apple"), action),
+			).toThrow(`Provider apple does not implement ${operation}`);
+			expect(() =>
+				commercialPreviewProvider(providerCapabilityDeclaration("paddle"), action),
+			).toThrow(`Provider paddle is not admitted for ${operation}`);
+		}
+	});
+
+	it("leaves Stripe as the only provider behind the commercial wire literal", () => {
+		const operations = Object.values(commercialActionOperations);
+		expect(
+			admittedProviders().filter((provider) =>
+				operations.every((operation) =>
+					implementsOperation(providerCapabilityDeclaration(provider), operation),
+				),
+			),
+		).toEqual(["stripe"]);
 	});
 });

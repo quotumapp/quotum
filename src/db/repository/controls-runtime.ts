@@ -7,6 +7,7 @@ import {
 	unitsToDecimal,
 } from "../../billing/decimal";
 import type { BillingProvider } from "../../billing/types";
+import { type ProviderCapabilityLookup, providersImplementing } from "../../providers/capabilities";
 import { controlWindowBounds, resolveEffectiveControls } from "./controls-enterprise";
 import { executeOne, executeRows } from "./query";
 import type { QueryExecutor } from "./types";
@@ -689,6 +690,20 @@ export async function recordUsageAlertDelta(
 	}
 }
 
+/** Providers Quotum can charge on its own, read from their declarations: `{stripe}` today. */
+const declaredAutomaticTopupProviders: ReadonlySet<BillingProvider> = new Set(
+	providersImplementing("topup.automatic"),
+);
+
+/** The declared set, resolved once for the consume path and re-derived only for an injection. */
+function automaticTopupProviders(
+	capabilities: ProviderCapabilityLookup | undefined,
+): ReadonlySet<BillingProvider> {
+	return capabilities === undefined
+		? declaredAutomaticTopupProviders
+		: new Set(providersImplementing("topup.automatic", capabilities));
+}
+
 export interface AutoTopupPolicyRow {
 	id: string | number | bigint;
 	provider: BillingProvider;
@@ -748,6 +763,8 @@ export async function scheduleAutoTopupIfNeeded(
 		availableQuantity: string;
 		triggerKey: string;
 		policy?: AutoTopupPolicyRow | null;
+		/** Overrides the declarations the chargeable providers are derived from; for tests. */
+		capabilities?: ProviderCapabilityLookup;
 	},
 ): Promise<void> {
 	const policy =
@@ -794,10 +811,8 @@ export async function scheduleAutoTopupIfNeeded(
 	if (state.cooldown_until !== null && new Date(state.cooldown_until) > now) return;
 	if (purchases >= policy.max_purchases_per_interval) return;
 	const amount = Number(policy.amount_minor ?? 0);
-	if (
-		policy.provider === "stripe" &&
-		(!Number.isSafeInteger(amount) || amount <= 0 || policy.currency === null)
-	)
+	const supported = automaticTopupProviders(input.capabilities).has(policy.provider);
+	if (supported && (!Number.isSafeInteger(amount) || amount <= 0 || policy.currency === null))
 		return;
 	if (policy.max_spend_minor !== null && spend + amount > Number(policy.max_spend_minor)) return;
 	const pending = await executeOne<{ pending: boolean }>(
@@ -810,7 +825,6 @@ export async function scheduleAutoTopupIfNeeded(
 	`,
 	);
 	if (pending?.pending === true) return;
-	const supported = policy.provider === "stripe";
 	await executeOne(
 		executor,
 		drizzleSql`
