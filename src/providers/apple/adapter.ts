@@ -32,7 +32,7 @@ export const appleRegistryEntry: ProviderRegistryEntry<"apple"> = {
 	overrideKey: "appleStoreKitService",
 	label: "Apple StoreKit",
 	notConfiguredStatus: 501,
-	accountIdentity: () => null,
+	accountIdentity: (config) => config.accountIdentity ?? null,
 	build({ project, config, repository, clientFactories }) {
 		const clientConfig = buildAppleStoreKitConfig(config);
 		return new AppleStoreKitService({

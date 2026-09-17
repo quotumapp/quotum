@@ -1,4 +1,5 @@
 import type { StripeProrationBehavior } from "./pricing";
+import type { BillingProvider } from "./types";
 
 export interface SubscriptionChangeInput {
 	billingAccountId: string;
@@ -41,6 +42,8 @@ export interface SubscriptionChangeOperation {
 	changeId: string;
 	projectInstanceId: string;
 	projectKey: string;
+	provider: BillingProvider;
+	providerAccountId: string | null;
 	status: "pending" | "processing" | "applied" | "failed" | "cancelled";
 	changeKind: "upgrade" | "downgrade" | "quantity";
 	effectiveMode: "immediate" | "period_end";
@@ -66,6 +69,8 @@ export interface UsageInvoiceJob {
 	adjustmentId: string | null;
 	projectInstanceId: string;
 	projectKey: string;
+	provider: BillingProvider;
+	providerAccountId: string | null;
 	billingAccountId: string;
 	externalCustomerId: string;
 	externalSubscriptionId: string;

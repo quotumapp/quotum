@@ -17,6 +17,7 @@ import { BillingError, InternalBillingError } from "../src/billing/errors";
 import type { BillingLogger } from "../src/observability/logger";
 import { type BillingMetrics, createInMemoryBillingMetrics } from "../src/observability/metrics";
 import { BillingAdminOperations } from "../src/operations/admin";
+import { createProviderRegistry } from "../src/providers/registry";
 import type { FixtureBillingEnv as BillingEnv } from "../src/testing/connection-fixtures";
 import { fixtureConnections } from "../src/testing/connection-fixtures";
 import { testRequest, withOpenApiAssertions } from "./helpers/openapi";
@@ -2198,6 +2199,32 @@ describe("billing app", () => {
 				message: "Stripe webhook signature is invalid",
 			},
 		});
+	});
+
+	it("refuses a provider registry combined with provider services", () => {
+		const providerRegistry = createProviderRegistry({
+			getRepository: () => {
+				throw new Error("repository must not be built");
+			},
+		});
+		const refusal = new Error(
+			"createApp accepts either a provider registry or provider services, not both",
+		);
+
+		expect(() =>
+			createBillingApp({
+				env,
+				providerRegistry,
+				projectProviderServices: { voysee: { stripeBillingService } },
+			}),
+		).toThrow(refusal);
+		expect(() => createBillingApp({ env, providerRegistry, stripeBillingService })).toThrow(
+			refusal,
+		);
+		expect(() => createBillingApp({ env, providerRegistry, appleStoreKitService: null })).toThrow(
+			refusal,
+		);
+		expect(() => createBillingApp({ env, providerRegistry })).not.toThrow();
 	});
 
 	it("selects Apple webhook services from the project webhook route", async () => {

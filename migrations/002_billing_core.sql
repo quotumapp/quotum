@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS provider_customers (
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe')),
+	provider_account_id TEXT,
 	external_customer_id TEXT NOT NULL,
 	metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 	store_product_id UUID NOT NULL REFERENCES store_products(id) ON DELETE RESTRICT,
 	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe')),
 	channel TEXT NOT NULL CHECK (channel IN ('ios', 'android', 'web')),
+	provider_account_id TEXT,
 	external_subscription_id TEXT NOT NULL,
 	external_product_id TEXT NOT NULL,
 	external_price_id TEXT,
@@ -396,6 +398,7 @@ CREATE TABLE IF NOT EXISTS checkout_requests (
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	store_product_id UUID REFERENCES store_products(id) ON DELETE RESTRICT,
 	provider TEXT NOT NULL CHECK (provider = 'stripe'),
+	provider_account_id TEXT,
 	idempotency_key TEXT NOT NULL CHECK (
 		char_length(idempotency_key) BETWEEN 1 AND 200
 	),

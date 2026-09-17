@@ -1,19 +1,16 @@
 import type { BillingMetrics } from "../../../src/observability/metrics";
 import type { ApiProjectProjectionFetch } from "../../../src/projections/http-types";
+import type { ProviderServiceSource } from "../../../src/providers/contract";
+import { wrapStripeService } from "../../../src/providers/stripe/adapter";
 import type { FixtureBillingEnv as BillingEnv } from "../../../src/testing/connection-fixtures";
 import { FixtureProjectionHttpClient as ProjectionHttpClient } from "../../../src/testing/connection-fixtures";
-import {
-	AutoTopupWorker,
-	type AutoTopupWorkerProvider,
-	type AutoTopupWorkerRepository,
-} from "../../../src/workers/auto-topup";
+import { AutoTopupWorker, type AutoTopupWorkerRepository } from "../../../src/workers/auto-topup";
 import {
 	type ProjectionSyncRepository,
 	ProjectionSyncWorker,
 } from "../../../src/workers/projection-sync";
 import {
 	RecurringBillingWorker,
-	type RecurringBillingWorkerProvider,
 	type RecurringBillingWorkerRepository,
 } from "../../../src/workers/recurring-billing";
 import {
@@ -177,7 +174,7 @@ export async function runAutoTopupWorkerOnce({
 	staleAfterMs,
 }: {
 	repository: AutoTopupWorkerRepository;
-	provider: AutoTopupWorkerProvider;
+	provider: ProviderServiceSource<"stripe">;
 	workerId?: string;
 	batchSize?: number;
 	staleAfterMs?: number;
@@ -188,7 +185,7 @@ export async function runAutoTopupWorkerOnce({
 		staleAfterMs,
 		repository,
 		projectContextResolver: integrationProjectContextResolver(),
-		providerForProject: async () => provider,
+		adapterForJob: async () => wrapStripeService(provider),
 		logger: noopWorkerLogger,
 	});
 	return await worker.runOnce();
@@ -201,7 +198,7 @@ export async function runRecurringBillingWorkerOnce({
 	batchSize = 25,
 }: {
 	repository: RecurringBillingWorkerRepository;
-	provider: RecurringBillingWorkerProvider;
+	provider: ProviderServiceSource<"stripe">;
 	workerId?: string;
 	batchSize?: number;
 }) {
@@ -210,7 +207,7 @@ export async function runRecurringBillingWorkerOnce({
 		batchSize,
 		repository,
 		projectContextResolver: integrationProjectContextResolver(),
-		providerForProject: async () => provider,
+		adapterForJob: async () => wrapStripeService(provider),
 		logger: noopWorkerLogger,
 	});
 	return await worker.runOnce();

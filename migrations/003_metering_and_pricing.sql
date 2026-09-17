@@ -966,6 +966,8 @@ CREATE TABLE IF NOT EXISTS subscription_changes (
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	subscription_id UUID NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe')),
+	provider_account_id TEXT,
 	from_plan_version_id BIGINT NOT NULL REFERENCES plan_versions(id) ON DELETE RESTRICT,
 	to_plan_version_id BIGINT NOT NULL REFERENCES plan_versions(id) ON DELETE RESTRICT,
 	requested_quantities JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (
@@ -1044,6 +1046,8 @@ CREATE TABLE IF NOT EXISTS usage_invoice_periods (
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	subscription_id UUID NOT NULL REFERENCES subscriptions(id) ON DELETE RESTRICT,
+	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe')),
+	provider_account_id TEXT,
 	plan_item_id BIGINT NOT NULL REFERENCES plan_items(id) ON DELETE RESTRICT,
 	price_component_id BIGINT NOT NULL REFERENCES price_components(id) ON DELETE RESTRICT,
 	period_start_at TIMESTAMPTZ NOT NULL,
@@ -1504,6 +1508,7 @@ CREATE TABLE IF NOT EXISTS auto_topup_jobs (
 	store_product_id UUID NOT NULL REFERENCES store_products(id) ON DELETE RESTRICT,
 	trigger_key TEXT COLLATE "C" NOT NULL CHECK (char_length(trigger_key) BETWEEN 1 AND 256),
 	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe')),
+	provider_account_id TEXT,
 	status TEXT NOT NULL DEFAULT 'pending' CHECK (
 		status IN ('pending', 'processing', 'succeeded', 'failed', 'provider_action_required')
 	),

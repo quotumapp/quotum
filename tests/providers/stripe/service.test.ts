@@ -46,7 +46,11 @@ function stripeProduct(
 function serviceFixture(
 	overrides: {
 		config?: Partial<
-			typeof config & { connectedAccountId?: string; connectedAccountLivemode?: boolean }
+			typeof config & {
+				accountIdentity?: string | null;
+				connectedAccountId?: string;
+				connectedAccountLivemode?: boolean;
+			}
 		>;
 		products?: Record<string, StripeWebStoreProductRow>;
 		checkoutSession?: Partial<Stripe.Checkout.Session>;
@@ -78,6 +82,7 @@ function serviceFixture(
 ) {
 	const calls: unknown[] = [];
 	const repositoryInputs: unknown[] = [];
+	const checkoutRequestInputs: unknown[] = [];
 	const products = overrides.products ?? {
 		credits_100: stripeProduct(),
 		premium_monthly: stripeProduct({
@@ -240,7 +245,8 @@ function serviceFixture(
 					recentInvoices: [],
 				});
 			},
-			prepareStripeCheckoutRequest(_input) {
+			prepareStripeCheckoutRequest(input) {
+				checkoutRequestInputs.push(input);
 				return Promise.resolve({
 					status: "creating" as const,
 					externalSessionId: null,
@@ -304,7 +310,7 @@ function serviceFixture(
 		},
 	});
 
-	return { calls, repositoryInputs, service };
+	return { calls, checkoutRequestInputs, repositoryInputs, service };
 }
 
 function checkoutMetadata(product: StripeWebStoreProductRow) {
@@ -462,6 +468,7 @@ function reconciliationSubscription(
 		status: "active",
 		expires_at: "2026-06-30T00:00:00.000Z",
 		provider_reconciliation_attempts: 1,
+		provider_account_id: null,
 		...overrides,
 	};
 }
@@ -471,6 +478,8 @@ function autoTopupJob(): AutoTopupJob {
 		jobId: "topup-job-1",
 		projectId: "project-1",
 		projectKey: "voysee",
+		provider: "stripe",
+		providerAccountId: null,
 		policyId: "7",
 		customerId: "customer-1",
 		billingAccountId: "user_1",
@@ -679,6 +688,8 @@ describe("StripeBillingService", () => {
 				adjustmentId: null,
 				projectInstanceId: "00000000-0000-4000-8000-000000000003",
 				projectKey: "voysee",
+				provider: "stripe",
+				providerAccountId: null,
 				billingAccountId: "user_1",
 				externalCustomerId: "cus_123",
 				externalSubscriptionId: "sub_123",
@@ -723,6 +734,8 @@ describe("StripeBillingService", () => {
 				adjustmentId: "42",
 				projectInstanceId: "00000000-0000-4000-8000-000000000003",
 				projectKey: "voysee",
+				provider: "stripe",
+				providerAccountId: null,
 				billingAccountId: "user_1",
 				externalCustomerId: "cus_123",
 				externalSubscriptionId: "sub_123",
@@ -1779,6 +1792,92 @@ describe("StripeBillingService", () => {
 				reconciliationSubscription({ provider: "google", channel: "android" }),
 			),
 		).rejects.toMatchObject({ code: "INVALID_REQUEST", status: 400 });
+	});
+});
+
+describe("provider account identity", () => {
+	async function recordWrites(accountIdentity?: string | null) {
+		const configOverride = accountIdentity === undefined ? {} : { accountIdentity };
+		const checkout = serviceFixture({ config: configOverride });
+		await checkout.service.createCheckoutSession({
+			billingAccountId: "user_1",
+			productKey: "credits_100",
+			idempotencyKey: "checkout-idempotency-key",
+		});
+		const creditPurchase = serviceFixture({ config: configOverride });
+		await creditPurchase.service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+		const subscription = serviceFixture({
+			config: configOverride,
+			webhookEvent: stripeEvent("invoice.paid", invoiceObject(), "evt_invoice"),
+		});
+		await subscription.service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+		const identityOnly = serviceFixture({
+			config: configOverride,
+			webhookEvent: stripeEvent(
+				"checkout.session.completed",
+				checkoutSessionObject({
+					mode: "subscription",
+					metadata: {
+						billingAccountId: "user_1",
+						productKey: "premium_monthly",
+						purchaseKind: "subscription",
+					},
+				}),
+			),
+		});
+		await identityOnly.service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+		const reconciliation = serviceFixture({ config: configOverride });
+		await reconciliation.service.reconcileSubscription(reconciliationSubscription());
+
+		const linkInputs = [checkout, identityOnly].flatMap(({ calls }) =>
+			calls
+				.map((call) => call as { method: string; input?: unknown })
+				.filter((call) => call.method === "linkStripeProviderCustomer")
+				.map((call) => call.input),
+		);
+		return {
+			checkoutRequests: checkout.checkoutRequestInputs,
+			customerLinks: linkInputs,
+			creditPurchases: creditPurchase.repositoryInputs,
+			subscriptions: [...subscription.repositoryInputs, ...reconciliation.repositoryInputs],
+		};
+	}
+
+	it("forwards the configured identity to every provider row write", async () => {
+		const writes = await recordWrites("acct_identity");
+
+		expect(writes.checkoutRequests).toHaveLength(1);
+		expect(writes.customerLinks).toHaveLength(2);
+		expect(writes.creditPurchases).toHaveLength(1);
+		expect(writes.subscriptions).toHaveLength(2);
+		for (const input of Object.values(writes).flat()) {
+			expect(input).toHaveProperty("providerAccountId", "acct_identity");
+		}
+	});
+
+	it("omits providerAccountId when no identity is configured", async () => {
+		for (const accountIdentity of [undefined, null]) {
+			const writes = await recordWrites(accountIdentity);
+
+			expect(Object.values(writes).flat()).toHaveLength(6);
+			for (const input of Object.values(writes).flat()) {
+				expect(input).not.toHaveProperty("providerAccountId");
+			}
+		}
+	});
+
+	it("never forwards the connected account as the identity", async () => {
+		const { checkoutRequestInputs, service } = serviceFixture({
+			config: { connectedAccountId: "acct_connected", connectedAccountLivemode: false },
+		});
+
+		await service.createCheckoutSession({
+			billingAccountId: "user_1",
+			productKey: "credits_100",
+			idempotencyKey: "checkout-idempotency-key",
+		});
+
+		expect(checkoutRequestInputs[0]).not.toHaveProperty("providerAccountId");
 	});
 });
 

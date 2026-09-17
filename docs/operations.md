@@ -53,6 +53,60 @@ changes. For a populated deployment, retain a restorable backup and its matching
 an incompatible schema change needs an explicit data-preserving transition before upgrading.
 Never reset populated production data as a routine upgrade.
 
+### Stored job provider identity
+
+The baselines add a required `provider` column to `subscription_changes` and
+`usage_invoice_periods`, and a nullable `provider_account_id` to those tables and to
+`auto_topup_jobs`, `checkout_requests`, `provider_customers` and `subscriptions`. A dump from an
+earlier revision has no `provider` values, so a plain data restore loses every subscription change
+and usage invoice period. The next recurring billing poll would then materialize the lost periods
+again and invoice customers a second time. Move a populated deployment as follows:
+
+1. Stop the whole old service, including its API, provider webhooks, merchant application and
+   workers, and keep it stopped until the new version serves traffic. Anything the old version
+   accepts after the dump is lost; while the service is down, providers retry undelivered webhooks.
+   Then take a [backup](#backup) with `pg_dump --format=custom`.
+2. Create an empty database and run `bun run migrate` from the target image.
+3. Let the restore load rows that have no provider:
+
+   ```sql
+   ALTER TABLE subscription_changes ALTER COLUMN provider DROP NOT NULL;
+   ALTER TABLE usage_invoice_periods ALTER COLUMN provider DROP NOT NULL;
+   ```
+
+4. Restore the data without the old migration history, which `migrate` already wrote. The schema
+   has circular foreign keys, so the restore disables triggers and needs a superuser:
+
+   ```sh
+   pg_restore --list quotum-before-upgrade.dump \
+     | grep -Ev ' TABLE DATA public migrations( |$)' > restore.list
+   pg_restore --data-only --disable-triggers --exit-on-error --no-owner \
+     --use-list restore.list --dbname "$POSTGRES_URI" quotum-before-upgrade.dump
+   ```
+
+5. Copy each job's provider from its subscription and restore the constraint. `SET NOT NULL` fails
+   while any row still has no provider:
+
+   ```sql
+   UPDATE subscription_changes AS job SET provider = subscription.provider
+   FROM subscriptions AS subscription
+   WHERE subscription.project_id = job.project_id AND subscription.id = job.subscription_id
+     AND job.provider IS NULL;
+   UPDATE usage_invoice_periods AS job SET provider = subscription.provider
+   FROM subscriptions AS subscription
+   WHERE subscription.project_id = job.project_id AND subscription.id = job.subscription_id
+     AND job.provider IS NULL;
+   ALTER TABLE subscription_changes ALTER COLUMN provider SET NOT NULL;
+   ALTER TABLE usage_invoice_periods ALTER COLUMN provider SET NOT NULL;
+   ```
+
+6. Compare the row counts of every table, at least `subscription_changes`,
+   `usage_invoice_periods` and `usage_invoice_adjustments`, with the source database. Run
+   `bun run migrate:status`, then start the new version and confirm `/ready`.
+
+Restored rows keep a null `provider_account_id`. Stripe events fill it on subscriptions and provider
+customers once their connection reports an account identity; jobs copy it when they are created.
+
 ## Upgrade
 
 1. Read the target version's [GitHub Release](https://github.com/quotumapp/quotum/releases) and

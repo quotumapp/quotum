@@ -64,6 +64,7 @@ export interface ProviderSubscriptionReconciliationRow {
 	project_key: string;
 	provider: BillingProvider;
 	channel: BillingChannel;
+	provider_account_id: string | null;
 	external_subscription_id: string;
 	external_product_id: string;
 	external_price_id: string | null;
@@ -208,6 +209,7 @@ export interface PrepareStripeCheckoutRequestInput {
 	requestedQuantities?: Record<string, number>;
 	idempotencyKey: string;
 	requestHash: string;
+	providerAccountId?: string | null;
 }
 
 export interface StripeRecurringCheckoutPlan {
@@ -253,6 +255,7 @@ export interface LinkStripeProviderCustomerInput {
 	billingAccountId: string;
 	stripeCustomerId: string;
 	email: string | null;
+	providerAccountId?: string | null;
 }
 
 export interface GetStripeProviderCustomerInput {
@@ -281,6 +284,7 @@ export interface RecordStripeCreditPurchaseProjectionInput {
 	projectionIdempotencyKey: string;
 	projectionContract?: ProjectionContract;
 	replayStoreEventId?: string;
+	providerAccountId?: string | null;
 }
 
 export interface RecordStripeSubscriptionProjectionInput {
@@ -320,6 +324,7 @@ export interface RecordStripeSubscriptionProjectionInput {
 	projectionIdempotencyKey: string;
 	projectionContract?: ProjectionContract;
 	replayStoreEventId?: string;
+	providerAccountId?: string | null;
 }
 
 export interface RecordStripeCreditReversalProjectionInput {

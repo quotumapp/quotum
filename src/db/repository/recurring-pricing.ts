@@ -18,7 +18,7 @@ import type {
 	SubscriptionChangePreview,
 	UsageInvoiceJob,
 } from "../../billing/recurring";
-import type { BillingProvider } from "../../billing/types";
+import type { BillingChannel, BillingProvider } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import {
@@ -34,6 +34,8 @@ interface ChangeContextRow {
 	project_id: string;
 	customer_id: string;
 	subscription_id: string;
+	provider: BillingProvider;
+	provider_account_id: string | null;
 	external_subscription_id: string;
 	from_plan_version_id: string | number | bigint;
 	from_tier_rank: number;
@@ -74,6 +76,9 @@ interface ChangeRow {
 	id: string;
 	project_id: string;
 	project_key: string;
+	provider: BillingProvider;
+	provider_account_id: string | null;
+	subscription_channel: BillingChannel;
 	status: "pending" | "processing" | "applied" | "failed" | "cancelled";
 	change_kind: "upgrade" | "downgrade" | "quantity";
 	effective_mode: "immediate" | "period_end";
@@ -190,12 +195,13 @@ export class RecurringPricingRepository extends RepositoryModule {
 				tx,
 				drizzleSql`
 					INSERT INTO subscription_changes (
-						project_id, customer_id, subscription_id, from_plan_version_id,
-						to_plan_version_id, requested_quantities, change_kind, effective_mode,
-						effective_at, proration_behavior, idempotency_key, request_hash
+						project_id, customer_id, subscription_id, provider, provider_account_id,
+						from_plan_version_id, to_plan_version_id, requested_quantities, change_kind,
+						effective_mode, effective_at, proration_behavior, idempotency_key, request_hash
 					)
 					VALUES (
 						${projectId}, ${context.customer_id}, ${context.subscription_id},
+						${context.provider}, ${context.provider_account_id},
 						${String(context.from_plan_version_id)}::bigint,
 						${String(context.to_plan_version_id)}::bigint, ${jsonb(quantities)},
 						${changeKind}, ${effectiveMode}, ${effectiveAt.toISOString()},
@@ -348,6 +354,8 @@ export class RecurringPricingRepository extends RepositoryModule {
 				project_id: string;
 				customer_id: string;
 				subscription_id: string;
+				provider: BillingProvider;
+				provider_account_id: string | null;
 				plan_item_id: string | number | bigint;
 				price_component_id: string | number | bigint;
 				period_start_at: Date | string;
@@ -362,12 +370,14 @@ export class RecurringPricingRepository extends RepositoryModule {
 				tx,
 				drizzleSql`
 					SELECT
-						uw.project_id, uw.customer_id, uw.subscription_id, uw.anchor_plan_item_id AS plan_item_id,
+						uw.project_id, uw.customer_id, uw.subscription_id, s.provider, s.provider_account_id,
+						uw.anchor_plan_item_id AS plan_item_id,
 						pc.id AS price_component_id, uw.window_start_at AS period_start_at,
 						uw.window_end_at AS period_end_at, sum(uw.usage)::text AS usage_quantity,
 						pi.quantity::text AS included_quantity, pc.billing_units::text AS billing_units,
 						pc.unit_amount_minor, pc.currency, pc.pricing_model
 					FROM usage_windows uw
+					JOIN subscriptions s ON s.project_id = uw.project_id AND s.id = uw.subscription_id
 					JOIN plan_items pi
 						ON pi.project_id = uw.project_id AND pi.id = uw.anchor_plan_item_id
 					JOIN price_components pc
@@ -384,9 +394,10 @@ export class RecurringPricingRepository extends RepositoryModule {
 								AND period.period_start_at = uw.window_start_at
 								AND period.period_end_at = uw.window_end_at
 						)
-					GROUP BY uw.project_id, uw.customer_id, uw.subscription_id, uw.anchor_plan_item_id,
-						pc.id, uw.window_start_at, uw.window_end_at, pi.quantity, pc.billing_units,
-						pc.unit_amount_minor, pc.currency, pc.pricing_model
+					GROUP BY uw.project_id, uw.customer_id, uw.subscription_id, s.provider,
+						s.provider_account_id, uw.anchor_plan_item_id, pc.id, uw.window_start_at,
+						uw.window_end_at, pi.quantity, pc.billing_units, pc.unit_amount_minor, pc.currency,
+						pc.pricing_model
 					ORDER BY uw.window_end_at
 					LIMIT ${limit}
 				`,
@@ -417,13 +428,14 @@ export class RecurringPricingRepository extends RepositoryModule {
 					tx,
 					drizzleSql`
 						INSERT INTO usage_invoice_periods (
-							project_id, customer_id, subscription_id, plan_item_id, price_component_id,
-							period_start_at, period_end_at, usage_quantity, included_quantity,
-							billable_quantity, billing_units, unit_amount_minor, amount_minor, currency,
-							status, invoiced_at
+							project_id, customer_id, subscription_id, provider, provider_account_id,
+							plan_item_id, price_component_id, period_start_at, period_end_at, usage_quantity,
+							included_quantity, billable_quantity, billing_units, unit_amount_minor,
+							amount_minor, currency, status, invoiced_at
 						)
 						VALUES (
 							${candidate.project_id}, ${candidate.customer_id}, ${candidate.subscription_id},
+							${candidate.provider}, ${candidate.provider_account_id},
 							${String(candidate.plan_item_id)}::bigint, ${String(candidate.price_component_id)}::bigint,
 							${new Date(candidate.period_start_at).toISOString()},
 							${new Date(candidate.period_end_at).toISOString()}, ${charge.usageQuantity}::numeric,
@@ -564,6 +576,7 @@ interface CatalogMigrationJobContext {
 	customer_id: string;
 	subscription_id: string;
 	provider: BillingProvider;
+	provider_account_id: string | null;
 	subscription_status: string;
 	current_plan_version_id: string | number | bigint;
 	from_plan_version_id: string | number | bigint;
@@ -620,7 +633,8 @@ async function stageCatalogMigrationChanges(
 			executor,
 			drizzleSql`
 				SELECT job.id, job.project_id, subscription.customer_id, job.subscription_id,
-					subscription.provider, subscription.status AS subscription_status,
+					subscription.provider, subscription.provider_account_id,
+					subscription.status AS subscription_status,
 					subscription.plan_version_id AS current_plan_version_id,
 					draft.from_plan_version_id, draft.to_plan_version_id,
 					current_version.tier_rank AS from_tier_rank,
@@ -819,11 +833,12 @@ async function stageCatalogMigrationChanges(
 			executor,
 			drizzleSql`
 				INSERT INTO subscription_changes (
-					project_id, customer_id, subscription_id, from_plan_version_id,
-					to_plan_version_id, requested_quantities, change_kind, effective_mode,
-					effective_at, proration_behavior, idempotency_key, request_hash
+					project_id, customer_id, subscription_id, provider, provider_account_id,
+					from_plan_version_id, to_plan_version_id, requested_quantities, change_kind,
+					effective_mode, effective_at, proration_behavior, idempotency_key, request_hash
 				) VALUES (
 					${job.project_id}, ${job.customer_id}, ${job.subscription_id},
+					${job.provider}, ${job.provider_account_id},
 					${fromPlanVersionId}::bigint, ${toPlanVersionId}::bigint, ${jsonb(quantities)},
 					${changeKind}, ${job.effective_mode}, now(), ${prorationBehavior},
 					${idempotencyKey}, ${requestHash}
@@ -923,6 +938,7 @@ async function changeContext(
 			SELECT
 				project.key AS project_key, project.id AS project_id, customer.id AS customer_id,
 				subscription.id AS subscription_id,
+				subscription.provider, subscription.provider_account_id,
 				subscription.external_subscription_id,
 				current_version.id AS from_plan_version_id,
 				current_version.tier_rank AS from_tier_rank,
@@ -1154,7 +1170,9 @@ async function buildChangeOperation(
 		executor,
 		drizzleSql`
 			SELECT
-				changes.id, changes.project_id, project.key AS project_key, changes.status, changes.change_kind,
+				changes.id, changes.project_id, project.key AS project_key, changes.provider,
+				changes.provider_account_id, subscription.channel AS subscription_channel,
+				changes.status, changes.change_kind,
 				changes.effective_mode, changes.effective_at, changes.proration_behavior,
 				subscription.external_subscription_id, changes.to_plan_version_id,
 				changes.requested_quantities, redemption.id AS redemption_id,
@@ -1205,7 +1223,8 @@ async function buildChangeOperation(
 			FROM price_components price
 			JOIN provider_price_bindings binding
 				ON binding.project_id = price.project_id AND binding.price_component_id = price.id
-				AND binding.provider = 'stripe' AND binding.channel = 'web' AND binding.status = 'published'
+				AND binding.provider = ${change.provider} AND binding.channel = ${change.subscription_channel}
+				AND binding.status = 'published'
 			JOIN store_products sp ON sp.project_id = binding.project_id AND sp.id = binding.store_product_id
 			LEFT JOIN plan_items plan_item ON plan_item.project_id = price.project_id AND plan_item.id = price.plan_item_id
 			LEFT JOIN features feature ON feature.project_id = plan_item.project_id AND feature.id = plan_item.feature_id
@@ -1253,6 +1272,8 @@ async function buildChangeOperation(
 		changeId: change.id,
 		projectInstanceId: change.project_id,
 		projectKey: change.project_key,
+		provider: change.provider,
+		providerAccountId: change.provider_account_id,
 		status: change.status,
 		changeKind: change.change_kind,
 		effectiveMode: change.effective_mode,
@@ -1269,6 +1290,11 @@ async function buildChangeOperation(
 	};
 }
 
+/**
+ * The customer and price joins stay on Stripe web. Joining on the period's provider would make a
+ * non-Stripe period whose customer also has a Stripe customer throw inside the claim transaction;
+ * as a job it reaches the worker, which fails it through the normal retry path.
+ */
 async function usageInvoicePeriodJob(
 	executor: QueryExecutor,
 	periodId: string,
@@ -1277,6 +1303,8 @@ async function usageInvoicePeriodJob(
 		period_id: string;
 		project_id: string;
 		project_key: string;
+		provider: BillingProvider;
+		provider_account_id: string | null;
 		billing_account_id: string;
 		external_customer_id: string;
 		external_subscription_id: string;
@@ -1294,6 +1322,7 @@ async function usageInvoicePeriodJob(
 		drizzleSql`
 			SELECT
 				period.id AS period_id, period.project_id, project.key AS project_key,
+				period.provider, period.provider_account_id,
 				customer.billing_account_id, provider_customer.external_customer_id,
 				subscription.external_subscription_id, store.external_product_id,
 				feature.key AS feature_key, period.period_start_at, period.period_end_at,
@@ -1329,6 +1358,8 @@ async function usageInvoicePeriodJob(
 		adjustmentId: null,
 		projectInstanceId: row.project_id,
 		projectKey: row.project_key,
+		provider: row.provider,
+		providerAccountId: row.provider_account_id,
 		billingAccountId: row.billing_account_id,
 		externalCustomerId: row.external_customer_id,
 		externalSubscriptionId: row.external_subscription_id,
@@ -1381,6 +1412,8 @@ async function usageInvoiceAdjustmentJob(
 		period_id: string;
 		project_id: string;
 		project_key: string;
+		provider: BillingProvider;
+		provider_account_id: string | null;
 		billing_account_id: string;
 		external_customer_id: string;
 		external_subscription_id: string;
@@ -1399,7 +1432,7 @@ async function usageInvoiceAdjustmentJob(
 		drizzleSql`
 			SELECT
 				adjustment.id AS job_id, period.id AS period_id, adjustment.project_id,
-				project.key AS project_key,
+				project.key AS project_key, period.provider, period.provider_account_id,
 				customer.billing_account_id, provider_customer.external_customer_id,
 				subscription.external_subscription_id, store.external_product_id,
 				feature.key AS feature_key, period.period_start_at, period.period_end_at,
@@ -1442,6 +1475,8 @@ async function usageInvoiceAdjustmentJob(
 		adjustmentId: String(row.job_id),
 		projectInstanceId: row.project_id,
 		projectKey: row.project_key,
+		provider: row.provider,
+		providerAccountId: row.provider_account_id,
 		billingAccountId: row.billing_account_id,
 		externalCustomerId: row.external_customer_id,
 		externalSubscriptionId: row.external_subscription_id,

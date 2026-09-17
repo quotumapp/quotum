@@ -104,15 +104,16 @@ export async function seedSubscriptionChanges(sql: SQL, count: number): Promise<
 	`;
 	const rows = await sql<{ id: string }[]>`
 		INSERT INTO subscription_changes (
-			project_id, customer_id, subscription_id, from_plan_version_id, to_plan_version_id,
-			change_kind, effective_mode, effective_at, proration_behavior, status,
-			idempotency_key, request_hash, requested_quantities
+			project_id, customer_id, subscription_id, provider, provider_account_id,
+			from_plan_version_id, to_plan_version_id, change_kind, effective_mode, effective_at,
+			proration_behavior, status, idempotency_key, request_hash, requested_quantities
 		)
 		SELECT
 			subscription.project_id, subscription.customer_id, subscription.id,
-			from_version.id, to_version.id, 'upgrade', 'immediate', now() - INTERVAL '1 second',
-			'none', 'pending', concat('change:', subscription.external_subscription_id),
-			repeat('b', 64), '{"licensed_seats": 7}'::jsonb
+			subscription.provider, subscription.provider_account_id, from_version.id, to_version.id,
+			'upgrade', 'immediate', now() - INTERVAL '1 second', 'none', 'pending',
+			concat('change:', subscription.external_subscription_id), repeat('b', 64),
+			'{"licensed_seats": 7}'::jsonb
 		FROM subscriptions subscription
 		JOIN projects project ON project.id = subscription.project_id AND project.key = 'voysee'
 		JOIN plans plan ON plan.project_id = project.id AND plan.key = 'migration-plan'
@@ -137,13 +138,13 @@ export async function seedUsageInvoicePeriods(sql: SQL, count: number): Promise<
 	await linkStripeCustomer(sql, "migration-stripe");
 	const rows = await sql<{ id: string }[]>`
 		INSERT INTO usage_invoice_periods (
-			project_id, customer_id, subscription_id, plan_item_id, price_component_id,
-			period_start_at, period_end_at, usage_quantity, included_quantity, billable_quantity,
-			billing_units, unit_amount_minor, amount_minor, currency, status
+			project_id, customer_id, subscription_id, provider, provider_account_id, plan_item_id,
+			price_component_id, period_start_at, period_end_at, usage_quantity, included_quantity,
+			billable_quantity, billing_units, unit_amount_minor, amount_minor, currency, status
 		)
 		SELECT
 			subscription.project_id, subscription.customer_id, subscription.id,
-			plan_item.id, price.id,
+			subscription.provider, subscription.provider_account_id, plan_item.id, price.id,
 			now() - ((generate_series.n + 1) * INTERVAL '1 day'),
 			now() - (generate_series.n * INTERVAL '1 day'),
 			2, 1, 1, 1, 100, 100, 'USD', 'pending'

@@ -165,6 +165,7 @@ export const providerCustomers = pgTable(
 			.notNull()
 			.references(() => storeProducts.id, { onDelete: "restrict" }),
 		provider: text("provider").$type<BillingProvider>().notNull(),
+		providerAccountId: text("provider_account_id"),
 		externalCustomerId: text("external_customer_id").notNull(),
 		metadata: metadataColumn(),
 		...timestampColumns(),
@@ -211,6 +212,7 @@ export const subscriptions = pgTable(
 			.references(() => storeProducts.id, { onDelete: "restrict" }),
 		provider: text("provider").$type<BillingProvider>().notNull(),
 		channel: text("channel").$type<BillingChannel>().notNull(),
+		providerAccountId: text("provider_account_id"),
 		externalSubscriptionId: text("external_subscription_id").notNull(),
 		externalProductId: text("external_product_id").notNull(),
 		externalPriceId: text("external_price_id"),
@@ -326,6 +328,7 @@ export const checkoutRequests = pgTable(
 			.notNull()
 			.default([]),
 		provider: text("provider").$type<"stripe">().notNull(),
+		providerAccountId: text("provider_account_id"),
 		idempotencyKey: text("idempotency_key").notNull(),
 		requestHash: text("request_hash").notNull(),
 		status: text("status").$type<"creating" | "created">().notNull().default("creating"),
@@ -1297,6 +1300,8 @@ export const subscriptionChanges = pgTable(
 		subscriptionId: uuid("subscription_id")
 			.notNull()
 			.references(() => subscriptions.id, { onDelete: "cascade" }),
+		provider: text("provider").$type<BillingProvider>().notNull(),
+		providerAccountId: text("provider_account_id"),
 		fromPlanVersionId: bigint("from_plan_version_id", { mode: "number" })
 			.notNull()
 			.references(() => planVersions.id, { onDelete: "restrict" }),
@@ -1328,6 +1333,10 @@ export const subscriptionChanges = pgTable(
 		...timestampColumns(),
 	},
 	(table) => [
+		check(
+			"subscription_changes_provider_check",
+			sql`${table.provider} IN ('apple', 'google', 'stripe')`,
+		),
 		unique("subscription_changes_project_id_id_unique").on(table.projectId, table.id),
 		uniqueIndex("idx_billing_subscription_changes_idempotency").on(
 			table.projectId,
@@ -1890,6 +1899,8 @@ export const usageInvoicePeriods = pgTable(
 		subscriptionId: uuid("subscription_id")
 			.notNull()
 			.references(() => subscriptions.id, { onDelete: "restrict" }),
+		provider: text("provider").$type<BillingProvider>().notNull(),
+		providerAccountId: text("provider_account_id"),
 		planItemId: bigint("plan_item_id", { mode: "number" })
 			.notNull()
 			.references(() => planItems.id, { onDelete: "restrict" }),
@@ -1918,6 +1929,10 @@ export const usageInvoicePeriods = pgTable(
 		...timestampColumns(),
 	},
 	(table) => [
+		check(
+			"usage_invoice_periods_provider_check",
+			sql`${table.provider} IN ('apple', 'google', 'stripe')`,
+		),
 		unique("usage_invoice_periods_project_id_id_unique").on(table.projectId, table.id),
 		unique("usage_invoice_periods_scope_unique").on(
 			table.projectId,
@@ -2362,6 +2377,7 @@ export const autoTopupJobs = pgTable(
 			.references(() => storeProducts.id, { onDelete: "restrict" }),
 		triggerKey: text("trigger_key").notNull(),
 		provider: text("provider").$type<BillingProvider>().notNull(),
+		providerAccountId: text("provider_account_id"),
 		status: text("status")
 			.$type<"pending" | "processing" | "succeeded" | "failed" | "provider_action_required">()
 			.notNull()

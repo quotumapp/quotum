@@ -32,6 +32,7 @@ import type {
 	WorkerMeteringMutationInput,
 } from "../../billing/metering";
 import { calculateTieredUsageCharge, calculateUsageCharge } from "../../billing/pricing";
+import type { BillingProvider } from "../../billing/types";
 import type {
 	UsageOperationInput,
 	UsageOperationKind,
@@ -1415,6 +1416,8 @@ async function recordClosedUsageInvoiceAdjustment(
 	const window = await executeOne<{
 		customer_id: string;
 		subscription_id: string;
+		provider: BillingProvider;
+		provider_account_id: string | null;
 		plan_item_id: string | number | bigint;
 		price_component_id: string | number | bigint;
 		period_start_at: Date | string;
@@ -1429,13 +1432,15 @@ async function recordClosedUsageInvoiceAdjustment(
 		executor,
 		drizzleSql`
 			SELECT
-				uw.customer_id, uw.subscription_id,
+				uw.customer_id, uw.subscription_id, subscription.provider, subscription.provider_account_id,
 				uw.anchor_plan_item_id AS plan_item_id, price.id AS price_component_id,
 				uw.window_start_at AS period_start_at, uw.window_end_at AS period_end_at,
 				uw.usage::text AS usage_quantity, item.quantity::text AS included_quantity,
 				price.billing_units::text AS billing_units, price.unit_amount_minor, price.currency,
 				price.pricing_model
 			FROM usage_windows uw
+			JOIN subscriptions subscription
+				ON subscription.project_id = uw.project_id AND subscription.id = uw.subscription_id
 			JOIN plan_items item
 				ON item.project_id = uw.project_id AND item.id = uw.anchor_plan_item_id
 			JOIN price_components price
@@ -1465,13 +1470,14 @@ async function recordClosedUsageInvoiceAdjustment(
 		executor,
 		drizzleSql`
 			INSERT INTO usage_invoice_periods (
-				project_id, customer_id, subscription_id, plan_item_id, price_component_id,
-				period_start_at, period_end_at, usage_quantity, included_quantity,
+				project_id, customer_id, subscription_id, provider, provider_account_id, plan_item_id,
+				price_component_id, period_start_at, period_end_at, usage_quantity, included_quantity,
 				billable_quantity, billing_units, unit_amount_minor, amount_minor, currency,
 				status, invoiced_at
 			)
 			VALUES (
 				${input.projectId}, ${window.customer_id}, ${window.subscription_id},
+				${window.provider}, ${window.provider_account_id},
 				${String(window.plan_item_id)}::bigint, ${String(window.price_component_id)}::bigint,
 				${new Date(window.period_start_at).toISOString()},
 				${new Date(window.period_end_at).toISOString()}, ${originalCharge.usageQuantity}::numeric,

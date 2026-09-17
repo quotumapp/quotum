@@ -4,6 +4,8 @@ import type {
 	AutoTopupFailureResult,
 	AutoTopupJob,
 } from "../../billing/auto-topup";
+import type { BillingProvider } from "../../billing/types";
+import { providerCapabilityDeclaration } from "../../providers/capabilities";
 import { RepositoryModule } from "./base";
 import { materializeTopupAllocation } from "./catalog-allocations";
 import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
@@ -17,6 +19,8 @@ interface ClaimedJobRow {
 	id: string;
 	project_id: string;
 	project_key: string;
+	provider: BillingProvider;
+	provider_account_id: string | null;
 	policy_id: string | number | bigint;
 	customer_id: string;
 	billing_account_id: string;
@@ -131,8 +135,8 @@ export class AutoTopupJobRepository extends RepositoryModule {
 				productId: job.product_id,
 				storeProductId: job.store_product_id,
 				subscriptionId: null,
-				provider: "stripe",
-				channel: "web",
+				provider: job.provider,
+				channel: providerCapabilityDeclaration(job.provider).channel,
 				purchaseKind: "consumable",
 				transactionId,
 				originalTransactionId: charge.externalInvoiceId,
@@ -290,7 +294,8 @@ async function lockClaimedJob(
 	return await executeOne<ClaimedJobRow>(
 		executor,
 		drizzleSql`
-		SELECT job.id, job.project_id, project.key AS project_key, job.policy_id, job.customer_id,
+		SELECT job.id, job.project_id, project.key AS project_key, job.provider,
+			job.provider_account_id, job.policy_id, job.customer_id,
 			customer.billing_account_id, provider_customer.external_customer_id,
 			job.store_product_id, store.external_price_id, job.amount_minor, job.currency, job.attempts,
 			job.budget_reserved_at, job.budget_interval_started_at, policy.active AS policy_active,
@@ -310,7 +315,7 @@ async function lockClaimedJob(
 		LEFT JOIN provider_customers provider_customer
 			ON provider_customer.project_id = job.project_id
 			AND provider_customer.customer_id = job.customer_id
-			AND provider_customer.provider = 'stripe'
+			AND provider_customer.provider = job.provider
 		WHERE job.id = ${jobId}
 		FOR UPDATE OF state
 	`,
@@ -385,6 +390,8 @@ async function prepareClaimedJob(
 		jobId: row.id,
 		projectId: row.project_id,
 		projectKey: row.project_key,
+		provider: row.provider,
+		providerAccountId: row.provider_account_id,
 		policyId: String(row.policy_id),
 		customerId: row.customer_id,
 		billingAccountId: row.billing_account_id,
@@ -408,7 +415,8 @@ async function lockJobForCompletion(
 	return await executeOne<LockedJobRow>(
 		executor,
 		drizzleSql`
-		SELECT job.id, job.project_id, project.key AS project_key, job.policy_id, job.customer_id,
+		SELECT job.id, job.project_id, project.key AS project_key, job.provider,
+			job.provider_account_id, job.policy_id, job.customer_id,
 			customer.billing_account_id, provider_customer.external_customer_id,
 			job.store_product_id, store.product_id, store.external_price_id, job.amount_minor,
 			job.charged_amount_minor, job.currency, job.attempts, job.trigger_key, job.status,
@@ -430,7 +438,7 @@ async function lockJobForCompletion(
 		LEFT JOIN provider_customers provider_customer
 			ON provider_customer.project_id = job.project_id
 			AND provider_customer.customer_id = job.customer_id
-			AND provider_customer.provider = 'stripe'
+			AND provider_customer.provider = job.provider
 		WHERE job.project_id = ${projectId} AND job.id = ${jobId}
 		FOR UPDATE OF job, state
 	`,

@@ -169,6 +169,7 @@ export async function upsertProviderCustomer(
 		customerId: string;
 		provider: BillingProvider;
 		externalCustomerId: string;
+		providerAccountId?: string | null;
 		identityError: string;
 	},
 ): Promise<void> {
@@ -179,15 +180,21 @@ export async function upsertProviderCustomer(
 			project_id,
 			customer_id,
 			provider,
+			provider_account_id,
 			external_customer_id
 		)
 		VALUES (
 			${projectId},
 			${input.customerId},
 			${input.provider},
+			${input.providerAccountId ?? null},
 			${input.externalCustomerId}
 		)
 		ON CONFLICT (project_id, provider, external_customer_id) DO UPDATE SET
+			provider_account_id = COALESCE(
+				provider_customers.provider_account_id,
+				EXCLUDED.provider_account_id
+			),
 			updated_at = now()
 		WHERE provider_customers.customer_id = EXCLUDED.customer_id
 		RETURNING id

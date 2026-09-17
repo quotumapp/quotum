@@ -12,6 +12,7 @@ import { projectContextResolver, projectInstanceContext } from "../helpers/proje
 const job = (objectId: string, attempts = 1): PromotionStripeSyncJob => ({
 	projectId: "project-1",
 	projectKey: "voysee",
+	provider: "stripe",
 	objectId,
 	promotionKey: "spring-sale",
 	promotionName: "Spring sale",
@@ -73,9 +74,11 @@ describe("PromotionMaintenanceWorker", () => {
 			batchSize: 10,
 			repository: repo,
 			projectContextResolver: resolver,
-			stripeForProject: () => ({
-				async syncPromotionStripeObject(claimed) {
-					return results[claimed.objectId] as PromotionStripeSyncOutcome;
+			adapterForJob: () => ({
+				promotions: {
+					async syncObject(claimed) {
+						return results[claimed.objectId] as PromotionStripeSyncOutcome;
+					},
 				},
 			}),
 			logger: { error() {} },
@@ -111,7 +114,7 @@ describe("PromotionMaintenanceWorker", () => {
 			workerId: "worker-1",
 			repository: repo,
 			projectContextResolver: resolver,
-			stripeForProject: (() => {
+			adapterForJob: (() => {
 				let first = true;
 				return () => {
 					if (first) {
@@ -119,8 +122,10 @@ describe("PromotionMaintenanceWorker", () => {
 						return null;
 					}
 					return {
-						async syncPromotionStripeObject() {
-							throw new Error("socket hang up");
+						promotions: {
+							async syncObject() {
+								throw new Error("socket hang up");
+							},
 						},
 					};
 				};
@@ -137,5 +142,33 @@ describe("PromotionMaintenanceWorker", () => {
 			error: "socket hang up",
 			nextAttemptAt: null,
 		});
+	});
+
+	it("selects the adapter by the job's provider and retries when it cannot sync promotions", async () => {
+		const selected: string[] = [];
+		const { repo, outcomes } = repository([{ ...job("google-object"), provider: "google" }]);
+		const worker = new PromotionMaintenanceWorker({
+			workerId: "worker-1",
+			repository: repo,
+			projectContextResolver: resolver,
+			adapterForJob(project, provider) {
+				selected.push(`${project.projectInstanceKey}:${provider}`);
+				return {};
+			},
+			logger: { error() {} },
+		});
+
+		expect(await worker.runOnce()).toMatchObject({ claimed: 1, retryScheduled: 1 });
+		expect(selected).toEqual(["voysee:google"]);
+		expect(outcomes).toEqual([
+			{
+				objectId: "google-object",
+				outcome: {
+					kind: "failed",
+					error: "google provider does not serve promotion.hosted_code",
+					nextAttemptAt: expect.any(Date),
+				},
+			},
+		]);
 	});
 });

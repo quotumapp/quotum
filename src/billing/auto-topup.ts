@@ -1,7 +1,11 @@
+import type { BillingProvider } from "./types";
+
 export interface AutoTopupJob {
 	jobId: string;
 	projectId: string;
 	projectKey: string;
+	provider: BillingProvider;
+	providerAccountId: string | null;
 	policyId: string;
 	customerId: string;
 	billingAccountId: string;

@@ -24,6 +24,8 @@ export interface SentryEnv {
 }
 
 export interface AppleBillingEnv {
+	/** Non-secret connection external_identity; never used for event matching. */
+	accountIdentity?: string | null;
 	bundleId: string;
 	appAppleId: number | null;
 	issuerId: string;
@@ -35,6 +37,8 @@ export interface AppleBillingEnv {
 }
 
 export interface GooglePlayBillingEnv {
+	/** Non-secret connection external_identity; never used for event matching. */
+	accountIdentity?: string | null;
 	packageName: string;
 	serviceAccountJson: string | null;
 	serviceAccountKeyFile: string | null;
@@ -47,6 +51,8 @@ export interface GooglePlayBillingEnv {
 }
 
 export interface StripeBillingEnv {
+	/** Non-secret connection external_identity; never used for event matching. */
+	accountIdentity?: string | null;
 	connectedAccountId?: string;
 	connectedAccountLivemode?: boolean;
 	secretKey: string;
