@@ -176,25 +176,31 @@ connections owned by the merchant platform.
 
 ### Sentry (optional)
 
-Leave `SENTRY_DSN` unset or blank to disable Sentry. When set, the service reports staff and
-merchant 5xx plus worker failures; without a DSN the SDK is never initialized.
+Leave `SENTRY_DSN` unset or blank to disable Sentry; without a DSN the SDK is never initialized.
+With a DSN, the service reports staff and merchant 5xx responses and worker failures.
 
-Variables (`SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_ENABLE_LOGS`,
-`SENTRY_TRACES_SAMPLE_RATE` with `0` disabling tracing, `SENTRY_LOG_LEVEL`,
-`SENTRY_CAPTURE_EXPECTED_ERRORS`):
+- `SENTRY_DSN` (unset).
+- `SENTRY_ENVIRONMENT` (`BILLING_ENV`): at most 64 characters, without whitespace or `/`.
+- `SENTRY_RELEASE` (`quotum-api@$BUILD_VERSION` when the image sets `BUILD_VERSION`, else unset).
+- `SENTRY_ENABLE_LOGS` (`true`), `SENTRY_LOG_LEVEL` (`warn`),
+  `SENTRY_TRACES_SAMPLE_RATE` (`0.01`; `0` disables tracing),
+  `SENTRY_CAPTURE_EXPECTED_ERRORS` (`false`).
 
-- `SENTRY_ENVIRONMENT` defaults to `BILLING_ENV`.
-- `SENTRY_RELEASE` defaults to `quotum-api@$BUILD_VERSION` when `BUILD_VERSION` is set
-  (the image sets it), else unset.
-
-What is sent: scrubbed messages and stacks, route patterns, method, status, error codes,
-project key, provider, worker names, hostname, runtime/OS/module versions, sampled
+Sent: scrubbed error messages and stack frames, route patterns, method, status, error codes,
+project key, provider, worker names, hostname, runtime, OS and module versions, and sampled
 transactions.
 
-Never sent: headers, cookies, query strings, bodies, client IPs, raw paths with identifiers,
-billing/customer/transaction ids, provider tokens and keys, emails, local variables, SQL
-parameters, console output. Opaque values of 32+ characters and emails inside messages are
-replaced; the local log line is untouched.
+Never collected: request and response headers, cookies, query strings and fragments, bodies,
+client IP addresses, user data, local variables, SQL query parameters, and console
+breadcrumbs.
+
+Masked on a best-effort basis: free text such as messages and log attributes is scrubbed with
+patterns. Bearer and Basic credentials, JWTs, project API keys, Stripe-style ids and keys, emails,
+IPv4 addresses, runs of 14 or more digits and opaque tokens of 32 or more characters are
+replaced. Keys named like secrets, tokens, sessions, emails or customer ids are dropped. Path
+identifiers become `:id`. An identifier that looks like an ordinary word inside a message is not
+recognized, so avoid putting customer data into error messages. Local Pino log lines are never
+scrubbed.
 
 ## Encryption-key rotation
 

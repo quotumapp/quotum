@@ -30,12 +30,15 @@ import {
 type SentryLogLevel = "info" | "warn" | "error";
 type SentryBreadcrumbLevel = "info" | "warning" | "error";
 
-export const SENTRY_DATA_COLLECTION: DataCollection = {
+// Every category is explicit: omitted ones default to collecting.
+const SENTRY_DATA_COLLECTION: DataCollection = {
 	userInfo: false,
 	cookies: false,
 	httpHeaders: { request: false, response: false },
 	httpBodies: [],
 	urlQueryParams: false,
+	graphQL: { document: false, variables: false },
+	genAI: { inputs: false, outputs: false },
 	databaseQueryData: false,
 	stackFrameVariables: false,
 };
@@ -114,36 +117,19 @@ export function initializeSentry(sentry: SentryClientLike, config: SentryEnv): v
 		maxValueLength: 1024,
 		normalizeDepth: 5,
 		integrations: (defaults) => defaults.filter((integration) => integration.name !== "Console"),
-		beforeSend: guarded((event) => scrubEvent(event)),
-		beforeSendTransaction: guarded((event) => scrubEvent(event)),
+		beforeSend: dropOnThrow(scrubEvent),
+		beforeSendTransaction: dropOnThrow(scrubEvent),
+		// The SDK cannot drop a span here. beforeSendTransaction scrubs every span again and drops
+		// the transaction if that throws, and a throw from this fallback drops it as well.
 		beforeSendSpan: (span) => {
 			try {
 				return scrubSpan(span);
 			} catch {
-				try {
-					return { ...span, description: FILTERED, data: {} };
-				} catch {
-					return {
-						span_id: "filtered",
-						trace_id: "filtered",
-						start_timestamp: 0,
-						description: FILTERED,
-						data: {},
-					};
-				}
+				return { ...span, description: FILTERED, data: {} };
 			}
 		},
-		beforeBreadcrumb: guarded((breadcrumb) => scrubBreadcrumb(breadcrumb)),
-		beforeSendLog: (log) => {
-			try {
-				if (!shouldSendSentryLog(log, config)) {
-					return null;
-				}
-				return scrubLog(log);
-			} catch {
-				return null;
-			}
-		},
+		beforeBreadcrumb: dropOnThrow(scrubBreadcrumb),
+		beforeSendLog: dropOnThrow((log) => (shouldSendSentryLog(log, config) ? scrubLog(log) : null)),
 	});
 }
 
@@ -242,14 +228,15 @@ function routeTag(route: string | undefined): Record<string, unknown> {
 	return { route };
 }
 
-function guarded<T extends (...args: never[]) => unknown>(fn: T): T {
-	return ((...args: Parameters<T>) => {
+/** Scrubber hooks fail closed: a scrubber that throws drops the payload instead of sending it. */
+function dropOnThrow<A extends unknown[], R>(scrub: (...args: A) => R): (...args: A) => R | null {
+	return (...args) => {
 		try {
-			return (fn as unknown as (...parameters: Parameters<T>) => unknown)(...args);
+			return scrub(...args);
 		} catch {
 			return null;
 		}
-	}) as T;
+	};
 }
 
 function recordSentryLog(

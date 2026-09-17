@@ -303,12 +303,9 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
 	});
 
-	const sentry = dependencies.sentry;
-	const sentryEnabled = sentry !== undefined && env.sentry.dsn !== null;
-	const sentryRequestScope =
-		sentryEnabled && sentry ? createSentryRequestScope(sentry, { service: "billing" }) : undefined;
-	const merchantSentryScope =
-		sentryEnabled && sentry ? createSentryRequestScope(sentry, { service: "merchant" }) : undefined;
+	const sentry = env.sentry.dsn === null ? undefined : dependencies.sentry;
+	const sentryRequestScope = sentry && createSentryRequestScope(sentry, { service: "billing" });
+	const merchantSentryScope = sentry && createSentryRequestScope(sentry, { service: "merchant" });
 	const staff = createApp({
 		env,
 		connections,

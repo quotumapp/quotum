@@ -26,11 +26,9 @@ export interface RequestScope {
 	run<T>(request: Request, dispatch: () => T): T;
 }
 
-/** @deprecated Use RequestScope; kept for backwards compatibility. */
-export type StaffRequestScope = RequestScope;
-
+/** A request scope plus the hooks that tag it, installed on the merchant app. */
 export interface MerchantRequestScope extends RequestScope {
-	plugin?: ElysiaPluginLike;
+	plugin: ElysiaPluginLike;
 }
 
 export interface MerchantRuntimeOptions {

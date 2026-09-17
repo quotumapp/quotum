@@ -11,60 +11,28 @@ function merchantApp() {
 }
 
 describe("composeRuntimeApp request scopes", () => {
-	it("runs /api inside merchant scope and fallback inside staff scope", async () => {
+	it("runs /api inside only the merchant scope and the fallback inside only the staff scope", async () => {
 		const calls: string[] = [];
-		const staffRequestScope = {
+		const recordingScope = (name: string) => ({
 			run<T>(request: Request, dispatch: () => T): T {
-				calls.push(`staff:${new URL(request.url).pathname}`);
+				calls.push(`${name}:${new URL(request.url).pathname}`);
 				return dispatch();
 			},
-		};
-		const merchantRequestScope = {
-			run<T>(request: Request, dispatch: () => T): T {
-				calls.push(`merchant:${new URL(request.url).pathname}`);
-				return dispatch();
-			},
-		};
+		});
 		const app = composeRuntimeApp({
 			staff: staffApp(),
 			merchant: merchantApp(),
-			staffRequestScope,
-			merchantRequestScope,
+			staffRequestScope: recordingScope("staff"),
+			merchantRequestScope: recordingScope("merchant"),
 		});
 
 		const merchantResponse = await app.fetch(new Request("http://localhost/api/ping"));
-		expect(merchantResponse.status).toBe(200);
-		const staffResponse = await app.fetch(new Request("http://localhost/v1/ping"));
-		expect(staffResponse.status).toBe(200);
-
-		expect(calls).toEqual(["merchant:/api/ping", "staff:/v1/ping"]);
-	});
-
-	it("neither scope wraps the other", async () => {
-		const calls: string[] = [];
-		const app = composeRuntimeApp({
-			staff: staffApp(),
-			merchant: merchantApp(),
-			staffRequestScope: {
-				run<T>(request: Request, dispatch: () => T): T {
-					calls.push(`staff:${new URL(request.url).pathname}`);
-					return dispatch();
-				},
-			},
-			merchantRequestScope: {
-				run<T>(request: Request, dispatch: () => T): T {
-					calls.push(`merchant:${new URL(request.url).pathname}`);
-					return dispatch();
-				},
-			},
-		});
-
-		await app.fetch(new Request("http://localhost/api/ping"));
+		expect(await merchantResponse.json()).toEqual({ scope: "merchant" });
 		expect(calls).toEqual(["merchant:/api/ping"]);
 
-		calls.length = 0;
-		await app.fetch(new Request("http://localhost/v1/ping"));
-		expect(calls).toEqual(["staff:/v1/ping"]);
+		const staffResponse = await app.fetch(new Request("http://localhost/v1/ping"));
+		expect(await staffResponse.json()).toEqual({ scope: "staff" });
+		expect(calls).toEqual(["merchant:/api/ping", "staff:/v1/ping"]);
 	});
 
 	it("works without scopes", async () => {

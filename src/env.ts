@@ -132,18 +132,9 @@ const envSchema = z.object({
 	).default("6000"),
 	BILLING_TRUST_PROXY_HEADERS: z.enum(["true", "false"]).default("false"),
 	SENTRY_DSN: z.string().optional(),
-	SENTRY_ENVIRONMENT: z.preprocess(
-		(value) => {
-			if (typeof value !== "string") {
-				return undefined;
-			}
-			const trimmed = value.trim();
-			return trimmed === "" ? undefined : trimmed;
-		},
-		z
-			.string()
-			.regex(/^[^\s/]{1,64}$/)
-			.optional(),
+	SENTRY_ENVIRONMENT: optionalString().refine(
+		(value) => value === undefined || /^[^\s/]{1,64}$/.test(value),
+		{ message: "SENTRY_ENVIRONMENT must be at most 64 characters without whitespace or /" },
 	),
 	SENTRY_RELEASE: optionalString(),
 	BUILD_VERSION: optionalString(),

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
 import type { ErrorEvent } from "@sentry/core";
 import {
 	describeThrown,
@@ -17,6 +18,11 @@ import {
 	scrubValue,
 	stripUndefined,
 } from "../../src/observability/sentry-scrub";
+import { routeTables } from "../helpers/route-tables";
+
+const errorContract = JSON.parse(
+	readFileSync(new URL("../../contracts/v1/errors.json", import.meta.url), "utf8"),
+) as { codes: Array<{ code: string }> };
 
 describe("scrubString", () => {
 	it("masks bearer and basic credentials", () => {
@@ -47,6 +53,13 @@ describe("scrubString", () => {
 		expect(scrubString("in_progress sub_total")).toBe("in_progress sub_total");
 	});
 
+	it("filters whole project API keys, including base64url - and _", () => {
+		const secret = "AbCdEfGh12345678-qwertyuiop_ASDFGH1234567";
+		expect(scrubString(`key sqpk_${secret} end`)).toBe("key sqpk_[Filtered] end");
+		expect(scrubString(`X-Quotum-Key=pqpk_${secret}`)).toBe("X-Quotum-Key=pqpk_[Filtered]");
+		expect(scrubString("sqpk_ab-cd")).toBe("sqpk_[Filtered]");
+	});
+
 	it("masks email and ip", () => {
 		expect(scrubString("contact user@example.com now")).toBe("contact [email] now");
 		expect(scrubString("db at 10.0.0.5:5432 failed")).toBe("db at [ip]:5432 failed");
@@ -71,6 +84,22 @@ describe("scrubString", () => {
 		).toBe("see /v1/billing-accounts/123e4567-e89b-12d3-a456-426614174000/usage ok");
 	});
 
+	it("keeps long error codes and identifiers but still filters secrets", () => {
+		for (const { code } of errorContract.codes) {
+			expect(scrubString(code)).toBe(code);
+		}
+		for (const identifier of [
+			"BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS",
+			"ProjectionDeliveryPermanentFailureError",
+			"subscriptionReconciliationConflictDetected",
+		]) {
+			expect(scrubString(identifier)).toBe(identifier);
+		}
+		expect(scrubString("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")).toBe(FILTERED);
+		expect(scrubString("4f0352a0fd22df8bd5660b6bbe6100e3ec282375")).toBe(FILTERED);
+		expect(scrubString("AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh")).toBe(FILTERED);
+	});
+
 	it("caps with ellipsis", () => {
 		expect(scrubString("abcdef", 5)).toBe("abcd…");
 	});
@@ -85,7 +114,11 @@ describe("maskPath", () => {
 		],
 		["/v1/admin/customers/cust-1", "/v1/admin/customers/:id"],
 		["/v1/admin/contracts/b1/c1", "/v1/admin/contracts/:id/:id"],
+		["/v1/admin/contracts/acme/enterprise", "/v1/admin/contracts/:id/:id"],
+		["/v1/admin/contracts/preview", "/v1/admin/contracts/preview"],
+		["/v1/admin/customers/search", "/v1/admin/customers/search"],
 		["/v1/admin/auto-topups/b1/p1/reset", "/v1/admin/auto-topups/:id/:id/reset"],
+		["/v1/billing-accounts/abc/balances/storage", "/v1/billing-accounts/:id/balances/:id"],
 		["/v1/admin/store-events/evt-1/replay", "/v1/admin/store-events/:id/replay"],
 		["/v1/admin/projection-jobs/job-1/retry", "/v1/admin/projection-jobs/:id/retry"],
 		["/v1/admin/promotions/SUMMER/codes", "/v1/admin/promotions/:id/codes"],
@@ -115,6 +148,35 @@ describe("maskPath", () => {
 			expect(maskPath(input)).toBe(expected);
 		});
 	}
+
+	it("masks every identifier param of every registered route and keeps static segments", () => {
+		// Enum params stay readable; any other param gets the worst case, a plain lowercase word.
+		const enumValues: Record<string, string> = {
+			kind: "projection",
+			mode: "live",
+			operation: "consume",
+			provider: "google",
+		};
+		const mismatches: string[] = [];
+		let checked = 0;
+		for (const app of routeTables()) {
+			for (const { path } of app.routes) {
+				checked += 1;
+				const segments = path.split("/");
+				const concrete = segments.map((segment) =>
+					segment.startsWith(":") ? (enumValues[segment.slice(1)] ?? "acme") : segment,
+				);
+				const expected = segments.map((segment) =>
+					segment.startsWith(":") ? (enumValues[segment.slice(1)] ?? ":id") : segment,
+				);
+				const masked = maskPath(concrete.join("/"));
+				if (masked !== expected.join("/")) mismatches.push(`${path} -> ${masked}`);
+			}
+		}
+
+		expect(checked).toBeGreaterThan(100);
+		expect(mismatches).toEqual([]);
+	});
 });
 
 describe("scrubUrl", () => {
@@ -130,6 +192,13 @@ describe("scrubUrl", () => {
 
 	it("falls back to string scrubbing", () => {
 		expect(scrubUrl("not a url cus_1A2b3C4d5E6F7G8H")).toBe("not a url cus_[Filtered]");
+	});
+
+	it("scrubs urls without an http origin instead of printing a null origin", () => {
+		expect(scrubUrl("postgres://user:pw@db.internal/quotum?sslmode=require")).toBe(
+			"postgres://[Filtered]@db.internal/quotum",
+		);
+		expect(scrubUrl("mailto:user@example.com")).toBe("mailto:[email]");
 	});
 });
 
@@ -170,7 +239,7 @@ describe("scrubRecord", () => {
 			actor: "someone",
 			dsn: "https://x@y/1",
 			postgresUri: "postgres://user:pw@host/db",
-			"user.id": "should-drop-by-substring?",
+			"user.id": "user-123",
 			path: "/v1/billing-accounts/abc/usage",
 			projectionUrl: "https://merchant.example/hooks?a=1",
 		});
@@ -185,6 +254,7 @@ describe("scrubRecord", () => {
 		expect(output.actor).toBeUndefined();
 		expect(output.dsn).toBeUndefined();
 		expect(output.postgresUri).toBeUndefined();
+		expect(output["user.id"]).toBeUndefined();
 		expect(output.path).toBe("/v1/billing-accounts/:id/usage");
 		expect(output.projectionUrl).toBe("https://merchant.example/hooks");
 	});

@@ -16,41 +16,65 @@ const DEFAULT_MAX_ITEMS = 50;
 const DEFAULT_MAX_STRING = 1024;
 
 const BEARER_BASIC_PATTERN = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi;
+// Project API keys are a prefix plus base64url, so the secret itself can contain `-` and `_`.
+const PROJECT_API_KEY_PATTERN = /(?<![A-Za-z0-9])([sp]qpk)_[A-Za-z0-9_-]+/g;
 const URL_USERINFO_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi;
 const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
 const PREFIXED_ID_PATTERN =
-	/\b(sk|rk|pk|whsec|sqpk|pqpk|cus|sub|cs|pi|in|ch|seti|pm|acct|promo|evt|req|txn|price|prod|si)_((?:live_|test_)?[A-Za-z0-9]{8,})\b/g;
+	/\b(sk|rk|pk|whsec|cus|sub|cs|pi|in|ch|seti|pm|acct|promo|evt|req|txn|price|prod|si)_((?:live_|test_)?[A-Za-z0-9]{8,})\b/g;
 const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const IPV4_PATTERN = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
 const LONG_DIGITS_PATTERN = /(?<![A-Za-z0-9_])\d{14,}(?![A-Za-z0-9_])/g;
 const OPAQUE_TOKEN_PATTERN = /[A-Za-z0-9_\-+=]{32,}/g;
 const UUID_PATTERN =
 	/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+// Error codes, env var names and camelCase identifiers are long but never secrets.
+const IDENTIFIER_PATTERN =
+	/^(?:[A-Z][A-Z0-9]*(?:_[A-Z][A-Z0-9]*)+|[A-Za-z][a-z]{2,}(?:[A-Z][a-z]{2,})+)$/;
 const KEEP_SEGMENT_PATTERN = /^(?:[a-z]+(?:-[a-z]+)*|v\d+)$/;
 
+/** Path segments followed by one identifier, e.g. `billing-accounts/:billingAccountId`. */
 const COLLECTIONS = new Set([
+	"balances",
 	"billing-accounts",
 	"by-billing-account",
-	"customers",
-	"contracts",
-	"auto-topups",
-	"entities",
-	"license-assignments",
-	"promotion-redemptions",
 	"checkout-sessions",
-	"subscriptions",
-	"events",
-	"reservations",
-	"store-events",
-	"projection-jobs",
-	"promotions",
 	"codes",
-	"provisioning",
-	"invitations",
-	"members",
-	"step-up",
-	"projects",
 	"connections",
+	"customers",
+	"entities",
+	"events",
+	"invitations",
+	"license-assignments",
+	"licenses",
+	"members",
+	"projection-jobs",
+	"projects",
+	"promotion-redemptions",
+	"promotions",
+	"provisioning",
+	"reservations",
+	"step-up",
+	"store-events",
+	"subscriptions",
+]);
+
+/** Path segments followed by two identifiers, e.g. `contracts/:billingAccountId/:contractId`. */
+const PAIR_COLLECTIONS = new Set(["auto-topups", "contracts"]);
+
+/** Static route segments, including enum values, that sit where a collection takes an id. */
+const STATIC_AFTER_COLLECTION = new Set([
+	"accept",
+	"apple",
+	"google",
+	"list",
+	"preview",
+	"projection",
+	"publish",
+	"request",
+	"run",
+	"search",
+	"stripe",
 ]);
 
 const SENSITIVE_EXACT = new Set([
@@ -182,7 +206,8 @@ const BREADCRUMB_DATA_DROP = new Set([
 const KEEP_CONTEXTS = new Set(["app", "device", "os", "runtime", "culture", "cloud_resource"]);
 
 export function scrubString(value: string, maxLength?: number): string {
-	let output = value.replace(BEARER_BASIC_PATTERN, "$1 [Filtered]");
+	let output = value.replace(PROJECT_API_KEY_PATTERN, "$1_[Filtered]");
+	output = output.replace(BEARER_BASIC_PATTERN, "$1 [Filtered]");
 	output = output.replace(URL_USERINFO_PATTERN, "$1[Filtered]@");
 	output = output.replace(JWT_PATTERN, "[jwt]");
 	output = output.replace(PREFIXED_ID_PATTERN, (match, prefix: string, suffix: string) => {
@@ -195,7 +220,7 @@ export function scrubString(value: string, maxLength?: number): string {
 	output = output.replace(IPV4_PATTERN, "[ip]");
 	output = output.replace(LONG_DIGITS_PATTERN, "[number]");
 	output = output.replace(OPAQUE_TOKEN_PATTERN, (match) => {
-		if (UUID_PATTERN.test(match)) {
+		if (UUID_PATTERN.test(match) || IDENTIFIER_PATTERN.test(match)) {
 			return match;
 		}
 		if (!/[0-9A-Z]/.test(match)) {
@@ -211,41 +236,57 @@ export function scrubString(value: string, maxLength?: number): string {
 
 export function maskPath(pathname: string): string {
 	const segments = pathname.split("/");
-	return segments
-		.map((segment, index) => {
-			if (segment === "" || segment.startsWith(":") || segment === "*") {
-				return segment;
-			}
-			if (!KEEP_SEGMENT_PATTERN.test(segment)) {
-				return ":id";
-			}
-			if (COLLECTIONS.has(segment)) {
-				return segment;
-			}
-			const previous = segments[index - 1] ?? "";
-			if (COLLECTIONS.has(previous)) {
-				return ":id";
-			}
-			if (index >= 2 && segments[index - 2] === "operations") {
-				return ":id";
-			}
-			return segment;
-		})
-		.join("/");
+	const output: string[] = [];
+	for (const [index, segment] of segments.entries()) {
+		output.push(
+			maskSegment(segment, segments[index - 1] ?? "", segments[index - 2] ?? "", output[index - 1]),
+		);
+	}
+	return output.join("/");
+}
+
+function maskSegment(
+	segment: string,
+	previous: string,
+	beforePrevious: string,
+	maskedPrevious: string | undefined,
+): string {
+	if (segment === "" || segment.startsWith(":") || segment === "*") {
+		return segment;
+	}
+	if (!KEEP_SEGMENT_PATTERN.test(segment)) {
+		return ":id";
+	}
+	if (COLLECTIONS.has(segment) || PAIR_COLLECTIONS.has(segment)) {
+		return segment;
+	}
+	if (COLLECTIONS.has(previous) || PAIR_COLLECTIONS.has(previous)) {
+		return STATIC_AFTER_COLLECTION.has(segment) ? segment : ":id";
+	}
+	if (PAIR_COLLECTIONS.has(beforePrevious) && maskedPrevious?.startsWith(":") === true) {
+		return ":id";
+	}
+	// `usage/operations/:operation/:operationId`: the operation kind is an enum, the next is an id.
+	if (beforePrevious === "operations") {
+		return ":id";
+	}
+	return segment;
 }
 
 export function scrubUrl(value: string): string {
+	const withoutQuery = value.split(/[?#]/)[0] ?? "";
+	if (value.startsWith("/")) {
+		return maskPath(withoutQuery);
+	}
 	try {
 		const parsed = new URL(value);
-		return `${parsed.origin}${maskPath(parsed.pathname)}`;
+		// Non-special schemes such as postgres: have an opaque "null" origin.
+		return parsed.origin === "null"
+			? scrubString(withoutQuery)
+			: `${parsed.origin}${maskPath(parsed.pathname)}`;
 	} catch {
-		// Not absolute; fall through to relative handling.
+		return scrubString(value);
 	}
-	if (value.startsWith("/")) {
-		const pathname = value.split(/[?#]/)[0] ?? "/";
-		return maskPath(pathname);
-	}
-	return scrubString(value);
 }
 
 export function isSensitiveKey(key: string): boolean {

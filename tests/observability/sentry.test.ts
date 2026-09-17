@@ -64,6 +64,8 @@ describe("initializeSentry", () => {
 			httpHeaders: { request: false, response: false },
 			httpBodies: [],
 			urlQueryParams: false,
+			graphQL: { document: false, variables: false },
+			genAI: { inputs: false, outputs: false },
 			databaseQueryData: false,
 			stackFrameVariables: false,
 		});
@@ -101,16 +103,14 @@ describe("initializeSentry", () => {
 	});
 
 	it("scrubs through every hook and drops on scrubber throw", () => {
-		const { sentry } = createRecordingSentry();
 		const initCalls: unknown[] = [];
-		const recording = {
-			...sentry,
+		const sentry = {
 			init(options: unknown) {
 				initCalls.push(options);
 			},
 		} satisfies SentryClientLike;
 
-		initializeSentry(recording, sentryEnv);
+		initializeSentry(sentry, sentryEnv);
 		const options = initCalls[0] as {
 			beforeSend(event: Record<string, unknown>, hint: unknown): unknown | null;
 			beforeSendTransaction(event: Record<string, unknown>, hint: unknown): unknown | null;
@@ -151,9 +151,30 @@ describe("initializeSentry", () => {
 		expect(options.beforeSendTransaction(throwing as Record<string, unknown>, {})).toBeNull();
 		expect(options.beforeBreadcrumb(throwing as Record<string, unknown>, {})).toBeNull();
 		expect(options.beforeSendLog(throwing as Record<string, unknown>)).toBeNull();
-		const stripped = options.beforeSendSpan(throwing as Record<string, unknown>);
-		expect(stripped.description).toBe("[Filtered]");
-		expect(stripped.data).toEqual({});
+
+		// Spans cannot be dropped, so a span whose data cannot be scrubbed keeps only its identity.
+		const unreadableData = new Proxy(
+			{},
+			{
+				ownKeys() {
+					throw new Error("scrub boom");
+				},
+			},
+		);
+		const stripped = options.beforeSendSpan({
+			span_id: "a",
+			trace_id: "b",
+			start_timestamp: 1,
+			description: "GET /v1/billing-accounts/abc",
+			data: unreadableData,
+		});
+		expect(stripped).toEqual({
+			span_id: "a",
+			trace_id: "b",
+			start_timestamp: 1,
+			description: "[Filtered]",
+			data: {},
+		});
 	});
 
 	it("skips SDK initialization when Sentry is disabled", () => {
@@ -537,6 +558,7 @@ describe("createSentryRequestScope", () => {
 							return (scope as { setTag(k: string, v: string): unknown }).setTag(key, value);
 						},
 						setContext(key: string, context: Record<string, unknown> | null) {
+							if (context?.status !== undefined) order.push(`context:status=${context.status}`);
 							return (scope as { setContext(k: string, c: unknown): unknown }).setContext(
 								key,
 								context,
@@ -568,14 +590,11 @@ describe("createSentryRequestScope", () => {
 			entry.startsWith("tag:route=/v1/billing-accounts/:billingAccountId"),
 		);
 		const handlerIndex = order.indexOf("handler");
-		const statusIndex = order.findIndex(
-			(entry) => entry.startsWith("tag:status=") || entry === "tag:status=200",
-		);
-		// onBeforeHandle tags route before the handler; status comes after.
+		const statusIndex = order.indexOf("context:status=200");
+		// onBeforeHandle tags the route before the handler runs; onAfterHandle records the status.
 		expect(routeTagIndex).toBeGreaterThanOrEqual(0);
 		expect(handlerIndex).toBeGreaterThan(routeTagIndex);
-		expect(order).toContain("handler");
-		void statusIndex;
+		expect(statusIndex).toBeGreaterThan(handlerIndex);
 	});
 
 	it("tags merchant auth wildcard with its pattern", async () => {
@@ -650,7 +669,6 @@ function createRecordingSentry(): {
 			tags: Record<string, string>;
 			contexts: Record<string, Record<string, unknown>>;
 		}>;
-		initOptions: unknown[];
 	};
 } {
 	const calls = {
@@ -661,7 +679,6 @@ function createRecordingSentry(): {
 			tags: Record<string, string>;
 			contexts: Record<string, Record<string, unknown>>;
 		}>,
-		initOptions: [] as unknown[],
 	};
 	const createScope = () => {
 		const tags: Record<string, string> = {};
@@ -681,9 +698,7 @@ function createRecordingSentry(): {
 		return { scope, record: { tags, contexts } };
 	};
 	const sentry = {
-		init(options: unknown) {
-			calls.initOptions.push(options);
-		},
+		init() {},
 		logger: {
 			info(message: string, attributes?: Record<string, unknown>) {
 				calls.logs.push({ level: "info", message, attributes });

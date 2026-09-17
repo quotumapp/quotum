@@ -129,8 +129,8 @@ export function createMerchantApp({
 	onUnexpectedError,
 }: MerchantAppDependencies) {
 	const app = new Elysia(HTTP_APP_CONFIG);
-	if (requestObservabilityMiddleware) {
-		requestObservabilityMiddleware(app);
+	if (requestObservabilityMiddleware !== undefined) {
+		app.use(requestObservabilityMiddleware);
 	}
 	const team = new MerchantTeam(store, mailer);
 	const stepUp = new MerchantStepUp(store);
