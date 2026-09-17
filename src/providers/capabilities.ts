@@ -170,7 +170,7 @@ export function bindingImplementsCatalogTarget(
 ): boolean {
 	if (!isDeclaredProvider(provider)) return false;
 	const declaration = lookup.get(provider);
-	if (declaration === undefined) return false;
+	if (declaration === undefined || declaration.availability !== "available") return false;
 	return catalogConstructOperations(target).every((operation) =>
 		implementsOperation(declaration, operation),
 	);

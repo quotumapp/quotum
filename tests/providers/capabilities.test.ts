@@ -543,6 +543,17 @@ describe("declaration helpers the runtime gates read", () => {
 		expect(bindingImplementsCatalogTarget(new Map(), "stripe", trialPlan)).toBe(false);
 	});
 
+	it("never admits a planned declaration, even for a target that requires no operation", () => {
+		const plainPlan: CatalogCapabilityTarget = { kind: "plan", plan: { trialDays: null } };
+		expect(catalogConstructOperations(plainPlan)).toEqual([]);
+		expect(bindingImplementsCatalogTarget(providerCapabilityCatalog, "stripe", plainPlan)).toBe(
+			true,
+		);
+		expect(bindingImplementsCatalogTarget(providerCapabilityCatalog, "paddle", plainPlan)).toBe(
+			false,
+		);
+	});
+
 	it("asks every admitted provider for a customer-initiated top-up purchase", () => {
 		for (const provider of admittedProviders()) {
 			expect(purchaseActionFor(provider)).toBe("purchase_required");
