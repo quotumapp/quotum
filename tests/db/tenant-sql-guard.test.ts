@@ -52,14 +52,6 @@ const allowlisted = [
 		reason: "global auto-topup queue claim",
 	},
 	{
-		snippet: "SELECT id FROM subscription_changes WHERE (status = 'pending'",
-		reason: "global subscription-change queue claim",
-	},
-	{
-		snippet: "SELECT id FROM usage_invoice_periods WHERE status = 'pending'",
-		reason: "global recurring-billing queue claim",
-	},
-	{
 		snippet: "FROM store_events se",
 		reason: "admin stats query uses projectFilter in the same template",
 	},

@@ -357,4 +357,280 @@ describe("BillingRepository workers", () => {
 		expect(database.params[2]).toContain("change-id");
 		expect(database.params[2]).not.toContain("worker-a");
 	});
+
+	it("claims subscription changes as ids carrying their project", async () => {
+		const database = new FakeDatabase([
+			[],
+			[{ id: "change-id", project_id: "project-id", project_key: "wiseley" }],
+		]);
+		const repository = new BillingRepository(database as never);
+
+		await expect(repository.claimSubscriptionChanges("worker-a", 5)).resolves.toEqual([
+			{ projectInstanceId: "project-id", projectKey: "wiseley", changeId: "change-id" },
+		]);
+
+		expect(database.queries[0]).toContain("UPDATE catalog_migration_jobs");
+		expect(database.queries[1]).toContain("attempts = attempts + 1");
+		expect(database.queries[1]).toContain("RETURNING changes.id, changes.project_id");
+		expect(database.queries[1]).toContain("AS project_key");
+	});
+
+	it("claims subscription changes after staging fails and reports the failure", async () => {
+		const inner = new FakeDatabase([
+			[{ id: "change-id", project_id: "project-id", project_key: "wiseley" }],
+		]);
+		const database = new FailingStagingDatabase(inner);
+		const repository = new BillingRepository(database as never);
+		const stagingErrors: unknown[] = [];
+
+		const claimed = await repository.claimSubscriptionChanges("worker-a", 5, {
+			onStagingError: (error) => stagingErrors.push(error),
+		});
+
+		expect(claimed).toEqual([
+			{ projectInstanceId: "project-id", projectKey: "wiseley", changeId: "change-id" },
+		]);
+		expect(stagingErrors).toEqual([new Error("staging failed")]);
+	});
+
+	it("skips a candidate that cannot be materialized and still claims usage invoice work", async () => {
+		const database = new FakeDatabase([
+			[
+				usageInvoiceCandidate({ subscription_id: "poison", billing_units: "0" }),
+				usageInvoiceCandidate(),
+			],
+			[{ id: "materialized-period-id" }],
+			[{ id: "period-id", project_id: "project-id", project_key: "wiseley" }],
+			[
+				{
+					id: 7,
+					project_id: "project-id",
+					project_key: "wiseley",
+					closed_period_id: "closed-period-id",
+				},
+			],
+		]);
+		const repository = new BillingRepository(database as never);
+		const skipped: Array<{ projectInstanceId: string; subscriptionId: string }> = [];
+
+		const claim = await repository.materializeAndClaimUsageInvoicePeriods("worker-a", 5, {
+			onMaterializationError: (_error, context) => skipped.push(context),
+		});
+
+		expect(claim).toEqual({
+			materialized: 1,
+			jobs: [
+				{
+					projectInstanceId: "project-id",
+					projectKey: "wiseley",
+					jobKind: "period",
+					jobId: "period-id",
+					periodId: "period-id",
+				},
+				{
+					projectInstanceId: "project-id",
+					projectKey: "wiseley",
+					jobKind: "adjustment",
+					jobId: "7",
+					periodId: "closed-period-id",
+				},
+			],
+		});
+		expect(skipped).toEqual([{ projectInstanceId: "project-id", subscriptionId: "poison" }]);
+		expect(database.queries[1]).toContain("INSERT INTO usage_invoice_periods");
+		expect(database.queries[1]).toContain("DO NOTHING");
+		expect(database.queries[2]).toContain("RETURNING periods.id, periods.project_id");
+		expect(database.queries[3]).toContain("adjustment.closed_period_id");
+	});
+
+	it("materializes each candidate in its own transaction, apart from the claim", async () => {
+		const inner = new FakeDatabase([
+			[usageInvoiceCandidate({ subscription_id: "poison" }), usageInvoiceCandidate()],
+			[],
+			[{ id: "materialized-period-id" }],
+			[{ id: "period-id", project_id: "project-id", project_key: "wiseley" }],
+			[],
+		]);
+		let inserts = 0;
+		const database = new TransactionalDatabase(inner, (query) => {
+			if (!query.includes("INSERT INTO usage_invoice_periods")) return undefined;
+			inserts += 1;
+			return inserts === 1 ? new Error("value out of range for type bigint") : undefined;
+		});
+		const repository = new BillingRepository(database as never);
+		const skipped: Array<{ projectInstanceId: string; subscriptionId: string }> = [];
+
+		const claim = await repository.materializeAndClaimUsageInvoicePeriods("worker-a", 5, {
+			onMaterializationError: (_error, context) => skipped.push(context),
+		});
+
+		expect(claim.materialized).toBe(1);
+		expect(claim.jobs.map(({ jobId }) => jobId)).toEqual(["period-id"]);
+		expect(skipped).toEqual([{ projectInstanceId: "project-id", subscriptionId: "poison" }]);
+		expect(database.transactions).toEqual(["rolled back", "committed", "committed"]);
+		inner.assertConsumed();
+	});
+
+	it("rolls the claimed periods back when the adjustment claim fails", async () => {
+		const inner = new FakeDatabase([
+			[],
+			[{ id: "period-id", project_id: "project-id", project_key: "wiseley" }],
+		]);
+		const database = new TransactionalDatabase(inner, (query) =>
+			query.includes("UPDATE usage_invoice_adjustments adjustment")
+				? new Error("canceling statement due to statement timeout")
+				: undefined,
+		);
+		const repository = new BillingRepository(database as never);
+
+		await expect(repository.materializeAndClaimUsageInvoicePeriods("worker-a", 5)).rejects.toThrow(
+			"canceling statement due to statement timeout",
+		);
+
+		const periodClaim = inner.queries.findIndex((query) =>
+			query.includes("UPDATE usage_invoice_periods periods"),
+		);
+		expect(periodClaim).toBeGreaterThanOrEqual(0);
+		expect(database.outcomeOf(periodClaim)).toBe("rolled back");
+	});
+
+	it("returns null for recurring-billing jobs whose lease was lost", async () => {
+		const database = new FakeDatabase([[], [], []]);
+		const repository = new BillingRepository(database as never);
+
+		await expect(
+			repository.loadClaimedSubscriptionChange("project-id", "change-id", "worker-a"),
+		).resolves.toBeNull();
+		await expect(
+			repository.loadClaimedUsageInvoiceJob("project-id", "period", "period-id", "worker-a"),
+		).resolves.toBeNull();
+		await expect(
+			repository.loadClaimedUsageInvoiceJob("project-id", "adjustment", "7", "worker-a"),
+		).resolves.toBeNull();
+
+		expect(database.queries[0]).toContain("FROM subscription_changes");
+		expect(database.queries[1]).toContain("FROM usage_invoice_periods");
+		expect(database.queries[2]).toContain("FROM usage_invoice_adjustments");
+		for (const [index, query] of database.queries.entries()) {
+			expect(query).toContain("status = 'processing'");
+			expect(database.boundParameter("project_id", index)).toBe("project-id");
+			expect(database.boundParameter("locked_by", index)).toBe("worker-a");
+		}
+	});
+
+	it("builds a recurring-billing job only once its lease check passes", async () => {
+		const changes = new FakeDatabase([[{ id: "change-id" }], []]);
+
+		await expect(
+			new BillingRepository(changes as never).loadClaimedSubscriptionChange(
+				"project-id",
+				"change-id",
+				"worker-a",
+			),
+		).rejects.toThrow("Subscription change change-id was not found");
+
+		expect(changes.queries).toHaveLength(2);
+		expect(changes.queries[1]).toContain("changes.status = 'processing'");
+
+		const periods = new FakeDatabase([[{ id: "period-id" }], []]);
+
+		await expect(
+			new BillingRepository(periods as never).loadClaimedUsageInvoiceJob(
+				"project-id",
+				"period",
+				"period-id",
+				"worker-a",
+			),
+		).rejects.toThrow("Usage invoice period period-id cannot be invoiced");
+
+		expect(periods.queries).toHaveLength(2);
+	});
 });
+
+/** Fails the catalog-migration staging statement that runs before the subscription-change claim. */
+class FailingStagingDatabase {
+	private staged = false;
+
+	constructor(private readonly inner: FakeDatabase) {}
+
+	async execute(query: unknown): Promise<Record<string, unknown>[]> {
+		if (!this.staged) {
+			this.staged = true;
+			throw new Error("staging failed");
+		}
+		return await this.inner.execute(query);
+	}
+
+	async transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> {
+		return await callback(this);
+	}
+}
+
+/**
+ * Adds the transaction semantics FakeDatabase leaves out: every statement records the transaction
+ * it ran in, a failing statement aborts the rest of that transaction, and the outcome is readable.
+ */
+class TransactionalDatabase {
+	readonly transactions: Array<"committed" | "rolled back"> = [];
+	private readonly statements: Array<number | null> = [];
+	private open: number | null = null;
+
+	constructor(
+		private readonly inner: FakeDatabase,
+		private readonly failOn: (query: string) => Error | undefined = () => undefined,
+	) {}
+
+	async execute(query: unknown): Promise<Record<string, unknown>[]> {
+		if (this.open !== null && this.transactions[this.open] === "rolled back") {
+			throw new Error("current transaction is aborted, commands ignored until end of transaction");
+		}
+		this.statements.push(this.open);
+		const rows = await this.inner.execute(query);
+		const failure = this.failOn(this.inner.queries.at(-1) ?? "");
+		if (failure === undefined) return rows;
+		if (this.open !== null) this.transactions[this.open] = "rolled back";
+		throw failure;
+	}
+
+	async transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> {
+		const index = this.transactions.length;
+		this.transactions.push("committed");
+		const enclosing = this.open;
+		this.open = index;
+		try {
+			return await callback(this);
+		} catch (error) {
+			this.transactions[index] = "rolled back";
+			throw error;
+		} finally {
+			this.open = enclosing;
+		}
+	}
+
+	/** The outcome of the transaction the nth statement ran in; null when it ran outside one. */
+	outcomeOf(statement: number): "committed" | "rolled back" | null {
+		const index = this.statements[statement];
+		return index === null || index === undefined ? null : this.transactions[index];
+	}
+}
+
+function usageInvoiceCandidate(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+	return {
+		project_id: "project-id",
+		customer_id: "customer-id",
+		subscription_id: "subscription-id",
+		provider: "stripe",
+		provider_account_id: null,
+		plan_item_id: 1,
+		price_component_id: 2,
+		period_start_at: "2026-01-01T00:00:00.000Z",
+		period_end_at: "2026-02-01T00:00:00.000Z",
+		usage_quantity: "10",
+		included_quantity: "0",
+		billing_units: "1",
+		unit_amount_minor: 500,
+		currency: "usd",
+		pricing_model: "flat",
+		...overrides,
+	};
+}

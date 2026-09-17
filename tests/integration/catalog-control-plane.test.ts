@@ -535,7 +535,16 @@ localDescribe("catalog control plane", () => {
 		);
 		expect(invoiceClaim.materialized).toBe(1);
 		expect(invoiceClaim.jobs).toHaveLength(1);
-		expect(invoiceClaim.jobs[0]).toMatchObject({
+		const claimedPeriod = invoiceClaim.jobs[0];
+		if (claimedPeriod === undefined) throw new Error("Expected a claimed usage invoice period");
+		const periodJob = await context.repository.loadClaimedUsageInvoiceJob(
+			claimedPeriod.projectInstanceId,
+			claimedPeriod.jobKind,
+			claimedPeriod.jobId,
+			"phase2-worker",
+		);
+		if (periodJob === null) throw new Error("Expected a usage invoice period job");
+		expect(periodJob).toMatchObject({
 			jobKind: "period",
 			billingAccountId: "phase2-metered-account",
 			externalCustomerId: "cus_phase2_metered",
@@ -547,13 +556,11 @@ localDescribe("catalog control plane", () => {
 			amountMinor: 50,
 			currency: "usd",
 		});
-		const periodJob = invoiceClaim.jobs[0];
-		if (periodJob === undefined) throw new Error("Expected a usage invoice period job");
 		await expect(
 			context.repository.markUsageInvoiceSucceeded(
 				integrationProjectContext("wiseley").projectInstanceId,
-				periodJob.jobKind,
-				periodJob.jobId,
+				claimedPeriod.jobKind,
+				claimedPeriod.jobId,
 				"in_wrong_project",
 				"phase2-worker",
 			),
@@ -561,16 +568,16 @@ localDescribe("catalog control plane", () => {
 		await expect(
 			context.repository.markUsageInvoiceSucceeded(
 				integrationProjectContext().projectInstanceId,
-				periodJob.jobKind,
-				periodJob.jobId,
+				claimedPeriod.jobKind,
+				claimedPeriod.jobId,
 				"in_stale_worker",
 				"stale-worker",
 			),
 		).rejects.toThrow("was not owned by worker");
 		await context.repository.markUsageInvoiceSucceeded(
 			integrationProjectContext().projectInstanceId,
-			periodJob.jobKind,
-			periodJob.jobId,
+			claimedPeriod.jobKind,
+			claimedPeriod.jobId,
 			"in_phase2_usage",
 			"phase2-worker",
 		);
@@ -589,7 +596,17 @@ localDescribe("catalog control plane", () => {
 		);
 		expect(adjustmentClaim.materialized).toBe(0);
 		expect(adjustmentClaim.jobs).toHaveLength(1);
-		expect(adjustmentClaim.jobs[0]).toMatchObject({
+		const claimedAdjustment = adjustmentClaim.jobs[0];
+		if (claimedAdjustment === undefined) throw new Error("Expected a claimed usage adjustment");
+		expect(claimedAdjustment.periodId).toBe(periodJob.periodId);
+		expect(
+			await context.repository.loadClaimedUsageInvoiceJob(
+				claimedAdjustment.projectInstanceId,
+				claimedAdjustment.jobKind,
+				claimedAdjustment.jobId,
+				"phase2-worker",
+			),
+		).toMatchObject({
 			jobKind: "adjustment",
 			periodId: periodJob.periodId,
 			adjustmentQuantity: "-2000.000000000",

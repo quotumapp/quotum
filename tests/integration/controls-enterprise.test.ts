@@ -399,7 +399,13 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		});
 		expect(published).toMatchObject({ queued: 2, duplicate: false });
 
-		const [change] = await context.repository.claimSubscriptionChanges("migration-worker", 10);
+		const [claimed] = await context.repository.claimSubscriptionChanges("migration-worker", 10);
+		if (claimed === undefined) throw new Error("the migration change was not claimed");
+		const change = await context.repository.loadClaimedSubscriptionChange(
+			claimed.projectInstanceId,
+			claimed.changeId,
+			"migration-worker",
+		);
 		expect(change).toMatchObject({
 			status: "processing",
 			externalSubscriptionId: "sub_migrate_stripe",
@@ -422,7 +428,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		await expect(
 			context.repository.markSubscriptionChangeApplied(
 				integrationProjectContext("wiseley").projectInstanceId,
-				change?.changeId ?? "",
+				claimed.changeId,
 				"sub_migrate_stripe",
 				"migration-worker",
 			),
@@ -430,14 +436,14 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		await expect(
 			context.repository.markSubscriptionChangeApplied(
 				project.projectInstanceId,
-				change?.changeId ?? "",
+				claimed.changeId,
 				"sub_migrate_stripe",
 				"stale-worker",
 			),
 		).rejects.toThrow("was not owned by worker");
 		await context.repository.markSubscriptionChangeApplied(
 			project.projectInstanceId,
-			change?.changeId ?? "",
+			claimed.changeId,
 			"sub_migrate_stripe",
 			"migration-worker",
 		);

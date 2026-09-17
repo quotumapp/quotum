@@ -6,6 +6,7 @@ import { MeteringService } from "../../src/billing/metering";
 import type { SubscriptionChangeOperation, UsageInvoiceJob } from "../../src/billing/recurring";
 import type { BillingProvider } from "../../src/billing/types";
 import { createWorkerProviderSelectors } from "../../src/composition/worker-providers";
+import type { ClaimedUsageInvoiceJob } from "../../src/db/repository";
 import type { StripeBillingEnv } from "../../src/env";
 import type { RuntimeConnectionResolver } from "../../src/projects/connections";
 import { createProviderRegistry } from "../../src/providers/registry";
@@ -232,7 +233,14 @@ localDescribe("Provider job identity integration", () => {
 
 			const claimed = await context.repository.claimSubscriptionChanges("identity-migration", 10);
 			expect(claimed).toHaveLength(1);
-			expect(claimed[0]).toMatchObject({
+			const [claimedChange] = claimed;
+			if (claimedChange === undefined) throw new Error("Expected a claimed migration change");
+			const change = await context.repository.loadClaimedSubscriptionChange(
+				claimedChange.projectInstanceId,
+				claimedChange.changeId,
+				"identity-migration",
+			);
+			expect(change).toMatchObject({
 				externalSubscriptionId: "sub_migrate_stripe",
 				provider: "stripe",
 				providerAccountId: identity,
@@ -284,12 +292,13 @@ localDescribe("Provider job identity integration", () => {
 				{ account: "identity-correction", provider: "stripe", provider_account_id: identity },
 				{ account: "identity-period", provider: "stripe", provider_account_id: identity },
 			]);
-			expect(jobIdentities(claim.jobs)).toEqual([
+			const jobs = await loadClaimedUsageJobs(claim.jobs, workerId);
+			expect(jobIdentities(jobs)).toEqual([
 				{ jobKind: "period", account: "identity-correction", identity: ["stripe", identity] },
 				{ jobKind: "period", account: "identity-period", identity: ["stripe", identity] },
 			]);
 
-			for (const job of claim.jobs) {
+			for (const job of jobs) {
 				await context.repository.markUsageInvoiceSucceeded(
 					project.projectInstanceId,
 					job.jobKind,
@@ -303,7 +312,7 @@ localDescribe("Provider job identity integration", () => {
 				workerId,
 				10,
 			);
-			expect(jobIdentities(adjustments.jobs)).toEqual([
+			expect(jobIdentities(await loadClaimedUsageJobs(adjustments.jobs, workerId))).toEqual([
 				{ jobKind: "adjustment", account: "identity-correction", identity: ["stripe", identity] },
 			]);
 		});
@@ -505,6 +514,24 @@ function identityApp(
 		}),
 	);
 	return { app, registry, stripe };
+}
+
+async function loadClaimedUsageJobs(
+	claimed: readonly ClaimedUsageInvoiceJob[],
+	workerId: string,
+): Promise<UsageInvoiceJob[]> {
+	const jobs: UsageInvoiceJob[] = [];
+	for (const job of claimed) {
+		const loaded = await context.repository.loadClaimedUsageInvoiceJob(
+			job.projectInstanceId,
+			job.jobKind,
+			job.jobId,
+			workerId,
+		);
+		if (loaded === null) throw new Error(`Expected to load claimed ${job.jobKind} ${job.jobId}`);
+		jobs.push(loaded);
+	}
+	return jobs;
 }
 
 function jobIdentities(jobs: readonly UsageInvoiceJob[]) {

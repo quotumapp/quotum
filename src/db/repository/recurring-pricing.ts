@@ -92,6 +92,54 @@ interface ChangeRow {
 	stripe_coupon_id: string | null;
 }
 
+interface UsageInvoicePeriodCandidateRow {
+	project_id: string;
+	customer_id: string;
+	subscription_id: string;
+	provider: BillingProvider;
+	provider_account_id: string | null;
+	plan_item_id: string | number | bigint;
+	price_component_id: string | number | bigint;
+	period_start_at: Date | string;
+	period_end_at: Date | string;
+	usage_quantity: unknown;
+	included_quantity: unknown;
+	billing_units: unknown;
+	unit_amount_minor: string | number;
+	currency: string;
+	pricing_model: "flat" | "graduated" | "volume";
+}
+
+/** What a claim knows about a subscription change before the job is loaded. */
+export interface ClaimedSubscriptionChange {
+	projectInstanceId: string;
+	projectKey: string;
+	changeId: string;
+}
+
+/** What a claim knows about a usage invoice job before the job is loaded. */
+export interface ClaimedUsageInvoiceJob {
+	projectInstanceId: string;
+	projectKey: string;
+	jobKind: UsageInvoiceJob["jobKind"];
+	jobId: string;
+	/** The invoiced period; an adjustment carries the period it closes. */
+	periodId: string;
+}
+
+export interface SubscriptionChangeClaimOptions {
+	/** Catalog-migration staging failed. The claim still runs; the caller logs the failure. */
+	onStagingError?(error: unknown): void;
+}
+
+export interface UsageInvoiceClaimOptions {
+	/** One candidate could not be materialized. The other candidates and the claim still run. */
+	onMaterializationError?(
+		error: unknown,
+		context: { projectInstanceId: string; subscriptionId: string },
+	): void;
+}
+
 export class RecurringPricingRepository extends RepositoryModule {
 	async previewSubscriptionChange(
 		project: ProjectInstanceContext,
@@ -231,35 +279,73 @@ export class RecurringPricingRepository extends RepositoryModule {
 		});
 	}
 
+	/**
+	 * Claims due changes as ids. Staging runs in its own transaction first, so a staging failure is
+	 * reported to the caller and the claim still runs, and the claimed attempt is committed before
+	 * any job is built.
+	 */
 	async claimSubscriptionChanges(
 		workerId: string,
 		limit: number,
-	): Promise<SubscriptionChangeOperation[]> {
+		options: SubscriptionChangeClaimOptions = {},
+	): Promise<ClaimedSubscriptionChange[]> {
+		try {
+			await this.transaction(async (tx) => {
+				await stageCatalogMigrationChanges(tx, workerId, limit);
+			});
+		} catch (error) {
+			options.onStagingError?.(error);
+		}
+		const rows = await executeRows<{ id: string; project_id: string; project_key: string }>(
+			this.database,
+			drizzleSql`
+				WITH due AS (
+					SELECT id
+					FROM subscription_changes
+					WHERE (status = 'pending' AND effective_at <= now())
+						OR (status = 'processing' AND locked_at < now() - interval '5 minutes')
+					ORDER BY effective_at, created_at
+					LIMIT ${limit}
+					FOR UPDATE SKIP LOCKED
+				)
+				UPDATE subscription_changes changes
+				SET status = 'processing', locked_at = now(), locked_by = ${workerId},
+					attempts = attempts + 1, updated_at = now()
+				FROM due
+				WHERE changes.id = due.id
+				RETURNING changes.id, changes.project_id,
+					(SELECT projects.key FROM projects projects WHERE projects.id = changes.project_id)
+						AS project_key
+			`,
+		);
+		return rows.map((row) => ({
+			projectInstanceId: row.project_id,
+			projectKey: row.project_key,
+			changeId: row.id,
+		}));
+	}
+
+	/**
+	 * Builds a claimed change after re-checking the lease. A lost lease returns null, which is not
+	 * the same as a job that cannot be built: only the latter reaches the failure path.
+	 */
+	async loadClaimedSubscriptionChange(
+		projectInstanceId: string,
+		changeId: string,
+		workerId: string,
+	): Promise<SubscriptionChangeOperation | null> {
 		return await this.transaction(async (tx) => {
-			await stageCatalogMigrationChanges(tx, workerId, limit);
-			const rows = await executeRows<{ id: string }>(
+			const owned = await executeOne<{ id: string }>(
 				tx,
 				drizzleSql`
-					WITH due AS (
-						SELECT id
-						FROM subscription_changes
-						WHERE (status = 'pending' AND effective_at <= now())
-							OR (status = 'processing' AND locked_at < now() - interval '5 minutes')
-						ORDER BY effective_at, created_at
-						LIMIT ${limit}
-						FOR UPDATE SKIP LOCKED
-					)
-					UPDATE subscription_changes changes
-					SET status = 'processing', locked_at = now(), locked_by = ${workerId},
-						attempts = attempts + 1, updated_at = now()
-					FROM due
-					WHERE changes.id = due.id
-					RETURNING changes.id
+					SELECT id
+					FROM subscription_changes
+					WHERE project_id = ${projectInstanceId} AND id = ${changeId}
+						AND status = 'processing' AND locked_by = ${workerId}
 				`,
 			);
-			const operations: SubscriptionChangeOperation[] = [];
-			for (const row of rows) operations.push(await buildChangeOperation(tx, row.id, true));
-			return operations;
+			if (owned === null) return null;
+			return await buildChangeOperation(tx, changeId, true);
 		});
 	}
 
@@ -345,114 +431,67 @@ export class RecurringPricingRepository extends RepositoryModule {
 		});
 	}
 
+	/**
+	 * Materializes due periods one transaction at a time and claims the queued work as ids. A
+	 * candidate that cannot be priced is skipped, so the claim and the other candidates still run.
+	 */
 	async materializeAndClaimUsageInvoicePeriods(
 		workerId: string,
 		limit: number,
-	): Promise<{ materialized: number; jobs: UsageInvoiceJob[] }> {
-		return await this.transaction(async (tx) => {
-			const candidates = await executeRows<{
-				project_id: string;
-				customer_id: string;
-				subscription_id: string;
-				provider: BillingProvider;
-				provider_account_id: string | null;
-				plan_item_id: string | number | bigint;
-				price_component_id: string | number | bigint;
-				period_start_at: Date | string;
-				period_end_at: Date | string;
-				usage_quantity: unknown;
-				included_quantity: unknown;
-				billing_units: unknown;
-				unit_amount_minor: string | number;
-				currency: string;
-				pricing_model: "flat" | "graduated" | "volume";
-			}>(
-				tx,
-				drizzleSql`
-					SELECT
-						uw.project_id, uw.customer_id, uw.subscription_id, s.provider, s.provider_account_id,
-						uw.anchor_plan_item_id AS plan_item_id,
-						pc.id AS price_component_id, uw.window_start_at AS period_start_at,
-						uw.window_end_at AS period_end_at, sum(uw.usage)::text AS usage_quantity,
-						pi.quantity::text AS included_quantity, pc.billing_units::text AS billing_units,
-						pc.unit_amount_minor, pc.currency, pc.pricing_model
-					FROM usage_windows uw
-					JOIN subscriptions s ON s.project_id = uw.project_id AND s.id = uw.subscription_id
-					JOIN plan_items pi
-						ON pi.project_id = uw.project_id AND pi.id = uw.anchor_plan_item_id
-					JOIN price_components pc
-						ON pc.project_id = pi.project_id AND pc.plan_item_id = pi.id
-						AND pc.component_kind = 'metered_overage'
-					WHERE uw.window_end_at <= now()
-						AND uw.subscription_id IS NOT NULL
-						AND pi.overage_policy = 'allowed'
-						AND NOT EXISTS (
-							SELECT 1 FROM usage_invoice_periods period
-							WHERE period.project_id = uw.project_id
-								AND period.subscription_id = uw.subscription_id
-								AND period.plan_item_id = uw.anchor_plan_item_id
-								AND period.period_start_at = uw.window_start_at
-								AND period.period_end_at = uw.window_end_at
-						)
-					GROUP BY uw.project_id, uw.customer_id, uw.subscription_id, s.provider,
-						s.provider_account_id, uw.anchor_plan_item_id, pc.id, uw.window_start_at,
-						uw.window_end_at, pi.quantity, pc.billing_units, pc.unit_amount_minor, pc.currency,
-						pc.pricing_model
-					ORDER BY uw.window_end_at
-					LIMIT ${limit}
-				`,
-			);
-			let materialized = 0;
-			for (const candidate of candidates) {
-				const commonCharge = {
-					usageQuantity: String(candidate.usage_quantity),
-					includedQuantity: String(candidate.included_quantity),
-					billingUnits: String(candidate.billing_units),
-				};
-				const charge =
-					candidate.pricing_model === "flat"
-						? calculateUsageCharge({
-								...commonCharge,
-								unitAmountMinor: BigInt(candidate.unit_amount_minor),
-							})
-						: calculateTieredUsageCharge({
-								...commonCharge,
-								pricingModel: candidate.pricing_model,
-								tiers: await readPriceTiers(
-									tx,
-									candidate.project_id,
-									String(candidate.price_component_id),
-								),
-							});
-				const inserted = await executeOne(
-					tx,
-					drizzleSql`
-						INSERT INTO usage_invoice_periods (
-							project_id, customer_id, subscription_id, provider, provider_account_id,
-							plan_item_id, price_component_id, period_start_at, period_end_at, usage_quantity,
-							included_quantity, billable_quantity, billing_units, unit_amount_minor,
-							amount_minor, currency, status, invoiced_at
-						)
-						VALUES (
-							${candidate.project_id}, ${candidate.customer_id}, ${candidate.subscription_id},
-							${candidate.provider}, ${candidate.provider_account_id},
-							${String(candidate.plan_item_id)}::bigint, ${String(candidate.price_component_id)}::bigint,
-							${new Date(candidate.period_start_at).toISOString()},
-							${new Date(candidate.period_end_at).toISOString()}, ${charge.usageQuantity}::numeric,
-							${charge.includedQuantity}::numeric, ${charge.billableQuantity}::numeric,
-							${String(candidate.billing_units)}::numeric, ${candidate.unit_amount_minor},
-							${charge.amountMinor.toString()}, ${candidate.currency},
-							${charge.amountMinor === 0n ? "credited" : "pending"},
-							${charge.amountMinor === 0n ? new Date().toISOString() : null}
-						)
-						ON CONFLICT (project_id, subscription_id, plan_item_id, period_start_at, period_end_at)
-						DO NOTHING
-						RETURNING id
-					`,
-				);
-				if (inserted !== null) materialized += 1;
+		options: UsageInvoiceClaimOptions = {},
+	): Promise<{ materialized: number; jobs: ClaimedUsageInvoiceJob[] }> {
+		const candidates = await executeRows<UsageInvoicePeriodCandidateRow>(
+			this.database,
+			drizzleSql`
+				SELECT
+					uw.project_id, uw.customer_id, uw.subscription_id, s.provider, s.provider_account_id,
+					uw.anchor_plan_item_id AS plan_item_id,
+					pc.id AS price_component_id, uw.window_start_at AS period_start_at,
+					uw.window_end_at AS period_end_at, sum(uw.usage)::text AS usage_quantity,
+					pi.quantity::text AS included_quantity, pc.billing_units::text AS billing_units,
+					pc.unit_amount_minor, pc.currency, pc.pricing_model
+				FROM usage_windows uw
+				JOIN subscriptions s ON s.project_id = uw.project_id AND s.id = uw.subscription_id
+				JOIN plan_items pi
+					ON pi.project_id = uw.project_id AND pi.id = uw.anchor_plan_item_id
+				JOIN price_components pc
+					ON pc.project_id = pi.project_id AND pc.plan_item_id = pi.id
+					AND pc.component_kind = 'metered_overage'
+				WHERE uw.window_end_at <= now()
+					AND uw.subscription_id IS NOT NULL
+					AND pi.overage_policy = 'allowed'
+					AND NOT EXISTS (
+						SELECT 1 FROM usage_invoice_periods period
+						WHERE period.project_id = uw.project_id
+							AND period.subscription_id = uw.subscription_id
+							AND period.plan_item_id = uw.anchor_plan_item_id
+							AND period.period_start_at = uw.window_start_at
+							AND period.period_end_at = uw.window_end_at
+					)
+				GROUP BY uw.project_id, uw.customer_id, uw.subscription_id, s.provider,
+					s.provider_account_id, uw.anchor_plan_item_id, pc.id, uw.window_start_at,
+					uw.window_end_at, pi.quantity, pc.billing_units, pc.unit_amount_minor, pc.currency,
+					pc.pricing_model
+				ORDER BY uw.window_end_at
+				LIMIT ${limit}
+			`,
+		);
+		let materialized = 0;
+		for (const candidate of candidates) {
+			try {
+				const inserted = await this.transaction((tx) => materializeUsagePeriod(tx, candidate));
+				if (inserted) materialized += 1;
+			} catch (error) {
+				options.onMaterializationError?.(error, {
+					projectInstanceId: candidate.project_id,
+					subscriptionId: candidate.subscription_id,
+				});
 			}
-			const claimed = await executeRows<{ id: string }>(
+		}
+		// Both claim statements share one transaction, so a failing adjustment claim cannot strand
+		// the periods it leased moments earlier.
+		return await this.transaction(async (tx) => {
+			const claimed = await executeRows<{ id: string; project_id: string; project_key: string }>(
 				tx,
 				drizzleSql`
 					WITH due AS (
@@ -467,12 +506,24 @@ export class RecurringPricingRepository extends RepositoryModule {
 					SET status = 'processing', locked_at = now(), locked_by = ${workerId},
 						attempts = attempts + 1, updated_at = now()
 					FROM due WHERE periods.id = due.id
-					RETURNING periods.id
+					RETURNING periods.id, periods.project_id,
+						(SELECT projects.key FROM projects projects WHERE projects.id = periods.project_id)
+							AS project_key
 				`,
 			);
-			const jobs: UsageInvoiceJob[] = [];
-			for (const row of claimed) jobs.push(await usageInvoicePeriodJob(tx, row.id));
-			const adjustmentClaims = await executeRows<{ id: string | number | bigint }>(
+			const jobs: ClaimedUsageInvoiceJob[] = claimed.map((row) => ({
+				projectInstanceId: row.project_id,
+				projectKey: row.project_key,
+				jobKind: "period",
+				jobId: row.id,
+				periodId: row.id,
+			}));
+			const adjustmentClaims = await executeRows<{
+				id: string | number | bigint;
+				project_id: string;
+				project_key: string;
+				closed_period_id: string;
+			}>(
 				tx,
 				drizzleSql`
 					WITH due AS (
@@ -497,13 +548,53 @@ export class RecurringPricingRepository extends RepositoryModule {
 					SET status = 'processing', locked_at = now(), locked_by = ${workerId},
 						attempts = attempts + 1, updated_at = now()
 					FROM due WHERE adjustment.id = due.id
-					RETURNING adjustment.id
+					RETURNING adjustment.id, adjustment.project_id, adjustment.closed_period_id,
+						(SELECT projects.key FROM projects projects WHERE projects.id = adjustment.project_id)
+							AS project_key
 				`,
 			);
 			for (const row of adjustmentClaims) {
-				jobs.push(await usageInvoiceAdjustmentJob(tx, String(row.id)));
+				jobs.push({
+					projectInstanceId: row.project_id,
+					projectKey: row.project_key,
+					jobKind: "adjustment",
+					jobId: String(row.id),
+					periodId: row.closed_period_id,
+				});
 			}
 			return { materialized, jobs };
+		});
+	}
+
+	/**
+	 * Builds a claimed usage invoice job after re-checking the lease. A lost lease returns null and
+	 * is skipped; only a job that cannot be built reaches the failure path.
+	 */
+	async loadClaimedUsageInvoiceJob(
+		projectInstanceId: string,
+		jobKind: UsageInvoiceJob["jobKind"],
+		jobId: string,
+		workerId: string,
+	): Promise<UsageInvoiceJob | null> {
+		return await this.transaction(async (tx) => {
+			const owned = await executeOne<{ id: string | number | bigint }>(
+				tx,
+				jobKind === "period"
+					? drizzleSql`
+						SELECT id FROM usage_invoice_periods
+						WHERE project_id = ${projectInstanceId} AND id = ${jobId}::uuid
+							AND status = 'processing' AND locked_by = ${workerId}
+					`
+					: drizzleSql`
+						SELECT id FROM usage_invoice_adjustments
+						WHERE project_id = ${projectInstanceId} AND id = ${jobId}::bigint
+							AND status = 'processing' AND locked_by = ${workerId}
+					`,
+			);
+			if (owned === null) return null;
+			return jobKind === "period"
+				? await usageInvoicePeriodJob(tx, jobId)
+				: await usageInvoiceAdjustmentJob(tx, jobId);
 		});
 	}
 
@@ -1292,8 +1383,8 @@ async function buildChangeOperation(
 
 /**
  * The customer and price joins stay on Stripe web. Joining on the period's provider would make a
- * non-Stripe period whose customer also has a Stripe customer throw inside the claim transaction;
- * as a job it reaches the worker, which fails it through the normal retry path.
+ * non-Stripe period whose customer also has a Stripe customer throw here. The load runs after the
+ * claim commits, so the worker fails that job on its own through the normal retry path.
  */
 async function usageInvoicePeriodJob(
 	executor: QueryExecutor,
@@ -1374,6 +1465,63 @@ async function usageInvoicePeriodJob(
 		amountMinor,
 		currency: row.currency.toLowerCase(),
 	};
+}
+
+/**
+ * Prices and stores one due period. The insert is idempotent, so a candidate that throws is
+ * retried on the next poll instead of rolling back the periods that were already materialized.
+ */
+async function materializeUsagePeriod(
+	executor: QueryExecutor,
+	candidate: UsageInvoicePeriodCandidateRow,
+): Promise<boolean> {
+	const commonCharge = {
+		usageQuantity: String(candidate.usage_quantity),
+		includedQuantity: String(candidate.included_quantity),
+		billingUnits: String(candidate.billing_units),
+	};
+	const charge =
+		candidate.pricing_model === "flat"
+			? calculateUsageCharge({
+					...commonCharge,
+					unitAmountMinor: BigInt(candidate.unit_amount_minor),
+				})
+			: calculateTieredUsageCharge({
+					...commonCharge,
+					pricingModel: candidate.pricing_model,
+					tiers: await readPriceTiers(
+						executor,
+						candidate.project_id,
+						String(candidate.price_component_id),
+					),
+				});
+	const inserted = await executeOne(
+		executor,
+		drizzleSql`
+			INSERT INTO usage_invoice_periods (
+				project_id, customer_id, subscription_id, provider, provider_account_id,
+				plan_item_id, price_component_id, period_start_at, period_end_at, usage_quantity,
+				included_quantity, billable_quantity, billing_units, unit_amount_minor,
+				amount_minor, currency, status, invoiced_at
+			)
+			VALUES (
+				${candidate.project_id}, ${candidate.customer_id}, ${candidate.subscription_id},
+				${candidate.provider}, ${candidate.provider_account_id},
+				${String(candidate.plan_item_id)}::bigint, ${String(candidate.price_component_id)}::bigint,
+				${new Date(candidate.period_start_at).toISOString()},
+				${new Date(candidate.period_end_at).toISOString()}, ${charge.usageQuantity}::numeric,
+				${charge.includedQuantity}::numeric, ${charge.billableQuantity}::numeric,
+				${String(candidate.billing_units)}::numeric, ${candidate.unit_amount_minor},
+				${charge.amountMinor.toString()}, ${candidate.currency},
+				${charge.amountMinor === 0n ? "credited" : "pending"},
+				${charge.amountMinor === 0n ? new Date().toISOString() : null}
+			)
+			ON CONFLICT (project_id, subscription_id, plan_item_id, period_start_at, period_end_at)
+			DO NOTHING
+			RETURNING id
+		`,
+	);
+	return inserted !== null;
 }
 
 async function readPriceTiers(
