@@ -1333,6 +1333,10 @@ export const subscriptionChanges = pgTable(
 		...timestampColumns(),
 	},
 	(table) => [
+		check(
+			"subscription_changes_provider_check",
+			sql`${table.provider} IN ('apple', 'google', 'stripe')`,
+		),
 		unique("subscription_changes_project_id_id_unique").on(table.projectId, table.id),
 		uniqueIndex("idx_billing_subscription_changes_idempotency").on(
 			table.projectId,
@@ -1925,6 +1929,10 @@ export const usageInvoicePeriods = pgTable(
 		...timestampColumns(),
 	},
 	(table) => [
+		check(
+			"usage_invoice_periods_provider_check",
+			sql`${table.provider} IN ('apple', 'google', 'stripe')`,
+		),
 		unique("usage_invoice_periods_project_id_id_unique").on(table.projectId, table.id),
 		unique("usage_invoice_periods_scope_unique").on(
 			table.projectId,

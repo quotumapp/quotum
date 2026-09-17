@@ -173,8 +173,9 @@ export class RecurringBillingWorker {
 			} catch (error) {
 				failed += 1;
 				this.recordJob(`usage_${job.jobKind}`, "failed");
-				this.dependencies.logger.error("Stripe usage invoice failed", error, {
+				this.dependencies.logger.error("Usage invoice failed", error, {
 					projectKey: job.projectKey,
+					provider: job.provider,
 					periodId: job.periodId,
 					...uncertainWriteContext(error),
 				});

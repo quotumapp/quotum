@@ -322,6 +322,27 @@ describe("provider registry", () => {
 				"Provider stripe requires reconciliation of uncertain writes and cannot implement subscription.change.apply, subscription.change.period_end, settlement.collect_finalized_charge, adjustment.issue, topup.automatic until an uncertain-write ledger exists",
 			),
 		);
+		const withPlannedAutomaticTopups = {
+			...appleRegistryEntry,
+			declaration: {
+				...appleCapabilities,
+				operations: {
+					...appleCapabilities.operations,
+					"topup.automatic": {
+						level: "native",
+						verification: { status: "planned", trackedBy: "P4" },
+						conditions: [],
+					},
+				},
+			},
+		} as unknown as AnyProviderRegistryEntry;
+		expect(() =>
+			createProviderRegistry({ getRepository, entries: [withPlannedAutomaticTopups] }),
+		).toThrow(
+			new Error(
+				"Provider apple requires reconciliation of uncertain writes and cannot implement topup.automatic until an uncertain-write ledger exists",
+			),
+		);
 	});
 
 	it("reads adapter account identity from the connection before the connected account", async () => {

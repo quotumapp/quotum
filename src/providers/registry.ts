@@ -104,11 +104,9 @@ function declaresImplementation(
 	declaration: ProviderCapabilityDeclaration,
 	operation: ProviderOperation,
 ): boolean {
-	const support = declaration.operations[operation];
-	return (
-		(support.level === "native" || support.level === "quotum_composed") &&
-		(support.verification.status === "verified" || support.verification.status === "conditional")
-	);
+	// Level alone decides: workers call adapter groups without consulting verification status.
+	const level = declaration.operations[operation].level;
+	return level === "native" || level === "quotum_composed";
 }
 
 export function createProviderRegistry({

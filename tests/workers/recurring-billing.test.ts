@@ -335,9 +335,10 @@ it("never finalizes an uncertain provider write and fails it for reconciliation"
 			},
 		},
 		{
-			message: "Stripe usage invoice failed",
+			message: "Usage invoice failed",
 			context: {
 				projectKey: "voysee",
+				provider: "stripe",
 				periodId: "period-1",
 				correlation: { requestKey: "adjustment-1" },
 			},
@@ -391,7 +392,12 @@ it("logs an uncertain write's correlation even when marking the job failed throw
 	).rejects.toThrow(usageLost);
 	expect(logged).toEqual([
 		{ projectKey: "voysee", changeId: "change-1", correlation: { requestKey: "change-1" } },
-		{ projectKey: "voysee", periodId: "period-1", correlation: { requestKey: "period-1" } },
+		{
+			projectKey: "voysee",
+			provider: "stripe",
+			periodId: "period-1",
+			correlation: { requestKey: "period-1" },
+		},
 	]);
 });
 

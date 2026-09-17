@@ -39,7 +39,9 @@ const drizzleMirroredTables = [
 	"purchases",
 	"store_events",
 	"store_products",
+	"subscription_changes",
 	"subscriptions",
+	"usage_invoice_periods",
 ];
 
 const shapeCheck = "promotion_provider_objects_shape_check";
