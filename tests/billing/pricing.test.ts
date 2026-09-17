@@ -214,6 +214,7 @@ describe("recurring pricing", () => {
 		).toBe("3.9");
 	});
 
+	// capability: subscription.change.period_end
 	it("classifies tier and quantity changes deterministically", () => {
 		expect(
 			classifySubscriptionChange({

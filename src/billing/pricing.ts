@@ -1,7 +1,41 @@
+import type { ChangeBillingPolicy } from "../shared/provider-capabilities";
 import { canonicalDecimal, decimalToUnits, unitsToDecimal } from "./decimal";
 import { InvalidRequestError } from "./errors";
 
 export type StripeProrationBehavior = "always_invoice" | "create_prorations" | "none";
+
+export const stripeProrationBehaviors = [
+	"always_invoice",
+	"create_prorations",
+	"none",
+] as const satisfies readonly StripeProrationBehavior[];
+
+const stripeChangeBillingPolicies: Record<StripeProrationBehavior, ChangeBillingPolicy> = {
+	always_invoice: { billing: "prorated", collection: "immediate" },
+	create_prorations: { billing: "prorated", collection: "next_renewal" },
+	none: { billing: "none", collection: "next_renewal" },
+};
+
+/** The provider-neutral change billing policy a Stripe proration behavior expresses. */
+export function changeBillingPolicyFromStripe(
+	prorationBehavior: StripeProrationBehavior,
+): ChangeBillingPolicy {
+	if (!Object.hasOwn(stripeChangeBillingPolicies, prorationBehavior)) {
+		throw new Error(`Unknown Stripe proration behavior: ${String(prorationBehavior)}`);
+	}
+	const { billing, collection } = stripeChangeBillingPolicies[prorationBehavior];
+	return { billing, collection };
+}
+
+/** The Stripe proration behavior expressing a change billing policy, or null when none does. */
+export function stripeProrationFor(policy: ChangeBillingPolicy): StripeProrationBehavior | null {
+	return (
+		stripeProrationBehaviors.find((behavior) => {
+			const expressed = stripeChangeBillingPolicies[behavior];
+			return expressed.billing === policy.billing && expressed.collection === policy.collection;
+		}) ?? null
+	);
+}
 
 export interface UsageCharge {
 	usageQuantity: string;

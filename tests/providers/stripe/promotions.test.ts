@@ -67,6 +67,7 @@ function codeJob(
 }
 
 describe("Stripe promotion provisioning", () => {
+	// capability: promotion.code_entry
 	it("creates a coupon with a Quotum id, multi-currency amounts and product scope", async () => {
 		const stripe = createFakeStripePromotions();
 
@@ -115,6 +116,7 @@ describe("Stripe promotion provisioning", () => {
 		});
 	});
 
+	// capability: promotion.hosted_code
 	it("creates, toggles and retires a hosted promotion code", async () => {
 		const stripe = createFakeStripePromotions();
 		await syncPromotionStripeObject(stripe, couponJob());

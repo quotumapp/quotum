@@ -71,6 +71,8 @@ localDescribe("Apple route flows integration", () => {
 		});
 	});
 
+	// capability: catalog.product.subscription
+	// capability: purchase.verify
 	it("verifies Apple subscriptions and persists durable billing state", async () => {
 		const { app, apple, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -116,6 +118,10 @@ localDescribe("Apple route flows integration", () => {
 		expect(projectionJob.payload.purchase).toBeUndefined();
 	});
 
+	// capability: catalog.product.subscription
+	// capability: catalog.product.consumable
+	// capability: catalog.topup
+	// capability: topup.customer_initiated
 	it("materializes catalog subscription and top-up allocations exactly once", async () => {
 		await publishAiCreditsCatalog(context.repository);
 		const { app, apple, authHeaders } = createIntegrationApp({
@@ -204,6 +210,7 @@ localDescribe("Apple route flows integration", () => {
 		]);
 	});
 
+	// capability: webhook.ingest
 	it("handles Apple renewal webhooks without API-key auth", async () => {
 		const { app, apple, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -251,6 +258,7 @@ localDescribe("Apple route flows integration", () => {
 		await expectAppleWebhookRows(context.sql);
 	});
 
+	// capability: refund.sync
 	it("records Apple consumable invalidations as reversal projection context", async () => {
 		const purchasedAt = new Date("2026-05-31T00:00:00.000Z");
 		const invalidatedAt = new Date("2026-06-01T00:00:00.000Z");
@@ -338,6 +346,7 @@ localDescribe("Apple route flows integration", () => {
 		});
 	});
 
+	// capability: refund.sync
 	it("restores durable Apple subscription and purchase state after REFUND_REVERSED", async () => {
 		const purchasedAt = new Date("2026-05-31T00:00:00.000Z");
 		const expiresAt = new Date("2099-06-30T00:00:00.000Z");

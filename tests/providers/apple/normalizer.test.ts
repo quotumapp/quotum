@@ -168,6 +168,7 @@ describe("StoreKit normalizer", () => {
 		}
 	});
 
+	// capability: refund.sync
 	it("maps refunds and revocations to invalidated purchase commands", () => {
 		const refund = normalizeStoreKitNotification({
 			notification: notification("REFUND"),
@@ -216,6 +217,7 @@ describe("StoreKit normalizer", () => {
 		expect(command.invalidationReason).toBe("revocation");
 	});
 
+	// capability: refund.sync
 	it("restores transactions for refund reversal notifications", () => {
 		const command = normalizeStoreKitNotification({
 			notification: notification("REFUND_REVERSED"),
@@ -234,6 +236,7 @@ describe("StoreKit normalizer", () => {
 		expect(command?.invalidationReason).toBeNull();
 	});
 
+	// capability: catalog.product.consumable
 	it("maps one-time consumable charges to consumable purchase commands", () => {
 		const command = normalizeStoreKitNotification({
 			notification: notification("ONE_TIME_CHARGE"),

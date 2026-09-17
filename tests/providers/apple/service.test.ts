@@ -146,6 +146,7 @@ describe("AppleStoreKitService", () => {
 		]);
 	});
 
+	// capability: purchase.verify
 	it("verifies purchases, checks account token binding, records transaction, and returns entitlements", async () => {
 		const { calls, service } = createService();
 
@@ -261,6 +262,7 @@ describe("AppleStoreKitService", () => {
 		expect(result).toEqual({ status: "ignored", entitlements: null });
 	});
 
+	// capability: webhook.ingest
 	it("does not mutate repository state when notification verification fails", async () => {
 		const { calls, service } = createService({
 			clientOverrides: {
@@ -309,6 +311,7 @@ describe("AppleStoreKitService", () => {
 		).toBe(false);
 	});
 
+	// capability: event.replay
 	it("replays stored Apple events through the recording repository", async () => {
 		const { calls, service } = createService();
 
@@ -466,6 +469,7 @@ describe("AppleStoreKitService", () => {
 		).toBe(false);
 	});
 
+	// capability: subscription.reconcile
 	it("reconciles provider subscriptions from latest StoreKit status", async () => {
 		const { calls, service } = createService();
 

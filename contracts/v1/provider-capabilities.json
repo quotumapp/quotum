@@ -1,0 +1,1986 @@
+{
+  "domains": [
+    {
+      "id": "catalog",
+      "title": "Catalog"
+    },
+    {
+      "id": "checkout",
+      "title": "Checkout"
+    },
+    {
+      "id": "purchases",
+      "title": "Purchase verification"
+    },
+    {
+      "id": "portal",
+      "title": "Customer portal"
+    },
+    {
+      "id": "events",
+      "title": "Events and reconciliation"
+    },
+    {
+      "id": "subscription_changes",
+      "title": "Subscription changes"
+    },
+    {
+      "id": "settlement",
+      "title": "Usage settlement"
+    },
+    {
+      "id": "refunds",
+      "title": "Refunds"
+    },
+    {
+      "id": "topups",
+      "title": "Top-ups"
+    },
+    {
+      "id": "promotions",
+      "title": "Promotions"
+    }
+  ],
+  "labels": [
+    {
+      "id": "supported",
+      "label": "Supported",
+      "rule": "Level is native or quotum_composed, verification is verified, and no conditions are declared."
+    },
+    {
+      "id": "conditional",
+      "label": "Conditional",
+      "rule": "Level is native or quotum_composed, and verification is conditional or verified with at least one condition."
+    },
+    {
+      "id": "conditional_not_implemented",
+      "label": "Conditional; not implemented",
+      "rule": "Level is native or quotum_composed, verification is planned without a blocker, and at least one condition is declared."
+    },
+    {
+      "id": "planned",
+      "label": "Planned",
+      "rule": "Level is native or quotum_composed, verification is planned without a blocker, and no conditions are declared."
+    },
+    {
+      "id": "requires_policy_decision",
+      "label": "Requires policy decision",
+      "rule": "Level is native or quotum_composed, and verification is planned with a decision blocker."
+    },
+    {
+      "id": "requires_semantic_validation",
+      "label": "Requires semantic validation",
+      "rule": "Level is native or quotum_composed, and verification is planned with a scenario or question blocker."
+    },
+    {
+      "id": "managed_by_provider",
+      "label": "Managed by provider",
+      "rule": "Level is provider_managed, whatever the verification."
+    },
+    {
+      "id": "unsupported",
+      "label": "Unsupported",
+      "rule": "Level is unsupported."
+    },
+    {
+      "id": "not_evaluated",
+      "label": "Not evaluated",
+      "rule": "Level is not_evaluated."
+    }
+  ],
+  "operations": [
+    {
+      "description": "A published catalog may bind an auto-renewing subscription product to this provider, and Quotum grants the plan's entitlements and allocations while the provider subscription is active.",
+      "domain": "catalog",
+      "id": "catalog.product.subscription",
+      "title": "Subscription products"
+    },
+    {
+      "description": "A published catalog may bind a one-time consumable product to this provider, and Quotum credits its balance grant once per completed purchase.",
+      "domain": "catalog",
+      "id": "catalog.product.consumable",
+      "title": "Consumable products"
+    },
+    {
+      "description": "A provisioned store product on this provider may be a one-time non-consumable purchase, and Quotum grants its lasting access from the completed purchase.",
+      "domain": "catalog",
+      "id": "catalog.product.non_consumable",
+      "title": "Non-consumable products"
+    },
+    {
+      "description": "A published plan may declare trial days that start the provider subscription in a trial, honoring the plan's payment-method requirement and trial-end behavior.",
+      "domain": "catalog",
+      "id": "catalog.trial",
+      "title": "Trials"
+    },
+    {
+      "description": "A published catalog may bind an add-on plan that is sold as its own provider subscription and requires an active base plan on the same billing account.",
+      "domain": "catalog",
+      "id": "catalog.addon",
+      "title": "Add-on plans"
+    },
+    {
+      "description": "A published catalog may bind a top-up option to a provider product, and Quotum credits the top-up quantity to a consumable metered feature when that product is paid for.",
+      "domain": "catalog",
+      "id": "catalog.topup",
+      "title": "Top-up options"
+    },
+    {
+      "description": "A plan version may bind an explicit flat price component, such as a base fee, to an exact provider price that Quotum sends on checkout and subscription changes.",
+      "domain": "catalog",
+      "id": "catalog.price.flat",
+      "title": "Flat price components"
+    },
+    {
+      "description": "A plan version may bind a licensed-quantity price, such as seats, whose explicit whole-number quantity Quotum sends to the provider on checkout and subscription changes.",
+      "domain": "catalog",
+      "id": "catalog.price.licensed",
+      "title": "Licensed-quantity prices"
+    },
+    {
+      "description": "A plan version may bind a graduated or volume tiered price component to an exact provider price.",
+      "domain": "catalog",
+      "id": "catalog.price.tiered",
+      "title": "Tiered prices"
+    },
+    {
+      "description": "A plan version may combine a base fee with licensed-quantity or metered-overage price components in one provider subscription.",
+      "domain": "catalog",
+      "id": "catalog.price.hybrid",
+      "title": "Hybrid prices"
+    },
+    {
+      "description": "A plan version may declare a meter limit that allows postpaid overage priced against a provider product, which Quotum rates after each usage period closes.",
+      "domain": "catalog",
+      "id": "catalog.price.postpaid_usage",
+      "title": "Postpaid usage prices"
+    },
+    {
+      "description": "Quotum creates a provider-hosted checkout session for one catalog product (subscription, consumable or non-consumable) and records the purchase from the provider's completion event.",
+      "domain": "checkout",
+      "id": "checkout.hosted",
+      "title": "Hosted product checkout"
+    },
+    {
+      "description": "Quotum creates a provider-hosted checkout session for a recurring plan version, with its base and licensed-quantity lines, trial and add-on rules, and records the subscription from the provider's completion event.",
+      "domain": "checkout",
+      "id": "checkout.plan",
+      "title": "Hosted plan checkout"
+    },
+    {
+      "description": "The trusted backend submits a purchase the customer completed in the provider's native purchase flow, and Quotum verifies it with the provider's server API, records it and returns the entitlement snapshot.",
+      "domain": "purchases",
+      "id": "purchase.verify",
+      "title": "Purchase verification"
+    },
+    {
+      "description": "Quotum creates a provider-hosted self-service session where the customer manages payment methods, invoices and subscriptions, and returns its URL.",
+      "domain": "portal",
+      "id": "portal.session",
+      "title": "Customer portal session"
+    },
+    {
+      "description": "Quotum authenticates provider notifications on the project webhook route, stores each once as a store event, and mirrors the purchase, subscription, refund and reversal state they carry.",
+      "domain": "events",
+      "id": "webhook.ingest",
+      "title": "Webhook ingestion"
+    },
+    {
+      "description": "Quotum reprocesses a stored provider event from its persisted payload, through the replay worker or an operator replay request, without the provider resending it.",
+      "domain": "events",
+      "id": "event.replay",
+      "title": "Stored event replay"
+    },
+    {
+      "description": "Quotum reads a subscription's current state from the provider's API, through the reconciliation worker or an operator run, and corrects local subscription state and entitlements that drifted from it.",
+      "domain": "events",
+      "id": "subscription.reconcile",
+      "title": "Subscription reconciliation"
+    },
+    {
+      "description": "Quotum previews a plan or quantity change on an existing provider subscription, returning line items, effective time and proration policy, without a provider write.",
+      "domain": "subscription_changes",
+      "id": "subscription.change.preview",
+      "title": "Subscription change preview"
+    },
+    {
+      "description": "Quotum queues an immediate plan or quantity change and its worker applies it to the provider subscription with the requested proration policy.",
+      "domain": "subscription_changes",
+      "id": "subscription.change.apply",
+      "title": "Immediate subscription change"
+    },
+    {
+      "description": "Quotum stores a plan or quantity change effective at the end of the current period, and its worker applies it to the provider subscription when that period ends.",
+      "domain": "subscription_changes",
+      "id": "subscription.change.period_end",
+      "title": "Period-end subscription change"
+    },
+    {
+      "description": "After a usage period closes, Quotum rates the postpaid overage and has the provider charge that finalized amount to the customer against the subscription.",
+      "domain": "settlement",
+      "id": "settlement.collect_finalized_charge",
+      "title": "Postpaid usage collection"
+    },
+    {
+      "description": "When usage in an already invoiced period is corrected, Quotum issues a provider-side adjustment for the rated difference against that period.",
+      "domain": "settlement",
+      "id": "adjustment.issue",
+      "title": "Usage adjustment"
+    },
+    {
+      "description": "Quotum mirrors refunds, disputes, revocations and voided purchases made in the provider, reversing the grants they funded, and never initiates a refund itself.",
+      "domain": "refunds",
+      "id": "refund.sync",
+      "title": "Refund and reversal sync"
+    },
+    {
+      "description": "The customer buys a top-up through the provider's own purchase flow when metering reports purchase_required, and Quotum credits the balance from the verified purchase or payment event.",
+      "domain": "topups",
+      "id": "topup.customer_initiated",
+      "title": "Customer-initiated top-up"
+    },
+    {
+      "description": "When an automatic top-up policy triggers, Quotum charges the customer's saved payment method off-session through the provider and credits the balance only after the charge succeeds.",
+      "domain": "topups",
+      "id": "topup.automatic",
+      "title": "Automatic top-up"
+    },
+    {
+      "description": "Quotum validates a promotion code the trusted backend collected, reserves one use, and passes the promotion's discount to the provider on checkout or a subscription change.",
+      "domain": "promotions",
+      "id": "promotion.code_entry",
+      "title": "Promotion code applied by Quotum"
+    },
+    {
+      "description": "The provider's hosted checkout accepts codes that Quotum mirrors as provider promotion codes, and Quotum records each use from the completed checkout event.",
+      "domain": "promotions",
+      "id": "promotion.hosted_code",
+      "title": "Hosted promotion code entry"
+    }
+  ],
+  "providers": [
+    {
+      "availability": "available",
+      "channel": "ios",
+      "connectionKind": "apple",
+      "operations": {
+        "adjustment.issue": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Adjustments apply to postpaid usage invoices, which App Store purchases cannot carry.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.addon": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "The catalog accepts add-on plans only when every binding is Stripe.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.price.flat": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "The catalog accepts explicit price components only on Stripe bindings.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.price.hybrid": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Hybrid pricing is not an App Store capability. The catalog accepts explicit price components only on Stripe bindings.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.price.licensed": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Seat pricing is not an App Store capability. The catalog accepts explicit price components only on Stripe bindings.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.price.postpaid_usage": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "App Store purchases cannot carry postpaid usage invoices.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.price.tiered": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "The catalog accepts explicit price components only on Stripe bindings.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.product.consumable": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/apple-flows.test.ts",
+                "tests/providers/apple/normalizer.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.product.non_consumable": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "StoreKit normalizes non-consumable transactions, but no test exercises one.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.product.subscription": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/apple-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.topup": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/apple-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.trial": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Introductory offers run in the App Store and Quotum mirrors the subscription; the catalog rejects plan trial days on Apple bindings.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "checkout.hosted": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Purchases start in the app through StoreKit and reach Quotum through purchase verification.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "checkout.plan": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Purchases start in the app through StoreKit and reach Quotum through purchase verification.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "event.replay": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/apple/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "portal.session": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "promotion.code_entry": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "Quotum rejects iOS promotion-code redemption because App Store rules forbid unlocking digital content with a developer's own codes.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "promotion.hosted_code": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "purchase.verify": {
+          "conditions": [],
+          "level": "native",
+          "notes": "The transaction's app account token must match the token Quotum issued for the billing account.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/apple/service.test.ts",
+                "tests/integration/apple-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "refund.sync": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Apple decides refunds; Quotum mirrors refund, revocation and refund reversal notifications.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/apple-flows.test.ts",
+                "tests/providers/apple/normalizer.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "settlement.collect_finalized_charge": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "App Store purchases cannot carry postpaid usage invoices.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "subscription.change.apply": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Upgrades and crossgrades happen in the App Store; Quotum records the resulting subscription notifications.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "subscription.change.period_end": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Downgrades are scheduled in the App Store; Quotum records the renewal preference notification.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "subscription.change.preview": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Upgrades, downgrades and crossgrades are chosen in the App Store; Quotum has no preview for them.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "subscription.reconcile": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/apple/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "topup.automatic": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Silent automatic purchases are unavailable; Apple automatic top-up jobs end as provider_action_required.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "topup.customer_initiated": {
+          "conditions": [],
+          "level": "native",
+          "notes": "The customer buys a consumable top-up through StoreKit.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/apple-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "webhook.ingest": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/apple-flows.test.ts",
+                "tests/providers/apple/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        }
+      },
+      "provider": "apple",
+      "writeSemantics": {
+        "clientIdempotencyKeys": false,
+        "uncertainWrite": "reconcile_required"
+      }
+    },
+    {
+      "availability": "available",
+      "channel": "android",
+      "connectionKind": "google",
+      "operations": {
+        "adjustment.issue": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Adjustments apply to postpaid usage invoices, which Google Play purchases cannot carry.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.addon": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "The catalog accepts add-on plans only when every binding is Stripe.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.price.flat": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "The catalog accepts explicit price components only on Stripe bindings.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.price.hybrid": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Hybrid pricing is not a Google Play capability. The catalog accepts explicit price components only on Stripe bindings.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.price.licensed": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Seat pricing is not a Google Play capability. The catalog accepts explicit price components only on Stripe bindings.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.price.postpaid_usage": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Google Play purchases cannot carry postpaid usage invoices.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.price.tiered": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "The catalog accepts explicit price components only on Stripe bindings.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.product.consumable": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/google-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.product.non_consumable": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "Play normalization accepts non-consumable products, but no test exercises a completed one.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.product.subscription": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/google-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.topup": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/google-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.trial": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Free trials are offers on Play base plans and Quotum mirrors the subscription; the catalog rejects plan trial days on Google bindings.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "checkout.hosted": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Purchases start in the app through Google Play Billing and reach Quotum through purchase verification.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "checkout.plan": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Purchases start in the app through Google Play Billing and reach Quotum through purchase verification.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "event.replay": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/google/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "portal.session": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "promotion.code_entry": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "Quotum passes no discount to Google Play; Android code redemption executes feature grants in Quotum only.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "promotion.hosted_code": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "purchase.verify": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Quotum acknowledges or consumes the purchase after recording it only when publisher mutations are enabled on the connection.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/google/service.test.ts",
+                "tests/integration/google-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "refund.sync": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Refunds and revocations happen in Google Play; Quotum mirrors voided purchase notifications, including partial consumable refunds.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/google-flows.test.ts",
+                "tests/providers/google/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "settlement.collect_finalized_charge": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Google Play purchases cannot carry postpaid usage invoices.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "subscription.change.apply": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Plan changes happen in Google Play and arrive as a new purchase token linked to the replaced one.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "subscription.change.period_end": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Deferred plan changes are scheduled in Google Play; Quotum records the resulting purchase state.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "subscription.change.preview": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Plan changes are chosen in Google Play; Quotum has no preview for them.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "subscription.reconcile": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/google/service.test.ts",
+                "tests/integration/worker-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "topup.automatic": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Silent automatic purchases are unavailable; Google automatic top-up jobs end as provider_action_required.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "topup.customer_initiated": {
+          "conditions": [],
+          "level": "native",
+          "notes": "The customer buys a consumable top-up through Google Play Billing.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/google-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "webhook.ingest": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/google-flows.test.ts",
+                "tests/providers/google/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        }
+      },
+      "provider": "google",
+      "writeSemantics": {
+        "clientIdempotencyKeys": false,
+        "uncertainWrite": "reconcile_required"
+      }
+    },
+    {
+      "availability": "available",
+      "changeBillingPolicies": [
+        {
+          "billing": "prorated",
+          "collection": "immediate"
+        },
+        {
+          "billing": "prorated",
+          "collection": "next_renewal"
+        },
+        {
+          "billing": "none",
+          "collection": "next_renewal"
+        }
+      ],
+      "channel": "web",
+      "connectionKind": "stripe",
+      "operations": {
+        "adjustment.issue": {
+          "composedVia": "Stripe invoices with a signed correction line",
+          "conditions": [],
+          "level": "quotum_composed",
+          "notes": "Late usage corrections invoice the rated difference for the closed period; negative corrections finalize without payment.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/stripe/service.test.ts",
+                "tests/integration/phase3-release-journeys.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.addon": {
+          "conditions": [],
+          "level": "native",
+          "notes": "An add-on is a separate Stripe subscription and requires an active base plan.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/catalog-control-plane.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.price.flat": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/catalog-control-plane.test.ts",
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.price.hybrid": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/catalog-control-plane.test.ts",
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.price.licensed": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/catalog-control-plane.test.ts",
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.price.postpaid_usage": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/catalog-control-plane.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.price.tiered": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Stripe prices tiered in-advance lines during Checkout; Quotum rates tiered postpaid overage itself.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/phase3-release-journeys.test.ts",
+                "tests/billing/commercial-pricing.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.product.consumable": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts",
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.product.non_consumable": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Non-consumable products are provisioned Stripe web store products sold through product Checkout.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts",
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.product.subscription": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts",
+                "tests/integration/catalog-control-plane.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.topup": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "catalog.trial": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/catalog-control-plane.test.ts",
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "checkout.hosted": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts",
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "checkout.plan": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/catalog-control-plane.test.ts",
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "event.replay": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "portal.session": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts",
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "promotion.code_entry": {
+          "composedVia": "Stripe coupons applied as Checkout and subscription discounts",
+          "conditions": [],
+          "level": "quotum_composed",
+          "notes": "Quotum validates and reserves the code, then applies the promotion's Stripe coupon to the Checkout Session or subscription change.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/promotions.test.ts",
+                "tests/providers/stripe/promotions.test.ts",
+                "tests/providers/stripe/normalizer.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "promotion.hosted_code": {
+          "conditions": [],
+          "level": "native",
+          "notes": "The connection needs write access to Stripe Coupons and Promotion codes.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/promotions.test.ts",
+                "tests/providers/stripe/promotions.test.ts",
+                "tests/providers/stripe/normalizer.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "purchase.verify": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Stripe purchases complete in hosted Checkout and are recorded from signed webhook events; the Checkout Session status route never grants access.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "refund.sync": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Refunds and disputes reverse the purchase they paid for in proportion to the cumulative amount reversed, deduplicated by refund id.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts",
+                "tests/providers/stripe/service.test.ts",
+                "tests/providers/stripe/normalizer.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "settlement.collect_finalized_charge": {
+          "composedVia": "Stripe invoices with a one-off usage line",
+          "conditions": [],
+          "level": "quotum_composed",
+          "notes": "Quotum rates the overage after the usage period closes, then finalizes and pays the invoice against the subscription.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/stripe/service.test.ts",
+                "tests/workers/recurring-billing.test.ts",
+                "tests/integration/catalog-control-plane.test.ts",
+                "tests/integration/phase3-release-journeys.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "subscription.change.apply": {
+          "conditions": [
+            {
+              "allowed": [
+                "active",
+                "grace_period",
+                "billing_retry",
+                "cancelled"
+              ],
+              "kind": "subscription_state"
+            }
+          ],
+          "level": "native",
+          "notes": "The target plan must be the same kind as the current plan and publish Stripe base or licensed prices. The recurring billing worker applies the change with its Stripe proration behavior.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/catalog-control-plane.test.ts",
+                "tests/integration/promotions.test.ts",
+                "tests/workers/recurring-billing.test.ts"
+              ]
+            },
+            "status": "conditional",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "subscription.change.period_end": {
+          "conditions": [
+            {
+              "allowed": [
+                "active",
+                "grace_period",
+                "billing_retry",
+                "cancelled"
+              ],
+              "kind": "subscription_state"
+            }
+          ],
+          "level": "native",
+          "notes": "The target plan must be the same kind as the current plan and publish Stripe base or licensed prices. Downgrades default to the end of the current period, when the recurring billing worker applies them.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/billing/pricing.test.ts",
+                "tests/workers/recurring-billing.test.ts"
+              ]
+            },
+            "status": "conditional",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "subscription.change.preview": {
+          "conditions": [
+            {
+              "allowed": [
+                "active",
+                "grace_period",
+                "billing_retry",
+                "cancelled"
+              ],
+              "kind": "subscription_state"
+            }
+          ],
+          "level": "native",
+          "notes": "The target plan must be the same kind as the current plan and publish Stripe base or licensed prices. Stripe calculates the final proration amount during execution.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts"
+              ]
+            },
+            "status": "conditional",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "subscription.reconcile": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "topup.automatic": {
+          "conditions": [
+            {
+              "kind": "saved_payment_method",
+              "required": true,
+              "resolveWith": "topup.customer_initiated"
+            }
+          ],
+          "level": "native",
+          "notes": "Quotum pays a Stripe invoice with the customer's default payment method; a missing method or an authentication request ends the job as action required.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/stripe/service.test.ts",
+                "tests/workers/auto-topup.test.ts",
+                "tests/integration/phase3-release-journeys.test.ts"
+              ]
+            },
+            "status": "conditional",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "topup.customer_initiated": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "webhook.ingest": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts",
+                "tests/providers/stripe/service.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        }
+      },
+      "provider": "stripe",
+      "writeSemantics": {
+        "clientIdempotencyKeys": true,
+        "uncertainWrite": "provider_idempotency"
+      }
+    },
+    {
+      "availability": "planned",
+      "changeBillingPolicies": [
+        {
+          "billing": "prorated",
+          "collection": "immediate"
+        },
+        {
+          "billing": "prorated",
+          "collection": "next_renewal"
+        },
+        {
+          "billing": "full",
+          "collection": "immediate"
+        },
+        {
+          "billing": "full",
+          "collection": "next_renewal"
+        },
+        {
+          "billing": "none",
+          "collection": "next_renewal"
+        }
+      ],
+      "channel": "web",
+      "connectionKind": "paddle",
+      "limits": {
+        "requestsPerMinute": 240,
+        "webhookOrdering": "unordered",
+        "webhookRetries": {
+          "attempts": 60,
+          "windowHours": 72
+        }
+      },
+      "operations": {
+        "adjustment.issue": {
+          "composedVia": "transaction adjustment",
+          "conditions": [],
+          "level": "quotum_composed",
+          "notes": "Most live refund adjustments need Paddle approval, so pending, approved, rejected and reversed states are kept before allocations change; a negative correction is not a negative price.",
+          "verification": {
+            "blockedBy": {
+              "kind": "decision",
+              "ref": "DEC-14"
+            },
+            "evidence": {
+              "questions": [
+                "Q-REF-01",
+                "Q-REF-02",
+                "Q-SET-03",
+                "Q-RET-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned"
+          }
+        },
+        "catalog.addon": {
+          "conditions": [
+            {
+              "kind": "uniform_billing_interval"
+            }
+          ],
+          "level": "native",
+          "notes": "All recurring items in one Paddle subscription must share a billing period.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-SUB-04"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "catalog.price.flat": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "catalog.price.hybrid": {
+          "conditions": [
+            {
+              "kind": "uniform_billing_interval"
+            }
+          ],
+          "level": "native",
+          "notes": "Base and seat items share one subscription and one billing period; metered overage follows postpaid usage settlement.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-SUB-04"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "catalog.price.licensed": {
+          "conditions": [
+            {
+              "kind": "quantity_integer"
+            }
+          ],
+          "level": "native",
+          "notes": "Paddle quantities are whole numbers; Quotum keeps seat allocation authority.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-SUB-05"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "catalog.price.postpaid_usage": {
+          "composedVia": "non-catalog transaction item",
+          "conditions": [],
+          "level": "quotum_composed",
+          "notes": "Quotum keeps usage rating and bills the finalized amount as one non-catalog item with quantity one, so fractional usage is never rounded into Paddle quantities.",
+          "verification": {
+            "blockedBy": {
+              "kind": "decision",
+              "ref": "DEC-14"
+            },
+            "evidence": {
+              "questions": [
+                "Q-SET-01",
+                "Q-SET-03",
+                "Q-TAX-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned"
+          }
+        },
+        "catalog.price.tiered": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "The Paddle assessment does not cover tiered prices.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "catalog.product.consumable": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Paddle must confirm that software-usage credit packs are acceptable products.",
+          "verification": {
+            "blockedBy": {
+              "kind": "decision",
+              "ref": "DEC-14"
+            },
+            "evidence": {
+              "questions": [
+                "Q-ELIG-03"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned"
+          }
+        },
+        "catalog.product.non_consumable": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-CHK-03"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "catalog.product.subscription": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-CHK-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "catalog.topup": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Paddle must confirm that software-usage credit packs are acceptable products.",
+          "verification": {
+            "blockedBy": {
+              "kind": "decision",
+              "ref": "DEC-14"
+            },
+            "evidence": {
+              "questions": [
+                "Q-ELIG-03"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned"
+          }
+        },
+        "catalog.trial": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Trial access follows subscription lifecycle state, separately from paid fulfilment.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-SUB-06"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "checkout.hosted": {
+          "conditions": [],
+          "level": "native",
+          "notes": "A server-created transaction opens through Paddle.js on the merchant's approved payment page; fulfilment follows the completed transaction event, never a browser callback.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-ELIG-02",
+                "Q-ELIG-05",
+                "Q-CHK-02",
+                "Q-CHK-03",
+                "Q-RET-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "checkout.plan": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Paddle creates subscriptions only from paid recurring transactions or issued recurring invoices; it has no direct create-subscription operation.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-ELIG-02",
+                "Q-CHK-01",
+                "Q-CHK-02",
+                "Q-RET-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "event.replay": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-WH-03"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "portal.session": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Portal sessions are created on demand; their authenticated URLs are never stored.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-PORT-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "promotion.code_entry": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Paddle has discount entities; stacking, product scope and duration parity with Quotum promotions is unvalidated.",
+          "verification": {
+            "blockedBy": {
+              "kind": "question",
+              "ref": "Q-PROMO-01"
+            },
+            "evidence": {
+              "questions": [
+                "Q-PROMO-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned"
+          }
+        },
+        "promotion.hosted_code": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "blockedBy": {
+              "kind": "question",
+              "ref": "Q-PROMO-01"
+            },
+            "evidence": {
+              "questions": [
+                "Q-PROMO-01",
+                "Q-PROMO-02"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned"
+          }
+        },
+        "purchase.verify": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "Paddle purchases are web checkouts fulfilled from webhooks; the assessment covers no client-submitted purchase verification.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "refund.sync": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Refunds arrive as adjustments whose approval state can change after creation.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-REF-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "settlement.collect_finalized_charge": {
+          "composedVia": "one-time subscription charge",
+          "conditions": [
+            {
+              "kind": "renewal_exclusion_window",
+              "minutes": 30
+            },
+            {
+              "allowed": [
+                "active"
+              ],
+              "kind": "subscription_state"
+            }
+          ],
+          "level": "quotum_composed",
+          "notes": "Charges are blocked within 30 minutes of renewal and while the subscription is past due, and the charge response returns the subscription rather than the created transaction.",
+          "verification": {
+            "blockedBy": {
+              "kind": "decision",
+              "ref": "DEC-14"
+            },
+            "evidence": {
+              "questions": [
+                "Q-SET-02",
+                "Q-SET-03",
+                "Q-TAX-01",
+                "Q-RET-01",
+                "Q-RET-02",
+                "Q-RATE-02"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned"
+          }
+        },
+        "subscription.change.apply": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Updates carry the full retained item set rather than item patches, with one of Paddle's five proration modes.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-SUB-01",
+                "Q-SUB-03",
+                "Q-RET-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "subscription.change.period_end": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Collecting at the next renewal does not by itself prove that the entitlement change waits for it.",
+          "verification": {
+            "blockedBy": {
+              "kind": "question",
+              "ref": "Q-SUB-02"
+            },
+            "evidence": {
+              "questions": [
+                "Q-SUB-01",
+                "Q-SUB-02"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned"
+          }
+        },
+        "subscription.change.preview": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "The Paddle assessment does not cover previewing subscription updates.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-SUB-07"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "not_applicable"
+          }
+        },
+        "subscription.reconcile": {
+          "conditions": [],
+          "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-RET-02",
+                "Q-RATE-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
+        "topup.automatic": {
+          "composedVia": "one-time subscription charge",
+          "conditions": [
+            {
+              "expected": [
+                true
+              ],
+              "flag": "spmConsent",
+              "kind": "account_flag"
+            },
+            {
+              "kind": "saved_payment_method",
+              "required": true,
+              "resolveWith": "topup.customer_initiated"
+            },
+            {
+              "kind": "renewal_exclusion_window",
+              "minutes": 30
+            },
+            {
+              "allowed": [
+                "active"
+              ],
+              "kind": "subscription_state"
+            }
+          ],
+          "level": "quotum_composed",
+          "notes": "Consent to save a payment method for future purchases differs from the method a subscription renews with; a customer without a collectable method needs a customer-initiated top-up.",
+          "verification": {
+            "blockedBy": {
+              "kind": "decision",
+              "ref": "DEC-14"
+            },
+            "evidence": {
+              "questions": [
+                "Q-SET-02",
+                "Q-SET-04",
+                "Q-ELIG-03",
+                "Q-RET-01",
+                "Q-RET-02",
+                "Q-RATE-02"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned"
+          }
+        },
+        "topup.customer_initiated": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Paddle must confirm that software-usage credit packs are acceptable products.",
+          "verification": {
+            "blockedBy": {
+              "kind": "decision",
+              "ref": "DEC-14"
+            },
+            "evidence": {
+              "questions": [
+                "Q-ELIG-03",
+                "Q-CHK-03"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned"
+          }
+        },
+        "webhook.ingest": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Paddle-Signature is verified over the raw body; deliveries need HTTP 200 within five seconds and may arrive out of order.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-WH-01",
+                "Q-WH-02",
+                "Q-WH-03"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        }
+      },
+      "provider": "paddle",
+      "writeSemantics": {
+        "clientIdempotencyKeys": false,
+        "uncertainWrite": "reconcile_required"
+      }
+    }
+  ],
+  "schemaVersion": 1,
+  "supportLevels": [
+    {
+      "id": "native",
+      "label": "Native"
+    },
+    {
+      "id": "quotum_composed",
+      "label": "Quotum-composed"
+    },
+    {
+      "id": "provider_managed",
+      "label": "Managed by provider, mirrored by Quotum"
+    },
+    {
+      "id": "unsupported",
+      "label": "Unsupported"
+    },
+    {
+      "id": "not_evaluated",
+      "label": "Not evaluated"
+    }
+  ]
+}

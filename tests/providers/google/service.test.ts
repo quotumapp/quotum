@@ -194,6 +194,7 @@ describe("GooglePlayBillingService", () => {
 		expect(calls).toEqual([`account-link:user_1:${expectedAccountId}`]);
 	});
 
+	// capability: purchase.verify
 	it("verifies subscriptions, records them, acknowledges them, and returns entitlements", async () => {
 		const { service, calls, repositoryInputs } = serviceFixture();
 
@@ -317,6 +318,7 @@ describe("GooglePlayBillingService", () => {
 		expect(calls).toContain("record:purchase_token_2");
 	});
 
+	// capability: webhook.ingest
 	it("handles subscription RTDNs from current Google state", async () => {
 		const { service, calls } = serviceFixture();
 
@@ -385,6 +387,7 @@ describe("GooglePlayBillingService", () => {
 		});
 	});
 
+	// capability: refund.sync
 	it("records voided purchase RTDNs by token without looking up an unknown product", async () => {
 		const { service, calls, repositoryInputs } = serviceFixture({
 			verifyRtdn: async () => ({
@@ -465,6 +468,7 @@ describe("GooglePlayBillingService", () => {
 		});
 	});
 
+	// capability: event.replay
 	it("replays stored Google subscription events through the recording repository", async () => {
 		const { service, calls, repositoryInputs } = serviceFixture();
 
@@ -539,6 +543,7 @@ describe("GooglePlayBillingService", () => {
 		expect(calls).not.toContain("ack-subscription:premium_monthly:purchase_token_1");
 	});
 
+	// capability: event.replay
 	it("replays skipped Google voided purchase events through the voided purchase repository", async () => {
 		const { service, calls, repositoryInputs } = serviceFixture({
 			voidedRecordingResult: "skipped",
@@ -629,6 +634,7 @@ describe("GooglePlayBillingService", () => {
 		});
 	});
 
+	// capability: subscription.reconcile
 	it("reconciles provider subscriptions from current Google Play state", async () => {
 		const { service, calls, repositoryInputs } = serviceFixture();
 

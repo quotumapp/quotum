@@ -164,6 +164,8 @@ describe("Stripe normalizer", () => {
 		});
 	});
 
+	// capability: promotion.code_entry
+	// capability: promotion.hosted_code
 	it("carries Quotum and hosted-entry discount facts from completed Checkout sessions", () => {
 		const quotum = normalizeStripeCheckoutSession({
 			eventId: "evt_discounted",
@@ -224,6 +226,7 @@ describe("Stripe normalizer", () => {
 		});
 	});
 
+	// capability: promotion.code_entry
 	it("releases a reserved promotion only for sessions Quotum created with one", () => {
 		expect(
 			normalizeStripeCheckoutSessionTermination({
@@ -298,6 +301,7 @@ describe("Stripe normalizer", () => {
 		expect("projectionIdempotencyKey" in command).toBe(false);
 	});
 
+	// capability: refund.sync
 	it("normalizes successful refunds to credit reversals by refund id", () => {
 		const command = normalizeStripeRefund({
 			eventId: "evt_refund",
@@ -402,6 +406,7 @@ describe("Stripe normalizer", () => {
 		});
 	});
 
+	// capability: refund.sync
 	it("normalizes disputes to credit reversals by dispute id", () => {
 		const command = normalizeStripeDispute({
 			eventId: "evt_dispute",

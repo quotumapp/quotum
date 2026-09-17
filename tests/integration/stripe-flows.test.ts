@@ -48,6 +48,8 @@ localDescribe("Stripe route flows integration", () => {
 		await context.sql.close();
 	});
 
+	// capability: catalog.product.subscription
+	// capability: checkout.hosted
 	it("creates Stripe Checkout sessions from seeded catalog rows", async () => {
 		const { app, stripe, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -290,6 +292,7 @@ localDescribe("Stripe route flows integration", () => {
 		expect(stored?.intent.expiresAt).toBe(expiresAt);
 	});
 
+	// capability: subscription.change.preview
 	it("previews subscription changes through the project-scoped repository", async () => {
 		await seedPhase3ControlCatalog(context.sql);
 		await seedPhase3CatalogMigration(context.sql);
@@ -524,6 +527,7 @@ localDescribe("Stripe route flows integration", () => {
 		expect(stripe.calls).toEqual([]);
 	});
 
+	// capability: portal.session
 	it("creates Stripe Portal sessions and links customers", async () => {
 		const { app, stripe, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -625,6 +629,9 @@ localDescribe("Stripe route flows integration", () => {
 		});
 	});
 
+	// capability: catalog.product.consumable
+	// capability: checkout.hosted
+	// capability: webhook.ingest
 	it("records Stripe checkout webhooks as credit purchases", async () => {
 		const fixture = createIntegrationApp({
 			env: context.env,
@@ -704,6 +711,9 @@ localDescribe("Stripe route flows integration", () => {
 		expectProjectionPurchase(projectionJob.payload);
 	});
 
+	// capability: catalog.product.consumable
+	// capability: catalog.topup
+	// capability: topup.customer_initiated
 	it("maps a Stripe one-time price to the published top-up allocation", async () => {
 		await publishAiCreditsCatalog(context.repository);
 		const fixture = createIntegrationApp({
@@ -739,6 +749,8 @@ localDescribe("Stripe route flows integration", () => {
 		expect(count.count).toBe(1);
 	});
 
+	// capability: catalog.product.subscription
+	// capability: webhook.ingest
 	it("records Stripe subscription-created webhooks as premium entitlements without purchase rows", async () => {
 		const fixture = createIntegrationApp({
 			env: context.env,
@@ -813,6 +825,7 @@ localDescribe("Stripe route flows integration", () => {
 		expectActivePremiumSnapshot((await entitlements.json()).data, "integration_user");
 	});
 
+	// capability: refund.sync
 	it("records Stripe refunds as reversal projection context", async () => {
 		const checkout = createIntegrationApp({
 			env: context.env,
@@ -871,6 +884,8 @@ localDescribe("Stripe route flows integration", () => {
 		expectProjectionReversal(projectionJob.payload);
 	});
 
+	// capability: catalog.product.non_consumable
+	// capability: refund.sync
 	it("grants and fully refunds a Stripe non-consumable one-time purchase", async () => {
 		await context.sql`
 			INSERT INTO products (
@@ -954,6 +969,7 @@ localDescribe("Stripe route flows integration", () => {
 		});
 	});
 
+	// capability: refund.sync
 	it("records partial Stripe refunds as proportional reversal projection context", async () => {
 		await publishAiCreditsCatalog(context.repository);
 		const checkout = createIntegrationApp({
@@ -1377,6 +1393,7 @@ localDescribe("Stripe route flows integration", () => {
 		await expectNoDurableRows(context.sql);
 	});
 
+	// capability: webhook.ingest
 	it("rejects invalid Stripe signatures before durable writes", async () => {
 		const fixture = createIntegrationApp({
 			env: context.env,
@@ -1428,6 +1445,7 @@ localDescribe("Stripe route flows integration", () => {
 		await expectNoDurableRows(context.sql);
 	});
 
+	// capability: webhook.ingest
 	it("keeps repeated Stripe webhook event ids idempotent", async () => {
 		const fixture = createIntegrationApp({
 			env: context.env,
