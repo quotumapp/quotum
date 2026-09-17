@@ -115,14 +115,14 @@ export class RecurringBillingWorker {
 				limit,
 				{
 					onStagingError: (error) =>
-						this.dependencies.logger.error("Catalog migration staging failed", error, {
+						this.logError("Catalog migration staging failed", error, {
 							workerId: this.dependencies.workerId,
 						}),
 				},
 			);
 		} catch (error) {
 			failed += 1;
-			this.dependencies.logger.error("Subscription change claim failed", error, {
+			this.logError("Subscription change claim failed", error, {
 				workerId: this.dependencies.workerId,
 			});
 		}
@@ -135,7 +135,7 @@ export class RecurringBillingWorker {
 					this.dependencies.workerId,
 				);
 				if (change === null) {
-					this.dependencies.logger.warn?.("Subscription change lease lost", {
+					this.logWarn("Subscription change lease lost", {
 						projectKey: claimed.projectKey,
 						changeId: claimed.changeId,
 						workerId: this.dependencies.workerId,
@@ -174,7 +174,7 @@ export class RecurringBillingWorker {
 				failed += 1;
 				this.recordJob("subscription_change", "failed");
 				// Log first: an uncertain write's correlation must survive a failing mark.
-				this.dependencies.logger.error("Subscription change failed", error, {
+				this.logError("Subscription change failed", error, {
 					projectKey: claimed.projectKey,
 					changeId: claimed.changeId,
 					...uncertainWriteContext(error),
@@ -193,7 +193,7 @@ export class RecurringBillingWorker {
 				limit,
 				{
 					onMaterializationError: (error, context) =>
-						this.dependencies.logger.error("Usage invoice materialization failed", error, {
+						this.logError("Usage invoice materialization failed", error, {
 							...context,
 							workerId: this.dependencies.workerId,
 						}),
@@ -201,7 +201,7 @@ export class RecurringBillingWorker {
 			);
 		} catch (error) {
 			failed += 1;
-			this.dependencies.logger.error("Usage invoice claim failed", error, {
+			this.logError("Usage invoice claim failed", error, {
 				workerId: this.dependencies.workerId,
 			});
 		}
@@ -216,7 +216,7 @@ export class RecurringBillingWorker {
 					this.dependencies.workerId,
 				);
 				if (job === null) {
-					this.dependencies.logger.warn?.("Usage invoice lease lost", {
+					this.logWarn("Usage invoice lease lost", {
 						projectKey: claimed.projectKey,
 						jobKind: claimed.jobKind,
 						jobId: claimed.jobId,
@@ -257,7 +257,7 @@ export class RecurringBillingWorker {
 			} catch (error) {
 				failed += 1;
 				this.recordJob(`usage_${claimed.jobKind}`, "failed");
-				this.dependencies.logger.error("Usage invoice failed", error, {
+				this.logError("Usage invoice failed", error, {
 					projectKey: claimed.projectKey,
 					...(job === null ? {} : { provider: job.provider }),
 					periodId: claimed.periodId,
@@ -289,7 +289,7 @@ export class RecurringBillingWorker {
 				this.dependencies.workerId,
 			);
 		} catch (markerError) {
-			this.dependencies.logger.error("Subscription change failure marker failed", markerError, {
+			this.logError("Subscription change failure marker failed", markerError, {
 				projectKey: claimed.projectKey,
 				changeId: claimed.changeId,
 				workerId: this.dependencies.workerId,
@@ -310,12 +310,29 @@ export class RecurringBillingWorker {
 				this.dependencies.workerId,
 			);
 		} catch (markerError) {
-			this.dependencies.logger.error("Usage invoice failure marker failed", markerError, {
+			this.logError("Usage invoice failure marker failed", markerError, {
 				projectKey: claimed.projectKey,
 				jobKind: claimed.jobKind,
 				jobId: claimed.jobId,
 				workerId: this.dependencies.workerId,
 			});
+		}
+	}
+
+	/** A throwing logger must never abandon the batch or skip a failure transition. */
+	private logError(message: string, error: unknown, context: Record<string, unknown>): void {
+		try {
+			this.dependencies.logger.error(message, error, context);
+		} catch {
+			// The logger is injectable; a reporting failure is never worth losing the job for.
+		}
+	}
+
+	private logWarn(message: string, context: Record<string, unknown>): void {
+		try {
+			this.dependencies.logger.warn?.(message, context);
+		} catch {
+			// Same reasoning as logError.
 		}
 	}
 

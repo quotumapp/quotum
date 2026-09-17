@@ -796,3 +796,30 @@ it("fails jobs whose provider adapter does not serve the operation", async () =>
 		{ kind: "usage_failed", error: "stripe provider does not serve adjustment.issue" },
 	]);
 });
+
+it("marks every failing job even when the logger throws", async () => {
+	const { repository, calls } = recordingRepository({
+		changes: [
+			changeFixture({ changeId: "immediate" }),
+			changeFixture({ changeId: "period-end", effectiveMode: "period_end" }),
+		],
+		usage: [usageFixture()],
+	});
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository,
+		adapterForJob: (): RecurringBillingWorkerAdapter => ({}),
+		logger: {
+			error() {
+				throw new Error("logger is unavailable");
+			},
+			warn() {
+				throw new Error("logger is unavailable");
+			},
+		},
+	});
+
+	expect(await worker.runOnce()).toMatchObject({ failed: 3 });
+	expect(calls.map(({ kind }) => kind)).toEqual(["change_failed", "change_failed", "usage_failed"]);
+});
