@@ -10,9 +10,14 @@ import { BillingError, InvalidRequestError, PersistenceConflictError } from "../
 import { type BillingProvider, isBillingProvider } from "../billing/types";
 import { RepositoryModule } from "../db/repository/base";
 import { executeOne, executeRows, jsonb } from "../db/repository/query";
-import type { QueryExecutor } from "../db/repository/types";
+import type { QueryExecutor, TransactionalQueryExecutor } from "../db/repository/types";
 import type { ProjectInstanceContext } from "../projects/context";
-import { providerCapabilityCatalog } from "../providers/capabilities";
+import {
+	bindingImplementsCatalogTarget,
+	type CatalogCapabilityTarget,
+	type ProviderCapabilityLookup,
+	providerCapabilityCatalog,
+} from "../providers/capabilities";
 import { toIso } from "../shared/date";
 import type {
 	CatalogControlIntent,
@@ -47,6 +52,16 @@ interface DraftRow {
 }
 
 export class CatalogControlPlane extends RepositoryModule implements CatalogControlPlaneLike {
+	private readonly capabilities: ProviderCapabilityLookup;
+
+	constructor(
+		database: TransactionalQueryExecutor,
+		options: { capabilities?: ProviderCapabilityLookup } = {},
+	) {
+		super(database);
+		this.capabilities = options.capabilities ?? providerCapabilityCatalog;
+	}
+
 	async getPublished(project: ProjectInstanceContext): Promise<PublishedCatalog> {
 		const projectState = await readProjectCatalog(this.database, project, false);
 		if (projectState.revision_id === null || projectState.revision === null) {
@@ -81,7 +96,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 			revision: projectState.revision,
 			intentHash: row.intent_hash,
 			publishedAt: toIso(row.published_at),
-			catalog: normalizeCatalog(row.intent),
+			catalog: normalizeCatalog(row.intent, this.capabilities),
 		};
 	}
 
@@ -89,11 +104,11 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		project: ProjectInstanceContext,
 		input: CatalogPreviewInput,
 	): Promise<CatalogPreview> {
-		const catalog = normalizeCatalog(input.catalog);
+		const catalog = normalizeCatalog(input.catalog, this.capabilities);
 		return await this.transaction(async (tx) => {
 			const projectState = await readProjectCatalog(tx, project, false);
 			assertExpectedRevision(input.expectedRevision, projectState.revision);
-			await validateCatalogLifecycle(tx, projectState.id, catalog);
+			await validateCatalogLifecycle(tx, projectState.id, catalog, this.capabilities);
 			const intentHash = sha256Hex(stableJson(catalog));
 			const nextRevision = (projectState.revision ?? 0) + 1;
 			const previewToken = sha256Hex(
@@ -106,7 +121,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				}),
 			);
 			const expiresAt = new Date(Date.now() + 30 * 60_000);
-			const impact = await calculateImpact(tx, projectState.id, catalog);
+			const impact = await calculateImpact(tx, projectState.id, catalog, this.capabilities);
 			await executeOne(
 				tx,
 				drizzleSql`
@@ -148,7 +163,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		project: ProjectInstanceContext,
 		input: CatalogPublishInput,
 	): Promise<CatalogPublishResult> {
-		const catalog = normalizeCatalog(input.catalog);
+		const catalog = normalizeCatalog(input.catalog, this.capabilities);
 		return await this.transaction(async (tx) => {
 			const projectState = await readProjectCatalog(tx, project, true);
 			const token = input.previewToken.trim();
@@ -207,9 +222,9 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				);
 			}
 
-			await validateCatalogLifecycle(tx, projectState.id, catalog);
-			const impact = await calculateImpact(tx, projectState.id, catalog);
-			const currentCatalog = await readCurrentCatalogIntent(tx, projectState.id);
+			await validateCatalogLifecycle(tx, projectState.id, catalog, this.capabilities);
+			const impact = await calculateImpact(tx, projectState.id, catalog, this.capabilities);
+			const currentCatalog = await readCurrentCatalogIntent(tx, projectState.id, this.capabilities);
 			const changedCatalog = {
 				...catalog,
 				plans: changedPlans(currentCatalog, catalog),
@@ -390,7 +405,10 @@ function assertExpectedRevision(expected: number | null, actual: number | null):
 	}
 }
 
-function normalizeCatalog(catalog: CatalogIntent): CatalogIntent {
+function normalizeCatalog(
+	catalog: CatalogIntent,
+	capabilities: ProviderCapabilityLookup,
+): CatalogIntent {
 	const retiredFeatureKeys = normalizedRetirementKeys(
 		catalog.retiredFeatureKeys,
 		"retired feature key",
@@ -423,7 +441,7 @@ function normalizeCatalog(catalog: CatalogIntent): CatalogIntent {
 
 	const plans = catalog.plans.map((plan) => {
 		const legacyBindings = plan.providerBindings
-			.map(normalizeProviderBinding)
+			.map((binding) => normalizeProviderBinding(binding, capabilities))
 			.sort((left, right) =>
 				providerBindingIdentity(left).localeCompare(providerBindingIdentity(right)),
 			);
@@ -432,7 +450,11 @@ function normalizeCatalog(catalog: CatalogIntent): CatalogIntent {
 				? null
 				: plan.basePrice === null
 					? null
-					: normalizePrice(plan.basePrice, "base price");
+					: normalizePrice(plan.basePrice, "base price", capabilities, {
+							kind: "price",
+							plan,
+							item: null,
+						});
 		const basePrice = explicitBasePrice;
 		return {
 			...plan,
@@ -461,7 +483,11 @@ function normalizeCatalog(catalog: CatalogIntent): CatalogIntent {
 				price:
 					item.price === undefined || item.price === null
 						? null
-						: normalizePrice(item.price, `price for ${item.featureKey}`),
+						: normalizePrice(item.price, `price for ${item.featureKey}`, capabilities, {
+								kind: "price",
+								plan,
+								item,
+							}),
 				allocationScope: item.allocationScope ?? "account",
 				rollover:
 					item.rollover === undefined || item.rollover === null
@@ -581,7 +607,10 @@ function normalizeCatalog(catalog: CatalogIntent): CatalogIntent {
 		);
 		if (
 			((plan.trialDays ?? 0) > 0 || plan.kind === "addon") &&
-			plan.providerBindings.some((binding) => binding.provider !== "stripe")
+			plan.providerBindings.some(
+				(binding) =>
+					!bindingImplementsCatalogTarget(capabilities, binding.provider, { kind: "plan", plan }),
+			)
 		) {
 			throw new InvalidRequestError(
 				`Plan ${plan.key} trials and add-ons are currently supported only on Stripe web`,
@@ -601,7 +630,7 @@ function normalizeCatalog(catalog: CatalogIntent): CatalogIntent {
 			featureKey,
 			quantity: positiveDecimal(topup.quantity, "top-up quantity", feature.creditScale),
 			providerBindings: topup.providerBindings
-				.map(normalizeProviderBinding)
+				.map((binding) => normalizeProviderBinding(binding, capabilities))
 				.sort((left, right) =>
 					providerBindingIdentity(left).localeCompare(providerBindingIdentity(right)),
 				),
@@ -722,9 +751,10 @@ function assertNoActiveRetirementOverlap(
 
 function normalizeProviderBinding(
 	binding: CatalogProviderBindingIntent,
+	capabilities: ProviderCapabilityLookup,
 ): CatalogProviderBindingIntent {
 	const expectedChannel = isBillingProvider(binding.provider)
-		? providerCapabilityCatalog.get(binding.provider)?.channel
+		? capabilities.get(binding.provider)?.channel
 		: undefined;
 	if (binding.channel !== expectedChannel) {
 		throw new InvalidRequestError(
@@ -737,7 +767,12 @@ function normalizeProviderBinding(
 	};
 }
 
-function normalizePrice(price: CatalogPriceIntent, label: string): CatalogPriceIntent {
+function normalizePrice(
+	price: CatalogPriceIntent,
+	label: string,
+	capabilities: ProviderCapabilityLookup,
+	target: CatalogCapabilityTarget,
+): CatalogPriceIntent {
 	if (!Number.isSafeInteger(price.unitAmountMinor) || price.unitAmountMinor < 0) {
 		throw new InvalidRequestError(`${label} unitAmountMinor must be a nonnegative safe integer`);
 	}
@@ -751,14 +786,18 @@ function normalizePrice(price: CatalogPriceIntent, label: string): CatalogPriceI
 		throw new InvalidRequestError(`${label} maximumQuantity must be at least minimumQuantity`);
 	}
 	const providerBindings = price.providerBindings
-		.map(normalizeProviderBinding)
+		.map((binding) => normalizeProviderBinding(binding, capabilities))
 		.sort((left, right) =>
 			providerBindingIdentity(left).localeCompare(providerBindingIdentity(right)),
 		);
 	if (providerBindings.length === 0) {
 		throw new InvalidRequestError(`${label} requires at least one provider binding`);
 	}
-	if (providerBindings.some((binding) => binding.provider !== "stripe")) {
+	if (
+		providerBindings.some(
+			(binding) => !bindingImplementsCatalogTarget(capabilities, binding.provider, target),
+		)
+	) {
 		throw new InvalidRequestError(
 			`${label} explicit price components are currently supported only on Stripe web`,
 		);
@@ -914,6 +953,7 @@ async function calculateImpact(
 	executor: QueryExecutor,
 	projectId: string,
 	catalog: CatalogIntent,
+	capabilities: ProviderCapabilityLookup,
 ): Promise<CatalogImpact> {
 	const featureRows = await executeRows<{ key: string; active: boolean }>(
 		executor,
@@ -925,7 +965,7 @@ async function calculateImpact(
 	);
 	const existingFeatures = new Set(featureRows.map(({ key }) => key));
 	const existingPlans = new Set(planRows.map(({ key }) => key));
-	const currentCatalog = await readCurrentCatalogIntent(executor, projectId);
+	const currentCatalog = await readCurrentCatalogIntent(executor, projectId, capabilities);
 	const planVersionsCreated = changedPlans(currentCatalog, catalog).length;
 	const currentTopups = new Set((currentCatalog?.topups ?? []).map(({ key }) => key));
 	const retiredFeatures = new Set(catalog.retiredFeatureKeys ?? []);
@@ -972,6 +1012,7 @@ async function validateCatalogLifecycle(
 	executor: QueryExecutor,
 	projectId: string,
 	catalog: CatalogIntent,
+	capabilities: ProviderCapabilityLookup,
 ): Promise<void> {
 	const featureRows = await executeRows<{ key: string; active: boolean }>(
 		executor,
@@ -1008,7 +1049,7 @@ async function validateCatalogLifecycle(
 			);
 		}
 	}
-	const currentCatalog = await readCurrentCatalogIntent(executor, projectId);
+	const currentCatalog = await readCurrentCatalogIntent(executor, projectId, capabilities);
 	for (const topup of currentCatalog?.topups ?? []) {
 		if (!activeTopupKeys.has(topup.key) && !retiredTopupKeys.has(topup.key)) {
 			throw new InvalidRequestError(
@@ -1032,6 +1073,7 @@ function assertKnownRetirements(
 async function readCurrentCatalogIntent(
 	executor: QueryExecutor,
 	projectId: string,
+	capabilities: ProviderCapabilityLookup,
 ): Promise<CatalogIntent | null> {
 	const row = await executeOne<{ intent: CatalogIntent }>(
 		executor,
@@ -1048,7 +1090,7 @@ async function readCurrentCatalogIntent(
 			WHERE project.id = ${projectId}
 		`,
 	);
-	return row === null ? null : normalizeCatalog(row.intent);
+	return row === null ? null : normalizeCatalog(row.intent, capabilities);
 }
 
 async function applyCatalogRetirements(

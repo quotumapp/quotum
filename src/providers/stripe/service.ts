@@ -51,7 +51,9 @@ import type {
 	StoreEventReplayProviderResult,
 } from "../../workers/store-event-replay";
 import type { SubscriptionReconciliationProvider } from "../../workers/subscription-reconciliation";
+import { commercialPreviewProvider } from "../capabilities";
 import { requireNonBlank } from "../validation";
+import { stripeCapabilities } from "./capabilities";
 import {
 	normalizeStripeCheckoutSession,
 	normalizeStripeCheckoutSessionTermination,
@@ -803,7 +805,7 @@ export class StripeBillingService
 					stateFingerprint,
 					billingAccountId,
 					action: normalized.kind,
-					provider: "stripe",
+					provider: commercialPreviewProvider(stripeCapabilities, normalized.kind),
 					lineItems: change.lineItems.map((line) => ({
 						...line,
 						subtotalMinor: null,
@@ -879,7 +881,7 @@ export class StripeBillingService
 					stateFingerprint,
 					billingAccountId,
 					action: normalized.kind,
-					provider: "stripe",
+					provider: commercialPreviewProvider(stripeCapabilities, normalized.kind),
 					...priced,
 					currency: product.currency,
 					effectiveMode: null,
@@ -943,7 +945,7 @@ export class StripeBillingService
 				stateFingerprint,
 				billingAccountId,
 				action: normalized.kind,
-				provider: "stripe",
+				provider: commercialPreviewProvider(stripeCapabilities, normalized.kind),
 				...priced,
 				currency,
 				effectiveMode: "immediate",

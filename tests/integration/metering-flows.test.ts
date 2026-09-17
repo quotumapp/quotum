@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
+import type { MeteringDecision } from "../../src/billing/metering";
 import { readProjectionBalances } from "../../src/db/repository/entitlements";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import { testRequest } from "../helpers/openapi";
@@ -1020,6 +1021,33 @@ localDescribe("authoritative metering flows", () => {
 			WHERE policy.control_kind = 'spend_limit'
 		`;
 		expect(control).toEqual({ consumed: "200.000000000", receipts: 3 });
+	});
+
+	it("offers one purchase action per credit-selling provider when a consume runs dry", async () => {
+		const project = integrationProjectContext();
+		const consume = {
+			billingAccountId: "purchase_actions",
+			featureKey: "model_tokens",
+			quantity: "100",
+			idempotencyKey: "purchase-actions:consume",
+		};
+		// The fixtures publish the same consumable credit product on all three admitted providers.
+		const expected: MeteringDecision["eligiblePurchaseActions"] = [
+			{ provider: "apple", action: "purchase_required" },
+			{ provider: "google", action: "purchase_required" },
+			{ provider: "stripe", action: "purchase_required" },
+		];
+
+		const denied = await context.repository.consumeUsage(project, consume);
+		expect(denied.allowed).toBe(false);
+		expect(denied.reason).toBe("insufficient_balance");
+		expect(denied.eligiblePurchaseActions).toEqual(expected);
+
+		// The stored outcome is what a retried client sees, so it must carry the same actions.
+		const replayed = await context.repository.consumeUsage(project, consume);
+		expect(replayed.eligiblePurchaseActions).toEqual(expected);
+		expect(replayed.usageEventId).toBeNull();
+		expect(await countRows(context.sql, "usage_events")).toBe(0);
 	});
 
 	it("expires holds, closes periods, and sweeps bounded metering state", async () => {

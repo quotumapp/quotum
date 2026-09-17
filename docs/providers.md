@@ -247,5 +247,13 @@ consume response and only needs purchase and provider events.
    table above, then `bun run openapi:check`.
 6. Document the connection fields in a section of this guide, next to the existing providers, for
    the connection kind the declaration names.
-7. Never add a provider branch to catalog, commercial or worker code. Express a provider difference
-   as a declared support level or condition instead.
+7. Never add a provider branch to catalog, commercial or worker code: the declarations already
+   decide. A catalog accepts a plan trial, an add-on or an explicit price component only when every
+   bound provider implements the operations that construct requires (`catalog.trial`,
+   `catalog.addon` and the `catalog.price.*` operations), and a binding's channel must be the one
+   its declaration names. Auto top-up charges the customer itself only for a provider that
+   implements `topup.automatic`, and queues a terminal `provider_action_required` job for the rest.
+   A denied consume offers `purchase_required` for the providers that implement
+   `topup.customer_initiated`, and a commercial preview reports the provider whose declaration
+   implements that action's operation. Express a provider difference as a declared support level or
+   condition instead of a branch.
