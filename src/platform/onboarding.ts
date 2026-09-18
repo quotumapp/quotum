@@ -28,12 +28,7 @@ export class MerchantOnboarding {
 	): Promise<OnboardingDraftView> {
 		return this.store.idempotent(identity, key, ["onboarding.organization", input], async (tx) => {
 			const draft = await this.store.draft(identity.principalId, tx);
-			if (draft?.organization)
-				throw new MerchantError(
-					"DRAFT_CHANGED",
-					"An organization already exists. Continue your saved onboarding.",
-					409,
-				);
+			if (draft?.organization) return this.renameOrganization(tx, identity, draft, input);
 			const existing = await tx`SELECT id FROM platform_organizations WHERE slug=${input.slug}`;
 			if (existing.length)
 				throw new MerchantError(
@@ -52,6 +47,59 @@ export class MerchantOnboarding {
 			if (!result) throw new Error("Draft insert failed");
 			return result;
 		});
+	}
+	/**
+	 * Step 1 revisited: until provisioning starts, the draft's organization takes a new name and
+	 * slug. A caller that did not read the draft (no revision) is told to continue it instead.
+	 */
+	private async renameOrganization(
+		tx: MerchantSql,
+		identity: MerchantIdentity,
+		draft: OnboardingDraftView,
+		input: { name: string; slug: string; revision?: number },
+	): Promise<OnboardingDraftView> {
+		const organization = draft.organization;
+		if (!organization || input.revision === undefined || draft.operationId)
+			throw new MerchantError(
+				"DRAFT_CHANGED",
+				"An organization already exists. Continue your saved onboarding.",
+				409,
+			);
+		// Renaming is organization administration; the lock also serializes it with provisioning.
+		const member = await this.store.membership(tx, identity.principalId, organization.slug, true);
+		requireCapability(member.role, "team.manage");
+		if (draft.revision !== input.revision)
+			throw new MerchantError(
+				"DRAFT_CHANGED",
+				"Your draft changed. Refresh it before continuing.",
+				409,
+			);
+		if (organization.name === input.name && organization.slug === input.slug) return draft;
+		const taken =
+			await tx`SELECT id FROM platform_organizations WHERE slug=${input.slug} AND id<>${organization.id}`;
+		if (taken.length)
+			throw new MerchantError("SLUG_UNAVAILABLE", "Choose a different organization address.", 409);
+		// Conditional on the revision read above, so a concurrent step wins and this one reports it.
+		const bumped =
+			await tx`UPDATE platform_onboarding_drafts SET revision=revision+1,updated_at=${this.store.now()} WHERE id=${draft.id} AND revision=${input.revision} RETURNING id`;
+		if (!bumped.length)
+			throw new MerchantError(
+				"DRAFT_CHANGED",
+				"Your draft changed. Refresh it before continuing.",
+				409,
+			);
+		await tx`UPDATE platform_organizations SET name=${input.name},slug=${input.slug},updated_at=${this.store.now()} WHERE id=${organization.id}`;
+		await this.store.audit(
+			tx,
+			identity.principalId,
+			organization.id,
+			"organization.updated",
+			organization.id,
+			{ previous: { name: organization.name, slug: organization.slug } },
+		);
+		const result = await this.store.draft(identity.principalId, tx);
+		if (!result) throw new Error("Draft disappeared");
+		return result;
 	}
 	async project(
 		identity: MerchantIdentity,

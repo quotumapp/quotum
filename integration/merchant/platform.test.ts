@@ -152,6 +152,55 @@ describe("merchant platform transactions", () => {
 			context: { environment: "sandbox" },
 		});
 	});
+	it("renames the draft's organization when step 1 is revisited before provisioning", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		const org = await browser.json<OnboardingDraftView>("/api/platform/onboarding/organization", {
+			name: "Acme Company",
+			slug: "acme",
+		});
+		const unchanged = await browser.json<OnboardingDraftView>(
+			"/api/platform/onboarding/organization",
+			{ name: "Acme Company", slug: "acme", revision: org.revision },
+		);
+		expect(unchanged.revision).toBe(org.revision);
+		const errorCode = async (body: unknown) => {
+			const response = await browser.request("/api/platform/onboarding/organization", body);
+			return [response.status, (await response.json()).error?.code];
+		};
+		await f.sql`INSERT INTO platform_organizations(name,slug) VALUES('Taken','taken')`;
+		expect(await errorCode({ name: "Acme", slug: "taken", revision: org.revision })).toEqual([
+			409,
+			"SLUG_UNAVAILABLE",
+		]);
+		expect(await errorCode({ name: "Acme", slug: "acme-labs" })).toEqual([409, "DRAFT_CHANGED"]);
+		expect(await errorCode({ name: "Acme", slug: "acme-labs", revision: 999 })).toEqual([
+			409,
+			"DRAFT_CHANGED",
+		]);
+		const renamed = await browser.json<OnboardingDraftView>(
+			"/api/platform/onboarding/organization",
+			{ name: "Acme Labs", slug: "acme-labs", revision: org.revision },
+		);
+		expect(renamed.organization).toMatchObject({ name: "Acme Labs", slug: "acme-labs" });
+		expect(renamed.organization?.id).toBe(org.organization?.id);
+		expect(renamed.revision).toBe(org.revision + 1);
+		const session = await browser.json<MerchantSessionView>("/api/platform/session");
+		expect(session.memberships.map((m) => m.organizationSlug)).toEqual(["acme-labs"]);
+		expect(
+			await f.sql`SELECT metadata FROM platform_audit_events WHERE action='organization.updated'`,
+		).toEqual([{ metadata: { previous: { name: "Acme Company", slug: "acme" } } }]);
+		const draft = await browser.json<OnboardingDraftView>("/api/platform/onboarding/project", {
+			name: "Example Project",
+			key: "example",
+			revision: renamed.revision,
+		});
+		await browser.json("/api/platform/onboarding/provision", { revision: draft.revision });
+		const started = await browser.json<OnboardingDraftView>("/api/platform/onboarding");
+		expect(
+			await errorCode({ name: "Acme", slug: "acme-labs", revision: started.revision }),
+		).toEqual([409, "DRAFT_CHANGED"]);
+	});
 	it("rejects stale drafts, changed idempotency requests, and cross-organization reads", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();
