@@ -1,7 +1,7 @@
 import type { Elysia } from "elysia";
 import { z } from "zod";
 import { operationDetail } from "../../shared/http";
-import { MerchantScopeSchema } from "../schemas";
+import { MerchantScopeSchema, ReadinessBlockerDetailSchema } from "../schemas";
 import { idempotencyKey, MERCHANT_JSON_PARSE, MerchantError } from "../security";
 import type { MerchantStore } from "../store";
 import type { MerchantStripeOAuth } from "./oauth";
@@ -307,6 +307,7 @@ export function registerConnectionRoutes(
 						lifecycleStatus: z.string(),
 						ready: z.boolean(),
 						blockers: z.array(z.string()),
+						blockerDetails: z.array(ReadinessBlockerDetailSchema),
 						catalogRevisionId: z.string().nullable(),
 						connections: z.array(connection),
 						fingerprint: z.string(),

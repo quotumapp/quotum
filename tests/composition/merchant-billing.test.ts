@@ -6,10 +6,12 @@ import { createMerchantBillingPort } from "../../src/composition/merchant-billin
 import type { BillingRepository } from "../../src/db/repository";
 import type { MerchantBillingCommand } from "../../src/platform/application/billing-port";
 import { appleCapabilities } from "../../src/providers/apple/capabilities";
+import type { ProviderCapabilityReads } from "../../src/providers/capability-read-types";
 import { evaluateCapability } from "../../src/shared/provider-capabilities";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const project = projectInstanceContext("voysee");
+const inactive = projectInstanceContext("wiseley", { lifecycleStatus: "inactive" });
 
 function requiredOnlyStripeService(): StripeBillingServiceLike {
 	return {
@@ -34,22 +36,46 @@ function requiredOnlyStripeService(): StripeBillingServiceLike {
 	};
 }
 
+/** Records each read and answers with an empty view. */
+function recordingCapabilityReads(calls: string[][] = []): ProviderCapabilityReads {
+	return {
+		async environment(context) {
+			calls.push(["environment", context.projectInstanceId]);
+			return { schemaVersion: 1, generatedAt: "2026-09-18T12:00:00.000Z", providers: [] };
+		},
+		async availableActions(context, billingAccountId) {
+			calls.push(["availableActions", context.projectInstanceId, billingAccountId]);
+			return {
+				schemaVersion: 1,
+				billingAccountId,
+				customerExists: false,
+				generatedAt: "2026-09-18T12:00:00.000Z",
+				account: [],
+				subscriptions: [],
+			};
+		},
+	};
+}
+
 function port({
 	stripe = requiredOnlyStripeService(),
 	repository = {},
+	capabilityReads = recordingCapabilityReads(),
 }: {
 	stripe?: StripeBillingServiceLike | null;
 	repository?: Partial<BillingRepository>;
+	capabilityReads?: ProviderCapabilityReads;
 } = {}) {
 	return createMerchantBillingPort({
 		repository: repository as BillingRepository,
 		reader: {} as AdminBillingReader,
-		resolver: projectContextResolver({ contexts: [project] }),
+		resolver: projectContextResolver({ contexts: [project, inactive] }),
 		providers: {
 			appleStoreKitService: async () => null,
 			googlePlayBillingService: async () => null,
 			stripeBillingService: async () => stripe,
 		},
+		capabilityReads,
 	});
 }
 
@@ -103,6 +129,78 @@ describe("merchant billing port", () => {
 				},
 			});
 		}
+	});
+
+	it("dispatches the capability reads for the environment and one billing account", async () => {
+		const calls: string[][] = [];
+		const billing = port({ capabilityReads: recordingCapabilityReads(calls) });
+
+		expect(await billing.dispatch(command("providers.capabilities", { parameters: [] }))).toEqual({
+			status: 200,
+			body: {
+				success: true,
+				data: { schemaVersion: 1, generatedAt: "2026-09-18T12:00:00.000Z", providers: [] },
+			},
+		});
+		expect(await billing.dispatch(command("account.actions"))).toEqual({
+			status: 200,
+			body: {
+				success: true,
+				data: {
+					schemaVersion: 1,
+					billingAccountId: "user_1",
+					customerExists: false,
+					generatedAt: "2026-09-18T12:00:00.000Z",
+					account: [],
+					subscriptions: [],
+				},
+			},
+		});
+		expect((await billing.dispatch(command("account.actions", { parameters: [" "] }))).status).toBe(
+			400,
+		);
+		expect(calls).toEqual([
+			["environment", project.projectInstanceId],
+			["availableActions", project.projectInstanceId, "user_1"],
+		]);
+	});
+
+	it("serves the capability reads to active environments only", async () => {
+		const calls: string[][] = [];
+		const published = {
+			revisionId: null,
+			revision: null,
+			intentHash: null,
+			publishedAt: null,
+			catalog: null,
+		};
+		const billing = port({
+			capabilityReads: recordingCapabilityReads(calls),
+			repository: { getPublishedCatalog: async () => published },
+		});
+
+		// The inactive environment resolves: its catalog stays readable while it awaits activation.
+		expect(
+			await billing.dispatch(command("catalog", { projectInstanceId: inactive.projectInstanceId })),
+		).toEqual({ status: 200, body: { success: true, data: published } });
+		for (const operation of ["providers.capabilities", "account.actions"] as const) {
+			expect(
+				await billing.dispatch(
+					command(operation, { projectInstanceId: inactive.projectInstanceId }),
+				),
+				operation,
+			).toEqual({
+				status: 404,
+				body: {
+					success: false,
+					error: {
+						code: "CONTEXT_UNAVAILABLE",
+						message: "The selected environment is unavailable",
+					},
+				},
+			});
+		}
+		expect(calls).toEqual([]);
 	});
 
 	it("keeps the envelope without details when an error carries none", async () => {

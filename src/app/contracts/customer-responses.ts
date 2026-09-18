@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+	BillingAccountAvailableActionsSchema,
 	EntitlementSnapshotSchema,
 	StripeBillingAccountSummarySchema,
 	SubscriptionChangeOperationSchema,
@@ -246,4 +247,9 @@ export const getV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessio
 export const postV1PurchasesVerifyResponse200Schema = z.object({
 	success: z.literal(true),
 	data: EntitlementSnapshotSchema,
+});
+
+export const getV1BillingAccountsByBillingAccountIdAvailableActionsResponse200Schema = z.object({
+	success: z.literal(true),
+	data: BillingAccountAvailableActionsSchema,
 });

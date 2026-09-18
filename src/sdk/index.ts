@@ -20,7 +20,21 @@ export type {
 	UsageOperationLookupResult,
 	UsageOperationReceipt,
 } from "../billing/usage-operations";
-export type { CatalogIntent } from "../catalog/types";
+export type { CatalogIntent, CatalogPreview } from "../catalog/types";
+export type {
+	BillingAccountAvailableActions,
+	ProviderConnectionSummary,
+	ProviderEnvironmentCapabilities,
+	ProviderEnvironmentCapability,
+	SubscriptionAvailableActions,
+	SubscriptionPendingChange,
+} from "../providers/capability-read-types";
+export type { CatalogProviderCompatibility } from "../providers/catalog-compatibility-types";
+export type {
+	CapabilityReason,
+	ProviderOperation,
+	RuntimeCapabilityVerdict,
+} from "../shared/provider-capabilities";
 export { defineCatalog } from "./catalog";
 export type { BillingClientOptions, CursorPage, PurchaseVerificationInput } from "./client";
 export { BillingApiError, BillingClient } from "./client";

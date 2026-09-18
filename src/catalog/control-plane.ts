@@ -17,7 +17,10 @@ import {
 	providerCapabilityCatalog,
 } from "../providers/capabilities";
 import { toIso } from "../shared/date";
-import { assertCatalogProviderCompatibility } from "./provider-compatibility";
+import {
+	assertCatalogProviderCompatibility,
+	catalogProviderCompatibility,
+} from "./provider-compatibility";
 import type {
 	CatalogControlIntent,
 	CatalogControlPlaneLike,
@@ -105,6 +108,10 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 	): Promise<CatalogPreview> {
 		const catalog = normalizeCatalog(input.catalog, this.capabilities);
 		assertCatalogProviderCompatibility(catalog, this.capabilities);
+		const providerCompatibility = catalogProviderCompatibility(catalog, {
+			capabilities: this.capabilities,
+			includeUnbound: true,
+		});
 		return await this.transaction(async (tx) => {
 			const projectState = await readProjectCatalog(tx, project, false);
 			assertExpectedRevision(input.expectedRevision, projectState.revision);
@@ -155,6 +162,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				nextRevision,
 				expiresAt: expiresAt.toISOString(),
 				impact,
+				providerCompatibility,
 			};
 		});
 	}

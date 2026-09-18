@@ -24,7 +24,8 @@ const readPatterns = [
 	"admin/projection-jobs",
 	"admin/usage-events",
 	"admin/catalog(?:/(?:products|store-products))?",
-	`admin/billing-accounts/${account}/(?:billing-summary|billing-account|controls|usage/(?:events|series)|promotion-redemptions)`,
+	"admin/providers/capabilities",
+	`admin/billing-accounts/${account}/(?:billing-summary|billing-account|available-actions|controls|usage/(?:events|series)|promotion-redemptions)`,
 	`admin/promotions(?:/${account}(?:/(?:codes|redemptions))?)?`,
 ];
 export function merchantBillingRoute(

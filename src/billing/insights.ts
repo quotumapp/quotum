@@ -1,4 +1,5 @@
-import type { BillingProvider } from "./types";
+import type { SubscriptionPendingChange } from "../providers/capability-read-types";
+import type { BillingChannel, BillingProvider, SubscriptionStatus } from "./types";
 
 export interface UsageEventCursor {
 	recordedAt: string;
@@ -111,6 +112,22 @@ export interface CustomerBillingSummary {
 		currency: string;
 		paidAt: string | null;
 		createdAt: string;
+	}>;
+}
+
+/** The persisted facts the available-actions read evaluates; no provider is asked. */
+export interface AvailableActionFacts {
+	customerExists: boolean;
+	/** Live subscriptions only: not expired, refunded or revoked and not past `expires_at`. */
+	subscriptions: Array<{
+		externalSubscriptionId: string;
+		provider: BillingProvider;
+		channel: BillingChannel;
+		status: SubscriptionStatus;
+		planKey: string | null;
+		currentPeriodEnd: string | null;
+		cancelAtPeriodEnd: boolean;
+		pendingChange: SubscriptionPendingChange | null;
 	}>;
 }
 

@@ -6,6 +6,7 @@ import type { ProjectInstanceContext } from "../projects/context";
 import {
 	type BillingProvider,
 	billingProviders,
+	type CapabilityConfigurationFacts,
 	type CapabilityFacts,
 	type CapabilityVerdict,
 	type DeclaredProvider,
@@ -14,7 +15,13 @@ import {
 	type ProviderOperation,
 } from "../shared/provider-capabilities";
 import { appleRegistryEntry } from "./apple/adapter";
-import { providerCapabilityDeclaration, providerCapabilityDeclarations } from "./capabilities";
+import {
+	connectionConfigurationFacts,
+	providerCapabilityDeclaration,
+	providerCapabilityDeclarations,
+	providerConnectionSummary,
+} from "./capabilities";
+import type { ProviderConnectionSummary } from "./capability-read-types";
 import {
 	type AnyProviderAdapter,
 	type AnyProviderRegistryEntry,
@@ -30,6 +37,12 @@ import { googleRegistryEntry } from "./google/adapter";
 import { stripeRegistryEntry } from "./stripe/adapter";
 
 export type ProviderPurpose = "new" | "recovery";
+
+/** A provider's persisted connection state and the configuration facts it gives the evaluator. */
+export interface ProviderConnectionState {
+	connection: ProviderConnectionSummary | null;
+	configuration: CapabilityConfigurationFacts | undefined;
+}
 
 /** Admitted providers in `billingProviders` order. */
 export const defaultProviderRegistryEntries: readonly AnyProviderRegistryEntry[] = [
@@ -77,6 +90,16 @@ export interface ProviderRegistry {
 		operation: ProviderOperation,
 		purpose?: ProviderPurpose,
 	): Promise<ProviderAdapter<P>>;
+	/**
+	 * Connection state for capability reads, with `resolve`'s precedence: an override or legacy
+	 * service counts as a configured, enabled and validated connection (none when null). Without an
+	 * override it reads persisted state through the resolver's `describe`, and both fields are
+	 * unknown when the resolver has none. Never resolves a connection or builds a service.
+	 */
+	describe(
+		project: ProjectInstanceContext,
+		provider: BillingProvider,
+	): Promise<ProviderConnectionState>;
 	/** Evaluates the declaration against the caller's facts; providers are always named explicitly. */
 	verdict(
 		project: ProjectInstanceContext,
@@ -152,23 +175,28 @@ export function createProviderRegistry({
 		return entry as unknown as ProviderRegistryEntry<P>;
 	};
 
+	/** The service replacing the connection build, null for an explicit none, undefined for none. */
+	const overrideFor = <P extends BillingProvider>(
+		project: ProjectInstanceContext,
+		entry: ProviderRegistryEntry<P>,
+	): ProviderServiceSource<P> | null | undefined => {
+		const projectOverrides = overrides?.[project.projectInstanceKey];
+		if (projectOverrides !== undefined && Object.hasOwn(projectOverrides, entry.overrideKey)) {
+			const service = projectOverrides[entry.overrideKey] as ProviderServiceSource<P> | undefined;
+			return service ?? null;
+		}
+		return legacyServices?.[entry.overrideKey] as ProviderServiceSource<P> | null | undefined;
+	};
+
 	const resolve = async <P extends BillingProvider>(
 		project: ProjectInstanceContext,
 		provider: P,
 		purpose: ProviderPurpose,
 	): Promise<ResolvedService<P>> => {
 		const entry = entryFor(provider);
-		const projectOverrides = overrides?.[project.projectInstanceKey];
-		if (projectOverrides !== undefined && Object.hasOwn(projectOverrides, entry.overrideKey)) {
-			const service = projectOverrides[entry.overrideKey] as ProviderServiceSource<P> | undefined;
-			return { source: "override", service: service ?? null };
-		}
-		const legacy = legacyServices?.[entry.overrideKey] as
-			| ProviderServiceSource<P>
-			| null
-			| undefined;
-		if (legacy !== undefined) {
-			return { source: "override", service: legacy };
+		const override = overrideFor(project, entry);
+		if (override !== undefined) {
+			return { source: "override", service: override };
 		}
 		const config = await connections.resolve(project, entry.connectionKind, purpose);
 		if (config === null) {
@@ -240,6 +268,30 @@ export function createProviderRegistry({
 				);
 			}
 			return resolved;
+		},
+		async describe(project, provider) {
+			const entry = entryFor(provider);
+			const override = overrideFor(project, entry);
+			if (override !== undefined) {
+				const present = override !== null;
+				const connection: ProviderConnectionSummary = {
+					configured: present,
+					enabled: present,
+					validated: present,
+					validatedAt: null,
+					accountIdentity: null,
+				};
+				return { connection, configuration: connectionConfigurationFacts(connection) };
+			}
+			if (connections.describe === undefined) {
+				return { connection: null, configuration: undefined };
+			}
+			const description = await connections.describe(project, entry.connectionKind);
+			const connection = providerConnectionSummary(description);
+			return {
+				connection,
+				configuration: connectionConfigurationFacts(connection, description?.settings ?? {}),
+			};
 		},
 		async verdict(_project, provider, operation, facts = {}) {
 			return evaluateCapability(providerCapabilityDeclaration(provider), operation, facts);

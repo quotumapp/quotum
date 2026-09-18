@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { billingProviderValues } from "./provider-enum";
+import { ProviderEnvironmentCapabilitiesSchema } from "./provider-responses";
 
 /** Authored HTTP wire schemas. Update these with the handlers; OpenAPI is generated from them. */
 export const getV1AdminCustomersSearchResponse200Schema = z.object({
@@ -966,4 +967,9 @@ export const postV1AdminReconciliationSubscriptionsRunResponse200Schema = z.obje
 export const postV1AdminProjectionJobsByJobIdRetryResponse200Schema = z.object({
 	success: z.literal(true),
 	data: z.object({ jobId: z.string(), status: z.literal("pending") }),
+});
+
+export const getV1AdminProvidersCapabilitiesResponse200Schema = z.object({
+	success: z.literal(true),
+	data: ProviderEnvironmentCapabilitiesSchema,
 });

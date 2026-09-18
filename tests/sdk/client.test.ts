@@ -394,4 +394,31 @@ describe("BillingClient", () => {
 			expect(call.headers.get("x-billing-actor")).toBe("release@example.com");
 		}
 	});
+
+	it("reads provider capabilities and available actions with project credentials only", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			operatorKey: "operator-secret",
+			actor: "support@example.com",
+			fetch: async (input, init) => {
+				calls.push(new Request(input, init));
+				return Response.json({ success: true, data: { schemaVersion: 1 } });
+			},
+		});
+
+		expect((await client.providers.capabilities()).schemaVersion).toBe(1);
+		expect((await client.commercial.availableActions("account/one")).schemaVersion).toBe(1);
+
+		expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+			"GET https://billing.example.com/v1/admin/providers/capabilities",
+			"GET https://billing.example.com/v1/billing-accounts/account%2Fone/available-actions",
+		]);
+		for (const call of calls) {
+			expect(call.headers.get("authorization")).toBe("Bearer project-secret");
+			expect(call.headers.has("x-billing-operator-key")).toBe(false);
+			expect(call.headers.has("x-billing-actor")).toBe(false);
+		}
+	});
 });

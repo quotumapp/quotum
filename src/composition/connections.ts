@@ -10,6 +10,7 @@ import {
 } from "../projects/config";
 import type {
 	RuntimeConnectionConfigs,
+	RuntimeConnectionDescription,
 	RuntimeConnectionKind,
 	RuntimeConnectionResolver,
 } from "../projects/connections";
@@ -20,6 +21,39 @@ import { createStripeOAuthPort } from "./stripe-oauth";
 export function createConnectionRepository() {
 	return new ConnectionRepository(merchantSql(sql), loadConnectionCipher());
 }
+/**
+ * Maps a connection row joined to its active version. `external_identity` is optional because the
+ * platform's connection list does not select it.
+ */
+export function connectionDescription(row: {
+	enabled: boolean;
+	active_version_id: string | null;
+	settings: Record<string, unknown> | null;
+	validated_at: Date | string | null;
+	external_identity?: string | null;
+}): RuntimeConnectionDescription {
+	const active = row.active_version_id !== null;
+	const validatedAt =
+		active && row.validated_at !== null ? new Date(row.validated_at).toISOString() : null;
+	return {
+		enabled: row.enabled,
+		active,
+		validated: validatedAt !== null,
+		validatedAt,
+		accountIdentity: active ? (row.external_identity ?? null) : null,
+		settings: Object.fromEntries(
+			Object.entries(row.settings ?? {}).filter(
+				(entry): entry is [string, string | boolean] =>
+					typeof entry[1] === "string" || typeof entry[1] === "boolean",
+			),
+		),
+	};
+}
+
+function connectionUnavailable(): BillingError {
+	return new BillingError("This project integration is unavailable", "CONNECTION_UNAVAILABLE", 503);
+}
+
 export function createRuntimeConnectionResolver(
 	repository: ConnectionRepository,
 ): RuntimeConnectionResolver {
@@ -83,11 +117,15 @@ export function createRuntimeConnectionResolver(
 					};
 				return parsed as RuntimeConnectionConfigs[K];
 			} catch {
-				throw new BillingError(
-					"This project integration is unavailable",
-					"CONNECTION_UNAVAILABLE",
-					503,
-				);
+				throw connectionUnavailable();
+			}
+		},
+		async describe(project, kind) {
+			try {
+				const row = await repository.describe(project.projectInstanceId, kind);
+				return row === null ? null : connectionDescription(row);
+			} catch {
+				throw connectionUnavailable();
 			}
 		},
 	};

@@ -43,15 +43,17 @@ import type {
 	MerchantBillingPort,
 } from "../platform/application/billing-port";
 import { isTenantTrafficEligible, type ProjectInstanceContextResolver } from "../projects/context";
+import type { ProviderCapabilityReads } from "../providers/capability-read-types";
 
 export function createMerchantBillingPort(input: {
 	repository: BillingRepository;
 	reader: AdminBillingReader;
 	resolver: ProjectInstanceContextResolver;
 	providers: ProjectProviderServiceResolver;
+	capabilityReads: ProviderCapabilityReads;
 	operations?: BillingAdminOperations | null;
 }): MerchantBillingPort {
-	const { repository: repo, reader, resolver, providers } = input;
+	const { repository: repo, reader, resolver, providers, capabilityReads } = input;
 	const meter = new MeteringService(repo);
 	const run = async (command: MerchantBillingCommand) => {
 		const resolved = await resolver.resolveInstanceId(command.projectInstanceId);
@@ -158,6 +160,8 @@ export function createMerchantBillingPort(input: {
 						queries.parseCatalogStoreProductListQuery(query),
 					),
 				);
+			case "providers.capabilities":
+				return ok(await capabilityReads.environment(project));
 			case "catalog.preview":
 				return ok(
 					await repo.previewCatalog(project, { ...parse(previewSchema, command.body), actor }),
@@ -177,6 +181,8 @@ export function createMerchantBillingPort(input: {
 				);
 				return ok(await getBillingAccount(account()));
 			}
+			case "account.actions":
+				return ok(await capabilityReads.availableActions(project, account()));
 			case "controls": {
 				const q = parse(
 					z.object({ entityId: z.string().trim().min(1).max(200).optional() }).strict(),

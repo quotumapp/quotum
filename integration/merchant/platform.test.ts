@@ -12,6 +12,7 @@ import type {
 } from "../../src/platform/contracts";
 import { capabilitiesFor, SESSION_COOKIE } from "../../src/platform/security";
 import { mutationTarget } from "../../src/platform/step-up";
+import type { ProviderEnvironmentCapabilities } from "../../src/providers/capability-read-types";
 import { testRequest, withOpenApiAssertions } from "../../tests/helpers/openapi";
 import { createIntegrationBillingEnv } from "../../tests/integration/helpers/local-postgres";
 import { MerchantBrowser, merchantFixture, password } from "./fixture";
@@ -196,6 +197,59 @@ describe("merchant platform transactions", () => {
 				})
 			).status,
 		).toBe(404);
+	});
+	it("serves the capability reads to organization members in active environments", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		const headers = {
+			"x-quotum-organization": "acme",
+			"x-quotum-project": "example",
+			"x-quotum-environment": "sandbox",
+		};
+		const capabilities = "/api/billing/admin/providers/capabilities";
+		const actions = "/api/billing/admin/billing-accounts/user_unknown/available-actions";
+
+		const environment = await browser.request(capabilities, undefined, { headers });
+		expect(environment.status).toBe(200);
+		const { providers } = (await environment.json()).data as ProviderEnvironmentCapabilities;
+		expect(providers.map(({ provider, connection }) => ({ provider, connection }))).toEqual(
+			(["apple", "google", "stripe"] as const).map((provider) => ({
+				provider,
+				connection: {
+					configured: false,
+					enabled: false,
+					validated: false,
+					validatedAt: null,
+					accountIdentity: null,
+				},
+			})),
+		);
+		const account = await browser.request(actions, undefined, { headers });
+		expect(account.status).toBe(200);
+		expect((await account.json()).data).toMatchObject({
+			billingAccountId: "user_unknown",
+			customerExists: false,
+			subscriptions: [],
+		});
+		for (const path of [capabilities, actions]) {
+			expect(
+				(
+					await browser.request(path, undefined, {
+						headers: { ...headers, "x-quotum-organization": "another" },
+					})
+				).status,
+				path,
+			).toBe(403);
+			expect(
+				(
+					await browser.request(path, undefined, {
+						headers: { ...headers, "x-quotum-environment": "production" },
+					})
+				).status,
+				path,
+			).toBe(404);
+		}
 	});
 	it("manages promotions through the merchant billing proxy", async () => {
 		const browser = new MerchantBrowser(f);

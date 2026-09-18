@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import type { AdminBillingReader } from "./admin/types";
 import { registerAdminRoutes } from "./app/admin-routes";
+import { registerCapabilityRoutes } from "./app/capability-routes";
 import { registerCatalogRoutes } from "./app/catalog-routes";
 import { registerControlsRoutes } from "./app/controls-routes";
 import { registerCustomerRoutes } from "./app/customer-routes";
@@ -44,6 +45,7 @@ import {
 	type ProjectInstanceContext,
 	type ProjectInstanceContextResolver,
 } from "./projects/context";
+import { createProviderCapabilityReads } from "./providers/capability-reads";
 import { createProviderRegistry } from "./providers/registry";
 import { DEFAULT_BODY_LIMIT_BYTES, isBodyTooLarge } from "./shared/body-limit";
 import {
@@ -93,6 +95,7 @@ export function createApp({
 	stripeBillingService,
 	projectProviderServices,
 	providerRegistry: sharedProviderRegistry,
+	providerCapabilityReads,
 	adminBillingReader,
 	adminOperations,
 	logger,
@@ -150,6 +153,14 @@ export function createApp({
 			},
 		});
 	const providerServices = projectProviderServiceResolver(providerRegistry);
+	const capabilityReads =
+		providerCapabilityReads ??
+		createProviderCapabilityReads({
+			registry: providerRegistry,
+			facts: {
+				getAvailableActionFacts: (...args) => getRepository().getAvailableActionFacts(...args),
+			},
+		});
 	let adminRepository: AdminBillingRepository | null = null;
 	const getAdminBillingReader = (): AdminBillingReader | null => {
 		if (adminBillingReader !== undefined) {
@@ -389,6 +400,7 @@ export function createApp({
 			getCustomerBillingSummary: (...args) => getRepository().getCustomerBillingSummary(...args),
 		},
 	});
+	registerCapabilityRoutes({ app, reads: capabilityReads });
 	registerMeteringRoutes({
 		app,
 		meteringLimiter: createMeteringLimiter(),
