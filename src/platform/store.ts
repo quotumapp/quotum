@@ -8,6 +8,7 @@ import type {
 	OnboardingDraftView,
 } from "./contracts";
 import type { MerchantSql } from "./database";
+import type { PlatformQueryExecutor } from "./persistence/query-executor";
 import {
 	ABSOLUTE_MS,
 	CSRF_COOKIE,
@@ -72,14 +73,26 @@ export class MerchantStore {
 		return tokenHash(value, this.config.secret);
 	}
 	async audit(
-		tx: MerchantSql,
+		executor: PlatformQueryExecutor,
 		principal: string | null,
 		organization: string | null,
 		action: string,
 		target: string | null,
 		metadata: Record<string, unknown> = {},
 	): Promise<void> {
-		await tx`INSERT INTO platform_audit_events(principal_id,organization_id,action,target,metadata) VALUES(${principal},${organization},${action},${target},${JSON.stringify(metadata)}::text::jsonb)`;
+		await executor.query({
+			text: `
+				INSERT INTO platform_audit_events (
+					principal_id,
+					organization_id,
+					action,
+					target,
+					metadata
+				)
+				VALUES ($1, $2, $3, $4, $5::text::jsonb)
+			`,
+			values: [principal, organization, action, target, JSON.stringify(metadata)],
+		});
 	}
 	async createServicePrincipal(name: string): Promise<string> {
 		const token = randomToken();
@@ -254,38 +267,97 @@ export class MerchantStore {
 		}));
 	}
 	async membership(
-		tx: MerchantSql,
+		executor: PlatformQueryExecutor,
 		principal: string,
 		slug: string,
 		lock = false,
 	): Promise<MembershipRecord> {
 		// Organization locks serialize seat checks and member administration; membership locks enforce revocation.
-		if (lock) await tx`SELECT id FROM platform_organizations WHERE slug=${slug} FOR UPDATE`;
+		if (lock)
+			await executor.query({
+				text: "SELECT id FROM platform_organizations WHERE slug = $1 FOR UPDATE",
+				values: [slug],
+			});
 		const rows = lock
-			? await tx<
-					MembershipRecord[]
-				>`SELECT m.*,o.name,o.slug,o.member_limit FROM platform_memberships m JOIN platform_organizations o ON o.id=m.organization_id WHERE m.principal_id=${principal} AND o.slug=${slug} AND m.status='active' AND o.status='active' FOR UPDATE OF m`
-			: await tx<
-					MembershipRecord[]
-				>`SELECT m.*,o.name,o.slug,o.member_limit FROM platform_memberships m JOIN platform_organizations o ON o.id=m.organization_id WHERE m.principal_id=${principal} AND o.slug=${slug} AND m.status='active' AND o.status='active'`;
+			? await executor.query<MembershipRecord>({
+					text: `
+						SELECT m.*, o.name, o.slug, o.member_limit
+						FROM platform_memberships m
+						JOIN platform_organizations o ON o.id = m.organization_id
+						WHERE m.principal_id = $1
+							AND o.slug = $2
+							AND m.status = 'active'
+							AND o.status = 'active'
+						FOR UPDATE OF m
+					`,
+					values: [principal, slug],
+				})
+			: await executor.query<MembershipRecord>({
+					text: `
+						SELECT m.*, o.name, o.slug, o.member_limit
+						FROM platform_memberships m
+						JOIN platform_organizations o ON o.id = m.organization_id
+						WHERE m.principal_id = $1
+							AND o.slug = $2
+							AND m.status = 'active'
+							AND o.status = 'active'
+					`,
+					values: [principal, slug],
+				});
 		if (!rows[0])
 			throw new MerchantError("FORBIDDEN", "You no longer have access to this organization.", 403);
 		return rows[0];
 	}
-	async draft(principal: string, tx: MerchantSql = this.sql): Promise<OnboardingDraftView | null> {
-		const [row] = await tx<
-			{
-				id: string;
-				organization_id: string | null;
-				name: string | null;
-				slug: string | null;
-				project_name: string | null;
-				project_key: string | null;
-				revision: number;
-				status: OnboardingDraftView["status"];
-				operation_id: string | null;
-			}[]
-		>`SELECT d.*,o.name,o.slug,p.id AS operation_id FROM platform_onboarding_drafts d LEFT JOIN platform_organizations o ON o.id=d.organization_id LEFT JOIN platform_provisioning_operations p ON p.draft_id=d.id WHERE d.principal_id=${principal}`;
+	async membershipByOrganizationId(
+		executor: PlatformQueryExecutor,
+		principal: string,
+		organizationId: string,
+	): Promise<MembershipRecord> {
+		await executor.query({
+			text: "SELECT id FROM platform_organizations WHERE id = $1 FOR UPDATE",
+			values: [organizationId],
+		});
+		const rows = await executor.query<MembershipRecord>({
+			text: `
+				SELECT m.*, o.name, o.slug, o.member_limit
+				FROM platform_memberships m
+				JOIN platform_organizations o ON o.id = m.organization_id
+				WHERE m.principal_id = $1
+					AND o.id = $2
+					AND m.status = 'active'
+					AND o.status = 'active'
+				FOR UPDATE OF m
+			`,
+			values: [principal, organizationId],
+		});
+		if (!rows[0])
+			throw new MerchantError("FORBIDDEN", "You no longer have access to this organization.", 403);
+		return rows[0];
+	}
+	async draft(
+		principal: string,
+		executor: PlatformQueryExecutor = this.sql,
+	): Promise<OnboardingDraftView | null> {
+		const [row] = await executor.query<{
+			id: string;
+			organization_id: string | null;
+			name: string | null;
+			slug: string | null;
+			project_name: string | null;
+			project_key: string | null;
+			revision: number;
+			status: OnboardingDraftView["status"];
+			operation_id: string | null;
+		}>({
+			text: `
+				SELECT d.*, o.name, o.slug, p.id AS operation_id
+				FROM platform_onboarding_drafts d
+				LEFT JOIN platform_organizations o ON o.id = d.organization_id
+				LEFT JOIN platform_provisioning_operations p ON p.draft_id = d.id
+				WHERE d.principal_id = $1
+			`,
+			values: [principal],
+		});
 		if (!row) return null;
 		return {
 			id: row.id,

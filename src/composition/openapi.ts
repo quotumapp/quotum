@@ -73,6 +73,7 @@ const unavailable = async (): Promise<never> => {
 
 function documentStore(): MerchantStore {
 	const sql = Object.assign(unavailable, {
+		query: unavailable,
 		begin: unavailable,
 		instances: { forProject: unavailable, create: unavailable, activateProduction: unavailable },
 	});

@@ -55,6 +55,50 @@ export class PlatformOrganizationRepository {
 		if (row === undefined) throw new Error("Platform organization could not be created");
 		return row;
 	}
+
+	async slugBelongsToAnotherOrganization(slug: string, organizationId: string): Promise<boolean> {
+		const rows = await this.executor.query<{ id: string }>({
+			text: `
+				SELECT id
+				FROM platform_organizations
+				WHERE slug = $1 AND id <> $2
+			`,
+			values: [slug, organizationId],
+		});
+		return rows.length > 0;
+	}
+
+	async update(input: { id: string; name: string; slug: string; updatedAt: Date }): Promise<void> {
+		await this.executor.query({
+			text: `
+				UPDATE platform_organizations
+				SET name = $1, slug = $2, updated_at = $3
+				WHERE id = $4
+			`,
+			values: [input.name, input.slug, input.updatedAt, input.id],
+		});
+	}
+}
+
+export class PlatformOnboardingDraftRepository {
+	constructor(private readonly executor: PlatformQueryExecutor) {}
+
+	async bumpRevision(input: {
+		id: string;
+		expectedRevision: number;
+		updatedAt: Date;
+	}): Promise<boolean> {
+		const rows = await this.executor.query<{ id: string }>({
+			text: `
+				UPDATE platform_onboarding_drafts
+				SET revision = revision + 1, updated_at = $1
+				WHERE id = $2 AND revision = $3
+				RETURNING id
+			`,
+			values: [input.updatedAt, input.id, input.expectedRevision],
+		});
+		return rows.length > 0;
+	}
 }
 
 export class PlatformLogicalProjectRepository {

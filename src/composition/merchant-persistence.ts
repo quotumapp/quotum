@@ -22,6 +22,7 @@ export function merchantSql(client: SQL): MerchantSql {
 		...values: PlatformQueryValue[]
 	): Promise<Rows> => (await client(strings, ...values.map(parameter))) as unknown as Rows;
 	return Object.assign(query, {
+		query: executor.query.bind(executor),
 		begin: async <Result>(work: (transaction: MerchantSql) => Promise<Result>): Promise<Result> =>
 			(await client.begin((tx) => work(merchantSql(tx)))) as Result,
 		instances: {

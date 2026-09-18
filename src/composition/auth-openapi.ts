@@ -12,6 +12,7 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 		throw new Error("OpenAPI export must not access persistence or send email");
 	};
 	const sql = Object.assign(unavailable, {
+		query: unavailable,
 		begin: unavailable,
 		instances: { forProject: unavailable, create: unavailable, activateProduction: unavailable },
 	});
