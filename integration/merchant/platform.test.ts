@@ -244,6 +244,87 @@ describe("merchant platform transactions", () => {
 		expect((await listed.json()).data.map((item: { key: string }) => item.key)).toEqual(["launch"]);
 		expect((await deactivated.json()).data).toMatchObject({ code: "LAUNCH", active: false });
 	});
+	it("forwards capability error details through the merchant billing proxy", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		const headers = {
+			"x-quotum-organization": "acme",
+			"x-quotum-project": "example",
+			"x-quotum-environment": "sandbox",
+		};
+		const catalog = {
+			features: [
+				{
+					key: "ai_credits",
+					name: "AI credits",
+					kind: "metered",
+					meterKind: "consumable",
+					unit: "credit",
+					creditScale: 0,
+					filterDimensions: [],
+				},
+			],
+			plans: [
+				{
+					key: "pro",
+					name: "Pro",
+					version: 1,
+					currency: "USD",
+					baseAmountMinor: 999,
+					billingInterval: "month",
+					trialDays: 14,
+					items: [
+						{
+							featureKey: "ai_credits",
+							itemKind: "allocation",
+							quantity: "1000",
+							resetInterval: "month",
+							expiresAfterSeconds: null,
+							overagePolicy: "blocked",
+						},
+					],
+					providerBindings: [{ productKey: "pro_monthly", provider: "apple", channel: "ios" }],
+				},
+			],
+			topups: [],
+			rateCards: [],
+		};
+
+		const response = await browser.request(
+			"/api/billing/admin/catalog/preview",
+			{ expectedRevision: null, catalog },
+			{ headers },
+		);
+
+		expect(response.status).toBe(400);
+		const body = await response.json();
+		expect(body).toMatchObject({
+			success: false,
+			error: {
+				code: "PROVIDER_CAPABILITY_UNSUPPORTED",
+				message: "Plan pro cannot bind apple: catalog.trial is not supported",
+			},
+		});
+		expect(body.error.details.providerCompatibility).toEqual([
+			{
+				target: { kind: "plan", key: "pro" },
+				provider: "apple",
+				channel: "ios",
+				productKey: "pro_monthly",
+				requiredOperations: ["catalog.trial"],
+				compatible: false,
+				verdicts: [
+					expect.objectContaining({
+						provider: "apple",
+						operation: "catalog.trial",
+						outcome: "blocked",
+						blockingLayer: "provider",
+					}),
+				],
+			},
+		]);
+	});
 	it("accepts an invitation once under concurrent requests and immediately revokes a removed member's session", async () => {
 		const owner = new MerchantBrowser(f);
 		await owner.signup();

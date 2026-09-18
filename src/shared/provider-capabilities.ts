@@ -552,6 +552,11 @@ export interface CapabilityVerdict {
 	reasons: CapabilityReason[];
 }
 
+/** A verdict for an admitted provider; runtime surfaces never report planned providers. */
+export interface RuntimeCapabilityVerdict extends CapabilityVerdict {
+	provider: BillingProvider;
+}
+
 /**
  * Answers whether `operation` is possible for this declaration and facts. Layers run in order and
  * stop after `through` (default `operation`); the first blocked layer ends evaluation, while a

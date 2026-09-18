@@ -1,5 +1,9 @@
 import { z } from "zod";
 import {
+	type CatalogProviderCompatibility,
+	catalogCompatibilityTargetKinds,
+} from "../../providers/catalog-compatibility-types";
+import {
 	billingChannels,
 	type CapabilityCondition,
 	type CapabilityEvidence,
@@ -23,10 +27,12 @@ import {
 	type ProviderOperation,
 	providerOperationDomains,
 	providerOperations,
+	type RuntimeCapabilityVerdict,
 	supportLevels,
 	uncertainWriteModes,
 	webhookOrderings,
 } from "../../shared/provider-capabilities";
+import { billingProviderValues } from "./provider-enum";
 export const StripeBillingAccountSummarySchema = z.object({
 	schemaVersion: z.literal(1),
 	customerExists: z.boolean(),
@@ -283,6 +289,25 @@ export const CapabilityVerdictSchema = z.object({
 	reasons: z.array(CapabilityReasonSchema),
 });
 
+/** Runtime surfaces report admitted providers only, so their verdicts never name a planned one. */
+export const RuntimeCapabilityVerdictSchema = CapabilityVerdictSchema.extend({
+	provider: z.enum(billingProviderValues()),
+});
+
+export const CatalogProviderCompatibilitySchema = z.object({
+	target: z.object({
+		kind: z.enum(catalogCompatibilityTargetKinds),
+		key: z.string(),
+		priceKey: z.union([z.null(), z.string()]).optional(),
+	}),
+	provider: z.enum(billingProviderValues()),
+	channel: z.enum(billingChannels),
+	productKey: z.union([z.null(), z.string()]),
+	requiredOperations: z.array(ProviderOperationSchema),
+	compatible: z.boolean(),
+	verdicts: z.array(RuntimeCapabilityVerdictSchema),
+});
+
 type MutuallyAssignable<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Expect<T extends true> = T;
 /** Fails typechecking when a wire schema drifts from the shared contract type it mirrors. */
@@ -301,4 +326,13 @@ export type ProviderCapabilitySchemaMirrors = [
 	Expect<MutuallyAssignable<z.infer<typeof CapabilityResolutionSchema>, CapabilityResolution>>,
 	Expect<MutuallyAssignable<z.infer<typeof CapabilityReasonSchema>, CapabilityReason>>,
 	Expect<MutuallyAssignable<z.infer<typeof CapabilityVerdictSchema>, CapabilityVerdict>>,
+	Expect<
+		MutuallyAssignable<z.infer<typeof RuntimeCapabilityVerdictSchema>, RuntimeCapabilityVerdict>
+	>,
+	Expect<
+		MutuallyAssignable<
+			z.infer<typeof CatalogProviderCompatibilitySchema>,
+			CatalogProviderCompatibility
+		>
+	>,
 ];

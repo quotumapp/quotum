@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { InvalidRequestError } from "../../src/billing/errors";
+import { CapabilityError, InvalidRequestError } from "../../src/billing/errors";
 import { CatalogControlPlane } from "../../src/catalog/control-plane";
 import type {
 	CatalogFeatureIntent,
@@ -58,11 +58,11 @@ const sentinelDatabase = {
 	},
 } as never;
 
-/** Runs the same normalization against a catalog of declarations the test controls. */
+/** Runs the same validation against a catalog of declarations the test controls. */
 async function previewWith(
 	capabilities: ProviderCapabilityLookup,
 	plans: CatalogPlanIntent[],
-): Promise<InvalidRequestError | "normalized"> {
+): Promise<InvalidRequestError | CapabilityError | "normalized"> {
 	const controlPlane = new CatalogControlPlane(sentinelDatabase, { capabilities });
 	try {
 		await controlPlane.preview({} as never, {
@@ -72,7 +72,7 @@ async function previewWith(
 		});
 	} catch (error) {
 		if (error === passedNormalization) return "normalized";
-		if (error instanceof InvalidRequestError) return error;
+		if (error instanceof InvalidRequestError || error instanceof CapabilityError) return error;
 		throw error;
 	}
 	throw new Error("Catalog preview resolved without reaching its transaction");
@@ -205,37 +205,85 @@ describe("catalog control plane provider bindings", () => {
 	});
 });
 
+/** The wire-visible parts of a capability rejection, with the entries reduced to what they name. */
+function capabilityRejection(error: unknown) {
+	expect(error).toBeInstanceOf(CapabilityError);
+	const rejection = error as CapabilityError;
+	return {
+		code: rejection.code,
+		status: rejection.status,
+		classification: rejection.classification,
+		message: rejection.message,
+		entries:
+			"providerCompatibility" in rejection.details
+				? rejection.details.providerCompatibility.map((entry) => ({
+						target: entry.target,
+						provider: entry.provider,
+						blocked: entry.verdicts.map(({ operation, blockingLayer }) => ({
+							operation,
+							blockingLayer,
+						})),
+					}))
+				: null,
+	};
+}
+
 describe("catalog control plane capability injection", () => {
 	it("accepts an Apple trial plan once the Apple declaration implements catalog.trial", async () => {
 		const trialPlan = plan({ trialDays: 7, providerBindings: [appleBinding] });
 		const declared = await previewWith(providerCapabilityCatalog, [trialPlan]);
-		expect(declared).toBeInstanceOf(InvalidRequestError);
-		expect((declared as InvalidRequestError).message).toBe(
-			"Plan pro trials and add-ons are currently supported only on Stripe web",
-		);
+		expect(capabilityRejection(declared)).toEqual({
+			code: "PROVIDER_CAPABILITY_UNSUPPORTED",
+			status: 400,
+			classification: "invalid_request",
+			message: "Plan pro cannot bind apple: catalog.trial is not supported",
+			entries: [
+				{
+					target: { kind: "plan", key: "pro" },
+					provider: "apple",
+					blocked: [{ operation: "catalog.trial", blockingLayer: "provider" }],
+				},
+			],
+		});
 		const injected = catalogDeclaring("apple", "catalog.trial", nativelyVerified);
 		expect(await previewWith(injected, [trialPlan])).toBe("normalized");
 	});
 
-	it("rejects a Stripe add-on with the same message once Stripe drops catalog.addon", async () => {
+	it("rejects a Stripe add-on once Stripe drops catalog.addon", async () => {
 		const addonPlan = plan({ kind: "addon", providerBindings: [stripeBinding] });
 		expect(await previewWith(providerCapabilityCatalog, [addonPlan])).toBe("normalized");
 		const injected = catalogDeclaring("stripe", "catalog.addon", unsupported);
-		const error = await previewWith(injected, [addonPlan]);
-		expect(error).toBeInstanceOf(InvalidRequestError);
-		expect((error as InvalidRequestError).code).toBe("INVALID_REQUEST");
-		expect((error as InvalidRequestError).message).toBe(
-			"Plan pro trials and add-ons are currently supported only on Stripe web",
-		);
+		expect(capabilityRejection(await previewWith(injected, [addonPlan]))).toEqual({
+			code: "PROVIDER_CAPABILITY_UNSUPPORTED",
+			status: 400,
+			classification: "invalid_request",
+			message: "Plan pro cannot bind stripe: catalog.addon is not supported",
+			entries: [
+				{
+					target: { kind: "plan", key: "pro" },
+					provider: "stripe",
+					blocked: [{ operation: "catalog.addon", blockingLayer: "provider" }],
+				},
+			],
+		});
 	});
 
 	it("accepts an Apple base price once the Apple declaration implements catalog.price.flat", async () => {
 		const pricedPlan = plan({ basePrice: flatPrice([appleBinding]) });
 		const declared = await previewWith(providerCapabilityCatalog, [pricedPlan]);
-		expect(declared).toBeInstanceOf(InvalidRequestError);
-		expect((declared as InvalidRequestError).message).toBe(
-			"base price explicit price components are currently supported only on Stripe web",
-		);
+		expect(capabilityRejection(declared)).toEqual({
+			code: "PROVIDER_CAPABILITY_UNSUPPORTED",
+			status: 400,
+			classification: "invalid_request",
+			message: "Plan pro price pro-base cannot bind apple: catalog.price.flat is not supported",
+			entries: [
+				{
+					target: { kind: "price", key: "pro", priceKey: "pro-base" },
+					provider: "apple",
+					blocked: [{ operation: "catalog.price.flat", blockingLayer: "provider" }],
+				},
+			],
+		});
 		const injected = catalogDeclaring("apple", "catalog.price.flat", nativelyVerified);
 		expect(await previewWith(injected, [pricedPlan])).toBe("normalized");
 	});
@@ -244,10 +292,19 @@ describe("catalog control plane capability injection", () => {
 		const pricedPlan = plan({ basePrice: flatPrice([stripeBinding]) });
 		expect(await previewWith(providerCapabilityCatalog, [pricedPlan])).toBe("normalized");
 		const injected = catalogDeclaring("stripe", "catalog.price.flat", unsupported);
-		const error = await previewWith(injected, [pricedPlan]);
-		expect((error as InvalidRequestError).message).toBe(
-			"base price explicit price components are currently supported only on Stripe web",
-		);
+		expect(capabilityRejection(await previewWith(injected, [pricedPlan]))).toEqual({
+			code: "PROVIDER_CAPABILITY_UNSUPPORTED",
+			status: 400,
+			classification: "invalid_request",
+			message: "Plan pro price pro-base cannot bind stripe: catalog.price.flat is not supported",
+			entries: [
+				{
+					target: { kind: "price", key: "pro", priceKey: "pro-base" },
+					provider: "stripe",
+					blocked: [{ operation: "catalog.price.flat", blockingLayer: "provider" }],
+				},
+			],
+		});
 	});
 
 	it("reads the expected binding channel from the injected declaration", async () => {

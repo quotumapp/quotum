@@ -159,6 +159,92 @@ localDescribe("catalog control plane", () => {
 		expect((await mismatch.json()).error.code).toBe("CATALOG_PREVIEW_MISMATCH");
 	});
 
+	it("rejects store trial bindings on preview and publish with provider compatibility details", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = operatorHeaders(authHeaders());
+		const intent = catalogIntent(1, "0.005");
+		const trialIntent = {
+			...intent,
+			plans: intent.plans.map((plan) => ({ ...plan, trialDays: 7 })),
+		};
+		const storeTrial = (provider: "apple" | "google", channel: "ios" | "android") => ({
+			target: { kind: "plan", key: "premium" },
+			provider,
+			channel,
+			productKey: "premium_monthly",
+			requiredOperations: ["catalog.trial"],
+			compatible: false,
+			verdicts: [
+				{
+					provider,
+					operation: "catalog.trial",
+					outcome: "blocked",
+					level: "provider_managed",
+					blockingLayer: "provider",
+					reasons: [
+						{
+							code: "PROVIDER_MANAGED",
+							layer: "provider",
+							observed: { level: "provider_managed" },
+							resolution: { kind: "none" },
+						},
+					],
+				},
+			],
+		});
+		const rejection = {
+			success: false,
+			error: {
+				code: "PROVIDER_CAPABILITY_UNSUPPORTED",
+				message: "Plan premium cannot bind apple: catalog.trial is not supported (and 1 more)",
+				details: {
+					providerCompatibility: [storeTrial("apple", "ios"), storeTrial("google", "android")],
+				},
+			},
+		};
+
+		const preview = await testRequest(app, "/v1/admin/catalog/preview", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ expectedRevision: null, catalog: trialIntent }),
+		});
+		expect(preview.status).toBe(400);
+		expect(await preview.json()).toEqual(rejection);
+
+		// An incompatible intent can never obtain a preview token, so publish stops at the token
+		// lookup; publish-time capability checks after a declaration change are unit tested.
+		const publish = await testRequest(app, "/v1/admin/catalog/publish", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				expectedRevision: null,
+				previewToken: "0".repeat(64),
+				catalog: trialIntent,
+			}),
+		});
+		expect(publish.status).toBe(409);
+		expect(await publish.json()).toMatchObject({
+			success: false,
+			error: { code: "CATALOG_PREVIEW_NOT_FOUND" },
+		});
+
+		const [state] = await context.sql<Array<{ drafts: number; revisions: number }>>`
+			SELECT
+				(SELECT count(*)::integer FROM catalog_drafts draft WHERE draft.project_id = p.id) AS drafts,
+				(SELECT count(*)::integer FROM catalog_revisions revision
+					WHERE revision.project_id = p.id) AS revisions
+			FROM projects p
+			WHERE p.key = 'voysee'
+		`;
+		expect(state).toEqual({ drafts: 0, revisions: 0 });
+
+		// The same plan without the trial still previews on every store.
+		await previewCatalog(app, headers, null, intent);
+	});
+
 	it("requires explicit retirement and keeps existing subscriptions pinned", async () => {
 		const errors: unknown[] = [];
 		const { app, authHeaders } = createIntegrationApp({

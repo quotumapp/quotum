@@ -1,4 +1,5 @@
 import { NotConfiguredError } from "../billing/errors";
+import type { ProviderAdapterMethod } from "../providers/contract";
 import type { ProviderRegistry } from "../providers/registry";
 import type {
 	AppleStoreKitServiceLike,
@@ -60,4 +61,36 @@ export function requireStripeBillingService(
 	}
 
 	return service;
+}
+
+/** The optional Stripe service method behind each adapter method a request guard checks. */
+const stripeGuardedMethods = {
+	"reads.catalog": "getCatalog",
+	"reads.billingAccount": "getBillingAccount",
+	"commercial.preview": "previewCommercialAction",
+	"commercial.execute": "executeCommercialAction",
+	"commercial.requestChange": "requestSubscriptionChange",
+	"checkout.createPlan": "createRecurringCheckoutSession",
+	"checkout.expire": "expireCheckoutSession",
+} as const satisfies Partial<Record<ProviderAdapterMethod, keyof StripeBillingServiceLike>>;
+
+type StripeGuardedAdapterMethod = keyof typeof stripeGuardedMethods;
+
+/**
+ * The service's method for `adapterMethod`, bound to it. A service without the method is a
+ * provider that is not configured for it; `message` keeps the route's own wording.
+ */
+export function requireProviderMethod<M extends StripeGuardedAdapterMethod>(
+	service: StripeBillingServiceLike,
+	provider: "stripe",
+	adapterMethod: M,
+	message: string,
+): NonNullable<StripeBillingServiceLike[(typeof stripeGuardedMethods)[M]]> {
+	const method: unknown = service[stripeGuardedMethods[adapterMethod]];
+	if (typeof method !== "function") {
+		throw new NotConfiguredError(message, undefined, 503, { provider, adapterMethod });
+	}
+	return method.bind(service) as NonNullable<
+		StripeBillingServiceLike[(typeof stripeGuardedMethods)[M]]
+	>;
 }

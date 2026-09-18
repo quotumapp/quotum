@@ -12,12 +12,14 @@ import type {
 	CatalogProviderBindingIntent,
 	CatalogTopupIntent,
 } from "../../src/catalog/types";
+import type { CatalogProviderCompatibility } from "../../src/providers/catalog-compatibility-types";
 
 /**
- * Pins the provider gates of `normalizeCatalog` — which constructs a non-Stripe binding may carry,
- * and in what order those rejections fire — so that rewriting them onto the capability
- * declarations cannot move a message, a code or a position. Written and proven green against
- * unchanged source first.
+ * Pins the order in which catalog validation rejects an intent: every structural check of
+ * `normalizeCatalog` in its own order first, then one capability assert that reports every binding
+ * its provider's declaration cannot build. The oracle encodes what the declarations say today:
+ * Stripe builds every catalog construct, while Apple and Google build top-ups but no trial, add-on
+ * or explicit price component, each blocked at the provider layer.
  */
 
 type GatedProvider = "apple" | "google" | "stripe";
@@ -28,6 +30,28 @@ const declaredChannel: Record<GatedProvider, BillingChannel> = {
 	stripe: "web",
 };
 
+/** Contract order of the catalog construct operations the assert can report. */
+const constructOperationOrder = [
+	"catalog.trial",
+	"catalog.addon",
+	"catalog.topup",
+	"catalog.price.flat",
+	"catalog.price.licensed",
+	"catalog.price.tiered",
+	"catalog.price.hybrid",
+	"catalog.price.postpaid_usage",
+];
+
+interface RecordedEntry {
+	target: { kind: string; key: string; priceKey?: string | null };
+	provider: string;
+	channel: string;
+	productKey: string | null;
+	requiredOperations: string[];
+	compatible: boolean;
+	blocked: Array<{ operation: string; blockingLayer: string | null }>;
+}
+
 interface RecordedOutcome {
 	name: string;
 	code: string;
@@ -35,11 +59,12 @@ interface RecordedOutcome {
 	classification: string;
 	exposeMessage: boolean;
 	message: string;
+	providerCompatibility: RecordedEntry[] | null;
 }
 
 class NormalizationSentinel extends Error {}
 
-/** Thrown in place of opening a transaction: reaching it means normalization accepted the intent. */
+/** Thrown in place of opening a transaction: reaching it means validation accepted the intent. */
 const passedNormalization = new NormalizationSentinel("normalization passed");
 
 const database = {
@@ -62,11 +87,28 @@ async function firstOutcome(catalog: CatalogIntent): Promise<RecordedOutcome | "
 				classification: error.classification,
 				exposeMessage: error.exposeMessage,
 				message: error.message,
+				providerCompatibility: recordedCompatibility(error),
 			};
 		}
 		throw error;
 	}
 	throw new Error("Catalog preview resolved without reaching its transaction");
+}
+
+function recordedCompatibility(error: BillingError): RecordedEntry[] | null {
+	if (!Object.hasOwn(error, "details")) return null;
+	const entries = (error.details as { providerCompatibility?: CatalogProviderCompatibility[] })
+		.providerCompatibility;
+	if (entries === undefined) throw new Error(`Unexpected details on ${error.name}`);
+	return entries.map((entry) => ({
+		target: entry.target,
+		provider: entry.provider,
+		channel: entry.channel,
+		productKey: entry.productKey,
+		requiredOperations: entry.requiredOperations,
+		compatible: entry.compatible,
+		blocked: entry.verdicts.map(({ operation, blockingLayer }) => ({ operation, blockingLayer })),
+	}));
 }
 
 function invalidRequest(message: string): RecordedOutcome {
@@ -77,6 +119,33 @@ function invalidRequest(message: string): RecordedOutcome {
 		classification: "invalid_request",
 		exposeMessage: true,
 		message,
+		providerCompatibility: null,
+	};
+}
+
+function capabilityRejection(entries: RecordedEntry[]): RecordedOutcome {
+	const [first] = entries;
+	if (first === undefined) throw new Error("A capability rejection needs an entry");
+	const operations = first.blocked.map(({ operation }) => operation);
+	const listed =
+		operations.length === 1
+			? operations[0]
+			: `${operations.slice(0, -1).join(", ")} and ${operations.at(-1)}`;
+	const label =
+		first.target.kind === "plan"
+			? `Plan ${first.target.key}`
+			: `Plan ${first.target.key} price ${first.target.priceKey}`;
+	const more = entries.length > 1 ? ` (and ${entries.length - 1} more)` : "";
+	return {
+		name: "CapabilityError",
+		code: "PROVIDER_CAPABILITY_UNSUPPORTED",
+		status: 400,
+		classification: "invalid_request",
+		exposeMessage: true,
+		message: `${label} cannot bind ${first.provider}: ${listed} ${
+			operations.length === 1 ? "is" : "are"
+		} not supported${more}`,
+		providerCompatibility: entries,
 	};
 }
 
@@ -199,50 +268,176 @@ function planIntent(spec: PlanSpec, index: number): CatalogPlanIntent {
 	};
 }
 
+interface TopupSpec {
+	featureKey: "api_requests" | "docs_access";
+	providers: GatedProvider[];
+}
+
+function topupIntent(spec: TopupSpec): CatalogTopupIntent {
+	return {
+		key: "pack",
+		featureKey: spec.featureKey,
+		quantity: "10",
+		expiresAfterSeconds: null,
+		providerBindings: bindings(spec.providers, "pack"),
+	};
+}
+
 function catalogOf(plans: PlanSpec[], topups: CatalogTopupIntent[] = []): CatalogIntent {
 	return { features, plans: plans.map(planIntent), topups, rateCards: [] };
 }
 
-/** The gate order as `normalizeCatalog` runs it today, and nothing else. */
-function oracleOutcome(plans: PlanSpec[]): RecordedOutcome | "normalized" {
-	// Phase 1: `plans.map` normalizes the base price, then each item price, plan by plan.
+/** Normalization sorts bindings by `provider:channel:productKey`, so by provider here. */
+function sortedProviders(providers: readonly GatedProvider[]): GatedProvider[] {
+	return [...providers].sort();
+}
+
+function inContractOrder(operations: string[]): string[] {
+	return constructOperationOrder.filter((operation) => operations.includes(operation));
+}
+
+function priceOperations(plan: PlanSpec, spec: PriceSpec, item: ItemSpec | null): string[] {
+	const operations = [spec.model === "flat" ? "catalog.price.flat" : "catalog.price.tiered"];
+	if (item !== null) {
+		operations.push(
+			item.kind === "licensed" ? "catalog.price.licensed" : "catalog.price.postpaid_usage",
+		);
+	}
+	const pricedItem = plan.items.some((candidate) => itemPriceSpec(candidate) !== null);
+	if (plan.basePrice !== null && pricedItem) operations.push("catalog.price.hybrid");
+	return inContractOrder(operations);
+}
+
+/** The entries a non-Stripe binding produces: it needs every operation and builds none. */
+function blockedEntries(
+	target: RecordedEntry["target"],
+	providers: readonly GatedProvider[],
+	slot: string,
+	requiredOperations: string[],
+): RecordedEntry[] {
+	return sortedProviders(providers)
+		.filter((provider) => provider !== "stripe")
+		.map((provider) => ({
+			target,
+			provider,
+			channel: declaredChannel[provider],
+			productKey: `${slot}-${provider}`,
+			requiredOperations,
+			compatible: false,
+			blocked: requiredOperations.map((operation) => ({ operation, blockingLayer: "provider" })),
+		}));
+}
+
+/** The rejection order of catalog validation, and nothing else. */
+function oracleOutcome(plans: PlanSpec[], topup: TopupSpec | null): RecordedOutcome | "normalized" {
+	// Structural, phase 1: `plans.map` normalizes the base price, then each item price, per plan.
 	for (const plan of plans) {
-		if (plan.basePrice !== null) {
-			const failure = priceGate(plan.basePrice, "base price");
-			if (failure !== null) return failure;
+		if (plan.basePrice !== null && plan.basePrice.providers.length === 0) {
+			return invalidRequest("base price requires at least one provider binding");
 		}
 		for (const item of plan.items) {
 			const spec = itemPriceSpec(item);
-			if (spec === null) continue;
-			const failure = priceGate(spec, `price for ${itemFeatureKeys[item.kind]}`);
-			if (failure !== null) return failure;
+			if (spec !== null && spec.providers.length === 0) {
+				return invalidRequest(
+					`price for ${itemFeatureKeys[item.kind]} requires at least one provider binding`,
+				);
+			}
 		}
 	}
-	// Phase 2: the per-plan loop, where the trial and add-on gate is the last check.
+	// Structural, phase 2: every generated plan passes the per-plan checks, so top-ups come next.
+	if (topup !== null && topup.featureKey !== "api_requests") {
+		return invalidRequest("Top-up pack must grant a consumable metered feature");
+	}
+	// Structural, phase 3: a top-up's wallet cannot also be a meter limit's usage window.
+	const meterLimited = plans.some((plan) => plan.items.some((item) => item.kind === "meter_limit"));
+	if (topup !== null && meterLimited) {
+		return invalidRequest(
+			"Feature api_requests cannot use both a usage window and an allocation stack",
+		);
+	}
+	// The capability assert: every incompatible binding, plan by plan, then top-ups (all built).
+	const entries: RecordedEntry[] = [];
 	for (const [index, plan] of plans.entries()) {
-		const planBindings = plan.legacy.length > 0 ? plan.legacy : (plan.basePrice?.providers ?? []);
-		if (
-			((plan.trialDays ?? 0) > 0 || plan.kind === "addon") &&
-			planBindings.some((provider) => provider !== "stripe")
-		) {
-			return invalidRequest(
-				`Plan plan_${index} trials and add-ons are currently supported only on Stripe web`,
+		const key = `plan_${index}`;
+		if ((plan.trialDays ?? 0) > 0 || plan.kind === "addon") {
+			const fallback = plan.legacy.length === 0;
+			const operations = inContractOrder([
+				...((plan.trialDays ?? 0) > 0 ? ["catalog.trial"] : []),
+				...(plan.kind === "addon" ? ["catalog.addon"] : []),
+			]);
+			entries.push(
+				...blockedEntries(
+					{ kind: "plan", key },
+					fallback ? (plan.basePrice?.providers ?? []) : plan.legacy,
+					fallback ? `p${index}-base` : `p${index}-plan`,
+					operations,
+				),
+			);
+		}
+		if (plan.basePrice !== null) {
+			entries.push(
+				...blockedEntries(
+					{ kind: "price", key, priceKey: `price-p${index}-base` },
+					plan.basePrice.providers,
+					`p${index}-base`,
+					priceOperations(plan, plan.basePrice, null),
+				),
+			);
+		}
+		for (const [itemIndex, item] of plan.items.entries()) {
+			const spec = itemPriceSpec(item);
+			if (spec === null) continue;
+			entries.push(
+				...blockedEntries(
+					{ kind: "price", key, priceKey: `price-p${index}-i${itemIndex}` },
+					spec.providers,
+					`p${index}-i${itemIndex}`,
+					priceOperations(plan, spec, item),
+				),
 			);
 		}
 	}
-	return "normalized";
+	return entries.length === 0 ? "normalized" : capabilityRejection(entries);
 }
 
-function priceGate(spec: PriceSpec, label: string): RecordedOutcome | null {
-	if (spec.providers.length === 0) {
-		return invalidRequest(`${label} requires at least one provider binding`);
+function planProviders(plan: PlanSpec): GatedProvider[] {
+	return [
+		...plan.legacy,
+		...(plan.basePrice?.providers ?? []),
+		...plan.items.flatMap((item) => itemPriceSpec(item)?.providers ?? []),
+	];
+}
+
+/** The branches an outcome reaches; the corpus must reach all of them. */
+function branches(plans: PlanSpec[], outcome: RecordedOutcome | "normalized"): string[] {
+	if (outcome === "normalized") return ["normalized"];
+	const entries = outcome.providerCompatibility;
+	if (entries === null) return [outcome.message];
+	const [first] = entries;
+	if (first === undefined) throw new Error("A capability rejection needs an entry");
+	const reached = [
+		first.target.kind === "plan"
+			? "capability: plan first"
+			: first.target.priceKey?.endsWith("-base")
+				? "capability: base price first"
+				: "capability: item price first",
+		entries.length === 1 ? "capability: one binding" : "capability: several bindings",
+	];
+	if (new Set(entries.map(({ target }) => target.key)).size > 1) {
+		reached.push("capability: across plans");
 	}
-	if (spec.providers.some((provider) => provider !== "stripe")) {
-		return invalidRequest(
-			`${label} explicit price components are currently supported only on Stripe web`,
-		);
+	if (first.blocked.length > 1) reached.push("capability: several operations");
+	if (
+		entries.some(
+			({ target, productKey }) => target.kind === "plan" && productKey?.includes("-base-"),
+		)
+	) {
+		reached.push("capability: plan through base-price bindings");
 	}
-	return null;
+	if (plans.some((plan) => planProviders(plan).includes("stripe"))) {
+		reached.push("capability: next to a Stripe binding");
+	}
+	return reached;
 }
 
 const providerSetArbitrary = fc.uniqueArray(
@@ -271,35 +466,54 @@ const planSpecArbitrary: fc.Arbitrary<PlanSpec> = fc.record({
 	items: fc.uniqueArray(itemSpecArbitrary, { maxLength: 3, selector: (item) => item.kind }),
 });
 
-describe("catalog provider gates", () => {
-	it("matches the recorded gate order across a generated catalog corpus", async () => {
+const topupSpecArbitrary: fc.Arbitrary<TopupSpec | null> = fc.oneof(
+	{ weight: 3, arbitrary: fc.constant(null) },
+	{
+		weight: 1,
+		arbitrary: fc.record({
+			featureKey: fc.constantFrom<TopupSpec["featureKey"]>("api_requests", "docs_access"),
+			providers: providerSetArbitrary,
+		}),
+	},
+);
+
+describe("catalog validation order", () => {
+	it("matches the recorded rejection order across a generated catalog corpus", async () => {
 		const seen = new Set<string>();
 		await fc.assert(
 			fc.asyncProperty(
 				fc.array(planSpecArbitrary, { minLength: 1, maxLength: 2 }),
-				async (plans) => {
-					const expected = oracleOutcome(plans);
-					seen.add(expected === "normalized" ? "normalized" : expected.message);
-					expect(await firstOutcome(catalogOf(plans))).toEqual(expected);
+				topupSpecArbitrary,
+				async (plans, topup) => {
+					const expected = oracleOutcome(plans, topup);
+					for (const branch of branches(plans, expected)) seen.add(branch);
+					const topups = topup === null ? [] : [topupIntent(topup)];
+					expect(await firstOutcome(catalogOf(plans, topups))).toEqual(expected);
 				},
 			),
 			{ seed: 42, numRuns: 500 },
 		);
 		// The corpus is worthless unless it reaches every branch of the recorded order.
 		expect([...seen].sort()).toEqual([
-			"Plan plan_0 trials and add-ons are currently supported only on Stripe web",
-			"Plan plan_1 trials and add-ons are currently supported only on Stripe web",
-			"base price explicit price components are currently supported only on Stripe web",
+			"Feature api_requests cannot use both a usage window and an allocation stack",
+			"Top-up pack must grant a consumable metered feature",
 			"base price requires at least one provider binding",
+			"capability: across plans",
+			"capability: base price first",
+			"capability: item price first",
+			"capability: next to a Stripe binding",
+			"capability: one binding",
+			"capability: plan first",
+			"capability: plan through base-price bindings",
+			"capability: several bindings",
+			"capability: several operations",
 			"normalized",
-			"price for api_requests explicit price components are currently supported only on Stripe web",
 			"price for api_requests requires at least one provider binding",
-			"price for seats explicit price components are currently supported only on Stripe web",
 			"price for seats requires at least one provider binding",
 		]);
 	});
 
-	it("checks a plan binding's channel before the base price gate", async () => {
+	it("checks a plan binding's channel before the capability assert", async () => {
 		const plan = planIntent(
 			{
 				legacy: [],
@@ -316,7 +530,7 @@ describe("catalog provider gates", () => {
 		);
 	});
 
-	it("checks a price binding's channel before the price gate", async () => {
+	it("checks a price binding's channel before the capability assert", async () => {
 		const plan = planIntent(
 			{
 				legacy: [],
@@ -335,7 +549,7 @@ describe("catalog provider gates", () => {
 		);
 	});
 
-	it("rejects empty base-price bindings before it reaches the gate", async () => {
+	it("rejects empty base-price bindings before the capability assert", async () => {
 		const outcome = await firstOutcome(
 			catalogOf([
 				{
@@ -350,7 +564,7 @@ describe("catalog provider gates", () => {
 		expect(outcome).toEqual(invalidRequest("base price requires at least one provider binding"));
 	});
 
-	it("rejects a non-Stripe price binding before it validates its tiers", async () => {
+	it("validates a non-Stripe price's tiers before the capability assert", async () => {
 		const plan = planIntent(
 			{
 				legacy: [],
@@ -366,13 +580,11 @@ describe("catalog provider gates", () => {
 			{ upToQuantity: "10", unitAmountMinor: 50 },
 		];
 		expect(await firstOutcome({ features, plans: [plan], topups: [], rateCards: [] })).toEqual(
-			invalidRequest(
-				"base price explicit price components are currently supported only on Stripe web",
-			),
+			invalidRequest("base price only the final tier can be unbounded"),
 		);
 	});
 
-	it("reports a later plan's price gate before an earlier plan's trial gate", async () => {
+	it("reports every plan's capability problems in one rejection, in catalog order", async () => {
 		const outcome = await firstOutcome(
 			catalogOf([
 				{ legacy: ["apple"], kind: "base", trialDays: 7, basePrice: null, items: [] },
@@ -386,13 +598,33 @@ describe("catalog provider gates", () => {
 			]),
 		);
 		expect(outcome).toEqual(
-			invalidRequest(
-				"base price explicit price components are currently supported only on Stripe web",
-			),
+			capabilityRejection([
+				{
+					target: { kind: "plan", key: "plan_0" },
+					provider: "apple",
+					channel: "ios",
+					productKey: "p0-plan-apple",
+					requiredOperations: ["catalog.trial"],
+					compatible: false,
+					blocked: [{ operation: "catalog.trial", blockingLayer: "provider" }],
+				},
+				{
+					target: { kind: "price", key: "plan_1", priceKey: "price-p1-base" },
+					provider: "apple",
+					channel: "ios",
+					productKey: "p1-base-apple",
+					requiredOperations: ["catalog.price.flat"],
+					compatible: false,
+					blocked: [{ operation: "catalog.price.flat", blockingLayer: "provider" }],
+				},
+			]),
+		);
+		expect((outcome as RecordedOutcome).message).toBe(
+			"Plan plan_0 cannot bind apple: catalog.trial is not supported (and 1 more)",
 		);
 	});
 
-	it("reports an invalid plan version before the trial gate", async () => {
+	it("reports an invalid plan version before the capability assert", async () => {
 		const plan = planIntent(
 			{ legacy: ["apple"], kind: "base", trialDays: 7, basePrice: null, items: [] },
 			0,
@@ -403,7 +635,7 @@ describe("catalog provider gates", () => {
 		);
 	});
 
-	it("reports an access item's price gate before the access item rejects its price", async () => {
+	it("rejects an access item's price before the capability assert", async () => {
 		const plan = planIntent(
 			{ legacy: [], kind: "base", trialDays: null, basePrice: null, items: [{ kind: "access" }] },
 			0,
@@ -412,13 +644,11 @@ describe("catalog provider gates", () => {
 		if (item === undefined) throw new Error("Expected one generated plan item");
 		item.price = priceIntent({ model: "flat", providers: ["apple"] }, "p0-i0");
 		expect(await firstOutcome({ features, plans: [plan], topups: [], rateCards: [] })).toEqual(
-			invalidRequest(
-				"price for docs_access explicit price components are currently supported only on Stripe web",
-			),
+			invalidRequest("Access item docs_access cannot declare a price"),
 		);
 	});
 
-	it("reports the trial gate before it normalizes an invalid top-up", async () => {
+	it("rejects an invalid top-up before the capability assert", async () => {
 		const outcome = await firstOutcome(
 			catalogOf(
 				[{ legacy: ["apple"], kind: "base", trialDays: 7, basePrice: null, items: [] }],
@@ -433,9 +663,7 @@ describe("catalog provider gates", () => {
 				],
 			),
 		);
-		expect(outcome).toEqual(
-			invalidRequest("Plan plan_0 trials and add-ons are currently supported only on Stripe web"),
-		);
+		expect(outcome).toEqual(invalidRequest("Top-up pack must grant a consumable metered feature"));
 	});
 
 	it("normalizes a plain Apple or Google plan", async () => {
@@ -482,7 +710,23 @@ describe("catalog provider gates", () => {
 			]),
 		);
 		expect(appleLegacy).toEqual(
-			invalidRequest("Plan plan_0 trials and add-ons are currently supported only on Stripe web"),
+			capabilityRejection([
+				{
+					target: { kind: "plan", key: "plan_0" },
+					provider: "apple",
+					channel: "ios",
+					productKey: "p0-plan-apple",
+					requiredOperations: ["catalog.trial", "catalog.addon"],
+					compatible: false,
+					blocked: [
+						{ operation: "catalog.trial", blockingLayer: "provider" },
+						{ operation: "catalog.addon", blockingLayer: "provider" },
+					],
+				},
+			]),
+		);
+		expect((appleLegacy as RecordedOutcome).message).toBe(
+			"Plan plan_0 cannot bind apple: catalog.trial and catalog.addon are not supported",
 		);
 	});
 
@@ -500,6 +744,16 @@ describe("catalog provider gates", () => {
 					],
 				},
 			]),
+		);
+		expect(outcome).toBe("normalized");
+	});
+
+	it("normalizes Apple, Google and Stripe top-up bindings", async () => {
+		const outcome = await firstOutcome(
+			catalogOf(
+				[{ legacy: ["apple"], kind: "base", trialDays: null, basePrice: null, items: [] }],
+				[topupIntent({ featureKey: "api_requests", providers: ["apple", "google", "stripe"] })],
+			),
 		);
 		expect(outcome).toBe("normalized");
 	});

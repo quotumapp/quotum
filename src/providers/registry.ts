@@ -1,5 +1,5 @@
 import type { ProjectProviderServiceSet } from "../app/types";
-import { NotConfiguredError } from "../billing/errors";
+import { CapabilityError, NotConfiguredError } from "../billing/errors";
 import type { BillingRepository } from "../db/repository";
 import { noRuntimeConnections, type RuntimeConnectionResolver } from "../projects/connections";
 import type { ProjectInstanceContext } from "../projects/context";
@@ -67,7 +67,10 @@ export interface ProviderRegistry {
 		provider: P,
 		purpose?: ProviderPurpose,
 	): Promise<ProviderAdapter<P> | null>;
-	/** The adapter, which must have a method for `operation`; throws not-configured otherwise. */
+	/**
+	 * The adapter, which must have a method for `operation`. The declaration is checked first,
+	 * without resolving a connection; a missing adapter or method throws not-configured.
+	 */
 	require<P extends BillingProvider>(
 		project: ProjectInstanceContext,
 		provider: P,
@@ -211,8 +214,16 @@ export function createProviderRegistry({
 		},
 		adapter,
 		async require(project, provider, operation, purpose = "new") {
+			const { declaration, label, notConfiguredStatus } = entryFor(provider);
+			const verdict = evaluateCapability(declaration, operation, {}, { through: "implementation" });
+			if (verdict.blockingLayer !== null) {
+				throw new CapabilityError(
+					`${label} provider does not support ${operation}`,
+					verdict.blockingLayer,
+					{ verdict: { ...verdict, provider } },
+				);
+			}
 			const resolved = await adapter(project, provider, purpose);
-			const { label, notConfiguredStatus } = entryFor(provider);
 			if (resolved === null) {
 				throw new NotConfiguredError(
 					`${label} provider is not configured`,
@@ -225,6 +236,7 @@ export function createProviderRegistry({
 					`${label} provider does not serve ${operation}`,
 					undefined,
 					notConfiguredStatus,
+					{ provider, operation },
 				);
 			}
 			return resolved;
