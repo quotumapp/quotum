@@ -28,6 +28,7 @@ import type {
 	ProjectProviderServiceOverrides,
 	ProjectProviderServices,
 } from "../projects/providers";
+import type { ProviderCapabilityReads } from "../providers/capability-read-types";
 import type { ProviderRegistry } from "../providers/registry";
 import type { StripeCheckoutSessionStatus } from "../providers/stripe/service";
 import type { StripeCatalog } from "../providers/stripe/types";
@@ -213,6 +214,8 @@ export interface AppDependencies {
 	>;
 	/** A registry shared with other runtime parts; cannot be combined with provider services. */
 	providerRegistry?: ProviderRegistry;
+	/** Defaults to reads over this app's provider registry and billing repository. */
+	providerCapabilityReads?: ProviderCapabilityReads;
 	adminBillingReader?: AdminBillingReader | null;
 	adminOperations?: BillingAdminOperations | null;
 	logger?: BillingLogger;

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { createRuntimeConnectionResolver } from "../../src/composition/connections";
+import { BillingError } from "../../src/billing/errors";
+import {
+	connectionDescription,
+	createRuntimeConnectionResolver,
+} from "../../src/composition/connections";
 import type {
+	ConnectionDescriptionRow,
 	ConnectionRepository,
 	ConnectionVersion,
 } from "../../src/platform/connections/repository";
@@ -188,6 +193,146 @@ describe("runtime connection resolver account identity", () => {
 			projectionSecret: "projection-secret",
 			projectionContract: "billing_state_v1",
 			usageDelivery: "coalesced",
+		});
+	});
+});
+
+describe("connection description", () => {
+	const row: ConnectionDescriptionRow = {
+		enabled: true,
+		active_version_id: "version_1",
+		settings: {
+			...stripeSettings,
+			authMethod: "oauth",
+			livemode: false,
+			appAppleId: 123456789,
+			serviceAccountJson: null,
+			nested: { secret: "never" },
+			list: ["a"],
+		},
+		validated_at: new Date("2026-09-18T10:00:00.000Z"),
+		external_identity: "acct_voysee",
+	};
+
+	it("keeps only string and boolean settings of the active version", () => {
+		expect(connectionDescription(row)).toEqual({
+			enabled: true,
+			active: true,
+			validated: true,
+			validatedAt: "2026-09-18T10:00:00.000Z",
+			accountIdentity: "acct_voysee",
+			settings: { ...stripeSettings, authMethod: "oauth", livemode: false },
+		});
+	});
+
+	it("reports a disabled or unvalidated version as persisted, with no freshness window", () => {
+		expect(
+			connectionDescription({
+				...row,
+				enabled: false,
+				validated_at: "2020-01-01T00:00:00Z",
+				settings: null,
+			}),
+		).toEqual({
+			enabled: false,
+			active: true,
+			validated: true,
+			validatedAt: "2020-01-01T00:00:00.000Z",
+			accountIdentity: "acct_voysee",
+			settings: {},
+		});
+		expect(connectionDescription({ ...row, validated_at: null })).toMatchObject({
+			active: true,
+			validated: false,
+			validatedAt: null,
+		});
+	});
+
+	it("reports nothing validated or identified without an active version", () => {
+		expect(
+			connectionDescription({
+				enabled: true,
+				active_version_id: null,
+				settings: null,
+				validated_at: new Date("2026-09-18T10:00:00.000Z"),
+				external_identity: "acct_stale",
+			}),
+		).toEqual({
+			enabled: true,
+			active: false,
+			validated: false,
+			validatedAt: null,
+			accountIdentity: null,
+			settings: {},
+		});
+		// Platform list rows carry no external identity.
+		const { external_identity: _, ...listRow } = row;
+		expect(connectionDescription(listRow).accountIdentity).toBeNull();
+	});
+});
+
+describe("runtime connection resolver describe", () => {
+	function describingRepository(result: () => Promise<ConnectionDescriptionRow | null>) {
+		const lookups: Array<{ instanceId: string; kind: string }> = [];
+		const repository = {
+			async describe(instanceId: string, kind: string) {
+				lookups.push({ instanceId, kind });
+				return result();
+			},
+			async active() {
+				throw new Error("describe must not read secrets");
+			},
+			async secrets() {
+				throw new Error("describe must not read secrets");
+			},
+		} as unknown as ConnectionRepository;
+		return { repository, lookups };
+	}
+
+	it("maps the persisted row and returns null when the project has none", async () => {
+		const { repository, lookups } = describingRepository(async () => ({
+			enabled: false,
+			active_version_id: "version_1",
+			settings: { bundleId: "com.voysee.app", appAppleId: 123456789 },
+			validated_at: new Date("2026-09-18T10:00:00.000Z"),
+			external_identity: "com.voysee.app",
+		}));
+		const resolver = createRuntimeConnectionResolver(repository);
+
+		expect(await resolver.describe?.(project, "apple")).toEqual({
+			enabled: false,
+			active: true,
+			validated: true,
+			validatedAt: "2026-09-18T10:00:00.000Z",
+			accountIdentity: "com.voysee.app",
+			settings: { bundleId: "com.voysee.app" },
+		});
+		expect(
+			await createRuntimeConnectionResolver(
+				describingRepository(async () => null).repository,
+			).describe?.(project, "stripe"),
+		).toBeNull();
+		expect(lookups).toEqual([{ instanceId: project.projectInstanceId, kind: "apple" }]);
+	});
+
+	it("reports a failing read as the unavailable integration error", async () => {
+		const resolver = createRuntimeConnectionResolver(
+			describingRepository(async () => {
+				throw new Error("connection refused");
+			}).repository,
+		);
+
+		let error: unknown;
+		try {
+			await resolver.describe?.(project, "google");
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(BillingError);
+		expect(error).toMatchObject({
+			message: "This project integration is unavailable",
+			code: "CONNECTION_UNAVAILABLE",
+			status: 503,
 		});
 	});
 });

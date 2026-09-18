@@ -1,4 +1,10 @@
 import { z } from "zod";
+import { billingProviders } from "../shared/provider-capabilities";
+import {
+	CapabilityReasonSchema,
+	catalogCompatibilityTargetSchema,
+	ProviderOperationSchema,
+} from "../shared/provider-capability-schemas";
 
 /** Authored merchant wire contracts; OpenAPI and server types derive from these schemas. */
 
@@ -153,6 +159,23 @@ export const StepUpChallengeViewSchema = z.object({
 	scope: MerchantScopeSchema,
 	expiresAt: z.string(),
 	returnTo: z.string(),
+});
+
+/**
+ * One readiness finding. Gating entries mirror `blockers` in order and block activation; the
+ * others report a catalog binding that the environment's connections cannot serve yet.
+ */
+export const ReadinessBlockerDetailSchema = z.object({
+	code: z.string(),
+	gating: z.boolean(),
+	connectionKind: z.enum(["stripe", "apple", "google", "projection"]).optional(),
+	provider: z.enum(billingProviders).optional(),
+	operation: ProviderOperationSchema.optional(),
+	targets: z.array(catalogCompatibilityTargetSchema).optional(),
+	observed: z
+		.record(z.string(), z.union([z.null(), z.string(), z.number(), z.boolean()]))
+		.optional(),
+	reason: CapabilityReasonSchema.optional(),
 });
 
 export const MerchantErrorBodySchema = z.object({

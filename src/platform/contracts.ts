@@ -14,6 +14,7 @@ import type {
 	MerchantSessionViewSchema,
 	OnboardingDraftViewSchema,
 	ProvisioningOperationViewSchema,
+	ReadinessBlockerDetailSchema,
 	StepUpChallengeViewSchema,
 	TeamViewSchema,
 } from "./schemas";
@@ -31,5 +32,6 @@ export type ProvisioningOperationView = z.infer<typeof ProvisioningOperationView
 export type InvitationView = z.infer<typeof InvitationViewSchema>;
 export type TeamView = z.infer<typeof TeamViewSchema>;
 export type StepUpChallengeView = z.infer<typeof StepUpChallengeViewSchema>;
+export type ReadinessBlockerDetail = z.infer<typeof ReadinessBlockerDetailSchema>;
 export type MerchantErrorBody = z.infer<typeof MerchantErrorBodySchema>;
 export type MerchantResponse<T> = { success: true; data: T } | MerchantErrorBody;

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { isBillingProvider } from "../../shared/provider-capabilities";
 import type { PlatformProjectInstanceRecord } from "../application/ports";
-import type { MerchantScope } from "../contracts";
+import type { MerchantScope, ReadinessBlockerDetail } from "../contracts";
 import { generateProjectApiCredential } from "../credentials/project-api-token";
 import type { MerchantSql } from "../database";
 import { MerchantError, randomToken, requireCapability } from "../security";
@@ -10,6 +11,9 @@ import type { StripeOAuthPort } from "./oauth-port";
 import { resolveStripeOAuth } from "./oauth-runtime";
 import type { ConnectionInput, ConnectionValidationPort, EnvironmentBillingPort } from "./ports";
 import { type ConnectionKind, ConnectionRepository, type ConnectionVersion } from "./repository";
+
+/** How long a validation stays fresh enough to commit a version or activate an environment. */
+const validationWindowMs = 900_000;
 
 export class MerchantConnections {
 	readonly repository: ConnectionRepository;
@@ -195,7 +199,7 @@ export class MerchantConnections {
 			this.assertDraft(version);
 			if (
 				!version.validated_at ||
-				version.validated_at.getTime() < this.store.now().getTime() - 900_000
+				version.validated_at.getTime() < this.store.now().getTime() - validationWindowMs
 			)
 				throw new MerchantError(
 					"CONNECTION_VALIDATION_REQUIRED",
@@ -299,33 +303,56 @@ export class MerchantConnections {
 	async readiness(identity: MerchantIdentity, scope: MerchantScope) {
 		const instance = await this.scope(identity, scope);
 		const connections = await this.repository.list(instance.id);
-		const catalog = await this.billing.catalogReadiness(instance.id);
+		const catalog = await this.billing.catalogReadiness(instance.id, connections);
+		// quotum-ui parses `blockers` by their KIND_ prefix; the gating details mirror them in order.
 		const blockers: string[] = [];
+		const blockerDetails: ReadinessBlockerDetail[] = [];
+		const block = (code: string, extra: Omit<ReadinessBlockerDetail, "code" | "gating"> = {}) => {
+			blockers.push(code);
+			blockerDetails.push({ code, gating: true, ...extra });
+		};
 		const providers = connections.filter((c) => c.enabled && c.kind !== "projection");
-		if (!providers.length) blockers.push("PROVIDER_REQUIRED");
-		for (const kind of ["projection", ...providers.map((c) => c.kind)]) {
+		if (!providers.length) block("PROVIDER_REQUIRED");
+		const kinds: ConnectionKind[] = ["projection", ...providers.map((c) => c.kind)];
+		for (const kind of kinds) {
+			const subject = {
+				connectionKind: kind,
+				...(isBillingProvider(kind) ? { provider: kind } : {}),
+			};
 			const row = connections.find((c) => c.kind === kind && c.enabled);
-			if (!row?.validated_at || row.validated_at.getTime() < this.store.now().getTime() - 900_000)
-				blockers.push(`${kind.toUpperCase()}_VALIDATION_REQUIRED`);
+			if (
+				!row?.validated_at ||
+				row.validated_at.getTime() < this.store.now().getTime() - validationWindowMs
+			)
+				block(`${kind.toUpperCase()}_VALIDATION_REQUIRED`, {
+					...subject,
+					observed: {
+						validatedAt: row?.validated_at?.toISOString() ?? null,
+						maxAgeSeconds: validationWindowMs / 1000,
+					},
+				});
 			if (kind !== "projection" && !row?.event_verified_at)
-				blockers.push(`${kind.toUpperCase()}_EVENT_REQUIRED`);
+				block(`${kind.toUpperCase()}_EVENT_REQUIRED`, subject);
 			if (row?.active_version_id) {
 				try {
-					await this.repository.active(instance.id, kind as ConnectionKind);
+					await this.repository.active(instance.id, kind);
 				} catch {
-					blockers.push(`${kind.toUpperCase()}_SECRET_UNAVAILABLE`);
+					block(`${kind.toUpperCase()}_SECRET_UNAVAILABLE`, subject);
 				}
 			}
 			if (kind !== "projection" && !catalog.providers.includes(kind))
-				blockers.push(`${kind.toUpperCase()}_CATALOG_REQUIRED`);
+				block(`${kind.toUpperCase()}_CATALOG_REQUIRED`, subject);
 		}
-		if (!catalog.ready) blockers.push("PUBLISHED_CATALOG_REQUIRED");
+		if (!catalog.ready) block("PUBLISHED_CATALOG_REQUIRED");
+		for (const detail of catalog.capabilityDetails ?? [])
+			blockerDetails.push({ ...detail, gating: false });
 		return {
 			instanceId: instance.id,
 			instanceKey: instance.key,
 			lifecycleStatus: instance.lifecycleStatus,
 			ready: blockers.length === 0,
 			blockers,
+			blockerDetails,
 			catalogRevisionId: catalog.revisionId,
 			connections,
 			fingerprint: this.store.hash(
@@ -377,7 +404,7 @@ export class MerchantConnections {
 			for (const row of current.filter((c) => c.enabled)) {
 				if (
 					!row.validated_at ||
-					row.validated_at.getTime() < this.store.now().getTime() - 900_000 ||
+					row.validated_at.getTime() < this.store.now().getTime() - validationWindowMs ||
 					(row.kind !== "projection" && !row.event_verified_at)
 				)
 					throw new MerchantError(

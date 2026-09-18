@@ -112,6 +112,46 @@
         ],
         "type": "object"
       },
+      "BillingAccountAvailableActions": {
+        "properties": {
+          "account": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeCapabilityVerdict"
+            },
+            "type": "array"
+          },
+          "billingAccountId": {
+            "type": "string"
+          },
+          "customerExists": {
+            "type": "boolean"
+          },
+          "generatedAt": {
+            "type": "string"
+          },
+          "schemaVersion": {
+            "enum": [
+              1
+            ],
+            "type": "number"
+          },
+          "subscriptions": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionAvailableActions"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "billingAccountId",
+          "customerExists",
+          "generatedAt",
+          "account",
+          "subscriptions"
+        ],
+        "type": "object"
+      },
       "CapabilityCondition": {
         "oneOf": [
           {
@@ -6328,6 +6368,24 @@
         ],
         "type": "object"
       },
+      "getV1AdminProvidersCapabilitiesResponse200": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProviderEnvironmentCapabilities"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ],
+        "type": "object"
+      },
       "getV1AdminPurchasesResponse200": {
         "properties": {
           "data": {
@@ -7439,6 +7497,24 @@
               "object",
               "null"
             ]
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ],
+        "type": "object"
+      },
+      "getV1BillingAccountsByBillingAccountIdAvailableActionsResponse200": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BillingAccountAvailableActions"
           },
           "success": {
             "enum": [
@@ -10572,6 +10648,12 @@
               },
               "previewToken": {
                 "type": "string"
+              },
+              "providerCompatibility": {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogProviderCompatibility"
+                },
+                "type": "array"
               }
             },
             "required": [
@@ -10580,7 +10662,8 @@
               "baseRevision",
               "nextRevision",
               "expiresAt",
-              "impact"
+              "impact",
+              "providerCompatibility"
             ],
             "type": "object"
           },
@@ -16663,6 +16746,108 @@
         ],
         "type": "object"
       },
+      "ProviderConnectionSummary": {
+        "properties": {
+          "accountIdentity": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "validated": {
+            "type": "boolean"
+          },
+          "validatedAt": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "configured",
+          "enabled",
+          "validated",
+          "validatedAt",
+          "accountIdentity"
+        ],
+        "type": "object"
+      },
+      "ProviderEnvironmentCapabilities": {
+        "properties": {
+          "generatedAt": {
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "properties": {
+                "channel": {
+                  "enum": [
+                    "ios",
+                    "android",
+                    "web"
+                  ],
+                  "type": "string"
+                },
+                "connection": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProviderConnectionSummary"
+                    }
+                  ]
+                },
+                "connectionKind": {
+                  "type": "string"
+                },
+                "operations": {
+                  "items": {
+                    "$ref": "#/components/schemas/RuntimeCapabilityVerdict"
+                  },
+                  "type": "array"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "provider",
+                "channel",
+                "connectionKind",
+                "connection",
+                "operations"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "schemaVersion": {
+            "enum": [
+              1
+            ],
+            "type": "number"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "generatedAt",
+          "providers"
+        ],
+        "type": "object"
+      },
       "ProviderOperation": {
         "enum": [
           "catalog.product.subscription",
@@ -17034,6 +17219,84 @@
         ],
         "type": "object"
       },
+      "ReadinessBlockerDetail": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "connectionKind": {
+            "enum": [
+              "stripe",
+              "apple",
+              "google",
+              "projection"
+            ],
+            "type": "string"
+          },
+          "gating": {
+            "type": "boolean"
+          },
+          "observed": {
+            "additionalProperties": {
+              "type": [
+                "null",
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "type": "object"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/ProviderOperation"
+          },
+          "provider": {
+            "enum": [
+              "apple",
+              "google",
+              "stripe"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/CapabilityReason"
+          },
+          "targets": {
+            "items": {
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "plan",
+                    "price",
+                    "topup"
+                  ],
+                  "type": "string"
+                },
+                "priceKey": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "key"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "gating"
+        ],
+        "type": "object"
+      },
       "RuntimeCapabilityVerdict": {
         "properties": {
           "blockingLayer": {
@@ -17304,6 +17567,108 @@
           "customerExists",
           "subscriptions",
           "recentInvoices"
+        ],
+        "type": "object"
+      },
+      "SubscriptionAvailableActions": {
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeCapabilityVerdict"
+            },
+            "type": "array"
+          },
+          "cancelAtPeriodEnd": {
+            "type": "boolean"
+          },
+          "channel": {
+            "enum": [
+              "ios",
+              "android",
+              "web"
+            ],
+            "type": "string"
+          },
+          "currentPeriodEnd": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "pendingChange": {
+            "properties": {
+              "changeId": {
+                "type": "string"
+              },
+              "effectiveAt": {
+                "type": "string"
+              },
+              "effectiveMode": {
+                "enum": [
+                  "immediate",
+                  "period_end"
+                ],
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "processing"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "changeId",
+              "status",
+              "effectiveMode",
+              "effectiveAt"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "planKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "provider": {
+            "enum": [
+              "apple",
+              "google",
+              "stripe"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "grace_period",
+              "billing_retry",
+              "cancelled",
+              "expired",
+              "refunded",
+              "revoked"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "channel",
+          "status",
+          "planKey",
+          "currentPeriodEnd",
+          "cancelAtPeriodEnd",
+          "pendingChange",
+          "actions"
         ],
         "type": "object"
       },
@@ -20181,6 +20546,211 @@
         "summary": "POST /api/auth/two-factor/verify-otp",
         "tags": [
           "authentication"
+        ]
+      }
+    },
+    "/api/billing/admin/billing-accounts/{billingAccountId}/available-actions": {
+      "get": {
+        "description": "Requires billing.read in sandbox and billing.read in production.  ",
+        "operationId": "merchantGetV1BillingAccountsByBillingAccountIdAvailableActions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Organization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Project",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Environment",
+            "required": true,
+            "schema": {
+              "enum": [
+                "sandbox",
+                "production"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Step-Up-Grant",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/getV1BillingAccountsByBillingAccountIdAvailableActionsResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "GET /api/billing/admin/billing-accounts/{billingAccountId}/available-actions",
+        "tags": [
+          "merchant-billing"
         ]
       }
     },
@@ -31439,6 +32009,202 @@
         ]
       }
     },
+    "/api/billing/admin/providers/capabilities": {
+      "get": {
+        "description": "Requires billing.read in sandbox and billing.read in production.  ",
+        "operationId": "merchantGetV1AdminProvidersCapabilities",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Quotum-Organization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Project",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Environment",
+            "required": true,
+            "schema": {
+              "enum": [
+                "sandbox",
+                "production"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Step-Up-Grant",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/getV1AdminProvidersCapabilitiesResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "GET /api/billing/admin/providers/capabilities",
+        "tags": [
+          "merchant-billing"
+        ]
+      }
+    },
     "/api/billing/admin/purchases": {
       "get": {
         "description": "Requires billing.read in sandbox and billing.read in production.  ",
@@ -36029,6 +36795,12 @@
                   "properties": {
                     "data": {
                       "properties": {
+                        "blockerDetails": {
+                          "items": {
+                            "$ref": "#/components/schemas/ReadinessBlockerDetail"
+                          },
+                          "type": "array"
+                        },
                         "blockers": {
                           "items": {
                             "type": "string"
@@ -36127,6 +36899,7 @@
                         "lifecycleStatus",
                         "ready",
                         "blockers",
+                        "blockerDetails",
                         "catalogRevisionId",
                         "connections",
                         "fingerprint"
@@ -49761,6 +50534,165 @@
         ]
       }
     },
+    "/v1/admin/providers/capabilities": {
+      "get": {
+        "operationId": "getV1AdminProvidersCapabilities",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/getV1AdminProvidersCapabilitiesResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/admin/providers/capabilities",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/purchases": {
       "get": {
         "operationId": "getV1AdminPurchases",
@@ -51583,6 +52515,176 @@
         "summary": "PUT /v1/billing-accounts/{billingAccountId}/auto-topup",
         "tags": [
           "controls"
+        ]
+      }
+    },
+    "/v1/billing-accounts/{billingAccountId}/available-actions": {
+      "get": {
+        "operationId": "getV1BillingAccountsByBillingAccountIdAvailableActions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/getV1BillingAccountsByBillingAccountIdAvailableActionsResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/billing-accounts/{billingAccountId}/available-actions",
+        "tags": [
+          "customer"
         ]
       }
     },

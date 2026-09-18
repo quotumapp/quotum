@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { billingProviderValues } from "./provider-enum";
+import { CatalogProviderCompatibilitySchema } from "./provider-responses";
 
 /** Authored HTTP wire schemas. Update these with the handlers; OpenAPI is generated from them. */
 export const getV1AdminCatalogResponse200Schema = z.object({
@@ -210,6 +211,7 @@ export const postV1AdminCatalogPreviewResponse200Schema = z.object({
 			providerBindingsValidated: z.number(),
 			existingSubscriptionsGrandfathered: z.number(),
 		}),
+		providerCompatibility: z.array(CatalogProviderCompatibilitySchema),
 	}),
 });
 

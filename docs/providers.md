@@ -26,6 +26,17 @@ its structural checks, and reject all incompatible bindings together with one
 `400 PROVIDER_CAPABILITY_UNSUPPORTED`; see
 [Provider capability errors](api.md#provider-capability-errors).
 
+The table shows the declarations alone. The capability reads and environment readiness also require
+a validated connection for every operation and, outside recovery work such as webhook ingestion, an
+enabled one. Requests do not evaluate these connection conditions: a request that reaches a
+provider without a usable connection fails with `BILLING_PROVIDER_NOT_CONFIGURED`, and catalog
+publish does not look at connections. `GET /v1/admin/providers/capabilities` evaluates the
+declarations against an environment's persisted connections, and
+`GET /v1/billing-accounts/:billingAccountId/available-actions` against one billing account and its
+live subscriptions. Environment readiness adds non-gating `blockerDetails` for catalog bindings the
+connections cannot serve. See
+[Provider capabilities and available actions](api.md#provider-capabilities-and-available-actions).
+
 <!-- provider-capabilities:start -->
 <!-- Generated from contracts/v1/provider-capabilities.json by bun run openapi:generate; do not edit. -->
 

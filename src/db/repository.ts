@@ -10,6 +10,7 @@ import type {
 	StoredCommercialActionPreview,
 } from "../billing/commercial";
 import type {
+	AvailableActionFacts,
 	CustomerBillingSummary,
 	ProjectUsageEventListInput,
 	ProjectUsageEventPage,
@@ -460,6 +461,13 @@ export class BillingRepository {
 		billingAccountId: string,
 	): Promise<CustomerBillingSummary> {
 		return await this.insights.getCustomerBillingSummary(project, billingAccountId);
+	}
+
+	async getAvailableActionFacts(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+	): Promise<AvailableActionFacts> {
+		return await this.insights.getAvailableActionFacts(project, billingAccountId);
 	}
 
 	async getCommercialActionPreview(

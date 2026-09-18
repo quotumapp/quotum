@@ -18,15 +18,20 @@ import type {
 } from "../../src/catalog/types";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import {
+	catalogConstructOperations,
+	implementsOperation,
 	type ProviderCapabilityLookup,
 	providerCapabilityCatalog,
 	providerCapabilityDeclaration,
 } from "../../src/providers/capabilities";
-import type {
-	DeclaredProvider,
-	OperationSupport,
-	ProviderCapabilityDeclaration,
-	ProviderOperation,
+import {
+	type BillingProvider,
+	type CapabilityConfigurationFacts,
+	type DeclaredProvider,
+	evaluateCapability,
+	type OperationSupport,
+	type ProviderCapabilityDeclaration,
+	type ProviderOperation,
 } from "../../src/shared/provider-capabilities";
 import { renderDrizzleSql } from "../helpers/drizzle-sql";
 import { projectInstanceContext } from "../helpers/project-context";
@@ -344,6 +349,310 @@ describe("catalog provider compatibility", () => {
 		for (const verdict of entries.flatMap(({ verdicts }) => verdicts)) {
 			expect(verdict.reasons.length).toBeGreaterThan(0);
 		}
+	});
+});
+
+/** The judged fields of each entry, with its verdicts reduced to operation, outcome and layer. */
+function judged(entries: ReturnType<typeof catalogProviderCompatibility>) {
+	return entries.map(({ target, provider, channel, productKey, compatible, verdicts }) => ({
+		target: target.priceKey ?? `${target.kind}:${target.key}`,
+		provider,
+		channel,
+		productKey,
+		compatible,
+		verdicts: verdicts.map(({ operation, outcome, blockingLayer }) => [
+			operation,
+			outcome,
+			blockingLayer,
+		]),
+	}));
+}
+
+type JudgedEntry = ReturnType<typeof judged>[number];
+
+/** Stripe's declaration with `catalog.trial` also requiring an enabled connection. */
+const stripeTrialNeedsConnection = catalogDeclaring("stripe", (declaration) => ({
+	operations: {
+		...declaration.operations,
+		"catalog.trial": {
+			...declaration.operations["catalog.trial"],
+			conditions: [{ kind: "connection_enabled" }],
+		},
+	},
+}));
+
+const connection = (connectionEnabled: boolean): CapabilityConfigurationFacts => ({
+	connectionEnabled,
+	connectionValidated: true,
+	accountFlags: {},
+});
+
+describe("catalog provider compatibility options", () => {
+	it("keeps the publish gate's output byte for byte under the default options", () => {
+		const legacy = catalogCapabilityTargets(mixedCatalog).flatMap(
+			({ target, construct, bindings }) => {
+				const requiredOperations = catalogConstructOperations(construct);
+				return bindings.map((binding) => {
+					const declaration = providerCapabilityDeclaration(binding.provider);
+					const verdicts = requiredOperations
+						.filter((operation) => !implementsOperation(declaration, operation))
+						.map((operation) => ({
+							...evaluateCapability(declaration, operation, {}, { through: "implementation" }),
+							provider: binding.provider,
+						}));
+					return {
+						target,
+						provider: binding.provider,
+						channel: binding.channel,
+						productKey: binding.productKey,
+						requiredOperations,
+						compatible: verdicts.length === 0,
+						verdicts,
+					};
+				});
+			},
+		);
+		const explicit = catalogProviderCompatibility(mixedCatalog, {
+			capabilities: providerCapabilityCatalog,
+			through: "implementation",
+			configuration: () => {
+				throw new Error("configuration is only read through the configuration layer");
+			},
+			includeUnbound: false,
+		});
+		expect(JSON.stringify(catalogProviderCompatibility(mixedCatalog))).toBe(JSON.stringify(legacy));
+		expect(JSON.stringify(explicit)).toBe(JSON.stringify(legacy));
+	});
+
+	it("follows each entry's bindings with hypothetical ones in billingProviders order", () => {
+		const entries = catalogProviderCompatibility(mixedCatalog, { includeUnbound: true });
+		expect(entries.filter(({ productKey }) => productKey !== null)).toEqual(
+			catalogProviderCompatibility(mixedCatalog),
+		);
+		expect(judged(entries)).toEqual([
+			{
+				target: "plan:trial",
+				provider: "apple",
+				channel: "ios",
+				productKey: "trial-apple",
+				compatible: false,
+				verdicts: [["catalog.trial", "blocked", "provider"]],
+			},
+			{
+				target: "plan:trial",
+				provider: "stripe",
+				channel: "web",
+				productKey: "trial-web",
+				compatible: true,
+				verdicts: [],
+			},
+			{
+				target: "plan:trial",
+				provider: "google",
+				channel: "android",
+				productKey: null,
+				compatible: false,
+				verdicts: [["catalog.trial", "blocked", "provider"]],
+			},
+			{
+				target: "plan:addon",
+				provider: "google",
+				channel: "android",
+				productKey: "addon-google",
+				compatible: false,
+				verdicts: [["catalog.addon", "blocked", "provider"]],
+			},
+			{
+				target: "plan:addon",
+				provider: "stripe",
+				channel: "web",
+				productKey: "addon-web",
+				compatible: true,
+				verdicts: [],
+			},
+			{
+				target: "plan:addon",
+				provider: "apple",
+				channel: "ios",
+				productKey: null,
+				compatible: false,
+				verdicts: [["catalog.addon", "blocked", "provider"]],
+			},
+			{
+				target: "addon-base",
+				provider: "google",
+				channel: "android",
+				productKey: "addon-google",
+				compatible: false,
+				verdicts: [
+					["catalog.price.flat", "blocked", "provider"],
+					["catalog.price.hybrid", "blocked", "provider"],
+				],
+			},
+			{
+				target: "addon-base",
+				provider: "stripe",
+				channel: "web",
+				productKey: "addon-web",
+				compatible: true,
+				verdicts: [],
+			},
+			{
+				target: "addon-base",
+				provider: "apple",
+				channel: "ios",
+				productKey: null,
+				compatible: false,
+				verdicts: [
+					["catalog.price.flat", "blocked", "provider"],
+					["catalog.price.hybrid", "blocked", "provider"],
+				],
+			},
+			{
+				target: "addon-seats",
+				provider: "stripe",
+				channel: "web",
+				productKey: "addon-seats-web",
+				compatible: true,
+				verdicts: [],
+			},
+			...(["apple", "google"] as const).map(
+				(provider): JudgedEntry => ({
+					target: "addon-seats",
+					provider,
+					channel: provider === "apple" ? "ios" : "android",
+					productKey: null,
+					compatible: false,
+					verdicts: [
+						["catalog.price.flat", "blocked", "provider"],
+						["catalog.price.licensed", "blocked", "provider"],
+						["catalog.price.hybrid", "blocked", "provider"],
+					],
+				}),
+			),
+			...(["apple", "google", "stripe"] as const).map(
+				(provider): JudgedEntry => ({
+					target: "topup:pack",
+					provider,
+					channel: provider === "apple" ? "ios" : provider === "google" ? "android" : "web",
+					productKey: `pack-${provider === "stripe" ? "web" : provider}`,
+					compatible: true,
+					verdicts: [],
+				}),
+			),
+		]);
+		const hypothetical = entries.find(
+			({ target, productKey }) => target.key === "trial" && productKey === null,
+		);
+		expect(hypothetical?.requiredOperations).toEqual(["catalog.trial"]);
+		expect(z.array(CatalogProviderCompatibilitySchema).parse(entries)).toEqual(entries);
+	});
+
+	it("adds nothing for an entry that asks nothing of its bindings", () => {
+		const plain = catalogOf([plan("plain", { providerBindings: [google("plain-google")] })]);
+		expect(catalogProviderCompatibility(plain, { includeUnbound: true })).toEqual([]);
+	});
+
+	it("adds hypothetical bindings only for available admitted providers", () => {
+		const trial = catalogOf([plan("trial", { trialDays: 7, providerBindings: [stripe("t")] })]);
+		const plannedGoogle = catalogDeclaring("google", () => ({ availability: "planned" }));
+		const providers = (capabilities: ProviderCapabilityLookup) =>
+			catalogProviderCompatibility(trial, { capabilities, includeUnbound: true }).map(
+				({ provider, productKey }) => [provider, productKey],
+			);
+		expect(providers(providerCapabilityCatalog)).toEqual([
+			["stripe", "t"],
+			["apple", null],
+			["google", null],
+		]);
+		expect(providers(plannedGoogle)).toEqual([
+			["stripe", "t"],
+			["apple", null],
+		]);
+	});
+
+	it("reports a connection condition as undetermined while the facts are unknown", () => {
+		const trial = catalogOf([plan("trial", { trialDays: 7, providerBindings: [stripe("t")] })]);
+		const asked: BillingProvider[] = [];
+		for (const configuration of [
+			undefined,
+			(provider: BillingProvider) => {
+				asked.push(provider);
+				return undefined;
+			},
+		]) {
+			const [entry] = catalogProviderCompatibility(trial, {
+				capabilities: stripeTrialNeedsConnection,
+				through: "configuration",
+				configuration,
+			});
+			expect(entry?.compatible).toBe(true);
+			expect(entry?.verdicts).toEqual([
+				{
+					provider: "stripe",
+					operation: "catalog.trial",
+					outcome: "undetermined",
+					level: "native",
+					blockingLayer: null,
+					reasons: [
+						{
+							code: "FACT_UNAVAILABLE",
+							layer: "configuration",
+							condition: { kind: "connection_enabled" },
+							observed: { connectionEnabled: null },
+							resolution: { kind: "checked_at_execution" },
+						},
+					],
+				},
+			]);
+		}
+		expect(asked).toEqual(["stripe"]);
+	});
+
+	it("blocks a binding whose connection is disabled", () => {
+		const trial = catalogOf([plan("trial", { trialDays: 7, providerBindings: [stripe("t")] })]);
+		const judge = (connectionEnabled: boolean) =>
+			catalogProviderCompatibility(trial, {
+				capabilities: stripeTrialNeedsConnection,
+				through: "configuration",
+				configuration: () => connection(connectionEnabled),
+			});
+		const [disabled] = judge(false);
+		expect(disabled?.compatible).toBe(false);
+		expect(disabled?.verdicts).toEqual([
+			{
+				provider: "stripe",
+				operation: "catalog.trial",
+				outcome: "blocked",
+				level: "native",
+				blockingLayer: "configuration",
+				reasons: [
+					{
+						code: "CONNECTION_DISABLED",
+						layer: "configuration",
+						condition: { kind: "connection_enabled" },
+						observed: { connectionEnabled: false },
+						resolution: { kind: "merchant_configuration", connectionKind: "stripe" },
+					},
+				],
+			},
+		]);
+		expect(judge(true)).toEqual([
+			{
+				target: { kind: "plan", key: "trial" },
+				provider: "stripe",
+				channel: "web",
+				productKey: "t",
+				requiredOperations: ["catalog.trial"],
+				compatible: true,
+				verdicts: [],
+			},
+		]);
+		const [unjudged] = catalogProviderCompatibility(trial, {
+			capabilities: stripeTrialNeedsConnection,
+			configuration: () => connection(false),
+		});
+		expect(unjudged?.verdicts).toEqual([]);
 	});
 });
 

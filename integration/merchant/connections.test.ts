@@ -1,20 +1,41 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
+import { capabilityErrorCodes } from "../../src/billing/errors";
 import { createConnectionValidation } from "../../src/composition/connection-validation";
+import { createEnvironmentBillingPort } from "../../src/composition/environment-billing";
 import { PostgresProjectInstanceContextResolver } from "../../src/composition/project-instance-persistence";
 import { BillingRepository } from "../../src/db/repository";
 import { MerchantStripeOAuth } from "../../src/platform/connections/oauth";
 import { resolveStripeOAuth } from "../../src/platform/connections/oauth-runtime";
+import type { ReadinessCapabilityDetail } from "../../src/platform/connections/ports";
 import { StripeAppEvents } from "../../src/platform/connections/stripe-events";
 import type {
 	MerchantScope,
 	OnboardingDraftView,
 	ProvisioningOperationView,
+	ReadinessBlockerDetail,
 } from "../../src/platform/contracts";
 import { seedIntegrationProjectsAndCatalog } from "../../tests/integration/helpers/catalog-fixtures";
 import { publishAiCreditsCatalog } from "../../tests/integration/helpers/metering-catalog";
 import { MerchantBrowser, merchantFixture, password } from "./fixture";
 
 const validator = createConnectionValidation();
+/** Reported by the stubbed billing port for every readiness read; it never gates activation. */
+const capabilityDetail: ReadinessCapabilityDetail = {
+	code: capabilityErrorCodes.configuration.code,
+	connectionKind: "apple",
+	provider: "apple",
+	operation: "catalog.topup",
+	targets: [{ kind: "topup", key: "credits_100" }],
+	reason: {
+		code: "CONNECTION_DISABLED",
+		layer: "configuration",
+		condition: { kind: "connection_enabled" },
+		observed: { connectionEnabled: false },
+		resolution: { kind: "merchant_configuration", connectionKind: "apple" },
+	},
+};
+/** The connection kinds each readiness read handed to the billing port. */
+const readinessConnectionKinds: string[][] = [];
 const f = merchantFixture({
 	connectionValidation: {
 		normalize: validator.normalize,
@@ -27,7 +48,8 @@ const f = merchantFixture({
 		},
 	},
 	environmentBilling: {
-		async catalogReadiness(id) {
+		async catalogReadiness(id, connections) {
+			readinessConnectionKinds.push(connections.map((connection) => connection.kind));
 			const [row] = await f.sql<
 				{ revision: string | null }[]
 			>`SELECT published_catalog_revision_id::text AS revision FROM projects WHERE id=${id}`;
@@ -35,6 +57,7 @@ const f = merchantFixture({
 				revisionId: row?.revision ?? null,
 				providers: row?.revision ? ["stripe"] : [],
 				ready: !!row?.revision,
+				capabilityDetails: [capabilityDetail],
 			};
 		},
 		async promote() {
@@ -71,6 +94,23 @@ const input = {
 	settings: { projectionUrl: "https://receiver.example.com" },
 	secrets: {},
 };
+interface Readiness {
+	ready: boolean;
+	blockers: string[];
+	catalogRevisionId: string | null;
+	blockerDetails: ReadinessBlockerDetail[];
+	connections: { kind: string; validated_at: string | null }[];
+	fingerprint: string;
+}
+/** Gating details mirror `blockers` in order; capability details follow them without gating. */
+function expectMirroredBlockers(readiness: Readiness) {
+	expect(
+		readiness.blockerDetails.filter((detail) => detail.gating).map((detail) => detail.code),
+	).toEqual(readiness.blockers);
+	expect(readiness.blockerDetails.slice(readiness.blockers.length)).toEqual([
+		{ ...capabilityDetail, gating: false },
+	]);
+}
 describe("encrypted merchant connections", () => {
 	it("discloses generated secrets once, commits by revision and retains disabled recovery credentials", async () => {
 		const browser = new MerchantBrowser(f);
@@ -177,12 +217,23 @@ describe("encrypted merchant connections", () => {
 			returnTo: "/",
 		});
 		expect(challenge.status).toBe(200);
-		const readiness = await browser.json<{ ready: boolean; blockers: string[] }>(
-			"/api/platform/environments/readiness",
-			{ scope: prod },
-		);
+		const readiness = await browser.json<Readiness>("/api/platform/environments/readiness", {
+			scope: prod,
+		});
 		expect(readiness.ready).toBe(false);
 		expect(readiness.blockers).toContain("PROVIDER_REQUIRED");
+		expectMirroredBlockers(readiness);
+		expect(readiness.blockerDetails).toEqual([
+			{ code: "PROVIDER_REQUIRED", gating: true },
+			{
+				code: "PROJECTION_VALIDATION_REQUIRED",
+				gating: true,
+				connectionKind: "projection",
+				observed: { validatedAt: null, maxAgeSeconds: 900 },
+			},
+			{ code: "PUBLISHED_CATALOG_REQUIRED", gating: true },
+			{ ...capabilityDetail, gating: false },
+		]);
 	});
 });
 
@@ -352,6 +403,21 @@ it("activates only reviewed production readiness and discloses its credential on
 			{ headers: { "x-quotum-step-up-grant": token } },
 		);
 	}
+	// A validated Stripe connection that has not received an event yet, before any catalog is
+	// published: every Stripe blocker names its connection and provider.
+	await f.sql`UPDATE platform_connection_versions v SET event_verified_at=NULL FROM platform_connections c WHERE c.active_version_id=v.id AND c.kind='stripe'`;
+	const pending = await browser.json<Readiness>("/api/platform/environments/readiness", {
+		scope: prod,
+	});
+	expect(pending.ready).toBe(false);
+	expectMirroredBlockers(pending);
+	const stripeSubject = { connectionKind: "stripe", provider: "stripe" } as const;
+	expect(pending.blockerDetails.slice(0, pending.blockers.length)).toEqual([
+		{ code: "STRIPE_EVENT_REQUIRED", gating: true, ...stripeSubject },
+		{ code: "STRIPE_CATALOG_REQUIRED", gating: true, ...stripeSubject },
+		{ code: "PUBLISHED_CATALOG_REQUIRED", gating: true },
+	]);
+	await f.sql`UPDATE platform_connection_versions v SET event_verified_at=now() FROM platform_connections c WHERE c.active_version_id=v.id AND c.kind='stripe'`;
 	const [instance] = await f.sql<
 		{ id: string }[]
 	>`SELECT id FROM projects WHERE environment='production'`;
@@ -372,11 +438,44 @@ it("activates only reviewed production readiness and discloses its credential on
 		},
 	]);
 	await publishAiCreditsCatalog(new BillingRepository(), context.context);
-	const ready = await browser.json<{ ready: boolean; fingerprint: string }>(
-		"/api/platform/environments/readiness",
-		{ scope: prod },
-	);
+	const ready = await browser.json<Readiness>("/api/platform/environments/readiness", {
+		scope: prod,
+	});
 	expect(ready.ready).toBe(true);
+	expectMirroredBlockers(ready);
+	expect(readinessConnectionKinds.at(-1)).toEqual(["projection", "stripe"]);
+	// The runtime port reads the same published revision for both views.
+	const published = await createEnvironmentBillingPort().catalogReadiness(
+		context.context.projectInstanceId,
+		await f.connectionRepository.list(context.context.projectInstanceId),
+	);
+	expect(published.ready).toBe(true);
+	expect(published.revisionId).toBe(ready.catalogRevisionId);
+	// The plan and the top-up both bind Apple and Google, which have no connection.
+	expect(
+		published.capabilityDetails?.map(({ code, provider, operation, targets, reason }) => ({
+			code,
+			provider,
+			operation,
+			targets,
+			reason: reason?.code,
+		})),
+	).toEqual(
+		(
+			[
+				["catalog.product.subscription", { kind: "plan", key: "premium" }],
+				["catalog.topup", { kind: "topup", key: "ai_credits_10" }],
+			] as const
+		).flatMap(([operation, target]) =>
+			(["apple", "google"] as const).map((provider) => ({
+				code: capabilityErrorCodes.configuration.code,
+				provider,
+				operation,
+				targets: [target],
+				reason: "CONNECTION_DISABLED" as const,
+			})),
+		),
+	);
 	expect(
 		(
 			await browser.request("/api/platform/environments/activate", {
@@ -446,6 +545,42 @@ it("activates only reviewed production readiness and discloses its credential on
 	expect(JSON.stringify(await f.sql`SELECT * FROM platform_connection_operations`)).not.toContain(
 		rotated.credential,
 	);
+
+	await f.sql`UPDATE platform_connection_versions SET validated_at=validated_at-interval '16 minutes' WHERE status='active'`;
+	const stale = await browser.json<Readiness>("/api/platform/environments/readiness", {
+		scope: prod,
+	});
+	const validatedAt = (kind: string) =>
+		stale.connections.find((connection) => connection.kind === kind)?.validated_at ?? null;
+	expect(stale.ready).toBe(false);
+	expectMirroredBlockers(stale);
+	expect(stale.blockerDetails.slice(0, stale.blockers.length)).toEqual([
+		{
+			code: "PROJECTION_VALIDATION_REQUIRED",
+			gating: true,
+			connectionKind: "projection",
+			observed: { validatedAt: validatedAt("projection"), maxAgeSeconds: 900 },
+		},
+		{
+			code: "STRIPE_VALIDATION_REQUIRED",
+			gating: true,
+			connectionKind: "stripe",
+			provider: "stripe",
+			observed: { validatedAt: validatedAt("stripe"), maxAgeSeconds: 900 },
+		},
+	]);
+	expect(typeof validatedAt("stripe")).toBe("string");
+
+	// A secret that can no longer be read blocks its connection after the validation blockers.
+	await f.sql`DELETE FROM platform_connection_secrets WHERE purpose='webhookSecret'`;
+	const broken = await browser.json<Readiness>("/api/platform/environments/readiness", {
+		scope: prod,
+	});
+	expectMirroredBlockers(broken);
+	expect(broken.blockerDetails.slice(0, broken.blockers.length)).toEqual([
+		...stale.blockerDetails.slice(0, stale.blockers.length),
+		{ code: "STRIPE_SECRET_UNAVAILABLE", gating: true, ...stripeSubject },
+	]);
 });
 
 function connectionService() {

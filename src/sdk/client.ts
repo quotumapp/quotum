@@ -41,6 +41,10 @@ import type {
 	PublishedCatalog,
 } from "../catalog/types";
 import type { AppleVerifyPurchaseInput } from "../providers/apple/types";
+import type {
+	BillingAccountAvailableActions,
+	ProviderEnvironmentCapabilities,
+} from "../providers/capability-read-types";
 import type { GoogleVerifyPurchaseInput } from "../providers/google/types";
 
 export interface BillingClientOptions {
@@ -69,6 +73,7 @@ export class BillingClient {
 	readonly usage;
 	readonly purchases;
 	readonly promotions;
+	readonly providers;
 	readonly admin;
 
 	private readonly baseUrl: string;
@@ -108,6 +113,10 @@ export class BillingClient {
 				this.request<CommercialActionExecutionResult>(
 					`/v1/billing-accounts/${segment(billingAccountId)}/commercial-actions`,
 					{ method: "POST", body: { previewToken }, idempotencyKey },
+				),
+			availableActions: (billingAccountId: string) =>
+				this.request<BillingAccountAvailableActions>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/available-actions`,
 				),
 		};
 		this.usage = {
@@ -293,6 +302,10 @@ export class BillingClient {
 					`/v1/billing-accounts/${segment(billingAccountId)}/promotion-codes/validate`,
 					{ method: "POST", body: input },
 				),
+		};
+		this.providers = {
+			capabilities: () =>
+				this.request<ProviderEnvironmentCapabilities>("/v1/admin/providers/capabilities"),
 		};
 		this.admin = {
 			customer: (billingAccountId: string) =>
