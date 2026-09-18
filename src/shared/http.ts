@@ -14,6 +14,8 @@ export const errorSchema = z.object({
 		message: z.string(),
 		retryAfter: z.number().optional(),
 		requestId: z.string().optional(),
+		/** Structured context for the code; opaque here so the envelope names no domain schema. */
+		details: z.record(z.string(), z.unknown()).optional(),
 	}),
 });
 
@@ -22,7 +24,13 @@ export const ERROR_SCHEMA_REF = "#/components/schemas/QuotumError";
 
 export interface ErrorEnvelopeBody {
 	success: false;
-	error: { code: string; message: string; retryAfter?: number; requestId?: string };
+	error: {
+		code: string;
+		message: string;
+		retryAfter?: number;
+		requestId?: string;
+		details?: Record<string, unknown>;
+	};
 }
 
 /**

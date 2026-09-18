@@ -304,7 +304,14 @@ export function createApp({
 		}
 		return billingJsonResponse(
 			classified.status,
-			{ success: false, error: { code: classified.code, message: classified.message } },
+			{
+				success: false,
+				error: {
+					code: classified.code,
+					message: classified.message,
+					...(classified.details === undefined ? {} : { details: classified.details }),
+				},
+			},
 			headers,
 		);
 	});

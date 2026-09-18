@@ -736,6 +736,83 @@
           }
         ]
       },
+      "CatalogProviderCompatibility": {
+        "properties": {
+          "channel": {
+            "enum": [
+              "ios",
+              "android",
+              "web"
+            ],
+            "type": "string"
+          },
+          "compatible": {
+            "type": "boolean"
+          },
+          "productKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "provider": {
+            "enum": [
+              "apple",
+              "google",
+              "stripe"
+            ],
+            "type": "string"
+          },
+          "requiredOperations": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderOperation"
+            },
+            "type": "array"
+          },
+          "target": {
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "plan",
+                  "price",
+                  "topup"
+                ],
+                "type": "string"
+              },
+              "priceKey": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "key"
+            ],
+            "type": "object"
+          },
+          "verdicts": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeCapabilityVerdict"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "target",
+          "provider",
+          "channel",
+          "productKey",
+          "requiredOperations",
+          "compatible",
+          "verdicts"
+        ],
+        "type": "object"
+      },
       "deleteV1AdminContractsByBillingAccountIdByContractIdResponse200": {
         "properties": {
           "data": {
@@ -16900,6 +16977,10 @@
               "code": {
                 "type": "string"
               },
+              "details": {
+                "additionalProperties": {},
+                "type": "object"
+              },
               "message": {
                 "type": "string"
               },
@@ -16950,6 +17031,70 @@
           "key",
           "count",
           "lastRequest"
+        ],
+        "type": "object"
+      },
+      "RuntimeCapabilityVerdict": {
+        "properties": {
+          "blockingLayer": {
+            "enum": [
+              "provider",
+              "implementation",
+              "configuration",
+              "operation",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "composedVia": {
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "native",
+              "quotum_composed",
+              "provider_managed",
+              "unsupported",
+              "not_evaluated"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/ProviderOperation"
+          },
+          "outcome": {
+            "enum": [
+              "available",
+              "blocked",
+              "undetermined"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "apple",
+              "google",
+              "stripe"
+            ],
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityReason"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider",
+          "operation",
+          "outcome",
+          "level",
+          "blockingLayer",
+          "reasons"
         ],
         "type": "object"
       },

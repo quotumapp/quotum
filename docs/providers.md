@@ -21,6 +21,11 @@ conditions, and which tests verify them. `bun run openapi:generate` renders it a
 capability declarations under `src/providers/`, and `bun run openapi:check` fails when either is
 stale.
 
+Catalog preview and publish check every binding of a new intent against these declarations after
+its structural checks, and reject all incompatible bindings together with one
+`400 PROVIDER_CAPABILITY_UNSUPPORTED`; see
+[Provider capability errors](api.md#provider-capability-errors).
+
 <!-- provider-capabilities:start -->
 <!-- Generated from contracts/v1/provider-capabilities.json by bun run openapi:generate; do not edit. -->
 
@@ -248,11 +253,12 @@ consume response and only needs purchase and provider events.
 6. Document the connection fields in a section of this guide, next to the existing providers, for
    the connection kind the declaration names.
 7. Never add a provider branch to catalog, commercial or worker code: the declarations already
-   decide. A catalog accepts a plan trial, an add-on or an explicit price component only when every
-   bound provider implements the operations that construct requires (`catalog.trial`,
-   `catalog.addon` and the `catalog.price.*` operations), and a binding's channel must be the one
-   its declaration names. Auto top-up charges the customer itself only for a provider that
-   implements `topup.automatic`, and queues a terminal `provider_action_required` job for the rest.
+   decide. A catalog accepts a plan trial, an add-on, an explicit price component or a top-up only
+   when every bound provider implements the operations that construct requires (`catalog.trial`,
+   `catalog.addon`, the `catalog.price.*` operations and `catalog.topup`), and a binding's channel
+   must be the one its declaration names. Auto top-up charges the customer itself only for a
+   provider that implements `topup.automatic`, and queues a terminal `provider_action_required`
+   job for the rest.
    A denied consume offers `purchase_required` for the providers that implement
    `topup.customer_initiated`, and a commercial preview reports the provider whose declaration
    implements that action's operation. Express a provider difference as a declared support level or

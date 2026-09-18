@@ -873,9 +873,27 @@
       ]
     },
     {
+      "code": "PROVIDER_ACTION_REQUIRED",
+      "sources": [
+        "src/billing/errors.ts"
+      ]
+    },
+    {
       "code": "PROVIDER_BINDING_NOT_READY",
       "sources": [
         "src/catalog/control-plane.ts"
+      ]
+    },
+    {
+      "code": "PROVIDER_CAPABILITY_NOT_CONFIGURED",
+      "sources": [
+        "src/billing/errors.ts"
+      ]
+    },
+    {
+      "code": "PROVIDER_CAPABILITY_UNSUPPORTED",
+      "sources": [
+        "src/billing/errors.ts"
       ]
     },
     {
@@ -1091,8 +1109,6 @@
     {
       "code": "STRIPE_NOT_CONFIGURED",
       "sources": [
-        "src/app/customer-routes.ts",
-        "src/composition/merchant-billing.ts",
         "src/providers/stripe/service.ts"
       ]
     },

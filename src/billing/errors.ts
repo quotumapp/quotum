@@ -1,3 +1,6 @@
+import type { CatalogProviderCompatibility } from "../providers/catalog-compatibility-types";
+import type { CapabilityLayer, RuntimeCapabilityVerdict } from "../shared/provider-capabilities";
+
 export type BillingErrorClassification =
 	| "invalid_request"
 	| "unauthorized"
@@ -7,14 +10,19 @@ export type BillingErrorClassification =
 	| "persistence_conflict"
 	| "internal";
 
+export type BillingErrorDetails = Record<string, unknown>;
+
 export interface BillingErrorOptions {
 	classification?: BillingErrorClassification;
 	exposeMessage?: boolean;
+	details?: BillingErrorDetails;
 }
 
 export class BillingError extends Error {
 	readonly classification: BillingErrorClassification;
 	readonly exposeMessage: boolean;
+	/** Absent, not undefined, when the error carries no details. */
+	declare readonly details?: BillingErrorDetails;
 
 	constructor(
 		message: string,
@@ -26,6 +34,9 @@ export class BillingError extends Error {
 		this.name = new.target.name;
 		this.classification = options.classification ?? classifyStatus(status);
 		this.exposeMessage = options.exposeMessage ?? true;
+		if (options.details !== undefined) {
+			this.details = options.details;
+		}
 	}
 }
 
@@ -42,8 +53,13 @@ export class UnauthorizedBillingError extends BillingError {
 }
 
 export class NotConfiguredError extends BillingError {
-	constructor(message: string, code = "BILLING_PROVIDER_NOT_CONFIGURED", status = 501) {
-		super(message, code, status, { classification: "not_configured" });
+	constructor(
+		message: string,
+		code = "BILLING_PROVIDER_NOT_CONFIGURED",
+		status = 501,
+		details?: BillingErrorDetails,
+	) {
+		super(message, code, status, { classification: "not_configured", details });
 	}
 }
 
@@ -71,11 +87,60 @@ export class InternalBillingError extends BillingError {
 	}
 }
 
+/**
+ * Wire code, status and classification for a capability rejection, keyed by the verdict's blocking
+ * layer. `PROVIDER_OPERATION_UNCERTAIN` stays reserved until a provider write can be uncertain.
+ */
+export const capabilityErrorCodes = {
+	provider: {
+		code: "PROVIDER_CAPABILITY_UNSUPPORTED",
+		status: 400,
+		classification: "invalid_request",
+	},
+	implementation: {
+		code: "PROVIDER_CAPABILITY_UNSUPPORTED",
+		status: 400,
+		classification: "invalid_request",
+	},
+	configuration: {
+		code: "PROVIDER_CAPABILITY_NOT_CONFIGURED",
+		status: 409,
+		classification: "not_configured",
+	},
+	operation: {
+		code: "PROVIDER_ACTION_REQUIRED",
+		status: 409,
+		classification: "invalid_request",
+	},
+} as const satisfies Record<
+	CapabilityLayer,
+	{ code: string; status: number; classification: BillingErrorClassification }
+>;
+
+export type CapabilityErrorDetails =
+	| { verdict: RuntimeCapabilityVerdict }
+	| { providerCompatibility: CatalogProviderCompatibility[] };
+
+/** A rejection decided by a provider capability declaration rather than by the provider. */
+export class CapabilityError extends BillingError {
+	declare readonly details: CapabilityErrorDetails;
+
+	constructor(
+		message: string,
+		readonly blockingLayer: CapabilityLayer,
+		details: CapabilityErrorDetails,
+	) {
+		const { code, status, classification } = capabilityErrorCodes[blockingLayer];
+		super(message, code, status, { classification, exposeMessage: true, details });
+	}
+}
+
 export interface ClassifiedBillingError {
 	code: string;
 	message: string;
 	status: number;
 	classification: BillingErrorClassification;
+	details?: BillingErrorDetails;
 }
 
 export function isBillingError(value: unknown): value is BillingError {
@@ -89,6 +154,7 @@ export function classifyBillingError(error: unknown): ClassifiedBillingError {
 			message: error.exposeMessage ? error.message : "Billing request failed",
 			status: error.status,
 			classification: error.classification,
+			...(error.details === undefined || !error.exposeMessage ? {} : { details: error.details }),
 		};
 	}
 

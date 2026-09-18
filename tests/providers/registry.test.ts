@@ -10,7 +10,7 @@ import type {
 	GooglePlayBillingServiceLike,
 	StripeBillingServiceLike,
 } from "../../src/app/types";
-import { NotConfiguredError } from "../../src/billing/errors";
+import { CapabilityError, NotConfiguredError } from "../../src/billing/errors";
 import type { BillingRepository } from "../../src/db/repository";
 import type { AppleBillingEnv, GooglePlayBillingEnv, StripeBillingEnv } from "../../src/env";
 import type {
@@ -46,6 +46,7 @@ import {
 	type BillingProvider,
 	billingProviders,
 	declaredProviders,
+	evaluateCapability,
 	type ProviderOperation,
 	providerOperations,
 } from "../../src/shared/provider-capabilities";
@@ -204,6 +205,20 @@ function errorShape(error: unknown) {
 		code: error.code,
 		status: error.status,
 		classification: error.classification,
+	};
+}
+
+function capabilityErrorShape(error: unknown) {
+	if (!(error instanceof CapabilityError)) throw new Error("expected a CapabilityError");
+	return {
+		name: error.name,
+		message: error.message,
+		code: error.code,
+		status: error.status,
+		classification: error.classification,
+		exposeMessage: error.exposeMessage,
+		blockingLayer: error.blockingLayer,
+		details: error.details,
 	};
 }
 
@@ -440,27 +455,117 @@ describe("provider registry", () => {
 			overrides: { voysee: { stripeBillingService: stripeFake, appleStoreKitService: appleFake } },
 		});
 
+		const through = { through: "implementation" } as const;
+		const appleCheckoutVerdict = evaluateCapability(
+			appleCapabilities,
+			"checkout.hosted",
+			{},
+			through,
+		);
+
 		const stripe = await registry.require(project, "stripe", "checkout.hosted");
 		expect(stripe.provider).toBe("stripe");
-		expect(
-			errorShape(await rejection(registry.require(project, "stripe", "subscription.change.apply"))),
-		).toEqual({
+		const unserved = await rejection(
+			registry.require(project, "stripe", "subscription.change.apply"),
+		);
+		expect(errorShape(unserved)).toEqual({
 			name: "NotConfiguredError",
 			message: "Stripe provider does not serve subscription.change.apply",
 			code: "BILLING_PROVIDER_NOT_CONFIGURED",
 			status: 503,
 			classification: "not_configured",
 		});
+		expect((unserved as NotConfiguredError).details).toEqual({
+			provider: "stripe",
+			operation: "subscription.change.apply",
+		});
 		expect(
-			errorShape(await rejection(registry.require(project, "apple", "checkout.hosted"))),
+			capabilityErrorShape(await rejection(registry.require(project, "apple", "checkout.hosted"))),
 		).toEqual({
-			name: "NotConfiguredError",
-			message: "Apple StoreKit provider does not serve checkout.hosted",
-			code: "BILLING_PROVIDER_NOT_CONFIGURED",
-			status: 501,
-			classification: "not_configured",
+			name: "CapabilityError",
+			message: "Apple StoreKit provider does not support checkout.hosted",
+			code: "PROVIDER_CAPABILITY_UNSUPPORTED",
+			status: 400,
+			classification: "invalid_request",
+			exposeMessage: true,
+			blockingLayer: "provider",
+			details: { verdict: { ...appleCheckoutVerdict, provider: "apple" } },
 		});
 		expect((await registry.require(project, "apple", "purchase.verify")).provider).toBe("apple");
+	});
+
+	it("checks the declaration before resolving a connection", async () => {
+		const { connections, resolved } = recordingConnections();
+		const { getRepository, scopedFor } = fakeRepository();
+		const registry = createProviderRegistry({
+			connections,
+			getRepository,
+			clientFactories: fakeClientFactories(),
+		});
+
+		for (const provider of ["apple", "google"] as const) {
+			const error = await rejection(registry.require(project, provider, "checkout.hosted"));
+			expect(error).toBeInstanceOf(CapabilityError);
+			expect((error as CapabilityError).details).toEqual({
+				verdict: expect.objectContaining({
+					provider,
+					operation: "checkout.hosted",
+					outcome: "blocked",
+					blockingLayer: "provider",
+				}),
+			});
+			const unconfigured = await rejection(
+				registry.require(otherProject, provider, "checkout.hosted"),
+			);
+			expect(unconfigured).toBeInstanceOf(CapabilityError);
+		}
+		expect(resolved).toEqual([]);
+		expect(scopedFor).toEqual([]);
+
+		expect((await registry.require(project, "apple", "purchase.verify")).provider).toBe("apple");
+		expect(resolved).toEqual([{ project: "voysee", kind: "apple", purpose: "new" }]);
+	});
+
+	it("reports a planned implementation from the registered declaration", async () => {
+		const { connections, resolved } = recordingConnections();
+		const plannedCheckout = {
+			...stripeRegistryEntry,
+			declaration: {
+				...stripeCapabilities,
+				operations: {
+					...stripeCapabilities.operations,
+					"checkout.hosted": {
+						...stripeCapabilities.operations["checkout.hosted"],
+						verification: {
+							...stripeCapabilities.operations["checkout.hosted"].verification,
+							status: "planned",
+						},
+					},
+				},
+			},
+		} as AnyProviderRegistryEntry;
+		const registry = createProviderRegistry({
+			connections,
+			getRepository: fakeRepository().getRepository,
+			entries: [plannedCheckout],
+		});
+
+		const error = await rejection(registry.require(project, "stripe", "checkout.hosted"));
+		expect(capabilityErrorShape(error)).toMatchObject({
+			name: "CapabilityError",
+			message: "Stripe provider does not support checkout.hosted",
+			code: "PROVIDER_CAPABILITY_UNSUPPORTED",
+			status: 400,
+			blockingLayer: "implementation",
+			details: {
+				verdict: {
+					provider: "stripe",
+					blockingLayer: "implementation",
+					reasons: [expect.objectContaining({ layer: "implementation" })],
+				},
+			},
+		});
+		expect(resolved).toEqual([]);
 	});
 
 	it("uses per-project overrides by override key, including an explicit null", async () => {

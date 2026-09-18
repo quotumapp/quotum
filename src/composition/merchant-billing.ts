@@ -26,9 +26,14 @@ import {
 	promotionCodeInputs,
 	revokePromotionRedemptionBodySchema,
 } from "../app/promotion-routes";
-import { requireStripeBillingService } from "../app/provider-services";
+import { requireProviderMethod, requireStripeBillingService } from "../app/provider-services";
 import type { ProjectProviderServiceResolver } from "../app/types";
-import { BillingError, InvalidRequestError, isBillingError } from "../billing/errors";
+import {
+	BillingError,
+	classifyBillingError,
+	InvalidRequestError,
+	isBillingError,
+} from "../billing/errors";
 import { encodeUsageCursor } from "../billing/insights";
 import { MeteringService } from "../billing/metering";
 import type { BillingRepository } from "../db/repository";
@@ -164,10 +169,13 @@ export function createMerchantBillingPort(input: {
 			case "account.summary":
 				return ok(await repo.getCustomerBillingSummary(project, account()));
 			case "account.billing": {
-				const service = await stripe();
-				if (!service.getBillingAccount)
-					throw new BillingError("Billing account is unavailable", "STRIPE_NOT_CONFIGURED", 503);
-				return ok(await service.getBillingAccount(account()));
+				const getBillingAccount = requireProviderMethod(
+					await stripe(),
+					"stripe",
+					"reads.billingAccount",
+					"Billing account is unavailable",
+				);
+				return ok(await getBillingAccount(account()));
 			}
 			case "controls": {
 				const q = parse(
@@ -399,15 +407,14 @@ export function createMerchantBillingPort(input: {
 				);
 			case "commercial.preview": {
 				const body = parse(commercialActionPreviewBodySchema, command.body);
-				const service = await stripe();
-				if (!service.previewCommercialAction)
-					throw new BillingError(
-						"Commercial previews are unavailable",
-						"STRIPE_NOT_CONFIGURED",
-						503,
-					);
+				const previewCommercialAction = requireProviderMethod(
+					await stripe(),
+					"stripe",
+					"commercial.preview",
+					"Commercial previews are unavailable",
+				);
 				return ok(
-					await service.previewCommercialAction({
+					await previewCommercialAction({
 						billingAccountId: account(),
 						intent: body.intent,
 					}),
@@ -415,14 +422,13 @@ export function createMerchantBillingPort(input: {
 			}
 			case "commercial.execute": {
 				const body = parse(commercialActionExecuteBodySchema, command.body);
-				const service = await stripe();
-				if (!service.executeCommercialAction)
-					throw new BillingError(
-						"Commercial actions are unavailable",
-						"STRIPE_NOT_CONFIGURED",
-						503,
-					);
-				const result = await service.executeCommercialAction({
+				const executeCommercialAction = requireProviderMethod(
+					await stripe(),
+					"stripe",
+					"commercial.execute",
+					"Commercial actions are unavailable",
+				);
+				const result = await executeCommercialAction({
 					billingAccountId: account(),
 					previewToken: body.previewToken,
 					idempotencyKey: requireKey(command),
@@ -436,17 +442,16 @@ export function createMerchantBillingPort(input: {
 			try {
 				return await run(command);
 			} catch (error) {
-				if (isBillingError(error))
+				if (isBillingError(error)) {
+					const { status, code, message, details } = classifyBillingError(error);
 					return {
-						status: error.status,
+						status,
 						body: {
 							success: false,
-							error: {
-								code: error.code,
-								message: error.exposeMessage ? error.message : "Billing request failed",
-							},
+							error: { code, message, ...(details === undefined ? {} : { details }) },
 						},
 					};
+				}
 				throw error;
 			}
 		},

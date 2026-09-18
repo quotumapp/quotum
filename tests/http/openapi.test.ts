@@ -7,6 +7,7 @@ import { generateOpenApi } from "../../src/composition/openapi";
 import { MERCHANT_AUTH_POST_PATHS } from "../../src/platform/app";
 import { merchantBillingOperations } from "../../src/platform/application/billing-port";
 import { TeamViewSchema } from "../../src/platform/schemas";
+import { plannedProviders } from "../../src/shared/provider-capabilities";
 
 const METHODS = ["get", "post", "put", "delete", "patch"] as const;
 
@@ -178,6 +179,98 @@ test("documents request bodies, required headers and the named schemas clients i
 	expect(
 		document.components?.schemas?.postV1BillingAccountsByBillingAccountIdUsageCheckResponse200,
 	).not.toHaveProperty("additionalProperties");
+});
+
+/** Declaration-level schemas that name planned providers; no operation may reach them. */
+const DECLARATION_ONLY_SCHEMAS = [
+	"CapabilityVerdict",
+	"ProviderCapabilityDeclaration",
+	"ProviderCapabilityMatrix",
+];
+
+/**
+ * Walks every operation's parameters, request body and responses, following `$ref`, and returns
+ * the named schemas it reaches plus every planned-provider value found on the way.
+ */
+function operationReach(document: OpenAPIObject) {
+	const schemas = new Set<string>();
+	const planned: string[] = [];
+	const plannedValues = new Set<string>(plannedProviders);
+	const resolved = new Set<string>();
+	const visit = (node: unknown, trail: string): void => {
+		if (typeof node === "string") {
+			if (plannedValues.has(node)) planned.push(`${trail}: ${node}`);
+			return;
+		}
+		if (Array.isArray(node)) {
+			node.forEach((item, index) => {
+				visit(item, `${trail}/${index}`);
+			});
+			return;
+		}
+		if (typeof node !== "object" || node === null) return;
+		for (const [key, value] of Object.entries(node)) {
+			if (plannedValues.has(key)) planned.push(`${trail}: ${key}`);
+			if (key === "$ref" && typeof value === "string") {
+				if (resolved.has(value)) continue;
+				resolved.add(value);
+				const name = /^#\/components\/schemas\/([^/]+)$/.exec(value)?.[1];
+				if (name !== undefined) schemas.add(name);
+				const target = value
+					.slice(2)
+					.split("/")
+					.reduce<unknown>(
+						(parent, segment) =>
+							(parent as Record<string, unknown> | undefined)?.[
+								segment.replaceAll("~1", "/").replaceAll("~0", "~")
+							],
+						document,
+					);
+				if (target === undefined) throw new Error(`${trail}: unresolved ${value}`);
+				visit(target, value);
+				continue;
+			}
+			visit(value, `${trail}/${key}`);
+		}
+	};
+	for (const { path, method, operation } of operations(document)) {
+		const trail = `${method.toUpperCase()} ${path}`;
+		visit(operation.parameters, `${trail} parameters`);
+		visit(operation.requestBody, `${trail} requestBody`);
+		visit(operation.responses, `${trail} responses`);
+	}
+	return { schemas, planned };
+}
+
+test("no operation reaches declaration-only capability schemas or a planned provider", async () => {
+	const document = await generateOpenApi("0.0.0-test");
+	for (const name of [...DECLARATION_ONLY_SCHEMAS, "RuntimeCapabilityVerdict"])
+		expect(document.components?.schemas?.[name], name).toBeDefined();
+
+	const reach = operationReach(document);
+	expect(reach.schemas.has("QuotumError")).toBe(true);
+	expect(DECLARATION_ONLY_SCHEMAS.filter((name) => reach.schemas.has(name))).toEqual([]);
+	expect(reach.planned).toEqual([]);
+
+	// The walk itself must see a declaration schema and its planned provider once a path refers to it.
+	const leaked = structuredClone(document);
+	const [first] = operations(leaked);
+	if (first === undefined) throw new Error("The document has no operations");
+	first.operation.responses = {
+		...first.operation.responses,
+		"299": {
+			description: "leak",
+			content: {
+				"application/json": {
+					schema: { $ref: "#/components/schemas/ProviderCapabilityMatrix" },
+				},
+			},
+		},
+	};
+	const leakedReach = operationReach(leaked);
+	expect(leakedReach.schemas.has("ProviderCapabilityMatrix")).toBe(true);
+	expect(leakedReach.schemas.has("ProviderCapabilityDeclaration")).toBe(true);
+	expect(leakedReach.planned.length).toBeGreaterThan(0);
 });
 
 test("new literal routes must register OpenAPI detail metadata", async () => {

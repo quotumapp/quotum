@@ -13,12 +13,11 @@ import { executeOne, executeRows, jsonb } from "../db/repository/query";
 import type { QueryExecutor, TransactionalQueryExecutor } from "../db/repository/types";
 import type { ProjectInstanceContext } from "../projects/context";
 import {
-	bindingImplementsCatalogTarget,
-	type CatalogCapabilityTarget,
 	type ProviderCapabilityLookup,
 	providerCapabilityCatalog,
 } from "../providers/capabilities";
 import { toIso } from "../shared/date";
+import { assertCatalogProviderCompatibility } from "./provider-compatibility";
 import type {
 	CatalogControlIntent,
 	CatalogControlPlaneLike,
@@ -105,6 +104,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		input: CatalogPreviewInput,
 	): Promise<CatalogPreview> {
 		const catalog = normalizeCatalog(input.catalog, this.capabilities);
+		assertCatalogProviderCompatibility(catalog, this.capabilities);
 		return await this.transaction(async (tx) => {
 			const projectState = await readProjectCatalog(tx, project, false);
 			assertExpectedRevision(input.expectedRevision, projectState.revision);
@@ -164,6 +164,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		input: CatalogPublishInput,
 	): Promise<CatalogPublishResult> {
 		const catalog = normalizeCatalog(input.catalog, this.capabilities);
+		assertCatalogProviderCompatibility(catalog, this.capabilities);
 		return await this.transaction(async (tx) => {
 			const projectState = await readProjectCatalog(tx, project, true);
 			const token = input.previewToken.trim();
@@ -405,6 +406,10 @@ function assertExpectedRevision(expected: number | null, actual: number | null):
 	}
 }
 
+/**
+ * Structural checks only: provider capabilities are asserted on new intents in preview and
+ * publish, never on stored catalogs. `capabilities` supplies each provider's binding channel.
+ */
 function normalizeCatalog(
 	catalog: CatalogIntent,
 	capabilities: ProviderCapabilityLookup,
@@ -450,11 +455,7 @@ function normalizeCatalog(
 				? null
 				: plan.basePrice === null
 					? null
-					: normalizePrice(plan.basePrice, "base price", capabilities, {
-							kind: "price",
-							plan,
-							item: null,
-						});
+					: normalizePrice(plan.basePrice, "base price", capabilities);
 		const basePrice = explicitBasePrice;
 		return {
 			...plan,
@@ -483,11 +484,7 @@ function normalizeCatalog(
 				price:
 					item.price === undefined || item.price === null
 						? null
-						: normalizePrice(item.price, `price for ${item.featureKey}`, capabilities, {
-								kind: "price",
-								plan,
-								item,
-							}),
+						: normalizePrice(item.price, `price for ${item.featureKey}`, capabilities),
 				allocationScope: item.allocationScope ?? "account",
 				rollover:
 					item.rollover === undefined || item.rollover === null
@@ -605,17 +602,6 @@ function normalizeCatalog(
 			allPlanPriceBindings(plan).map(providerBindingIdentity),
 			`plan ${plan.key} price provider binding`,
 		);
-		if (
-			((plan.trialDays ?? 0) > 0 || plan.kind === "addon") &&
-			plan.providerBindings.some(
-				(binding) =>
-					!bindingImplementsCatalogTarget(capabilities, binding.provider, { kind: "plan", plan }),
-			)
-		) {
-			throw new InvalidRequestError(
-				`Plan ${plan.key} trials and add-ons are currently supported only on Stripe web`,
-			);
-		}
 	}
 
 	const topups = catalog.topups.map((topup) => {
@@ -771,7 +757,6 @@ function normalizePrice(
 	price: CatalogPriceIntent,
 	label: string,
 	capabilities: ProviderCapabilityLookup,
-	target: CatalogCapabilityTarget,
 ): CatalogPriceIntent {
 	if (!Number.isSafeInteger(price.unitAmountMinor) || price.unitAmountMinor < 0) {
 		throw new InvalidRequestError(`${label} unitAmountMinor must be a nonnegative safe integer`);
@@ -792,15 +777,6 @@ function normalizePrice(
 		);
 	if (providerBindings.length === 0) {
 		throw new InvalidRequestError(`${label} requires at least one provider binding`);
-	}
-	if (
-		providerBindings.some(
-			(binding) => !bindingImplementsCatalogTarget(capabilities, binding.provider, target),
-		)
-	) {
-		throw new InvalidRequestError(
-			`${label} explicit price components are currently supported only on Stripe web`,
-		);
 	}
 	const pricingModel = price.pricingModel ?? "flat";
 	const tiers = (price.tiers ?? []).map((tier) => {

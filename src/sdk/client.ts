@@ -329,6 +329,7 @@ export class BillingClient {
 				error?.message ?? `Billing request failed with ${response.status}`,
 				error?.code ?? "HTTP_ERROR",
 				response.status,
+				envelopeDetails(error?.details),
 			);
 		}
 		return payload.data;
@@ -348,6 +349,7 @@ export class BillingClient {
 				error?.message ?? `Billing request failed with ${response.status}`,
 				error?.code ?? "HTTP_ERROR",
 				response.status,
+				envelopeDetails(error?.details),
 			);
 		}
 		return { data: payload.data, nextCursor: payload.pagination.nextCursor };
@@ -383,18 +385,34 @@ export class BillingClient {
 }
 
 export class BillingApiError extends Error {
+	/** Structured context from the error envelope; absent when the response carried none. */
+	declare readonly details?: Record<string, unknown>;
+
 	constructor(
 		message: string,
 		readonly code: string,
 		readonly status: number,
+		details?: Record<string, unknown>,
 	) {
 		super(message);
 		this.name = "BillingApiError";
+		if (details !== undefined) {
+			this.details = details;
+		}
 	}
 }
 
+function envelopeDetails(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
 type ApiEnvelope<T> = { success: true; data: T } | ApiFailure;
-type ApiFailure = { success: false; error: { code: string; message: string } };
+type ApiFailure = {
+	success: false;
+	error: { code: string; message: string; details?: Record<string, unknown> };
+};
 type PagedEnvelope<T> = {
 	success: true;
 	data: T[];

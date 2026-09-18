@@ -9,6 +9,7 @@ import * as responses from "./contracts/customer-responses";
 import {
 	requireAppleStoreKitService,
 	requireGooglePlayBillingService,
+	requireProviderMethod,
 	requireStripeBillingService,
 } from "./provider-services";
 import { privateProject, rejectCallerProjectSelectorBody } from "./request-context";
@@ -207,13 +208,15 @@ export function registerCustomerRoutes({
 	app.get(
 		"/v1/catalog",
 		async ({ project }) => {
-			const stripe = requireStripeBillingService(
-				await providerServices.stripeBillingService(privateProject(project)),
+			const getCatalog = requireProviderMethod(
+				requireStripeBillingService(
+					await providerServices.stripeBillingService(privateProject(project)),
+				),
+				"stripe",
+				"reads.catalog",
+				"Stripe catalog is not available",
 			);
-			if (stripe.getCatalog === undefined) {
-				throw new BillingError("Stripe catalog is not available", "STRIPE_NOT_CONFIGURED", 503);
-			}
-			const catalog = await stripe.getCatalog();
+			const catalog = await getCatalog();
 			return { success: true, data: catalog };
 		},
 		{
@@ -232,17 +235,15 @@ export function registerCustomerRoutes({
 	app.get(
 		"/v1/billing-accounts/:billingAccountId/billing-account",
 		async ({ params, project }) => {
-			const stripe = requireStripeBillingService(
-				await providerServices.stripeBillingService(privateProject(project)),
+			const getBillingAccount = requireProviderMethod(
+				requireStripeBillingService(
+					await providerServices.stripeBillingService(privateProject(project)),
+				),
+				"stripe",
+				"reads.billingAccount",
+				"Stripe billing account is not available",
 			);
-			if (stripe.getBillingAccount === undefined) {
-				throw new BillingError(
-					"Stripe billing account is not available",
-					"STRIPE_NOT_CONFIGURED",
-					503,
-				);
-			}
-			const account = await stripe.getBillingAccount(params.billingAccountId);
+			const account = await getBillingAccount(params.billingAccountId);
 			return { success: true, data: account };
 		},
 		{
@@ -261,17 +262,15 @@ export function registerCustomerRoutes({
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/commercial-actions/preview",
 		async ({ params, body, project }) => {
-			const stripe = requireStripeBillingService(
-				await providerServices.stripeBillingService(privateProject(project)),
+			const previewCommercialAction = requireProviderMethod(
+				requireStripeBillingService(
+					await providerServices.stripeBillingService(privateProject(project)),
+				),
+				"stripe",
+				"commercial.preview",
+				"Commercial previews are not available",
 			);
-			if (stripe.previewCommercialAction === undefined) {
-				throw new BillingError(
-					"Commercial previews are not available",
-					"STRIPE_NOT_CONFIGURED",
-					503,
-				);
-			}
-			const preview = await stripe.previewCommercialAction({
+			const preview = await previewCommercialAction({
 				billingAccountId: params.billingAccountId,
 				intent: body.intent,
 			});
@@ -300,17 +299,15 @@ export function registerCustomerRoutes({
 			if (idempotencyKey === undefined || idempotencyKey === "") {
 				throw new BillingError("Invalid commercial action execution", "INVALID_REQUEST", 400);
 			}
-			const stripe = requireStripeBillingService(
-				await providerServices.stripeBillingService(privateProject(project)),
+			const executeCommercialAction = requireProviderMethod(
+				requireStripeBillingService(
+					await providerServices.stripeBillingService(privateProject(project)),
+				),
+				"stripe",
+				"commercial.execute",
+				"Commercial actions are not available",
 			);
-			if (stripe.executeCommercialAction === undefined) {
-				throw new BillingError(
-					"Commercial actions are not available",
-					"STRIPE_NOT_CONFIGURED",
-					503,
-				);
-			}
-			const result = await stripe.executeCommercialAction({
+			const result = await executeCommercialAction({
 				billingAccountId: params.billingAccountId,
 				previewToken: body.previewToken,
 				idempotencyKey,
@@ -402,7 +399,12 @@ export function registerCustomerRoutes({
 					cancelUrl: body.cancelUrl,
 				});
 			} else {
-				session = await requireRecurringCheckout(stripe)({
+				session = await requireProviderMethod(
+					stripe,
+					"stripe",
+					"checkout.createPlan",
+					"Plan Checkout is not available",
+				)({
 					...sessionInput,
 					planKey: body.planKey,
 					quantities: body.quantities,
@@ -467,17 +469,15 @@ export function registerCustomerRoutes({
 					400,
 				);
 			}
-			const stripe = requireStripeBillingService(
-				await providerServices.stripeBillingService(privateProject(project)),
+			const requestSubscriptionChange = requireProviderMethod(
+				requireStripeBillingService(
+					await providerServices.stripeBillingService(privateProject(project)),
+				),
+				"stripe",
+				"commercial.requestChange",
+				"Subscription changes are not available",
 			);
-			if (stripe.requestSubscriptionChange === undefined) {
-				throw new BillingError(
-					"Subscription changes are not available",
-					"STRIPE_NOT_CONFIGURED",
-					503,
-				);
-			}
-			const change = await stripe.requestSubscriptionChange({
+			const change = await requestSubscriptionChange({
 				billingAccountId: params.billingAccountId,
 				externalSubscriptionId: params.subscriptionId,
 				targetPlanKey: body.targetPlanKey,
@@ -533,12 +533,15 @@ export function registerCustomerRoutes({
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions/:sessionId/expire",
 		async ({ params, project }) => {
-			const stripe = requireStripeBillingService(
-				await providerServices.stripeBillingService(privateProject(project)),
+			const expireCheckoutSession = requireProviderMethod(
+				requireStripeBillingService(
+					await providerServices.stripeBillingService(privateProject(project)),
+				),
+				"stripe",
+				"checkout.expire",
+				"Checkout expiration is unavailable",
 			);
-			if (!stripe.expireCheckoutSession)
-				throw new BillingError("Checkout expiration is unavailable", "STRIPE_NOT_CONFIGURED", 503);
-			return { success: true, data: await stripe.expireCheckoutSession(params) };
+			return { success: true, data: await expireCheckoutSession(params) };
 		},
 		{
 			parse: "none",
@@ -625,15 +628,6 @@ function withoutJobProviderIdentity(change: unknown): unknown {
 		...data
 	} = change as Record<string, unknown>;
 	return data;
-}
-
-function requireRecurringCheckout(
-	service: StripeBillingServiceLike,
-): NonNullable<StripeBillingServiceLike["createRecurringCheckoutSession"]> {
-	if (service.createRecurringCheckoutSession === undefined) {
-		throw new BillingError("Plan Checkout is not available", "STRIPE_NOT_CONFIGURED", 503);
-	}
-	return service.createRecurringCheckoutSession.bind(service);
 }
 
 function recordVerificationFailure(

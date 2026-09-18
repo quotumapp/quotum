@@ -4,8 +4,11 @@
 
 The complete HTTP surface is published as [`contracts/v1/openapi.json`](../contracts/v1/openapi.json)
 with the runtime error inventory in [`contracts/v1/errors.json`](../contracts/v1/errors.json). Billing JSON operations use the envelope `{"success":true,"data":...}` or
-`{"success":false,"error":{"code":...,"message":...}}`. Error codes are extensible, so handle unknown
-codes. Health/metrics and authentication/provider callback surfaces have their own response shapes;
+`{"success":false,"error":{"code":...,"message":...}}`. An error may also carry an optional
+`details` object with structured context for its code (see
+[Provider capability errors](#provider-capability-errors)); the key is absent when there is none.
+Error codes are extensible, so handle unknown codes and ignore `details` keys you do not recognize.
+Health/metrics and authentication/provider callback surfaces have their own response shapes;
 consult the generated contract rather than applying the billing envelope to every route.
 
 Regenerate and validate after changing a route:
@@ -106,6 +109,17 @@ Retiring a plan removes it from new selection without rewriting pinned subscript
 `GET /v1/admin/catalog` returns the active intent. See
 [`examples/quickstart/catalog.json`](../examples/quickstart/catalog.json) for a minimal intent.
 
+Preview and publish validate the intent's structure first and reject the first structural problem,
+including a binding on the wrong channel, with `400 INVALID_REQUEST`. Only then do they check each
+provider binding against its provider's capability declaration: a plan with a trial, an add-on
+plan, every explicit price component (`basePrice` or an item `price`), and every top-up need the
+matching `catalog.*` operations (a top-up needs `catalog.topup`). All incompatible bindings are
+reported together as one `400 PROVIDER_CAPABILITY_UNSUPPORTED` whose
+`details.providerCompatibility` lists them in catalog order; see
+[Provider capability errors](#provider-capability-errors). The whole submitted intent is checked,
+including the plans it keeps unchanged. The published catalog is never re-validated against the
+declarations: it stays readable, and preview still compares a new intent against it.
+
 The same contract is available as code:
 
 ```sh
@@ -121,6 +135,98 @@ bun run catalog push ./billing.catalog.ts
 
 The backend SDK (`quotum-api/sdk`) wraps catalog, commercial, usage, and selected admin calls and
 keeps credentials server-side.
+
+## Provider capability errors
+
+Each provider declares which operations it supports and under which conditions; see
+[Provider capabilities](providers.md#provider-capabilities). A request that a declaration rules out
+fails before Quotum calls the provider, with a code chosen by the layer that blocked it:
+
+| Code | Status | Blocking layer | `details` |
+| --- | --- | --- | --- |
+| `PROVIDER_CAPABILITY_UNSUPPORTED` | 400 | `provider`: the provider does not offer the operation or manages it itself. `implementation`: Quotum does not implement it for that provider. | `providerCompatibility` from catalog preview and publish, otherwise `verdict` |
+| `PROVIDER_CAPABILITY_NOT_CONFIGURED` | 409 | `configuration`: the project's provider connection lacks a setting the operation needs. | `verdict` |
+| `PROVIDER_ACTION_REQUIRED` | 409 | `operation`: the request does not meet one of the operation's conditions. | `verdict` |
+
+Catalog preview and publish are the only routes that return a capability error today, always as
+`PROVIDER_CAPABILITY_UNSUPPORTED`. The two `409` codes are in the error inventory, but no route
+returns them yet.
+
+- `details.verdict` is one capability verdict: `provider`, `operation`, `outcome`, `level`,
+  `blockingLayer`, and ordered `reasons`. Each reason has its own `code`, `layer`, `observed`
+  values, and a `resolution`. Reason codes such as `PROVIDER_MANAGED` explain the verdict; they
+  are not error codes.
+- `details.providerCompatibility` lists every incompatible binding in catalog order: per plan, the
+  plan itself when it has a trial or is an add-on, then its base price and item prices; then
+  top-ups. An entry names its `target` (`kind` `plan`, `price` or `topup`, the plan or top-up
+  `key`, and `priceKey` for a price), the binding's `provider`, `channel` and `productKey`, the
+  `requiredOperations`, `compatible: false`, and the blocked `verdicts`. The message names the
+  first entry and counts the others, as in `Plan pro cannot bind apple: catalog.trial is not
+  supported (and 2 more)`.
+
+The named schemas `RuntimeCapabilityVerdict` and `CatalogProviderCompatibility` in the OpenAPI
+contract describe these objects; the envelope itself types `details` as an open object. A plan
+with a 14-day trial bound to Apple and Stripe is rejected with:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "PROVIDER_CAPABILITY_UNSUPPORTED",
+    "message": "Plan pro cannot bind apple: catalog.trial is not supported",
+    "details": {
+      "providerCompatibility": [
+        {
+          "target": { "kind": "plan", "key": "pro" },
+          "provider": "apple",
+          "channel": "ios",
+          "productKey": "pro_monthly",
+          "requiredOperations": ["catalog.trial"],
+          "compatible": false,
+          "verdicts": [
+            {
+              "provider": "apple",
+              "operation": "catalog.trial",
+              "outcome": "blocked",
+              "level": "provider_managed",
+              "blockingLayer": "provider",
+              "reasons": [
+                {
+                  "code": "PROVIDER_MANAGED",
+                  "layer": "provider",
+                  "observed": { "level": "provider_managed" },
+                  "resolution": { "kind": "none" }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+A Stripe-backed route whose Stripe service lacks the method it needs returns
+`503 BILLING_PROVIDER_NOT_CONFIGURED` with `details` `{"provider":"stripe","adapterMethod":...}`:
+
+| Route | `adapterMethod` |
+| --- | --- |
+| `GET /v1/catalog` | `reads.catalog` |
+| `GET /v1/billing-accounts/:billingAccountId/billing-account` | `reads.billingAccount` |
+| `POST /v1/billing-accounts/:billingAccountId/commercial-actions/preview` | `commercial.preview` |
+| `POST /v1/billing-accounts/:billingAccountId/commercial-actions` | `commercial.execute` |
+| `POST /v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions` with a `planKey` | `checkout.createPlan` |
+| `POST /v1/billing-accounts/:billingAccountId/subscriptions/:subscriptionId/changes` | `commercial.requestChange` |
+| `POST /v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions/:sessionId/expire` | `checkout.expire` |
+
+The merchant billing proxy returns the same code and `details` for its billing-account,
+commercial preview and commercial action operations. On `/v1`, commercial execution and
+subscription changes reject a missing `Idempotency-Key` with `400` before this check. When the
+provider has no connection at all, `BILLING_PROVIDER_NOT_CONFIGURED` carries no `details` (`503`
+for Stripe, `501` for Apple and Google). `503 STRIPE_NOT_CONFIGURED` is narrower: only the Stripe
+service returns it, when its Stripe client or billing storage lacks a dependency of subscription
+changes, commercial actions, checkout expiry, or recurring pricing.
 
 ## Promotions
 

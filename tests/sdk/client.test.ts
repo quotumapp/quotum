@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { BillingClient } from "../../src/sdk/client";
+import { BillingApiError, BillingClient } from "../../src/sdk/client";
 
 describe("BillingClient", () => {
 	it("looks up recovery with encoded account/operation IDs and no replacement mutation", async () => {
@@ -85,6 +85,63 @@ describe("BillingClient", () => {
 				status: 409,
 			}),
 		);
+	});
+
+	it("carries envelope details on API errors, for single and paged requests", async () => {
+		const details = {
+			providerCompatibility: [
+				{ target: { kind: "plan", key: "pro" }, provider: "apple", compatible: false },
+			],
+		};
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			operatorKey: "operator-secret",
+			actor: "deploy@example.com",
+			fetch: async () =>
+				Response.json(
+					{
+						success: false,
+						error: { code: "PROVIDER_CAPABILITY_UNSUPPORTED", message: "no trials", details },
+					},
+					{ status: 400 },
+				),
+		});
+
+		for (const request of [() => client.catalog.status(), () => client.usage.events("account_1")]) {
+			const error = await request().then(
+				() => null,
+				(failure: unknown) => failure,
+			);
+			expect(error).toBeInstanceOf(BillingApiError);
+			const apiError = error as BillingApiError;
+			expect(apiError.code).toBe("PROVIDER_CAPABILITY_UNSUPPORTED");
+			expect(apiError.status).toBe(400);
+			expect(apiError.message).toBe("no trials");
+			expect(apiError.details).toEqual(details);
+		}
+	});
+
+	it("omits details when the envelope has none or they are not an object", async () => {
+		for (const error of [
+			{ code: "NOT_FOUND", message: "missing" },
+			{ code: "NOT_FOUND", message: "missing", details: null },
+			{ code: "NOT_FOUND", message: "missing", details: ["unexpected"] },
+			{ code: "NOT_FOUND", message: "missing", details: "unexpected" },
+		]) {
+			const client = new BillingClient({
+				baseUrl: "https://billing.example.com",
+				apiKey: "project-secret",
+				fetch: async () => Response.json({ success: false, error }, { status: 404 }),
+			});
+			const failure = await client.usage.events("account_1").then(
+				() => null,
+				(reason: unknown) => reason,
+			);
+			expect(failure).toBeInstanceOf(BillingApiError);
+			expect(Object.hasOwn(failure as BillingApiError, "details")).toBe(false);
+			expect((failure as BillingApiError).details).toBeUndefined();
+		}
 	});
 
 	it("covers reservation lifecycles and native purchase verification with caller-owned keys", async () => {
