@@ -214,7 +214,8 @@ localDescribe("catalog control plane", () => {
 		expect(preview.status).toBe(400);
 		expect(await preview.json()).toEqual(rejection);
 
-		// Capability checks run before the preview token is read, so no preview is needed to see them.
+		// An incompatible intent can never obtain a preview token, so publish stops at the token
+		// lookup; publish-time capability checks after a declaration change are unit tested.
 		const publish = await testRequest(app, "/v1/admin/catalog/publish", {
 			method: "POST",
 			headers,
@@ -224,8 +225,11 @@ localDescribe("catalog control plane", () => {
 				catalog: trialIntent,
 			}),
 		});
-		expect(publish.status).toBe(400);
-		expect(await publish.json()).toEqual(rejection);
+		expect(publish.status).toBe(409);
+		expect(await publish.json()).toMatchObject({
+			success: false,
+			error: { code: "CATALOG_PREVIEW_NOT_FOUND" },
+		});
 
 		const [state] = await context.sql<Array<{ drafts: number; revisions: number }>>`
 			SELECT

@@ -623,3 +623,98 @@ describe("stored catalogs after a declaration changes", () => {
 		});
 	});
 });
+
+/** Answers a publish from one catalog draft; records every write so a rejection can prove none ran. */
+class PublishDraftDatabase {
+	readonly writes: string[] = [];
+
+	constructor(private readonly draft: Record<string, unknown>) {}
+
+	async execute<T>(query: unknown): Promise<T[]> {
+		return (await this.answer(renderDrizzleSql(query))) as T[];
+	}
+
+	async transaction<T>(callback: (tx: QueryExecutor) => Promise<T>): Promise<T> {
+		return await callback(this);
+	}
+
+	private async answer(text: string): Promise<Record<string, unknown>[]> {
+		if (/^\s*(INSERT|UPDATE|DELETE)\b/i.test(text)) {
+			this.writes.push(text);
+			return [];
+		}
+		if (text.includes("SELECT p.id, cr.id AS revision_id")) {
+			return [{ id: projectInstanceContext().projectInstanceId, revision_id: "7", revision: 1 }];
+		}
+		if (text.includes("FROM catalog_drafts")) return [this.draft];
+		if (text.includes("SELECT revision, intent_hash, published_at, metadata")) {
+			return [
+				{
+					revision: 2,
+					intent_hash: "b".repeat(64),
+					published_at: "2026-09-02T00:00:00.000Z",
+					metadata: {},
+				},
+			];
+		}
+		throw new Error(`Unscripted query: ${text}`);
+	}
+}
+
+describe("publish retries after a declaration changes", () => {
+	const trialCatalog = catalogOf([
+		plan("pro", {
+			trialDays: 14,
+			basePrice: flatPrice("pro-monthly", [stripe("pro-web")]),
+		}),
+	]);
+	const withoutStripeTrials = withSupport("stripe", "catalog.trial", unsupported);
+	const publishInput = {
+		expectedRevision: 1,
+		actor: "test",
+		previewToken: "c".repeat(64),
+		catalog: trialCatalog,
+	};
+
+	it("replays an already published draft instead of re-checking capabilities", async () => {
+		const database = new PublishDraftDatabase({
+			intent_hash: "b".repeat(64),
+			intent: trialCatalog,
+			base_revision: 1,
+			next_revision: 2,
+			status: "published",
+			expires_at: "2026-09-01T00:15:00.000Z",
+			published_revision_id: "8",
+		});
+		const controlPlane = new CatalogControlPlane(database, { capabilities: withoutStripeTrials });
+
+		const result = await controlPlane.publish(projectInstanceContext(), publishInput);
+
+		expect(result).toMatchObject({ revisionId: "8", revision: 2, duplicate: true });
+		expect(database.writes).toEqual([]);
+	});
+
+	it("rejects a draft that has not been published yet before writing anything", async () => {
+		const database = new PublishDraftDatabase({
+			intent_hash: "b".repeat(64),
+			intent: trialCatalog,
+			base_revision: 1,
+			next_revision: 2,
+			status: "previewed",
+			expires_at: "2999-01-01T00:00:00.000Z",
+			published_revision_id: null,
+		});
+		const controlPlane = new CatalogControlPlane(database, { capabilities: withoutStripeTrials });
+
+		const rejection = await controlPlane
+			.publish(projectInstanceContext(), publishInput)
+			.then(() => null)
+			.catch((error: unknown) => error);
+
+		expect(rejection).toBeInstanceOf(CapabilityError);
+		expect((rejection as CapabilityError).message).toBe(
+			"Plan pro cannot bind stripe: catalog.trial is not supported",
+		);
+		expect(database.writes).toEqual([]);
+	});
+});

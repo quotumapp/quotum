@@ -164,7 +164,6 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		input: CatalogPublishInput,
 	): Promise<CatalogPublishResult> {
 		const catalog = normalizeCatalog(input.catalog, this.capabilities);
-		assertCatalogProviderCompatibility(catalog, this.capabilities);
 		return await this.transaction(async (tx) => {
 			const projectState = await readProjectCatalog(tx, project, true);
 			const token = input.previewToken.trim();
@@ -202,6 +201,9 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 					true,
 				);
 			}
+			// After the retry branch: a published draft replays its result even if a declaration
+			// narrowed since, while every new publish is still checked before any write.
+			assertCatalogProviderCompatibility(catalog, this.capabilities);
 			if (draft.status !== "previewed" || new Date(draft.expires_at).getTime() <= Date.now()) {
 				throw new PersistenceConflictError(
 					"Catalog preview has expired",

@@ -118,7 +118,9 @@ reported together as one `400 PROVIDER_CAPABILITY_UNSUPPORTED` whose
 `details.providerCompatibility` lists them in catalog order; see
 [Provider capability errors](#provider-capability-errors). The whole submitted intent is checked,
 including the plans it keeps unchanged. The published catalog is never re-validated against the
-declarations: it stays readable, and preview still compares a new intent against it.
+declarations: it stays readable, and preview still compares a new intent against it. Publish checks
+capabilities after it finds the preview token, so retrying a publish that already succeeded
+returns its stored result with `duplicate: true`.
 
 The same contract is available as code:
 
