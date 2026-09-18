@@ -1,6 +1,11 @@
 import type { OnboardingDraftView, ProvisioningOperationView } from "./contracts";
 import { generateProjectApiCredential } from "./credentials/project-api-token";
 import type { MerchantSql } from "./database";
+import type { PlatformQueryExecutor } from "./persistence/query-executor";
+import {
+	PlatformOnboardingDraftRepository,
+	PlatformOrganizationRepository,
+} from "./persistence/repositories";
 import { MerchantError, requireCapability } from "./security";
 import type { MerchantIdentity, MerchantStore } from "./store";
 
@@ -53,7 +58,7 @@ export class MerchantOnboarding {
 	 * slug. A caller that did not read the draft (no revision) is told to continue it instead.
 	 */
 	private async renameOrganization(
-		tx: MerchantSql,
+		executor: PlatformQueryExecutor,
 		identity: MerchantIdentity,
 		draft: OnboardingDraftView,
 		input: { name: string; slug: string; revision?: number },
@@ -65,8 +70,14 @@ export class MerchantOnboarding {
 				"An organization already exists. Continue your saved onboarding.",
 				409,
 			);
+		const drafts = new PlatformOnboardingDraftRepository(executor);
+		const organizations = new PlatformOrganizationRepository(executor);
 		// Renaming is organization administration; the lock also serializes it with provisioning.
-		const member = await this.store.membership(tx, identity.principalId, organization.slug, true);
+		const member = await this.store.membershipByOrganizationId(
+			executor,
+			identity.principalId,
+			organization.id,
+		);
 		requireCapability(member.role, "team.manage");
 		if (draft.revision !== input.revision)
 			throw new MerchantError(
@@ -75,29 +86,35 @@ export class MerchantOnboarding {
 				409,
 			);
 		if (organization.name === input.name && organization.slug === input.slug) return draft;
-		const taken =
-			await tx`SELECT id FROM platform_organizations WHERE slug=${input.slug} AND id<>${organization.id}`;
-		if (taken.length)
+		if (await organizations.slugBelongsToAnotherOrganization(input.slug, organization.id))
 			throw new MerchantError("SLUG_UNAVAILABLE", "Choose a different organization address.", 409);
 		// Conditional on the revision read above, so a concurrent step wins and this one reports it.
-		const bumped =
-			await tx`UPDATE platform_onboarding_drafts SET revision=revision+1,updated_at=${this.store.now()} WHERE id=${draft.id} AND revision=${input.revision} RETURNING id`;
-		if (!bumped.length)
+		const bumped = await drafts.bumpRevision({
+			id: draft.id,
+			expectedRevision: input.revision,
+			updatedAt: this.store.now(),
+		});
+		if (!bumped)
 			throw new MerchantError(
 				"DRAFT_CHANGED",
 				"Your draft changed. Refresh it before continuing.",
 				409,
 			);
-		await tx`UPDATE platform_organizations SET name=${input.name},slug=${input.slug},updated_at=${this.store.now()} WHERE id=${organization.id}`;
+		await organizations.update({
+			id: organization.id,
+			name: input.name,
+			slug: input.slug,
+			updatedAt: this.store.now(),
+		});
 		await this.store.audit(
-			tx,
+			executor,
 			identity.principalId,
 			organization.id,
 			"organization.updated",
 			organization.id,
 			{ previous: { name: organization.name, slug: organization.slug } },
 		);
-		const result = await this.store.draft(identity.principalId, tx);
+		const result = await this.store.draft(identity.principalId, executor);
 		if (!result) throw new Error("Draft disappeared");
 		return result;
 	}

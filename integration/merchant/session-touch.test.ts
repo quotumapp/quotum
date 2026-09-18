@@ -33,7 +33,7 @@ function observingSql(onQuery: (query: string, rows: object[]) => Promise<void>)
 			await onQuery(strings.join("?"), rows);
 			return rows;
 		},
-		{ begin: f.sql.begin, instances: f.sql.instances },
+		{ query: f.sql.query, begin: f.sql.begin, instances: f.sql.instances },
 	);
 	return query;
 }

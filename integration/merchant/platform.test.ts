@@ -201,6 +201,34 @@ describe("merchant platform transactions", () => {
 			await errorCode({ name: "Acme", slug: "acme-labs", revision: started.revision }),
 		).toEqual([409, "DRAFT_CHANGED"]);
 	});
+	it("reports a concurrent organization rename loser as a changed draft", async () => {
+		const first = new MerchantBrowser(f);
+		await first.signup();
+		const original = await first.json<OnboardingDraftView>(
+			"/api/platform/onboarding/organization",
+			{ name: "Acme Company", slug: "acme" },
+		);
+		const second = new MerchantBrowser(f);
+		await f.sql`DELETE FROM platform_rate_limits`;
+		await second.login("owner@example.com");
+
+		const responses = await Promise.all([
+			first.request(
+				"/api/platform/onboarding/organization",
+				{ name: "First Rename", slug: "first-rename", revision: original.revision },
+				{ key: "first-concurrent-rename" },
+			),
+			second.request(
+				"/api/platform/onboarding/organization",
+				{ name: "Second Rename", slug: "second-rename", revision: original.revision },
+				{ key: "second-concurrent-rename" },
+			),
+		]);
+		expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+		const loser = responses.find((response) => response.status === 409);
+		if (!loser) throw new Error("Expected one concurrent rename to lose");
+		expect((await loser.json()).error?.code).toBe("DRAFT_CHANGED");
+	});
 	it("rejects stale drafts, changed idempotency requests, and cross-organization reads", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();
