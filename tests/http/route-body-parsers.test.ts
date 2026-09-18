@@ -1,8 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Elysia } from "elysia";
-import { createConnectionEventApp } from "../../src/composition/connection-events";
-import { buildDocumentedApps } from "../../src/composition/openapi";
-import { createStripeAppEvents } from "../../src/composition/stripe-app-events";
+import { routeTables } from "../helpers/route-tables";
 
 /**
  * Parsers a route that accepts a body may use: `none`, or a named parser that reads under a cap
@@ -10,16 +7,6 @@ import { createStripeAppEvents } from "../../src/composition/stripe-app-events";
  * parser, Elysia's built-in parsers read the whole body, and they run before authentication.
  */
 const BOUNDED_PARSERS = new Set(["none", "flexJson", "merchantJson"]);
-
-function routeTables(): readonly Elysia[] {
-	// Registration-only stubs: the ingress apps are built but never receive a request here.
-	const repository = { sql: {} } as never;
-	return [
-		...buildDocumentedApps(),
-		createConnectionEventApp(repository) as unknown as Elysia,
-		createStripeAppEvents(repository, {} as never).app as unknown as Elysia,
-	];
-}
 
 test("every route that can receive a body declares a bounded parser", () => {
 	const unbounded: string[] = [];

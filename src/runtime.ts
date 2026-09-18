@@ -24,7 +24,7 @@ import {
 	StoreEventReplayJobRepository,
 } from "./db/repository-domains";
 import type { BillingEnv } from "./env";
-import { createPinoBillingLogger } from "./observability/logger";
+import { createPinoBillingLogger, safelyLogError } from "./observability/logger";
 import { createInMemoryBillingMetrics } from "./observability/metrics";
 import {
 	createSentryBillingLogger,
@@ -227,10 +227,9 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
 	});
 
-	const sentryRequestScope =
-		dependencies.sentry === undefined || env.sentry.dsn === null
-			? undefined
-			: createSentryRequestScope(dependencies.sentry);
+	const sentry = env.sentry.dsn === null ? undefined : dependencies.sentry;
+	const sentryRequestScope = sentry && createSentryRequestScope(sentry, { service: "billing" });
+	const merchantSentryScope = sentry && createSentryRequestScope(sentry, { service: "merchant" });
 	const staff = createApp({
 		env,
 		entitlementService: new EntitlementService(billingRepository),
@@ -255,6 +254,18 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		...dependencies.merchant,
 		config: merchantConfig,
 		staffRequestScope: sentryRequestScope,
+		merchantRequestScope: merchantSentryScope,
+		onMerchantUnexpectedError: (error, report) => {
+			const url = new URL(report.request.url);
+			safelyLogError(logger, "Merchant request failed", error, {
+				requestId: report.requestId,
+				method: report.request.method,
+				path: url.pathname,
+				route: report.route,
+				status: String(report.status),
+				code: report.code,
+			});
+		},
 		registerBackground: (worker) => {
 			jobs.push({
 				name: "stripe_app_events",

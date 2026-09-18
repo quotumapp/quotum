@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { z } from "zod";
 import { readCappedText } from "../shared/body-limit";
-import { HTTP_APP_CONFIG, operationDetail } from "../shared/http";
+import { type ElysiaPluginLike, HTTP_APP_CONFIG, operationDetail } from "../shared/http";
 import type { MerchantAuth } from "./auth";
 import { SIGNUP_COOKIE } from "./auth";
 import { merchantBillingRoute } from "./billing";
@@ -55,6 +55,13 @@ export const MERCHANT_AUTH_POST_PATHS = new Set([
 	"/request-password-reset",
 	"/reset-password",
 ]);
+export interface MerchantUnexpectedErrorReport {
+	request: Request;
+	requestId: string | undefined;
+	route: string | undefined;
+	status: number;
+	code: string;
+}
 export interface MerchantAppDependencies {
 	store: MerchantStore;
 	connections?: MerchantConnections;
@@ -63,6 +70,8 @@ export interface MerchantAppDependencies {
 	auth: MerchantAuth;
 	onboarding?: MerchantOnboarding;
 	billing?: (request: Request, identity: MerchantIdentity) => Promise<Response>;
+	requestObservabilityMiddleware?: ElysiaPluginLike;
+	onUnexpectedError?: (error: unknown, report: MerchantUnexpectedErrorReport) => void;
 }
 
 const MERCHANT_MAX_BODY_BYTES = 64 * 1024;
@@ -116,8 +125,13 @@ export function createMerchantApp({
 	connections,
 	stripeOAuth,
 	billing,
+	requestObservabilityMiddleware,
+	onUnexpectedError,
 }: MerchantAppDependencies) {
 	const app = new Elysia(HTTP_APP_CONFIG);
+	if (requestObservabilityMiddleware !== undefined) {
+		app.use(requestObservabilityMiddleware);
+	}
 	const team = new MerchantTeam(store, mailer);
 	const stepUp = new MerchantStepUp(store);
 	const current = (request: Request) => store.authenticate(request);
@@ -146,7 +160,7 @@ export function createMerchantApp({
 
 	app.parser("merchantJson", ({ request }: { request: Request }) => merchantJson(request));
 
-	app.onError(({ request, error, set, code }) => {
+	app.onError(({ request, error, set, code, route }) => {
 		// Elysia wraps anything a parser throws in a ParseError; merchantJson's own 413 and 415
 		// errors must surface unchanged, so unwrap the cause before the generic mappings.
 		const cause = code === "PARSE" ? (error as { cause?: unknown }).cause : error;
@@ -164,6 +178,19 @@ export function createMerchantApp({
 							);
 		if (failure.retryAfter !== undefined) set.headers["retry-after"] = String(failure.retryAfter);
 		const requestId = requestIds.get(request);
+		if (failure.status >= 500 && onUnexpectedError) {
+			try {
+				onUnexpectedError(cause, {
+					request,
+					requestId,
+					route,
+					status: failure.status,
+					code: failure.code,
+				});
+			} catch {
+				// Observability must not alter merchant behavior.
+			}
+		}
 		set.status = failure.status;
 		return {
 			success: false as const,

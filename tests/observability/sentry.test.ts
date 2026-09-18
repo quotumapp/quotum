@@ -13,6 +13,8 @@ import { testRequest } from "../helpers/openapi";
 
 const sentryEnv: SentryEnv = {
 	dsn: "https://sentry.example/123",
+	environment: "test",
+	release: "quotum-api@1.2.3",
 	enableLogs: true,
 	tracesSampleRate: 0.01,
 	logLevel: "warn",
@@ -33,8 +35,18 @@ describe("initializeSentry", () => {
 		expect(initCalls).toHaveLength(1);
 		const options = initCalls[0] as {
 			dsn: string;
+			environment: string;
+			release?: string;
 			enableLogs: boolean;
 			tracesSampleRate: number;
+			dataCollection: Record<string, unknown>;
+			maxValueLength: number;
+			normalizeDepth: number;
+			integrations(defaults: Array<{ name: string }>): Array<{ name: string }>;
+			beforeSend(event: unknown, hint: unknown): unknown | null;
+			beforeSendTransaction(event: unknown, hint: unknown): unknown | null;
+			beforeSendSpan(span: unknown): unknown;
+			beforeBreadcrumb(breadcrumb: unknown, hint?: unknown): unknown | null;
 			beforeSendLog(log: {
 				level: string;
 				message: string;
@@ -42,8 +54,27 @@ describe("initializeSentry", () => {
 			}): unknown | null;
 		};
 		expect(options.dsn).toBe("https://sentry.example/123");
+		expect(options.environment).toBe("test");
+		expect(options.release).toBe("quotum-api@1.2.3");
 		expect(options.enableLogs).toBe(true);
 		expect(options.tracesSampleRate).toBe(0.01);
+		expect(options.dataCollection).toEqual({
+			userInfo: false,
+			cookies: false,
+			httpHeaders: { request: false, response: false },
+			httpBodies: [],
+			urlQueryParams: false,
+			graphQL: { document: false, variables: false },
+			genAI: { inputs: false, outputs: false },
+			databaseQueryData: false,
+			stackFrameVariables: false,
+		});
+		expect(options.maxValueLength).toBe(1024);
+		expect(options.normalizeDepth).toBe(5);
+		expect(
+			options.integrations([{ name: "Console" }, { name: "Http" }]).map((i) => i.name),
+		).toEqual(["Http"]);
+		expect("sendDefaultPii" in options).toBe(false);
 
 		const noisyInfo = { level: "info", message: "Routine detail" };
 		const workerSummary = {
@@ -55,6 +86,95 @@ describe("initializeSentry", () => {
 		expect(options.beforeSendLog(noisyInfo)).toBeNull();
 		expect(options.beforeSendLog(workerSummary)).toEqual(workerSummary);
 		expect(options.beforeSendLog(warning)).toEqual(warning);
+	});
+
+	it("omits release when unset", () => {
+		const initCalls: unknown[] = [];
+		const sentry = {
+			init(options: unknown) {
+				initCalls.push(options);
+			},
+		} satisfies SentryClientLike;
+
+		initializeSentry(sentry, { ...sentryEnv, release: null });
+
+		const options = initCalls[0] as { release?: string };
+		expect("release" in options).toBe(false);
+	});
+
+	it("scrubs through every hook and drops on scrubber throw", () => {
+		const initCalls: unknown[] = [];
+		const sentry = {
+			init(options: unknown) {
+				initCalls.push(options);
+			},
+		} satisfies SentryClientLike;
+
+		initializeSentry(sentry, sentryEnv);
+		const options = initCalls[0] as {
+			beforeSend(event: Record<string, unknown>, hint: unknown): unknown | null;
+			beforeSendTransaction(event: Record<string, unknown>, hint: unknown): unknown | null;
+			beforeSendSpan(span: Record<string, unknown>): Record<string, unknown>;
+			beforeBreadcrumb(breadcrumb: Record<string, unknown>, hint?: unknown): unknown | null;
+			beforeSendLog(log: Record<string, unknown>): unknown | null;
+		};
+		expect(
+			options.beforeSend(
+				{
+					message: "hi user@example.com",
+					request: { url: "https://x/y?z=1", headers: { a: "b" } },
+				},
+				{},
+			),
+		).toMatchObject({ message: "hi [email]" });
+		expect(
+			options.beforeSendTransaction({ transaction: "GET /v1/billing-accounts/abc" }, {}),
+		).toMatchObject({ transaction: "GET /v1/billing-accounts/:id" });
+		expect(options.beforeBreadcrumb({ category: "console", message: "x" }, {})).toBeNull();
+		expect(
+			options.beforeSendLog({
+				level: "error",
+				message: "bad user@example.com",
+				attributes: { "user.email": "a@b.com" },
+			}),
+		).toMatchObject({ message: "bad [email]" });
+
+		const throwing = new Proxy(
+			{ message: "x", description: "x", data: {}, level: "error" },
+			{
+				get() {
+					throw new Error("scrub boom");
+				},
+			},
+		);
+		expect(options.beforeSend(throwing as Record<string, unknown>, {})).toBeNull();
+		expect(options.beforeSendTransaction(throwing as Record<string, unknown>, {})).toBeNull();
+		expect(options.beforeBreadcrumb(throwing as Record<string, unknown>, {})).toBeNull();
+		expect(options.beforeSendLog(throwing as Record<string, unknown>)).toBeNull();
+
+		// Spans cannot be dropped, so a span whose data cannot be scrubbed keeps only its identity.
+		const unreadableData = new Proxy(
+			{},
+			{
+				ownKeys() {
+					throw new Error("scrub boom");
+				},
+			},
+		);
+		const stripped = options.beforeSendSpan({
+			span_id: "a",
+			trace_id: "b",
+			start_timestamp: 1,
+			description: "GET /v1/billing-accounts/abc",
+			data: unreadableData,
+		});
+		expect(stripped).toEqual({
+			span_id: "a",
+			trace_id: "b",
+			start_timestamp: 1,
+			description: "[Filtered]",
+			data: {},
+		});
 	});
 
 	it("skips SDK initialization when Sentry is disabled", () => {
@@ -423,6 +543,95 @@ describe("createSentryRequestScope", () => {
 				},
 			},
 		]);
+	});
+
+	it("uses Elysia route patterns and exposes onBeforeHandle tags inside handlers", async () => {
+		const order: string[] = [];
+		const { sentry, calls } = createRecordingSentry();
+		const instrumented: SentryClientLike = {
+			...sentry,
+			withIsolationScope<T>(callback: (scope: never) => T): T {
+				return sentry.withIsolationScope?.((scope) => {
+					const wrapped = {
+						setTag(key: string, value: string) {
+							order.push(`tag:${key}=${value}`);
+							return (scope as { setTag(k: string, v: string): unknown }).setTag(key, value);
+						},
+						setContext(key: string, context: Record<string, unknown> | null) {
+							if (context?.status !== undefined) order.push(`context:status=${context.status}`);
+							return (scope as { setContext(k: string, c: unknown): unknown }).setContext(
+								key,
+								context,
+							);
+						},
+					};
+					return callback(wrapped as never);
+				}) as T;
+			},
+		};
+		const requestScope = createSentryRequestScope(instrumented, { service: "billing" });
+		const app = new Elysia()
+			.use(requestScope.plugin)
+			.post("/v1/billing-accounts/:billingAccountId/usage/consume", () => {
+				order.push("handler");
+				return { ok: true };
+			});
+
+		const response = await dispatch(requestScope, app, "/v1/billing-accounts/abc/usage/consume", {
+			method: "POST",
+		});
+
+		expect(response.status).toBe(200);
+		// Fallback would be :id; Elysia pattern proves onBeforeHandle overwrote it.
+		expect(calls.scopes[0]?.tags.route).toBe(
+			"/v1/billing-accounts/:billingAccountId/usage/consume",
+		);
+		const routeTagIndex = order.findIndex((entry) =>
+			entry.startsWith("tag:route=/v1/billing-accounts/:billingAccountId"),
+		);
+		const handlerIndex = order.indexOf("handler");
+		const statusIndex = order.indexOf("context:status=200");
+		// onBeforeHandle tags the route before the handler runs; onAfterHandle records the status.
+		expect(routeTagIndex).toBeGreaterThanOrEqual(0);
+		expect(handlerIndex).toBeGreaterThan(routeTagIndex);
+		expect(statusIndex).toBeGreaterThan(handlerIndex);
+	});
+
+	it("tags merchant auth wildcard with its pattern", async () => {
+		const { sentry, calls } = createRecordingSentry();
+		const requestScope = createSentryRequestScope(sentry, { service: "merchant" });
+		const app = new Elysia().use(requestScope.plugin).all("/api/auth/*", () => ({ ok: true }));
+
+		const response = await dispatch(requestScope, app, "/api/auth/callback/google");
+
+		expect(response.status).toBe(200);
+		expect(calls.scopes[0]?.tags.route).toBe("/api/auth/*");
+	});
+
+	it("falls back to maskPath for 404s", async () => {
+		const { sentry, calls } = createRecordingSentry();
+		const requestScope = createSentryRequestScope(sentry, { service: "billing" });
+		const app = new Elysia().use(requestScope.plugin).get("/health", () => ({ ok: true }));
+
+		const response = await dispatch(requestScope, app, "/v1/billing-accounts/abc/usage/consume");
+
+		expect(response.status).toBe(404);
+		expect(calls.scopes[0]?.tags.route).toBe("/v1/billing-accounts/:id/usage/consume");
+	});
+
+	it("bounds non-Error throws", async () => {
+		const { sentry, calls } = createRecordingSentry();
+		const requestScope = createSentryRequestScope(sentry, { service: "billing" });
+		const app = new Elysia().use(requestScope.plugin).get("/health", () => {
+			throw "oops cus_1A2b3C4d5E6F7G8H ".repeat(200) as unknown as Error;
+		});
+
+		await dispatch(requestScope, app, "/health");
+
+		const message = calls.scopes[0]?.contexts["billing.request"]?.["error.message"];
+		expect(typeof message).toBe("string");
+		expect((message as string).length).toBeLessThanOrEqual(1024);
+		expect(message).not.toContain("cus_1A2b3C4d5E6F7G8H");
 	});
 
 	it("still dispatches the request when Sentry fails to open a scope", async () => {

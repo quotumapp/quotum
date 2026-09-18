@@ -168,13 +168,39 @@ Defaults in parentheses.
   (`6000`), `BILLING_ADMIN_RATE_LIMIT_PER_WINDOW` (`60`).
 - `BILLING_LOG_LEVEL` (`info`): `trace`, `debug`, `info`, `warn`, `error`, `fatal`, or `silent`.
   Controls local Pino diagnostics independently of Sentry; invalid or blank values are rejected.
-- `SENTRY_DSN` (unset disables Sentry), `SENTRY_ENABLE_LOGS` (`true`),
-  `SENTRY_TRACES_SAMPLE_RATE` (`0.01`), `SENTRY_LOG_LEVEL` (`warn`),
-  `SENTRY_CAPTURE_EXPECTED_ERRORS` (`false`).
+- Sentry error reporting is optional; see [Sentry (optional)](#sentry-optional).
 
 Removed and rejected when supplied: `BILLING_PROJECT_RUNTIME_JSON`, `BILLING_PROJECTS_JSON`, and
 `BILLING_PROJECTION_ADAPTER`. Provider and projection settings live in encrypted, versioned
 connections owned by the merchant platform.
+
+### Sentry (optional)
+
+Leave `SENTRY_DSN` unset or blank to disable Sentry; without a DSN the SDK is never initialized.
+With a DSN, the service reports staff and merchant 5xx responses and worker failures.
+
+- `SENTRY_DSN` (unset).
+- `SENTRY_ENVIRONMENT` (`BILLING_ENV`): at most 64 characters, without whitespace or `/`.
+- `SENTRY_RELEASE` (`quotum-api@$BUILD_VERSION` when the image sets `BUILD_VERSION`, else unset).
+- `SENTRY_ENABLE_LOGS` (`true`), `SENTRY_LOG_LEVEL` (`warn`),
+  `SENTRY_TRACES_SAMPLE_RATE` (`0.01`; `0` disables tracing),
+  `SENTRY_CAPTURE_EXPECTED_ERRORS` (`false`).
+
+Sent: scrubbed error messages and stack frames, route patterns, method, status, error codes,
+project key, provider, worker names, hostname, runtime, OS and module versions, and sampled
+transactions.
+
+Never collected: request and response headers, cookies, query strings and fragments, bodies,
+client IP addresses, user data, local variables, SQL query parameters, and console
+breadcrumbs.
+
+Masked on a best-effort basis: free text such as messages and log attributes is scrubbed with
+patterns. Bearer and Basic credentials, JWTs, project API keys, Stripe-style ids and keys, emails,
+IPv4 addresses, runs of 14 or more digits and opaque tokens of 32 or more characters are
+replaced. Keys named like secrets, tokens, sessions, emails or customer ids are dropped. Path
+identifiers become `:id`. An identifier that looks like an ordinary word inside a message is not
+recognized, so avoid putting customer data into error messages. Local Pino log lines are never
+scrubbed.
 
 ## Encryption-key rotation
 
