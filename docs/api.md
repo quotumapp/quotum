@@ -138,7 +138,11 @@ bun run catalog push ./billing.catalog.ts
 ```
 
 The backend SDK (`quotum-api/sdk`) wraps catalog, commercial, usage, provider capability, and
-selected admin calls and keeps credentials server-side.
+selected admin calls and keeps credentials server-side. Its admin reads (`admin.customer`,
+`admin.searchCustomers`, `admin.storeEvents`, `admin.storeEvent`, `admin.projectionJobs`,
+`admin.statsSummary`) and `accounts.controls` use project authentication only and never send the
+operator key; `admin.storeEvent` never requests the raw provider payload. On a 429,
+`BillingApiError.rateLimitResetAt` carries the `ratelimit-reset` timestamp.
 
 ## Provider capability errors
 

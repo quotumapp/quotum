@@ -36,5 +36,13 @@ export type {
 	RuntimeCapabilityVerdict,
 } from "../shared/provider-capabilities";
 export { defineCatalog } from "./catalog";
-export type { BillingClientOptions, CursorPage, PurchaseVerificationInput } from "./client";
+export type {
+	AdminListQuery,
+	AdminProjectionJobQuery,
+	AdminStatsSummaryQuery,
+	AdminStoreEventQuery,
+	BillingClientOptions,
+	CursorPage,
+	PurchaseVerificationInput,
+} from "./client";
 export { BillingApiError, BillingClient } from "./client";

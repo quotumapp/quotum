@@ -1,9 +1,16 @@
-import type { AdminCustomerDetail, AdminCustomerSearchResult } from "../admin/types";
+import type {
+	AdminCustomerDetail,
+	AdminCustomerSearchResult,
+	AdminProjectionJob,
+	AdminStatsSummary,
+	AdminStoreEvent,
+} from "../admin/types";
 import type {
 	CommercialActionExecutionResult,
 	CommercialActionIntent,
 	CommercialActionPreview,
 } from "../billing/commercial";
+import type { EffectiveControl } from "../billing/controls";
 import type { CustomerBillingSummary, UsageEventItem, UsageSeriesPoint } from "../billing/insights";
 import type {
 	ConfirmReservationInput,
@@ -29,7 +36,14 @@ import type {
 	PromotionTarget,
 	PromotionValidation,
 } from "../billing/promotions";
-import type { EntitlementSnapshot } from "../billing/types";
+import type {
+	BillingChannel,
+	BillingProvider,
+	EntitlementSnapshot,
+	ProjectionSyncReason,
+	ProjectionSyncStatus,
+	StoreEventProcessingStatus,
+} from "../billing/types";
 import type {
 	UsageOperationLookupInput,
 	UsageOperationLookupResult,
@@ -46,6 +60,7 @@ import type {
 	ProviderEnvironmentCapabilities,
 } from "../providers/capability-read-types";
 import type { GoogleVerifyPurchaseInput } from "../providers/google/types";
+import type { StripeCatalog } from "../providers/stripe/types";
 
 export interface BillingClientOptions {
 	baseUrl: string;
@@ -67,8 +82,41 @@ export interface CursorPage<T> {
 	nextCursor: string | null;
 }
 
+/** Filters shared by the project-wide admin lists, named as they appear in the query string. */
+export interface AdminListQuery {
+	provider?: BillingProvider;
+	channel?: BillingChannel;
+	billingAccountId?: string;
+	customerId?: string;
+	productKey?: string;
+	entitlementKey?: string;
+	from?: string;
+	to?: string;
+	limit?: number;
+	cursor?: string;
+}
+
+export interface AdminStoreEventQuery extends AdminListQuery {
+	processingStatus?: StoreEventProcessingStatus;
+	eventType?: string;
+	externalEventId?: string;
+}
+
+export interface AdminProjectionJobQuery extends AdminListQuery {
+	status?: ProjectionSyncStatus;
+	reason?: ProjectionSyncReason;
+}
+
+export interface AdminStatsSummaryQuery {
+	provider?: BillingProvider;
+	channel?: BillingChannel;
+	from?: string;
+	to?: string;
+}
+
 export class BillingClient {
 	readonly catalog;
+	readonly accounts;
 	readonly commercial;
 	readonly usage;
 	readonly purchases;
@@ -85,6 +133,8 @@ export class BillingClient {
 		if (typeof this.requestFetch !== "function")
 			throw new Error("A fetch implementation is required");
 		this.catalog = {
+			/** The purchasable Stripe catalog; `STRIPE_NOT_CONFIGURED` without a Stripe connection. */
+			get: () => this.request<StripeCatalog>("/v1/catalog"),
 			status: () => this.request<PublishedCatalog>("/v1/admin/catalog", { operator: true }),
 			preview: (input: { expectedRevision: number | null; catalog: CatalogIntent }) =>
 				this.request<CatalogPreview>("/v1/admin/catalog/preview", {
@@ -102,6 +152,14 @@ export class BillingClient {
 					body: input,
 					operator: true,
 				}),
+		};
+		this.accounts = {
+			controls: (billingAccountId: string, entityId?: string) =>
+				this.request<EffectiveControl[]>(
+					pathWithQuery(`/v1/billing-accounts/${segment(billingAccountId)}/controls`, {
+						entityId,
+					}),
+				),
 		};
 		this.commercial = {
 			preview: (billingAccountId: string, intent: CommercialActionIntent) =>
@@ -307,17 +365,27 @@ export class BillingClient {
 			capabilities: () =>
 				this.request<ProviderEnvironmentCapabilities>("/v1/admin/providers/capabilities"),
 		};
+		// These admin reads need project authentication only, so they never send the operator key.
 		this.admin = {
 			customer: (billingAccountId: string) =>
 				this.request<AdminCustomerDetail>(
 					`/v1/admin/customers/by-billing-account/${segment(billingAccountId)}`,
-					{ operator: true },
 				),
-			searchCustomers: (query: string) =>
+			searchCustomers: (query: string, page: { limit?: number; cursor?: string } = {}) =>
 				this.requestPage<AdminCustomerSearchResult>(
-					pathWithQuery("/v1/admin/customers/search", { q: query }),
-					{ operator: true },
+					pathWithQuery("/v1/admin/customers/search", { q: query, ...page }),
 				),
+			storeEvents: (query: AdminStoreEventQuery = {}) =>
+				this.requestPage<AdminStoreEvent>(pathWithQuery("/v1/admin/store-events", { ...query })),
+			/** Never requests the raw provider payload. */
+			storeEvent: (eventId: string) =>
+				this.request<AdminStoreEvent>(`/v1/admin/store-events/${segment(eventId)}`),
+			projectionJobs: (query: AdminProjectionJobQuery = {}) =>
+				this.requestPage<AdminProjectionJob>(
+					pathWithQuery("/v1/admin/projection-jobs", { ...query }),
+				),
+			statsSummary: (query: AdminStatsSummaryQuery = {}) =>
+				this.request<AdminStatsSummary>(pathWithQuery("/v1/admin/stats/summary", { ...query })),
 		};
 	}
 
@@ -343,6 +411,7 @@ export class BillingClient {
 				error?.code ?? "HTTP_ERROR",
 				response.status,
 				envelopeDetails(error?.details),
+				rateLimitReset(response),
 			);
 		}
 		return payload.data;
@@ -363,6 +432,7 @@ export class BillingClient {
 				error?.code ?? "HTTP_ERROR",
 				response.status,
 				envelopeDetails(error?.details),
+				rateLimitReset(response),
 			);
 		}
 		return { data: payload.data, nextCursor: payload.pagination.nextCursor };
@@ -400,19 +470,31 @@ export class BillingClient {
 export class BillingApiError extends Error {
 	/** Structured context from the error envelope; absent when the response carried none. */
 	declare readonly details?: Record<string, unknown>;
+	/** ISO timestamp from `ratelimit-reset` on a 429; the API sends no `retry-after`. */
+	declare readonly rateLimitResetAt?: string;
 
 	constructor(
 		message: string,
 		readonly code: string,
 		readonly status: number,
 		details?: Record<string, unknown>,
+		rateLimitResetAt?: string,
 	) {
 		super(message);
 		this.name = "BillingApiError";
 		if (details !== undefined) {
 			this.details = details;
 		}
+		if (rateLimitResetAt !== undefined) {
+			this.rateLimitResetAt = rateLimitResetAt;
+		}
 	}
+}
+
+function rateLimitReset(response: Response): string | undefined {
+	return response.status === 429
+		? (response.headers.get("ratelimit-reset") ?? undefined)
+		: undefined;
 }
 
 function envelopeDetails(value: unknown): Record<string, unknown> | undefined {
