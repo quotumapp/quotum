@@ -2,6 +2,9 @@ import { createHmac } from "node:crypto";
 import { createSanitizedProcessEnv } from "../../../scripts/lib/sanitized-env";
 
 export const e2eApiKey = testCredential("voysee") ?? "voysee-unit-test-placeholder";
+/** The sandbox instance of the same logical project; its credential starts with `sqpk_`. */
+export const e2eSandboxApiKey =
+	testCredential("voysee-sandbox") ?? "voysee-sandbox-unit-test-placeholder";
 export const e2eOperatorKey = "voysee-e2e-operator-key";
 export const e2eProjectionSecret = "voysee-e2e-projection-secret";
 export const e2eStripeWebhookSecret = "whsec_voysee_e2e";

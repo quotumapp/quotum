@@ -10,7 +10,8 @@ Bun/TypeScript/Elysia billing service backed by one Postgres database. Runtime c
 onboarding, connections, and audit behind consumer-owned ports; `billing/`, `catalog/`, and `db/`
 hold the billing domain, versioned catalog, and Drizzle repositories; `providers/` integrates Apple,
 Google, and Stripe; `workers/` and `projections/` run durable background work and signed HTTP
-projection delivery; `composition/` wires modules together. Ordered SQL migrations live in
+projection delivery; `mcp/` is the read-only stdio MCP server, a client of `/v1` through `sdk/`
+([docs/mcp.md](docs/mcp.md)); `composition/` wires modules together. Ordered SQL migrations live in
 `migrations/`, generated contracts in `contracts/v1/`, and tests mirror the source layout under
 `tests/`, `integration/merchant/`, and `src/testing/`. Module and table ownership is enforced by
 `bun run check:boundaries`; see [docs/architecture.md](docs/architecture.md).
@@ -28,6 +29,8 @@ projection delivery; `composition/` wires modules together. Ordered SQL migratio
   vocabulary (`src/shared/provider-capabilities.ts`).
 - `bun run platform:bootstrap`, `catalog:provision`, and `catalog` for operator workflows; see
   [docs/quickstart.md](docs/quickstart.md).
+- `bun run mcp` starts the read-only stdio MCP server against `QUOTUM_MCP_BASE_URL` with a sandbox
+  `QUOTUM_MCP_API_KEY`; see [docs/mcp.md](docs/mcp.md).
 
 ## Coding style
 

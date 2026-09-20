@@ -117,6 +117,49 @@ describe("module boundaries", () => {
 		).toEqual(["FORBIDDEN_DEPENDENCY", "FORBIDDEN_DEPENDENCY"]);
 	});
 
+	it("lets the MCP server reach billing only through the SDK", async () => {
+		expect(
+			await violationCodes([
+				source("src/sdk/client.ts"),
+				source("src/shared/cli-output.ts"),
+				source("src/mcp/tools.ts"),
+				source(
+					"src/mcp/server.ts",
+					'import "../sdk/client"; import "../shared/cli-output"; import "./tools";',
+				),
+				source("src/composition/mcp-mount.ts", 'import "../mcp/server";'),
+			]),
+		).toEqual([]);
+		expect(
+			await violationCodes([
+				source("src/db/repository.ts"),
+				source("src/app/types.ts"),
+				source("src/platform/example.ts"),
+				source("src/composition/example.ts"),
+				source(
+					"src/mcp/server.ts",
+					'import type {} from "../db/repository"; import "../app/types"; import "../platform/example"; import "../composition/example";',
+				),
+			]),
+		).toEqual([
+			"FORBIDDEN_DEPENDENCY",
+			"FORBIDDEN_DEPENDENCY",
+			"FORBIDDEN_DEPENDENCY",
+			"FORBIDDEN_PERSISTENCE_ACCESS",
+		]);
+		expect(
+			await violationCodes([
+				source("src/mcp/server.ts"),
+				source("src/billing/example.ts", 'import "../mcp/server";'),
+				source("src/platform/example.ts", 'import "../mcp/server";'),
+				source("src/shared/example.ts", 'import "../mcp/server";'),
+			]),
+		).toEqual(["FORBIDDEN_DEPENDENCY", "FORBIDDEN_DEPENDENCY", "FORBIDDEN_DEPENDENCY"]);
+		expect(
+			await violationCodes([source("src/mcp/server.ts", 'import {sql} from "drizzle-orm";')]),
+		).toEqual(["FORBIDDEN_PERSISTENCE_ACCESS"]);
+	});
+
 	it("treats type imports, re-exports, dynamic imports, and require calls as dependencies", async () => {
 		const violations = await analyzeModuleBoundaries([
 			source("src/platform/contracts.ts", 'import type { Value } from "../billing/value";'),

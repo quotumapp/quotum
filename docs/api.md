@@ -142,7 +142,8 @@ selected admin calls and keeps credentials server-side. Its admin reads (`admin.
 `admin.searchCustomers`, `admin.storeEvents`, `admin.storeEvent`, `admin.projectionJobs`,
 `admin.statsSummary`) and `accounts.controls` use project authentication only and never send the
 operator key; `admin.storeEvent` never requests the raw provider payload. On a 429,
-`BillingApiError.rateLimitResetAt` carries the `ratelimit-reset` timestamp.
+`BillingApiError.rateLimitResetAt` carries the `ratelimit-reset` timestamp. The read-only
+[MCP server](mcp.md) for coding agents is built on these reads.
 
 ## Provider capability errors
 

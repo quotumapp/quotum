@@ -17,6 +17,7 @@ customer list is required. The operator UI is the sibling `quotum-ui` applicatio
 - [Provider integrations](docs/providers.md): Apple, Google, Stripe, and signed projections.
 - [API guide](docs/api.md): metering, recovery, catalog publication, admin operations.
 - [Operations](docs/operations.md): backup, restore, upgrade, rollback, workers, support policy.
+- [MCP server](docs/mcp.md): read-only sandbox access for coding agents.
 - [Architecture](docs/architecture.md): module boundaries and source map.
 - [Releases](https://github.com/quotumapp/quotum/releases), [CHANGELOG.md](CHANGELOG.md) (up to 0.10.1),
   [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -57,6 +58,7 @@ customer integrations and production activation have separate checks.
 | Optional exact-topology bootstrap | `bun run platform:bootstrap -- --check` or `--apply --credentials-out <new-file>` |
 | Development catalog import | `bun run catalog:provision` |
 | Catalog automation | `bun run catalog status`, `bun run catalog diff <file>`, `bun run catalog push <file>` |
+| Read-only MCP server (stdio, sandbox key) | `bun run mcp` |
 | Connection encryption-key rotation | `bun run connections:rotate-secrets` |
 
 Database/process lanes require Docker and are not implied by a plain unit-test pass. Browser
