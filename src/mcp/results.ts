@@ -23,12 +23,23 @@ const hints: Readonly<Record<string, string>> = {
 	BILLING_ACCOUNT_NOT_FOUND: "Use find_customer to look the account up by another identifier.",
 };
 
-let activeTools = 0;
+let activeRequests = 0;
 const idleWaiters: Array<() => void> = [];
 
-/** Resolves once no tool call is running, so shutdown does not drop a response in flight. */
-export function whenToolsIdle(): Promise<void> {
-	return activeTools === 0 ? Promise.resolve() : new Promise((done) => idleWaiters.push(done));
+/** Resolves once no request is being answered, so shutdown does not drop a response in flight. */
+export function whenIdle(): Promise<void> {
+	return activeRequests === 0 ? Promise.resolve() : new Promise((done) => idleWaiters.push(done));
+}
+
+/** Counts a tool call or resource read as in flight until it settles. */
+export async function trackRequest<T>(work: () => Promise<T>): Promise<T> {
+	activeRequests += 1;
+	try {
+		return await work();
+	} finally {
+		activeRequests -= 1;
+		if (activeRequests === 0) for (const done of idleWaiters.splice(0)) done();
+	}
 }
 
 /**
@@ -39,22 +50,20 @@ export async function runTool(
 	body: () => Promise<unknown>,
 	log: DiagnosticLog,
 ): Promise<ToolResult> {
-	activeTools += 1;
-	try {
-		const text = JSON.stringify(await body());
-		if (Buffer.byteLength(text, "utf8") > maxResultBytes) {
-			return errorResult({
-				code: "RESULT_TOO_LARGE",
-				message: "The result is too large to return. Lower `limit` or narrow the filters.",
-			});
+	return trackRequest(async () => {
+		try {
+			const text = JSON.stringify(await body());
+			if (Buffer.byteLength(text, "utf8") > maxResultBytes) {
+				return errorResult({
+					code: "RESULT_TOO_LARGE",
+					message: "The result is too large to return. Lower `limit` or narrow the filters.",
+				});
+			}
+			return { content: [{ type: "text", text }] };
+		} catch (error) {
+			return errorResult(describeError(error, log));
 		}
-		return { content: [{ type: "text", text }] };
-	} catch (error) {
-		return errorResult(describeError(error, log));
-	} finally {
-		activeTools -= 1;
-		if (activeTools === 0) for (const done of idleWaiters.splice(0)) done();
-	}
+	});
 }
 
 export interface ToolErrorBody {
@@ -89,7 +98,18 @@ export function describeError(error: unknown, log: DiagnosticLog): ToolErrorBody
 }
 
 function errorResult(error: ToolErrorBody): ToolResult {
-	return { content: [{ type: "text", text: JSON.stringify({ error }) }], isError: true };
+	let text = JSON.stringify({ error });
+	// An upstream error envelope is bounded only by the response cap, which is far above this.
+	if (Buffer.byteLength(text, "utf8") > maxResultBytes) {
+		text = JSON.stringify({
+			error: {
+				code: "RESULT_TOO_LARGE",
+				message: "The billing API returned an error too large to show.",
+				...(error.status === undefined ? {} : { status: error.status }),
+			},
+		});
+	}
+	return { content: [{ type: "text", text }], isError: true };
 }
 
 /** Drops the named keys at any depth. Used to keep merchant-supplied free-form data out by default. */

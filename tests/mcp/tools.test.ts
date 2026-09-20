@@ -209,6 +209,28 @@ describe("MCP tools", () => {
 		expect(network.logs.join("\n")).toContain("ECONNREFUSED");
 	});
 
+	it("bounds an oversized API error the same way as a result", async () => {
+		const { client } = await connect(() =>
+			Response.json(
+				{
+					success: false,
+					error: { code: "INVALID_REQUEST", message: "No", details: { dump: "x".repeat(150_000) } },
+				},
+				{ status: 400 },
+			),
+		);
+		const result = await client.callTool({ name: "get_catalog", arguments: {} });
+		expect(result.isError).toBe(true);
+		expect(toolText(result).length).toBeLessThan(1000);
+		expect(toolJson(result)).toEqual({
+			error: {
+				code: "RESULT_TOO_LARGE",
+				message: "The billing API returned an error too large to show.",
+				status: 400,
+			},
+		});
+	});
+
 	it("refuses a page that is too large instead of cutting it", async () => {
 		const { client } = await connect(() =>
 			okPage(Array.from({ length: 25 }, (_, index) => ({ id: index, text: "x".repeat(5000) }))),
