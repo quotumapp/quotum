@@ -1,11 +1,15 @@
+import { resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { createContractStore } from "../../src/mcp/contracts";
 import { createGuardedFetch } from "../../src/mcp/guarded-fetch";
 import { createQuotumMcpServer } from "../../src/mcp/server";
 import { BillingClient } from "../../src/sdk/index";
 
 export const mcpTestBaseUrl = "https://billing.example.com";
 export const mcpTestApiKey = `sqpk_${"a".repeat(43)}`;
+
+const contracts = createContractStore(resolve(import.meta.dir, "../../contracts/v1"));
 
 export type McpTestResponder = (request: Request) => Response | Promise<Response>;
 
@@ -36,6 +40,7 @@ export async function connectMcp(respond: McpTestResponder): Promise<McpTestConn
 		client: billing,
 		log: (line) => logs.push(line),
 		version: "0.0.0-test",
+		contracts,
 	});
 	const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
 	await server.connect(serverTransport);

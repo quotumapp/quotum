@@ -22,6 +22,18 @@ claude mcp add quotum \
   -- bun --no-env-file /path/to/quotum-api/src/mcp/index.ts
 ```
 
+The released image carries the server too:
+
+```sh
+docker run -i --rm \
+  -e QUOTUM_MCP_BASE_URL=https://billing.example.com \
+  -e QUOTUM_MCP_API_KEY=sqpk_... \
+  ghcr.io/quotumapp/quotum bun --no-env-file src/mcp/index.ts
+```
+
+From a container, `localhost` is the container itself. Reaching a service on the host or in the same
+compose network over plain `http` needs `QUOTUM_MCP_ALLOW_INSECURE_HTTP=true`.
+
 `bun run mcp` runs the same command from a checkout. Keep `--no-env-file`: hosts start MCP servers
 in the directory of the project being edited, and Bun would otherwise load that project's `.env`,
 which for a product backend holds billing credentials.
@@ -65,6 +77,13 @@ the server never follows a cursor on its own.
 | `get_catalog` | The Stripe purchasable catalog; `STRIPE_NOT_CONFIGURED` without a Stripe connection |
 | `get_provider_capabilities` | Operations each connected provider supports in this environment |
 | `get_available_actions` | Commercial actions available for an account, with capability reasons |
+
+| `find_api_operations`, `get_api_operation` | The generated `/v1` contract: search operations, then one operation with every schema it references. They read `contracts/v1` next to the server and never call the API |
+
+The error inventory and the provider capability table are also served as resources
+(`quotum://contracts/v1/errors.json`, `quotum://contracts/v1/provider-capabilities.json`). The
+1.8 MB OpenAPI document is not, which is what the two contract tools are for. Without a
+`contracts/v1` directory beside `src/` the contract tools and resources are not registered.
 
 A denied consume records no usage event. Explain a denial with `check_usage`, or with
 `get_usage_operation` while the outcome is retained (about 24 hours).

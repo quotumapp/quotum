@@ -1,7 +1,10 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { BillingClient } from "../sdk/index";
 import { writeStderr } from "../shared/cli-output";
 import { McpConfigError, readMcpConfig } from "./config";
+import { createContractStore } from "./contracts";
 import { createGuardedFetch } from "./guarded-fetch";
 import { whenIdle } from "./results";
 import { createQuotumMcpServer } from "./server";
@@ -18,7 +21,12 @@ try {
 		fetch: createGuardedFetch({ baseUrl: config.baseUrl }),
 	});
 	const version = process.env.BUILD_VERSION?.trim() || "0.0.0-dev";
-	const handle = serveStdio(() => createQuotumMcpServer({ client, log, version }), {
+	const contractsDirectory = resolve(import.meta.dir, "../../contracts/v1");
+	const contracts = existsSync(resolve(contractsDirectory, "openapi.json"))
+		? createContractStore(contractsDirectory)
+		: undefined;
+	if (contracts === undefined) log("quotum-mcp: contracts/v1 not found; contract tools are off");
+	const handle = serveStdio(() => createQuotumMcpServer({ client, log, version, contracts }), {
 		onerror: (error) => log(`quotum-mcp: ${error.name}: ${error.message}`),
 	});
 

@@ -31,6 +31,8 @@ ARG BUILD_COMMIT
 COPY --from=install --chown=bun /temp/prod/node_modules node_modules
 COPY --from=prerelease --chown=bun /usr/src/app/src ./src
 COPY --from=prerelease --chown=bun /usr/src/app/migrations ./migrations
+# the MCP server (src/mcp) answers contract questions from the generated /v1 contract
+COPY --from=prerelease --chown=bun /usr/src/app/contracts ./contracts
 COPY --from=prerelease --chown=bun /usr/src/app/tsconfig.json .
 COPY --from=prerelease --chown=bun /usr/src/app/package.json .
 

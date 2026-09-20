@@ -1,4 +1,5 @@
 import { BillingApiError } from "../sdk/index";
+import { ContractUnavailableError } from "./contracts";
 import { McpRequestBlockedError } from "./guarded-fetch";
 
 export interface ToolResult {
@@ -89,6 +90,10 @@ export function describeError(error: unknown, log: DiagnosticLog): ToolErrorBody
 	}
 	if (error instanceof McpRequestBlockedError) {
 		return { code: "MCP_REQUEST_BLOCKED", message: error.message };
+	}
+	if (error instanceof ContractUnavailableError) {
+		log(`contract unavailable: ${error.cause instanceof Error ? error.cause.message : "unknown"}`);
+		return { code: "CONTRACT_UNAVAILABLE", message: error.message };
 	}
 	log(`tool failure: ${error instanceof Error ? `${error.name}: ${error.message}` : "unknown"}`);
 	return {
