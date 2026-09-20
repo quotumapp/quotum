@@ -2,10 +2,10 @@ import type {
 	CreatePlatformProjectInstanceInput,
 	PlatformProjectInstanceRecord,
 } from "./application/ports";
-import type { PlatformQueryValue } from "./persistence/query-executor";
+import type { PlatformQueryExecutor, PlatformQueryValue } from "./persistence/query-executor";
 
 /** Platform-owned persistence port. Composition supplies the driver and transaction-bound instance seam. */
-export interface MerchantSql {
+export interface MerchantSql extends PlatformQueryExecutor {
 	<Rows extends object[] = Record<string, unknown>[]>(
 		strings: TemplateStringsArray,
 		...values: PlatformQueryValue[]

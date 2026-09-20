@@ -1,6 +1,11 @@
 import type { OnboardingDraftView, ProvisioningOperationView } from "./contracts";
 import { generateProjectApiCredential } from "./credentials/project-api-token";
 import type { MerchantSql } from "./database";
+import type { PlatformQueryExecutor } from "./persistence/query-executor";
+import {
+	PlatformOnboardingDraftRepository,
+	PlatformOrganizationRepository,
+} from "./persistence/repositories";
 import { MerchantError, requireCapability } from "./security";
 import type { MerchantIdentity, MerchantStore } from "./store";
 
@@ -28,12 +33,7 @@ export class MerchantOnboarding {
 	): Promise<OnboardingDraftView> {
 		return this.store.idempotent(identity, key, ["onboarding.organization", input], async (tx) => {
 			const draft = await this.store.draft(identity.principalId, tx);
-			if (draft?.organization)
-				throw new MerchantError(
-					"DRAFT_CHANGED",
-					"An organization already exists. Continue your saved onboarding.",
-					409,
-				);
+			if (draft?.organization) return this.renameOrganization(tx, identity, draft, input);
 			const existing = await tx`SELECT id FROM platform_organizations WHERE slug=${input.slug}`;
 			if (existing.length)
 				throw new MerchantError(
@@ -52,6 +52,71 @@ export class MerchantOnboarding {
 			if (!result) throw new Error("Draft insert failed");
 			return result;
 		});
+	}
+	/**
+	 * Step 1 revisited: until provisioning starts, the draft's organization takes a new name and
+	 * slug. A caller that did not read the draft (no revision) is told to continue it instead.
+	 */
+	private async renameOrganization(
+		executor: PlatformQueryExecutor,
+		identity: MerchantIdentity,
+		draft: OnboardingDraftView,
+		input: { name: string; slug: string; revision?: number },
+	): Promise<OnboardingDraftView> {
+		const organization = draft.organization;
+		if (!organization || input.revision === undefined || draft.operationId)
+			throw new MerchantError(
+				"DRAFT_CHANGED",
+				"An organization already exists. Continue your saved onboarding.",
+				409,
+			);
+		const drafts = new PlatformOnboardingDraftRepository(executor);
+		const organizations = new PlatformOrganizationRepository(executor);
+		// Renaming is organization administration; the lock also serializes it with provisioning.
+		const member = await this.store.membershipByOrganizationId(
+			executor,
+			identity.principalId,
+			organization.id,
+		);
+		requireCapability(member.role, "team.manage");
+		if (draft.revision !== input.revision)
+			throw new MerchantError(
+				"DRAFT_CHANGED",
+				"Your draft changed. Refresh it before continuing.",
+				409,
+			);
+		if (organization.name === input.name && organization.slug === input.slug) return draft;
+		if (await organizations.slugBelongsToAnotherOrganization(input.slug, organization.id))
+			throw new MerchantError("SLUG_UNAVAILABLE", "Choose a different organization address.", 409);
+		// Conditional on the revision read above, so a concurrent step wins and this one reports it.
+		const bumped = await drafts.bumpRevision({
+			id: draft.id,
+			expectedRevision: input.revision,
+			updatedAt: this.store.now(),
+		});
+		if (!bumped)
+			throw new MerchantError(
+				"DRAFT_CHANGED",
+				"Your draft changed. Refresh it before continuing.",
+				409,
+			);
+		await organizations.update({
+			id: organization.id,
+			name: input.name,
+			slug: input.slug,
+			updatedAt: this.store.now(),
+		});
+		await this.store.audit(
+			executor,
+			identity.principalId,
+			organization.id,
+			"organization.updated",
+			organization.id,
+			{ previous: { name: organization.name, slug: organization.slug } },
+		);
+		const result = await this.store.draft(identity.principalId, executor);
+		if (!result) throw new Error("Draft disappeared");
+		return result;
 	}
 	async project(
 		identity: MerchantIdentity,

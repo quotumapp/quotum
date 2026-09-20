@@ -6,6 +6,7 @@ import type {
 import {
 	acquirePlatformBootstrapLock,
 	PlatformLogicalProjectRepository,
+	PlatformOnboardingDraftRepository,
 	PlatformOrganizationRepository,
 	PlatformProjectCredentialRepository,
 } from "../../src/platform/persistence/repositories";
@@ -26,6 +27,8 @@ describe("platform schema-neutral repositories", () => {
 		const executor = new RecordingExecutor([
 			[{ id: "organization-id", slug: "voysee", name: "Voysee" }],
 			[{ id: "created-id", slug: "wiseley", name: "Wiseley" }],
+			[{ id: "other-id" }],
+			[],
 		]);
 		const repository = new PlatformOrganizationRepository(executor);
 
@@ -40,6 +43,35 @@ describe("platform schema-neutral repositories", () => {
 		expect(executor.calls[0]?.text).toContain("FROM platform_organizations");
 		expect(executor.calls[1]?.text).toContain("VALUES ($1, $2)");
 		expect(executor.calls[1]?.values).toEqual(["wiseley", "Wiseley"]);
+		await expect(
+			repository.slugBelongsToAnotherOrganization("wiseley", "organization-id"),
+		).resolves.toBe(true);
+		expect(executor.calls[2]?.text).toContain("WHERE slug = $1 AND id <> $2");
+		expect(executor.calls[2]?.values).toEqual(["wiseley", "organization-id"]);
+		const updatedAt = new Date("2026-09-18T12:00:00.000Z");
+		await repository.update({
+			id: "organization-id",
+			name: "Wiseley",
+			slug: "wiseley",
+			updatedAt,
+		});
+		expect(executor.calls[3]?.text).toContain("SET name = $1, slug = $2, updated_at = $3");
+		expect(executor.calls[3]?.values).toEqual(["Wiseley", "wiseley", updatedAt, "organization-id"]);
+	});
+
+	it("conditionally bumps onboarding draft revisions with bound values", async () => {
+		const executor = new RecordingExecutor([[{ id: "draft-id" }], []]);
+		const repository = new PlatformOnboardingDraftRepository(executor);
+		const updatedAt = new Date("2026-09-18T12:00:00.000Z");
+
+		await expect(
+			repository.bumpRevision({ id: "draft-id", expectedRevision: 3, updatedAt }),
+		).resolves.toBe(true);
+		await expect(
+			repository.bumpRevision({ id: "draft-id", expectedRevision: 2, updatedAt }),
+		).resolves.toBe(false);
+		expect(executor.calls[0]?.text).toContain("WHERE id = $2 AND revision = $3");
+		expect(executor.calls[0]?.values).toEqual([updatedAt, "draft-id", 3]);
 	});
 
 	it("maps logical-project ownership and binds create inputs", async () => {
