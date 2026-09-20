@@ -1,7 +1,7 @@
 import { type McpServer, ResourceNotFoundError } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { type ContractStore, contractDocuments } from "./contracts";
-import { type DiagnosticLog, runTool } from "./results";
+import { type DiagnosticLog, runTool, trackRequest } from "./results";
 
 const readOnly = { readOnlyHint: true, openWorldHint: false } as const;
 
@@ -59,22 +59,23 @@ export function registerContractTools(
 			name,
 			uri,
 			{ title: name, description: documentDescriptions[name], mimeType: "application/json" },
-			async (requested) => {
-				try {
-					return {
-						contents: [
-							{
-								uri: requested.href,
-								mimeType: "application/json",
-								text: await contracts.readDocument(name),
-							},
-						],
-					};
-				} catch (error) {
-					log(`contract read failed: ${error instanceof Error ? error.message : "unknown"}`);
-					throw new ResourceNotFoundError(requested.href, "The contract document is unavailable");
-				}
-			},
+			(requested) =>
+				trackRequest(async () => {
+					try {
+						return {
+							contents: [
+								{
+									uri: requested.href,
+									mimeType: "application/json",
+									text: await contracts.readDocument(name),
+								},
+							],
+						};
+					} catch (error) {
+						log(`contract read failed: ${error instanceof Error ? error.message : "unknown"}`);
+						throw new ResourceNotFoundError(requested.href, "The contract document is unavailable");
+					}
+				}),
 		);
 	}
 }
