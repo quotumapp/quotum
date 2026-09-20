@@ -166,8 +166,22 @@ test("documents request bodies, required headers and the named schemas clients i
 		"MerchantErrorBody",
 		"EntitlementSnapshot",
 		"QuotumError",
+		"ReadinessBlockerDetail",
 	])
 		expect(document.components?.schemas?.[name], name).toBeDefined();
+	const readiness = operation("/api/platform/environments/readiness", "post");
+	expect(
+		(
+			readiness.responses?.["200"] as
+				| {
+						content: Record<
+							string,
+							{ schema: { properties: { data: { properties: Record<string, unknown> } } } }
+						>;
+				  }
+				| undefined
+		)?.content["application/json"]?.schema.properties.data.properties.blockerDetails,
+	).toEqual({ type: "array", items: { $ref: "#/components/schemas/ReadinessBlockerDetail" } });
 	const check = operation("/v1/billing-accounts/{billingAccountId}/usage/check", "post");
 	expect(
 		(check.responses?.["200"] as { content: Record<string, { schema: unknown }> } | undefined)
@@ -186,6 +200,15 @@ const DECLARATION_ONLY_SCHEMAS = [
 	"CapabilityVerdict",
 	"ProviderCapabilityDeclaration",
 	"ProviderCapabilityMatrix",
+];
+
+/** Runtime capability schemas: admitted providers only, embedded by the capability reads. */
+const RUNTIME_CAPABILITY_SCHEMAS = [
+	"RuntimeCapabilityVerdict",
+	"ProviderConnectionSummary",
+	"ProviderEnvironmentCapabilities",
+	"SubscriptionAvailableActions",
+	"BillingAccountAvailableActions",
 ];
 
 /**
@@ -244,11 +267,14 @@ function operationReach(document: OpenAPIObject) {
 
 test("no operation reaches declaration-only capability schemas or a planned provider", async () => {
 	const document = await generateOpenApi("0.0.0-test");
-	for (const name of [...DECLARATION_ONLY_SCHEMAS, "RuntimeCapabilityVerdict"])
+	for (const name of [...DECLARATION_ONLY_SCHEMAS, ...RUNTIME_CAPABILITY_SCHEMAS])
 		expect(document.components?.schemas?.[name], name).toBeDefined();
 
 	const reach = operationReach(document);
 	expect(reach.schemas.has("QuotumError")).toBe(true);
+	// The runtime capability reads embed verdicts, so the walk must cover them too.
+	for (const name of RUNTIME_CAPABILITY_SCHEMAS)
+		expect(reach.schemas.has(name), `${name} is reachable`).toBe(true);
 	expect(DECLARATION_ONLY_SCHEMAS.filter((name) => reach.schemas.has(name))).toEqual([]);
 	expect(reach.planned).toEqual([]);
 

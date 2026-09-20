@@ -27,6 +27,7 @@ import type { MerchantEmail, MerchantMailer } from "../../src/platform/email";
 import { MerchantOnboarding } from "../../src/platform/onboarding";
 import { CSRF_COOKIE } from "../../src/platform/security";
 import { MerchantStore } from "../../src/platform/store";
+import { createProviderCapabilityReads } from "../../src/providers/capability-reads";
 import { createProviderRegistry } from "../../src/providers/registry";
 import { fixtureConnections } from "../../src/testing/connection-fixtures";
 import { assertOpenApiResponse } from "../../tests/helpers/openapi";
@@ -95,6 +96,10 @@ export function merchantFixture(
 	const env = createIntegrationBillingEnv(process.env.POSTGRES_URI);
 	const repository = new BillingRepository();
 	const resolver = new PostgresProjectInstanceContextResolver(client);
+	const registry = createProviderRegistry({
+		connections: fixtureConnections(env.connectionFixtures),
+		getRepository: () => repository,
+	});
 	const billing = createMerchantBilling(
 		store,
 		createMerchantBillingPort({
@@ -103,12 +108,8 @@ export function merchantFixture(
 				providerReconciliationStaleAfterMs: env.providerReconciliationStaleAfterMs,
 			}),
 			resolver,
-			providers: projectProviderServiceResolver(
-				createProviderRegistry({
-					connections: fixtureConnections(env.connectionFixtures),
-					getRepository: () => repository,
-				}),
-			),
+			providers: projectProviderServiceResolver(registry),
+			capabilityReads: createProviderCapabilityReads({ registry, facts: repository }),
 		}),
 	);
 	const connectionRepository = new ConnectionRepository(

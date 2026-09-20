@@ -55,6 +55,24 @@ localDescribe("catalog control plane", () => {
 		});
 		expect(previewData.intentHash).toMatch(/^[a-f0-9]{64}$/);
 		expect(previewData.previewToken).toMatch(/^[a-f0-9]{64}$/);
+		// Only the top-up asks something of its bindings, and every admitted provider binds it.
+		expect(previewData.providerCompatibility).toEqual(
+			(
+				[
+					["apple", "ios"],
+					["google", "android"],
+					["stripe", "web"],
+				] as const
+			).map(([provider, channel]) => ({
+				target: { kind: "topup", key: "ai_credits_10" },
+				provider,
+				channel,
+				productKey: "echo_credits_10",
+				requiredOperations: ["catalog.topup"],
+				compatible: true,
+				verdicts: [],
+			})),
+		);
 
 		const publishBody = {
 			expectedRevision: null,

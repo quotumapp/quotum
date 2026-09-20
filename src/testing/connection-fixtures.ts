@@ -44,6 +44,27 @@ export function fixtureConnections(
 							: fixture.stripe;
 			return result ?? null;
 		},
+		async describe(project, kind) {
+			const fixture = fixtures.find((row) => row.projectInstanceKey === project.projectInstanceKey);
+			const config =
+				kind === "google"
+					? fixture?.googlePlay
+					: kind === "apple"
+						? fixture?.apple
+						: fixture?.stripe;
+			if (!config) return null;
+			return {
+				enabled: true,
+				active: true,
+				validated: true,
+				validatedAt: null,
+				accountIdentity:
+					config.accountIdentity ??
+					("connectedAccountId" in config ? config.connectedAccountId : null) ??
+					null,
+				settings: {},
+			};
+		},
 	} as RuntimeConnectionResolver;
 }
 export function loadFixtureEnv(): FixtureBillingEnv {

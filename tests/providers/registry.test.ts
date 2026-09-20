@@ -14,13 +14,15 @@ import { CapabilityError, NotConfiguredError } from "../../src/billing/errors";
 import type { BillingRepository } from "../../src/db/repository";
 import type { AppleBillingEnv, GooglePlayBillingEnv, StripeBillingEnv } from "../../src/env";
 import type {
+	ProviderConnectionKind,
+	RuntimeConnectionDescription,
 	RuntimeConnectionKind,
 	RuntimeConnectionResolver,
 } from "../../src/projects/connections";
 import { appleRegistryEntry } from "../../src/providers/apple/adapter";
 import { appleCapabilities } from "../../src/providers/apple/capabilities";
 import { AppleStoreKitService } from "../../src/providers/apple/service";
-import { admittedProviders } from "../../src/providers/capabilities";
+import { admittedProviders, providerCapabilityDeclaration } from "../../src/providers/capabilities";
 import {
 	type AnyProviderAdapter,
 	type AnyProviderRegistryEntry,
@@ -35,6 +37,7 @@ import { GooglePlayBillingService } from "../../src/providers/google/service";
 import { paddleCapabilities } from "../../src/providers/paddle/capabilities";
 import {
 	createProviderRegistry,
+	defaultProviderRegistryEntries,
 	type ProviderRegistry,
 	type ProviderRegistryDependencies,
 } from "../../src/providers/registry";
@@ -50,6 +53,7 @@ import {
 	type ProviderOperation,
 	providerOperations,
 } from "../../src/shared/provider-capabilities";
+import { fixtureConnections } from "../../src/testing/connection-fixtures";
 import { projectInstanceContext } from "../helpers/project-context";
 import {
 	createFakeAppleStoreKitClient,
@@ -302,6 +306,21 @@ describe("provider registry", () => {
 		]);
 		expect(() => registry.label("paddle" as unknown as BillingProvider)).toThrow(
 			"Provider paddle is not admitted by the runtime",
+		);
+	});
+
+	it("resolves and describes the connection kind each declaration reports", () => {
+		// describe() queries the entry's kind while the capabilities read reports the declaration's.
+		expect(
+			defaultProviderRegistryEntries.map((entry): string[] => [
+				entry.provider,
+				entry.connectionKind,
+			]),
+		).toEqual(
+			billingProviders.map((provider) => [
+				provider,
+				providerCapabilityDeclaration(provider).connectionKind,
+			]),
 		);
 	});
 
@@ -790,5 +809,265 @@ describe("provider registry", () => {
 		const apple = await registry.require(project, "apple", "purchase.verify");
 
 		expect(await apple.purchases?.accountLink("user_1")).toBe("token-for-user_1");
+	});
+});
+
+const validatedDescription: RuntimeConnectionDescription = {
+	enabled: true,
+	active: true,
+	validated: true,
+	validatedAt: "2026-09-18T10:00:00.000Z",
+	accountIdentity: "acct_voysee",
+	settings: { authMethod: "api_key" },
+};
+
+/** A resolver whose resolve throws, so a test fails if describe ever resolves a connection. */
+function describingConnections(
+	descriptions: Partial<Record<ProviderConnectionKind, RuntimeConnectionDescription | null>>,
+) {
+	const described: Array<{ project: string; kind: ProviderConnectionKind }> = [];
+	const connections: RuntimeConnectionResolver = {
+		async resolve() {
+			throw new Error("describe must not resolve a connection");
+		},
+		async describe(context, kind) {
+			described.push({ project: context.projectInstanceKey, kind });
+			return descriptions[kind] ?? null;
+		},
+	};
+	return { connections, described };
+}
+
+function describingRegistry(
+	connections: RuntimeConnectionResolver,
+	overrides: Partial<ProviderRegistryDependencies> = {},
+) {
+	const { getRepository, scopedFor } = fakeRepository();
+	const built: string[] = [];
+	const registry = createProviderRegistry({
+		connections,
+		getRepository,
+		clientFactories: {
+			apple: () => {
+				built.push("apple");
+				throw new Error("describe must not build a client");
+			},
+			google: () => {
+				built.push("google");
+				throw new Error("describe must not build a client");
+			},
+			stripe: () => {
+				built.push("stripe");
+				throw new Error("describe must not build a client");
+			},
+		},
+		...overrides,
+	});
+	return { registry, scopedFor, built };
+}
+
+const presentOverride = {
+	connection: {
+		configured: true,
+		enabled: true,
+		validated: true,
+		validatedAt: null,
+		accountIdentity: null,
+	},
+	configuration: { connectionEnabled: true, connectionValidated: true, accountFlags: {} },
+};
+
+const absentConnection = {
+	connection: {
+		configured: false,
+		enabled: false,
+		validated: false,
+		validatedAt: null,
+		accountIdentity: null,
+	},
+	configuration: { connectionEnabled: false, connectionValidated: false, accountFlags: {} },
+};
+
+describe("provider registry describe", () => {
+	it("reports a project override as configured and an explicit null override as absent", async () => {
+		const { connections, described } = describingConnections({ google: validatedDescription });
+		const { registry, scopedFor, built } = describingRegistry(connections, {
+			overrides: {
+				voysee: { stripeBillingService: stripeFake, appleStoreKitService: null },
+			},
+			legacyServices: { stripeBillingService: null, appleStoreKitService: appleFake },
+		});
+
+		expect(await registry.describe(project, "stripe")).toEqual(presentOverride);
+		expect(await registry.describe(project, "apple")).toEqual(absentConnection);
+		expect(described).toEqual([]);
+		expect(await registry.describe(project, "google")).toMatchObject({
+			connection: { configured: true, accountIdentity: "acct_voysee" },
+		});
+		expect(described).toEqual([{ project: "voysee", kind: "google" }]);
+		expect(scopedFor).toEqual([]);
+		expect(built).toEqual([]);
+	});
+
+	it("falls back to legacy services, including an explicit null, before the resolver", async () => {
+		const { connections, described } = describingConnections({
+			apple: validatedDescription,
+			google: validatedDescription,
+			stripe: validatedDescription,
+		});
+		const { registry } = describingRegistry(connections, {
+			overrides: { wiseley: { stripeBillingService: null } },
+			legacyServices: { stripeBillingService: stripeFake, googlePlayBillingService: null },
+		});
+
+		expect(await registry.describe(project, "stripe")).toEqual(presentOverride);
+		expect(await registry.describe(project, "google")).toEqual(absentConnection);
+		expect(await registry.describe(otherProject, "stripe")).toEqual(absentConnection);
+		expect(described).toEqual([]);
+		expect((await registry.describe(project, "apple")).connection?.configured).toBe(true);
+		expect(described).toEqual([{ project: "voysee", kind: "apple" }]);
+	});
+
+	it("leaves the state unknown when the resolver cannot describe connections", async () => {
+		const resolveOnly: RuntimeConnectionResolver = {
+			async resolve() {
+				throw new Error("describe must not resolve a connection");
+			},
+		};
+		const { registry, scopedFor, built } = describingRegistry(resolveOnly);
+
+		for (const provider of billingProviders) {
+			expect(await registry.describe(project, provider)).toEqual({
+				connection: null,
+				configuration: undefined,
+			});
+		}
+		expect(scopedFor).toEqual([]);
+		expect(built).toEqual([]);
+	});
+
+	it("reads persisted rows by connection kind: missing, disabled, unvalidated and validated", async () => {
+		const { connections, described } = describingConnections({
+			apple: { ...validatedDescription, enabled: false, accountIdentity: "com.voysee.app" },
+			google: {
+				...validatedDescription,
+				validated: false,
+				validatedAt: null,
+				accountIdentity: null,
+				settings: {},
+			},
+			stripe: validatedDescription,
+		});
+		const { registry, scopedFor, built } = describingRegistry(connections);
+
+		expect(await registry.describe(project, "apple")).toEqual({
+			connection: {
+				configured: true,
+				enabled: false,
+				validated: true,
+				validatedAt: "2026-09-18T10:00:00.000Z",
+				accountIdentity: "com.voysee.app",
+			},
+			configuration: {
+				connectionEnabled: false,
+				connectionValidated: true,
+				accountFlags: { authMethod: "api_key" },
+			},
+		});
+		expect(await registry.describe(project, "google")).toEqual({
+			connection: {
+				configured: true,
+				enabled: true,
+				validated: false,
+				validatedAt: null,
+				accountIdentity: null,
+			},
+			configuration: { connectionEnabled: true, connectionValidated: false, accountFlags: {} },
+		});
+		expect(await registry.describe(project, "stripe")).toEqual({
+			connection: {
+				configured: true,
+				enabled: true,
+				validated: true,
+				validatedAt: "2026-09-18T10:00:00.000Z",
+				accountIdentity: "acct_voysee",
+			},
+			configuration: {
+				connectionEnabled: true,
+				connectionValidated: true,
+				accountFlags: { authMethod: "api_key" },
+			},
+		});
+		expect(
+			await describingRegistry(describingConnections({}).connections).registry.describe(
+				project,
+				"stripe",
+			),
+		).toEqual(absentConnection);
+		expect(
+			await describingRegistry(
+				describingConnections({
+					stripe: { ...validatedDescription, active: false, settings: {} },
+				}).connections,
+			).registry.describe(project, "stripe"),
+		).toEqual(absentConnection);
+		expect(described).toEqual([
+			{ project: "voysee", kind: "apple" },
+			{ project: "voysee", kind: "google" },
+			{ project: "voysee", kind: "stripe" },
+		]);
+		expect(scopedFor).toEqual([]);
+		expect(built).toEqual([]);
+	});
+
+	it("describes fixture connections as enabled and validated with their account identity", async () => {
+		const { connectedAccountId: _, ...apiKeyStripe } = stripeConfig;
+		const connections = fixtureConnections([
+			{
+				projectInstanceKey: "voysee",
+				projectionUrl: "https://voysee.example.com/billing/projection",
+				projectionSecret: "projection-secret",
+				apple: { ...appleConfig, accountIdentity: "com.voysee.app" },
+				googlePlay: null,
+				stripe: stripeConfig,
+			},
+			{
+				projectInstanceKey: "wiseley",
+				projectionUrl: "https://wiseley.example.com/billing/projection",
+				projectionSecret: "projection-secret",
+				stripe: apiKeyStripe,
+			},
+		]);
+		const { registry, scopedFor, built } = describingRegistry(connections);
+		const fixture = (accountIdentity: string | null) => ({
+			connection: {
+				configured: true,
+				enabled: true,
+				validated: true,
+				validatedAt: null,
+				accountIdentity,
+			},
+			configuration: { connectionEnabled: true, connectionValidated: true, accountFlags: {} },
+		});
+
+		expect(await registry.describe(project, "apple")).toEqual(fixture("com.voysee.app"));
+		expect(await registry.describe(project, "google")).toEqual(absentConnection);
+		expect(await registry.describe(project, "stripe")).toEqual(fixture("acct_voysee"));
+		expect(await registry.describe(otherProject, "stripe")).toEqual(fixture(null));
+		expect(await registry.describe(otherProject, "apple")).toEqual(absentConnection);
+		expect(await registry.describe(projectInstanceContext("unknown"), "stripe")).toEqual(
+			absentConnection,
+		);
+		expect(scopedFor).toEqual([]);
+		expect(built).toEqual([]);
+	});
+
+	it("describes no connection by default and refuses providers the runtime does not admit", async () => {
+		const registry = createProviderRegistry({ getRepository: fakeRepository().getRepository });
+
+		expect(await registry.describe(project, "stripe")).toEqual(absentConnection);
+		expect(
+			await rejection(registry.describe(project, "paddle" as unknown as BillingProvider)),
+		).toEqual(new Error("Provider paddle is not admitted by the runtime"));
 	});
 });

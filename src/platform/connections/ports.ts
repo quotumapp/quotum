@@ -1,3 +1,4 @@
+import type { ReadinessBlockerDetail } from "../contracts";
 import type { ConnectionKind } from "./repository";
 
 export interface ConnectionInput {
@@ -23,10 +24,26 @@ export interface ConnectionValidationPort {
 		context: { instanceId: string; instanceKey: string; versionId: string },
 	): Promise<ConnectionValidation>;
 }
+/** The connection state readiness reads; `ConnectionRepository.list` rows satisfy it. */
+export interface ReadinessConnectionState {
+	kind: ConnectionKind;
+	enabled: boolean;
+	active_version_id: string | null;
+	validated_at: Date | null;
+	settings: Record<string, unknown> | null;
+}
+/** A non-gating readiness finding about the published catalog; readiness adds `gating: false`. */
+export type ReadinessCapabilityDetail = Omit<ReadinessBlockerDetail, "gating">;
 export interface EnvironmentBillingPort {
 	catalogReadiness(
 		instanceId: string,
-	): Promise<{ revisionId: string | null; providers: string[]; ready: boolean }>;
+		connections: readonly ReadinessConnectionState[],
+	): Promise<{
+		revisionId: string | null;
+		providers: string[];
+		ready: boolean;
+		capabilityDetails?: ReadinessCapabilityDetail[];
+	}>;
 	promote(input: {
 		sourceInstanceId: string;
 		targetInstanceId: string;

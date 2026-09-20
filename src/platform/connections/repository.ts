@@ -16,6 +16,14 @@ export interface ConnectionVersion {
 	external_identity: string | null;
 	expires_at: Date;
 }
+/** Non-secret state of one connection and its active version, if any. */
+export interface ConnectionDescriptionRow {
+	enabled: boolean;
+	active_version_id: string | null;
+	settings: Record<string, unknown> | null;
+	validated_at: Date | null;
+	external_identity: string | null;
+}
 export class ConnectionRepository {
 	constructor(
 		readonly sql: MerchantSql,
@@ -41,6 +49,16 @@ export class ConnectionRepository {
 		>`SELECT v.* FROM platform_connections c JOIN platform_connection_versions v ON v.connection_id=c.id AND v.id=c.active_version_id WHERE c.project_instance_id=${instanceId} AND c.kind=${kind} AND (c.enabled OR ${recovery})`;
 		if (!version) return null;
 		return { version, secrets: await this.secrets(version) };
+	}
+	/** Reads persisted state only: never secrets, the cipher or a provider. Null when no row exists. */
+	async describe(
+		instanceId: string,
+		kind: ConnectionKind,
+	): Promise<ConnectionDescriptionRow | null> {
+		const [row] = await this.sql<
+			ConnectionDescriptionRow[]
+		>`SELECT c.enabled,c.active_version_id,v.settings,v.validated_at,v.external_identity FROM platform_connections c LEFT JOIN platform_connection_versions v ON v.connection_id=c.id AND v.id=c.active_version_id WHERE c.project_instance_id=${instanceId} AND c.kind=${kind}`;
+		return row ?? null;
 	}
 	async version(instanceId: string, id: string, sql = this.sql): Promise<ConnectionVersion> {
 		const [version] = await sql<

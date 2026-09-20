@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { postV1AdminCatalogPreviewResponse200Schema } from "../../src/app/contracts/catalog-responses";
 import { CapabilityError, InvalidRequestError } from "../../src/billing/errors";
 import { CatalogControlPlane } from "../../src/catalog/control-plane";
 import type {
@@ -7,17 +8,22 @@ import type {
 	CatalogPlanIntent,
 	CatalogPriceIntent,
 	CatalogProviderBindingIntent,
+	CatalogTopupIntent,
 } from "../../src/catalog/types";
+import type { QueryExecutor } from "../../src/db/repository/types";
 import {
 	type ProviderCapabilityLookup,
 	providerCapabilityCatalog,
 	providerCapabilityDeclaration,
 } from "../../src/providers/capabilities";
+import type { CatalogProviderCompatibility } from "../../src/providers/catalog-compatibility-types";
 import type {
 	DeclaredProvider,
 	OperationSupport,
 	ProviderOperation,
 } from "../../src/shared/provider-capabilities";
+import { renderDrizzleSql } from "../helpers/drizzle-sql";
+import { projectInstanceContext } from "../helpers/project-context";
 
 const feature: CatalogFeatureIntent = {
 	key: "credits",
@@ -316,5 +322,143 @@ describe("catalog control plane capability injection", () => {
 		expect((error as InvalidRequestError).message).toBe(
 			"apple catalog bindings must use the web channel",
 		);
+	});
+});
+
+/** Answers a preview for an environment that has never published a catalog. */
+class EmptyCatalogDatabase {
+	async execute<T>(query: unknown): Promise<T[]> {
+		return this.answer(renderDrizzleSql(query)) as T[];
+	}
+
+	async transaction<T>(callback: (tx: QueryExecutor) => Promise<T>): Promise<T> {
+		return await callback(this);
+	}
+
+	private answer(text: string): Record<string, unknown>[] {
+		if (text.includes("SELECT p.id, cr.id AS revision_id")) {
+			return [
+				{ id: projectInstanceContext().projectInstanceId, revision_id: null, revision: null },
+			];
+		}
+		if (text.includes("SELECT draft.intent")) return [];
+		if (text.includes("SELECT key, active FROM features")) return [];
+		if (text.includes("SELECT key, active FROM plans")) return [];
+		if (text.includes("SELECT DISTINCT key FROM topup_options")) return [];
+		if (text.includes("FROM subscriptions")) return [{ count: "0" }];
+		if (text.includes("INSERT INTO catalog_drafts")) return [{ id: "1" }];
+		throw new Error(`Unscripted query: ${text}`);
+	}
+}
+
+const googleBinding: CatalogProviderBindingIntent = {
+	provider: "google",
+	channel: "android",
+	productKey: "pack",
+};
+
+function pack(bindings: CatalogProviderBindingIntent[]): CatalogTopupIntent {
+	return {
+		key: "pack",
+		featureKey: "credits",
+		quantity: "10",
+		expiresAfterSeconds: null,
+		providerBindings: bindings,
+	};
+}
+
+async function preview(plans: CatalogPlanIntent[], topups: CatalogTopupIntent[]) {
+	return await new CatalogControlPlane(new EmptyCatalogDatabase()).preview(
+		projectInstanceContext(),
+		{
+			expectedRevision: null,
+			actor: "test",
+			catalog: { features: [feature], plans, topups, rateCards: [] },
+		},
+	);
+}
+
+/** Each entry with its verdicts reduced to the operation and its reason codes. */
+function summarized(entries: CatalogProviderCompatibility[]) {
+	return entries.map(({ target, provider, channel, productKey, compatible, verdicts }) => ({
+		target,
+		provider,
+		channel,
+		productKey,
+		compatible,
+		blocked: verdicts.map(({ operation, reasons }) => [operation, reasons.map(({ code }) => code)]),
+	}));
+}
+
+type SummarizedEntry = ReturnType<typeof summarized>[number];
+
+describe("catalog control plane preview provider compatibility", () => {
+	const trialPlan = plan({ trialDays: 7, providerBindings: [stripeBinding] });
+	const packBindings = [
+		{ ...appleBinding, productKey: "pack" },
+		googleBinding,
+		{ ...stripeBinding, productKey: "pack" },
+	];
+
+	it("reports every bound entry as compatible, then the admitted providers left unbound", async () => {
+		const result = await preview([trialPlan], [pack(packBindings)]);
+		expect(summarized(result.providerCompatibility)).toEqual([
+			{
+				target: { kind: "plan", key: "pro" },
+				provider: "stripe",
+				channel: "web",
+				productKey: "pro",
+				compatible: true,
+				blocked: [],
+			},
+			...(
+				[
+					["apple", "ios"],
+					["google", "android"],
+				] as const
+			).map(
+				([provider, channel]): SummarizedEntry => ({
+					target: { kind: "plan", key: "pro" },
+					provider,
+					channel,
+					productKey: null,
+					compatible: false,
+					blocked: [["catalog.trial", ["PROVIDER_MANAGED"]]],
+				}),
+			),
+			...packBindings.map(
+				({ provider, channel }): SummarizedEntry => ({
+					target: { kind: "topup", key: "pack" },
+					provider,
+					channel,
+					productKey: "pack",
+					compatible: true,
+					blocked: [],
+				}),
+			),
+		]);
+		expect(
+			result.providerCompatibility
+				.filter(({ productKey }) => productKey !== null)
+				.every(({ compatible }) => compatible),
+		).toBe(true);
+		const parsed = postV1AdminCatalogPreviewResponse200Schema.parse({
+			success: true,
+			data: result,
+		});
+		expect(parsed.data.providerCompatibility).toEqual(result.providerCompatibility);
+	});
+
+	it("reports the same entries whatever order the intent lists its bindings in", async () => {
+		const first = await preview([trialPlan], [pack(packBindings)]);
+		const reversed = await preview([trialPlan], [pack([...packBindings].reverse())]);
+		const again = await preview([trialPlan], [pack(packBindings)]);
+		expect(reversed.providerCompatibility).toEqual(first.providerCompatibility);
+		expect(again.providerCompatibility).toEqual(first.providerCompatibility);
+	});
+
+	it("adds no entries for a plain base plan", async () => {
+		const result = await preview([plan({ providerBindings: [stripeBinding] })], []);
+		expect(result.providerCompatibility).toEqual([]);
 	});
 });

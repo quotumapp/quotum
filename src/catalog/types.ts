@@ -1,5 +1,6 @@
 import type { BillingChannel, BillingProvider } from "../billing/types";
 import type { ProjectInstanceContext } from "../projects/context";
+import type { CatalogProviderCompatibility } from "../providers/catalog-compatibility-types";
 
 export interface CatalogFeatureIntent {
 	key: string;
@@ -141,6 +142,12 @@ export interface CatalogPreview {
 	nextRevision: number;
 	expiresAt: string;
 	impact: CatalogImpact;
+	/**
+	 * Every binding judged on the declarations, each entry's bindings followed by one hypothetical
+	 * binding per admitted provider it leaves unbound. A preview only succeeds when every bound
+	 * entry is compatible.
+	 */
+	providerCompatibility: CatalogProviderCompatibility[];
 }
 
 export interface CatalogPublishResult {

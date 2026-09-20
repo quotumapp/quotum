@@ -2,7 +2,6 @@ import { CapabilityError } from "../billing/errors";
 import {
 	type CatalogCapabilityTarget,
 	catalogConstructOperations,
-	implementsOperation,
 	type ProviderCapabilityLookup,
 	providerCapabilityCatalog,
 } from "../providers/capabilities";
@@ -11,6 +10,11 @@ import type {
 	CatalogProviderCompatibility,
 } from "../providers/catalog-compatibility-types";
 import {
+	type BillingChannel,
+	type BillingProvider,
+	billingProviders,
+	type CapabilityConfigurationFacts,
+	type CapabilityFacts,
 	evaluateCapability,
 	isBillingProvider,
 	type ProviderCapabilityDeclaration,
@@ -73,29 +77,85 @@ function effectivePlanBindings(plan: CatalogPlanIntent): CatalogProviderBindingI
 		: (plan.basePrice?.providerBindings ?? []);
 }
 
-/** Every binding of every entry, judged on the declarations alone, in catalog order. */
+/** How {@link catalogProviderCompatibility} judges a catalog; the defaults are the publish gate. */
+export interface CatalogProviderCompatibilityOptions {
+	capabilities?: ProviderCapabilityLookup;
+	/**
+	 * The last layer judged: `implementation` reads the declarations alone, while `configuration`
+	 * also checks each provider's connection. Per-call conditions never apply to a catalog, so
+	 * `operation` is not a choice.
+	 */
+	through?: "implementation" | "configuration";
+	/**
+	 * The connection facts of `provider`, read only through `configuration`. Undefined means they
+	 * are unknown, so its connection conditions come back undetermined.
+	 */
+	configuration?: (provider: BillingProvider) => CapabilityConfigurationFacts | undefined;
+	/**
+	 * Also judges, after each entry's bindings, one hypothetical binding per available admitted
+	 * provider the entry does not bind, in `billingProviders` order.
+	 */
+	includeUnbound?: boolean;
+}
+
+/**
+ * Every binding of every entry, in catalog order, judged on the declarations alone unless
+ * `through` is `configuration`. A binding is compatible unless one of its verdicts is blocked.
+ */
 export function catalogProviderCompatibility(
 	catalog: CatalogIntent,
-	options: { capabilities?: ProviderCapabilityLookup } = {},
+	options: CatalogProviderCompatibilityOptions = {},
 ): CatalogProviderCompatibility[] {
 	const capabilities = options.capabilities ?? providerCapabilityCatalog;
+	const through = options.through ?? "implementation";
+	const factsFor = (provider: BillingProvider): CapabilityFacts => {
+		if (through !== "configuration") return {};
+		const configuration = options.configuration?.(provider);
+		return configuration === undefined ? {} : { configuration };
+	};
 	return catalogCapabilityTargets(catalog).flatMap(({ target, construct, bindings }) => {
 		const requiredOperations = catalogConstructOperations(construct);
-		return bindings.map((binding) => {
-			const declaration = bindingDeclaration(capabilities, binding);
+		const judge = (
+			declaration: ProviderCapabilityDeclaration,
+			provider: BillingProvider,
+			channel: BillingChannel,
+			productKey: string | null,
+		): CatalogProviderCompatibility => {
+			const facts = factsFor(provider);
 			const verdicts = requiredOperations
-				.filter((operation) => !implementsOperation(declaration, operation))
-				.map((operation) => blockedVerdict(declaration, binding, operation));
+				.map(
+					(operation): RuntimeCapabilityVerdict => ({
+						...evaluateCapability(declaration, operation, facts, { through }),
+						provider,
+					}),
+				)
+				.filter(({ outcome }) => outcome !== "available");
 			return {
 				target,
-				provider: binding.provider,
-				channel: binding.channel,
-				productKey: binding.productKey,
+				provider,
+				channel,
+				productKey,
 				requiredOperations,
-				compatible: verdicts.length === 0,
+				compatible: verdicts.every(({ outcome }) => outcome !== "blocked"),
 				verdicts,
 			};
-		});
+		};
+		const entries = bindings.map((binding) =>
+			judge(
+				bindingDeclaration(capabilities, binding),
+				binding.provider,
+				binding.channel,
+				binding.productKey,
+			),
+		);
+		if (options.includeUnbound !== true) return entries;
+		for (const provider of billingProviders) {
+			const declaration = capabilities.get(provider);
+			if (declaration?.availability !== "available") continue;
+			if (bindings.some((binding) => binding.provider === provider)) continue;
+			entries.push(judge(declaration, provider, declaration.channel, null));
+		}
+		return entries;
 	});
 }
 
@@ -135,15 +195,6 @@ function bindingDeclaration(
 		throw new Error(`Provider ${String(binding.provider)} has no capability declaration`);
 	}
 	return declaration;
-}
-
-function blockedVerdict(
-	declaration: ProviderCapabilityDeclaration,
-	binding: CatalogProviderBindingIntent,
-	operation: ProviderOperation,
-): RuntimeCapabilityVerdict {
-	const verdict = evaluateCapability(declaration, operation, {}, { through: "implementation" });
-	return { ...verdict, provider: binding.provider };
 }
 
 function targetLabel(target: CatalogCompatibilityTarget): string {

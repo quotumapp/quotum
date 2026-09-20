@@ -2,6 +2,7 @@ import { sql as drizzleSql } from "drizzle-orm";
 import { databaseDecimal } from "../../billing/decimal";
 import { NotFoundBillingError } from "../../billing/errors";
 import type {
+	AvailableActionFacts,
 	CustomerBillingSummary,
 	ProjectUsageEventItem,
 	ProjectUsageEventListInput,
@@ -12,7 +13,7 @@ import type {
 	UsageSeriesInput,
 	UsageSeriesPoint,
 } from "../../billing/insights";
-import type { BillingProvider } from "../../billing/types";
+import type { BillingChannel, BillingProvider, SubscriptionStatus } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import { executeOne, executeRows } from "./query";
@@ -285,6 +286,83 @@ export class BillingInsightsRepository extends RepositoryModule {
 				currency: row.currency,
 				paidAt: row.paid_at === null ? null : iso(row.paid_at),
 				createdAt: iso(row.created_at),
+			})),
+		};
+	}
+
+	async getAvailableActionFacts(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+	): Promise<AvailableActionFacts> {
+		const projectId = project.projectInstanceId;
+		const customer = await executeOne<CustomerRow>(
+			this.database,
+			drizzleSql`
+				SELECT id FROM customers
+				WHERE project_id = ${projectId} AND billing_account_id = ${billingAccountId}
+			`,
+		);
+		if (customer === null) {
+			return { customerExists: false, subscriptions: [] };
+		}
+		// idx_billing_subscription_changes_pending_scope allows one pending or processing change per
+		// subscription, so the change join never multiplies rows.
+		const rows = await executeRows<{
+			external_subscription_id: string;
+			provider: BillingProvider;
+			channel: BillingChannel;
+			status: SubscriptionStatus;
+			plan_key: string | null;
+			current_period_end: Date | string | null;
+			cancel_at_period_end: boolean;
+			change_id: string | null;
+			change_status: "pending" | "processing" | null;
+			effective_mode: "immediate" | "period_end" | null;
+			effective_at: Date | string | null;
+		}>(
+			this.database,
+			drizzleSql`
+				SELECT subscription.external_subscription_id, subscription.provider, subscription.channel,
+					subscription.status, plan.key AS plan_key, subscription.current_period_end,
+					subscription.cancel_at_period_end, pending_change.id AS change_id,
+					pending_change.status AS change_status, pending_change.effective_mode,
+					pending_change.effective_at
+				FROM subscriptions subscription
+				LEFT JOIN plan_versions version
+					ON version.project_id = subscription.project_id AND version.id = subscription.plan_version_id
+				LEFT JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+				LEFT JOIN subscription_changes pending_change
+					ON pending_change.project_id = subscription.project_id
+					AND pending_change.subscription_id = subscription.id
+					AND pending_change.status IN ('pending', 'processing')
+				WHERE subscription.project_id = ${projectId} AND subscription.customer_id = ${customer.id}
+					AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+					AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
+				ORDER BY subscription.created_at DESC, subscription.id
+			`,
+		);
+		return {
+			customerExists: true,
+			subscriptions: rows.map((row) => ({
+				externalSubscriptionId: row.external_subscription_id,
+				provider: row.provider,
+				channel: row.channel,
+				status: row.status,
+				planKey: row.plan_key,
+				currentPeriodEnd: row.current_period_end === null ? null : iso(row.current_period_end),
+				cancelAtPeriodEnd: row.cancel_at_period_end,
+				pendingChange:
+					row.change_id === null ||
+					row.change_status === null ||
+					row.effective_mode === null ||
+					row.effective_at === null
+						? null
+						: {
+								changeId: row.change_id,
+								status: row.change_status,
+								effectiveMode: row.effective_mode,
+								effectiveAt: iso(row.effective_at),
+							},
 			})),
 		};
 	}

@@ -38,6 +38,7 @@ import { ProjectionHttpClient } from "./projections/http-client";
 import type { ApiProjectProjectionFetch } from "./projections/http-types";
 import type { RuntimeConnectionResolver } from "./projects/connections";
 import type { ProjectInstanceContextResolver } from "./projects/context";
+import { createProviderCapabilityReads } from "./providers/capability-reads";
 import { createProviderRegistry } from "./providers/registry";
 import type { StripeBillingConfig } from "./providers/stripe/client";
 import type { StripeBillingClientDependency } from "./providers/stripe/service";
@@ -108,6 +109,10 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 				: { stripe: dependencies.stripeClientFactory },
 	});
 	const workerProviders = createWorkerProviderSelectors(providerRegistry);
+	const capabilityReads = createProviderCapabilityReads({
+		registry: providerRegistry,
+		facts: billingRepository,
+	});
 	const projectionSyncWorker = new ProjectionSyncWorker({
 		workerId: env.workerId,
 		maxAttempts: env.projectionSyncMaxAttempts,
@@ -235,6 +240,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		entitlementService: new EntitlementService(billingRepository),
 		projectContextResolver,
 		providerRegistry,
+		providerCapabilityReads: capabilityReads,
 		adminOperations,
 		logger,
 		metrics,
@@ -248,6 +254,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		}),
 		resolver: projectContextResolver,
 		providers: projectProviderServiceResolver(providerRegistry),
+		capabilityReads,
 		operations: adminOperations,
 	});
 	const app = attachMerchantRuntime(staff, merchantBilling, {

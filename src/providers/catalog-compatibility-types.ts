@@ -1,32 +1,31 @@
 import type {
 	BillingChannel,
 	BillingProvider,
+	CatalogCompatibilityTarget,
 	ProviderOperation,
 	RuntimeCapabilityVerdict,
 } from "../shared/provider-capabilities";
 
-export const catalogCompatibilityTargetKinds = ["plan", "price", "topup"] as const;
-export type CatalogCompatibilityTargetKind = (typeof catalogCompatibilityTargetKinds)[number];
-
-/**
- * The catalog entry a binding belongs to: `key` is the plan or top-up key, and `priceKey` names
- * the plan's base or item price for a `price` target.
- */
-export type CatalogCompatibilityTarget = {
-	kind: CatalogCompatibilityTargetKind;
-	key: string;
-	priceKey?: string | null;
-};
+export {
+	type CatalogCompatibilityTarget,
+	type CatalogCompatibilityTargetKind,
+	catalogCompatibilityTargetKinds,
+} from "../shared/provider-capabilities";
 
 /** Whether one provider binding of a catalog entry can be built from its declaration. */
 export type CatalogProviderCompatibility = {
 	target: CatalogCompatibilityTarget;
 	provider: BillingProvider;
 	channel: BillingChannel;
+	/** The bound product, or null for a hypothetical binding the catalog does not declare. */
 	productKey: string | null;
 	/** Contract-ordered operations the binding needs. */
 	requiredOperations: ProviderOperation[];
+	/** False when any verdict is blocked; undetermined verdicts do not make a binding incompatible. */
 	compatible: boolean;
-	/** The blocked verdicts, in contract order; empty when `compatible`. */
+	/**
+	 * The required operations that are not available, blocked or undetermined, in contract order;
+	 * empty when every one is available.
+	 */
 	verdicts: RuntimeCapabilityVerdict[];
 };

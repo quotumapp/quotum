@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { artifactJson } from "../../scripts/openapi";
 import { changeBillingPolicyFromStripe, stripeProrationBehaviors } from "../../src/billing/pricing";
 import { subscriptionStatuses } from "../../src/billing/types";
 import type {
@@ -8,6 +9,8 @@ import type {
 	CatalogPlanItemIntent,
 	CatalogPriceIntent,
 } from "../../src/catalog/types";
+import { providerCapabilityContract } from "../../src/composition/provider-capabilities";
+import type { RuntimeConnectionDescription } from "../../src/projects/connections";
 import {
 	admittedProviders,
 	bindingImplementsCatalogTarget,
@@ -15,18 +18,26 @@ import {
 	catalogConstructOperations,
 	commercialActionOperations,
 	commercialPreviewProvider,
+	connectionConfigurationFacts,
+	evaluateRuntimeCapability,
 	implementsOperation,
 	type ProviderCapabilityLookup,
 	providerCapabilityCatalog,
 	providerCapabilityDeclaration,
 	providerCapabilityDeclarations,
+	providerConnectionSummary,
 	providersImplementing,
 	purchaseActionFor,
+	recoveryPurposeOperations,
 	requiredOperationsFor,
+	runtimeCapabilityDeclaration,
+	runtimeCapabilityLookup,
 } from "../../src/providers/capabilities";
 import { stripeCapabilities } from "../../src/providers/stripe/capabilities";
 import {
 	billingProviders,
+	type CapabilityCondition,
+	type CapabilityConfigurationFacts,
 	type DeclaredProvider,
 	declaredProviders,
 	type OperationSupport,
@@ -596,5 +607,227 @@ describe("declaration helpers the runtime gates read", () => {
 				),
 			),
 		).toEqual(["stripe"]);
+	});
+});
+
+const enabledAndValidated: CapabilityConfigurationFacts = {
+	connectionEnabled: true,
+	connectionValidated: true,
+	accountFlags: {},
+};
+
+describe("runtime capability declarations", () => {
+	it("pass declaration validation for every admitted provider", () => {
+		for (const provider of billingProviders) {
+			const runtime = runtimeCapabilityDeclaration(providerCapabilityDeclaration(provider));
+			expect({ provider, issues: validateDeclaration(runtime) }).toEqual({ provider, issues: [] });
+		}
+	});
+
+	it("copy each declaration once and never mutate the source", () => {
+		const before = structuredClone(providerCapabilityDeclarations);
+
+		for (const declaration of providerCapabilityDeclarations) {
+			const runtime = runtimeCapabilityDeclaration(declaration);
+			expect(runtimeCapabilityDeclaration(declaration)).toBe(runtime);
+			expect(runtimeCapabilityLookup().get(declaration.provider)).toBe(runtime);
+			expect(runtime).not.toBe(declaration);
+			expect(runtime.operations).not.toBe(declaration.operations);
+			for (const operation of providerOperations) {
+				expect(runtime.operations[operation]).not.toBe(declaration.operations[operation]);
+				expect(runtime.operations[operation].conditions).not.toBe(
+					declaration.operations[operation].conditions,
+				);
+			}
+		}
+
+		expect(providerCapabilityDeclarations).toEqual(before);
+	});
+
+	it("require only a validated connection on the recovery path, and an enabled one elsewhere", () => {
+		expect([...recoveryPurposeOperations]).toEqual([
+			"webhook.ingest",
+			"event.replay",
+			"subscription.reconcile",
+			"settlement.collect_finalized_charge",
+			"adjustment.issue",
+			"refund.sync",
+			"topup.automatic",
+		]);
+		const recovery: readonly ProviderOperation[] = recoveryPurposeOperations;
+		for (const provider of billingProviders) {
+			const declaration = providerCapabilityDeclaration(provider);
+			const runtime = runtimeCapabilityDeclaration(declaration);
+			for (const operation of providerOperations) {
+				const declared = declaration.operations[operation].conditions;
+				expect(declared.map(({ kind }) => kind)).not.toContain("connection_enabled");
+				expect(declared.map(({ kind }) => kind)).not.toContain("connection_validated");
+				const implicit: CapabilityCondition[] = recovery.includes(operation)
+					? [{ kind: "connection_validated" }]
+					: [{ kind: "connection_enabled" }, { kind: "connection_validated" }];
+				expect({
+					provider,
+					operation,
+					conditions: runtime.operations[operation].conditions,
+				}).toEqual({ provider, operation, conditions: [...implicit, ...declared] });
+			}
+		}
+	});
+
+	it("skip a connection condition the operation already declares", () => {
+		const declaration = providerCapabilityDeclaration("stripe");
+		const custom: ProviderCapabilityDeclaration = {
+			...declaration,
+			operations: {
+				...declaration.operations,
+				"checkout.hosted": {
+					...declaration.operations["checkout.hosted"],
+					conditions: [{ kind: "currency", allowed: ["usd"] }, { kind: "connection_validated" }],
+				},
+				"webhook.ingest": {
+					...declaration.operations["webhook.ingest"],
+					conditions: [{ kind: "connection_validated" }],
+				},
+			},
+		};
+
+		const runtime = runtimeCapabilityLookup(new Map([["stripe", custom]])).get("stripe");
+
+		expect(runtime?.operations["checkout.hosted"].conditions).toEqual([
+			{ kind: "connection_enabled" },
+			{ kind: "currency", allowed: ["usd"] },
+			{ kind: "connection_validated" },
+		]);
+		expect(runtime?.operations["webhook.ingest"].conditions).toEqual([
+			{ kind: "connection_validated" },
+		]);
+		expect(runtimeCapabilityLookup(new Map()).get("stripe")).toBeUndefined();
+	});
+
+	it("leave the committed capability contract unchanged", () => {
+		for (const provider of billingProviders) {
+			for (const operation of providerOperations) {
+				evaluateRuntimeCapability(provider, operation, {});
+			}
+		}
+
+		expect(artifactJson(providerCapabilityContract())).toBe(
+			readFileSync(join(repositoryRoot, "contracts/v1/provider-capabilities.json"), "utf8"),
+		);
+		expect(providerCapabilityContract().providers).toEqual([...providerCapabilityDeclarations]);
+	});
+
+	it("block a disabled connection at the configuration layer", () => {
+		const disabled = { configuration: { ...enabledAndValidated, connectionEnabled: false } };
+
+		expect(
+			evaluateRuntimeCapability("stripe", "checkout.hosted", disabled, {
+				through: "configuration",
+			}),
+		).toEqual({
+			provider: "stripe",
+			operation: "checkout.hosted",
+			outcome: "blocked",
+			level: "native",
+			blockingLayer: "configuration",
+			reasons: [
+				{
+					code: "CONNECTION_DISABLED",
+					layer: "configuration",
+					condition: { kind: "connection_enabled" },
+					observed: { connectionEnabled: false },
+					resolution: { kind: "merchant_configuration", connectionKind: "stripe" },
+				},
+			],
+		});
+		// Recovery operations keep working on a disabled connection that is still validated.
+		expect(
+			evaluateRuntimeCapability("stripe", "webhook.ingest", disabled, { through: "configuration" }),
+		).toMatchObject({ outcome: "available", blockingLayer: null, reasons: [] });
+		expect(
+			evaluateRuntimeCapability(
+				"apple",
+				"webhook.ingest",
+				{ configuration: { ...enabledAndValidated, connectionValidated: false } },
+				{ through: "configuration" },
+			),
+		).toMatchObject({
+			provider: "apple",
+			outcome: "blocked",
+			blockingLayer: "configuration",
+			reasons: [{ code: "CONNECTION_VALIDATION_REQUIRED" }],
+		});
+	});
+
+	it("leave a verdict undetermined without configuration facts and report the provider", () => {
+		const verdict = evaluateRuntimeCapability("google", "purchase.verify", {});
+
+		expect(verdict).toMatchObject({ provider: "google", outcome: "undetermined" });
+		expect(verdict.reasons.map(({ code, layer }) => ({ code, layer }))).toEqual([
+			{ code: "FACT_UNAVAILABLE", layer: "configuration" },
+			{ code: "FACT_UNAVAILABLE", layer: "configuration" },
+		]);
+		expect(
+			evaluateRuntimeCapability("google", "purchase.verify", { configuration: enabledAndValidated })
+				.outcome,
+		).toBe("available");
+		// The provider layer still decides first.
+		expect(
+			evaluateRuntimeCapability("apple", "checkout.hosted", {}, { through: "configuration" }),
+		).toMatchObject({ outcome: "blocked", blockingLayer: "provider" });
+		expect(() =>
+			evaluateRuntimeCapability("stripe", "checkout.hosted", {}, { capabilities: new Map() }),
+		).toThrow("Provider stripe has no capability declaration");
+	});
+});
+
+describe("connection summary helpers", () => {
+	const description: RuntimeConnectionDescription = {
+		enabled: false,
+		active: true,
+		validated: true,
+		validatedAt: "2026-09-18T10:00:00.000Z",
+		accountIdentity: "acct_voysee",
+		settings: { authMethod: "oauth", livemode: false },
+	};
+
+	it("counts nothing without an active version", () => {
+		const none = {
+			configured: false,
+			enabled: false,
+			validated: false,
+			validatedAt: null,
+			accountIdentity: null,
+		};
+
+		expect(providerConnectionSummary(null)).toEqual(none);
+		expect(providerConnectionSummary({ ...description, enabled: true, active: false })).toEqual(
+			none,
+		);
+	});
+
+	it("reports an active connection as persisted", () => {
+		expect(providerConnectionSummary(description)).toEqual({
+			configured: true,
+			enabled: false,
+			validated: true,
+			validatedAt: "2026-09-18T10:00:00.000Z",
+			accountIdentity: "acct_voysee",
+		});
+	});
+
+	it("builds configuration facts from the summary and settings", () => {
+		const summary = providerConnectionSummary(description);
+
+		expect(connectionConfigurationFacts(summary)).toEqual({
+			connectionEnabled: false,
+			connectionValidated: true,
+			accountFlags: {},
+		});
+		expect(connectionConfigurationFacts(summary, description.settings)).toEqual({
+			connectionEnabled: false,
+			connectionValidated: true,
+			accountFlags: { authMethod: "oauth", livemode: false },
+		});
 	});
 });

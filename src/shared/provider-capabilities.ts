@@ -557,6 +557,19 @@ export interface RuntimeCapabilityVerdict extends CapabilityVerdict {
 	provider: BillingProvider;
 }
 
+export const catalogCompatibilityTargetKinds = ["plan", "price", "topup"] as const;
+export type CatalogCompatibilityTargetKind = (typeof catalogCompatibilityTargetKinds)[number];
+
+/**
+ * The catalog entry a binding belongs to: `key` is the plan or top-up key, and `priceKey` names
+ * the plan's base or item price for a `price` target.
+ */
+export type CatalogCompatibilityTarget = {
+	kind: CatalogCompatibilityTargetKind;
+	key: string;
+	priceKey?: string | null;
+};
+
 /**
  * Answers whether `operation` is possible for this declaration and facts. Layers run in order and
  * stop after `through` (default `operation`); the first blocked layer ends evaluation, while a

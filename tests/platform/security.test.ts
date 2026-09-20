@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { billingOperation } from "../../src/platform/application/billing-port";
 import { merchantBillingRoute } from "../../src/platform/billing";
 import { loadMerchantConfig } from "../../src/platform/config";
 import {
@@ -101,6 +102,50 @@ describe("merchant security boundaries", () => {
 				merchantBillingRoute("GET", "/api/billing/admin/usage-events", environment),
 			).toMatchObject({ capability: "billing.read", sensitive: false });
 		}
+	});
+	it("exposes the capability reads to merchants as billing reads", () => {
+		for (const environment of ["sandbox", "production"] as const) {
+			expect(
+				merchantBillingRoute("GET", "/api/billing/admin/providers/capabilities", environment),
+			).toEqual({
+				path: "/v1/admin/providers/capabilities",
+				capability: "billing.read",
+				action: null,
+				sensitive: false,
+			});
+			expect(
+				merchantBillingRoute(
+					"GET",
+					"/api/billing/admin/billing-accounts/acct_1/available-actions",
+					environment,
+				),
+			).toEqual({
+				path: "/v1/billing-accounts/acct_1/available-actions",
+				capability: "billing.read",
+				action: null,
+				sensitive: false,
+			});
+		}
+		expect(billingOperation("GET", "/v1/admin/providers/capabilities")).toEqual({
+			operation: "providers.capabilities",
+			parameters: [],
+		});
+		expect(billingOperation("GET", "/v1/billing-accounts/acct%201/available-actions")).toEqual({
+			operation: "account.actions",
+			parameters: ["acct 1"],
+		});
+		for (const path of [
+			"/api/billing/admin/providers/capabilities",
+			"/api/billing/admin/billing-accounts/acct_1/available-actions",
+		])
+			expect(merchantBillingRoute("POST", path, "sandbox")).toBeNull();
+		for (const path of [
+			"/api/billing/admin/providers/capabilities/stripe",
+			"/api/billing/admin/providers",
+			"/api/billing/admin/billing-accounts/acct_1/available-actions/extra",
+			"/api/billing/billing-accounts/acct_1/available-actions",
+		])
+			expect(merchantBillingRoute("GET", path, "sandbox")).toBeNull();
 	});
 	it("does not expose global reconciliation or provider routes to merchants", () => {
 		for (const path of [

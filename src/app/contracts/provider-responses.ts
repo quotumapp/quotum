@@ -1,8 +1,12 @@
 import { z } from "zod";
-import {
-	type CatalogProviderCompatibility,
-	catalogCompatibilityTargetKinds,
-} from "../../providers/catalog-compatibility-types";
+import { subscriptionStatuses } from "../../billing/types";
+import type {
+	BillingAccountAvailableActions,
+	ProviderConnectionSummary,
+	ProviderEnvironmentCapabilities,
+	SubscriptionAvailableActions,
+} from "../../providers/capability-read-types";
+import type { CatalogProviderCompatibility } from "../../providers/catalog-compatibility-types";
 import {
 	billingChannels,
 	type CapabilityCondition,
@@ -11,12 +15,9 @@ import {
 	type CapabilityResolution,
 	type CapabilityVerdict,
 	type CapabilityVerification,
-	capabilityBillingIntervals,
 	capabilityBlockerKinds,
-	capabilityCollectionMethods,
 	capabilityLayers,
 	capabilityOutcomes,
-	capabilityReasonCodes,
 	capabilityStatusLabelIds,
 	changeBillingModes,
 	changeCollectionTimings,
@@ -32,6 +33,13 @@ import {
 	uncertainWriteModes,
 	webhookOrderings,
 } from "../../shared/provider-capabilities";
+import {
+	CapabilityConditionSchema,
+	CapabilityReasonSchema,
+	type CapabilityResolutionSchema,
+	catalogCompatibilityTargetSchema,
+	ProviderOperationSchema,
+} from "../../shared/provider-capability-schemas";
 import { billingProviderValues } from "./provider-enum";
 export const StripeBillingAccountSummarySchema = z.object({
 	schemaVersion: z.literal(1),
@@ -131,7 +139,12 @@ export const GoogleWebhookResultSchema = z.object({
 });
 
 /** Wire mirrors of the provider capability contract in `src/shared/provider-capabilities.ts`. */
-export const ProviderOperationSchema = z.enum(providerOperations);
+export {
+	CapabilityConditionSchema,
+	CapabilityReasonSchema,
+	CapabilityResolutionSchema,
+	ProviderOperationSchema,
+} from "../../shared/provider-capability-schemas";
 
 export const CapabilityEvidenceSchema = z.object({
 	tests: z.array(z.string()),
@@ -162,41 +175,6 @@ export const CapabilityVerificationSchema = z.discriminatedUnion("status", [
 		status: z.literal("not_applicable"),
 		evidence: CapabilityEvidenceSchema.optional(),
 	}),
-]);
-
-export const CapabilityConditionSchema = z.discriminatedUnion("kind", [
-	z.object({ kind: z.literal("connection_enabled") }),
-	z.object({ kind: z.literal("connection_validated") }),
-	z.object({
-		kind: z.literal("account_flag"),
-		flag: z.string(),
-		expected: z.array(z.union([z.string(), z.boolean()])),
-	}),
-	z.object({ kind: z.literal("currency"), allowed: z.array(z.string()) }),
-	z.object({ kind: z.literal("catalog_bound") }),
-	z.object({ kind: z.literal("subscription_state"), allowed: z.array(z.string()) }),
-	z.object({
-		kind: z.literal("collection_method"),
-		allowed: z.array(z.enum(capabilityCollectionMethods)),
-	}),
-	z.object({
-		kind: z.literal("billing_interval"),
-		allowed: z.array(z.enum(capabilityBillingIntervals)),
-	}),
-	z.object({ kind: z.literal("uniform_billing_interval") }),
-	z.object({
-		kind: z.literal("saved_payment_method"),
-		required: z.literal(true),
-		resolveWith: ProviderOperationSchema.optional(),
-	}),
-	z.object({ kind: z.literal("renewal_exclusion_window"), minutes: z.number() }),
-	z.object({ kind: z.literal("requires_prior"), operation: ProviderOperationSchema }),
-	z.object({
-		kind: z.literal("amount_bounds"),
-		minMinor: z.number().optional(),
-		maxMinor: z.number().optional(),
-	}),
-	z.object({ kind: z.literal("quantity_integer") }),
 ]);
 
 export const ProviderOperationSupportSchema = z.object({
@@ -257,28 +235,6 @@ export const ProviderCapabilityMatrixSchema = z.object({
 	providers: z.array(ProviderCapabilityDeclarationSchema),
 });
 
-export const CapabilityResolutionSchema = z.discriminatedUnion("kind", [
-	z.object({ kind: z.literal("customer_action"), operation: ProviderOperationSchema.optional() }),
-	z.object({
-		kind: z.literal("merchant_configuration"),
-		connectionKind: z.string(),
-		flag: z.string().optional(),
-	}),
-	z.object({ kind: z.literal("wait_until"), at: z.string() }),
-	z.object({ kind: z.literal("checked_at_execution") }),
-	z.object({ kind: z.literal("none") }),
-]);
-
-export const CapabilityReasonSchema = z.object({
-	code: z.enum(capabilityReasonCodes),
-	layer: z.enum(capabilityLayers),
-	condition: CapabilityConditionSchema.optional(),
-	observed: z
-		.record(z.string(), z.union([z.null(), z.string(), z.number(), z.boolean()]))
-		.optional(),
-	resolution: CapabilityResolutionSchema.optional(),
-});
-
 export const CapabilityVerdictSchema = z.object({
 	provider: z.enum(declaredProviders),
 	operation: ProviderOperationSchema,
@@ -295,17 +251,64 @@ export const RuntimeCapabilityVerdictSchema = CapabilityVerdictSchema.extend({
 });
 
 export const CatalogProviderCompatibilitySchema = z.object({
-	target: z.object({
-		kind: z.enum(catalogCompatibilityTargetKinds),
-		key: z.string(),
-		priceKey: z.union([z.null(), z.string()]).optional(),
-	}),
+	target: catalogCompatibilityTargetSchema,
 	provider: z.enum(billingProviderValues()),
 	channel: z.enum(billingChannels),
 	productKey: z.union([z.null(), z.string()]),
 	requiredOperations: z.array(ProviderOperationSchema),
 	compatible: z.boolean(),
 	verdicts: z.array(RuntimeCapabilityVerdictSchema),
+});
+
+export const ProviderConnectionSummarySchema = z.object({
+	configured: z.boolean(),
+	enabled: z.boolean(),
+	validated: z.boolean(),
+	validatedAt: z.union([z.null(), z.string()]),
+	accountIdentity: z.union([z.null(), z.string()]),
+});
+
+export const ProviderEnvironmentCapabilitiesSchema = z.object({
+	schemaVersion: z.literal(1),
+	generatedAt: z.string(),
+	providers: z.array(
+		z.object({
+			provider: z.enum(billingProviderValues()),
+			channel: z.enum(billingChannels),
+			connectionKind: z.string(),
+			connection: z.union([z.null(), ProviderConnectionSummarySchema]),
+			operations: z.array(RuntimeCapabilityVerdictSchema),
+		}),
+	),
+});
+
+export const SubscriptionAvailableActionsSchema = z.object({
+	id: z.string(),
+	provider: z.enum(billingProviderValues()),
+	channel: z.enum(billingChannels),
+	status: z.enum(subscriptionStatuses),
+	planKey: z.union([z.null(), z.string()]),
+	currentPeriodEnd: z.union([z.null(), z.string()]),
+	cancelAtPeriodEnd: z.boolean(),
+	pendingChange: z.union([
+		z.null(),
+		z.object({
+			changeId: z.string(),
+			status: z.enum(["pending", "processing"]),
+			effectiveMode: z.enum(["immediate", "period_end"]),
+			effectiveAt: z.string(),
+		}),
+	]),
+	actions: z.array(RuntimeCapabilityVerdictSchema),
+});
+
+export const BillingAccountAvailableActionsSchema = z.object({
+	schemaVersion: z.literal(1),
+	billingAccountId: z.string(),
+	customerExists: z.boolean(),
+	generatedAt: z.string(),
+	account: z.array(RuntimeCapabilityVerdictSchema),
+	subscriptions: z.array(SubscriptionAvailableActionsSchema),
 });
 
 type MutuallyAssignable<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
@@ -333,6 +336,27 @@ export type ProviderCapabilitySchemaMirrors = [
 		MutuallyAssignable<
 			z.infer<typeof CatalogProviderCompatibilitySchema>,
 			CatalogProviderCompatibility
+		>
+	>,
+	Expect<
+		MutuallyAssignable<z.infer<typeof ProviderConnectionSummarySchema>, ProviderConnectionSummary>
+	>,
+	Expect<
+		MutuallyAssignable<
+			z.infer<typeof ProviderEnvironmentCapabilitiesSchema>,
+			ProviderEnvironmentCapabilities
+		>
+	>,
+	Expect<
+		MutuallyAssignable<
+			z.infer<typeof SubscriptionAvailableActionsSchema>,
+			SubscriptionAvailableActions
+		>
+	>,
+	Expect<
+		MutuallyAssignable<
+			z.infer<typeof BillingAccountAvailableActionsSchema>,
+			BillingAccountAvailableActions
 		>
 	>,
 ];

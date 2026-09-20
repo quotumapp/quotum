@@ -5,18 +5,26 @@ import type {
 	CatalogPlanItemIntent,
 	CatalogPriceIntent,
 } from "../catalog/types";
+import type { RuntimeConnectionDescription } from "../projects/connections";
 import {
 	type BillingProvider,
 	billingProviders,
+	type CapabilityCondition,
+	type CapabilityConfigurationFacts,
+	type CapabilityFacts,
+	type CapabilityLayer,
 	type DeclaredProvider,
 	evaluateCapability,
 	isBillingProvider,
 	isDeclaredProvider,
+	type OperationSupport,
 	type ProviderCapabilityDeclaration,
 	type ProviderOperation,
 	providerOperations,
+	type RuntimeCapabilityVerdict,
 } from "../shared/provider-capabilities";
 import { appleCapabilities } from "./apple/capabilities";
+import type { ProviderConnectionSummary } from "./capability-read-types";
 import { googleCapabilities } from "./google/capabilities";
 import { paddleCapabilities } from "./paddle/capabilities";
 import { stripeCapabilities } from "./stripe/capabilities";
@@ -212,4 +220,122 @@ export function commercialPreviewProvider(
 		throw new Error(`Provider ${provider} does not implement ${operation}`);
 	}
 	return provider;
+}
+
+/** The connection state a capability read reports; nothing counts without an active version. */
+export function providerConnectionSummary(
+	description: RuntimeConnectionDescription | null,
+): ProviderConnectionSummary {
+	if (!description?.active) {
+		return {
+			configured: false,
+			enabled: false,
+			validated: false,
+			validatedAt: null,
+			accountIdentity: null,
+		};
+	}
+	return {
+		configured: true,
+		enabled: description.enabled,
+		validated: description.validated,
+		validatedAt: description.validatedAt,
+		accountIdentity: description.accountIdentity,
+	};
+}
+
+export function connectionConfigurationFacts(
+	summary: ProviderConnectionSummary,
+	settings: Record<string, string | boolean> = {},
+): CapabilityConfigurationFacts {
+	return {
+		connectionEnabled: summary.enabled,
+		connectionValidated: summary.validated,
+		accountFlags: settings,
+	};
+}
+
+/**
+ * Operations served on the recovery path. Webhooks (src/app/webhook-routes.ts) and workers
+ * (src/composition/worker-providers.ts) resolve connections with purpose "recovery", which
+ * `ConnectionRepository.active` serves even when the connection is disabled, so these operations
+ * need a validated connection but not an enabled one.
+ */
+export const recoveryPurposeOperations = [
+	"webhook.ingest",
+	"event.replay",
+	"subscription.reconcile",
+	"settlement.collect_finalized_charge",
+	"adjustment.issue",
+	"refund.sync",
+	"topup.automatic",
+] as const satisfies readonly ProviderOperation[];
+
+const runtimeDeclarations = new WeakMap<
+	ProviderCapabilityDeclaration,
+	ProviderCapabilityDeclaration
+>();
+
+/**
+ * The declaration the runtime evaluates: every operation also requires a validated connection and,
+ * off the recovery path, an enabled one. Evaluation only; status labels,
+ * contracts/v1/provider-capabilities.json and the docs table render the declaration itself. The
+ * copy is memoized and the source is never mutated.
+ */
+export function runtimeCapabilityDeclaration(
+	declaration: ProviderCapabilityDeclaration,
+): ProviderCapabilityDeclaration {
+	const cached = runtimeDeclarations.get(declaration);
+	if (cached !== undefined) return cached;
+	const operations = Object.fromEntries(
+		Object.entries(declaration.operations).map(([operation, support]) => [
+			operation,
+			runtimeOperationSupport(operation as ProviderOperation, support),
+		]),
+	) as Record<ProviderOperation, OperationSupport>;
+	const runtime = { ...declaration, operations };
+	runtimeDeclarations.set(declaration, runtime);
+	return runtime;
+}
+
+function runtimeOperationSupport(
+	operation: ProviderOperation,
+	support: OperationSupport,
+): OperationSupport {
+	const kinds: Array<"connection_enabled" | "connection_validated"> = (
+		recoveryPurposeOperations as readonly ProviderOperation[]
+	).includes(operation)
+		? ["connection_validated"]
+		: ["connection_enabled", "connection_validated"];
+	const implicit = kinds
+		.filter((kind) => !support.conditions.some((condition) => condition.kind === kind))
+		.map((kind): CapabilityCondition => ({ kind }));
+	return { ...support, conditions: [...implicit, ...support.conditions] };
+}
+
+/** Runtime declarations over `base`. */
+export function runtimeCapabilityLookup(
+	base: ProviderCapabilityLookup = providerCapabilityCatalog,
+): ProviderCapabilityLookup {
+	return {
+		get(provider) {
+			const declaration = base.get(provider);
+			return declaration === undefined ? undefined : runtimeCapabilityDeclaration(declaration);
+		},
+	};
+}
+
+/** Evaluates the runtime declaration of an admitted provider; `capabilities` supplies the base. */
+export function evaluateRuntimeCapability(
+	provider: BillingProvider,
+	operation: ProviderOperation,
+	facts: CapabilityFacts,
+	options?: { through?: CapabilityLayer; capabilities?: ProviderCapabilityLookup },
+): RuntimeCapabilityVerdict {
+	const declaration = runtimeCapabilityLookup(options?.capabilities).get(provider);
+	if (declaration === undefined) {
+		throw new Error(`Provider ${provider} has no capability declaration`);
+	}
+	const verdict = evaluateCapability(declaration, operation, facts, { through: options?.through });
+	return { ...verdict, provider };
 }
