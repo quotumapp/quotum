@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { MerchantSql } from "../database";
 import type { StripeOAuthPort } from "./oauth-port";
 import { ConnectionRepository, type ConnectionVersion } from "./repository";
 /** A short transaction claims refresh; provider I/O runs outside the transaction. */
@@ -7,9 +8,10 @@ export async function resolveStripeOAuth(
 	version: ConnectionVersion,
 	environment: "sandbox" | "production",
 	provider: StripeOAuthPort,
+	persistence: MerchantSql,
 ) {
 	const lease = randomUUID();
-	const initial = await repository.sql.begin(async (tx) => {
+	const initial = await persistence.begin(async (tx) => {
 		await tx`SELECT id FROM platform_connection_versions WHERE id=${version.id} AND connection_id=${version.connection_id} FOR UPDATE`;
 		const secrets = await new ConnectionRepository(tx, repository.cipher).secrets(version);
 		if (
@@ -39,7 +41,7 @@ export async function resolveStripeOAuth(
 			refreshToken: refreshed.refreshToken,
 			expiresAt: String(refreshed.expiresAt),
 		};
-		await repository.sql.begin(async (tx) => {
+		await persistence.begin(async (tx) => {
 			const rows =
 				await tx`UPDATE platform_connection_versions SET refresh_lease_id=NULL,refresh_lease_until=NULL WHERE id=${version.id} AND refresh_lease_id=${lease} AND refresh_lease_until>now() RETURNING id`;
 			if (!rows.length) throw new Error("Stripe token refresh lease expired; reconnect Stripe");
@@ -55,6 +57,6 @@ export async function resolveStripeOAuth(
 		});
 		return { secretKey: secrets.accessToken, webhookSecret: provider.webhookSecret(environment) };
 	} finally {
-		await repository.sql`UPDATE platform_connection_versions SET refresh_lease_id=NULL,refresh_lease_until=NULL WHERE id=${version.id} AND refresh_lease_id=${lease}`;
+		await persistence`UPDATE platform_connection_versions SET refresh_lease_id=NULL,refresh_lease_until=NULL WHERE id=${version.id} AND refresh_lease_id=${lease}`;
 	}
 }

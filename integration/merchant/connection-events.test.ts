@@ -251,7 +251,7 @@ describe("Stripe App webhook verification", () => {
 		await onboard(browser);
 		const provider = isolatedStripeOAuthPort();
 		await authorizeStripeApp(f, browser, provider, stubConnectionValidation());
-		const events = createStripeAppEvents(f.connectionRepository, provider);
+		const events = createStripeAppEvents(f.connectionRepository, provider, f.sql);
 		const app = withOpenApiAssertions(events.app);
 
 		const deauth = stripeAppEvent("account.application.deauthorized", "evt_deauth");

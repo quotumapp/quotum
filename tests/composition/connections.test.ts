@@ -9,6 +9,7 @@ import type {
 	ConnectionRepository,
 	ConnectionVersion,
 } from "../../src/platform/connections/repository";
+import type { MerchantSql } from "../../src/platform/database";
 import type { RuntimeConnectionKind } from "../../src/projects/connections";
 import { projectInstanceContext } from "../helpers/project-context";
 
@@ -92,19 +93,34 @@ function oauthRepository(externalIdentity: string) {
 		{ purpose: "refreshToken", envelope: { value: "rt_voysee" } },
 		{ purpose: "expiresAt", envelope: { value: String(Date.now() + 3_600_000) } },
 	];
-	const tx = async (strings: TemplateStringsArray) => {
-		const text = strings.join("?");
-		if (text.includes("SELECT purpose,envelope")) return envelopes;
-		if (text.includes("SELECT kind")) return [{ kind: "stripe" }];
-		return [];
-	};
-	return {
-		async active() {
-			return { version, secrets: {} };
+	const tx = Object.assign(
+		async (strings: TemplateStringsArray) => {
+			const text = strings.join("?");
+			if (text.includes("SELECT purpose,envelope")) return envelopes;
+			if (text.includes("SELECT kind")) return [{ kind: "stripe" }];
+			return [];
 		},
-		sql: { begin: async (callback: (sql: typeof tx) => unknown) => callback(tx) },
-		cipher: { decrypt: (envelope: { value: string }) => envelope.value },
-	} as unknown as ConnectionRepository;
+		{
+			query: async <Row>({ text }: { text: string }) => {
+				if (text.includes("SELECT purpose, envelope"))
+					return envelopes as unknown as readonly Row[];
+				if (text.includes("SELECT kind")) return [{ kind: "stripe" }] as unknown as readonly Row[];
+				return [] as readonly Row[];
+			},
+		},
+	);
+	const persistence = {
+		begin: async (callback: (sql: typeof tx) => unknown) => callback(tx),
+	} as unknown as MerchantSql;
+	return {
+		repository: {
+			async active() {
+				return { version, secrets: {} };
+			},
+			cipher: { decrypt: (envelope: { value: string }) => envelope.value },
+		} as unknown as ConnectionRepository,
+		persistence,
+	};
 }
 
 const stripeAppEnv = {
@@ -155,7 +171,8 @@ describe("runtime connection resolver account identity", () => {
 	});
 
 	it("fills accountIdentity and the connected account for a Stripe OAuth connection", async () => {
-		const resolver = createRuntimeConnectionResolver(oauthRepository("acct_oauth"));
+		const { repository, persistence } = oauthRepository("acct_oauth");
+		const resolver = createRuntimeConnectionResolver(repository, persistence);
 
 		const config = await withStripeAppEnv(() => resolver.resolve(sandboxProject, "stripe"));
 
