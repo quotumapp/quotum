@@ -213,11 +213,14 @@ recovery secret storage. Rotation is restartable; missing or wrong keys fail clo
 ## Authentication
 
 In `api_key` mode, trusted backends send a database-issued project credential as
-`Authorization: Bearer <credential>`. Credentials are 48 characters: `sqpk_` for a sandbox instance
-or `pqpk_` for a production instance, followed by 43 base64url characters of random secret. The
-database stores only the SHA-256 hash of the whole token under a unique index; authentication looks
-the hash up and requires the prefix to match the instance's environment. Internal instances never
-receive credentials. Every rejected credential returns the same `401 UNAUTHORIZED` error. See
+`Authorization: Bearer <credential>`. Credentials are 48 characters: a prefix followed by 43
+base64url characters of random secret. `sqpk_` (sandbox) and `pqpk_` (production) are full keys;
+`sqrk_` and `pqrk_` are [read-only keys](api.md#read-only-credentials). The database stores only the
+SHA-256 hash of the whole token under a unique index together with the credential's access level.
+Authentication looks the hash up and requires the prefix to match both the instance's environment
+and the stored access level; the stored level, not the prefix, decides what the key may do. Internal
+instances never receive credentials. Every rejected credential returns the same `401 UNAUTHORIZED`
+error. See
 [replacing project credentials](operations.md#project-credentials) for rotation and the retired
 `qpk_v1` format. Operator routes additionally require `X-Billing-Operator-Key`,
 and audited mutations require `X-Billing-Actor`. Provider webhooks are outside project
@@ -225,7 +228,8 @@ authentication and rely on provider signature or token verification.
 
 In `gateway` mode, billing-level key checks are disabled for non-webhook `/v1/*` routes only when
 `BILLING_TRUST_GATEWAY_PROJECT_HEADER=true`; the gateway must enforce access and send
-`x-billing-project-key`.
+`x-billing-project-key`. No credential is read in this mode, so every request has full access and a
+read-only restriction is the gateway's to enforce.
 
 ## Test entrypoints
 

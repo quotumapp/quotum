@@ -27,6 +27,7 @@ export async function bootstrapTestPlatform(
 			projectInstanceKey,
 			...generateProjectApiCredential(
 				platformBootstrapCredentialEnvironment(manifest, projectInstanceKey),
+				"full",
 			),
 		}));
 		await service.apply(

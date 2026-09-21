@@ -166,6 +166,7 @@ export function registerControlsRoutes({
 			params: accountParams,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdEntities",
+				credentialAccess: "read_only",
 				tags: ["controls"],
 				path: "/v1/billing-accounts/:billingAccountId/entities",
 				responses: {
@@ -220,6 +221,7 @@ export function registerControlsRoutes({
 			query: effectiveControlsQuerySchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdControls",
+				credentialAccess: "read_only",
 				tags: ["controls"],
 				path: "/v1/billing-accounts/:billingAccountId/controls",
 				responses: {
@@ -268,6 +270,7 @@ export function registerControlsRoutes({
 			params: accountParams,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdUsageAlerts",
+				credentialAccess: "read_only",
 				tags: ["controls"],
 				path: "/v1/billing-accounts/:billingAccountId/usage-alerts",
 				responses: {
@@ -295,6 +298,7 @@ export function registerControlsRoutes({
 			params: accountParams,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdUsageAlertEvents",
+				credentialAccess: "read_only",
 				tags: ["controls"],
 				path: "/v1/billing-accounts/:billingAccountId/usage-alert-events",
 				responses: {
@@ -349,6 +353,7 @@ export function registerControlsRoutes({
 			query: autoTopupQuerySchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdAutoTopup",
+				credentialAccess: "read_only",
 				tags: ["controls"],
 				path: "/v1/billing-accounts/:billingAccountId/auto-topup",
 				responses: {
@@ -542,6 +547,7 @@ export function registerControlsRoutes({
 			params: accountParams,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdLicensePools",
+				credentialAccess: "read_only",
 				tags: ["controls"],
 				path: "/v1/billing-accounts/:billingAccountId/license-pools",
 				responses: {
@@ -623,6 +629,7 @@ export function registerControlsRoutes({
 			params: licenseCheckParams,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKey",
+				credentialAccess: "read_only",
 				tags: ["controls"],
 				path: "/v1/billing-accounts/:billingAccountId/entities/:entityId/licenses/:featureKey",
 				responses: {

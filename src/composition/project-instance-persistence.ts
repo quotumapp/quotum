@@ -15,6 +15,7 @@ import type {
 	PlatformQueryValue,
 } from "../platform/persistence/query-executor";
 import type {
+	ProjectCredentialLookupResult,
 	ProjectEnvironment,
 	ProjectInstanceContext,
 	ProjectInstanceContextResolver,
@@ -40,6 +41,7 @@ interface ProjectContextRow {
 }
 
 interface CredentialContextRow extends ProjectContextRow {
+	access: string;
 	secret_verifier: Uint8Array;
 	expires_at: Date | null;
 	revoked_at: Date | null;
@@ -176,13 +178,14 @@ export class PostgresProjectInstanceContextResolver implements ProjectInstanceCo
 		this.executor = new BunPlatformQueryExecutor(client as unknown as SqlClient);
 	}
 
-	async resolveCredential(credential: string): Promise<ProjectInstanceLookupResult> {
+	async resolveCredential(credential: string): Promise<ProjectCredentialLookupResult> {
 		const parsed = parseProjectApiCredential(credential);
 		if (parsed === null) return { kind: "not_found" };
 		try {
 			const rows = await this.executor.query<CredentialContextRow>({
 				text: `
 					SELECT
+						credentials.access,
 						credentials.secret_verifier,
 						credentials.expires_at,
 						credentials.revoked_at,
@@ -208,11 +211,13 @@ export class PostgresProjectInstanceContextResolver implements ProjectInstanceCo
 				values: [parsed.secretVerifier],
 			});
 			const row = rows[0];
-			// The prefix is covered by the hash; a stored environment mismatch is an inconsistent issuance.
+			// The prefix is covered by the hash; a stored environment or access mismatch is an
+			// inconsistent issuance. The stored access is authoritative, never the prefix.
 			if (
 				row === undefined ||
 				!verifierMatches(parsed.secretVerifier, row.secret_verifier) ||
-				row.environment !== parsed.environment
+				row.environment !== parsed.environment ||
+				row.access !== parsed.access
 			) {
 				return { kind: "not_found" };
 			}
@@ -222,7 +227,7 @@ export class PostgresProjectInstanceContextResolver implements ProjectInstanceCo
 			) {
 				return { kind: "ineligible" };
 			}
-			return { kind: "resolved", context: mapProjectContextRow(row) };
+			return { kind: "resolved", context: mapProjectContextRow(row), access: parsed.access };
 		} catch {
 			return { kind: "unavailable" };
 		}

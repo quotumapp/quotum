@@ -91,7 +91,7 @@ const operatorRequiredPathPattern =
 
 function operatorRequiredPath(path: string): boolean {
 	return (
-		path.startsWith("/v1/admin/catalog") ||
+		path.startsWith("/v1/admin/catalog/") ||
 		path.startsWith("/v1/admin/contracts/") ||
 		path.startsWith("/v1/admin/catalog-migrations/") ||
 		path.startsWith("/v1/admin/auto-topups/") ||
@@ -131,6 +131,12 @@ export function defaultSecurity(
 /** Key under which `operationDetail` keeps an operation's Zod metadata for the OpenAPI generator. */
 export const OPERATION_DOC = "x-quotum-operation";
 
+/**
+ * Published on an operation that a read-only project credential may call. The `/v1` shell enforces
+ * exactly this field, so the contract and the gate cannot disagree. Absent means full access only.
+ */
+export const CREDENTIAL_ACCESS_EXTENSION = "x-quotum-credential-access";
+
 /** Request inputs a handler validates itself; Elysia `body`, `query` and `params` validators are read directly. */
 export interface OperationRequestDoc {
 	body?: z.ZodType;
@@ -156,6 +162,8 @@ export function operationDetail(input: {
 	path: string;
 	description?: string;
 	security?: Record<string, string[]>[];
+	/** Opt the route in for read-only credentials. Only for `/v1` reads that write nothing. */
+	credentialAccess?: "read_only";
 	responses: Record<string, z.ZodType>;
 	contentType?: string;
 	request?: OperationRequestDoc;
@@ -171,6 +179,9 @@ export function operationDetail(input: {
 		tags: [...input.tags],
 		...(input.description === undefined ? {} : { description: input.description }),
 		security: defaultSecurity(input.path, input.security),
+		...(input.credentialAccess === undefined
+			? {}
+			: { [CREDENTIAL_ACCESS_EXTENSION]: input.credentialAccess }),
 		[OPERATION_DOC]: doc,
 	};
 }

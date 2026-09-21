@@ -51,7 +51,7 @@ localDescribe("platform project identity persistence", () => {
 			credentialsIssued: 0,
 		});
 
-		const unexpected = generateProjectApiCredential("production");
+		const unexpected = generateProjectApiCredential("production", "full");
 		await expect(
 			service.apply(manifest, [
 				{
@@ -143,6 +143,7 @@ localDescribe("platform project identity persistence", () => {
 			"projects_platform_project_environment_unique",
 			"platform_project_api_credentials_project_instance_id_fkey",
 			"platform_project_api_credentials_audience_check",
+			"platform_project_api_credentials_access_check",
 			"platform_project_api_credentials_verifier_check",
 			"platform_project_api_credentials_expiry_check",
 			"platform_project_api_credentials_revocation_check",
@@ -189,6 +190,7 @@ localDescribe("platform project identity persistence", () => {
 			"idx_platform_project_api_credentials_secret_verifier",
 			"idx_platform_project_api_credentials_instance",
 			"idx_platform_project_api_credentials_active_instance",
+			"idx_platform_project_api_credentials_active_access",
 		]) {
 			expect(indexNames.has(expected)).toBe(true);
 		}
@@ -212,7 +214,7 @@ localDescribe("platform project identity persistence", () => {
 		expect(otherOrganization.projectInstanceId).not.toBe(otherSandbox.projectInstanceId);
 		await expect(
 			resolver.resolveCredential(integrationProjectCredential("voysee")),
-		).resolves.toEqual({ kind: "resolved", context: expected });
+		).resolves.toEqual({ kind: "resolved", context: expected, access: "full" });
 		await expect(resolver.resolveInstanceKey(expected.projectInstanceKey)).resolves.toEqual({
 			kind: "resolved",
 			context: expected,
@@ -342,22 +344,38 @@ localDescribe("platform project identity persistence", () => {
 		const sandbox = integrationProjectContext("voysee-sandbox");
 		const internal = integrationProjectContext("billing-internal");
 		const cases = [
-			{ token: generateProjectApiCredential("sandbox"), instanceId: production.projectInstanceId },
-			{ token: generateProjectApiCredential("production"), instanceId: sandbox.projectInstanceId },
-			{ token: generateProjectApiCredential("production"), instanceId: internal.projectInstanceId },
-			{ token: generateProjectApiCredential("sandbox"), instanceId: internal.projectInstanceId },
+			{
+				token: generateProjectApiCredential("sandbox", "full"),
+				instanceId: production.projectInstanceId,
+			},
+			{
+				token: generateProjectApiCredential("production", "full"),
+				instanceId: sandbox.projectInstanceId,
+			},
+			{
+				token: generateProjectApiCredential("production", "full"),
+				instanceId: internal.projectInstanceId,
+			},
+			{
+				token: generateProjectApiCredential("sandbox", "full"),
+				instanceId: internal.projectInstanceId,
+			},
 		];
 		try {
 			for (const { token, instanceId } of cases) {
+				// Bootstrapped instances already hold their one live full key, so these rows are stored
+				// revoked. A mismatch is `not_found`; only a matching revoked row is `ineligible`.
 				await context.sql`
-					INSERT INTO platform_project_api_credentials (id, project_instance_id, secret_verifier)
-					VALUES (${token.credentialId}, ${instanceId}, ${token.secretVerifier})
+					INSERT INTO platform_project_api_credentials (
+						id, project_instance_id, access, secret_verifier, revoked_at
+					)
+					VALUES (${token.credentialId}, ${instanceId}, 'full', ${token.secretVerifier}, now())
 				`;
 				await expect(resolver.resolveCredential(token.token)).resolves.toEqual({
 					kind: "not_found",
 				});
 			}
-			const unknown = generateProjectApiCredential("production");
+			const unknown = generateProjectApiCredential("production", "full");
 			await expect(resolver.resolveCredential(unknown.token)).resolves.toEqual({
 				kind: "not_found",
 			});
@@ -367,6 +385,73 @@ localDescribe("platform project identity persistence", () => {
 			await context.sql`
 				DELETE FROM platform_project_api_credentials
 				WHERE id IN ${context.sql(cases.map(({ token }) => token.credentialId))}
+			`;
+		}
+	});
+	it("stores the access level, keeps it authoritative, and allows one live key of each kind", async () => {
+		const resolver = new PostgresProjectInstanceContextResolver(context.sql);
+		const production = integrationProjectContext("voysee");
+		const readOnly = generateProjectApiCredential("production", "read_only");
+		const mislabelled = generateProjectApiCredential("production", "read_only");
+		const second = generateProjectApiCredential("production", "read_only");
+		const insert = (token: typeof readOnly, access: string, revoked: boolean) => context.sql`
+			INSERT INTO platform_project_api_credentials (
+				id, project_instance_id, access, secret_verifier, revoked_at
+			)
+			VALUES (
+				${token.credentialId}, ${production.projectInstanceId}, ${access},
+				${token.secretVerifier}, CASE WHEN ${revoked} THEN now() ELSE NULL END
+			)
+		`;
+		try {
+			await insert(readOnly, "read_only", false);
+			await expect(resolver.resolveCredential(readOnly.token)).resolves.toEqual({
+				kind: "resolved",
+				context: production,
+				access: "read_only",
+			});
+			// The full key of the same instance is untouched by the read-only one.
+			await expect(
+				resolver.resolveCredential(integrationProjectCredential("voysee")),
+			).resolves.toMatchObject({ kind: "resolved", access: "full" });
+
+			// A read-only token stored as full must not authenticate as either kind.
+			await insert(mislabelled, "full", true);
+			await expect(resolver.resolveCredential(mislabelled.token)).resolves.toEqual({
+				kind: "not_found",
+			});
+
+			let duplicate: unknown;
+			try {
+				await insert(second, "read_only", false);
+			} catch (error) {
+				duplicate = error;
+			}
+			expect(String((duplicate as { constraint?: string; message?: string })?.message)).toContain(
+				"idx_platform_project_api_credentials_active_access",
+			);
+
+			let invalid: unknown;
+			try {
+				await insert(second, "admin", true);
+			} catch (error) {
+				invalid = error;
+			}
+			expect(String((invalid as { message?: string })?.message)).toContain(
+				"platform_project_api_credentials_access_check",
+			);
+
+			await context.sql`
+				UPDATE platform_project_api_credentials SET revoked_at = now()
+				WHERE id = ${readOnly.credentialId}
+			`;
+			await expect(resolver.resolveCredential(readOnly.token)).resolves.toEqual({
+				kind: "ineligible",
+			});
+		} finally {
+			await context.sql`
+				DELETE FROM platform_project_api_credentials
+				WHERE id IN ${context.sql([readOnly.credentialId, mislabelled.credentialId, second.credentialId])}
 			`;
 		}
 	});

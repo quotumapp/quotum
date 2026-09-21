@@ -135,7 +135,8 @@ export class BillingClient {
 		this.catalog = {
 			/** The purchasable Stripe catalog; `STRIPE_NOT_CONFIGURED` without a Stripe connection. */
 			get: () => this.request<StripeCatalog>("/v1/catalog"),
-			status: () => this.request<PublishedCatalog>("/v1/admin/catalog", { operator: true }),
+			/** The versioned catalog. Project authentication only; publishing still needs the operator key. */
+			status: () => this.request<PublishedCatalog>("/v1/admin/catalog"),
 			preview: (input: { expectedRevision: number | null; catalog: CatalogIntent }) =>
 				this.request<CatalogPreview>("/v1/admin/catalog/preview", {
 					method: "POST",

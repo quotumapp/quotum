@@ -22,6 +22,27 @@ bun run openapi:lint
 Generation uses module-owned Zod schemas and needs no database or credentials. CI diffs the contract
 against the base revision; compatible patch releases must not introduce breaking changes.
 
+## Read-only credentials
+
+A project credential is either full (`sqpk_`, `pqpk_`) or read-only (`sqrk_`, `pqrk_`). A read-only
+credential is for tools that inspect billing state without authority to change it, such as the
+[MCP server](mcp.md) or a support console. It reaches only the operations that carry
+`x-quotum-credential-access: read_only` in the [contract](../contracts/v1/openapi.json): the reads
+that write nothing and call no provider, plus `POST .../usage/check`. Everything else answers
+`403 READ_ONLY_CREDENTIAL` before validation, rate limiting or any handler runs:
+
+- every mutation, including the previews, which persist a draft or a token;
+- `GET .../providers/apple/account-token` and `GET .../providers/google/account-link`, which create
+  state on first read, and `GET .../providers/stripe/checkout-sessions/:sessionId`, which calls
+  Stripe;
+- promotion code validation and the promotion redemption reads, because codes are bearer-like;
+- every operator route, and `includeRawPayload=true` on a store event.
+
+The stored credential decides the access level; the prefix only lets a client refuse a full key
+without a lookup. Both kinds share the project's rate-limit buckets. Each refusal logs a warning,
+`Read-only project credential refused`, with the project instance, method and route. It is worth an
+alert: a read-only key used for writes is either a misconfigured tool or a leaked key being probed.
+
 ## Metering
 
 Trusted backends authorize work through these routes:
@@ -106,7 +127,7 @@ and operator authentication plus `X-Billing-Actor`. Provider bindings adopt pre-
 products and must all be ready before the active pointer advances. Previously active features,
 plans, and top-ups must be retained or listed explicitly for retirement; omission is not deletion.
 Retiring a plan removes it from new selection without rewriting pinned subscriptions.
-`GET /v1/admin/catalog` returns the active intent. See
+`GET /v1/admin/catalog` returns the active intent and needs project authentication only. See
 [`examples/quickstart/catalog.json`](../examples/quickstart/catalog.json) for a minimal intent.
 
 Preview and publish validate the intent's structure first and reject the first structural problem,
@@ -569,16 +590,17 @@ Reads with project authentication only:
   Same 30-day default, 90-day cap, and cursor paging (default 50, maximum 200) as the other
   usage reads. Each row carries `customerId`, `billingAccountId`, and nullable `customerEmail`.
 - `GET /v1/admin/store-events/:eventId` with optional `includeRawPayload=true` (audit-logged, secrets
-  redacted).
+  redacted; refused for a read-only credential).
+- `GET /v1/admin/catalog`: the published catalog with its revision. Every other catalog route,
+  reads included, is an operator route.
 - `GET /v1/admin/stats/summary`.
 - `GET /v1/admin/providers/capabilities`; see
   [Provider capabilities and available actions](#provider-capabilities-and-available-actions).
 
 Operator routes:
 
-- `GET /v1/admin/catalog`, `GET /v1/admin/catalog/products`,
-  `GET /v1/admin/catalog/store-products`, `POST /v1/admin/catalog/preview`,
-  `POST /v1/admin/catalog/publish`.
+- `GET /v1/admin/catalog/products`, `GET /v1/admin/catalog/store-products`,
+  `POST /v1/admin/catalog/preview`, `POST /v1/admin/catalog/publish`.
 - `POST /v1/admin/contracts/preview`, `POST /v1/admin/contracts/publish`,
   `GET /v1/admin/contracts/:billingAccountId`,
   `DELETE /v1/admin/contracts/:billingAccountId/:contractId`.

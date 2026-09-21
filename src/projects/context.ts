@@ -1,3 +1,5 @@
+import type { CredentialAccess } from "../shared/credential-access";
+
 export const projectEnvironments = ["sandbox", "production", "internal"] as const;
 export type ProjectEnvironment = (typeof projectEnvironments)[number];
 
@@ -29,8 +31,18 @@ export type ProjectInstanceLookupResult =
 	| { kind: "ineligible" }
 	| { kind: "unavailable" };
 
+/**
+ * A credential lookup also reports what the credential may do. `access` is required on purpose: a
+ * resolver that omits it fails typecheck instead of being read as full access.
+ */
+export type ProjectCredentialLookupResult =
+	| { kind: "resolved"; context: ProjectInstanceContext; access: CredentialAccess }
+	| { kind: "not_found" }
+	| { kind: "ineligible" }
+	| { kind: "unavailable" };
+
 export interface ProjectInstanceContextResolver {
-	resolveCredential(credential: string): Promise<ProjectInstanceLookupResult>;
+	resolveCredential(credential: string): Promise<ProjectCredentialLookupResult>;
 	resolveInstanceKey(projectInstanceKey: string): Promise<ProjectInstanceLookupResult>;
 	resolveInstanceId(projectInstanceId: string): Promise<ProjectInstanceLookupResult>;
 }

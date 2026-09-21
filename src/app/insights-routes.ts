@@ -51,6 +51,7 @@ export function registerInsightsRoutes(input: {
 			params: accountParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdBillingSummary",
+				credentialAccess: "read_only",
 				tags: ["insights"],
 				path: "/v1/billing-accounts/:billingAccountId/billing-summary",
 				responses: {
@@ -88,6 +89,7 @@ export function registerInsightsRoutes(input: {
 			query: usageEventsQuerySchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdUsageEvents",
+				credentialAccess: "read_only",
 				tags: ["insights"],
 				path: "/v1/billing-accounts/:billingAccountId/usage/events",
 				responses: {
@@ -123,6 +125,7 @@ export function registerInsightsRoutes(input: {
 			query: projectUsageEventsQuerySchema,
 			detail: operationDetail({
 				operationId: "getV1AdminUsageEvents",
+				credentialAccess: "read_only",
 				tags: ["insights"],
 				path: "/v1/admin/usage-events",
 				responses: {
@@ -159,6 +162,7 @@ export function registerInsightsRoutes(input: {
 			query: usageSeriesQuerySchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdUsageSeries",
+				credentialAccess: "read_only",
 				tags: ["insights"],
 				path: "/v1/billing-accounts/:billingAccountId/usage/series",
 				responses: {

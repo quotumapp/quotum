@@ -97,12 +97,16 @@ CREATE TABLE platform_project_api_credentials (
 	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 	project_instance_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	audience TEXT COLLATE "C" NOT NULL DEFAULT 'billing_api',
+	access TEXT COLLATE "C" NOT NULL DEFAULT 'full',
 	secret_verifier BYTEA NOT NULL,
 	expires_at TIMESTAMPTZ,
 	revoked_at TIMESTAMPTZ,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	CONSTRAINT platform_project_api_credentials_audience_check CHECK (audience = 'billing_api'),
+	CONSTRAINT platform_project_api_credentials_access_check CHECK (
+		access IN ('full', 'read_only')
+	),
 	CONSTRAINT platform_project_api_credentials_verifier_check CHECK (
 		octet_length(secret_verifier) = 32
 	),
@@ -122,6 +126,11 @@ CREATE INDEX idx_platform_project_api_credentials_instance
 
 CREATE INDEX idx_platform_project_api_credentials_active_instance
 	ON platform_project_api_credentials (project_instance_id, created_at DESC)
+	WHERE revoked_at IS NULL;
+
+-- One live credential of each kind per instance; rotation revokes before it inserts.
+CREATE UNIQUE INDEX idx_platform_project_api_credentials_active_access
+	ON platform_project_api_credentials (project_instance_id, access)
 	WHERE revoked_at IS NULL;
 
 CREATE TABLE platform_connections (

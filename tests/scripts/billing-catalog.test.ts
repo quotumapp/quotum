@@ -23,7 +23,7 @@ afterEach(async () => {
 });
 
 describe("billing catalog CLI", () => {
-	it("prints status through the authenticated operator contract", async () => {
+	it("prints status with project authentication only", async () => {
 		const fixture = catalogServer();
 		const result = await runCli(["status"], fixture.baseUrl);
 
@@ -33,8 +33,10 @@ describe("billing catalog CLI", () => {
 		expect(fixture.calls).toHaveLength(1);
 		expect(fixture.calls[0]).toMatchObject({ method: "GET", pathname: "/v1/admin/catalog" });
 		expect(fixture.calls[0]?.headers.get("authorization")).toBe("Bearer project-secret");
-		expect(fixture.calls[0]?.headers.get("x-billing-operator-key")).toBe("operator-secret");
-		expect(fixture.calls[0]?.headers.get("x-billing-actor")).toBe("catalog-test");
+		// Reading the published catalog is a project-auth read; only preview and publish carry the
+		// operator key.
+		expect(fixture.calls[0]?.headers.has("x-billing-operator-key")).toBe(false);
+		expect(fixture.calls[0]?.headers.has("x-billing-actor")).toBe(false);
 	});
 
 	it("diffs and pushes the unchanged catalog snapshot against its declared revision", async () => {

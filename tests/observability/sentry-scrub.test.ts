@@ -58,6 +58,9 @@ describe("scrubString", () => {
 		expect(scrubString(`key sqpk_${secret} end`)).toBe("key sqpk_[Filtered] end");
 		expect(scrubString(`X-Quotum-Key=pqpk_${secret}`)).toBe("X-Quotum-Key=pqpk_[Filtered]");
 		expect(scrubString("sqpk_ab-cd")).toBe("sqpk_[Filtered]");
+		// Read-only keys disclose production data, so they are scrubbed like full ones.
+		expect(scrubString(`Bearer-less sqrk_${secret}`)).toBe("Bearer-less sqrk_[Filtered]");
+		expect(scrubString(`token=pqrk_${secret};`)).toBe("token=pqrk_[Filtered];");
 	});
 
 	it("masks email and ip", () => {

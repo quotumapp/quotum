@@ -433,8 +433,11 @@ export class MerchantConnections {
 					"Production capacity or catalog state changed. Refresh readiness.",
 					409,
 				);
-			const generated = generateProjectApiCredential("production");
-			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,secret_verifier) VALUES(${generated.credentialId},${instance.id},'billing_api',${generated.secretVerifier})`;
+			const generated = generateProjectApiCredential("production", "full");
+			// A first activation finds nothing to revoke. One live key of a kind per instance is a
+			// database invariant, so a repeated activation replaces the key instead of failing.
+			await tx`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND access=${generated.access} AND revoked_at IS NULL`;
+			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,access,secret_verifier) VALUES(${generated.credentialId},${instance.id},'billing_api',${generated.access},${generated.secretVerifier})`;
 			await this.store.audit(
 				tx,
 				identity.principalId,
@@ -476,9 +479,9 @@ export class MerchantConnections {
 			if (instance.lifecycleStatus !== "active")
 				throw new MerchantError("ENVIRONMENT_INACTIVE", "Activate the environment first.", 409);
 			await this.confirm(tx, identity, scope, "credentials.rotate", key, grant);
-			const generated = generateProjectApiCredential(scope.environment);
+			const generated = generateProjectApiCredential(scope.environment, "full");
 			await tx`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND revoked_at IS NULL`;
-			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,secret_verifier) VALUES(${generated.credentialId},${instance.id},'billing_api',${generated.secretVerifier})`;
+			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,access,secret_verifier) VALUES(${generated.credentialId},${instance.id},'billing_api',${generated.access},${generated.secretVerifier})`;
 			const member = await this.store.membership(tx, identity.principalId, scope.organizationSlug);
 			await this.store.audit(
 				tx,

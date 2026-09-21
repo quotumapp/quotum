@@ -27,6 +27,7 @@ export function registerCapabilityRoutes(input: {
 		{
 			detail: operationDetail({
 				operationId: "getV1AdminProvidersCapabilities",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/providers/capabilities",
 				responses: { 200: adminResponses.getV1AdminProvidersCapabilitiesResponse200Schema },
@@ -47,6 +48,7 @@ export function registerCapabilityRoutes(input: {
 			params: accountParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdAvailableActions",
+				credentialAccess: "read_only",
 				tags: ["customer"],
 				path: "/v1/billing-accounts/:billingAccountId/available-actions",
 				responses: {
