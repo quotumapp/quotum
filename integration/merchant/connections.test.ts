@@ -729,6 +729,43 @@ it("activates only reviewed production readiness and discloses its credential on
 	>`SELECT metadata->>'access' AS access FROM platform_audit_events WHERE action='credential.revoked'`;
 	expect(revocations.map((event) => event.access)).toEqual(["read_only"]);
 
+	// An expired key is not live: status and revoke agree, and issuing again still replaces its row.
+	const expiringGrant = await grant(browser, "rotate-read-only-3", "credentials.rotate_read_only");
+	const expiring = await browser.json<{ credential: string }>(
+		"/api/platform/environments/credentials/rotate",
+		readOnlyBody,
+		{ headers: { "x-quotum-step-up-grant": expiringGrant }, key: "rotate-read-only-3" },
+	);
+	await f.sql`UPDATE platform_project_api_credentials SET expires_at=created_at+interval '1 millisecond' WHERE access='read_only' AND revoked_at IS NULL`;
+	expect(await resolver.resolveCredential(expiring.credential)).toEqual({ kind: "ineligible" });
+	expect((await status()).readOnly).toEqual({ live: false, issuedAt: null });
+	const expiredGrant = await grant(browser, "revoke-read-only-3", "credentials.revoke_read_only");
+	expect(
+		await browser.json<Record<string, unknown>>(
+			"/api/platform/environments/credentials/revoke",
+			readOnlyBody,
+			{ headers: { "x-quotum-step-up-grant": expiredGrant }, key: "revoke-read-only-3" },
+		),
+	).toEqual({ access: "read_only", revoked: false });
+	expect(
+		await f.sql`SELECT id FROM platform_audit_events WHERE action='credential.revoked'`,
+	).toHaveLength(1);
+	const afterExpiryGrant = await grant(
+		browser,
+		"rotate-read-only-4",
+		"credentials.rotate_read_only",
+	);
+	const afterExpiry = await browser.json<{ credential: string }>(
+		"/api/platform/environments/credentials/rotate",
+		readOnlyBody,
+		{ headers: { "x-quotum-step-up-grant": afterExpiryGrant }, key: "rotate-read-only-4" },
+	);
+	expect(await resolver.resolveCredential(afterExpiry.credential)).toMatchObject({
+		kind: "resolved",
+		access: "read_only",
+	});
+	expect((await status()).readOnly.live).toBe(true);
+
 	await f.sql`UPDATE platform_connection_versions SET validated_at=validated_at-interval '16 minutes' WHERE status='active'`;
 	const stale = await browser.json<Readiness>("/api/platform/environments/readiness", {
 		scope: prod,

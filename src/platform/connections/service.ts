@@ -552,9 +552,11 @@ export class MerchantConnections {
 			if (instance.lifecycleStatus !== "active")
 				throw new MerchantError("ENVIRONMENT_INACTIVE", "Activate the environment first.", 409);
 			await this.confirm(tx, identity, scope, "credentials.revoke_read_only", key, grant);
+			// The same liveness test as `credentialStatus`: an expired key is already dead, so withdrawing
+			// it is neither reported nor audited. The next issue revokes that row whatever its expiry.
 			const revoked = await tx<
 				{ id: string }[]
-			>`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND access=${access} AND revoked_at IS NULL RETURNING id`;
+			>`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND access=${access} AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>${this.store.now()}) RETURNING id`;
 			if (revoked.length > 0) {
 				const member = await this.store.membership(
 					tx,
