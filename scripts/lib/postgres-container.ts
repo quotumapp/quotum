@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { Wait } from "testcontainers";
 
 const postgresImage =
 	"postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2";
@@ -14,7 +15,8 @@ export function createPostgresContainer(options: EphemeralPostgresOptions): Post
 	return new PostgreSqlContainer(postgresImage)
 		.withDatabase(options.postgresDatabase)
 		.withUsername(postgresUser)
-		.withPassword(postgresPassword);
+		.withPassword(postgresPassword)
+		.withWaitStrategy(Wait.forListeningPorts());
 }
 
 export function startPostgresContainer(
