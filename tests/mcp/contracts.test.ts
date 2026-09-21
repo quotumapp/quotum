@@ -102,9 +102,9 @@ describe("MCP contract tools", () => {
 		const logs: string[] = [];
 		const missing = createQuotumMcpServer({
 			client: new BillingClient({ baseUrl: "https://billing.example.com", fetch: unreachable }),
-			log: (line) => logs.push(line),
 			version: "0.0.0-test",
 			contracts: createContractStore("/nonexistent/secret-directory"),
+			log: (line) => logs.push(line),
 		});
 		const [missingServer, missingClient] = InMemoryTransport.createLinkedPair();
 		await missing.connect(missingServer);
