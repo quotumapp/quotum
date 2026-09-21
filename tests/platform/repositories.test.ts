@@ -29,6 +29,7 @@ describe("platform schema-neutral repositories", () => {
 			[{ id: "created-id", slug: "wiseley", name: "Wiseley" }],
 			[{ id: "other-id" }],
 			[],
+			[{ id: "organization-id" }],
 		]);
 		const repository = new PlatformOrganizationRepository(executor);
 
@@ -57,6 +58,10 @@ describe("platform schema-neutral repositories", () => {
 		});
 		expect(executor.calls[3]?.text).toContain("SET name = $1, slug = $2, updated_at = $3");
 		expect(executor.calls[3]?.values).toEqual(["Wiseley", "wiseley", updatedAt, "organization-id"]);
+		await repository.lockById("organization-id");
+		expect(executor.calls[4]?.text).toContain("WHERE id = $1");
+		expect(executor.calls[4]?.text).toContain("FOR UPDATE");
+		expect(executor.calls[4]?.values).toEqual(["organization-id"]);
 	});
 
 	it("conditionally bumps onboarding draft revisions with bound values", async () => {
