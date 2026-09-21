@@ -1,3 +1,4 @@
+import type { CredentialAccess } from "../../shared/credential-access";
 import type { PlatformQueryExecutor } from "./query-executor";
 
 export interface PlatformOrganizationRecord {
@@ -191,9 +192,11 @@ export class PlatformProjectCredentialRepository {
 		}));
 	}
 
+	/** `access` is named on every insert: the column default would otherwise mint a full key. */
 	async create(input: {
 		id: string;
 		projectInstanceId: string;
+		access: CredentialAccess;
 		secretVerifier: Uint8Array;
 	}): Promise<void> {
 		await this.executor.query({
@@ -202,11 +205,12 @@ export class PlatformProjectCredentialRepository {
 					id,
 					project_instance_id,
 					audience,
+					access,
 					secret_verifier
 				)
-				VALUES ($1, $2, 'billing_api', $3)
+				VALUES ($1, $2, 'billing_api', $3, $4)
 			`,
-			values: [input.id, input.projectInstanceId, input.secretVerifier],
+			values: [input.id, input.projectInstanceId, input.access, input.secretVerifier],
 		});
 	}
 }

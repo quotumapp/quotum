@@ -86,6 +86,7 @@ export class PlatformBootstrapService {
 				await credentials.create({
 					id: prepared.credentialId,
 					projectInstanceId: instance.id,
+					access: "full",
 					secretVerifier: prepared.secretVerifier,
 				});
 			}

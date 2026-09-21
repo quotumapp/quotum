@@ -79,12 +79,38 @@ describe("BillingClient", () => {
 				);
 			},
 		});
-		await expect(client.catalog.status()).rejects.toEqual(
+		await expect(
+			client.catalog.preview({
+				expectedRevision: 1,
+				catalog: { features: [], plans: [], topups: [], rateCards: [] },
+			}),
+		).rejects.toEqual(
 			expect.objectContaining({
 				code: "CATALOG_REVISION_CONFLICT",
 				status: 409,
 			}),
 		);
+	});
+
+	it("reads the versioned catalog with project credentials only", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			operatorKey: "operator-secret",
+			actor: "deploy@example.com",
+			fetch: async (input, init) => {
+				calls.push(new Request(input, init));
+				return Response.json({ success: true, data: { revision: 3 } });
+			},
+		});
+		expect((await client.catalog.status()).revision).toBe(3);
+		expect(`${calls[0]?.method} ${calls[0]?.url}`).toBe(
+			"GET https://billing.example.com/v1/admin/catalog",
+		);
+		expect(calls[0]?.headers.get("authorization")).toBe("Bearer project-secret");
+		expect(calls[0]?.headers.has("x-billing-operator-key")).toBe(false);
+		expect(calls[0]?.headers.has("x-billing-actor")).toBe(false);
 	});
 
 	it("carries envelope details on API errors, for single and paged requests", async () => {

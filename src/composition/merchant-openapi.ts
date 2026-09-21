@@ -1,6 +1,7 @@
 import type { OpenAPIObject } from "openapi3-ts/oas31";
 import { merchantBillingOperations } from "../platform/application/billing-port";
 import { merchantBillingRoute } from "../platform/billing";
+import { CREDENTIAL_ACCESS_EXTENSION } from "../shared/http";
 
 /**
  * Re-expose the /v1 staff operations that the merchant BFF proxies as /api/billing operations.
@@ -28,6 +29,8 @@ export function rewriteStaffOperationsForMerchantBilling(
 		rewritten.operationId = operationId;
 		rewritten.tags = ["merchant-billing"];
 		rewritten.security = [{ serviceToken: [], merchantSession: [] }];
+		// Project credentials never reach the merchant surface, so their access level means nothing here.
+		delete rewritten[CREDENTIAL_ACCESS_EXTENSION];
 		rewritten.description = `Requires ${sandbox.capability} in sandbox and ${production.capability} in production. ${production.sensitive ? "Production requires an action-bound step-up grant." : ""} ${sandbox.sensitive ? "Sandbox requires an action-bound step-up grant." : ""}`;
 		const headerParameters = [
 			{

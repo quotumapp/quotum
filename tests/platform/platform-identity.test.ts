@@ -28,35 +28,38 @@ function sha256Hex(value: string | Uint8Array): string {
 
 describe("project API credentials", () => {
 	it("generates environment-prefixed tokens whose verifier hashes the whole token", () => {
-		for (const [environment, prefix] of [
-			["sandbox", "sqpk_"],
-			["production", "pqpk_"],
+		for (const [environment, access, prefix] of [
+			["sandbox", "full", "sqpk_"],
+			["production", "full", "pqpk_"],
+			["sandbox", "read_only", "sqrk_"],
+			["production", "read_only", "pqrk_"],
 		] as const) {
-			const generated = generateProjectApiCredential(environment);
+			const generated = generateProjectApiCredential(environment, access);
 			const parsed = parseProjectApiCredential(generated.token);
 
 			expect(generated.token).toMatch(new RegExp(`^${prefix}[A-Za-z0-9_-]{43}$`, "u"));
 			expect(generated.token).toHaveLength(48);
 			expect(generated.environment).toBe(environment);
+			expect(generated.access).toBe(access);
 			expect(generated.credentialId).toMatch(
 				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
 			);
 			expect(generated.token).not.toContain(generated.credentialId);
-			expect(parsed).toEqual({ environment, secretVerifier: generated.secretVerifier });
+			expect(parsed).toEqual({ environment, access, secretVerifier: generated.secretVerifier });
 			expect(hashProjectApiCredential(generated.token)).toEqual(generated.secretVerifier);
 			expect(sha256Hex(generated.secretVerifier)).toBe(sha256Hex(generated.token));
 			expect(sha256Hex(generated.secretVerifier)).not.toBe(sha256Hex(generated.token.slice(5)));
 			expect(generated.secretVerifier).toHaveLength(32);
 			expect(Buffer.from(generated.secretVerifier).toString("utf8")).not.toContain(generated.token);
 		}
-		expect(generateProjectApiCredential("sandbox").token).not.toBe(
-			generateProjectApiCredential("sandbox").token,
+		expect(generateProjectApiCredential("sandbox", "full").token).not.toBe(
+			generateProjectApiCredential("sandbox", "full").token,
 		);
 	});
 
 	it("refuses to issue credentials outside sandbox and production", () => {
 		for (const environment of ["internal", "live", ""]) {
-			expect(() => generateProjectApiCredential(environment as "sandbox")).toThrow(
+			expect(() => generateProjectApiCredential(environment as "sandbox", "full")).toThrow(
 				"Project API credentials are issued only for sandbox or production instances",
 			);
 		}
@@ -82,7 +85,7 @@ describe("project API credentials", () => {
 	});
 
 	it("rejects malformed, modified-prefix, and legacy tokens", () => {
-		const generated = generateProjectApiCredential("production");
+		const generated = generateProjectApiCredential("production", "full");
 		const body = generated.token.slice("pqpk_".length);
 		for (const token of [
 			"",

@@ -238,19 +238,19 @@ describe("api key authentication", () => {
 			environment: "sandbox" | "production",
 			instance: Partial<ReturnType<typeof credentialRow>> = {},
 		) => {
-			const generated = generateProjectApiCredential(environment);
+			const generated = generateProjectApiCredential(environment, "full");
 			rows.push(credentialRow(generated.secretVerifier, { environment, ...instance }));
 			return generated.token;
 		};
 		const sandbox = issue("sandbox", { project_instance_key: "voysee-sandbox" });
 		const production = issue("production");
-		const mismatched = generateProjectApiCredential("sandbox").token;
+		const mismatched = generateProjectApiCredential("sandbox", "full").token;
 		rows.push(credentialRow(hashProjectApiCredential(mismatched), { environment: "production" }));
 		const expired = issue("production", { expires_at: new Date(Date.now() - 1_000) });
 		const revoked = issue("production", { revoked_at: new Date() });
 		const inactive = issue("production", { lifecycle_status: "inactive" });
 		const suspendedOrganization = issue("production", { organization_status: "suspended" });
-		const internal = generateProjectApiCredential("production").token;
+		const internal = generateProjectApiCredential("production", "full").token;
 		rows.push(
 			credentialRow(hashProjectApiCredential(internal), {
 				environment: "internal",
@@ -285,7 +285,7 @@ describe("api key authentication", () => {
 			`pqpk_${secret}`,
 			altered,
 			mismatched,
-			generateProjectApiCredential("production").token,
+			generateProjectApiCredential("production", "full").token,
 			expired,
 			revoked,
 			inactive,
@@ -324,10 +324,12 @@ function credentialRow(
 		organization_status: string;
 		expires_at: Date | null;
 		revoked_at: Date | null;
+		access: string;
 	}> = {},
 ) {
 	const context = projectInstanceContext();
 	return {
+		access: "full",
 		secret_verifier: secretVerifier,
 		expires_at: null as Date | null,
 		revoked_at: null as Date | null,

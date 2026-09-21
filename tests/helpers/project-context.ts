@@ -3,6 +3,7 @@ import type {
 	ProjectInstanceContextResolver,
 	ProjectInstanceLookupResult,
 } from "../../src/projects/context";
+import type { CredentialAccess } from "../../src/shared/credential-access";
 
 const idsByKey: Record<string, { organization: string; logicalProject: string; instance: string }> =
 	{
@@ -47,7 +48,10 @@ export function projectContextResolver({
 	unavailable = false,
 }: {
 	contexts?: readonly ProjectInstanceContext[];
-	credentials?: Readonly<Record<string, string>>;
+	/** Token to instance key; give `{ projectInstanceKey, access }` for a read-only credential. */
+	credentials?: Readonly<
+		Record<string, string | { projectInstanceKey: string; access: CredentialAccess }>
+	>;
 	unavailable?: boolean;
 } = {}): ProjectInstanceContextResolver {
 	const byKey = new Map(contexts.map((context) => [context.projectInstanceKey, context]));
@@ -58,7 +62,12 @@ export function projectContextResolver({
 	};
 	return {
 		async resolveCredential(credential) {
-			return result(byKey.get(credentials[credential] ?? ""));
+			const entry = credentials[credential];
+			const declared = typeof entry === "string" ? { projectInstanceKey: entry } : entry;
+			const resolved = result(byKey.get(declared?.projectInstanceKey ?? ""));
+			return resolved.kind === "resolved"
+				? { ...resolved, access: (declared as { access?: CredentialAccess }).access ?? "full" }
+				: resolved;
 		},
 		async resolveInstanceKey(projectInstanceKey) {
 			return result(byKey.get(projectInstanceKey));

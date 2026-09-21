@@ -143,10 +143,16 @@ describe("platform schema-neutral repositories", () => {
 		await repository.create({
 			id: "new-credential-id",
 			projectInstanceId: "instance-id",
+			access: "read_only",
 			secretVerifier: verifier,
 		});
-		expect(executor.calls[1]?.text).toContain("VALUES ($1, $2, 'billing_api', $3)");
-		expect(executor.calls[1]?.values).toEqual(["new-credential-id", "instance-id", verifier]);
+		expect(executor.calls[1]?.text).toContain("VALUES ($1, $2, 'billing_api', $3, $4)");
+		expect(executor.calls[1]?.values).toEqual([
+			"new-credential-id",
+			"instance-id",
+			"read_only",
+			verifier,
+		]);
 	});
 
 	it("takes the platform bootstrap advisory lock through the same executor", async () => {

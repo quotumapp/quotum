@@ -196,6 +196,7 @@ export function registerCustomerRoutes({
 			params: stripeCustomerRouteParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdEntitlements",
+				credentialAccess: "read_only",
 				tags: ["customer"],
 				path: "/v1/billing-accounts/:billingAccountId/entitlements",
 				responses: {
@@ -223,6 +224,7 @@ export function registerCustomerRoutes({
 			query: stripeCatalogQuerySchema,
 			detail: operationDetail({
 				operationId: "getV1Catalog",
+				credentialAccess: "read_only",
 				tags: ["customer"],
 				path: "/v1/catalog",
 				responses: {
@@ -250,6 +252,7 @@ export function registerCustomerRoutes({
 			params: stripeCustomerRouteParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdBillingAccount",
+				credentialAccess: "read_only",
 				tags: ["customer"],
 				path: "/v1/billing-accounts/:billingAccountId/billing-account",
 				responses: {

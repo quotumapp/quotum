@@ -4,6 +4,7 @@ import { registerAdminRoutes } from "./app/admin-routes";
 import { registerCapabilityRoutes } from "./app/capability-routes";
 import { registerCatalogRoutes } from "./app/catalog-routes";
 import { registerControlsRoutes } from "./app/controls-routes";
+import { createCredentialAccessGate } from "./app/credential-access";
 import { registerCustomerRoutes } from "./app/customer-routes";
 import { registerInsightsRoutes } from "./app/insights-routes";
 import { registerMeteringRoutes } from "./app/metering-routes";
@@ -34,7 +35,7 @@ import {
 	rateLimitResponse,
 	requestIp,
 } from "./http/rate-limit";
-import { createNoopBillingLogger, safelyLogError } from "./observability/logger";
+import { createNoopBillingLogger, safelyLogError, safelyLogWarn } from "./observability/logger";
 import {
 	createInMemoryBillingMetrics,
 	safelyIncrementBillingMetric,
@@ -48,6 +49,7 @@ import {
 import { createProviderCapabilityReads } from "./providers/capability-reads";
 import { createProviderRegistry } from "./providers/registry";
 import { DEFAULT_BODY_LIMIT_BYTES, isBodyTooLarge } from "./shared/body-limit";
+import type { CredentialAccess } from "./shared/credential-access";
 import {
 	type ErrorEnvelopeBody,
 	HTTP_APP_CONFIG,
@@ -348,13 +350,32 @@ export function createApp({
 		aggregateV1RateLimitGate(createAggregateLimiter(), env.rateLimit.trustProxyHeaders),
 	);
 
-	app.derive(async ({ request, path, server, set }) => {
-		const { project } =
+	const credentialAccessGate = createCredentialAccessGate(() => app.routes);
+
+	app.derive(async ({ request, path, route, server, set }) => {
+		// Gateway mode reads no credential, so the trusted gateway owns any read-only restriction.
+		const { project, credentialAccess } =
 			env.authMode === "api_key"
 				? await resolveProjectFromApiKey(request, contextResolver)
-				: await resolveGatewayProject(request, contextResolver);
+				: {
+						...(await resolveGatewayProject(request, contextResolver)),
+						credentialAccess: "full" as const,
+					};
 		if (queryHasCallerProjectSelector(new URL(request.url).searchParams)) {
 			throw projectSelectorRejectedError();
+		}
+		// Before observers and limiters: a refused read-only credential is neither a failed metering
+		// operation nor a charge against the project's rate-limit budget.
+		try {
+			credentialAccessGate({ access: credentialAccess, method: request.method, route });
+		} catch (error) {
+			// A read-only key used for a write is a misconfigured tool or a leaked key being probed.
+			safelyLogWarn(billingLogger, "Read-only project credential refused", {
+				projectKey: project.projectInstanceKey,
+				method: request.method,
+				route: route ?? null,
+			});
+			throw error;
 		}
 		const observers = requestObservers.filter((observer) => observer.matches(path));
 		if (observers.length > 0) {
@@ -375,7 +396,7 @@ export function createApp({
 				set: set as unknown as { headers: Record<string, string> },
 			});
 		}
-		return { project };
+		return { project, credentialAccess };
 	});
 	app.onAfterHandle(({ request }) => {
 		finishObservedRequest(request, "completed");
@@ -492,7 +513,7 @@ export function createApp({
 function resolveProjectFromApiKey(
 	request: Request,
 	resolver: ProjectInstanceContextResolver,
-): Promise<{ project: ProjectInstanceContext }> {
+): Promise<{ project: ProjectInstanceContext; credentialAccess: CredentialAccess }> {
 	return (async () => {
 		const token = parseBearerToken(request.headers.get("authorization"));
 		const resolution =
@@ -507,7 +528,7 @@ function resolveProjectFromApiKey(
 		if (resolution.kind !== "resolved" || !isTenantTrafficEligible(resolution.context)) {
 			throw new BillingError("Invalid billing API key", "UNAUTHORIZED", 401);
 		}
-		return { project: resolution.context };
+		return { project: resolution.context, credentialAccess: resolution.access };
 	})();
 }
 

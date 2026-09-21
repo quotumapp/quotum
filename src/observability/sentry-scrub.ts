@@ -17,7 +17,7 @@ const DEFAULT_MAX_STRING = 1024;
 
 const BEARER_BASIC_PATTERN = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi;
 // Project API keys are a prefix plus base64url, so the secret itself can contain `-` and `_`.
-const PROJECT_API_KEY_PATTERN = /(?<![A-Za-z0-9])([sp]qpk)_[A-Za-z0-9_-]+/g;
+const PROJECT_API_KEY_PATTERN = /(?<![A-Za-z0-9])([sp]q[pr]k)_[A-Za-z0-9_-]+/g;
 const URL_USERINFO_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi;
 const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
 const PREFIXED_ID_PATTERN =

@@ -42655,18 +42655,17 @@
         },
         "security": [
           {
-            "operatorKey": [],
             "projectKey": []
           },
           {
-            "gatewayProject": [],
-            "operatorKey": []
+            "gatewayProject": []
           }
         ],
         "summary": "GET /v1/admin/catalog",
         "tags": [
           "catalog"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/catalog-migrations/preview": {
@@ -46701,7 +46700,8 @@
         "summary": "GET /v1/admin/customers/{customerId}",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/customers/{customerId}/projection-jobs": {
@@ -46871,7 +46871,8 @@
         "summary": "GET /v1/admin/customers/{customerId}/projection-jobs",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/customers/{customerId}/purchases": {
@@ -47041,7 +47042,8 @@
         "summary": "GET /v1/admin/customers/{customerId}/purchases",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/customers/{customerId}/store-events": {
@@ -47211,7 +47213,8 @@
         "summary": "GET /v1/admin/customers/{customerId}/store-events",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/customers/{customerId}/subscriptions": {
@@ -47381,7 +47384,8 @@
         "summary": "GET /v1/admin/customers/{customerId}/subscriptions",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/customers/by-billing-account/{billingAccountId}": {
@@ -47551,7 +47555,8 @@
         "summary": "GET /v1/admin/customers/by-billing-account/{billingAccountId}",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/customers/search": {
@@ -47710,7 +47715,8 @@
         "summary": "GET /v1/admin/customers/search",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/metrics": {
@@ -48030,7 +48036,8 @@
         "summary": "GET /v1/admin/projection-jobs",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/projection-jobs/{jobId}/retry": {
@@ -50690,7 +50697,8 @@
         "summary": "GET /v1/admin/providers/capabilities",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/purchases": {
@@ -50849,7 +50857,8 @@
         "summary": "GET /v1/admin/purchases",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/reconciliation/subscriptions/run": {
@@ -51169,7 +51178,8 @@
         "summary": "GET /v1/admin/stats/summary",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/store-events": {
@@ -51328,7 +51338,8 @@
         "summary": "GET /v1/admin/store-events",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/store-events/{eventId}": {
@@ -51498,7 +51509,8 @@
         "summary": "GET /v1/admin/store-events/{eventId}",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/store-events/{eventId}/replay": {
@@ -51829,7 +51841,8 @@
         "summary": "GET /v1/admin/subscriptions",
         "tags": [
           "admin"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/admin/usage-events": {
@@ -52068,7 +52081,8 @@
         "summary": "GET /v1/admin/usage-events",
         "tags": [
           "insights"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/auto-topup": {
@@ -52259,7 +52273,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/auto-topup",
         "tags": [
           "controls"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       },
       "put": {
         "operationId": "putV1BillingAccountsByBillingAccountIdAutoTopup",
@@ -52685,7 +52700,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/available-actions",
         "tags": [
           "customer"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/balances/{featureKey}": {
@@ -52866,7 +52882,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/balances/{featureKey}",
         "tags": [
           "metering"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/billing-account": {
@@ -53036,7 +53053,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/billing-account",
         "tags": [
           "customer"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/billing-summary": {
@@ -53206,7 +53224,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/billing-summary",
         "tags": [
           "insights"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/commercial-actions": {
@@ -53959,7 +53978,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/controls",
         "tags": [
           "controls"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       },
       "put": {
         "operationId": "putV1BillingAccountsByBillingAccountIdControls",
@@ -54371,7 +54391,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/entities",
         "tags": [
           "controls"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       },
       "post": {
         "operationId": "postV1BillingAccountsByBillingAccountIdEntities",
@@ -54773,7 +54794,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/entities/{entityId}/licenses/{featureKey}",
         "tags": [
           "controls"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/entitlements": {
@@ -54943,7 +54965,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/entitlements",
         "tags": [
           "customer"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/license-assignments": {
@@ -55516,7 +55539,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/license-pools",
         "tags": [
           "controls"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/promotion-codes/validate": {
@@ -57848,7 +57872,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/usage-alert-events",
         "tags": [
           "controls"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/usage-alerts": {
@@ -58019,7 +58044,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/usage-alerts",
         "tags": [
           "controls"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       },
       "post": {
         "operationId": "postV1BillingAccountsByBillingAccountIdUsageAlerts",
@@ -58488,7 +58514,8 @@
         "summary": "POST /v1/billing-accounts/{billingAccountId}/usage/check",
         "tags": [
           "metering"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/usage/consume": {
@@ -58970,7 +58997,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/usage/events",
         "tags": [
           "insights"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/usage/events/{usageEventId}/corrections": {
@@ -59408,7 +59436,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/usage/operations/{operation}/{operationId}",
         "tags": [
           "metering"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/usage/reservations": {
@@ -60289,7 +60318,8 @@
         "summary": "GET /v1/billing-accounts/{billingAccountId}/usage/series",
         "tags": [
           "insights"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/catalog": {
@@ -60474,7 +60504,8 @@
         "summary": "GET /v1/catalog",
         "tags": [
           "customer"
-        ]
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/projects/{projectKey}/connections/{versionId}/webhooks/{provider}": {

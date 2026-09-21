@@ -1,0 +1,246 @@
+import { describe, expect, it } from "bun:test";
+import { createApp as createBillingApp } from "../../src/app";
+import { EntitlementService } from "../../src/billing/entitlements";
+import { createNoopBillingLogger } from "../../src/observability/logger";
+import { BillingAdminOperations } from "../../src/operations/admin";
+import { CREDENTIAL_ACCESS_EXTENSION } from "../../src/shared/http";
+import type { FixtureBillingEnv as BillingEnv } from "../../src/testing/connection-fixtures";
+import { fixtureConnections } from "../../src/testing/connection-fixtures";
+import { testRequest, withOpenApiAssertions } from "../helpers/openapi";
+import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
+
+const env: BillingEnv = {
+	postgresUri: "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+	postgresPreparedStatements: true,
+	authMode: "api_key",
+	operatorApiKey: "operator-secret-key",
+	trustGatewayProjectHeader: false,
+	connectionFixtures: [
+		{
+			projectInstanceKey: "voysee",
+			projectionUrl: "https://voysee.example.com",
+			projectionSecret: "voysee-projection-secret",
+		},
+	],
+	runtimeEnvironment: "development",
+	workerId: "worker-a",
+	workerPollIntervalMs: 5000,
+	projectionSyncMaxAttempts: 10,
+	storeEventReplayMaxAttempts: 10,
+	storeEventReplayPollIntervalMs: 5000,
+	subscriptionReconciliationMaxAttempts: 10,
+	subscriptionReconciliationPollIntervalMs: 60000,
+	providerReconciliationStaleAfterMs: 21600000,
+	meteringMaintenancePollIntervalMs: 60000,
+	rateLimit: {
+		windowMs: 60000,
+		verifyLimit: 100000,
+		webhookLimit: 100000,
+		adminLimit: 100000,
+		meteringLimit: 100000,
+		trustProxyHeaders: false,
+	},
+	sentry: {
+		dsn: null,
+		environment: "test",
+		release: null,
+		enableLogs: true,
+		tracesSampleRate: 0.01,
+		logLevel: "warn",
+		captureExpectedErrors: false,
+	},
+};
+
+const snapshot = {
+	billingAccountId: "account-1",
+	entitlements: [],
+	generatedAt: "2026-09-21T00:00:00.000Z",
+};
+const refusal = {
+	success: false,
+	error: {
+		code: "READ_ONLY_CREDENTIAL",
+		message: "This operation is not available to a read-only project credential",
+	},
+};
+
+function testApp(warnings: Array<{ message: string; context: unknown }> = []) {
+	return createBillingApp({
+		env,
+		logger: {
+			...createNoopBillingLogger(),
+			warn: (message, context) => {
+				warnings.push({ message, context });
+			},
+		},
+		connections: fixtureConnections(env.connectionFixtures),
+		projectContextResolver: projectContextResolver({
+			contexts: [projectInstanceContext("voysee")],
+			credentials: {
+				"full-key": "voysee",
+				"read-key": { projectInstanceKey: "voysee", access: "read_only" },
+			},
+		}),
+		entitlementService: new EntitlementService({
+			async getEntitlementSnapshot() {
+				return snapshot;
+			},
+		}),
+		adminOperations: new BillingAdminOperations({
+			replayWorker: {
+				runOne() {
+					throw new Error("unused");
+				},
+			},
+			reconciliationWorker: {
+				runOnce() {
+					throw new Error("unused");
+				},
+			},
+		}),
+	});
+}
+
+/** Every route behind the authentication derive; provider webhooks authenticate on their own. */
+function gatedRoutes(app: ReturnType<typeof testApp>) {
+	return app.routes
+		.filter((route) => route.path.startsWith("/v1/") && !route.path.includes("/webhooks/"))
+		.map((route) => ({
+			method: route.method,
+			path: route.path,
+			requestPath: route.path.replace(/:[A-Za-z]+/gu, "00000000-0000-4000-8000-000000000001"),
+			readOnly:
+				(route.hooks as { detail?: Record<string, unknown> }).detail?.[
+					CREDENTIAL_ACCESS_EXTENSION
+				] === "read_only",
+		}));
+}
+
+function headers(key: string, method: string): Record<string, string> {
+	const result: Record<string, string> = { authorization: `Bearer ${key}` };
+	if (method !== "GET" && method !== "HEAD") {
+		result["content-type"] = "application/json";
+		result["x-billing-actor"] = "read-only-test";
+		result["idempotency-key"] = "read-only-credential";
+		result["x-billing-operator-key"] = "operator-secret-key";
+	}
+	return result;
+}
+
+describe("read-only project credentials", () => {
+	it("are refused on every route that has not opted in, before validation or any handler", async () => {
+		const app = withOpenApiAssertions(testApp());
+		const routes = gatedRoutes(app).filter((route) => !route.readOnly);
+		expect(routes.length).toBeGreaterThan(40);
+		for (const route of routes) {
+			const response = await testRequest(app, route.requestPath, {
+				method: route.method,
+				headers: headers("read-key", route.method),
+				// An empty object is invalid for most of these bodies: a 403 proves the gate ran first.
+				body: route.method === "GET" ? undefined : "{}",
+			});
+			expect(response.status, `${route.method} ${route.path}`).toBe(403);
+			expect(await response.json()).toEqual(refusal);
+		}
+	});
+
+	it("are refused through path variants and HEAD as well", async () => {
+		const app = testApp();
+		for (const route of gatedRoutes(app).filter((candidate) => !candidate.readOnly)) {
+			const variants = [
+				`http://localhost${route.requestPath}/`,
+				`http://a/xx${route.requestPath}`,
+				`http://a/x${route.requestPath}`,
+			];
+			for (const url of variants) {
+				const response = await app.handle(
+					new Request(url, {
+						method: route.method,
+						headers: headers("read-key", route.method),
+						body: route.method === "GET" ? undefined : "{}",
+					}),
+				);
+				expect([403, 404], `${route.method} ${url}`).toContain(response.status);
+			}
+			if (route.method === "GET") {
+				const head = await app.handle(
+					new Request(`http://localhost${route.requestPath}`, {
+						method: "HEAD",
+						headers: headers("read-key", "HEAD"),
+					}),
+				);
+				expect([403, 404], `HEAD ${route.path}`).toContain(head.status);
+			}
+		}
+	});
+
+	it("reach an opted-in route, which proves the router reports the matched pattern", async () => {
+		const app = withOpenApiAssertions(testApp());
+		const response = await testRequest(app, "/v1/billing-accounts/account-1/entitlements", {
+			headers: headers("read-key", "GET"),
+		});
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ success: true, data: snapshot });
+	});
+
+	it("leave a full credential untouched on the same routes", async () => {
+		const app = testApp();
+		for (const route of gatedRoutes(app).filter((candidate) => !candidate.readOnly)) {
+			// A wrong operator key stops operator routes and an empty body stops the rest, so no
+			// handler runs; the point is only that the read-only refusal never appears.
+			const response = await app.handle(
+				new Request(`http://localhost${route.requestPath}?limit=not-a-number`, {
+					method: route.method,
+					headers: { ...headers("full-key", route.method), "x-billing-operator-key": "wrong" },
+					body: route.method === "GET" ? undefined : "{}",
+				}),
+			);
+			if (response.status === 403) {
+				const body = (await response.json()) as { error?: { code?: string } };
+				expect(body.error?.code, `${route.method} ${route.path}`).not.toBe("READ_ONLY_CREDENTIAL");
+			}
+		}
+	});
+
+	it("never get raw provider payloads, even from a store-event read they may call", async () => {
+		const app = withOpenApiAssertions(testApp());
+		const response = await testRequest(
+			app,
+			"/v1/admin/store-events/00000000-0000-4000-8000-000000000001?includeRawPayload=true",
+			{ headers: headers("read-key", "GET") },
+		);
+		expect(response.status).toBe(403);
+		expect(await response.json()).toEqual(refusal);
+	});
+
+	it("leave a warning that names the project, method and route, and never the key", async () => {
+		const warnings: Array<{ message: string; context: unknown }> = [];
+		const app = testApp(warnings);
+		await testRequest(app, "/v1/billing-accounts/account-1/usage/consume", {
+			method: "POST",
+			headers: headers("read-key", "POST"),
+			body: "{}",
+		});
+		await testRequest(app, "/v1/billing-accounts/account-1/entitlements", {
+			headers: headers("read-key", "GET"),
+		});
+		expect(warnings).toEqual([
+			{
+				message: "Read-only project credential refused",
+				context: {
+					projectKey: "voysee",
+					method: "POST",
+					route: "/v1/billing-accounts/:billingAccountId/usage/consume",
+				},
+			},
+		]);
+		expect(JSON.stringify(warnings)).not.toContain("read-key");
+	});
+
+	it("are rejected outright when the presented key is unknown", async () => {
+		const response = await testRequest(testApp(), "/v1/billing-accounts/account-1/entitlements", {
+			headers: headers("sqrk_unknown", "GET"),
+		});
+		expect(response.status).toBe(401);
+	});
+});

@@ -36,7 +36,11 @@ export function integrationProjectContextResolver(): ProjectInstanceContextResol
 				([, candidate]) => candidate === credential,
 			)?.[0];
 			if (projectInstanceKey === undefined) return { kind: "not_found" };
-			return { kind: "resolved", context: integrationProjectContext(projectInstanceKey) };
+			return {
+				kind: "resolved",
+				context: integrationProjectContext(projectInstanceKey),
+				access: "full",
+			};
 		},
 		async resolveInstanceKey(projectInstanceKey) {
 			const context = integrationProjectContexts().find(

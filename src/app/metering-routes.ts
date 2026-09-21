@@ -134,6 +134,7 @@ export function registerMeteringRoutes({
 			params: balanceParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdBalancesByFeatureKey",
+				credentialAccess: "read_only",
 				tags: ["metering"],
 				path: "/v1/billing-accounts/:billingAccountId/balances/:featureKey",
 				responses: {
@@ -154,6 +155,7 @@ export function registerMeteringRoutes({
 			detail: operationDetail({
 				operationId:
 					"getV1BillingAccountsByBillingAccountIdUsageOperationsByOperationByOperationId",
+				credentialAccess: "read_only",
 				tags: ["metering"],
 				path: "/v1/billing-accounts/:billingAccountId/usage/operations/:operation/:operationId",
 				responses: {
@@ -179,6 +181,8 @@ export function registerMeteringRoutes({
 			transform: rejectCallerProjectSelectorBody,
 			detail: operationDetail({
 				operationId: "postV1BillingAccountsByBillingAccountIdUsageCheck",
+				// check reads balances and controls and records nothing.
+				credentialAccess: "read_only",
 				tags: ["metering"],
 				path: "/v1/billing-accounts/:billingAccountId/usage/check",
 				responses: {

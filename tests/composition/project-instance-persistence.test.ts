@@ -17,6 +17,7 @@ const mappedContext = {
 
 function contextRow(overrides: Record<string, unknown> = {}) {
 	return {
+		access: "full",
 		organization_id: mappedContext.organizationId,
 		organization_slug: mappedContext.organizationSlug,
 		logical_project_id: mappedContext.logicalProjectId,
@@ -40,7 +41,7 @@ describe("Postgres project instance composition adapter", () => {
 			},
 		};
 		const resolver = new PostgresProjectInstanceContextResolver(unavailableClient as never);
-		const credential = generateProjectApiCredential("production").token;
+		const credential = generateProjectApiCredential("production", "full").token;
 
 		await expect(resolver.resolveCredential(credential)).resolves.toEqual({ kind: "unavailable" });
 		await expect(resolver.resolveInstanceKey("voysee")).resolves.toEqual({ kind: "unavailable" });
@@ -58,7 +59,7 @@ describe("Postgres project instance composition adapter", () => {
 				return [];
 			},
 		} as never);
-		const secret = generateProjectApiCredential("production").token.slice("pqpk_".length);
+		const secret = generateProjectApiCredential("production", "full").token.slice("pqpk_".length);
 
 		for (const credential of [
 			"legacy-plaintext-key",
@@ -77,7 +78,7 @@ describe("Postgres project instance composition adapter", () => {
 	});
 
 	it("looks credentials up by the whole-token hash and billing audience", async () => {
-		const generated = generateProjectApiCredential("production");
+		const generated = generateProjectApiCredential("production", "full");
 		const queries: Array<{ text: string; values: readonly unknown[] }> = [];
 		const resolver = new PostgresProjectInstanceContextResolver({
 			async unsafe(text: string, values: readonly unknown[] = []) {
@@ -99,7 +100,7 @@ describe("Postgres project instance composition adapter", () => {
 	});
 
 	it("maps resolved credential, routing-key, and UUID lookups to the full trusted context", async () => {
-		const generated = generateProjectApiCredential("production");
+		const generated = generateProjectApiCredential("production", "full");
 		const resolver = new PostgresProjectInstanceContextResolver({
 			async unsafe(query: string) {
 				return query.includes("platform_project_api_credentials")
@@ -117,6 +118,7 @@ describe("Postgres project instance composition adapter", () => {
 		await expect(resolver.resolveCredential(generated.token)).resolves.toEqual({
 			kind: "resolved",
 			context: mappedContext,
+			access: "full",
 		});
 		await expect(resolver.resolveInstanceKey("voysee")).resolves.toEqual({
 			kind: "resolved",
@@ -129,8 +131,8 @@ describe("Postgres project instance composition adapter", () => {
 	});
 
 	it("resolves sandbox credentials only for sandbox instances", async () => {
-		const sandbox = generateProjectApiCredential("sandbox");
-		const production = generateProjectApiCredential("production");
+		const sandbox = generateProjectApiCredential("sandbox", "full");
+		const production = generateProjectApiCredential("production", "full");
 		const resolverFor = (row: Record<string, unknown>) =>
 			new PostgresProjectInstanceContextResolver({
 				async unsafe() {
@@ -145,6 +147,7 @@ describe("Postgres project instance composition adapter", () => {
 		).resolves.toEqual({
 			kind: "resolved",
 			context: { ...mappedContext, environment: "sandbox" },
+			access: "full",
 		});
 		for (const [credential, environment] of [
 			[sandbox, "production"],
@@ -164,8 +167,8 @@ describe("Postgres project instance composition adapter", () => {
 	});
 
 	it("returns not-found for absent or mismatched verifiers and ineligible for expiry or revocation", async () => {
-		const generated = generateProjectApiCredential("production");
-		const other = generateProjectApiCredential("production");
+		const generated = generateProjectApiCredential("production", "full");
+		const other = generateProjectApiCredential("production", "full");
 		const resolverFor = (row: Record<string, unknown> | undefined) =>
 			new PostgresProjectInstanceContextResolver({
 				async unsafe() {
@@ -214,5 +217,38 @@ describe("Postgres project instance composition adapter", () => {
 				internalProject: true,
 			}),
 		).toBe(false);
+	});
+	it("reports the stored access and rejects a prefix that disagrees with it", async () => {
+		const resolverFor = (row: Record<string, unknown>) =>
+			new PostgresProjectInstanceContextResolver({
+				async unsafe() {
+					return [{ expires_at: null, revoked_at: null, ...row }];
+				},
+			} as never);
+		const readOnly = generateProjectApiCredential("production", "read_only");
+		await expect(
+			resolverFor(
+				contextRow({ access: "read_only", secret_verifier: readOnly.secretVerifier }),
+			).resolveCredential(readOnly.token),
+		).resolves.toEqual({ kind: "resolved", context: mappedContext, access: "read_only" });
+
+		// A read-only token whose row says full (or the reverse) is an inconsistent issuance: the
+		// stored access is authoritative, and neither side may widen the other.
+		await expect(
+			resolverFor(
+				contextRow({ access: "full", secret_verifier: readOnly.secretVerifier }),
+			).resolveCredential(readOnly.token),
+		).resolves.toEqual({ kind: "not_found" });
+		const full = generateProjectApiCredential("production", "full");
+		await expect(
+			resolverFor(
+				contextRow({ access: "read_only", secret_verifier: full.secretVerifier }),
+			).resolveCredential(full.token),
+		).resolves.toEqual({ kind: "not_found" });
+		await expect(
+			resolverFor(
+				contextRow({ access: "admin", secret_verifier: full.secretVerifier }),
+			).resolveCredential(full.token),
+		).resolves.toEqual({ kind: "not_found" });
 	});
 });

@@ -66,6 +66,7 @@ export async function applyPlatformBootstrap(
 		projectInstanceKey,
 		...generateProjectApiCredential(
 			platformBootstrapCredentialEnvironment(manifest, projectInstanceKey),
+			"full",
 		),
 	}));
 	let outputCreated = false;

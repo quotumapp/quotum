@@ -2,8 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { McpConfigError, readMcpConfig } from "../../src/mcp/config";
 import { generateProjectApiCredential } from "../../src/platform/credentials/project-api-token";
 
-const sandboxKey = generateProjectApiCredential("sandbox").token;
-const productionKey = generateProjectApiCredential("production").token;
+const sandboxKey = generateProjectApiCredential("sandbox", "full").token;
+const productionKey = generateProjectApiCredential("production", "full").token;
 
 function failure(env: Record<string, string | undefined>): string {
 	try {

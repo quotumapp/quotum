@@ -107,6 +107,23 @@ again and invoice customers a second time. Move a populated deployment as follow
 Restored rows keep a null `provider_account_id`. Stripe events fill it on subscriptions and provider
 customers once their connection reports an account identity; jobs copy it when they are created.
 
+### Credential access level
+
+The platform baseline adds `platform_project_api_credentials.access` (`full` or `read_only`,
+default `full`), its check constraint, and a unique index that allows one live credential of each
+kind per instance. The column is additive and has a default, so the move needs no manual SQL: follow
+steps 1, 2, 4 and 6 above. The data-only restore lists its columns, so every existing credential
+takes `access = 'full'` and keeps authenticating. Afterwards confirm
+
+```sql
+SELECT access, count(*) FROM platform_project_api_credentials GROUP BY 1;
+```
+
+returns only `full`. The restore fails on the new unique index if an instance holds more than one
+unrevoked credential; no release creates that state, so revoke the stale rows in the source database
+and dump again. An older image does not recognize `sqrk_` or `pqrk_` tokens and rejects them, so a
+rollback fails closed.
+
 ## Upgrade
 
 1. Read the target version's [GitHub Release](https://github.com/quotumapp/quotum/releases) and

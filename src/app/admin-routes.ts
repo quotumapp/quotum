@@ -25,6 +25,7 @@ import type { BillingAdminOperations } from "../operations/admin";
 import { constantTimeEquals } from "../shared/constant-time-equals";
 import { operationDetail } from "../shared/http";
 import * as responses from "./contracts/admin-responses";
+import { readOnlyCredentialError } from "./credential-access";
 import { privateProject } from "./request-context";
 import type { BillingElysia, PostAuthGuard } from "./types";
 
@@ -103,6 +104,7 @@ export function registerAdminRoutes({
 		{
 			detail: operationDetail({
 				operationId: "getV1AdminCustomersSearch",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/search",
 				responses: { 200: responses.getV1AdminCustomersSearchResponse200Schema },
@@ -123,6 +125,7 @@ export function registerAdminRoutes({
 			params: billingAccountIdParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1AdminCustomersByBillingAccountByBillingAccountId",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/by-billing-account/:billingAccountId",
 				responses: {
@@ -146,6 +149,7 @@ export function registerAdminRoutes({
 			params: customerIdParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1AdminCustomersByCustomerIdPurchases",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/:customerId/purchases",
 				responses: { 200: responses.getV1AdminCustomersByCustomerIdPurchasesResponse200Schema },
@@ -167,6 +171,7 @@ export function registerAdminRoutes({
 			params: customerIdParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1AdminCustomersByCustomerIdSubscriptions",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/:customerId/subscriptions",
 				responses: { 200: responses.getV1AdminCustomersByCustomerIdSubscriptionsResponse200Schema },
@@ -188,6 +193,7 @@ export function registerAdminRoutes({
 			params: customerIdParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1AdminCustomersByCustomerIdStoreEvents",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/:customerId/store-events",
 				responses: { 200: responses.getV1AdminCustomersByCustomerIdStoreEventsResponse200Schema },
@@ -209,6 +215,7 @@ export function registerAdminRoutes({
 			params: customerIdParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1AdminCustomersByCustomerIdProjectionJobs",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/:customerId/projection-jobs",
 				responses: {
@@ -232,6 +239,7 @@ export function registerAdminRoutes({
 			params: customerIdParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1AdminCustomersByCustomerId",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/:customerId",
 				responses: { 200: responses.getV1AdminCustomersByCustomerIdResponse200Schema },
@@ -252,6 +260,7 @@ export function registerAdminRoutes({
 		{
 			detail: operationDetail({
 				operationId: "getV1AdminPurchases",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/purchases",
 				responses: { 200: responses.getV1AdminPurchasesResponse200Schema },
@@ -272,6 +281,7 @@ export function registerAdminRoutes({
 		{
 			detail: operationDetail({
 				operationId: "getV1AdminSubscriptions",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/subscriptions",
 				responses: { 200: responses.getV1AdminSubscriptionsResponse200Schema },
@@ -292,6 +302,7 @@ export function registerAdminRoutes({
 		{
 			detail: operationDetail({
 				operationId: "getV1AdminStoreEvents",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/store-events",
 				responses: { 200: responses.getV1AdminStoreEventsResponse200Schema },
@@ -301,10 +312,14 @@ export function registerAdminRoutes({
 
 	app.get(
 		"/v1/admin/store-events/:eventId",
-		async ({ params, request, project }) => {
+		async ({ params, request, project, credentialAccess }) => {
 			const scopedProject = privateProject(project);
 			const eventId = parseEventIdParam(params.eventId);
 			const detailQuery = parseStoreEventDetailQuery(queryParams(request));
+			// Raw provider payloads carry more than the normalized event; a read-only key never gets them.
+			if (detailQuery.includeRawPayload && credentialAccess !== "full") {
+				throw readOnlyCredentialError();
+			}
 			if (detailQuery.includeRawPayload) {
 				safelyLogInfo(billingLogger, "Billing admin raw store event payload read", {
 					projectKey: scopedProject.projectInstanceKey,
@@ -324,6 +339,7 @@ export function registerAdminRoutes({
 			params: eventIdParamsSchema,
 			detail: operationDetail({
 				operationId: "getV1AdminStoreEventsByEventId",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/store-events/:eventId",
 				responses: { 200: responses.getV1AdminStoreEventsByEventIdResponse200Schema },
@@ -344,6 +360,7 @@ export function registerAdminRoutes({
 		{
 			detail: operationDetail({
 				operationId: "getV1AdminProjectionJobs",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/projection-jobs",
 				responses: { 200: responses.getV1AdminProjectionJobsResponse200Schema },
@@ -385,6 +402,7 @@ export function registerAdminRoutes({
 		{
 			detail: operationDetail({
 				operationId: "getV1AdminStatsSummary",
+				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/stats/summary",
 				responses: { 200: responses.getV1AdminStatsSummaryResponse200Schema },

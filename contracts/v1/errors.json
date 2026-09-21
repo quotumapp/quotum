@@ -930,6 +930,12 @@
       ]
     },
     {
+      "code": "READ_ONLY_CREDENTIAL",
+      "sources": [
+        "src/app/credential-access.ts"
+      ]
+    },
+    {
       "code": "REQUEST_BODY_TOO_LARGE",
       "sources": [
         "src/app.ts",

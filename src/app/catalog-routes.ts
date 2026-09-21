@@ -184,7 +184,9 @@ export function registerCatalogRoutes({
 	registerPostAuthGuard,
 }: CatalogRoutesDependencies): void {
 	registerPostAuthGuard(
-		operatorApiKeyGuard(operatorApiKey, (p) => /^\/v1\/admin\/catalog(\/.*)?$/.test(p)),
+		// Reading the published catalog needs project authentication only; every other catalog
+		// route, reads included, stays behind the operator key.
+		operatorApiKeyGuard(operatorApiKey, (p) => /^\/v1\/admin\/catalog\/.+$/.test(p)),
 	);
 
 	app.get(
@@ -199,6 +201,7 @@ export function registerCatalogRoutes({
 		{
 			detail: operationDetail({
 				operationId: "getV1AdminCatalog",
+				credentialAccess: "read_only",
 				tags: ["catalog"],
 				path: "/v1/admin/catalog",
 				responses: {
