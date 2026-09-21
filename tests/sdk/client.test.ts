@@ -421,4 +421,99 @@ describe("BillingClient", () => {
 			expect(call.headers.has("x-billing-actor")).toBe(false);
 		}
 	});
+
+	it("reads project-auth admin routes without the operator key, even when one is configured", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			operatorKey: "operator-secret",
+			actor: "support@example.com",
+			fetch: async (input, init) => {
+				const request = new Request(input, init);
+				calls.push(request);
+				const paged = /\/(search|store-events|projection-jobs)(\?|$)/.test(request.url);
+				return Response.json(
+					paged
+						? { success: true, data: [], pagination: { nextCursor: "next" } }
+						: { success: true, data: [] },
+				);
+			},
+		});
+
+		await client.admin.customer("account/one");
+		expect(await client.admin.searchCustomers("cus_1", { limit: 5, cursor: "c1" })).toEqual({
+			data: [],
+			nextCursor: "next",
+		});
+		await client.admin.storeEvents({
+			billingAccountId: "account/one",
+			processingStatus: "failed",
+			limit: 10,
+		});
+		await client.admin.storeEvent("4d0c2e0e-5a63-4a4e-9c53-0d5f4b6f7a11");
+		await client.admin.projectionJobs({ status: "failed", reason: "usage_changed", cursor: "c2" });
+		await client.admin.statsSummary({ provider: "stripe", from: "2026-09-01T00:00:00.000Z" });
+		await client.accounts.controls("account/one", "seat 1");
+		await client.catalog.get();
+
+		expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+			"GET https://billing.example.com/v1/admin/customers/by-billing-account/account%2Fone",
+			"GET https://billing.example.com/v1/admin/customers/search?q=cus_1&limit=5&cursor=c1",
+			"GET https://billing.example.com/v1/admin/store-events?billingAccountId=account%2Fone&processingStatus=failed&limit=10",
+			"GET https://billing.example.com/v1/admin/store-events/4d0c2e0e-5a63-4a4e-9c53-0d5f4b6f7a11",
+			"GET https://billing.example.com/v1/admin/projection-jobs?status=failed&reason=usage_changed&cursor=c2",
+			"GET https://billing.example.com/v1/admin/stats/summary?provider=stripe&from=2026-09-01T00%3A00%3A00.000Z",
+			"GET https://billing.example.com/v1/billing-accounts/account%2Fone/controls?entityId=seat+1",
+			"GET https://billing.example.com/v1/catalog",
+		]);
+		for (const call of calls) {
+			expect(call.headers.get("authorization")).toBe("Bearer project-secret");
+			expect(call.headers.has("x-billing-operator-key")).toBe(false);
+			expect(call.headers.has("x-billing-actor")).toBe(false);
+			expect(call.url).not.toContain("includeRawPayload");
+		}
+	});
+
+	it("carries the rate-limit reset time on a 429 and nowhere else", async () => {
+		const responses = [
+			new Response(
+				JSON.stringify({
+					success: false,
+					error: { code: "RATE_LIMITED", message: "Too many requests" },
+				}),
+				{
+					status: 429,
+					headers: {
+						"content-type": "application/json",
+						"ratelimit-reset": "2026-09-21T10:00:30.000Z",
+					},
+				},
+			),
+			new Response(
+				JSON.stringify({ success: false, error: { code: "NOT_FOUND", message: "Missing" } }),
+				{
+					status: 404,
+					headers: {
+						"content-type": "application/json",
+						"ratelimit-reset": "2026-09-21T10:00:30.000Z",
+					},
+				},
+			),
+		];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			fetch: async () => responses.shift() as Response,
+		});
+
+		const limited = await client.admin.projectionJobs().catch((error: unknown) => error);
+		expect(limited).toBeInstanceOf(BillingApiError);
+		expect((limited as BillingApiError).code).toBe("RATE_LIMITED");
+		expect((limited as BillingApiError).rateLimitResetAt).toBe("2026-09-21T10:00:30.000Z");
+
+		const missing = await client.admin.customer("unknown").catch((error: unknown) => error);
+		expect(missing).toBeInstanceOf(BillingApiError);
+		expect("rateLimitResetAt" in (missing as BillingApiError)).toBe(false);
+	});
 });
