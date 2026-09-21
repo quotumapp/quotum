@@ -16,7 +16,7 @@ export function createPostgresContainer(options: EphemeralPostgresOptions): Post
 		.withDatabase(options.postgresDatabase)
 		.withUsername(postgresUser)
 		.withPassword(postgresPassword)
-		.withWaitStrategy(Wait.forListeningPorts());
+		.withWaitStrategy(Wait.forLogMessage(/database system is ready to accept connections/, 2));
 }
 
 export function startPostgresContainer(
