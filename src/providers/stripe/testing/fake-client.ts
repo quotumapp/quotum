@@ -39,6 +39,8 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		Array<{ id: string; couponId: string | null }>
 	>();
 	private readonly priceAmountsMinor: Readonly<Record<string, number>>;
+	/** Every invoice creation, so a test can assert what the charge was attached to. */
+	readonly invoiceCreateParams: Stripe.InvoiceCreateParams[] = [];
 	private readonly failures = new Map<string, Error>();
 	readonly promotions = createFakeStripePromotions();
 	readonly createCoupon = this.promotions.createCoupon;
@@ -192,6 +194,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		idempotencyKey: string,
 	): Promise<{ id: string }> {
 		this.throwIfFailed("createInvoice");
+		this.invoiceCreateParams.push(params);
 		const existing = this.invoicesByIdempotencyKey.get(idempotencyKey);
 		if (existing !== undefined) return { id: existing.id };
 		const id = `in_fake_${digest(idempotencyKey).slice(0, 24)}`;

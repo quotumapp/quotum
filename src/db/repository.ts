@@ -555,6 +555,20 @@ export class BillingRepository {
 		);
 	}
 
+	async markSubscriptionChangeCancelled(
+		projectInstanceId: string,
+		changeId: string,
+		reason: string,
+		workerId: string,
+	): Promise<void> {
+		await this.recurringPricing.markSubscriptionChangeCancelled(
+			projectInstanceId,
+			changeId,
+			reason,
+			workerId,
+		);
+	}
+
 	async materializeAndClaimUsageInvoicePeriods(
 		workerId: string,
 		limit: number,

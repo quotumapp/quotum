@@ -25,7 +25,7 @@ import type {
 	SubscriptionChangePreview,
 	UsageInvoiceJob,
 } from "../../billing/recurring";
-import type { ProjectionContract, PurchaseKind } from "../../billing/types";
+import type { ProjectionContract, PurchaseKind, SubscriptionStatus } from "../../billing/types";
 import type {
 	CompleteStripeCheckoutRequestInput,
 	GetStripeProviderCustomerInput,
@@ -1035,9 +1035,25 @@ export class StripeBillingService
 			...(job.adjustmentId === null ? {} : { usageInvoiceAdjustmentId: job.adjustmentId }),
 			featureKey: job.featureKey,
 		};
+		// A usage window can close after its subscription ended: an immediate cancellation, here or
+		// in the portal, leaves the last period's overage owed with nothing left to invoice against.
+		// Stripe's invoice `subscription` expects a live subscription, and an invoice without an
+		// explicit method falls back to the subscription's, which ends with it, so the late charge is
+		// billed to the customer against their saved default method instead.
+		const subscriptionEnded = !liveStripeSubscriptionStatuses.has(job.subscriptionStatus);
+		// A late correction is always a credit and is never collected, so it needs no payment
+		// method; demanding one would strand the credit of a customer who has none saved.
+		const endedPaymentMethod =
+			subscriptionEnded && job.amountMinor > 0
+				? await this.endedSubscriptionPaymentMethod(job)
+				: null;
 		const invoiceParams: Stripe.InvoiceCreateParams = {
 			customer: job.externalCustomerId,
-			subscription: job.externalSubscriptionId,
+			...(subscriptionEnded
+				? endedPaymentMethod === null
+					? {}
+					: { default_payment_method: endedPaymentMethod }
+				: { subscription: job.externalSubscriptionId }),
 			currency: job.currency,
 			collection_method: "charge_automatically",
 			auto_advance: false,
@@ -1089,6 +1105,26 @@ export class StripeBillingService
 			);
 		}
 		return invoice.id;
+	}
+
+	/**
+	 * Resolves the customer's saved default payment method for a charge that has outlived its
+	 * subscription. A customer without one cannot be charged automatically, so the job fails and
+	 * retries into its own terminal outcome rather than dropping the amount owed.
+	 */
+	private async endedSubscriptionPaymentMethod(job: UsageInvoiceJob): Promise<string> {
+		if (this.dependencies.client.retrieveDefaultPaymentMethod === undefined) {
+			throw new Error("Stripe customer retrieval is unavailable");
+		}
+		const paymentMethodId = await this.dependencies.client.retrieveDefaultPaymentMethod(
+			job.externalCustomerId,
+		);
+		if (paymentMethodId === null) {
+			throw new Error(
+				`A saved default payment method is required to invoice usage after subscription ${job.externalSubscriptionId} ended`,
+			);
+		}
+		return paymentMethodId;
 	}
 
 	async createAutoTopupCharge(job: AutoTopupJob): Promise<AutoTopupChargeResult> {
@@ -1829,6 +1865,13 @@ function commercialPlanLines(
 		};
 	});
 }
+
+/** Statuses in which Stripe still holds a subscription that can carry an invoice or a change. */
+const liveStripeSubscriptionStatuses: ReadonlySet<SubscriptionStatus> = new Set([
+	"active",
+	"grace_period",
+	"billing_retry",
+]);
 
 function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialActionIntent {
 	if (intent.kind === "subscription_change") {

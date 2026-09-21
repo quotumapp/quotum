@@ -3,7 +3,7 @@ import type {
 	SubscriptionChangeOperation,
 	UsageInvoiceJob,
 } from "../billing/recurring";
-import type { BillingProvider } from "../billing/types";
+import type { BillingProvider, SubscriptionStatus } from "../billing/types";
 import type {
 	ClaimedSubscriptionChange,
 	ClaimedUsageInvoiceJob,
@@ -41,6 +41,12 @@ export interface RecurringBillingWorkerRepository {
 		projectInstanceId: string,
 		changeId: string,
 		error: string,
+		workerId: string,
+	): Promise<void>;
+	markSubscriptionChangeCancelled(
+		projectInstanceId: string,
+		changeId: string,
+		reason: string,
 		workerId: string,
 	): Promise<void>;
 	materializeAndClaimUsageInvoicePeriods(
@@ -103,6 +109,7 @@ export class RecurringBillingWorker {
 	async runOnce(): Promise<RecurringBillingRunResult> {
 		const limit = this.dependencies.batchSize ?? 25;
 		let subscriptionChangesApplied = 0;
+		let subscriptionChangesCancelled = 0;
 		let usageInvoicesCreated = 0;
 		let usageAdjustmentsCreated = 0;
 		let failed = 0;
@@ -158,6 +165,15 @@ export class RecurringBillingWorker {
 							: "subscription.change.apply",
 					);
 				}
+				if (!changeableSubscriptionStatuses.has(change.subscriptionStatus)) {
+					const ended = await this.endUnappliableChange(
+						claimed,
+						`The subscription is ${change.subscriptionStatus} and can no longer be changed`,
+					);
+					if (ended) subscriptionChangesCancelled += 1;
+					else failed += 1;
+					continue;
+				}
 				const applied = await changes.apply(change);
 				if (applied.outcome === "uncertain") {
 					throw new UncertainProviderWriteError(applied.correlation);
@@ -171,6 +187,16 @@ export class RecurringBillingWorker {
 				subscriptionChangesApplied += 1;
 				this.recordJob("subscription_change", "succeeded");
 			} catch (error) {
+				// The provider may know the subscription ended before the local row does; retrying
+				// that change can never succeed, so it ends here instead of burning its attempts.
+				if (providerRejectedEndedSubscription(error)) {
+					if (await this.endUnappliableChange(claimed, errorMessage(error))) {
+						subscriptionChangesCancelled += 1;
+					} else {
+						failed += 1;
+					}
+					continue;
+				}
 				failed += 1;
 				this.recordJob("subscription_change", "failed");
 				// Log first: an uncertain write's correlation must survive a failing mark.
@@ -270,10 +296,48 @@ export class RecurringBillingWorker {
 		return {
 			materializedUsagePeriods: usage.materialized,
 			subscriptionChangesApplied,
+			subscriptionChangesCancelled,
 			usageInvoicesCreated,
 			usageAdjustmentsCreated,
 			failed,
 		};
+	}
+
+	/**
+	 * Ends a claimed change that no later attempt could apply, and reports whether the transition
+	 * committed. A failing mark leaves the row `processing` for its lease to expire, and the next
+	 * claim reaches the same conclusion, so the run counts a failure rather than a cancellation it
+	 * cannot prove.
+	 */
+	private async endUnappliableChange(
+		claimed: ClaimedSubscriptionChange,
+		reason: string,
+	): Promise<boolean> {
+		try {
+			await this.dependencies.repository.markSubscriptionChangeCancelled(
+				claimed.projectInstanceId,
+				claimed.changeId,
+				reason,
+				this.dependencies.workerId,
+			);
+		} catch (markerError) {
+			this.recordJob("subscription_change", "failed");
+			this.logError("Subscription change cancellation marker failed", markerError, {
+				projectKey: claimed.projectKey,
+				changeId: claimed.changeId,
+				workerId: this.dependencies.workerId,
+				reason,
+			});
+			return false;
+		}
+		this.recordJob("subscription_change", "cancelled");
+		this.logWarn("Subscription change cancelled", {
+			projectKey: claimed.projectKey,
+			changeId: claimed.changeId,
+			workerId: this.dependencies.workerId,
+			reason,
+		});
+		return true;
 	}
 
 	/** A failing mark must not abandon the rest of the batch; the job is retried from its lease. */
@@ -336,7 +400,7 @@ export class RecurringBillingWorker {
 		}
 	}
 
-	private recordJob(operation: string, result: "succeeded" | "failed"): void {
+	private recordJob(operation: string, result: "succeeded" | "failed" | "cancelled"): void {
 		safelyIncrementBillingMetric(
 			this.dependencies.metrics ?? createNoopBillingMetrics(),
 			"billing_worker_jobs_total",
@@ -353,6 +417,29 @@ class UncertainProviderWriteError extends Error {
 	constructor(readonly correlation: Record<string, string>) {
 		super("Provider write outcome is uncertain; reconciliation is required");
 	}
+}
+
+/** Local statuses a subscription can still be changed from; the rest have ended for good. */
+const changeableSubscriptionStatuses: ReadonlySet<SubscriptionStatus> = new Set([
+	"active",
+	"grace_period",
+	"billing_retry",
+	"cancelled",
+]);
+
+/**
+ * Recognizes a provider refusing to change a subscription that no longer exists or has already
+ * ended. The local row can lag the provider by a webhook, so this is read from the answer rather
+ * than assumed, and it is deliberately narrow: anything else stays a retryable failure.
+ */
+export function providerRejectedEndedSubscription(error: unknown): boolean {
+	if (error instanceof UncertainProviderWriteError) return false;
+	const message = errorMessage(error).toLowerCase();
+	return (
+		/no such subscription/.test(message) ||
+		/(canceled|cancelled) subscription/.test(message) ||
+		/subscription (is|was) (canceled|cancelled)/.test(message)
+	);
 }
 
 function unservedOperation(provider: BillingProvider, operation: ProviderOperation): Error {
