@@ -12,7 +12,9 @@ afterEach(async () => {
 // One minimal call per tool. Adding a tool means adding it here, which is the review point.
 const toolCalls: Readonly<Record<string, Record<string, unknown>>> = {
 	check_usage: { billingAccountId: "account-1", featureKey: "tokens", quantity: "1" },
+	find_api_operations: { query: "usage/check" },
 	find_customer: { query: "account" },
+	get_api_operation: { operationId: "postV1BillingAccountsByBillingAccountIdUsageCheck" },
 	get_available_actions: { billingAccountId: "account-1" },
 	get_balance: { billingAccountId: "account-1", featureKey: "tokens" },
 	get_catalog: {},

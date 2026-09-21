@@ -75,5 +75,9 @@ describe("package scripts", () => {
 		expect(dockerfile).not.toContain("console/");
 		expect(dockerfile).not.toContain("quotum-ui");
 		expect(dockerfile).toContain("COPY --from=prerelease --chown=bun /usr/src/app/src ./src");
+		// src/mcp reads the generated contract at ../../contracts/v1 relative to itself.
+		expect(dockerfile).toContain(
+			"COPY --from=prerelease --chown=bun /usr/src/app/contracts ./contracts",
+		);
 	});
 });
