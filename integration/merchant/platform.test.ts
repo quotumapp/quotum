@@ -37,6 +37,21 @@ async function onboard(browser: MerchantBrowser, orgSlug = "acme") {
 	);
 	return { org, draft, operation };
 }
+// The fixture pool is shared by the app and this file, so a blocked request, the transaction
+// holding the lock and each poll each occupy one of its connections.
+async function waitForOrganizationLockWaiter(): Promise<void> {
+	const deadline = Date.now() + 3_000;
+	while (Date.now() < deadline) {
+		// The pattern matches the lock by id and the older lock by slug, so a step that is not fixed
+		// still reaches its assertion instead of hanging here.
+		const [waiter] = await f.sql<
+			{ waiting: number }[]
+		>`SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='active' AND wait_event_type='Lock' AND query LIKE '%platform_organizations%FOR UPDATE%'`;
+		if (waiter && waiter.waiting > 0) return;
+		await Bun.sleep(20);
+	}
+	throw new Error("No onboarding step waited on the organization lock");
+}
 describe("merchant platform transactions", () => {
 	it("uses canonical sandbox credentials without deployment customer configuration", async () => {
 		const browser = new MerchantBrowser(f);
@@ -230,6 +245,67 @@ describe("merchant platform transactions", () => {
 		if (!loser) throw new Error("Expected one concurrent rename to lose");
 		expect((await loser.json()).error?.code).toBe("DRAFT_CHANGED");
 	});
+	it("reports a rename that commits while a draft step waits as a changed draft", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		const org = await browser.json<OnboardingDraftView>("/api/platform/onboarding/organization", {
+			name: "Acme Company",
+			slug: "acme",
+		});
+		const organizationId = org.organization?.id;
+		await browser.json("/api/platform/onboarding/project", {
+			name: "Example Project",
+			key: "example",
+			revision: org.revision,
+		});
+		const steps = [
+			// Unchanged name and slug: before the fix this answered 200 with the stale draft.
+			{
+				path: "/api/platform/onboarding/organization",
+				slug: "acme-one",
+				body: (revision: number) => ({ name: "Acme Company", slug: "acme", revision }),
+			},
+			{
+				path: "/api/platform/onboarding/project",
+				slug: "acme-two",
+				body: (revision: number) => ({ name: "Other Project", key: "other", revision }),
+			},
+			{
+				path: "/api/platform/onboarding/provision",
+				slug: "acme-three",
+				body: (revision: number) => ({ revision }),
+			},
+		];
+		for (const step of steps) {
+			const before = await browser.json<OnboardingDraftView>("/api/platform/onboarding");
+			let pending: Promise<Response> | undefined;
+			try {
+				await f.client.begin(async (tx) => {
+					await tx`SELECT id FROM platform_organizations WHERE id=${organizationId} FOR UPDATE`;
+					// Never awaited inside the transaction: the request cannot finish until it commits.
+					pending = browser.request(step.path, step.body(before.revision));
+					await waitForOrganizationLockWaiter();
+					// What a committed rename writes: a new slug and a bumped draft revision.
+					await tx`UPDATE platform_onboarding_drafts SET revision=revision+1 WHERE id=${before.id}`;
+					await tx`UPDATE platform_organizations SET slug=${step.slug} WHERE id=${organizationId}`;
+				});
+			} finally {
+				const response = await pending;
+				if (response)
+					expect([step.path, response.status, (await response.json()).error?.code]).toEqual([
+						step.path,
+						409,
+						"DRAFT_CHANGED",
+					]);
+			}
+		}
+		const draft = await browser.json<OnboardingDraftView>("/api/platform/onboarding");
+		expect(draft).toMatchObject({
+			organization: { id: organizationId, slug: "acme-three" },
+			project: { key: "example" },
+			operationId: null,
+		});
+	}, 20_000);
 	it("rejects stale drafts, changed idempotency requests, and cross-organization reads", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();

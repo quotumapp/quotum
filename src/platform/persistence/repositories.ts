@@ -56,6 +56,19 @@ export class PlatformOrganizationRepository {
 		return row;
 	}
 
+	/** Serializes a draft step with a rename; the id never moves, so the lock cannot miss the row. */
+	async lockById(id: string): Promise<void> {
+		await this.executor.query({
+			text: `
+				SELECT id
+				FROM platform_organizations
+				WHERE id = $1
+				FOR UPDATE
+			`,
+			values: [id],
+		});
+	}
+
 	async slugBelongsToAnotherOrganization(slug: string, organizationId: string): Promise<boolean> {
 		const rows = await this.executor.query<{ id: string }>({
 			text: `

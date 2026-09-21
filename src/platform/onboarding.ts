@@ -32,7 +32,7 @@ export class MerchantOnboarding {
 		input: { name: string; slug: string; revision?: number },
 	): Promise<OnboardingDraftView> {
 		return this.store.idempotent(identity, key, ["onboarding.organization", input], async (tx) => {
-			const draft = await this.store.draft(identity.principalId, tx);
+			const draft = await this.lockedDraft(tx, identity.principalId);
 			if (draft?.organization) return this.renameOrganization(tx, identity, draft, input);
 			const existing = await tx`SELECT id FROM platform_organizations WHERE slug=${input.slug}`;
 			if (existing.length)
@@ -52,6 +52,20 @@ export class MerchantOnboarding {
 			if (!result) throw new Error("Draft insert failed");
 			return result;
 		});
+	}
+	/**
+	 * Reads the draft with its organization locked by the immutable id. A step that waited on a
+	 * concurrent rename then compares revisions against the draft as it is now, instead of looking
+	 * a membership up by a slug the rename has already moved.
+	 */
+	private async lockedDraft(
+		executor: PlatformQueryExecutor,
+		principalId: string,
+	): Promise<OnboardingDraftView | null> {
+		const draft = await this.store.draft(principalId, executor);
+		if (!draft?.organization) return draft;
+		await new PlatformOrganizationRepository(executor).lockById(draft.organization.id);
+		return this.store.draft(principalId, executor);
 	}
 	/**
 	 * Step 1 revisited: until provisioning starts, the draft's organization takes a new name and
@@ -88,7 +102,8 @@ export class MerchantOnboarding {
 		if (organization.name === input.name && organization.slug === input.slug) return draft;
 		if (await organizations.slugBelongsToAnotherOrganization(input.slug, organization.id))
 			throw new MerchantError("SLUG_UNAVAILABLE", "Choose a different organization address.", 409);
-		// Conditional on the revision read above, so a concurrent step wins and this one reports it.
+		// The compare above is the primary guard now that the draft is read under the lock; this
+		// predicate still covers writers that do not take it, such as the provisioning completion.
 		const bumped = await drafts.bumpRevision({
 			id: draft.id,
 			expectedRevision: input.revision,
@@ -124,14 +139,13 @@ export class MerchantOnboarding {
 		input: { name: string; key: string; revision: number },
 	): Promise<OnboardingDraftView> {
 		return this.store.idempotent(identity, key, ["onboarding.project", input], async (tx) => {
-			const draft = await this.store.draft(identity.principalId, tx);
+			const draft = await this.lockedDraft(tx, identity.principalId);
 			if (!draft?.organization)
 				throw new MerchantError("ORGANIZATION_REQUIRED", "Create an organization first.");
-			const member = await this.store.membership(
+			const member = await this.store.membershipByOrganizationId(
 				tx,
 				identity.principalId,
-				draft.organization.slug,
-				true,
+				draft.organization.id,
 			);
 			requireCapability(member.role, "project.create");
 			if (draft.revision !== input.revision || draft.operationId)
@@ -156,14 +170,13 @@ export class MerchantOnboarding {
 			key,
 			["onboarding.provision", revision],
 			async (tx) => {
-				const draft = await this.store.draft(identity.principalId, tx);
+				const draft = await this.lockedDraft(tx, identity.principalId);
 				if (!draft?.organization || !draft.project)
 					throw new MerchantError("PROJECT_REQUIRED", "Complete the project details first.");
-				const member = await this.store.membership(
+				const member = await this.store.membershipByOrganizationId(
 					tx,
 					identity.principalId,
-					draft.organization.slug,
-					true,
+					draft.organization.id,
 				);
 				requireCapability(member.role, "project.create");
 				if (draft.operationId) return { id: draft.operationId };
