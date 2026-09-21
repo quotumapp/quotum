@@ -27,6 +27,7 @@ export function merchantSql(client: SQL): MerchantSql {
 			(await client.begin((tx) => work(merchantSql(tx)))) as Result,
 		instances: {
 			forProject: (id: string) => instances.forProject(id),
+			forPrincipal: (id: string) => instances.forPrincipal(id),
 			create: instances.create.bind(instances),
 			activateProduction: (instanceId: string, organizationId: string, catalogRevisionId: string) =>
 				activateProjectProduction(client, instanceId, organizationId, catalogRevisionId),

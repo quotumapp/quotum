@@ -5,6 +5,7 @@ import type {
 	CreatePlatformProjectInstanceInput,
 	PlatformProjectInstanceRecord,
 	PlatformProjectInstanceStore,
+	PlatformProjectWithInstancesRecord,
 	PlatformTransactionResources,
 	PlatformUnitOfWork,
 } from "../platform/application/ports";
@@ -46,6 +47,14 @@ interface CredentialContextRow extends ProjectContextRow {
 	expires_at: Date | null;
 	revoked_at: Date | null;
 }
+
+/** One row per instance; a project without instances yields a single row whose `id` is null. */
+type PrincipalProjectRow = {
+	project_id: string;
+	project_key: string;
+	project_name: string;
+	organization_slug: string;
+} & (Parameters<typeof mapProjectInstanceRow>[0] | { id: null });
 
 const environmentValues = new Set<ProjectEnvironment>(["sandbox", "production", "internal"]);
 const lifecycleValues = new Set<ProjectLifecycleStatus>([
@@ -94,6 +103,62 @@ export class BunProjectInstanceStore implements PlatformProjectInstanceStore {
 			values: [platformProjectId],
 		});
 		return rows.map(mapProjectInstanceRow);
+	}
+
+	/**
+	 * Every logical project the principal reaches through an active membership of an active
+	 * organization, with its instances, in one statement however many projects there are. A project
+	 * has no instances until provisioning creates them, so the instance join is a LEFT JOIN.
+	 */
+	async forPrincipal(principalId: string): Promise<readonly PlatformProjectWithInstancesRecord[]> {
+		const rows = await this.executor.query<PrincipalProjectRow>({
+			text: `
+				SELECT
+					logical_projects.id AS project_id,
+					logical_projects.key AS project_key,
+					logical_projects.name AS project_name,
+					organizations.slug AS organization_slug,
+					instances.id,
+					instances.platform_project_id,
+					instances.key,
+					instances.name,
+					instances.environment,
+					instances.lifecycle_status,
+					instances.internal_project
+				FROM platform_memberships memberships
+				JOIN platform_organizations organizations
+					ON organizations.id = memberships.organization_id
+				JOIN platform_projects logical_projects
+					ON logical_projects.organization_id = organizations.id
+				LEFT JOIN projects instances
+					ON instances.platform_project_id = logical_projects.id
+				WHERE memberships.principal_id = $1
+					AND memberships.status = 'active'
+					AND organizations.status = 'active'
+				ORDER BY logical_projects.created_at, logical_projects.id, instances.environment
+			`,
+			values: [principalId],
+		});
+		// Rows arrive grouped by project; a Map keeps that order.
+		const projects = new Map<
+			string,
+			PlatformProjectWithInstancesRecord & { instances: PlatformProjectInstanceRecord[] }
+		>();
+		for (const row of rows) {
+			let project = projects.get(row.project_id);
+			if (project === undefined) {
+				project = {
+					id: row.project_id,
+					key: row.project_key,
+					name: row.project_name,
+					organizationSlug: row.organization_slug,
+					instances: [],
+				};
+				projects.set(row.project_id, project);
+			}
+			if (row.id !== null) project.instances.push(mapProjectInstanceRow(row));
+		}
+		return [...projects.values()];
 	}
 
 	async list(): Promise<readonly PlatformProjectInstanceRecord[]> {

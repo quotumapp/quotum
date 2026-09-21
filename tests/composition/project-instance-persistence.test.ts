@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { PostgresProjectInstanceContextResolver } from "../../src/composition/project-instance-persistence";
+import {
+	BunProjectInstanceStore,
+	PostgresProjectInstanceContextResolver,
+} from "../../src/composition/project-instance-persistence";
 import { generateProjectApiCredential } from "../../src/platform/credentials/project-api-token";
 import { isTenantTrafficEligible } from "../../src/projects/context";
 
@@ -250,5 +253,103 @@ describe("Postgres project instance composition adapter", () => {
 				contextRow({ access: "admin", secret_verifier: full.secretVerifier }),
 			).resolveCredential(full.token),
 		).resolves.toEqual({ kind: "not_found" });
+	});
+});
+
+describe("principal project listing", () => {
+	const principalId = "00000000-0000-4000-8000-0000000000aa";
+	const project = {
+		project_id: mappedContext.logicalProjectId,
+		project_key: "voysee",
+		project_name: "Voysee",
+		organization_slug: "voysee-organization",
+	};
+	const instanceRow = (environment: "production" | "sandbox", id: string) => ({
+		...project,
+		id,
+		platform_project_id: project.project_id,
+		key: environment === "production" ? "voysee" : "voysee-sandbox",
+		name: "Voysee",
+		environment,
+		lifecycle_status: environment === "production" ? "inactive" : "active",
+		internal_project: false,
+	});
+
+	it("reads every visible project and its instances in one membership-scoped statement", async () => {
+		const queries: Array<{ text: string; values: readonly unknown[] }> = [];
+		const store = new BunProjectInstanceStore({
+			async query<Row>(query: { text: string; values: readonly unknown[] }) {
+				queries.push(query);
+				return [
+					instanceRow("production", "00000000-0000-4000-8000-000000000003"),
+					instanceRow("sandbox", "00000000-0000-4000-8000-000000000004"),
+					// Mid-provisioning: the LEFT JOIN yields the project with null instance columns.
+					{
+						project_id: "00000000-0000-4000-8000-000000000005",
+						project_key: "pending",
+						project_name: "Pending",
+						organization_slug: "voysee-organization",
+						id: null,
+						platform_project_id: null,
+						key: null,
+						name: null,
+						environment: null,
+						lifecycle_status: null,
+						internal_project: null,
+					},
+				] as unknown as readonly Row[];
+			},
+		});
+
+		await expect(store.forPrincipal(principalId)).resolves.toEqual([
+			{
+				id: project.project_id,
+				key: "voysee",
+				name: "Voysee",
+				organizationSlug: "voysee-organization",
+				instances: [
+					{
+						id: "00000000-0000-4000-8000-000000000003",
+						platformProjectId: project.project_id,
+						key: "voysee",
+						name: "Voysee",
+						environment: "production",
+						lifecycleStatus: "inactive",
+						internalProject: false,
+					},
+					{
+						id: "00000000-0000-4000-8000-000000000004",
+						platformProjectId: project.project_id,
+						key: "voysee-sandbox",
+						name: "Voysee",
+						environment: "sandbox",
+						lifecycleStatus: "active",
+						internalProject: false,
+					},
+				],
+			},
+			{
+				id: "00000000-0000-4000-8000-000000000005",
+				key: "pending",
+				name: "Pending",
+				organizationSlug: "voysee-organization",
+				instances: [],
+			},
+		]);
+		expect(queries).toHaveLength(1);
+		const [query] = queries;
+		expect(query?.values).toEqual([principalId]);
+		expect(query?.text).toContain("LEFT JOIN projects instances");
+		expect(query?.text).toContain("WHERE memberships.principal_id = $1");
+		expect(query?.text).toContain("AND memberships.status = 'active'");
+		expect(query?.text).toContain("AND organizations.status = 'active'");
+		expect(query?.text).toContain(
+			"ORDER BY logical_projects.created_at, logical_projects.id, instances.environment",
+		);
+	});
+
+	it("returns no projects for a principal without a visible membership", async () => {
+		const store = new BunProjectInstanceStore({ query: async () => [] });
+		await expect(store.forPrincipal(principalId)).resolves.toEqual([]);
 	});
 });

@@ -100,6 +100,45 @@ describe("merchant platform transactions", () => {
 			).status,
 		).toBe(401);
 	});
+	it("lists each visible project once in the session, with its environments", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		const projects = async () =>
+			(await browser.json<MerchantSessionView>("/api/platform/session")).projects.map(
+				({ key, name, organizationSlug, environments }) => ({
+					key,
+					name,
+					organizationSlug,
+					environments,
+				}),
+			);
+		const example = {
+			key: "example",
+			name: "Example Project",
+			organizationSlug: "acme",
+			environments: [
+				{ environment: "production" as const, active: false },
+				{ environment: "sandbox" as const, active: true },
+			],
+		};
+		expect(await projects()).toEqual([example]);
+
+		// A project exists before provisioning creates its instances; it is still listed.
+		await f.sql`INSERT INTO platform_projects(organization_id,name,key) SELECT id,'Pending Project','pending' FROM platform_organizations WHERE slug='acme'`;
+		expect(await projects()).toEqual([
+			example,
+			{ key: "pending", name: "Pending Project", organizationSlug: "acme", environments: [] },
+		]);
+
+		// Visibility follows the membership and the organization, exactly as the memberships do.
+		await f.sql`UPDATE platform_memberships SET status='suspended'`;
+		expect(await projects()).toEqual([]);
+		await f.sql`UPDATE platform_memberships SET status='active'`;
+		expect(await projects()).toHaveLength(2);
+		await f.sql`UPDATE platform_organizations SET status='suspended' WHERE slug='acme'`;
+		expect(await projects()).toEqual([]);
+	});
 	it("resumes partial provisioning without duplicating environments or exposing credentials", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();

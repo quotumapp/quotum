@@ -380,29 +380,20 @@ export class MerchantStore {
 		context: MerchantScope | null = null,
 	): Promise<MerchantSessionView> {
 		const memberships = await this.memberships(identity.principalId);
-		const rows = await this.sql<
-			{
-				id: string;
-				key: string;
-				name: string;
-				slug: string;
-				environments: { environment: "sandbox" | "production"; active: boolean }[];
-			}[]
-		>`SELECT p.id,p.key,p.name,o.slug FROM platform_projects p JOIN platform_organizations o ON o.id=p.organization_id JOIN platform_memberships m ON m.organization_id=o.id WHERE m.principal_id=${identity.principalId} AND m.status='active' AND o.status='active' ORDER BY p.created_at,p.id`;
-		const projects = await Promise.all(
-			rows.map(async (r) => ({
-				id: r.id,
-				key: r.key,
-				name: r.name,
-				organizationSlug: r.slug,
-				environments: (await this.sql.instances.forProject(r.id))
-					.filter((i) => i.environment !== "internal")
-					.map((i) => ({
-						environment: i.environment as "sandbox" | "production",
-						active: i.lifecycleStatus === "active",
-					})),
-			})),
-		);
+		// One statement however many projects the principal sees; a query per project would fan out
+		// over the connection pool the /v1 API shares.
+		const projects = (await this.sql.instances.forPrincipal(identity.principalId)).map((p) => ({
+			id: p.id,
+			key: p.key,
+			name: p.name,
+			organizationSlug: p.organizationSlug,
+			environments: p.instances
+				.filter((i) => i.environment !== "internal")
+				.map((i) => ({
+					environment: i.environment as "sandbox" | "production",
+					active: i.lifecycleStatus === "active",
+				})),
+		}));
 		const validContext =
 			context &&
 			projects.some(
