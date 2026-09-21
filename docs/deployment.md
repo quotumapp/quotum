@@ -228,8 +228,12 @@ authentication and rely on provider signature or token verification.
 
 In `gateway` mode, billing-level key checks are disabled for non-webhook `/v1/*` routes only when
 `BILLING_TRUST_GATEWAY_PROJECT_HEADER=true`; the gateway must enforce access and send
-`x-billing-project-key`. No credential is read in this mode, so every request has full access and a
-read-only restriction is the gateway's to enforce.
+`x-billing-project-key`. No credential is read in this mode, so the gateway states the access it
+granted: `x-billing-credential-access: read_only` restricts the request to the
+[read-only operations](api.md#read-only-credentials) exactly like a read-only key, while `full` or
+no header means full access. Any other value is `400 INVALID_REQUEST`, never read as full. Like the
+project header, it is trusted only from the gateway, which must strip any copy a client sends. In
+`api_key` mode the header is ignored and the stored credential decides.
 
 ## Test entrypoints
 

@@ -446,7 +446,8 @@ export async function generateOpenApi(version: string) {
 					type: "apiKey",
 					in: "header",
 					name: "X-Billing-Project-Key",
-					description: "Only accepted from the configured trusted gateway.",
+					description:
+						"Only accepted from the configured trusted gateway. The gateway may also send X-Billing-Credential-Access: read_only to restrict the request to the operations marked x-quotum-credential-access; absent or full means full access, and any other value is a 400.",
 				},
 				merchantSession: {
 					type: "apiKey",
