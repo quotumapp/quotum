@@ -18,6 +18,7 @@ import {
 import {
 	integrationProjectContext,
 	integrationProjectCredential,
+	integrationProjectReadOnlyCredential,
 } from "./helpers/platform-fixture";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
@@ -41,6 +42,7 @@ localDescribe("platform project identity persistence", () => {
 			logicalProjectCount: 3,
 			projectInstanceCount: 5,
 			credentialsToIssue: [],
+			readOnlyCredentialsToIssue: [],
 		});
 		await expect(service.apply(manifest, [])).resolves.toEqual({
 			state: "exact",
@@ -48,6 +50,7 @@ localDescribe("platform project identity persistence", () => {
 			logicalProjectCount: 3,
 			projectInstanceCount: 5,
 			credentialsToIssue: [],
+			readOnlyCredentialsToIssue: [],
 			credentialsIssued: 0,
 		});
 
@@ -58,10 +61,23 @@ localDescribe("platform project identity persistence", () => {
 					credentialId: unexpected.credentialId,
 					projectInstanceKey: "voysee",
 					environment: unexpected.environment,
+					access: unexpected.access,
 					secretVerifier: unexpected.secretVerifier,
 				},
 			]),
 		).rejects.toThrow("Prepared credentials do not match the platform bootstrap plan");
+
+		// The lane issued a read-only key per instance. A manifest that does not ask for them still
+		// matches: such a key may come from merchant management, and bootstrap never revokes it.
+		const withoutReadOnly = structuredClone(manifest);
+		for (const organization of withoutReadOnly.organizations)
+			for (const project of organization.projects)
+				for (const instance of project.instances) delete instance.issueReadOnlyCredential;
+		await expect(service.inspect(withoutReadOnly)).resolves.toMatchObject({
+			state: "exact",
+			credentialsToIssue: [],
+			readOnlyCredentialsToIssue: [],
+		});
 
 		const drifted = structuredClone(manifest);
 		const organization = drifted.organizations[0];
@@ -391,10 +407,11 @@ localDescribe("platform project identity persistence", () => {
 	it("stores the access level, keeps it authoritative, and allows one live key of each kind", async () => {
 		const resolver = new PostgresProjectInstanceContextResolver(context.sql);
 		const production = integrationProjectContext("voysee");
-		const readOnly = generateProjectApiCredential("production", "read_only");
+		// The lane bootstrap issued this instance's one live read-only key.
+		const readOnlyToken = integrationProjectReadOnlyCredential("voysee");
 		const mislabelled = generateProjectApiCredential("production", "read_only");
 		const second = generateProjectApiCredential("production", "read_only");
-		const insert = (token: typeof readOnly, access: string, revoked: boolean) => context.sql`
+		const insert = (token: typeof second, access: string, revoked: boolean) => context.sql`
 			INSERT INTO platform_project_api_credentials (
 				id, project_instance_id, access, secret_verifier, revoked_at
 			)
@@ -403,9 +420,17 @@ localDescribe("platform project identity persistence", () => {
 				${token.secretVerifier}, CASE WHEN ${revoked} THEN now() ELSE NULL END
 			)
 		`;
+		const message = async (attempt: Promise<unknown>) => {
+			try {
+				await attempt;
+				return "";
+			} catch (error) {
+				return String((error as { message?: string }).message);
+			}
+		};
 		try {
-			await insert(readOnly, "read_only", false);
-			await expect(resolver.resolveCredential(readOnly.token)).resolves.toEqual({
+			expect(readOnlyToken).toMatch(/^pqrk_[A-Za-z0-9_-]{43}$/u);
+			await expect(resolver.resolveCredential(readOnlyToken)).resolves.toEqual({
 				kind: "resolved",
 				context: production,
 				access: "read_only",
@@ -421,37 +446,29 @@ localDescribe("platform project identity persistence", () => {
 				kind: "not_found",
 			});
 
-			let duplicate: unknown;
-			try {
-				await insert(second, "read_only", false);
-			} catch (error) {
-				duplicate = error;
-			}
-			expect(String((duplicate as { constraint?: string; message?: string })?.message)).toContain(
+			expect(await message(insert(second, "read_only", false))).toContain(
 				"idx_platform_project_api_credentials_active_access",
 			);
-
-			let invalid: unknown;
-			try {
-				await insert(second, "admin", true);
-			} catch (error) {
-				invalid = error;
-			}
-			expect(String((invalid as { message?: string })?.message)).toContain(
+			expect(await message(insert(second, "admin", true))).toContain(
 				"platform_project_api_credentials_access_check",
 			);
 
 			await context.sql`
 				UPDATE platform_project_api_credentials SET revoked_at = now()
-				WHERE id = ${readOnly.credentialId}
+				WHERE project_instance_id = ${production.projectInstanceId}
+					AND access = 'read_only' AND revoked_at IS NULL
 			`;
-			await expect(resolver.resolveCredential(readOnly.token)).resolves.toEqual({
+			await expect(resolver.resolveCredential(readOnlyToken)).resolves.toEqual({
 				kind: "ineligible",
 			});
 		} finally {
 			await context.sql`
 				DELETE FROM platform_project_api_credentials
-				WHERE id IN ${context.sql([readOnly.credentialId, mislabelled.credentialId, second.credentialId])}
+				WHERE id IN ${context.sql([mislabelled.credentialId, second.credentialId])}
+			`;
+			await context.sql`
+				UPDATE platform_project_api_credentials SET revoked_at = NULL
+				WHERE project_instance_id = ${production.projectInstanceId} AND access = 'read_only'
 			`;
 		}
 	});

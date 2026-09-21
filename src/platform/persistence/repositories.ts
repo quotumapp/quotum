@@ -17,6 +17,7 @@ export interface PlatformLogicalProjectRecord {
 export interface PlatformProjectCredentialRecord {
 	id: string;
 	projectInstanceId: string;
+	access: CredentialAccess;
 	revokedAt: Date | null;
 }
 
@@ -176,10 +177,11 @@ export class PlatformProjectCredentialRepository {
 		const rows = await this.executor.query<{
 			id: string;
 			project_instance_id: string;
+			access: CredentialAccess;
 			revoked_at: Date | null;
 		}>({
 			text: `
-				SELECT id, project_instance_id, revoked_at
+				SELECT id, project_instance_id, access, revoked_at
 				FROM platform_project_api_credentials
 				ORDER BY project_instance_id, created_at
 			`,
@@ -188,6 +190,7 @@ export class PlatformProjectCredentialRepository {
 		return rows.map((row) => ({
 			id: row.id,
 			projectInstanceId: row.project_instance_id,
+			access: row.access,
 			revokedAt: row.revoked_at,
 		}));
 	}

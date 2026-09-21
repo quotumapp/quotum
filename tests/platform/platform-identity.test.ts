@@ -218,6 +218,7 @@ describe("platform bootstrap check", () => {
 								logicalProjectCount: 1,
 								projectInstanceCount: 2,
 								credentialsToIssue: [],
+								readOnlyCredentialsToIssue: [],
 								credentialsIssued: 2,
 							};
 						},
@@ -253,12 +254,14 @@ describe("platform bootstrap check", () => {
 							credentialId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
 							projectInstanceKey: "voysee-production",
 							environment: "production",
+							access: "full",
 							secretVerifier: parsedProduction.secretVerifier,
 						},
 						{
 							credentialId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
 							projectInstanceKey: "voysee-sandbox",
 							environment: "sandbox",
+							access: "full",
 							secretVerifier: parsedSandbox.secretVerifier,
 						},
 					],
@@ -268,6 +271,124 @@ describe("platform bootstrap check", () => {
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
+	});
+
+	it("issues read-only credentials on request, into their own array of the output file", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "quotum-platform-credentials-"));
+		const path = join(directory, "credentials.json");
+		const declared = validManifest();
+		const instances = declared.organizations[0]?.projects[0]?.instances ?? [];
+		const manifest = parsePlatformBootstrapManifest(
+			JSON.stringify({
+				...declared,
+				organizations: [
+					{
+						...declared.organizations[0],
+						projects: [
+							{
+								...declared.organizations[0]?.projects[0],
+								instances: instances.map((instance) => ({
+									...instance,
+									issueReadOnlyCredential: instance.key === "voysee-production",
+								})),
+							},
+						],
+					},
+				],
+			}),
+		);
+		const prepared: Array<{ projectInstanceKey: string; access: string }> = [];
+		try {
+			await applyPlatformBootstrap(
+				{
+					async apply(_manifest, credentials) {
+						prepared.push(
+							...credentials.map(({ projectInstanceKey, access }) => ({
+								projectInstanceKey,
+								access,
+							})),
+						);
+						return {
+							state: "exact" as const,
+							organizationCount: 1,
+							logicalProjectCount: 1,
+							projectInstanceCount: 2,
+							credentialsToIssue: [],
+							readOnlyCredentialsToIssue: [],
+							credentialsIssued: credentials.length,
+						};
+					},
+				},
+				manifest,
+				["voysee-production"],
+				path,
+				() => {},
+				["voysee-production"],
+			);
+			const output = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+			expect(Object.keys(output)).toEqual(["version", "credentials", "readOnlyCredentials"]);
+			const [full] = output.credentials as Array<{
+				projectInstanceKey: string;
+				credential: string;
+			}>;
+			const [readOnly] = output.readOnlyCredentials as typeof output.credentials as Array<{
+				projectInstanceKey: string;
+				credential: string;
+			}>;
+			expect(full?.credential).toMatch(/^pqpk_[A-Za-z0-9_-]{43}$/u);
+			expect(readOnly).toMatchObject({ projectInstanceKey: "voysee-production" });
+			expect(readOnly?.credential).toMatch(/^pqrk_[A-Za-z0-9_-]{43}$/u);
+			expect(prepared).toEqual([
+				{ projectInstanceKey: "voysee-production", access: "full" },
+				{ projectInstanceKey: "voysee-production", access: "read_only" },
+			]);
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+
+		// A read-only key the manifest does not declare is never generated.
+		await expect(
+			applyPlatformBootstrap(
+				{
+					async apply(): Promise<never> {
+						throw new Error("apply must not run");
+					},
+				},
+				parsePlatformBootstrapManifest(JSON.stringify(validManifest())),
+				[],
+				join(directory, "unused.json"),
+				() => {},
+				["voysee-sandbox"],
+			),
+		).rejects.toThrow("Bootstrap does not declare a credential for voysee-sandbox");
+	});
+
+	it("holds read-only credentials to the same manifest rules and check exit code", () => {
+		const withFlag = (environment: string, lifecycleStatus: string) => {
+			const manifest = validManifest();
+			const project = manifest.organizations[0]?.projects[0];
+			if (project === undefined) throw new Error("fixture has a project");
+			project.instances = [
+				{
+					key: "voysee-instance",
+					environment: environment as "sandbox",
+					lifecycleStatus: lifecycleStatus as "active",
+					issueCredential: false,
+					issueReadOnlyCredential: true,
+				} as (typeof project.instances)[number],
+			];
+			return JSON.stringify(manifest);
+		};
+		expect(() => parsePlatformBootstrapManifest(withFlag("sandbox", "active"))).not.toThrow();
+		expect(() => parsePlatformBootstrapManifest(withFlag("internal", "active"))).toThrow();
+		expect(() => parsePlatformBootstrapManifest(withFlag("production", "inactive"))).toThrow();
+		expect(
+			platformBootstrapCheckExitCode({
+				state: "exact",
+				credentialsToIssue: [],
+				readOnlyCredentialsToIssue: ["voysee"],
+			}),
+		).toBe(2);
 	});
 
 	it("issues nothing for a credential the manifest does not declare", async () => {

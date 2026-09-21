@@ -1,5 +1,6 @@
 import type { Elysia } from "elysia";
 import { z } from "zod";
+import { credentialAccessLevels } from "../../shared/credential-access";
 import { operationDetail } from "../../shared/http";
 import { MerchantScopeSchema, ReadinessBlockerDetailSchema } from "../schemas";
 import { idempotencyKey, MERCHANT_JSON_PARSE, MerchantError } from "../security";
@@ -18,6 +19,11 @@ const draftBody = z.strictObject({
 });
 const versionBody = z.strictObject({ scope, draftId: z.uuid() });
 const scopeBody = z.strictObject({ scope });
+// `full` replaces the backend's key; `read_only` issues or replaces the inspection key beside it.
+const rotateBody = z.strictObject({
+	scope,
+	access: z.enum(credentialAccessLevels).default("full"),
+});
 const disableBody = z.strictObject({ scope, expectedRevision: z.number().int().nonnegative() });
 const activateBody = z.strictObject({ scope, fingerprint: z.string().min(1) });
 const connection = z.object({
@@ -32,6 +38,7 @@ const connection = z.object({
 });
 const credential = z.object({
 	active: z.boolean().optional(),
+	access: z.enum(credentialAccessLevels).optional(),
 	credentialDisclosed: z.boolean(),
 	credential: z.string().optional(),
 });
@@ -343,7 +350,7 @@ export function registerConnectionRoutes(
 	app.post(
 		"/api/platform/environments/credentials/rotate",
 		async ({ body, request }) => {
-			const input = scopeBody.parse(body);
+			const input = rotateBody.parse(body);
 			return {
 				success: true as const,
 				data: await service.rotateCredential(
@@ -351,11 +358,12 @@ export function registerConnectionRoutes(
 					input.scope,
 					idempotencyKey(request),
 					request.headers.get("x-quotum-step-up-grant") ?? null,
+					input.access,
 				),
 			};
 		},
 		{
-			...jsonBody(scopeBody),
+			...jsonBody(rotateBody),
 			...route("rotateEnvironmentCredential", "/api/platform/environments/credentials/rotate", {
 				200: success(credential),
 			}),

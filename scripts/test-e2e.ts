@@ -57,7 +57,11 @@ async function runE2eTests(): Promise<void> {
 		if (((await stat(credentialPath)).mode & 0o777) !== 0o600) {
 			throw new Error("E2E bootstrap credential file is not owner-only");
 		}
-		const credentials = await readBootstrapCredentials(credentialPath);
+		const credentials = await readBootstrapCredentials(credentialPath, "credentials");
+		const readOnlyCredentials = await readBootstrapCredentials(
+			credentialPath,
+			"readOnlyCredentials",
+		);
 		const contexts = await resolveTestPlatformContexts(container.getConnectionUri(), manifest);
 		run("bun", ["run", "platform:bootstrap", "--", "--check"], { env: bootstrapEnv });
 		const env = {
@@ -65,6 +69,7 @@ async function runE2eTests(): Promise<void> {
 			...migrationEnv,
 			BILLING_TEST_PROJECT_CONTEXTS_JSON: JSON.stringify(contexts),
 			BILLING_TEST_PROJECT_CREDENTIALS_JSON: JSON.stringify(credentials),
+			BILLING_TEST_PROJECT_READ_ONLY_CREDENTIALS_JSON: JSON.stringify(readOnlyCredentials),
 		};
 		reportDirectory = await mkdtemp(join(tmpdir(), "quotum-e2e-report-"));
 		const reportPath = join(reportDirectory, "junit.xml");
@@ -87,17 +92,21 @@ async function runE2eTests(): Promise<void> {
 	}
 }
 
-async function readBootstrapCredentials(path: string): Promise<Readonly<Record<string, string>>> {
+async function readBootstrapCredentials(
+	path: string,
+	field: "credentials" | "readOnlyCredentials",
+): Promise<Readonly<Record<string, string>>> {
 	const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
 	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
 		throw new Error("E2E bootstrap credential output is invalid");
 	}
 	const output = parsed as Record<string, unknown>;
-	if (output.version !== 1 || !Array.isArray(output.credentials)) {
+	const entries = output[field];
+	if (output.version !== 1 || !Array.isArray(entries)) {
 		throw new Error("E2E bootstrap credential output is invalid");
 	}
 	const credentials: Record<string, string> = {};
-	for (const item of output.credentials) {
+	for (const item of entries) {
 		if (item === null || typeof item !== "object" || Array.isArray(item)) {
 			throw new Error("E2E bootstrap credential output is invalid");
 		}

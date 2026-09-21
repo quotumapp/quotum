@@ -1017,6 +1017,7 @@ const postApiPlatformStepUpBodySchema = z.strictObject({
 		"connections.manage",
 		"environment.activate",
 		"credentials.rotate",
+		"credentials.rotate_read_only",
 	]),
 	target: z.string().max(1024).min(1),
 	returnTo: z.string().max(2048),

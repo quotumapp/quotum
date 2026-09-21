@@ -130,6 +130,7 @@ describe("platform schema-neutral repositories", () => {
 				{
 					id: "credential-id",
 					project_instance_id: "instance-id",
+					access: "read_only",
 					revoked_at: null,
 				},
 			],
@@ -138,7 +139,12 @@ describe("platform schema-neutral repositories", () => {
 		const repository = new PlatformProjectCredentialRepository(executor);
 
 		await expect(repository.list()).resolves.toEqual([
-			{ id: "credential-id", projectInstanceId: "instance-id", revokedAt: null },
+			{
+				id: "credential-id",
+				projectInstanceId: "instance-id",
+				access: "read_only",
+				revokedAt: null,
+			},
 		]);
 		await repository.create({
 			id: "new-credential-id",

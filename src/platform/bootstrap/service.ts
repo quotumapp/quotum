@@ -1,3 +1,4 @@
+import type { CredentialAccess } from "../../shared/credential-access";
 import type {
 	PlatformProjectInstanceRecord,
 	PlatformTransactionResources,
@@ -17,6 +18,7 @@ export interface PreparedPlatformCredential {
 	credentialId: string;
 	projectInstanceKey: string;
 	environment: "sandbox" | "production";
+	access: CredentialAccess;
 	secretVerifier: Uint8Array;
 }
 
@@ -25,7 +27,10 @@ export interface PlatformBootstrapInspection {
 	organizationCount: number;
 	logicalProjectCount: number;
 	projectInstanceCount: number;
+	/** Instance keys that declare a full credential and have never had one. */
 	credentialsToIssue: readonly string[];
+	/** The same for read-only credentials, planned independently of the full ones. */
+	readOnlyCredentialsToIssue: readonly string[];
 }
 
 export interface PlatformBootstrapResult extends PlatformBootstrapInspection {
@@ -37,6 +42,8 @@ interface PlatformSnapshot {
 	projects: readonly PlatformLogicalProjectRecord[];
 	instances: readonly PlatformProjectInstanceRecord[];
 	credentialInstanceIds: ReadonlySet<string>;
+	/** `${instanceId}:${access}` for every credential ever stored, revoked ones included. */
+	credentialKinds: ReadonlySet<string>;
 }
 
 export class PlatformBootstrapService {
@@ -66,9 +73,12 @@ export class PlatformBootstrapService {
 				instancesByKey = new Map(instances.map((instance) => [instance.key, instance]));
 			}
 
-			const expectedCredentialKeys = [...inspection.credentialsToIssue].sort();
+			const expectedCredentialKeys = [
+				...inspection.credentialsToIssue.map((key) => `${key}:full`),
+				...inspection.readOnlyCredentialsToIssue.map((key) => `${key}:read_only`),
+			].sort();
 			const preparedCredentialKeys = preparedCredentials
-				.map((credential) => credential.projectInstanceKey)
+				.map((credential) => `${credential.projectInstanceKey}:${credential.access}`)
 				.sort();
 			if (JSON.stringify(expectedCredentialKeys) !== JSON.stringify(preparedCredentialKeys)) {
 				throw new Error("Prepared credentials do not match the platform bootstrap plan");
@@ -86,7 +96,7 @@ export class PlatformBootstrapService {
 				await credentials.create({
 					id: prepared.credentialId,
 					projectInstanceId: instance.id,
-					access: "full",
+					access: prepared.access,
 					secretVerifier: prepared.secretVerifier,
 				});
 			}
@@ -103,13 +113,14 @@ async function inspectManifest(
 ): Promise<PlatformBootstrapInspection> {
 	const organizations = new PlatformOrganizationRepository(resources.executor);
 	const projects = new PlatformLogicalProjectRepository(resources.executor);
-	const credentials = new PlatformProjectCredentialRepository(resources.executor);
+	const stored = await new PlatformProjectCredentialRepository(resources.executor).list();
 	const snapshot: PlatformSnapshot = {
 		organizations: await organizations.list(),
 		projects: await projects.list(),
 		instances: await resources.projectInstances.list(),
-		credentialInstanceIds: new Set(
-			(await credentials.list()).map((credential) => credential.projectInstanceId),
+		credentialInstanceIds: new Set(stored.map((credential) => credential.projectInstanceId)),
+		credentialKinds: new Set(
+			stored.map((credential) => `${credential.projectInstanceId}:${credential.access}`),
 		),
 	};
 	const expected = flattenManifest(manifest);
@@ -123,14 +134,19 @@ async function inspectManifest(
 	const instanceIdsByKey = new Map(
 		snapshot.instances.map((instance) => [instance.key, instance.id]),
 	);
-	const credentialsToIssue = expected.instances
-		.filter((instance) => {
-			if (!instance.issueCredential) return false;
-			const instanceId = instanceIdsByKey.get(instance.key);
-			return instanceId === undefined || !snapshot.credentialInstanceIds.has(instanceId);
-		})
-		.map((instance) => instance.key)
-		.sort();
+	// Bootstrap issues each declared kind once and never rotates: a revoked row still counts.
+	const toIssue = (access: CredentialAccess) =>
+		expected.instances
+			.filter((instance) => {
+				if (!(access === "full" ? instance.issueCredential : instance.issueReadOnlyCredential))
+					return false;
+				const instanceId = instanceIdsByKey.get(instance.key);
+				return instanceId === undefined || !snapshot.credentialKinds.has(`${instanceId}:${access}`);
+			})
+			.map((instance) => instance.key)
+			.sort();
+	const credentialsToIssue = toIssue("full");
+	const readOnlyCredentialsToIssue = toIssue("read_only");
 
 	return {
 		state: empty ? "empty" : "exact",
@@ -138,6 +154,7 @@ async function inspectManifest(
 		logicalProjectCount: expected.projects.length,
 		projectInstanceCount: expected.instances.length,
 		credentialsToIssue,
+		readOnlyCredentialsToIssue,
 	};
 }
 
@@ -196,6 +213,7 @@ function flattenManifest(manifest: PlatformBootstrapManifest) {
 					lifecycleStatus: instance.lifecycleStatus,
 					internalProject: instance.environment === "internal",
 					issueCredential: instance.issueCredential,
+					issueReadOnlyCredential: instance.issueReadOnlyCredential ?? false,
 				})),
 			),
 		),
@@ -234,7 +252,13 @@ function assertSnapshotMatches(
 		})
 		.sort(compareJson);
 	const expectedInstances = expected.instances
-		.map(({ issueCredential: _issueCredential, ...instance }) => instance)
+		.map(
+			({
+				issueCredential: _issueCredential,
+				issueReadOnlyCredential: _issueReadOnlyCredential,
+				...instance
+			}) => instance,
+		)
 		.sort(compareJson);
 
 	if (
@@ -246,9 +270,11 @@ function assertSnapshotMatches(
 		throw new Error("BILLING_PLATFORM_BOOTSTRAP_JSON does not match database state");
 	}
 
+	// By instance, not by kind: a read-only key minted later through merchant management on an
+	// instance that holds a declared credential does not make the database drift from the manifest.
 	const expectedCredentialInstanceIds = new Set(
 		expected.instances
-			.filter((instance) => instance.issueCredential)
+			.filter((instance) => instance.issueCredential || instance.issueReadOnlyCredential)
 			.map((instance) => snapshot.instances.find((row) => row.key === instance.key)?.id),
 	);
 	for (const credentialInstanceId of snapshot.credentialInstanceIds) {

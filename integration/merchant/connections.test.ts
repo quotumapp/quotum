@@ -537,16 +537,113 @@ it("activates only reviewed production readiness and discloses its credential on
 		{ scope: prod },
 		{ key: "rotate-production" },
 	);
-	expect(rotateReplay).toEqual({ credentialDisclosed: false });
+	expect(rotateReplay).toEqual({ access: "full", credentialDisclosed: false });
 	const resolver = new PostgresProjectInstanceContextResolver(f.client);
 	expect(await resolver.resolveCredential(activated.credential)).toEqual({ kind: "ineligible" });
 	expect(await resolver.resolveCredential(rotated.credential)).toMatchObject({
 		kind: "resolved",
 		context: { environment: "production" },
+		access: "full",
 	});
 	expect(JSON.stringify(await f.sql`SELECT * FROM platform_connection_operations`)).not.toContain(
 		rotated.credential,
 	);
+
+	// A read-only key is issued beside the full key and bound to its own step-up action: a grant
+	// confirmed for replacing the backend's key cannot mint an inspection key, or the reverse.
+	const readOnlyBody = { scope: prod, access: "read_only" };
+	const fullActionGrant = await grant(browser, "issue-read-only", "credentials.rotate");
+	const refusedWithFullGrant = await browser.request(
+		"/api/platform/environments/credentials/rotate",
+		readOnlyBody,
+		{ headers: { "x-quotum-step-up-grant": fullActionGrant }, key: "issue-read-only" },
+	);
+	expect(refusedWithFullGrant.status).toBe(409);
+	expect(await refusedWithFullGrant.json()).toMatchObject({ error: { code: "STEP_UP_EXPIRED" } });
+	const readOnlyGrant = await grant(browser, "issue-read-only", "credentials.rotate_read_only");
+	const refusedWithReadOnlyGrant = await browser.request(
+		"/api/platform/environments/credentials/rotate",
+		{ scope: prod },
+		{ headers: { "x-quotum-step-up-grant": readOnlyGrant }, key: "issue-read-only" },
+	);
+	expect(refusedWithReadOnlyGrant.status).toBe(409);
+	expect(await refusedWithReadOnlyGrant.json()).toMatchObject({
+		error: { code: "STEP_UP_EXPIRED" },
+	});
+	const issued = await browser.json<{
+		access: string;
+		credential: string;
+		credentialDisclosed: boolean;
+	}>("/api/platform/environments/credentials/rotate", readOnlyBody, {
+		headers: { "x-quotum-step-up-grant": readOnlyGrant },
+		key: "issue-read-only",
+	});
+	expect(issued).toMatchObject({ access: "read_only", credentialDisclosed: true });
+	expect(issued.credential).toMatch(/^pqrk_[A-Za-z0-9_-]{43}$/u);
+	const readOnlyReplay = await browser.json<Record<string, unknown>>(
+		"/api/platform/environments/credentials/rotate",
+		readOnlyBody,
+		{ key: "issue-read-only" },
+	);
+	expect(readOnlyReplay).toEqual({ access: "read_only", credentialDisclosed: false });
+	// The same idempotency key for the other kind is a conflict, never the stored receipt.
+	const otherKindReplay = await browser.request(
+		"/api/platform/environments/credentials/rotate",
+		{ scope: prod },
+		{ key: "issue-read-only" },
+	);
+	expect(otherKindReplay.status).toBe(409);
+	expect(await otherKindReplay.json()).toMatchObject({ error: { code: "IDEMPOTENCY_CONFLICT" } });
+	expect(await resolver.resolveCredential(issued.credential)).toMatchObject({
+		kind: "resolved",
+		context: { environment: "production" },
+		access: "read_only",
+	});
+	expect(await resolver.resolveCredential(rotated.credential)).toMatchObject({ kind: "resolved" });
+
+	// Each kind rotates on its own.
+	const rotateReadOnlyGrant = await grant(
+		browser,
+		"rotate-read-only",
+		"credentials.rotate_read_only",
+	);
+	const reissued = await browser.json<{ credential: string }>(
+		"/api/platform/environments/credentials/rotate",
+		readOnlyBody,
+		{ headers: { "x-quotum-step-up-grant": rotateReadOnlyGrant }, key: "rotate-read-only" },
+	);
+	expect(await resolver.resolveCredential(issued.credential)).toEqual({ kind: "ineligible" });
+	expect(await resolver.resolveCredential(reissued.credential)).toMatchObject({
+		access: "read_only",
+	});
+	expect(await resolver.resolveCredential(rotated.credential)).toMatchObject({ access: "full" });
+	const secondFullGrant = await grant(browser, "rotate-production-2", "credentials.rotate");
+	const rotatedAgain = await browser.json<{ credential: string }>(
+		"/api/platform/environments/credentials/rotate",
+		{ scope: prod },
+		{ headers: { "x-quotum-step-up-grant": secondFullGrant }, key: "rotate-production-2" },
+	);
+	expect(await resolver.resolveCredential(rotated.credential)).toEqual({ kind: "ineligible" });
+	expect(await resolver.resolveCredential(rotatedAgain.credential)).toMatchObject({
+		access: "full",
+	});
+	expect(await resolver.resolveCredential(reissued.credential)).toMatchObject({
+		kind: "resolved",
+		access: "read_only",
+	});
+	const audited = await f.sql<
+		{ action: string; access: string | null }[]
+	>`SELECT action, metadata->>'access' AS access FROM platform_audit_events WHERE action LIKE 'credential.%' ORDER BY created_at`;
+	expect(audited.map((event) => `${event.action}:${event.access}`)).toEqual([
+		"credential.rotated:full",
+		"credential.issued:read_only",
+		"credential.rotated:read_only",
+		"credential.rotated:full",
+	]);
+	const stored = JSON.stringify(await f.sql`SELECT * FROM platform_connection_operations`);
+	for (const secret of [issued.credential, reissued.credential, rotatedAgain.credential]) {
+		expect(stored).not.toContain(secret);
+	}
 
 	await f.sql`UPDATE platform_connection_versions SET validated_at=validated_at-interval '16 minutes' WHERE status='active'`;
 	const stale = await browser.json<Readiness>("/api/platform/environments/readiness", {

@@ -86,5 +86,6 @@ async function withBootstrappedProjects(
 		),
 		BILLING_TEST_PROJECT_CONTEXTS_JSON: JSON.stringify(platform.contexts),
 		BILLING_TEST_PROJECT_CREDENTIALS_JSON: JSON.stringify(platform.credentials),
+		BILLING_TEST_PROJECT_READ_ONLY_CREDENTIALS_JSON: JSON.stringify(platform.readOnlyCredentials),
 	};
 }
