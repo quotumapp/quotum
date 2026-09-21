@@ -23,6 +23,7 @@ const toolCalls: Readonly<Record<string, Record<string, unknown>>> = {
 	get_project_stats: {},
 	get_provider_capabilities: {},
 	get_store_event: { eventId: "event-1" },
+	get_stripe_catalog: {},
 	get_usage_operation: { billingAccountId: "account-1", operationId: "key-1" },
 	list_projection_jobs: {},
 	list_store_events: {},

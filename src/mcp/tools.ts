@@ -11,11 +11,16 @@ export interface QuotumToolDependencies {
 
 const readOnly = { readOnlyHint: true, openWorldHint: false } as const;
 const operationKinds = ["consume", "reserve", "confirm", "release", "correct"] as const;
+const catalogSections = ["features", "plans", "topups", "rateCards"] as const;
 
 // Free-form data a merchant or a provider controls. Left out unless the caller asks, so text an
 // outsider can influence does not reach the model by default.
 const providerPayloadKeys = new Set(["payload", "rawPayload"]);
 const merchantFreeFormKeys = new Set(["payload", "rawPayload", "metadata"]);
+// With a production key these results reach an LLM host, so contact details are opt-in too.
+const contactKeys = new Set(["email", "customerEmail"]);
+const withoutContact = (value: unknown, include: boolean) =>
+	include ? value : omitKeys(value, contactKeys);
 
 const billingAccountId = z
 	.string()
@@ -54,11 +59,22 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			title: "Find a customer",
 			description:
 				"Prefix search across billing account ids, customer ids, provider customer ids, transaction ids and order ids. Returns the match and why it matched.",
-			inputSchema: z.object({ query: z.string().min(1).max(128), ...page }),
+			inputSchema: z.object({
+				query: z.string().min(1).max(128),
+				includeEmail: z.boolean().default(false),
+				...page,
+			}),
 			annotations: readOnly,
 		},
-		({ query, limit, cursor }) =>
-			runTool(() => client.admin.searchCustomers(query, { limit, cursor }), log),
+		({ query, limit, cursor, includeEmail }) =>
+			runTool(
+				async () =>
+					withoutContact(
+						await client.admin.searchCustomers(query, { limit, cursor }),
+						includeEmail,
+					),
+				log,
+			),
 	);
 
 	server.registerTool(
@@ -67,10 +83,10 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			title: "Customer overview",
 			description:
 				"One customer's entitlements, provider links, active subscriptions, recent purchases, store events and projection jobs, plus the billing summary and effective controls. Each section is either data or an error, so one failing read does not hide the others.",
-			inputSchema: z.object({ billingAccountId }),
+			inputSchema: z.object({ billingAccountId, includeEmail: z.boolean().default(false) }),
 			annotations: readOnly,
 		},
-		({ billingAccountId: account }) =>
+		({ billingAccountId: account, includeEmail }) =>
 			runTool(async () => {
 				const [customer, summary, controls] = await Promise.allSettled([
 					client.admin.customer(account),
@@ -79,7 +95,7 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 				]);
 				const section = (result: PromiseSettledResult<unknown>) =>
 					result.status === "fulfilled"
-						? omitKeys(result.value, merchantFreeFormKeys)
+						? withoutContact(omitKeys(result.value, merchantFreeFormKeys), includeEmail)
 						: { error: describeError(result.reason, log) };
 				return {
 					customer: section(customer),
@@ -268,9 +284,34 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 	server.registerTool(
 		"get_catalog",
 		{
-			title: "Purchasable catalog",
+			title: "Published catalog",
 			description:
-				"The Stripe purchasable catalog: plans with versions, components, prices, included quantities and tiers. It does not list features, meters or rate cards; those live in the versioned catalog, which needs the operator key this server never holds. Fails with STRIPE_NOT_CONFIGURED on a project without Stripe.",
+				"The published catalog with its revision: features, plans with their components and meters, top-ups and rate cards. This is what metering and pricing run on, so it explains a configuration_error or a missing rate. Pass sections to keep a large catalog within the result budget.",
+			inputSchema: z.object({
+				sections: z.array(z.enum(catalogSections)).min(1).optional(),
+			}),
+			annotations: readOnly,
+		},
+		({ sections }) =>
+			runTool(async () => {
+				const published = await client.catalog.status();
+				if (sections === undefined || published.catalog === null) return published;
+				const selected = new Set<string>(sections);
+				return {
+					...published,
+					catalog: Object.fromEntries(
+						Object.entries(published.catalog).filter(([section]) => selected.has(section)),
+					),
+				};
+			}, log),
+	);
+
+	server.registerTool(
+		"get_stripe_catalog",
+		{
+			title: "Stripe purchasable catalog",
+			description:
+				"What Stripe Checkout can sell: plans with versions, components, prices, included quantities and tiers, as bound to Stripe prices. Fails with STRIPE_NOT_CONFIGURED on a project without Stripe. For features, meters and rate cards use get_catalog.",
 			inputSchema: z.object({}),
 			annotations: readOnly,
 		},
