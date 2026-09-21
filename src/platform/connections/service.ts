@@ -513,6 +513,71 @@ export class MerchantConnections {
 			...(credential ? { credential } : {}),
 		};
 	}
+	/** Whether the environment holds a live key of each kind, and since when. Never any key material. */
+	async credentialStatus(identity: MerchantIdentity, scope: MerchantScope) {
+		const instance = await this.scope(identity, scope);
+		const rows = await this.store.sql<
+			{ access: CredentialAccess; created_at: Date }[]
+		>`SELECT access, created_at FROM platform_project_api_credentials WHERE project_instance_id=${instance.id} AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>${this.store.now()})`;
+		const kind = (access: CredentialAccess) => {
+			const row = rows.find((candidate) => candidate.access === access);
+			return { live: row !== undefined, issuedAt: row?.created_at.toISOString() ?? null };
+		};
+		return { full: kind("full"), readOnly: kind("read_only") };
+	}
+	/**
+	 * Withdraws the read-only key without minting a replacement. The full key has no such operation:
+	 * a backend without a key is an outage, so it is only ever replaced by `rotateCredential`.
+	 */
+	async revokeCredential(
+		identity: MerchantIdentity,
+		scope: MerchantScope,
+		key: string,
+		grant: string | null,
+	) {
+		const access: CredentialAccess = "read_only";
+		const receiptAction = `credential.revoke:${access}`;
+		return await this.store.sql.begin(async (tx) => {
+			const instance = await this.scope(identity, scope, true, tx);
+			await this.lock(
+				tx,
+				identity,
+				scope,
+				scope.environment === "production"
+					? "production.credentials.rotate"
+					: "sandbox.credentials.rotate",
+			);
+			const saved = await this.receipt(tx, instance.id, key, receiptAction);
+			if (saved) return saved;
+			if (instance.lifecycleStatus !== "active")
+				throw new MerchantError("ENVIRONMENT_INACTIVE", "Activate the environment first.", 409);
+			await this.confirm(tx, identity, scope, "credentials.revoke_read_only", key, grant);
+			// The same liveness test as `credentialStatus`: an expired key is already dead, so withdrawing
+			// it is neither reported nor audited. The next issue revokes that row whatever its expiry.
+			const revoked = await tx<
+				{ id: string }[]
+			>`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND access=${access} AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>${this.store.now()}) RETURNING id`;
+			if (revoked.length > 0) {
+				const member = await this.store.membership(
+					tx,
+					identity.principalId,
+					scope.organizationSlug,
+				);
+				await this.store.audit(
+					tx,
+					identity.principalId,
+					member.organization_id,
+					"credential.revoked",
+					instance.id,
+					{ access },
+				);
+			}
+			// Receipted even when nothing was live: a replay of this key never revokes a later key.
+			const result = { access, revoked: revoked.length > 0 };
+			await this.saveReceipt(tx, instance.id, key, receiptAction, result);
+			return result;
+		});
+	}
 	private async lock(
 		tx: MerchantSql,
 		identity: MerchantIdentity,

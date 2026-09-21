@@ -42,6 +42,9 @@ const credential = z.object({
 	credentialDisclosed: z.boolean(),
 	credential: z.string().optional(),
 });
+// Only the read-only key can be withdrawn; the full key is replaced, never removed.
+const revokeBody = z.strictObject({ scope, access: z.literal("read_only") });
+const credentialKindStatus = z.object({ live: z.boolean(), issuedAt: z.string().nullable() });
 const oauthStartBody = z.strictObject({
 	scope,
 	settings: z.record(z.string(), z.unknown()),
@@ -366,6 +369,45 @@ export function registerConnectionRoutes(
 			...jsonBody(rotateBody),
 			...route("rotateEnvironmentCredential", "/api/platform/environments/credentials/rotate", {
 				200: success(credential),
+			}),
+		},
+	);
+
+	app.post(
+		"/api/platform/environments/credentials/status",
+		async ({ body, request }) => {
+			const input = scopeBody.parse(body);
+			return {
+				success: true as const,
+				data: await service.credentialStatus(await store.authenticate(request), input.scope),
+			};
+		},
+		{
+			...jsonBody(scopeBody),
+			...route("environmentCredentialStatus", "/api/platform/environments/credentials/status", {
+				200: success(z.object({ full: credentialKindStatus, readOnly: credentialKindStatus })),
+			}),
+		},
+	);
+
+	app.post(
+		"/api/platform/environments/credentials/revoke",
+		async ({ body, request }) => {
+			const input = revokeBody.parse(body);
+			return {
+				success: true as const,
+				data: await service.revokeCredential(
+					await store.authenticate(request),
+					input.scope,
+					idempotencyKey(request),
+					request.headers.get("x-quotum-step-up-grant") ?? null,
+				),
+			};
+		},
+		{
+			...jsonBody(revokeBody),
+			...route("revokeEnvironmentCredential", "/api/platform/environments/credentials/revoke", {
+				200: success(z.object({ access: z.literal("read_only"), revoked: z.boolean() })),
 			}),
 		},
 	);

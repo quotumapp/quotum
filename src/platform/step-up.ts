@@ -25,11 +25,18 @@ export function canonicalJson(value: unknown): string {
 export function mutationTarget(method: string, pathname: string, body: unknown): string {
 	return `${method} ${pathname} ${digest(canonicalJson(body))}`;
 }
+// Issuing, replacing and withdrawing a key share one capability; each stays its own action so a
+// grant confirmed for one can never authorize another.
+const credentialActions: ReadonlySet<string> = new Set([
+	"credentials.rotate",
+	"credentials.rotate_read_only",
+	"credentials.revoke_read_only",
+]);
 export function actionCapability(action: string, environment: MerchantScope["environment"]) {
 	if (action === "connections.manage")
 		return environment === "production" ? "production.connections.manage" : "sandbox.configure";
 	if (action === "environment.activate") return "production.activate";
-	if (action === "credentials.rotate" || action === "credentials.rotate_read_only")
+	if (credentialActions.has(action))
 		return environment === "production"
 			? "production.credentials.rotate"
 			: "sandbox.credentials.rotate";
@@ -73,19 +80,15 @@ export class MerchantStepUp {
 				? /^(?:[0-9a-f-]{36}|disable:(?:stripe|apple|google|projection):[0-9]+)$/
 				: input.action === "environment.activate"
 					? /^[a-f0-9]{64}$/
-					: input.action === "credentials.rotate" || input.action === "credentials.rotate_read_only"
+					: credentialActions.has(input.action)
 						? /^[A-Za-z0-9._:-]{8,128}$/
 						: /^(POST|PUT|DELETE) \/api\/billing\/[^ ]+ [a-f0-9]{64}$/;
 		if (!setupTarget.test(input.target))
 			throw new MerchantError("ACTION_REJECTED", "Confirm a saved operation identifier.");
 		if (
 			input.request &&
-			[
-				"connections.manage",
-				"environment.activate",
-				"credentials.rotate",
-				"credentials.rotate_read_only",
-			].includes(input.action)
+			(["connections.manage", "environment.activate"].includes(input.action) ||
+				credentialActions.has(input.action))
 		)
 			throw new MerchantError(
 				"REQUEST_REJECTED",

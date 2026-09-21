@@ -645,6 +645,127 @@ it("activates only reviewed production readiness and discloses its credential on
 		expect(stored).not.toContain(secret);
 	}
 
+	// Status reports each kind without any key material, and the read-only key can be withdrawn.
+	type CredentialStatus = Record<"full" | "readOnly", { live: boolean; issuedAt: string | null }>;
+	const status = () =>
+		browser.json<CredentialStatus>("/api/platform/environments/credentials/status", {
+			scope: prod,
+		});
+	const before = await status();
+	// No asymmetric matcher here: Bun writes the matcher into the received value, and
+	// `before.full.issuedAt` is compared again below.
+	for (const kind of [before.full, before.readOnly]) {
+		expect(kind.live).toBe(true);
+		expect(Number.isNaN(Date.parse(kind.issuedAt ?? ""))).toBe(false);
+		expect(Object.keys(kind).sort()).toEqual(["issuedAt", "live"]);
+	}
+
+	const revokeFull = await browser.request(
+		"/api/platform/environments/credentials/revoke",
+		{ scope: prod, access: "full" },
+		{ key: "revoke-full-key" },
+	);
+	expect(revokeFull.status).toBe(400);
+	const rotateActionGrant = await grant(
+		browser,
+		"revoke-read-only",
+		"credentials.rotate_read_only",
+	);
+	const refusedRevoke = await browser.request(
+		"/api/platform/environments/credentials/revoke",
+		readOnlyBody,
+		{ headers: { "x-quotum-step-up-grant": rotateActionGrant }, key: "revoke-read-only" },
+	);
+	expect(refusedRevoke.status).toBe(409);
+	expect(await refusedRevoke.json()).toMatchObject({ error: { code: "STEP_UP_EXPIRED" } });
+	expect(await resolver.resolveCredential(reissued.credential)).toMatchObject({
+		kind: "resolved",
+	});
+
+	const revokeGrant = await grant(browser, "revoke-read-only", "credentials.revoke_read_only");
+	// A grant confirmed for withdrawing the key cannot mint a new one either.
+	const refusedRotate = await browser.request(
+		"/api/platform/environments/credentials/rotate",
+		readOnlyBody,
+		{ headers: { "x-quotum-step-up-grant": revokeGrant }, key: "revoke-read-only" },
+	);
+	expect(refusedRotate.status).toBe(409);
+	const revoked = await browser.json<Record<string, unknown>>(
+		"/api/platform/environments/credentials/revoke",
+		readOnlyBody,
+		{ headers: { "x-quotum-step-up-grant": revokeGrant }, key: "revoke-read-only" },
+	);
+	expect(revoked).toEqual({ access: "read_only", revoked: true });
+	const revokeReplay = await browser.json<Record<string, unknown>>(
+		"/api/platform/environments/credentials/revoke",
+		readOnlyBody,
+		{ key: "revoke-read-only" },
+	);
+	expect(revokeReplay).toEqual({ access: "read_only", revoked: true });
+	expect(await resolver.resolveCredential(reissued.credential)).toEqual({ kind: "ineligible" });
+	expect(await resolver.resolveCredential(rotatedAgain.credential)).toMatchObject({
+		kind: "resolved",
+		access: "full",
+	});
+	expect(await status()).toEqual({
+		full: { live: true, issuedAt: before.full.issuedAt },
+		readOnly: { live: false, issuedAt: null },
+	});
+
+	// Nothing left to withdraw is still a success, and leaves no audit event.
+	const secondRevokeGrant = await grant(
+		browser,
+		"revoke-read-only-2",
+		"credentials.revoke_read_only",
+	);
+	const nothingLive = await browser.json<Record<string, unknown>>(
+		"/api/platform/environments/credentials/revoke",
+		readOnlyBody,
+		{ headers: { "x-quotum-step-up-grant": secondRevokeGrant }, key: "revoke-read-only-2" },
+	);
+	expect(nothingLive).toEqual({ access: "read_only", revoked: false });
+	const revocations = await f.sql<
+		{ access: string | null }[]
+	>`SELECT metadata->>'access' AS access FROM platform_audit_events WHERE action='credential.revoked'`;
+	expect(revocations.map((event) => event.access)).toEqual(["read_only"]);
+
+	// An expired key is not live: status and revoke agree, and issuing again still replaces its row.
+	const expiringGrant = await grant(browser, "rotate-read-only-3", "credentials.rotate_read_only");
+	const expiring = await browser.json<{ credential: string }>(
+		"/api/platform/environments/credentials/rotate",
+		readOnlyBody,
+		{ headers: { "x-quotum-step-up-grant": expiringGrant }, key: "rotate-read-only-3" },
+	);
+	await f.sql`UPDATE platform_project_api_credentials SET expires_at=created_at+interval '1 millisecond' WHERE access='read_only' AND revoked_at IS NULL`;
+	expect(await resolver.resolveCredential(expiring.credential)).toEqual({ kind: "ineligible" });
+	expect((await status()).readOnly).toEqual({ live: false, issuedAt: null });
+	const expiredGrant = await grant(browser, "revoke-read-only-3", "credentials.revoke_read_only");
+	expect(
+		await browser.json<Record<string, unknown>>(
+			"/api/platform/environments/credentials/revoke",
+			readOnlyBody,
+			{ headers: { "x-quotum-step-up-grant": expiredGrant }, key: "revoke-read-only-3" },
+		),
+	).toEqual({ access: "read_only", revoked: false });
+	expect(
+		await f.sql`SELECT id FROM platform_audit_events WHERE action='credential.revoked'`,
+	).toHaveLength(1);
+	const afterExpiryGrant = await grant(
+		browser,
+		"rotate-read-only-4",
+		"credentials.rotate_read_only",
+	);
+	const afterExpiry = await browser.json<{ credential: string }>(
+		"/api/platform/environments/credentials/rotate",
+		readOnlyBody,
+		{ headers: { "x-quotum-step-up-grant": afterExpiryGrant }, key: "rotate-read-only-4" },
+	);
+	expect(await resolver.resolveCredential(afterExpiry.credential)).toMatchObject({
+		kind: "resolved",
+		access: "read_only",
+	});
+	expect((await status()).readOnly.live).toBe(true);
+
 	await f.sql`UPDATE platform_connection_versions SET validated_at=validated_at-interval '16 minutes' WHERE status='active'`;
 	const stale = await browser.json<Readiness>("/api/platform/environments/readiness", {
 		scope: prod,

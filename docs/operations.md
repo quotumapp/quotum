@@ -182,9 +182,20 @@ never automatically:
   `--credentials-out` file, so the `credentials` array keeps one entry per instance. Like full keys,
   bootstrap issues a read-only key once and never rotates it.
 
-The two kinds rotate independently: replacing one never revokes the other. There is no route that
-withdraws a read-only key without minting a replacement; to retire one, rotate it and discard the
-new token. The audit trail records `credential.issued` or `credential.rotated` with the `access`.
+The two kinds rotate independently: replacing one never revokes the other.
+
+- `POST /api/platform/environments/credentials/status` reports, for each kind, whether the
+  environment holds a live key and when it was issued. It never returns key material. It answers for
+  active and inactive environments; a suspended or deactivated one is `404 CONTEXT_UNAVAILABLE`.
+- `POST /api/platform/environments/credentials/revoke` with `"access": "read_only"` withdraws the
+  read-only key without minting a replacement, and the key is rejected from the next request. It
+  needs the rotation capability, an active environment and, in production, a step-up grant for the
+  action `credentials.revoke_read_only`. It answers `revoked: false` when no key was live; replaying
+  that idempotency key later does not revoke a key issued since. The full key cannot be withdrawn,
+  only rotated: a backend without a key is an outage.
+
+The audit trail records `credential.issued`, `credential.rotated` and `credential.revoked` with the
+`access`.
 
 ### Replacing retired `qpk_v1` credentials
 
