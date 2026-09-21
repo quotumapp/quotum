@@ -58,7 +58,7 @@ customer integrations and production activation have separate checks.
 | Optional exact-topology bootstrap | `bun run platform:bootstrap -- --check` or `--apply --credentials-out <new-file>` |
 | Development catalog import | `bun run catalog:provision` |
 | Catalog automation | `bun run catalog status`, `bun run catalog diff <file>`, `bun run catalog push <file>` |
-| Read-only MCP server (stdio, sandbox key) | `bun run mcp` |
+| Read-only MCP server (stdio, read-only or sandbox key) | `bun run mcp` |
 | Connection encryption-key rotation | `bun run connections:rotate-secrets` |
 
 Database/process lanes require Docker and are not implied by a plain unit-test pass. Browser

@@ -112,6 +112,59 @@ describe("MCP tools", () => {
 		expect(toolJson(balance)).toEqual({ featureKey: "tokens", available: "7" });
 	});
 
+	it("keeps customer contact details out unless asked", async () => {
+		const { client } = await connect((request) =>
+			new URL(request.url).pathname.endsWith("/search")
+				? okPage([
+						{
+							customer: { id: "customer-1", email: "payer@example.com" },
+							matchType: "customer_id",
+						},
+					])
+				: ok({ customer: { id: "customer-1", email: "payer@example.com" } }),
+		);
+		const found = await client.callTool({ name: "find_customer", arguments: { query: "cus" } });
+		expect(toolText(found)).not.toContain("payer@example.com");
+		const overview = await client.callTool({
+			name: "get_customer_overview",
+			arguments: { billingAccountId: "account-1" },
+		});
+		expect(toolText(overview)).not.toContain("payer@example.com");
+		const asked = await client.callTool({
+			name: "find_customer",
+			arguments: { query: "cus", includeEmail: true },
+		});
+		expect(toolText(asked)).toContain("payer@example.com");
+	});
+
+	it("reads the versioned catalog with project credentials and can narrow it to sections", async () => {
+		const published = {
+			revision: 4,
+			catalog: {
+				features: [{ key: "tokens" }],
+				plans: [{ key: "pro" }],
+				topups: [],
+				rateCards: [],
+			},
+		};
+		const { client, calls } = await connect(() => ok(published));
+		expect(toolJson(await client.callTool({ name: "get_catalog", arguments: {} }))).toEqual(
+			published,
+		);
+		expect(
+			toolJson(
+				await client.callTool({ name: "get_catalog", arguments: { sections: ["features"] } }),
+			),
+		).toEqual({ revision: 4, catalog: { features: [{ key: "tokens" }] } });
+		await client.callTool({ name: "get_stripe_catalog", arguments: {} });
+		expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+			"/v1/admin/catalog",
+			"/v1/admin/catalog",
+			"/v1/catalog",
+		]);
+		for (const call of calls) expect(call.headers.has("x-billing-operator-key")).toBe(false);
+	});
+
 	it("returns each overview section on its own, so one failure does not hide the rest", async () => {
 		const { client, calls } = await connect((request) => {
 			const path = new URL(request.url).pathname;

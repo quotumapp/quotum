@@ -31,7 +31,7 @@ bun run test:merchant:integration   # integration/merchant against a container
 
 bun run openapi:generate && bun run openapi:check && bun run openapi:lint   # after any route or capability change
 
-bun run mcp                      # read-only stdio MCP server; QUOTUM_MCP_BASE_URL + sandbox QUOTUM_MCP_API_KEY
+bun run mcp                      # read-only stdio MCP server; QUOTUM_MCP_BASE_URL + read-only (or sandbox) QUOTUM_MCP_API_KEY
 ```
 
 Postgres-backed test files are wrapped in `describeLocalPostgres` / `describeE2e` and silently

@@ -5,6 +5,10 @@ export const e2eApiKey = testCredential("voysee") ?? "voysee-unit-test-placehold
 /** The sandbox instance of the same logical project; its credential starts with `sqpk_`. */
 export const e2eSandboxApiKey =
 	testCredential("voysee-sandbox") ?? "voysee-sandbox-unit-test-placeholder";
+/** The read-only key of the production instance; it starts with `pqrk_`. */
+export const e2eReadOnlyApiKey =
+	testCredential("voysee", "BILLING_TEST_PROJECT_READ_ONLY_CREDENTIALS_JSON") ??
+	"voysee-read-only-unit-test-placeholder";
 export const e2eOperatorKey = "voysee-e2e-operator-key";
 export const e2eProjectionSecret = "voysee-e2e-projection-secret";
 export const e2eStripeWebhookSecret = "whsec_voysee_e2e";
@@ -86,18 +90,21 @@ export function e2eServiceEnv({
 	};
 }
 
-function testCredential(projectInstanceKey: string): string | null {
-	const serialized = process.env.BILLING_TEST_PROJECT_CREDENTIALS_JSON;
+function testCredential(
+	projectInstanceKey: string,
+	variable = "BILLING_TEST_PROJECT_CREDENTIALS_JSON",
+): string | null {
+	const serialized = process.env[variable];
 	if (serialized === undefined) return null;
 
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(serialized);
 	} catch {
-		throw new Error("BILLING_TEST_PROJECT_CREDENTIALS_JSON must be valid JSON");
+		throw new Error(`${variable} must be valid JSON`);
 	}
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-		throw new Error("BILLING_TEST_PROJECT_CREDENTIALS_JSON must be an object");
+		throw new Error(`${variable} must be an object`);
 	}
 	const credential = (parsed as Record<string, unknown>)[projectInstanceKey];
 	if (typeof credential !== "string" || credential.trim() === "") {

@@ -12,8 +12,11 @@ export class McpConfigError extends Error {
 }
 
 // Mirrors src/platform/credentials/project-api-token.ts, which this module cannot import.
-const sandboxKeyPattern = /^sqpk_[A-Za-z0-9_-]{43}$/u;
-const productionKeyPattern = /^pqpk_[A-Za-z0-9_-]{43}$/u;
+// Accepted: any sandbox key, and the read-only production key. The server only ever reads, so a
+// read-only key is the right one everywhere; a sandbox full key stays accepted because that is what
+// a developer already has.
+const acceptedKeyPattern = /^(?:sq[pr]k|pqrk)_[A-Za-z0-9_-]{43}$/u;
+const fullProductionKeyPattern = /^pqpk_[A-Za-z0-9_-]{43}$/u;
 const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /**
@@ -33,14 +36,14 @@ export function readMcpConfig(env: Readonly<Record<string, string | undefined>>)
 function parseApiKey(value: string | undefined): string {
 	const key = value?.trim() ?? "";
 	if (key === "") throw new McpConfigError("QUOTUM_MCP_API_KEY is required");
-	if (sandboxKeyPattern.test(key)) return key;
-	if (productionKeyPattern.test(key)) {
+	if (acceptedKeyPattern.test(key)) return key;
+	if (fullProductionKeyPattern.test(key)) {
 		throw new McpConfigError(
-			"QUOTUM_MCP_API_KEY is a production key. The MCP server accepts sandbox keys only until read-only production credentials exist.",
+			"QUOTUM_MCP_API_KEY is a full production key, which can also consume usage and execute commercial actions. Issue a read-only production key (pqrk_) and use that.",
 		);
 	}
 	throw new McpConfigError(
-		"QUOTUM_MCP_API_KEY is not a sandbox project API key (sqpk_ followed by 43 characters)",
+		"QUOTUM_MCP_API_KEY is not a project API key this server accepts (sqpk_, sqrk_ or pqrk_ followed by 43 characters)",
 	);
 }
 

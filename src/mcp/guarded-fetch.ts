@@ -20,6 +20,7 @@ export interface GuardedFetchOptions {
  */
 export const allowedRequests: ReadonlyArray<readonly ["GET" | "POST", RegExp]> = [
 	["GET", /^\/v1\/catalog$/u],
+	["GET", /^\/v1\/admin\/catalog$/u],
 	["GET", /^\/v1\/admin\/customers\/search$/u],
 	["GET", /^\/v1\/admin\/customers\/by-billing-account\/[^/]+$/u],
 	["GET", /^\/v1\/admin\/store-events$/u],

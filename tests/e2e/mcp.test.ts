@@ -14,7 +14,7 @@ import {
 } from "../integration/helpers/catalog-fixtures";
 import { publishAiCreditsCatalog } from "../integration/helpers/metering-catalog";
 import { integrationProjectContext } from "../integration/helpers/platform-fixture";
-import { e2eApiKey, e2eSandboxApiKey, e2eServiceEnv } from "./helpers/e2e-env";
+import { e2eApiKey, e2eReadOnlyApiKey, e2eSandboxApiKey, e2eServiceEnv } from "./helpers/e2e-env";
 import { describeE2e } from "./helpers/gating";
 import { type BillingServiceProcess, startBillingService } from "./helpers/service-process";
 
@@ -54,15 +54,19 @@ e2eDescribe("E2E MCP server", () => {
 			},
 		]);
 		const repository = new BillingRepository(connection.db as never);
-		const sandbox = integrationProjectContext("voysee-sandbox");
-		await publishAiCreditsCatalog(repository, sandbox);
-		await repository.grantAllocation(sandbox, {
-			billingAccountId: "mcp-account",
-			featureKey: "ai_credits",
-			quantity: "10",
-			sourceKind: "operator",
-			sourceKey: "e2e-mcp",
-		});
+		for (const instance of [
+			integrationProjectContext("voysee-sandbox"),
+			integrationProjectContext("voysee"),
+		]) {
+			await publishAiCreditsCatalog(repository, instance);
+			await repository.grantAllocation(instance, {
+				billingAccountId: "mcp-account",
+				featureKey: "ai_credits",
+				quantity: "10",
+				sourceKind: "operator",
+				sourceKey: "e2e-mcp",
+			});
+		}
 		service = await startBillingService(e2eServiceEnv({ postgresUri }));
 	});
 	afterEach(async () => {
@@ -135,6 +139,79 @@ e2eDescribe("E2E MCP server", () => {
 			arguments: { billingAccountId: "mcp-account", operationId: "never-sent" },
 		});
 		expect(toolJson(missing)).toMatchObject({ operations: [] });
+	}, 60_000);
+
+	it("reads production with a read-only key that the API refuses to let write", async () => {
+		if (service === null) throw new Error("Service not started");
+		expect(e2eReadOnlyApiKey.startsWith("pqrk_")).toBe(true);
+		client = new Client({ name: "quotum-e2e", version: "0.0.0" });
+		await client.connect(
+			new StdioClientTransport({
+				command: process.execPath,
+				args: ["--no-env-file", "src/mcp/index.ts"],
+				cwd: repositoryRoot,
+				env: mcpEnv(service.baseUrl, e2eReadOnlyApiKey),
+				stderr: "pipe",
+			}),
+		);
+
+		const denied = await client.callTool({
+			name: "check_usage",
+			arguments: { billingAccountId: "mcp-account", featureKey: "ai_credits", quantity: "11" },
+		});
+		expect(toolJson(denied)).toMatchObject({ allowed: false });
+
+		// The versioned catalog, without an operator key.
+		const catalog = await client.callTool({
+			name: "get_catalog",
+			arguments: { sections: ["features"] },
+		});
+		expect(catalog.isError).toBeUndefined();
+		expect(toolJson(catalog)).toMatchObject({
+			revision: expect.any(Number),
+			catalog: {
+				features: expect.arrayContaining([expect.objectContaining({ key: "ai_credits" })]),
+			},
+		});
+
+		// Every tool works with the read-only key, so none reaches a route that has not opted in.
+		const { tools } = await client.listTools();
+		const samples: Record<string, Record<string, unknown>> = {
+			check_usage: { billingAccountId: "mcp-account", featureKey: "ai_credits", quantity: "1" },
+			find_customer: { query: "mcp" },
+			get_balance: { billingAccountId: "mcp-account", featureKey: "ai_credits" },
+			get_store_event: { eventId: "00000000-0000-4000-8000-000000000001" },
+			get_usage_operation: { billingAccountId: "mcp-account", operationId: "never-sent" },
+			get_api_operation: { operationId: "getV1Catalog" },
+		};
+		for (const tool of tools) {
+			const result = await client.callTool({
+				name: tool.name,
+				arguments: samples[tool.name] ?? { billingAccountId: "mcp-account" },
+			});
+			expect(JSON.stringify(result), tool.name).not.toContain("READ_ONLY_CREDENTIAL");
+		}
+
+		// The same key, used directly, cannot write: the API enforces it, not the MCP server.
+		const consume = await fetch(
+			`${service.baseUrl}/v1/billing-accounts/mcp-account/usage/consume`,
+			{
+				method: "POST",
+				headers: {
+					authorization: `Bearer ${e2eReadOnlyApiKey}`,
+					"content-type": "application/json",
+					"idempotency-key": "read-only-consume",
+				},
+				body: JSON.stringify({ featureKey: "ai_credits", quantity: "1" }),
+			},
+		);
+		expect(consume.status).toBe(403);
+		expect(await consume.json()).toMatchObject({ error: { code: "READ_ONLY_CREDENTIAL" } });
+		const balance = await client.callTool({
+			name: "get_balance",
+			arguments: { billingAccountId: "mcp-account", featureKey: "ai_credits" },
+		});
+		expect(toolJson(balance)).toMatchObject({ consumed: "0", available: "10" });
 	}, 60_000);
 
 	it("refuses the production key of the same project", async () => {

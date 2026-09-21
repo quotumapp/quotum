@@ -29,8 +29,8 @@ projection delivery; `mcp/` is the read-only stdio MCP server, a client of `/v1`
   vocabulary (`src/shared/provider-capabilities.ts`).
 - `bun run platform:bootstrap`, `catalog:provision`, and `catalog` for operator workflows; see
   [docs/quickstart.md](docs/quickstart.md).
-- `bun run mcp` starts the read-only stdio MCP server against `QUOTUM_MCP_BASE_URL` with a sandbox
-  `QUOTUM_MCP_API_KEY`; see [docs/mcp.md](docs/mcp.md).
+- `bun run mcp` starts the read-only stdio MCP server against `QUOTUM_MCP_BASE_URL` with a read-only or
+  sandbox `QUOTUM_MCP_API_KEY`; see [docs/mcp.md](docs/mcp.md).
 
 ## Coding style
 

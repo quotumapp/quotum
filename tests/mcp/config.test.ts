@@ -29,10 +29,23 @@ describe("MCP configuration", () => {
 		});
 	});
 
-	it("refuses issued production keys and anything that is not a sandbox key", () => {
+	it("accepts every issued key kind except the full production key", () => {
+		const base = { QUOTUM_MCP_BASE_URL: "https://billing.example.com" };
+		for (const [environment, access] of [
+			["sandbox", "full"],
+			["sandbox", "read_only"],
+			["production", "read_only"],
+		] as const) {
+			const key = generateProjectApiCredential(environment, access).token;
+			expect(readMcpConfig({ ...base, QUOTUM_MCP_API_KEY: key }).apiKey).toBe(key);
+		}
+	});
+
+	it("refuses issued full production keys and anything that is not a project key", () => {
 		const base = { QUOTUM_MCP_BASE_URL: "https://billing.example.com" };
 		const production = failure({ ...base, QUOTUM_MCP_API_KEY: productionKey });
-		expect(production).toContain("production key");
+		expect(production).toContain("full production key");
+		expect(production).toContain("pqrk_");
 		expect(production).not.toContain(productionKey);
 
 		for (const key of ["", "qpk_v1_legacy", `${sandboxKey}x`, sandboxKey.slice(0, -1)]) {
