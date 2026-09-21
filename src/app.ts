@@ -20,7 +20,12 @@ import type {
 } from "./app/types";
 import { registerWebhookRoutes } from "./app/webhook-routes";
 import { EntitlementService } from "./billing/entitlements";
-import { BillingError, classifyBillingError, isBillingError } from "./billing/errors";
+import {
+	BillingError,
+	classifyBillingError,
+	InvalidRequestError,
+	isBillingError,
+} from "./billing/errors";
 import { MeteringService } from "./billing/metering";
 import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
 import { AdminBillingRepository } from "./db/admin-repository";
@@ -353,14 +358,12 @@ export function createApp({
 	const credentialAccessGate = createCredentialAccessGate(() => app.routes);
 
 	app.derive(async ({ request, path, route, server, set }) => {
-		// Gateway mode reads no credential, so the trusted gateway owns any read-only restriction.
+		// Gateway mode reads no credential: the trusted gateway states the access it granted, or
+		// nothing, which means full.
 		const { project, credentialAccess } =
 			env.authMode === "api_key"
 				? await resolveProjectFromApiKey(request, contextResolver)
-				: {
-						...(await resolveGatewayProject(request, contextResolver)),
-						credentialAccess: "full" as const,
-					};
+				: await resolveGatewayProject(request, contextResolver);
 		if (queryHasCallerProjectSelector(new URL(request.url).searchParams)) {
 			throw projectSelectorRejectedError();
 		}
@@ -371,6 +374,7 @@ export function createApp({
 		} catch (error) {
 			// A read-only key used for a write is a misconfigured tool or a leaked key being probed.
 			safelyLogWarn(billingLogger, "Read-only project credential refused", {
+				source: env.authMode === "api_key" ? "credential" : "gateway",
 				projectKey: project.projectInstanceKey,
 				method: request.method,
 				route: route ?? null,
@@ -532,11 +536,26 @@ function resolveProjectFromApiKey(
 	})();
 }
 
+/**
+ * What the trusted gateway granted the caller. Read only in gateway mode, under the same trust as
+ * `x-billing-project-key`: the gateway must strip any copy a client sends. An unknown value is
+ * refused, never read as full.
+ */
+function gatewayCredentialAccess(request: Request): CredentialAccess {
+	const header = request.headers.get("x-billing-credential-access");
+	if (header === null) return "full";
+	const value = header.trim();
+	if (value === "full" || value === "read_only") return value;
+	throw new InvalidRequestError("X-Billing-Credential-Access must be full or read_only");
+}
+
 function resolveGatewayProject(
 	request: Request,
 	resolver: ProjectInstanceContextResolver,
-): Promise<{ project: ProjectInstanceContext }> {
+): Promise<{ project: ProjectInstanceContext; credentialAccess: CredentialAccess }> {
 	return (async () => {
+		// Before the lookup, so a malformed header costs no database call.
+		const credentialAccess = gatewayCredentialAccess(request);
 		const projectKey = request.headers.get("x-billing-project-key")?.trim();
 		if (projectKey === undefined || projectKey === "") {
 			throw new BillingError(
@@ -560,7 +579,7 @@ function resolveGatewayProject(
 				404,
 			);
 		}
-		return { project: resolution.context };
+		return { project: resolution.context, credentialAccess };
 	})();
 }
 

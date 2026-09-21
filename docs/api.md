@@ -39,7 +39,8 @@ that write nothing and call no provider, plus `POST .../usage/check`. Everything
 - every operator route, and `includeRawPayload=true` on a store event.
 
 The stored credential decides the access level; the prefix only lets a client refuse a full key
-without a lookup. Both kinds share the project's rate-limit buckets. Each refusal logs a warning,
+without a lookup. In [gateway mode](deployment.md#authentication) the trusted gateway states the
+level with `x-billing-credential-access` instead. Both kinds share the project's rate-limit buckets. Each refusal logs a warning,
 `Read-only project credential refused`, with the project instance, method and route. It is worth an
 alert: a read-only key used for writes is either a misconfigured tool or a leaked key being probed.
 

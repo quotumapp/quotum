@@ -61,7 +61,8 @@ picked up from the environment.
 - The operator key is never used. Operator routes are therefore out of reach: catalog products,
   catalog preview and publication, enterprise contracts, promotion administration and
   `/v1/admin/metrics`.
-- API-key mode only. A gateway-mode deployment must enforce the same restriction in its gateway.
+- API-key mode only. A gateway-mode deployment puts the server behind its gateway, which sends
+  `x-billing-credential-access: read_only` for it.
 
 ## Tools
 

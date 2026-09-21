@@ -228,6 +228,7 @@ describe("read-only project credentials", () => {
 			{
 				message: "Read-only project credential refused",
 				context: {
+					source: "credential",
 					projectKey: "voysee",
 					method: "POST",
 					route: "/v1/billing-accounts/:billingAccountId/usage/consume",
@@ -242,5 +243,105 @@ describe("read-only project credentials", () => {
 			headers: headers("sqrk_unknown", "GET"),
 		});
 		expect(response.status).toBe(401);
+	});
+});
+
+describe("gateway credential access header", () => {
+	function gatewayApp(authMode: "gateway" | "api_key" = "gateway") {
+		const lookups: string[] = [];
+		const inner = projectContextResolver({
+			contexts: [projectInstanceContext("voysee")],
+			credentials: { "full-key": "voysee" },
+		});
+		const app = createBillingApp({
+			env: { ...env, authMode, trustGatewayProjectHeader: authMode === "gateway" },
+			connections: fixtureConnections(env.connectionFixtures),
+			projectContextResolver: {
+				...inner,
+				resolveInstanceKey: (key) => {
+					lookups.push(key);
+					return inner.resolveInstanceKey(key);
+				},
+			},
+			entitlementService: new EntitlementService({
+				async getEntitlementSnapshot() {
+					return snapshot;
+				},
+			}),
+		});
+		return { app, lookups };
+	}
+	const gatewayHeaders = (access?: string): Record<string, string> => ({
+		"x-billing-project-key": "voysee",
+		"content-type": "application/json",
+		"idempotency-key": "gateway-access",
+		...(access === undefined ? {} : { "x-billing-credential-access": access }),
+	});
+	const read = "/v1/billing-accounts/account-1/entitlements";
+	const write = "/v1/billing-accounts/account-1/usage/consume";
+
+	it("restricts a request the gateway marks read_only exactly like a read-only key", async () => {
+		const { app } = gatewayApp();
+		const refused = await testRequest(withOpenApiAssertions(app), write, {
+			method: "POST",
+			headers: gatewayHeaders(" read_only "),
+			body: "{}",
+		});
+		expect(refused.status).toBe(403);
+		expect(await refused.json()).toEqual(refusal);
+		const allowed = await testRequest(app, read, { headers: gatewayHeaders("read_only") });
+		expect(allowed.status).toBe(200);
+	});
+
+	it("keeps full access when the header is absent or says full", async () => {
+		const { app } = gatewayApp();
+		for (const access of [undefined, "full"]) {
+			const response = await testRequest(app, write, {
+				method: "POST",
+				headers: gatewayHeaders(access),
+				body: "{}",
+			});
+			// The empty body fails validation: the request got past the access gate.
+			expect([access, response.status]).toEqual([access, 400]);
+			expect(await response.json()).not.toMatchObject({
+				error: { code: "READ_ONLY_CREDENTIAL" },
+			});
+		}
+	});
+
+	it("refuses any other value before resolving the project, never reading it as full", async () => {
+		const { app, lookups } = gatewayApp();
+		for (const access of ["readonly", "READ_ONLY", "", "read_only, full", "admin"]) {
+			const response = await testRequest(withOpenApiAssertions(app), read, {
+				headers: gatewayHeaders(access),
+			});
+			expect([access, response.status]).toEqual([access, 400]);
+			expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+		}
+		expect(lookups).toEqual([]);
+	});
+
+	it("ignores the header entirely in api_key mode, where the stored credential decides", async () => {
+		const { app } = gatewayApp("api_key");
+		const apiKeyHeaders = (access: string) => ({
+			authorization: "Bearer full-key",
+			"content-type": "application/json",
+			"idempotency-key": "api-key-mode",
+			"x-billing-credential-access": access,
+		});
+		// A value that gateway mode would refuse does not even get looked at.
+		const readResponse = await testRequest(app, read, { headers: apiKeyHeaders("nonsense") });
+		expect(readResponse.status).toBe(200);
+		// A client cannot downgrade or upgrade itself: the full key still reaches the write route,
+		// which then fails on its empty body rather than on access.
+		const writeResponse = await testRequest(app, write, {
+			method: "POST",
+			headers: apiKeyHeaders("read_only"),
+			body: "{}",
+		});
+		expect(writeResponse.status).toBe(400);
+		expect(await writeResponse.json()).not.toMatchObject({
+			error: { code: "READ_ONLY_CREDENTIAL" },
+		});
 	});
 });
