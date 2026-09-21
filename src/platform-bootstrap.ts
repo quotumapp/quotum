@@ -12,6 +12,7 @@ import {
 } from "./platform/bootstrap/service";
 import { generateProjectApiCredential } from "./platform/credentials/project-api-token";
 import { writeStdout } from "./shared/cli-output";
+import type { CredentialAccess } from "./shared/credential-access";
 
 if (import.meta.main) {
 	await runPlatformBootstrap();
@@ -37,6 +38,8 @@ async function runPlatformBootstrap(): Promise<void> {
 				manifest,
 				inspection.credentialsToIssue,
 				mode.credentialsOut,
+				writeStdout,
+				inspection.readOnlyCredentialsToIssue,
 			);
 		}
 	} finally {
@@ -47,8 +50,13 @@ async function runPlatformBootstrap(): Promise<void> {
 export function platformBootstrapCheckExitCode(inspection: {
 	state: "empty" | "exact";
 	credentialsToIssue: readonly string[];
+	readOnlyCredentialsToIssue?: readonly string[];
 }): 0 | 2 {
-	return inspection.state === "exact" && inspection.credentialsToIssue.length === 0 ? 0 : 2;
+	return inspection.state === "exact" &&
+		inspection.credentialsToIssue.length === 0 &&
+		(inspection.readOnlyCredentialsToIssue ?? []).length === 0
+		? 0
+		: 2;
 }
 
 export async function applyPlatformBootstrap(
@@ -57,18 +65,27 @@ export async function applyPlatformBootstrap(
 	credentialsToIssue: readonly string[],
 	credentialsOut: string | null,
 	writeSummary: (message: string) => void = writeStdout,
+	readOnlyCredentialsToIssue: readonly string[] = [],
 ): Promise<void> {
-	if (credentialsToIssue.length > 0 && credentialsOut === null) {
+	if (
+		credentialsToIssue.length + readOnlyCredentialsToIssue.length > 0 &&
+		credentialsOut === null
+	) {
 		throw new Error("--credentials-out is required when bootstrap will issue credentials");
 	}
 
-	const generated = credentialsToIssue.map((projectInstanceKey) => ({
-		projectInstanceKey,
-		...generateProjectApiCredential(
-			platformBootstrapCredentialEnvironment(manifest, projectInstanceKey),
-			"full",
-		),
-	}));
+	const generate = (keys: readonly string[], access: CredentialAccess) =>
+		keys.map((projectInstanceKey) => ({
+			projectInstanceKey,
+			...generateProjectApiCredential(
+				platformBootstrapCredentialEnvironment(manifest, projectInstanceKey, access),
+				access,
+			),
+		}));
+	const generated = [
+		...generate(credentialsToIssue, "full"),
+		...generate(readOnlyCredentialsToIssue, "read_only"),
+	];
 	let outputCreated = false;
 	let result: PlatformBootstrapResult;
 	try {
@@ -83,6 +100,7 @@ export async function applyPlatformBootstrap(
 				credentialId: credential.credentialId,
 				projectInstanceKey: credential.projectInstanceKey,
 				environment: credential.environment,
+				access: credential.access,
 				secretVerifier: credential.secretVerifier,
 			})),
 		);
@@ -109,10 +127,22 @@ export async function applyPlatformBootstrap(
 	);
 }
 
+/**
+ * Full keys keep their `credentials` array, one entry per instance, so existing readers are
+ * unaffected. Read-only keys go to `readOnlyCredentials`, present only when any were issued.
+ */
 export async function writePlatformCredentialOutput(
 	path: string,
-	credentials: readonly { projectInstanceKey: string; token: string }[],
+	credentials: readonly { projectInstanceKey: string; token: string; access?: CredentialAccess }[],
 ): Promise<void> {
+	const entries = (access: CredentialAccess) =>
+		credentials
+			.filter((credential) => (credential.access ?? "full") === access)
+			.map((credential) => ({
+				projectInstanceKey: credential.projectInstanceKey,
+				credential: credential.token,
+			}));
+	const readOnly = entries("read_only");
 	let output: Awaited<ReturnType<typeof open>> | undefined;
 	try {
 		output = await open(path, "wx", 0o600);
@@ -120,10 +150,8 @@ export async function writePlatformCredentialOutput(
 			`${JSON.stringify(
 				{
 					version: 1,
-					credentials: credentials.map((credential) => ({
-						projectInstanceKey: credential.projectInstanceKey,
-						credential: credential.token,
-					})),
+					credentials: entries("full"),
+					...(readOnly.length === 0 ? {} : { readOnlyCredentials: readOnly }),
 				},
 				null,
 				2,

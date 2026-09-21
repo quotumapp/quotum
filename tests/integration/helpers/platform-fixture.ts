@@ -29,6 +29,17 @@ export function integrationProjectCredential(projectInstanceKey = "voysee"): str
 	return credential;
 }
 
+/** The read-only key the lane bootstrap issued for the instance (`sqrk_` or `pqrk_`). */
+export function integrationProjectReadOnlyCredential(projectInstanceKey = "voysee"): string {
+	const raw = process.env.BILLING_TEST_PROJECT_READ_ONLY_CREDENTIALS_JSON;
+	const credential =
+		raw === undefined ? undefined : (JSON.parse(raw) as Record<string, string>)[projectInstanceKey];
+	if (credential === undefined) {
+		throw new Error(`Integration read-only credential ${projectInstanceKey} is not configured`);
+	}
+	return credential;
+}
+
 export function integrationProjectContextResolver(): ProjectInstanceContextResolver {
 	return {
 		async resolveCredential(credential) {

@@ -29,7 +29,7 @@ export function actionCapability(action: string, environment: MerchantScope["env
 	if (action === "connections.manage")
 		return environment === "production" ? "production.connections.manage" : "sandbox.configure";
 	if (action === "environment.activate") return "production.activate";
-	if (action === "credentials.rotate")
+	if (action === "credentials.rotate" || action === "credentials.rotate_read_only")
 		return environment === "production"
 			? "production.credentials.rotate"
 			: "sandbox.credentials.rotate";
@@ -73,14 +73,19 @@ export class MerchantStepUp {
 				? /^(?:[0-9a-f-]{36}|disable:(?:stripe|apple|google|projection):[0-9]+)$/
 				: input.action === "environment.activate"
 					? /^[a-f0-9]{64}$/
-					: input.action === "credentials.rotate"
+					: input.action === "credentials.rotate" || input.action === "credentials.rotate_read_only"
 						? /^[A-Za-z0-9._:-]{8,128}$/
 						: /^(POST|PUT|DELETE) \/api\/billing\/[^ ]+ [a-f0-9]{64}$/;
 		if (!setupTarget.test(input.target))
 			throw new MerchantError("ACTION_REJECTED", "Confirm a saved operation identifier.");
 		if (
 			input.request &&
-			["connections.manage", "environment.activate", "credentials.rotate"].includes(input.action)
+			[
+				"connections.manage",
+				"environment.activate",
+				"credentials.rotate",
+				"credentials.rotate_read_only",
+			].includes(input.action)
 		)
 			throw new MerchantError(
 				"REQUEST_REJECTED",

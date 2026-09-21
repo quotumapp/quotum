@@ -317,7 +317,7 @@ export class MerchantOnboarding {
 			if (!instance)
 				throw new MerchantError("SANDBOX_NOT_READY", "Finish sandbox provisioning first.", 409);
 			const credential = generateProjectApiCredential("sandbox", "full");
-			await tx`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND revoked_at IS NULL`;
+			await tx`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND access=${credential.access} AND revoked_at IS NULL`;
 			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,access,secret_verifier) VALUES(${credential.credentialId},${instance.id},'billing_api',${credential.access},${credential.secretVerifier})`;
 			await tx`UPDATE platform_provisioning_operations SET credential_delivery='delivered' WHERE id=${id}`;
 			await this.store.audit(
@@ -326,7 +326,7 @@ export class MerchantOnboarding {
 				op.organization_id,
 				rotate ? "credential.rotated" : "credential.issued",
 				instance.id,
-				{ environment: "sandbox" },
+				{ environment: "sandbox", access: credential.access },
 			);
 			delivered = credential.token;
 			return { state: "delivered" };

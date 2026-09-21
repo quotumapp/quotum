@@ -8,10 +8,12 @@ import {
 import { PlatformBootstrapService } from "../../src/platform/bootstrap/service";
 import { generateProjectApiCredential } from "../../src/platform/credentials/project-api-token";
 import type { ProjectInstanceContext } from "../../src/projects/context";
+import type { CredentialAccess } from "../../src/shared/credential-access";
 
 export interface TestPlatformBootstrapResult {
 	contexts: readonly ProjectInstanceContext[];
 	credentials: Readonly<Record<string, string>>;
+	readOnlyCredentials: Readonly<Record<string, string>>;
 }
 
 export async function bootstrapTestPlatform(
@@ -23,28 +25,39 @@ export async function bootstrapTestPlatform(
 	try {
 		const service = new PlatformBootstrapService(new BunPlatformUnitOfWork(connection.sql));
 		const inspection = await service.inspect(manifest);
-		const generated = inspection.credentialsToIssue.map((projectInstanceKey) => ({
-			projectInstanceKey,
-			...generateProjectApiCredential(
-				platformBootstrapCredentialEnvironment(manifest, projectInstanceKey),
-				"full",
-			),
-		}));
+		const generate = (keys: readonly string[], access: CredentialAccess) =>
+			keys.map((projectInstanceKey) => ({
+				projectInstanceKey,
+				...generateProjectApiCredential(
+					platformBootstrapCredentialEnvironment(manifest, projectInstanceKey, access),
+					access,
+				),
+			}));
+		const generated = [
+			...generate(inspection.credentialsToIssue, "full"),
+			...generate(inspection.readOnlyCredentialsToIssue, "read_only"),
+		];
 		await service.apply(
 			manifest,
 			generated.map((credential) => ({
 				credentialId: credential.credentialId,
 				projectInstanceKey: credential.projectInstanceKey,
 				environment: credential.environment,
+				access: credential.access,
 				secretVerifier: credential.secretVerifier,
 			})),
 		);
+		const tokens = (access: CredentialAccess) =>
+			Object.fromEntries(
+				generated
+					.filter((credential) => credential.access === access)
+					.map((credential) => [credential.projectInstanceKey, credential.token]),
+			);
 
 		return {
 			contexts: await resolveTestPlatformContextsWithConnection(connection.sql, manifest),
-			credentials: Object.fromEntries(
-				generated.map((credential) => [credential.projectInstanceKey, credential.token]),
-			),
+			credentials: tokens("full"),
+			readOnlyCredentials: tokens("read_only"),
 		};
 	} finally {
 		await connection.sql.close();
@@ -84,12 +97,14 @@ export function createTestPlatformManifest(
 							environment: "sandbox" as const,
 							lifecycleStatus: "active" as const,
 							issueCredential: true,
+							issueReadOnlyCredential: true,
 						},
 						{
 							key: logicalProjectKey,
 							environment: "production" as const,
 							lifecycleStatus: "active" as const,
 							issueCredential: true,
+							issueReadOnlyCredential: true,
 						},
 					],
 				},

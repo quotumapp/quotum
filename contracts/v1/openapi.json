@@ -36004,6 +36004,13 @@
                   "properties": {
                     "data": {
                       "properties": {
+                        "access": {
+                          "enum": [
+                            "full",
+                            "read_only"
+                          ],
+                          "type": "string"
+                        },
                         "active": {
                           "type": "boolean"
                         },
@@ -36487,6 +36494,14 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "access": {
+                    "default": "full",
+                    "enum": [
+                      "full",
+                      "read_only"
+                    ],
+                    "type": "string"
+                  },
                   "scope": {
                     "additionalProperties": false,
                     "properties": {
@@ -36532,6 +36547,13 @@
                   "properties": {
                     "data": {
                       "properties": {
+                        "access": {
+                          "enum": [
+                            "full",
+                            "read_only"
+                          ],
+                          "type": "string"
+                        },
                         "active": {
                           "type": "boolean"
                         },
@@ -40214,7 +40236,8 @@
                       "operations.write",
                       "connections.manage",
                       "environment.activate",
-                      "credentials.rotate"
+                      "credentials.rotate",
+                      "credentials.rotate_read_only"
                     ],
                     "type": "string"
                   },

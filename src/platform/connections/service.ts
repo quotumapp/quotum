@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { CredentialAccess } from "../../shared/credential-access";
 import { isBillingProvider } from "../../shared/provider-capabilities";
 import type { PlatformProjectInstanceRecord } from "../application/ports";
 import type { MerchantScope, ReadinessBlockerDetail } from "../contracts";
@@ -457,12 +458,20 @@ export class MerchantConnections {
 			...(credential ? { credential } : {}),
 		};
 	}
+	/**
+	 * Replaces the instance's live credential of one kind, or issues the first read-only one. The two
+	 * kinds never revoke each other. The receipt and the step-up grant are bound to the kind, so a
+	 * confirmation given for a read-only key cannot replace the backend's full key.
+	 */
 	async rotateCredential(
 		identity: MerchantIdentity,
 		scope: MerchantScope,
 		key: string,
 		grant: string | null,
+		access: CredentialAccess = "full",
 	) {
+		const receiptAction = access === "full" ? "credential.rotate" : `credential.rotate:${access}`;
+		const stepUpAction = access === "full" ? "credentials.rotate" : "credentials.rotate_read_only";
 		let credential: string | null = null;
 		const result = await this.store.sql.begin(async (tx) => {
 			const instance = await this.scope(identity, scope, true, tx);
@@ -474,25 +483,27 @@ export class MerchantConnections {
 					? "production.credentials.rotate"
 					: "sandbox.credentials.rotate",
 			);
-			const saved = await this.receipt(tx, instance.id, key, "credential.rotate");
+			const saved = await this.receipt(tx, instance.id, key, receiptAction);
 			if (saved) return saved;
 			if (instance.lifecycleStatus !== "active")
 				throw new MerchantError("ENVIRONMENT_INACTIVE", "Activate the environment first.", 409);
-			await this.confirm(tx, identity, scope, "credentials.rotate", key, grant);
-			const generated = generateProjectApiCredential(scope.environment, "full");
-			await tx`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND revoked_at IS NULL`;
+			await this.confirm(tx, identity, scope, stepUpAction, key, grant);
+			const generated = generateProjectApiCredential(scope.environment, access);
+			const replaced = await tx<
+				{ id: string }[]
+			>`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND access=${access} AND revoked_at IS NULL RETURNING id`;
 			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,access,secret_verifier) VALUES(${generated.credentialId},${instance.id},'billing_api',${generated.access},${generated.secretVerifier})`;
 			const member = await this.store.membership(tx, identity.principalId, scope.organizationSlug);
 			await this.store.audit(
 				tx,
 				identity.principalId,
 				member.organization_id,
-				"credential.rotated",
+				replaced.length === 0 ? "credential.issued" : "credential.rotated",
 				instance.id,
-				{},
+				{ access },
 			);
-			const result = { credentialDisclosed: false };
-			await this.saveReceipt(tx, instance.id, key, "credential.rotate", result);
+			const result = { access, credentialDisclosed: false };
+			await this.saveReceipt(tx, instance.id, key, receiptAction, result);
 			credential = generated.token;
 			return result;
 		});

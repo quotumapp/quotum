@@ -165,6 +165,27 @@ same transaction, so the replaced key is rejected from the next request. Write t
 every integration's secret store and redeploy those backends. `platform:bootstrap` issues only for
 instances that have never had a credential, so it does not rotate.
 
+### Read-only credentials
+
+An instance can also hold one [read-only credential](api.md#read-only-credentials) (`sqrk_<secret>`
+or `pqrk_<secret>`) for inspection tools such as the [MCP server](mcp.md). It is issued on request,
+never automatically:
+
+- Merchant management: `POST /api/platform/environments/credentials/rotate` with
+  `"access": "read_only"` issues the key when the instance has none and replaces it otherwise. It
+  needs the same capability as a full rotation and, in production, a step-up grant for the action
+  `credentials.rotate_read_only`. Grants and idempotency keys are bound to the kind: a confirmation
+  given for a read-only key cannot replace the backend's key, and reusing an idempotency key for the
+  other kind is an `IDEMPOTENCY_CONFLICT`.
+- `platform:bootstrap`: set `"issueReadOnlyCredential": true` on an active sandbox or production
+  instance. The token is written to a separate `readOnlyCredentials` array of the
+  `--credentials-out` file, so the `credentials` array keeps one entry per instance. Like full keys,
+  bootstrap issues a read-only key once and never rotates it.
+
+The two kinds rotate independently: replacing one never revokes the other. There is no route that
+withdraws a read-only key without minting a replacement; to retire one, rotate it and discard the
+new token. The audit trail records `credential.issued` or `credential.rotated` with the `access`.
+
 ### Replacing retired `qpk_v1` credentials
 
 Earlier releases issued `qpk_v1.<uuid>.<secret>` credentials. They no longer authenticate and are

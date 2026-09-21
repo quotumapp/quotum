@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { CredentialAccess } from "../../shared/credential-access";
 
 const slugSchema = z
 	.string()
@@ -13,22 +14,27 @@ const instanceSchema = z
 		environment: z.enum(["sandbox", "production", "internal"]),
 		lifecycleStatus: z.enum(["inactive", "active", "suspended", "deactivating", "deactivated"]),
 		issueCredential: z.boolean(),
+		/** Also issue a read-only key (`sqrk_`/`pqrk_`) for inspection tools such as the MCP server. */
+		issueReadOnlyCredential: z.boolean().optional(),
 	})
 	.strict()
 	.superRefine((instance, context) => {
-		if (instance.environment === "internal" && instance.issueCredential) {
-			context.addIssue({
-				code: "custom",
-				path: ["issueCredential"],
-				message: "internal instances cannot receive project API credentials",
-			});
-		}
-		if (instance.issueCredential && instance.lifecycleStatus !== "active") {
-			context.addIssue({
-				code: "custom",
-				path: ["issueCredential"],
-				message: "only active instances can receive project API credentials",
-			});
+		for (const field of ["issueCredential", "issueReadOnlyCredential"] as const) {
+			if (!instance[field]) continue;
+			if (instance.environment === "internal") {
+				context.addIssue({
+					code: "custom",
+					path: [field],
+					message: "internal instances cannot receive project API credentials",
+				});
+			}
+			if (instance.lifecycleStatus !== "active") {
+				context.addIssue({
+					code: "custom",
+					path: [field],
+					message: "only active instances can receive project API credentials",
+				});
+			}
 		}
 	});
 const projectSchema = z
@@ -121,12 +127,15 @@ export type PlatformBootstrapInstance =
 export function platformBootstrapCredentialEnvironment(
 	manifest: PlatformBootstrapManifest,
 	projectInstanceKey: string,
+	access: CredentialAccess = "full",
 ): "sandbox" | "production" {
 	const instance = manifest.organizations
 		.flatMap((organization) => organization.projects)
 		.flatMap((project) => project.instances)
 		.find((candidate) => candidate.key === projectInstanceKey);
-	if (instance === undefined || !instance.issueCredential || instance.environment === "internal") {
+	const declared =
+		access === "full" ? instance?.issueCredential : instance?.issueReadOnlyCredential;
+	if (instance === undefined || !declared || instance.environment === "internal") {
 		throw new Error(`Bootstrap does not declare a credential for ${projectInstanceKey}`);
 	}
 	return instance.environment;
