@@ -109,6 +109,12 @@ export const googleCapabilities: ProviderCapabilityDeclaration = {
 		"subscription.change.period_end": providerManaged(
 			"Deferred plan changes are scheduled in Google Play; Quotum records the resulting purchase state.",
 		),
+		"subscription.cancel": providerManaged(
+			"Cancellation happens in the store's subscription settings; Quotum records the resulting notification.",
+		),
+		"subscription.uncancel": providerManaged(
+			"Resubscribing before the period ends happens in the store's subscription settings; Quotum records the resulting notification.",
+		),
 		"settlement.collect_finalized_charge": unsupported(noUsageInvoices),
 		"adjustment.issue": unsupported(
 			"Adjustments apply to postpaid usage invoices, which Google Play purchases cannot carry.",

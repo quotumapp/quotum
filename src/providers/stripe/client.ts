@@ -51,6 +51,11 @@ interface StripeClientLike {
 			params: Stripe.SubscriptionUpdateParams,
 			options?: Stripe.RequestOptions,
 		): Promise<Stripe.Subscription>;
+		cancel?(
+			subscriptionId: string,
+			params?: Stripe.SubscriptionCancelParams,
+			options?: Stripe.RequestOptions,
+		): Promise<Stripe.Subscription>;
 	};
 	invoices?: {
 		create(
@@ -203,6 +208,21 @@ export class StripeBillingClient {
 		if (this.stripe.subscriptions.update === undefined)
 			throw new Error("Stripe subscription updates are unavailable");
 		return this.stripe.subscriptions.update(subscriptionId, params, { idempotencyKey });
+	}
+
+	/**
+	 * Ends the subscription now. Quotum asks for no proration credit and no closing invoice: an
+	 * immediate cancellation ends access without refunding the paid period, and postpaid usage in
+	 * the open period settles on its own window rather than being pulled forward.
+	 */
+	cancelSubscription(subscriptionId: string, idempotencyKey: string) {
+		if (this.stripe.subscriptions.cancel === undefined)
+			throw new Error("Stripe subscription cancellation is unavailable");
+		return this.stripe.subscriptions.cancel(
+			subscriptionId,
+			{ prorate: false, invoice_now: false },
+			{ idempotencyKey },
+		);
 	}
 
 	createInvoice(params: Stripe.InvoiceCreateParams, idempotencyKey: string) {

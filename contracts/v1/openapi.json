@@ -268,6 +268,27 @@
           },
           {
             "properties": {
+              "kind": {
+                "enum": [
+                  "cancellation_pending"
+                ],
+                "type": "string"
+              },
+              "required": {
+                "enum": [
+                  true
+                ],
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "kind",
+              "required"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
               "allowed": {
                 "items": {
                   "enum": [
@@ -468,6 +489,7 @@
               "CURRENCY_UNSUPPORTED",
               "CATALOG_BINDING_REQUIRED",
               "SUBSCRIPTION_STATE",
+              "CANCELLATION_NOT_PENDING",
               "COLLECTION_METHOD",
               "BILLING_INTERVAL",
               "SAVED_PAYMENT_METHOD_REQUIRED",
@@ -13130,7 +13152,10 @@
                 "enum": [
                   "checkout_plan",
                   "checkout_product",
-                  "subscription_change"
+                  "subscription_change",
+                  "cancel",
+                  "uncancel",
+                  "none"
                 ],
                 "type": "string"
               },
@@ -13143,6 +13168,61 @@
               },
               "billingAccountId": {
                 "type": "string"
+              },
+              "cancellation": {
+                "properties": {
+                  "accessEndsAt": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "action": {
+                    "enum": [
+                      "cancel",
+                      "uncancel",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "activeAddOnSubscriptionIds": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "cancelAtPeriodEnd": {
+                    "type": "boolean"
+                  },
+                  "keepsGrantedAllocations": {
+                    "type": "boolean"
+                  },
+                  "postpaidUsageSettlesAt": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "supersedesChangeId": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  }
+                },
+                "required": [
+                  "action",
+                  "accessEndsAt",
+                  "cancelAtPeriodEnd",
+                  "keepsGrantedAllocations",
+                  "postpaidUsageSettlesAt",
+                  "supersedesChangeId",
+                  "activeAddOnSubscriptionIds"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
               },
               "changeKind": {
                 "anyOf": [
@@ -13530,6 +13610,7 @@
               "promotionCodeEntry",
               "promotion",
               "nextCycle",
+              "cancellation",
               "effectiveMode",
               "effectiveAt",
               "prorationBehavior",
@@ -13668,6 +13749,71 @@
                   "effectiveAt"
                 ],
                 "type": "object"
+              },
+              {
+                "properties": {
+                  "action": {
+                    "enum": [
+                      "cancel",
+                      "uncancel",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "cancelAtPeriodEnd": {
+                    "type": "boolean"
+                  },
+                  "effectiveAt": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "effectiveMode": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "enum": [
+                          "immediate"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "enum": [
+                          "period_end"
+                        ],
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "externalSubscriptionId": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "subscription_cancellation"
+                    ],
+                    "type": "string"
+                  },
+                  "supersededChangeId": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "action",
+                  "externalSubscriptionId",
+                  "effectiveMode",
+                  "effectiveAt",
+                  "cancelAtPeriodEnd",
+                  "supersededChangeId"
+                ],
+                "type": "object"
               }
             ]
           },
@@ -13796,6 +13942,71 @@
                   "status",
                   "effectiveMode",
                   "effectiveAt"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "action": {
+                    "enum": [
+                      "cancel",
+                      "uncancel",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "cancelAtPeriodEnd": {
+                    "type": "boolean"
+                  },
+                  "effectiveAt": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "effectiveMode": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "enum": [
+                          "immediate"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "enum": [
+                          "period_end"
+                        ],
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "externalSubscriptionId": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "subscription_cancellation"
+                    ],
+                    "type": "string"
+                  },
+                  "supersededChangeId": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "action",
+                  "externalSubscriptionId",
+                  "effectiveMode",
+                  "effectiveAt",
+                  "cancelAtPeriodEnd",
+                  "supersededChangeId"
                 ],
                 "type": "object"
               }
@@ -16502,6 +16713,9 @@
               "settlement.collect_finalized_charge": {
                 "$ref": "#/components/schemas/ProviderOperationSupport"
               },
+              "subscription.cancel": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
               "subscription.change.apply": {
                 "$ref": "#/components/schemas/ProviderOperationSupport"
               },
@@ -16512,6 +16726,9 @@
                 "$ref": "#/components/schemas/ProviderOperationSupport"
               },
               "subscription.reconcile": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
+              "subscription.uncancel": {
                 "$ref": "#/components/schemas/ProviderOperationSupport"
               },
               "topup.automatic": {
@@ -16546,6 +16763,8 @@
               "subscription.change.preview",
               "subscription.change.apply",
               "subscription.change.period_end",
+              "subscription.cancel",
+              "subscription.uncancel",
               "settlement.collect_finalized_charge",
               "adjustment.issue",
               "refund.sync",
@@ -16871,6 +17090,8 @@
           "subscription.change.preview",
           "subscription.change.apply",
           "subscription.change.period_end",
+          "subscription.cancel",
+          "subscription.uncancel",
           "settlement.collect_finalized_charge",
           "adjustment.issue",
           "refund.sync",
@@ -21676,6 +21897,54 @@
                           "kind",
                           "externalSubscriptionId",
                           "targetPlanKey"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "effectiveMode": {
+                            "enum": [
+                              "immediate",
+                              "period_end"
+                            ],
+                            "type": "string"
+                          },
+                          "externalSubscriptionId": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "cancel"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "externalSubscriptionId",
+                          "effectiveMode"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "externalSubscriptionId": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "uncancel"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "externalSubscriptionId"
                         ],
                         "type": "object"
                       }
@@ -54215,6 +54484,54 @@
                           "kind",
                           "externalSubscriptionId",
                           "targetPlanKey"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "effectiveMode": {
+                            "enum": [
+                              "immediate",
+                              "period_end"
+                            ],
+                            "type": "string"
+                          },
+                          "externalSubscriptionId": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "cancel"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "externalSubscriptionId",
+                          "effectiveMode"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "externalSubscriptionId": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "uncancel"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "externalSubscriptionId"
                         ],
                         "type": "object"
                       }

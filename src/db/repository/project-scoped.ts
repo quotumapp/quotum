@@ -12,6 +12,7 @@ import type {
 	StripeCheckoutPromotionFacts,
 } from "../../billing/promotions";
 import type {
+	SubscriptionCancellationContext,
 	SubscriptionChangeInput,
 	SubscriptionChangeOperation,
 	SubscriptionChangePreview,
@@ -102,6 +103,13 @@ export class ProjectScopedBillingRepository {
 		input: Omit<SubscriptionChangeInput, "idempotencyKey" | "expectedStateFingerprint">,
 	): Promise<SubscriptionChangePreview> {
 		return await this.repository.previewSubscriptionChange(this.project, input);
+	}
+
+	async previewSubscriptionCancellation(input: {
+		billingAccountId: string;
+		externalSubscriptionId: string;
+	}): Promise<SubscriptionCancellationContext> {
+		return await this.repository.previewSubscriptionCancellation(this.project, input);
 	}
 
 	async createCommercialActionPreview(
@@ -209,6 +217,21 @@ export class ProjectScopedBillingRepository {
 		result: CommercialActionExecutionResult;
 	}): Promise<CommercialActionExecutionResult> {
 		return await this.repository.completeCommercialActionExecution(this.project, input);
+	}
+
+	async completeSubscriptionCancellation(input: {
+		billingAccountId: string;
+		previewToken: string;
+		idempotencyKey: string;
+		externalSubscriptionId: string;
+		supersedeReason: string;
+		supersedesPendingChange: boolean;
+		result: Omit<
+			Extract<CommercialActionExecutionResult, { kind: "subscription_cancellation" }>,
+			"supersededChangeId"
+		>;
+	}): Promise<CommercialActionExecutionResult> {
+		return await this.repository.completeSubscriptionCancellation(this.project, input);
 	}
 
 	async markSubscriptionChangeApplied(

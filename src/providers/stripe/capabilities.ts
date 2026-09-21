@@ -15,6 +15,7 @@ const pricingTest = "tests/billing/pricing.test.ts";
 const normalizerTest = "tests/providers/stripe/normalizer.test.ts";
 const promotionProvisioningTest = "tests/providers/stripe/promotions.test.ts";
 const serviceTest = "tests/providers/stripe/service.test.ts";
+const cancellationTest = "tests/providers/stripe/commercial-cancellation.test.ts";
 const autoTopupWorkerTest = "tests/workers/auto-topup.test.ts";
 const recurringBillingWorkerTest = "tests/workers/recurring-billing.test.ts";
 
@@ -23,6 +24,9 @@ const changeableSubscription: CapabilityCondition = {
 	kind: "subscription_state",
 	allowed: ["active", "grace_period", "billing_retry", "cancelled"],
 };
+
+/** Uncancelling needs something to clear: a period-end cancellation that has not run yet. */
+const cancellationPending: CapabilityCondition = { kind: "cancellation_pending", required: true };
 
 const changeTargets =
 	"The target plan must be the same kind as the current plan and publish Stripe base or licensed prices.";
@@ -126,6 +130,16 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 		"subscription.change.period_end": native([stripeFlowsTest, pricingTest], {
 			conditions: [changeableSubscription],
 			notes: `${changeTargets} Downgrades default to the end of the current period, when the recurring billing worker applies them.`,
+		}),
+		"subscription.cancel": native([stripeFlowsTest, cancellationTest], {
+			conditions: [changeableSubscription],
+			notes:
+				"An immediate cancellation ends the Stripe subscription with no proration credit and no closing invoice; a period-end cancellation sets `cancel_at_period_end`. A queued change for the subscription is superseded, and a base plan cannot be cancelled while add-on subscriptions are active.",
+		}),
+		"subscription.uncancel": native([stripeFlowsTest, cancellationTest], {
+			conditions: [changeableSubscription, cancellationPending],
+			notes:
+				"Clearing `cancel_at_period_end` only restores renewal; it does not restore a subscription change the cancellation superseded, and a subscription Stripe already ended cannot be cleared.",
 		}),
 		"settlement.collect_finalized_charge": composed(
 			"Stripe invoices with a one-off usage line",

@@ -79,10 +79,13 @@ localDescribe("Provider capability reads integration", () => {
 			pendingChange: null,
 		});
 		for (const entry of data.subscriptions) {
+			// Uncancelling needs a pending cancellation, which only the cancelled subscription has.
 			expect(entry.actions.map((action) => [action.operation, action.outcome])).toEqual([
 				["subscription.change.preview", "available"],
 				["subscription.change.apply", "available"],
 				["subscription.change.period_end", "available"],
+				["subscription.cancel", "available"],
+				["subscription.uncancel", entry.cancelAtPeriodEnd ? "available" : "blocked"],
 			]);
 		}
 		expect(outcome(data.account, "stripe", "checkout.hosted")).toBe("available");

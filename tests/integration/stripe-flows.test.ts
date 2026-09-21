@@ -34,6 +34,7 @@ import {
 } from "./helpers/local-postgres";
 import { publishAiCreditsCatalog } from "./helpers/metering-catalog";
 import { seedPhase3CatalogMigration, seedPhase3ControlCatalog } from "./helpers/phase3-fixtures";
+import { integrationProjectReadOnlyCredential } from "./helpers/platform-fixture";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 let context: LocalPostgresContext;
@@ -557,6 +558,425 @@ localDescribe("Stripe route flows integration", () => {
 
 		// A cancelled change is terminal: the next poll leaves it alone.
 		expect(await worker.runOnce()).toMatchObject({ subscriptionChangesCancelled: 0, failed: 0 });
+	});
+
+	// capability: subscription.cancel
+	// capability: subscription.uncancel
+	it("cancels a Stripe subscription at period end, uncancels it, then ends it immediately", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		const project = integrationProjectContext();
+		const { app, stripe, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const periodEnd = new Date(Math.floor(Date.now() / 1000) * 1000 + 29 * 24 * 60 * 60 * 1000);
+		await context.sql`
+			UPDATE subscriptions SET current_period_end = ${periodEnd.toISOString()}::timestamptz
+			WHERE project_id = ${project.projectInstanceId}::uuid
+				AND external_subscription_id = 'sub_migrate_stripe'
+		`;
+		const preview = async (intent: Record<string, unknown>) => {
+			const response = await testRequest(
+				app,
+				"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+				{ method: "POST", headers, body: JSON.stringify({ intent }) },
+			);
+			return { status: response.status, body: await response.json() };
+		};
+		const execute = (previewToken: string, idempotencyKey: string) =>
+			testRequest(app, "/v1/billing-accounts/migration-stripe/commercial-actions", {
+				method: "POST",
+				headers: { ...headers, "idempotency-key": idempotencyKey },
+				body: JSON.stringify({ previewToken }),
+			});
+
+		const periodEndCancel = await preview({
+			kind: "cancel",
+			externalSubscriptionId: "sub_migrate_stripe",
+			effectiveMode: "period_end",
+		});
+		expect(periodEndCancel.status).toBe(200);
+		expect(periodEndCancel.body.data).toMatchObject({
+			action: "cancel",
+			effectiveMode: "period_end",
+			effectiveAt: periodEnd.toISOString(),
+			lineItems: [],
+			estimatedTotalMinor: 0,
+			targetId: "sub_migrate_stripe",
+			cancellation: {
+				action: "cancel",
+				accessEndsAt: periodEnd.toISOString(),
+				cancelAtPeriodEnd: true,
+				keepsGrantedAllocations: true,
+				supersedesChangeId: null,
+				activeAddOnSubscriptionIds: [],
+			},
+		});
+
+		const executed = await execute(periodEndCancel.body.data.previewToken, "cancel:period-end");
+		expect(executed.status).toBe(200);
+		expect((await executed.json()).data).toMatchObject({
+			kind: "subscription_cancellation",
+			action: "cancel",
+			externalSubscriptionId: "sub_migrate_stripe",
+			effectiveMode: "period_end",
+			cancelAtPeriodEnd: true,
+			supersededChangeId: null,
+		});
+		expect(stripe.subscriptionUpdates).toHaveLength(1);
+		expect(stripe.subscriptionUpdates[0]).toMatchObject({
+			subscriptionId: "sub_migrate_stripe",
+			params: { cancel_at_period_end: true },
+		});
+		expect(stripe.subscriptionUpdates[0]?.idempotencyKey).toStartWith(
+			"billing:subscription-cancel:commercial:",
+		);
+
+		// Replaying the same key returns the stored result; another key is a conflict.
+		const replay = await execute(periodEndCancel.body.data.previewToken, "cancel:period-end");
+		expect(replay.status).toBe(200);
+		expect((await replay.json()).data).toMatchObject({ action: "cancel" });
+		const conflicting = await execute(periodEndCancel.body.data.previewToken, "cancel:other-key");
+		expect(conflicting.status).toBe(409);
+		expect((await conflicting.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
+		expect(stripe.subscriptionUpdates).toHaveLength(1);
+
+		// Local state only moves through the webhook, so the cancellation is mirrored here.
+		await context.sql`
+			UPDATE subscriptions SET cancel_at_period_end = true
+			WHERE project_id = ${project.projectInstanceId}::uuid
+				AND external_subscription_id = 'sub_migrate_stripe'
+		`;
+		const uncancel = await preview({
+			kind: "uncancel",
+			externalSubscriptionId: "sub_migrate_stripe",
+		});
+		expect(uncancel.body.data).toMatchObject({
+			action: "uncancel",
+			effectiveMode: null,
+			effectiveAt: null,
+			cancellation: { action: "uncancel", cancelAtPeriodEnd: false },
+		});
+		const uncancelled = await execute(uncancel.body.data.previewToken, "uncancel:1");
+		expect(uncancelled.status).toBe(200);
+		expect((await uncancelled.json()).data).toMatchObject({
+			kind: "subscription_cancellation",
+			action: "uncancel",
+			cancelAtPeriodEnd: false,
+		});
+		expect(stripe.subscriptionUpdates.at(-1)?.params).toEqual({ cancel_at_period_end: false });
+		await context.sql`
+			UPDATE subscriptions SET cancel_at_period_end = false
+			WHERE project_id = ${project.projectInstanceId}::uuid
+				AND external_subscription_id = 'sub_migrate_stripe'
+		`;
+
+		const immediate = await preview({
+			kind: "cancel",
+			externalSubscriptionId: "sub_migrate_stripe",
+			effectiveMode: "immediate",
+		});
+		expect(immediate.body.data).toMatchObject({
+			action: "cancel",
+			effectiveMode: "immediate",
+			cancellation: { action: "cancel", cancelAtPeriodEnd: false },
+		});
+		const ended = await execute(immediate.body.data.previewToken, "cancel:immediate");
+		expect(ended.status).toBe(200);
+		expect((await ended.json()).data).toMatchObject({
+			kind: "subscription_cancellation",
+			action: "cancel",
+			effectiveMode: "immediate",
+			cancelAtPeriodEnd: false,
+		});
+		expect(stripe.subscriptionCancellations).toHaveLength(1);
+		expect(stripe.subscriptionCancellations[0]?.subscriptionId).toBe("sub_migrate_stripe");
+		expect(stripe.subscriptionCancellations[0]?.idempotencyKey).toStartWith(
+			"billing:subscription-cancel:commercial:",
+		);
+		const [stored] = await context.sql<Array<{ intent_kind: string; status: string }>>`
+			SELECT intent_kind, status FROM commercial_action_previews
+			WHERE preview_token = ${immediate.body.data.previewToken}::uuid
+		`;
+		expect(stored).toEqual({ intent_kind: "cancel", status: "executed" });
+	});
+
+	// capability: subscription.cancel
+	it("supersedes a queued change, refuses an ended subscription and a stale cancellation preview", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		await context.sql`
+			UPDATE plan_versions version
+			SET tier_rank = 5
+			FROM plans plan, projects project
+			WHERE version.project_id = plan.project_id AND version.plan_id = plan.id
+				AND plan.project_id = project.id AND project.key = 'voysee'
+				AND plan.key = 'migration-plan' AND version.version = 2
+		`;
+		const project = integrationProjectContext();
+		const { app, stripe, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const periodEnd = new Date(Math.floor(Date.now() / 1000) * 1000 + 29 * 24 * 60 * 60 * 1000);
+		await context.sql`
+			UPDATE subscriptions SET current_period_end = ${periodEnd.toISOString()}::timestamptz
+			WHERE project_id = ${project.projectInstanceId}::uuid
+				AND external_subscription_id = 'sub_migrate_stripe'
+		`;
+		const queued = await testRequest(
+			app,
+			"/v1/billing-accounts/migration-stripe/subscriptions/sub_migrate_stripe/changes",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "downgrade-before-cancel" },
+				body: JSON.stringify({
+					targetPlanKey: "migration-plan",
+					quantities: { licensed_seats: 7 },
+				}),
+			},
+		);
+		expect(queued.status).toBe(202);
+		const changeId = (await queued.json()).data.changeId as string;
+
+		const previewResponse = await testRequest(
+			app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: {
+						kind: "cancel",
+						externalSubscriptionId: "sub_migrate_stripe",
+						effectiveMode: "immediate",
+					},
+				}),
+			},
+		);
+		const preview = (await previewResponse.json()).data;
+		expect(preview.cancellation.supersedesChangeId).toBe(changeId);
+		expect(preview.warnings).toContain(`Subscription change ${changeId} will be cancelled.`);
+
+		const executed = await testRequest(
+			app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "cancel-supersedes" },
+				body: JSON.stringify({ previewToken: preview.previewToken }),
+			},
+		);
+		expect(executed.status).toBe(200);
+		expect((await executed.json()).data).toMatchObject({
+			kind: "subscription_cancellation",
+			action: "cancel",
+			supersededChangeId: changeId,
+		});
+		expect(stripe.subscriptionCancellations).toHaveLength(1);
+		const [change] = await context.sql<Array<{ status: string; last_error: string | null }>>`
+			SELECT status, last_error FROM subscription_changes WHERE id = ${changeId}::uuid
+		`;
+		expect(change).toEqual({
+			status: "cancelled",
+			last_error: "Superseded by the cancellation of subscription sub_migrate_stripe",
+		});
+
+		// A preview taken before the state moved cannot be executed afterwards.
+		const stale = await testRequest(
+			app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: {
+						kind: "cancel",
+						externalSubscriptionId: "sub_migrate_stripe",
+						effectiveMode: "period_end",
+					},
+				}),
+			},
+		);
+		const staleToken = (await stale.json()).data.previewToken as string;
+		await context.sql`
+			UPDATE subscriptions SET cancel_at_period_end = true
+			WHERE project_id = ${project.projectInstanceId}::uuid
+				AND external_subscription_id = 'sub_migrate_stripe'
+		`;
+		const staleExecute = await testRequest(
+			app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "cancel-stale" },
+				body: JSON.stringify({ previewToken: staleToken }),
+			},
+		);
+		expect(staleExecute.status).toBe(409);
+		expect((await staleExecute.json()).error.code).toBe("COMMERCIAL_PREVIEW_STALE");
+
+		// Once Stripe has ended the subscription there is nothing left to cancel.
+		await context.sql`
+			UPDATE subscriptions SET status = 'expired'
+			WHERE project_id = ${project.projectInstanceId}::uuid
+				AND external_subscription_id = 'sub_migrate_stripe'
+		`;
+		const ended = await testRequest(
+			app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: {
+						kind: "cancel",
+						externalSubscriptionId: "sub_migrate_stripe",
+						effectiveMode: "immediate",
+					},
+				}),
+			},
+		);
+		expect(ended.status).toBe(409);
+		expect(await ended.json()).toMatchObject({
+			error: {
+				code: "SUBSCRIPTION_NOT_CANCELLABLE",
+				details: { subscriptionStatus: "expired" },
+			},
+		});
+	});
+
+	// capability: subscription.cancel
+	it("refuses to cancel a base plan while add-on subscriptions are active", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		await seedActiveAddOnSubscription(context.sql, "sub_migrate_stripe", "sub_addon_stripe");
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const cancelIntent = (externalSubscriptionId: string) =>
+			testRequest(app, "/v1/billing-accounts/migration-stripe/commercial-actions/preview", {
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: { kind: "cancel", externalSubscriptionId, effectiveMode: "immediate" },
+				}),
+			});
+
+		const base = await cancelIntent("sub_migrate_stripe");
+		expect(base.status).toBe(409);
+		expect(await base.json()).toMatchObject({
+			error: {
+				code: "ADDON_SUBSCRIPTIONS_ACTIVE",
+				details: { addOnSubscriptionIds: ["sub_addon_stripe"] },
+			},
+		});
+
+		// The add-on itself is cancellable; only the base plan under it is held back.
+		const addOn = await cancelIntent("sub_addon_stripe");
+		expect(addOn.status).toBe(200);
+		expect((await addOn.json()).data).toMatchObject({ action: "cancel" });
+	});
+
+	// capability: subscription.cancel
+	it("cancels a subscription that is still in its trial", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		const project = integrationProjectContext();
+		const { app, stripe, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		// Stripe reports a trialing subscription as active, so only its trial window marks it here.
+		await context.sql`
+			UPDATE subscriptions
+			SET status = 'active', trial_start_at = now() - interval '1 day',
+				trial_end_at = now() + interval '13 days'
+			WHERE project_id = ${project.projectInstanceId}::uuid
+				AND external_subscription_id = 'sub_migrate_stripe'
+		`;
+
+		const preview = await testRequest(
+			app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: {
+						kind: "cancel",
+						externalSubscriptionId: "sub_migrate_stripe",
+						effectiveMode: "immediate",
+					},
+				}),
+			},
+		);
+		expect(preview.status).toBe(200);
+		const previewToken = (await preview.json()).data.previewToken as string;
+		const executed = await testRequest(
+			app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "cancel-trial" },
+				body: JSON.stringify({ previewToken }),
+			},
+		);
+
+		expect(executed.status).toBe(200);
+		expect((await executed.json()).data).toMatchObject({
+			kind: "subscription_cancellation",
+			action: "cancel",
+			effectiveMode: "immediate",
+		});
+		expect(stripe.subscriptionCancellations).toHaveLength(1);
+	});
+
+	// capability: subscription.cancel
+	it("refuses a cancellation from a read-only project credential", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		const { app } = createIntegrationApp({ env: context.env, repository: context.repository });
+		const headers = {
+			authorization: `Bearer ${integrationProjectReadOnlyCredential("voysee")}`,
+			"content-type": "application/json",
+		};
+
+		const preview = await testRequest(
+			app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: {
+						kind: "cancel",
+						externalSubscriptionId: "sub_migrate_stripe",
+						effectiveMode: "immediate",
+					},
+				}),
+			},
+		);
+		expect(preview.status).toBe(403);
+		expect((await preview.json()).error.code).toBe("READ_ONLY_CREDENTIAL");
+
+		const execute = await testRequest(
+			app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "read-only-cancel" },
+				body: JSON.stringify({ previewToken: "11111111-1111-4111-8111-111111111111" }),
+			},
+		);
+		expect(execute.status).toBe(403);
+		expect((await execute.json()).error.code).toBe("READ_ONLY_CREDENTIAL");
 	});
 
 	it("rejects expired, drifted, mismatched, and cross-account commercial previews", async () => {
@@ -2055,4 +2475,45 @@ async function expectProjectionJobByKey(
 // so the integration suite exercises the real serialization instead of patching Date.
 async function withIsoDateSqlParameters<T>(callback: () => T | Promise<T>): Promise<T> {
 	return await callback();
+}
+
+/** One extra Stripe subscription on the same customer, priced by an add-on plan version. */
+async function seedActiveAddOnSubscription(
+	sql: SQL,
+	baseSubscriptionId: string,
+	addOnSubscriptionId: string,
+): Promise<void> {
+	await sql`
+		WITH base AS (
+			SELECT subscription.*, project.id AS pid, revision.id AS revision_id
+			FROM subscriptions subscription
+			JOIN projects project ON project.id = subscription.project_id
+			JOIN catalog_revisions revision ON revision.project_id = project.id AND revision.revision = 1
+			WHERE subscription.external_subscription_id = ${baseSubscriptionId}
+		), plan AS (
+			INSERT INTO plans (project_id, key, name)
+			SELECT pid, 'migration-addon', 'Migration add-on' FROM base
+			RETURNING id, project_id
+		), version AS (
+			INSERT INTO plan_versions (
+				project_id, plan_id, catalog_revision_id, version, status, currency,
+				base_amount_minor, billing_interval, plan_kind, tier_rank
+			)
+			SELECT plan.project_id, plan.id, base.revision_id, 1, 'published', 'USD', 500, 'month',
+				'addon', 10
+			FROM plan, base
+			RETURNING id, project_id, plan_id
+		)
+		INSERT INTO subscriptions (
+			project_id, customer_id, product_id, store_product_id, provider, channel,
+			external_subscription_id, external_product_id, external_price_id, status,
+			starts_at, current_period_start, current_period_end, auto_renew,
+			plan_version_id, catalog_revision_id
+		)
+		SELECT base.project_id, base.customer_id, base.product_id, base.store_product_id,
+			'stripe', 'web', ${addOnSubscriptionId}, base.external_product_id, base.external_price_id,
+			'active', base.starts_at, base.current_period_start, base.current_period_end, true,
+			version.id, base.revision_id
+		FROM base, version
+	`;
 }

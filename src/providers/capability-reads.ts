@@ -35,6 +35,8 @@ export const subscriptionActionOperations = [
 	"subscription.change.preview",
 	"subscription.change.apply",
 	"subscription.change.period_end",
+	"subscription.cancel",
+	"subscription.uncancel",
 ] as const satisfies readonly ProviderOperation[];
 
 /**
@@ -51,6 +53,7 @@ export const accountActionConditionKinds = [
 export const subscriptionActionConditionKinds = [
 	...accountActionConditionKinds,
 	"subscription_state",
+	"cancellation_pending",
 	"renewal_exclusion_window",
 ] as const satisfies readonly CapabilityConditionKind[];
 
@@ -136,6 +139,7 @@ export function createProviderCapabilityReads(deps: {
 					const operation: CapabilityOperationFacts = {
 						...paymentMethodFacts,
 						subscriptionState: subscription.status,
+						cancellationPending: subscription.cancelAtPeriodEnd,
 						now: generatedAt,
 						...(subscription.currentPeriodEnd === null
 							? {}

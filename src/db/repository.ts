@@ -36,6 +36,7 @@ import type {
 	WorkerMeteringMutationInput,
 } from "../billing/metering";
 import type {
+	SubscriptionCancellationContext,
 	SubscriptionChangeInput,
 	SubscriptionChangeOperation,
 	SubscriptionChangePreview,
@@ -428,6 +429,13 @@ export class BillingRepository {
 		return await this.recurringPricing.previewSubscriptionChange(project, input);
 	}
 
+	async previewSubscriptionCancellation(
+		project: ProjectInstanceContext,
+		input: { billingAccountId: string; externalSubscriptionId: string },
+	): Promise<SubscriptionCancellationContext> {
+		return await this.recurringPricing.previewSubscriptionCancellation(project, input);
+	}
+
 	async createCommercialActionPreview(
 		project: ProjectInstanceContext,
 		draft: CommercialPreviewDraft,
@@ -505,6 +513,24 @@ export class BillingRepository {
 		},
 	): Promise<CommercialActionExecutionResult> {
 		return await this.commercialActions.completeCommercialActionExecution(project, input);
+	}
+
+	async completeSubscriptionCancellation(
+		project: ProjectInstanceContext,
+		input: {
+			billingAccountId: string;
+			previewToken: string;
+			idempotencyKey: string;
+			externalSubscriptionId: string;
+			supersedeReason: string;
+			supersedesPendingChange: boolean;
+			result: Omit<
+				Extract<CommercialActionExecutionResult, { kind: "subscription_cancellation" }>,
+				"supersededChangeId"
+			>;
+		},
+	): Promise<CommercialActionExecutionResult> {
+		return await this.commercialActions.completeSubscriptionCancellation(project, input);
 	}
 
 	async claimSubscriptionChanges(

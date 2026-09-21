@@ -254,30 +254,49 @@ describe("billing account available actions", () => {
 			]);
 			expect(entry.actions.every((action) => action.provider === entry.provider)).toBe(true);
 		}
+		// Cancelling is available; uncancelling is blocked because nothing is pending to clear.
 		expect(active?.actions.map((action) => action.outcome)).toEqual([
 			"available",
 			"available",
 			"available",
+			"available",
+			"blocked",
+		]);
+		expect(active?.actions.at(-1)?.reasons).toEqual([
+			expect.objectContaining({
+				code: "CANCELLATION_NOT_PENDING",
+				observed: { cancellationPending: false },
+			}),
 		]);
 		expect(expired?.pendingChange).toBeNull();
 		for (const action of expired?.actions ?? []) {
 			expect(action).toMatchObject({ outcome: "blocked", blockingLayer: "operation" });
-			expect(action.reasons).toEqual([
-				expect.objectContaining({
-					code: "SUBSCRIPTION_STATE",
-					observed: { subscriptionState: "expired" },
-				}),
-			]);
+			expect(action.reasons[0]).toMatchObject({
+				code: "SUBSCRIPTION_STATE",
+				observed: { subscriptionState: "expired" },
+			});
 		}
+		// Uncancelling an expired subscription is blocked on both of its operation conditions.
+		expect(expired?.actions.at(-1)?.reasons.map((reason) => reason.code)).toEqual([
+			"SUBSCRIPTION_STATE",
+			"CANCELLATION_NOT_PENDING",
+		]);
 		expect(google?.actions.map((action) => action.reasons[0]?.code)).toEqual([
 			"PROVIDER_UNSUPPORTED",
+			"PROVIDER_MANAGED",
+			"PROVIDER_MANAGED",
 			"PROVIDER_MANAGED",
 			"PROVIDER_MANAGED",
 		]);
 	});
 
 	it("leaves connection conditions undetermined when a provider has no configuration facts", async () => {
-		const facts: AvailableActionFacts = { customerExists: true, subscriptions: [subscription()] };
+		const facts: AvailableActionFacts = {
+			customerExists: true,
+			// A pending cancellation, so no operation fact is decided against the subscription and
+			// only the missing configuration facts are left to report.
+			subscriptions: [subscription({ cancelAtPeriodEnd: true })],
+		};
 		const undescribedStripe = reads({ states: { stripe: undescribed }, facts });
 		const unadmittedStripe = reads({ admitted: ["apple", "google"], facts });
 

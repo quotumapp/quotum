@@ -13,6 +13,7 @@ import {
 	stripeProrationForChange,
 } from "../../billing/pricing";
 import type {
+	SubscriptionCancellationContext,
 	SubscriptionChangeInput,
 	SubscriptionChangeOperation,
 	SubscriptionChangePreview,
@@ -151,6 +152,19 @@ export class RecurringPricingRepository extends RepositoryModule {
 			const resolved = await resolveSubscriptionChange(tx, projectId, input);
 			return subscriptionChangePreview(resolved);
 		});
+	}
+
+	/**
+	 * Reads what a cancel or uncancel would act on. It locks the subscription like a change preview
+	 * does, so the pending change and add-ons it reports cannot move while the fingerprint is taken.
+	 */
+	async previewSubscriptionCancellation(
+		project: ProjectInstanceContext,
+		input: { billingAccountId: string; externalSubscriptionId: string },
+	): Promise<SubscriptionCancellationContext> {
+		return await this.transaction(async (tx) =>
+			subscriptionCancellationContext(tx, project.projectInstanceId, input),
+		);
 	}
 
 	async prepareSubscriptionChange(
@@ -1117,6 +1131,175 @@ async function changeContext(
 		);
 	}
 	return row;
+}
+
+/**
+ * The local state a cancellation acts on. Every ended status is returned rather than filtered out,
+ * so the caller can answer "this subscription can no longer be cancelled" instead of "not found".
+ */
+async function subscriptionCancellationContext(
+	executor: QueryExecutor,
+	projectId: string,
+	input: { billingAccountId: string; externalSubscriptionId: string },
+): Promise<SubscriptionCancellationContext> {
+	const row = await executeOne<{
+		subscription_id: string;
+		customer_id: string;
+		external_subscription_id: string;
+		status: SubscriptionStatus;
+		plan_kind: "base" | "addon" | null;
+		plan_version_id: string | number | bigint | null;
+		cancel_at_period_end: boolean;
+		current_period_end: Date | string | null;
+		subscription_updated_at: Date | string;
+	}>(
+		executor,
+		drizzleSql`
+			SELECT
+				subscription.id AS subscription_id, customer.id AS customer_id,
+				subscription.external_subscription_id, subscription.status,
+				version.plan_kind, subscription.plan_version_id,
+				subscription.cancel_at_period_end, subscription.current_period_end,
+				subscription.updated_at AS subscription_updated_at
+			FROM projects project
+			JOIN customers customer ON customer.project_id = project.id
+			JOIN subscriptions subscription
+				ON subscription.project_id = customer.project_id AND subscription.customer_id = customer.id
+			LEFT JOIN plan_versions version
+				ON version.project_id = subscription.project_id
+				AND version.id = subscription.plan_version_id
+			WHERE project.id = ${projectId}
+				AND customer.billing_account_id = ${input.billingAccountId}
+				AND subscription.external_subscription_id = ${input.externalSubscriptionId}
+				AND subscription.provider = 'stripe'
+			LIMIT 1
+			FOR UPDATE OF subscription
+		`,
+	);
+	if (row === null) {
+		throw new NotFoundBillingError(
+			"Stripe subscription was not found",
+			"SUBSCRIPTION_CHANGE_TARGET_NOT_FOUND",
+		);
+	}
+	const pending = await executeOne<{ id: string; status: "pending" | "processing" }>(
+		executor,
+		drizzleSql`
+			SELECT id, status
+			FROM subscription_changes
+			WHERE project_id = ${projectId} AND subscription_id = ${row.subscription_id}
+				AND status IN ('pending', 'processing')
+			ORDER BY CASE status WHEN 'processing' THEN 0 ELSE 1 END, created_at
+			LIMIT 1
+		`,
+	);
+	const addOns = await executeRows<{ external_subscription_id: string }>(
+		executor,
+		drizzleSql`
+			SELECT addon.external_subscription_id
+			FROM subscriptions addon
+			JOIN plan_versions version
+				ON version.project_id = addon.project_id AND version.id = addon.plan_version_id
+			WHERE addon.project_id = ${projectId} AND addon.customer_id = ${row.customer_id}
+				AND addon.id <> ${row.subscription_id}
+				AND version.plan_kind = 'addon'
+				AND addon.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+				AND (
+					addon.status <> 'cancelled'
+					OR COALESCE(addon.expires_at, addon.current_period_end) > now()
+				)
+			ORDER BY addon.external_subscription_id
+		`,
+	);
+	const settlement = await executeOne<{ settles_at: Date | string | null }>(
+		executor,
+		drizzleSql`
+			SELECT max(usage_window.window_end_at) AS settles_at
+			FROM usage_windows usage_window
+			JOIN plan_items plan_item
+				ON plan_item.project_id = usage_window.project_id
+				AND plan_item.id = usage_window.anchor_plan_item_id
+			WHERE usage_window.project_id = ${projectId}
+				AND usage_window.subscription_id = ${row.subscription_id}
+				AND plan_item.overage_policy = 'allowed'
+				AND usage_window.window_end_at > now()
+		`,
+	);
+	const currentPeriodEnd =
+		row.current_period_end === null ? null : new Date(row.current_period_end).toISOString();
+	return {
+		customerId: row.customer_id,
+		externalSubscriptionId: row.external_subscription_id,
+		status: row.status,
+		planKind: row.plan_kind ?? "base",
+		planVersionId: row.plan_version_id === null ? null : String(row.plan_version_id),
+		cancelAtPeriodEnd: row.cancel_at_period_end,
+		currentPeriodEnd,
+		pendingChange: pending,
+		activeAddOnSubscriptionIds: addOns.map((addOn) => addOn.external_subscription_id),
+		postpaidUsageSettlesAt:
+			settlement?.settles_at == null ? null : new Date(settlement.settles_at).toISOString(),
+		// Only what a cancellation acts on: the plan-price fingerprint of a change would make an
+		// unrelated catalog publication invalidate a preview that never reads a price.
+		stateFingerprint: sha256Hex(
+			stableJson({
+				subscriptionId: row.subscription_id,
+				subscriptionStatus: row.status,
+				subscriptionUpdatedAt: new Date(row.subscription_updated_at).toISOString(),
+				cancelAtPeriodEnd: row.cancel_at_period_end,
+				currentPeriodEnd,
+				pendingChange: pending,
+			}),
+		),
+	};
+}
+
+/**
+ * Marks the subscription's queued change `cancelled` because a cancellation superseded it, and
+ * releases the promotion use it reserved. A change a worker already holds is left alone: the
+ * caller refuses the cancellation instead, so the worker's own lease decides that change's fate.
+ */
+export async function supersedePendingSubscriptionChangeInTx(
+	executor: QueryExecutor,
+	projectId: string,
+	input: { billingAccountId: string; externalSubscriptionId: string },
+	reason: string,
+): Promise<string | null> {
+	const change = await executeOne<{ id: string }>(
+		executor,
+		drizzleSql`
+			UPDATE subscription_changes changes
+			SET status = 'cancelled', last_error = ${reason},
+				locked_at = NULL, locked_by = NULL, updated_at = now()
+			FROM subscriptions subscription
+			JOIN customers customer
+				ON customer.project_id = subscription.project_id AND customer.id = subscription.customer_id
+			WHERE changes.project_id = ${projectId}
+				AND changes.subscription_id = subscription.id
+				AND subscription.project_id = ${projectId}
+				AND subscription.external_subscription_id = ${input.externalSubscriptionId}
+				AND customer.billing_account_id = ${input.billingAccountId}
+				AND changes.status = 'pending'
+			RETURNING changes.id
+		`,
+	);
+	if (change === null) return null;
+	const redemption = await changeRedemption(executor, projectId, change.id);
+	if (redemption !== null) {
+		await releasePromotionRedemptionInTx(executor, projectId, redemption.id);
+	}
+	await executeRows(
+		executor,
+		drizzleSql`
+			UPDATE catalog_migration_jobs
+			SET status = 'failed', last_error = ${reason}, locked_at = NULL,
+				locked_by = NULL, updated_at = now()
+			WHERE project_id = ${projectId}
+				AND subscription_change_id = ${change.id}
+				AND status = 'waiting_provider'
+		`,
+	);
+	return change.id;
 }
 
 async function resolveSubscriptionChange(

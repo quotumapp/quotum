@@ -32,7 +32,20 @@ export type CommercialActionIntent =
 			effectiveMode?: "immediate" | "period_end";
 			prorationBehavior?: StripeProrationBehavior;
 			promotionCode?: string | null;
+	  }
+	| {
+			kind: "cancel";
+			externalSubscriptionId: string;
+			/** `immediate` ends access now; `period_end` keeps it until the paid period ends. */
+			effectiveMode: "immediate" | "period_end";
+	  }
+	| {
+			kind: "uncancel";
+			externalSubscriptionId: string;
 	  };
+
+/** What a preview says a cancellation would do; `none` when the state already holds. */
+export type CommercialCancellationAction = "cancel" | "uncancel" | "none";
 
 export interface CommercialLineItem {
 	key: string;
@@ -72,6 +85,27 @@ export interface CommercialPreviewNextCycle {
 	discountStatus: "none" | "applies" | "ended" | "provider_calculated";
 }
 
+/**
+ * The effects a cancel or uncancel preview reports. Access and entitlements end together; plan
+ * allocations already granted for the paid period keep their own expiry, and postpaid usage in the
+ * open period is not accelerated, so it settles when that window ends.
+ */
+export interface CommercialPreviewCancellation {
+	action: CommercialCancellationAction;
+	/** When the subscription and its entitlements end; null when nothing would change. */
+	accessEndsAt: string | null;
+	/** The `cancel_at_period_end` state the execution would leave behind. */
+	cancelAtPeriodEnd: boolean;
+	/** Granted plan allocations are never clawed back by a cancellation. */
+	keepsGrantedAllocations: boolean;
+	/** When open postpaid usage settles, which a cancellation never brings forward. */
+	postpaidUsageSettlesAt: string | null;
+	/** A queued subscription change this cancellation would mark `cancelled`. */
+	supersedesChangeId: string | null;
+	/** Add-on subscriptions on the same account; a base plan cannot be cancelled while any is active. */
+	activeAddOnSubscriptionIds: string[];
+}
+
 export interface CommercialActionPreview {
 	schemaVersion: 1;
 	previewToken: string;
@@ -79,7 +113,7 @@ export interface CommercialActionPreview {
 	stateFingerprint: string;
 	expiresAt: string;
 	billingAccountId: string;
-	action: CommercialActionIntent["kind"];
+	action: CommercialActionIntent["kind"] | "none";
 	provider: BillingProvider;
 	lineItems: CommercialLineItem[];
 	estimatedTotalMinor: number | null;
@@ -90,6 +124,7 @@ export interface CommercialActionPreview {
 	promotionCodeEntry: "none" | "code" | "hosted";
 	promotion: CommercialPreviewPromotion | null;
 	nextCycle: CommercialPreviewNextCycle | null;
+	cancellation: CommercialPreviewCancellation | null;
 	effectiveMode: "immediate" | "period_end" | null;
 	effectiveAt: string | null;
 	prorationBehavior: StripeProrationBehavior | null;
@@ -123,6 +158,17 @@ export type CommercialActionExecutionResult =
 			effectiveMode: "immediate" | "period_end";
 			effectiveAt: string;
 			promotionRedemption?: { id: string; status: "reserved" | "applied" } | null;
+	  }
+	| {
+			kind: "subscription_cancellation";
+			action: CommercialCancellationAction;
+			externalSubscriptionId: string;
+			effectiveMode: "immediate" | "period_end" | null;
+			/** When access ends, or null once a cancellation is cleared or nothing changed. */
+			effectiveAt: string | null;
+			cancelAtPeriodEnd: boolean;
+			/** The queued change this cancellation marked `cancelled`. */
+			supersededChangeId: string | null;
 	  };
 
 export interface CommercialPreviewDraft {

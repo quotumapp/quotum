@@ -240,6 +240,8 @@ describe("provider capability routes", () => {
 			"available",
 			"available",
 			"available",
+			"available",
+			"blocked",
 		]);
 		expect(unknownData).toMatchObject({
 			billingAccountId: "acct_missing",

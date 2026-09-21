@@ -890,7 +890,7 @@ export const commercialActionPreviews = pgTable(
 		billingAccountId: text("billing_account_id").notNull(),
 		previewToken: uuid("preview_token").notNull(),
 		intentKind: text("intent_kind")
-			.$type<"checkout_plan" | "checkout_product" | "subscription_change">()
+			.$type<"checkout_plan" | "checkout_product" | "subscription_change" | "cancel" | "uncancel">()
 			.notNull(),
 		intentHash: text("intent_hash").notNull(),
 		stateFingerprint: text("state_fingerprint").notNull(),

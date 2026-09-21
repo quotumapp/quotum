@@ -52,6 +52,8 @@ export const providerOperations = [
 	"subscription.change.preview",
 	"subscription.change.apply",
 	"subscription.change.period_end",
+	"subscription.cancel",
+	"subscription.uncancel",
 	"settlement.collect_finalized_charge",
 	"adjustment.issue",
 	"refund.sync",
@@ -227,6 +229,18 @@ export const providerOperationDefinitions: Record<ProviderOperation, ProviderOpe
 			description:
 				"Quotum stores a plan or quantity change effective at the end of the current period, and its worker applies it to the provider subscription when that period ends.",
 		},
+		"subscription.cancel": {
+			domain: "subscription_changes",
+			title: "Subscription cancellation",
+			description:
+				"Quotum ends a provider subscription, at once or at the end of the paid period, asking for no proration credit; entitlements end with access while plan allocations already granted keep their own expiry.",
+		},
+		"subscription.uncancel": {
+			domain: "subscription_changes",
+			title: "Subscription uncancellation",
+			description:
+				"Quotum clears a pending period-end cancellation on a provider subscription, so it renews again; a cancellation that already ended the subscription cannot be cleared this way.",
+		},
 		"settlement.collect_finalized_charge": {
 			domain: "settlement",
 			title: "Postpaid usage collection",
@@ -348,6 +362,7 @@ export type CapabilityCondition =
 	| { kind: "currency"; allowed: string[] }
 	| { kind: "catalog_bound" }
 	| { kind: "subscription_state"; allowed: string[] }
+	| { kind: "cancellation_pending"; required: true }
 	| { kind: "collection_method"; allowed: CapabilityCollectionMethod[] }
 	| { kind: "billing_interval"; allowed: CapabilityBillingInterval[] }
 	| { kind: "uniform_billing_interval" }
@@ -365,6 +380,7 @@ export const capabilityConditionKinds = [
 	"currency",
 	"catalog_bound",
 	"subscription_state",
+	"cancellation_pending",
 	"collection_method",
 	"billing_interval",
 	"uniform_billing_interval",
@@ -383,6 +399,7 @@ export const conditionLayer: Record<CapabilityConditionKind, CapabilityCondition
 	currency: "configuration",
 	catalog_bound: "configuration",
 	subscription_state: "operation",
+	cancellation_pending: "operation",
 	collection_method: "operation",
 	billing_interval: "operation",
 	uniform_billing_interval: "operation",
@@ -461,6 +478,8 @@ export interface CapabilityConfigurationFacts {
 
 export interface CapabilityOperationFacts {
 	subscriptionState?: string;
+	/** Whether the subscription already ends at its period end; an uncancel needs one to clear. */
+	cancellationPending?: boolean;
 	collectionMethod?: CapabilityCollectionMethod;
 	billingIntervals?: CapabilityBillingInterval[];
 	nextRenewalAt?: string;
@@ -488,6 +507,7 @@ export const capabilityReasonCodes = [
 	"CURRENCY_UNSUPPORTED",
 	"CATALOG_BINDING_REQUIRED",
 	"SUBSCRIPTION_STATE",
+	"CANCELLATION_NOT_PENDING",
 	"COLLECTION_METHOD",
 	"BILLING_INTERVAL",
 	"SAVED_PAYMENT_METHOD_REQUIRED",
@@ -510,6 +530,7 @@ export const conditionReasonCode: Record<CapabilityConditionKind, CapabilityReas
 	currency: "CURRENCY_UNSUPPORTED",
 	catalog_bound: "CATALOG_BINDING_REQUIRED",
 	subscription_state: "SUBSCRIPTION_STATE",
+	cancellation_pending: "CANCELLATION_NOT_PENDING",
 	collection_method: "COLLECTION_METHOD",
 	billing_interval: "BILLING_INTERVAL",
 	uniform_billing_interval: "BILLING_INTERVAL",
@@ -760,6 +781,11 @@ function evaluateCondition(
 			const state = operation?.subscriptionState;
 			if (state === undefined) return unavailable({ subscriptionState: null });
 			return condition.allowed.includes(state) ? null : blocked({ subscriptionState: state });
+		}
+		case "cancellation_pending": {
+			const pending = operation?.cancellationPending;
+			if (pending === undefined) return unavailable({ cancellationPending: null });
+			return pending ? null : blocked({ cancellationPending: false });
 		}
 		case "collection_method": {
 			const method = operation?.collectionMethod;
@@ -1148,6 +1174,11 @@ function validateCondition(
 		case "billing_interval":
 			validateAllowed(path, condition.allowed, capabilityBillingIntervals, issue);
 			return;
+		case "cancellation_pending":
+			if (condition.required !== true) {
+				issue(`${path}.required`, "Cancellation pending condition must be required");
+			}
+			return;
 		case "saved_payment_method":
 			if (condition.required !== true) {
 				issue(`${path}.required`, "Saved payment method condition must be required");
@@ -1312,6 +1343,8 @@ export function describeCondition(condition: CapabilityCondition): string {
 			return "The catalog item must be bound to a product on this provider.";
 		case "subscription_state":
 			return `The subscription state must be ${alternatives(condition.allowed)}.`;
+		case "cancellation_pending":
+			return "The subscription must have a cancellation pending at its period end.";
 		case "collection_method":
 			return `The subscription must use ${alternatives(condition.allowed)} collection.`;
 		case "billing_interval":

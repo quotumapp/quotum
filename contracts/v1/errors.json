@@ -32,6 +32,12 @@
       ]
     },
     {
+      "code": "ADDON_SUBSCRIPTIONS_ACTIVE",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
       "code": "ALLOCATION_IDENTITY_CONFLICT",
       "sources": [
         "src/db/repository/metering.ts"
@@ -1127,7 +1133,8 @@
     {
       "code": "SUBSCRIPTION_CHANGE_PENDING",
       "sources": [
-        "src/db/repository/recurring-pricing.ts"
+        "src/db/repository/recurring-pricing.ts",
+        "src/providers/stripe/service.ts"
       ]
     },
     {
@@ -1137,9 +1144,16 @@
       ]
     },
     {
+      "code": "SUBSCRIPTION_NOT_CANCELLABLE",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
       "code": "SUBSCRIPTION_PERIOD_MISSING",
       "sources": [
-        "src/db/repository/recurring-pricing.ts"
+        "src/db/repository/recurring-pricing.ts",
+        "src/providers/stripe/service.ts"
       ]
     },
     {

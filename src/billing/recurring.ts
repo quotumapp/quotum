@@ -38,6 +38,24 @@ export interface SubscriptionChangePreview {
 	}>;
 }
 
+/** What Quotum knows locally before it asks Stripe to end or keep a subscription. */
+export interface SubscriptionCancellationContext {
+	customerId: string;
+	externalSubscriptionId: string;
+	status: SubscriptionStatus;
+	planKind: "base" | "addon";
+	planVersionId: string | null;
+	cancelAtPeriodEnd: boolean;
+	currentPeriodEnd: string | null;
+	/** A queued change for this subscription; a cancel supersedes a pending one. */
+	pendingChange: { id: string; status: "pending" | "processing" } | null;
+	/** Live add-on subscriptions on the same account, which a base plan cannot be cancelled over. */
+	activeAddOnSubscriptionIds: string[];
+	/** When the open postpaid usage window closes, which a cancellation never brings forward. */
+	postpaidUsageSettlesAt: string | null;
+	stateFingerprint: string;
+}
+
 export interface SubscriptionChangeOperation {
 	changeId: string;
 	projectInstanceId: string;

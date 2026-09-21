@@ -216,6 +216,18 @@
       "title": "Period-end subscription change"
     },
     {
+      "description": "Quotum ends a provider subscription, at once or at the end of the paid period, asking for no proration credit; entitlements end with access while plan allocations already granted keep their own expiry.",
+      "domain": "subscription_changes",
+      "id": "subscription.cancel",
+      "title": "Subscription cancellation"
+    },
+    {
+      "description": "Quotum clears a pending period-end cancellation on a provider subscription, so it renews again; a cancellation that already ended the subscription cannot be cleared this way.",
+      "domain": "subscription_changes",
+      "id": "subscription.uncancel",
+      "title": "Subscription uncancellation"
+    },
+    {
       "description": "After a usage period closes, Quotum rates the postpaid overage and has the provider charge that finalized amount to the customer against the subscription.",
       "domain": "settlement",
       "id": "settlement.collect_finalized_charge",
@@ -477,6 +489,14 @@
             "status": "not_applicable"
           }
         },
+        "subscription.cancel": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Cancellation happens in the store's subscription settings; Quotum records the resulting notification.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
         "subscription.change.apply": {
           "conditions": [],
           "level": "provider_managed",
@@ -514,6 +534,14 @@
             },
             "status": "verified",
             "verifiedOn": "2026-09-17"
+          }
+        },
+        "subscription.uncancel": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Resubscribing before the period ends happens in the store's subscription settings; Quotum records the resulting notification.",
+          "verification": {
+            "status": "not_applicable"
           }
         },
         "topup.automatic": {
@@ -780,6 +808,14 @@
             "status": "not_applicable"
           }
         },
+        "subscription.cancel": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Cancellation happens in the store's subscription settings; Quotum records the resulting notification.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
         "subscription.change.apply": {
           "conditions": [],
           "level": "provider_managed",
@@ -818,6 +854,14 @@
             },
             "status": "verified",
             "verifiedOn": "2026-09-17"
+          }
+        },
+        "subscription.uncancel": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Resubscribing before the period ends happens in the store's subscription settings; Quotum records the resulting notification.",
+          "verification": {
+            "status": "not_applicable"
           }
         },
         "topup.automatic": {
@@ -1226,6 +1270,33 @@
             "verifiedOn": "2026-09-17"
           }
         },
+        "subscription.cancel": {
+          "conditions": [
+            {
+              "allowed": [
+                "active",
+                "grace_period",
+                "billing_retry",
+                "cancelled"
+              ],
+              "kind": "subscription_state"
+            }
+          ],
+          "level": "native",
+          "notes": "An immediate cancellation ends the Stripe subscription with no proration credit and no closing invoice; a period-end cancellation sets `cancel_at_period_end`. A queued change for the subscription is superseded, and a base plan cannot be cancelled while add-on subscriptions are active.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts",
+                "tests/providers/stripe/commercial-cancellation.test.ts"
+              ]
+            },
+            "status": "conditional",
+            "verifiedOn": "2026-09-17"
+          }
+        },
         "subscription.change.apply": {
           "conditions": [
             {
@@ -1319,6 +1390,37 @@
               ]
             },
             "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "subscription.uncancel": {
+          "conditions": [
+            {
+              "allowed": [
+                "active",
+                "grace_period",
+                "billing_retry",
+                "cancelled"
+              ],
+              "kind": "subscription_state"
+            },
+            {
+              "kind": "cancellation_pending",
+              "required": true
+            }
+          ],
+          "level": "native",
+          "notes": "Clearing `cancel_at_period_end` only restores renewal; it does not restore a subscription change the cancellation superseded, and a subscription Stripe already ended cannot be cleared.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts",
+                "tests/providers/stripe/commercial-cancellation.test.ts"
+              ]
+            },
+            "status": "conditional",
             "verifiedOn": "2026-09-17"
           }
         },
@@ -1798,6 +1900,22 @@
             "status": "planned"
           }
         },
+        "subscription.cancel": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Paddle cancels immediately or at the next billing period; whether an immediate cancellation refunds the paid period is not assessed.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-SUB-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned",
+            "trackedBy": "P4"
+          }
+        },
         "subscription.change.apply": {
           "conditions": [],
           "level": "native",
@@ -1865,6 +1983,21 @@
             },
             "status": "planned",
             "trackedBy": "P4"
+          }
+        },
+        "subscription.uncancel": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "The Paddle assessment does not cover clearing a scheduled cancellation.",
+          "verification": {
+            "evidence": {
+              "questions": [
+                "Q-SUB-01"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "not_applicable"
           }
         },
         "topup.automatic": {

@@ -93,7 +93,14 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 			stateFingerprint: z.string(),
 			expiresAt: z.string(),
 			billingAccountId: z.string(),
-			action: z.enum(["checkout_plan", "checkout_product", "subscription_change"]),
+			action: z.enum([
+				"checkout_plan",
+				"checkout_product",
+				"subscription_change",
+				"cancel",
+				"uncancel",
+				"none",
+			]),
 			provider: z.literal("stripe"),
 			lineItems: z.array(
 				z.object({
@@ -143,6 +150,18 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 					discountStatus: z.enum(["none", "applies", "ended", "provider_calculated"]),
 				}),
 			]),
+			cancellation: z.union([
+				z.null(),
+				z.object({
+					action: z.enum(["cancel", "uncancel", "none"]),
+					accessEndsAt: z.union([z.null(), z.string()]),
+					cancelAtPeriodEnd: z.boolean(),
+					keepsGrantedAllocations: z.boolean(),
+					postpaidUsageSettlesAt: z.union([z.null(), z.string()]),
+					supersedesChangeId: z.union([z.null(), z.string()]),
+					activeAddOnSubscriptionIds: z.array(z.string()),
+				}),
+			]),
 			effectiveMode: z.union([z.null(), z.literal("immediate"), z.literal("period_end")]),
 			effectiveAt: z.union([z.null(), z.string()]),
 			prorationBehavior: z.union([
@@ -186,6 +205,15 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse200
 				.union([z.null(), z.object({ id: z.string(), status: z.enum(["reserved", "applied"]) })])
 				.optional(),
 		}),
+		z.object({
+			kind: z.literal("subscription_cancellation"),
+			action: z.enum(["cancel", "uncancel", "none"]),
+			externalSubscriptionId: z.string(),
+			effectiveMode: z.union([z.null(), z.literal("immediate"), z.literal("period_end")]),
+			effectiveAt: z.union([z.null(), z.string()]),
+			cancelAtPeriodEnd: z.boolean(),
+			supersededChangeId: z.union([z.null(), z.string()]),
+		}),
 	]),
 });
 
@@ -210,6 +238,15 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse202
 			promotionRedemption: z
 				.union([z.null(), z.object({ id: z.string(), status: z.enum(["reserved", "applied"]) })])
 				.optional(),
+		}),
+		z.object({
+			kind: z.literal("subscription_cancellation"),
+			action: z.enum(["cancel", "uncancel", "none"]),
+			externalSubscriptionId: z.string(),
+			effectiveMode: z.union([z.null(), z.literal("immediate"), z.literal("period_end")]),
+			effectiveAt: z.union([z.null(), z.string()]),
+			cancelAtPeriodEnd: z.boolean(),
+			supersededChangeId: z.union([z.null(), z.string()]),
 		}),
 	]),
 });

@@ -5,7 +5,10 @@ import type {
 	CommercialPreviewDraft,
 } from "../../../src/billing/commercial";
 import { sha256Hex, stableJson } from "../../../src/billing/decimal";
-import type { SubscriptionChangePreview } from "../../../src/billing/recurring";
+import type {
+	SubscriptionCancellationContext,
+	SubscriptionChangePreview,
+} from "../../../src/billing/recurring";
 import type {
 	StripeRecurringCheckoutPlan,
 	StripeWebStoreProductRow,
@@ -92,6 +95,20 @@ const change: SubscriptionChangePreview = {
 	],
 };
 
+const cancellation: SubscriptionCancellationContext = {
+	customerId: "customer-1",
+	externalSubscriptionId: "sub_123",
+	status: "active",
+	planKind: "base",
+	planVersionId: "42",
+	cancelAtPeriodEnd: true,
+	currentPeriodEnd: "2026-10-17T00:00:00.000Z",
+	pendingChange: null,
+	activeAddOnSubscriptionIds: [],
+	postpaidUsageSettlesAt: null,
+	stateFingerprint: "cancellation-fingerprint-1",
+};
+
 function previewService(): { service: StripeBillingService; drafts: CommercialPreviewDraft[] } {
 	const drafts: CommercialPreviewDraft[] = [];
 	const repository: Partial<Repository> = {
@@ -108,6 +125,9 @@ function previewService(): { service: StripeBillingService; drafts: CommercialPr
 		},
 		previewSubscriptionChange() {
 			return Promise.resolve(change);
+		},
+		previewSubscriptionCancellation() {
+			return Promise.resolve(cancellation);
 		},
 		createCommercialActionPreview(draft: CommercialPreviewDraft) {
 			drafts.push(draft);
@@ -151,6 +171,8 @@ describe("commercial preview provider", () => {
 				targetPlanKey: plan.planKey,
 				quantities: {},
 			},
+			{ kind: "cancel", externalSubscriptionId: "sub_123", effectiveMode: "immediate" },
+			{ kind: "uncancel", externalSubscriptionId: "sub_123" },
 		];
 
 		const previews = [];
@@ -158,11 +180,19 @@ describe("commercial preview provider", () => {
 			previews.push(await service.previewCommercialAction({ billingAccountId, intent }));
 		}
 
-		expect(previews.map((preview) => preview.provider)).toEqual(["stripe", "stripe", "stripe"]);
+		expect(previews.map((preview) => preview.provider)).toEqual([
+			"stripe",
+			"stripe",
+			"stripe",
+			"stripe",
+			"stripe",
+		]);
 		expect(previews.map((preview) => preview.action)).toEqual([
 			"checkout_product",
 			"checkout_plan",
 			"subscription_change",
+			"cancel",
+			"uncancel",
 		]);
 		// Every hash is a function of the intent or the provider state, neither of which names a
 		// provider, so the reported provider cannot move a stored preview's identity.
@@ -176,6 +206,8 @@ describe("commercial preview provider", () => {
 			sha256Hex(stableJson(product)),
 			sha256Hex(stableJson({ plan, hasActiveBasePlan: false })),
 			change.stateFingerprint,
+			cancellation.stateFingerprint,
+			cancellation.stateFingerprint,
 		]);
 		expect(drafts.map((draft) => draft.intentHash)).toEqual([
 			sha256Hex(
@@ -205,6 +237,14 @@ describe("commercial preview provider", () => {
 					quantities: {},
 				}),
 			),
+			sha256Hex(
+				stableJson({
+					kind: "cancel",
+					externalSubscriptionId: "sub_123",
+					effectiveMode: "immediate",
+				}),
+			),
+			sha256Hex(stableJson({ kind: "uncancel", externalSubscriptionId: "sub_123" })),
 		]);
 	});
 

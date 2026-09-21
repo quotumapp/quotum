@@ -501,6 +501,7 @@ describe("billing app", () => {
 				promotionCodeEntry: "none" as const,
 				promotion: null,
 				nextCycle: null,
+				cancellation: null,
 				effectiveMode: null,
 				effectiveAt: null,
 				prorationBehavior: null,
