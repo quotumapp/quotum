@@ -301,10 +301,12 @@ describe("Stripe OAuth custody and account isolation", () => {
 		const instance = await connectionService().scope(identity, scope);
 		const version = await f.connectionRepository.version(instance.id, draft.draftId);
 		expect(
-			(await resolveStripeOAuth(f.connectionRepository, version, "sandbox", provider)).secretKey,
+			(await resolveStripeOAuth(f.connectionRepository, version, "sandbox", provider, f.sql))
+				.secretKey,
 		).toBe("rotated-synthetic-access");
 		expect(
-			(await resolveStripeOAuth(f.connectionRepository, version, "sandbox", provider)).secretKey,
+			(await resolveStripeOAuth(f.connectionRepository, version, "sandbox", provider, f.sql))
+				.secretKey,
 		).toBe("rotated-synthetic-access");
 		expect(refreshCalls).toBe(1);
 		expect((await f.connectionRepository.secrets(version)).refreshToken).toBe(

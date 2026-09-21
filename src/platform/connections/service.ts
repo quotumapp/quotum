@@ -153,7 +153,13 @@ export class MerchantConnections {
 		if (version.status !== "active") this.assertDraft(version);
 		const resolvedSecrets =
 			version.settings.authMethod === "oauth" && this.oauth
-				? await resolveStripeOAuth(this.repository, version, scope.environment, this.oauth)
+				? await resolveStripeOAuth(
+						this.repository,
+						version,
+						scope.environment,
+						this.oauth,
+						this.store.sql,
+					)
 				: await this.repository.secrets(version);
 		const result = await this.validator.validate(
 			kind,

@@ -6,6 +6,7 @@ import { createFixedWindowRateLimiter } from "../http/rate-limit";
 import type { StripeOAuthPort } from "../platform/connections/oauth-port";
 import type { ConnectionRepository } from "../platform/connections/repository";
 import { StripeAppEvents } from "../platform/connections/stripe-events";
+import type { MerchantSql } from "../platform/database";
 import { buildStripeConfig, StripeBillingClient } from "../providers/stripe/client";
 import { StripeBillingService } from "../providers/stripe/service";
 import { HTTP_APP_CONFIG, operationDetail } from "../shared/http";
@@ -34,10 +35,14 @@ export function stripeAppEventDetail(): Record<string, unknown> {
 	});
 }
 
-export function createStripeAppEvents(repository: ConnectionRepository, oauth: StripeOAuthPort) {
-	const events = new StripeAppEvents(repository.sql);
+export function createStripeAppEvents(
+	repository: ConnectionRepository,
+	oauth: StripeOAuthPort,
+	persistence: MerchantSql,
+) {
+	const events = new StripeAppEvents(persistence);
 	const resolver = new PostgresProjectInstanceContextResolver();
-	const connections = createRuntimeConnectionResolver(repository);
+	const connections = createRuntimeConnectionResolver(repository, persistence);
 	const billing = new BillingRepository();
 	const runOnce = async () => {
 		for (const event of await events.pending()) {

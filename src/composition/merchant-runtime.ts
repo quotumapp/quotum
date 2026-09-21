@@ -52,12 +52,13 @@ export function attachMerchantRuntime(
 	},
 ): QuotumApp {
 	const { config } = options;
-	const store = new MerchantStore(merchantSql(sql), config);
+	const persistence = merchantSql(sql);
+	const store = new MerchantStore(persistence, config);
 	const mailer = options.mailer ?? (config.email ? createMerchantMailer(config.email) : null);
 	if (!mailer)
 		throw new Error("Merchant email transport is required; tests must inject a capture mailer");
 	const database = merchantAuthDatabase(sql);
-	const repository = createConnectionRepository();
+	const repository = createConnectionRepository(persistence);
 	const validator = createConnectionValidation();
 	const oauth = createStripeOAuthPort();
 	const connections = new MerchantConnections(
@@ -81,7 +82,7 @@ export function attachMerchantRuntime(
 	});
 	const ingress = [createConnectionEventApp(repository)];
 	if (oauth) {
-		const events = createStripeAppEvents(repository, oauth);
+		const events = createStripeAppEvents(repository, oauth, persistence);
 		ingress.push(events.app);
 		options.registerBackground?.(events);
 	}

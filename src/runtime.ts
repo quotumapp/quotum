@@ -7,6 +7,7 @@ import {
 	createRuntimeConnectionResolver,
 } from "./composition/connections";
 import { createMerchantBillingPort } from "./composition/merchant-billing";
+import { merchantSql } from "./composition/merchant-persistence";
 import { attachMerchantRuntime, type MerchantRuntimeOptions } from "./composition/merchant-runtime";
 import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
 import {
@@ -16,7 +17,7 @@ import {
 } from "./composition/runtime-lifecycle";
 import { createWorkerProviderSelectors } from "./composition/worker-providers";
 import { AdminBillingRepository } from "./db/admin-repository";
-import { closePool, configureDefaultConnection, initializePostgresHealth } from "./db/client";
+import { closePool, configureDefaultConnection, initializePostgresHealth, sql } from "./db/client";
 import { BillingRepository } from "./db/repository";
 import {
 	ProjectionSyncJobRepository,
@@ -82,9 +83,10 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const metrics = createInMemoryBillingMetrics();
 	const projectContextResolver =
 		dependencies.projectContextResolver ?? new PostgresProjectInstanceContextResolver();
-	const connectionRepository = createConnectionRepository();
+	const persistence = merchantSql(sql);
+	const connectionRepository = createConnectionRepository(persistence);
 	const connections =
-		dependencies.connections ?? createRuntimeConnectionResolver(connectionRepository);
+		dependencies.connections ?? createRuntimeConnectionResolver(connectionRepository, persistence);
 	const projectionDelivery = new ProjectionHttpClient({
 		fetch: dependencies.projectionFetch,
 		async resolveProject(key) {

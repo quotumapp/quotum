@@ -3,6 +3,7 @@ import { sql } from "../db/client";
 import { loadConnectionCipher } from "../platform/connections/cipher";
 import { resolveStripeOAuth } from "../platform/connections/oauth-runtime";
 import { ConnectionRepository } from "../platform/connections/repository";
+import type { MerchantSql } from "../platform/database";
 import {
 	appleProjectConfigSchema,
 	googlePlayProjectConfigSchema,
@@ -18,8 +19,8 @@ import type { ProjectInstanceContext } from "../projects/context";
 import { merchantSql } from "./merchant-persistence";
 import { createStripeOAuthPort } from "./stripe-oauth";
 
-export function createConnectionRepository() {
-	return new ConnectionRepository(merchantSql(sql), loadConnectionCipher());
+export function createConnectionRepository(persistence: MerchantSql = merchantSql(sql)) {
+	return new ConnectionRepository(persistence, loadConnectionCipher());
 }
 /**
  * Maps a connection row joined to its active version. `external_identity` is optional because the
@@ -56,6 +57,7 @@ function connectionUnavailable(): BillingError {
 
 export function createRuntimeConnectionResolver(
 	repository: ConnectionRepository,
+	persistence?: MerchantSql,
 ): RuntimeConnectionResolver {
 	return {
 		async resolve<K extends RuntimeConnectionKind>(
@@ -80,11 +82,13 @@ export function createRuntimeConnectionResolver(
 						const oauth = createStripeOAuthPort();
 						if (!oauth) throw new Error("Stripe app unavailable");
 						const { authMethod: _, ...settings } = current.version.settings;
+						if (!persistence) throw new Error("Merchant persistence is unavailable");
 						const tokens = await resolveStripeOAuth(
 							repository,
 							current.version,
 							project.environment,
 							oauth,
+							persistence,
 						);
 						parsed = {
 							...stripeProjectConfigSchema.parse({

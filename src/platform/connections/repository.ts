@@ -1,4 +1,4 @@
-import type { MerchantSql } from "../database";
+import type { PlatformQueryExecutor } from "../persistence/query-executor";
 import { MerchantError } from "../security";
 import type { ConnectionCipher, SecretEnvelope } from "./cipher";
 
@@ -26,17 +26,34 @@ export interface ConnectionDescriptionRow {
 }
 export class ConnectionRepository {
 	constructor(
-		readonly sql: MerchantSql,
+		readonly executor: PlatformQueryExecutor,
 		readonly cipher: ConnectionCipher,
 	) {}
 	async matchesKind(connectionId: string, kind: ConnectionKind) {
-		const rows = await this
-			.sql`SELECT id FROM platform_connections WHERE id=${connectionId} AND kind=${kind}`;
+		const rows = await this.executor.query<{ id: string }>({
+			text: `
+				SELECT id
+				FROM platform_connections
+				WHERE id = $1 AND kind = $2
+			`,
+			values: [connectionId, kind],
+		});
 		return rows.length > 0;
 	}
 	async recordEvent(version: ConnectionVersion, identity: string, occurred: Date) {
-		const rows = await this
-			.sql`UPDATE platform_connection_versions SET event_verified_at=now() WHERE id=${version.id} AND connection_id=${version.connection_id} AND (external_identity IS NULL OR external_identity=${identity}) AND created_at<=${occurred} AND (status='active' OR (status IN ('draft','validated') AND expires_at>now())) RETURNING id`;
+		const rows = await this.executor.query<{ id: string }>({
+			text: `
+				UPDATE platform_connection_versions
+				SET event_verified_at = now()
+				WHERE id = $1
+					AND connection_id = $2
+					AND (external_identity IS NULL OR external_identity = $3)
+					AND created_at <= $4
+					AND (status = 'active' OR (status IN ('draft', 'validated') AND expires_at > now()))
+				RETURNING id
+			`,
+			values: [version.id, version.connection_id, identity, occurred.toISOString()],
+		});
 		return rows.length > 0;
 	}
 	async active(
@@ -44,9 +61,18 @@ export class ConnectionRepository {
 		kind: ConnectionKind,
 		recovery = false,
 	): Promise<{ version: ConnectionVersion; secrets: Record<string, string> } | null> {
-		const [version] = await this.sql<
-			ConnectionVersion[]
-		>`SELECT v.* FROM platform_connections c JOIN platform_connection_versions v ON v.connection_id=c.id AND v.id=c.active_version_id WHERE c.project_instance_id=${instanceId} AND c.kind=${kind} AND (c.enabled OR ${recovery})`;
+		const [version] = await this.executor.query<ConnectionVersion>({
+			text: `
+				SELECT v.*
+				FROM platform_connections c
+				JOIN platform_connection_versions v
+					ON v.connection_id = c.id AND v.id = c.active_version_id
+				WHERE c.project_instance_id = $1
+					AND c.kind = $2
+					AND (c.enabled OR $3::boolean)
+			`,
+			values: [instanceId, kind, recovery],
+		});
 		if (!version) return null;
 		return { version, secrets: await this.secrets(version) };
 	}
@@ -55,27 +81,56 @@ export class ConnectionRepository {
 		instanceId: string,
 		kind: ConnectionKind,
 	): Promise<ConnectionDescriptionRow | null> {
-		const [row] = await this.sql<
-			ConnectionDescriptionRow[]
-		>`SELECT c.enabled,c.active_version_id,v.settings,v.validated_at,v.external_identity FROM platform_connections c LEFT JOIN platform_connection_versions v ON v.connection_id=c.id AND v.id=c.active_version_id WHERE c.project_instance_id=${instanceId} AND c.kind=${kind}`;
+		const [row] = await this.executor.query<ConnectionDescriptionRow>({
+			text: `
+				SELECT c.enabled, c.active_version_id, v.settings, v.validated_at, v.external_identity
+				FROM platform_connections c
+				LEFT JOIN platform_connection_versions v
+					ON v.connection_id = c.id AND v.id = c.active_version_id
+				WHERE c.project_instance_id = $1 AND c.kind = $2
+			`,
+			values: [instanceId, kind],
+		});
 		return row ?? null;
 	}
-	async version(instanceId: string, id: string, sql = this.sql): Promise<ConnectionVersion> {
-		const [version] = await sql<
-			ConnectionVersion[]
-		>`SELECT * FROM platform_connection_versions WHERE id=${id} AND project_instance_id=${instanceId}`;
+	async version(
+		instanceId: string,
+		id: string,
+		executor: PlatformQueryExecutor = this.executor,
+	): Promise<ConnectionVersion> {
+		const [version] = await executor.query<ConnectionVersion>({
+			text: `
+				SELECT *
+				FROM platform_connection_versions
+				WHERE id = $1 AND project_instance_id = $2
+			`,
+			values: [id, instanceId],
+		});
 		if (!version)
 			throw new MerchantError("CONNECTION_NOT_FOUND", "Connection draft is unavailable.", 404);
 		return version;
 	}
 	async secrets(version: ConnectionVersion): Promise<Record<string, string>> {
-		const rows = await this.sql<
-			{ purpose: string; envelope: SecretEnvelope }[]
-		>`SELECT purpose,envelope FROM platform_connection_secrets WHERE connection_id=${version.connection_id} AND version_id=${version.id}`;
+		const rows = await this.executor.query<{
+			purpose: string;
+			envelope: SecretEnvelope;
+		}>({
+			text: `
+				SELECT purpose, envelope
+				FROM platform_connection_secrets
+				WHERE connection_id = $1 AND version_id = $2
+			`,
+			values: [version.connection_id, version.id],
+		});
 		try {
-			const [connection] = await this.sql<
-				{ kind: ConnectionKind }[]
-			>`SELECT kind FROM platform_connections WHERE id=${version.connection_id}`;
+			const [connection] = await this.executor.query<{ kind: ConnectionKind }>({
+				text: `
+					SELECT kind
+					FROM platform_connections
+					WHERE id = $1
+				`,
+				values: [version.connection_id],
+			});
 			const purposes: Record<ConnectionKind, string[]> = {
 				stripe:
 					version.settings.authMethod === "oauth"
@@ -110,7 +165,7 @@ export class ConnectionRepository {
 		}
 	}
 	async saveSecrets(
-		sql: MerchantSql,
+		executor: PlatformQueryExecutor,
 		version: Pick<ConnectionVersion, "id" | "connection_id" | "project_instance_id">,
 		values: Record<string, string>,
 	): Promise<void> {
@@ -121,21 +176,43 @@ export class ConnectionRepository {
 				versionId: version.id,
 				purpose,
 			});
-			await sql`INSERT INTO platform_connection_secrets(connection_id,version_id,purpose,envelope) VALUES(${version.connection_id},${version.id},${purpose},${JSON.stringify(envelope)}::text::jsonb)`;
+			await executor.query({
+				text: `
+					INSERT INTO platform_connection_secrets(connection_id, version_id, purpose, envelope)
+					VALUES ($1, $2, $3, $4::text::jsonb)
+				`,
+				values: [version.connection_id, version.id, purpose, JSON.stringify(envelope)],
+			});
 		}
 	}
 	async list(instanceId: string) {
-		return this.sql<
-			{
-				id: string;
-				kind: ConnectionKind;
-				revision: number;
-				enabled: boolean;
-				active_version_id: string | null;
-				settings: Record<string, unknown> | null;
-				validated_at: Date | null;
-				event_verified_at: Date | null;
-			}[]
-		>`SELECT c.id,c.kind,c.revision,c.enabled,c.active_version_id,v.settings,v.validated_at,v.event_verified_at FROM platform_connections c LEFT JOIN platform_connection_versions v ON v.connection_id=c.id AND v.id=c.active_version_id WHERE c.project_instance_id=${instanceId} ORDER BY c.kind`;
+		return this.executor.query<{
+			id: string;
+			kind: ConnectionKind;
+			revision: number;
+			enabled: boolean;
+			active_version_id: string | null;
+			settings: Record<string, unknown> | null;
+			validated_at: Date | null;
+			event_verified_at: Date | null;
+		}>({
+			text: `
+				SELECT
+					c.id,
+					c.kind,
+					c.revision,
+					c.enabled,
+					c.active_version_id,
+					v.settings,
+					v.validated_at,
+					v.event_verified_at
+				FROM platform_connections c
+				LEFT JOIN platform_connection_versions v
+					ON v.connection_id = c.id AND v.id = c.active_version_id
+				WHERE c.project_instance_id = $1
+				ORDER BY c.kind
+			`,
+			values: [instanceId],
+		});
 	}
 }
