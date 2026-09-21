@@ -14,7 +14,12 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 	const sql = Object.assign(unavailable, {
 		query: unavailable,
 		begin: unavailable,
-		instances: { forProject: unavailable, create: unavailable, activateProduction: unavailable },
+		instances: {
+			forProject: unavailable,
+			forPrincipal: unavailable,
+			create: unavailable,
+			activateProduction: unavailable,
+		},
 	});
 	const store = new MerchantStore(sql, {
 		signupEnabled: true,

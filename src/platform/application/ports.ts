@@ -10,6 +10,15 @@ export interface PlatformProjectInstanceRecord {
 	internalProject: boolean;
 }
 
+/** A logical project with its instances; `instances` is empty until provisioning creates them. */
+export interface PlatformProjectWithInstancesRecord {
+	id: string;
+	key: string;
+	name: string;
+	organizationSlug: string;
+	instances: readonly PlatformProjectInstanceRecord[];
+}
+
 export interface CreatePlatformProjectInstanceInput {
 	platformProjectId: string;
 	key: string;
