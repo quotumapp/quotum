@@ -30,6 +30,8 @@ bun run test:e2e                 # boots the real service process against a cont
 bun run test:merchant:integration   # integration/merchant against a container
 
 bun run openapi:generate && bun run openapi:check && bun run openapi:lint   # after any route or capability change
+
+bun run mcp                      # read-only stdio MCP server; QUOTUM_MCP_BASE_URL + sandbox QUOTUM_MCP_API_KEY
 ```
 
 Postgres-backed test files are wrapped in `describeLocalPostgres` / `describeE2e` and silently
@@ -72,6 +74,10 @@ migration. The rules that most often bite:
   `src/projections`, `src/projects`, `src/http`, `src/admin`, `src/operations`, `src/sdk`,
   `src/env.ts`) and Platform (`src/platform`) never import each other. Only `src/composition`,
   the root entrypoints, and test support may import both.
+- `src/mcp` (the read-only stdio MCP server, see `docs/mcp.md`) is its own owner: it may import only
+  `src/mcp`, `src/shared` and `src/sdk`, and no domain module may import it. Every request it can
+  send is listed in `src/mcp/guarded-fetch.ts`; `tests/mcp/inventory.test.ts` pins the tool list
+  against that allowlist, so add a tool and its route together and never add a write.
 - `src/shared` depends on nothing domain-specific. Production code never imports `src/composition`
   or `src/testing`.
 - Platform code cannot touch Drizzle, Bun SQL, or billing persistence. Platform repositories get a

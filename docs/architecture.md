@@ -12,6 +12,7 @@ unclassified or overlapping files and unresolved imports fail the check.
 | Billing | `src/admin`, `src/app`, `src/billing`, `src/catalog`, `src/db`, `src/http`, `src/observability`, `src/operations`, `src/projects`, `src/projections`, `src/providers`, `src/sdk`, `src/workers`, `src/env.ts`, `scripts/billing-catalog.ts` | Billing, shared |
 | Platform | `src/platform` | Platform, shared |
 | Shared | `src/shared` | Shared |
+| MCP | `src/mcp` | MCP, shared, and `src/sdk` only |
 | Composition | `src/composition`, `src/app.ts`, `src/index.ts`, `src/runtime.ts`, `src/migrate.ts`, `src/platform-bootstrap.ts`, `src/shutdown.ts`, `scripts/provision-catalog.ts` | Everything |
 | Test support | `tests`, `src/testing`, scenario runners, release tooling (`scripts/release.ts`), `scripts/lib` | Everything |
 
@@ -21,6 +22,9 @@ The policy is deny-by-default:
   Composition wires them through typed ports.
 - Shared code cannot depend on either domain, and production modules cannot import composition or
   test-support code.
+- The MCP server is an HTTP client of the billing API. Its only billing import is the SDK in
+  `src/sdk`, no domain module may import it, and it is held to the same persistence ban as platform
+  and shared code.
 - Platform and shared code cannot import billing persistence, Drizzle, Postgres clients, or Bun SQL.
   Platform repositories receive a schema-neutral query executor from composition and must pass inline
   static SQL as `executor.query({ text, values })`; computed or concatenated SQL fails the check.
@@ -48,6 +52,7 @@ The policy is deny-by-default:
   `src/composition/worker-providers.ts` selects each job's adapter by that stored provider and
   resolves connections for recovery, so queued work still drains after a connection stops
   accepting new work. Stripe App events are handled outside the registry.
+- `src/mcp/`: the read-only stdio [MCP server](mcp.md), a client of `/v1` through `src/sdk/`.
 - `migrations/`: ordered schema authority.
 - `tests/`: unit, integration, and end-to-end coverage mirroring the source layout.
 - `contracts/v1/`: generated OpenAPI contract, error inventory and provider capability declarations.

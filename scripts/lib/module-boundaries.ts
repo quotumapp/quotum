@@ -34,6 +34,7 @@ export const moduleOwners = [
 	"billing",
 	"platform",
 	"shared",
+	"mcp",
 	"composition",
 	"test_support",
 ] as const;
@@ -144,6 +145,11 @@ export const defaultModuleBoundaryRules: readonly ModuleBoundaryRule[] = [
 		matches: (path) => path.startsWith("src/shared/"),
 	},
 	{
+		owner: "mcp",
+		description: "MCP server, an HTTP client of the billing API through the SDK",
+		matches: (path) => path.startsWith("src/mcp/"),
+	},
+	{
 		owner: "composition",
 		description: "application composition and lifecycle entrypoints",
 		matches: (path) => compositionPaths.has(path) || hasPrefix(path, compositionPrefixes),
@@ -159,7 +165,9 @@ const allowedInternalDependencies: Readonly<Record<ModuleOwner, ReadonlySet<Modu
 	billing: new Set(["billing", "shared"]),
 	platform: new Set(["platform", "shared"]),
 	shared: new Set(["shared"]),
-	composition: new Set(["billing", "platform", "shared", "composition"]),
+	// The billing dependency is narrowed to src/sdk/ where dependencies are checked.
+	mcp: new Set(["mcp", "shared", "billing"]),
+	composition: new Set(["billing", "platform", "shared", "mcp", "composition"]),
 	test_support: new Set(moduleOwners),
 };
 
@@ -176,6 +184,8 @@ const ignoredSourceDirectories = new Set([
 ]);
 const allowedNonLiteralModuleReferencePaths = new Set(["scripts/billing-catalog.ts"]);
 const selfPackageName = "quotum-api";
+// The MCP server reaches billing only as an HTTP client, so the SDK is its single billing import.
+const mcpSdkPrefix = "src/sdk/";
 const crossDomainProjectPersistenceAdapterPath = "src/composition/project-instance-persistence.ts";
 const platformSqlExecutionMethodNames = new Set(["execute", "query", "raw", "unsafe"]);
 const platformProjectIdentityMigrationPath = "migrations/001_platform.sql";
@@ -310,7 +320,7 @@ export async function analyzeModuleBoundaries(
 				const references = collectModuleReferences(sourceFile);
 				violations.push(...analyzeSourceTableOwnership(path, owner, sourceFile));
 
-				if (owner === "platform" || owner === "shared") {
+				if (isPersistenceFreeOwner(owner)) {
 					for (const node of findBunSqlReferences(sourceFile)) {
 						violations.push({
 							code: "FORBIDDEN_PERSISTENCE_ACCESS",
@@ -379,7 +389,7 @@ export async function analyzeModuleBoundaries(
 							continue;
 						}
 
-						if ((owner === "platform" || owner === "shared") && targetPath.startsWith("src/db/")) {
+						if (isPersistenceFreeOwner(owner) && targetPath.startsWith("src/db/")) {
 							violations.push({
 								code: "FORBIDDEN_PERSISTENCE_ACCESS",
 								path,
@@ -389,7 +399,10 @@ export async function analyzeModuleBoundaries(
 							continue;
 						}
 
-						if (!allowedInternalDependencies[owner].has(targetOwner)) {
+						if (
+							!allowedInternalDependencies[owner].has(targetOwner) ||
+							(owner === "mcp" && targetOwner === "billing" && !targetPath.startsWith(mcpSdkPrefix))
+						) {
 							violations.push({
 								code: "FORBIDDEN_DEPENDENCY",
 								path,
@@ -401,7 +414,7 @@ export async function analyzeModuleBoundaries(
 					}
 
 					if (
-						(owner === "platform" || owner === "shared") &&
+						isPersistenceFreeOwner(owner) &&
 						isRestrictedPersistencePackage(reference.specifier) &&
 						!(
 							path === "src/platform/persistence/auth-schema.ts" &&
@@ -1228,6 +1241,10 @@ function isRestrictedPersistencePackage(specifier: string): boolean {
 	return restrictedPersistencePackages.some(
 		(packageName) => specifier === packageName || specifier.startsWith(`${packageName}/`),
 	);
+}
+
+function isPersistenceFreeOwner(owner: ModuleOwner): boolean {
+	return owner === "platform" || owner === "shared" || owner === "mcp";
 }
 
 function isPersistenceFreeContract(path: string): boolean {
