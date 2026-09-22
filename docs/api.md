@@ -83,7 +83,9 @@ controls, alerts, automatic top-ups, and license assignments also require `X-Bil
 Confirming more than the reserved quantity returns `RESERVATION_QUANTITY_EXCEEDED`, a changed
 confirmation returns `RESERVATION_ALREADY_CONFIRMED`, and using a newly published meter absent from
 the account's purchased catalog returns `METER_RATE_NOT_ACTIVATED`. Omitted `expiresInSeconds` on a
-reservation defaults to 300.
+reservation defaults to 300. License pools follow the purchased subscription-item quantity: an
+entity license check honors active assignments in assignment order up to that capacity, so a seat
+downgrade stops authorizing the assignments beyond it until they are revoked.
 
 Usage reads default to the last 30 days, reject ranges over 90 days, and page with an opaque cursor
 (default 50, maximum 200). Series support `hour` or `day` buckets. These reads and `billing-summary`
