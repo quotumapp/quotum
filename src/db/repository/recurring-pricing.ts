@@ -491,6 +491,9 @@ export class RecurringPricingRepository extends RepositoryModule {
 	/**
 	 * Materializes due periods one transaction at a time and claims the queued work as ids. A
 	 * candidate that cannot be priced is skipped, so the claim and the other candidates still run.
+	 * A period with an active reservation on any of its windows is not due yet: the reservation was
+	 * taken while the window was open and either confirms into it or expires within its TTL, so
+	 * waiting invoices the final usage instead of an adjustment.
 	 */
 	async materializeAndClaimUsageInvoicePeriods(
 		workerId: string,
@@ -529,6 +532,13 @@ export class RecurringPricingRepository extends RepositoryModule {
 					s.provider_account_id, uw.anchor_plan_item_id, pc.id, uw.window_start_at,
 					uw.window_end_at, pi.quantity, pc.billing_units, pc.unit_amount_minor, pc.currency,
 					pc.pricing_model
+				HAVING NOT bool_or(EXISTS (
+					SELECT 1 FROM reservations reservation
+					WHERE reservation.project_id = uw.project_id
+						AND reservation.usage_window_id = uw.id
+						AND reservation.status = 'active'
+						AND reservation.expires_at > now()
+				))
 				ORDER BY uw.window_end_at
 				LIMIT ${limit}
 			`,

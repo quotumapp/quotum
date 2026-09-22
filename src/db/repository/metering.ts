@@ -31,7 +31,6 @@ import type {
 	WorkerConsumeUsageResult,
 	WorkerMeteringMutationInput,
 } from "../../billing/metering";
-import { calculateTieredUsageCharge, calculateUsageCharge } from "../../billing/pricing";
 import type {
 	UsageOperationInput,
 	UsageOperationKind,
@@ -118,7 +117,10 @@ import {
 } from "./metering-persistence";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
-import { materializeUsageInvoicePeriod, readPriceTiers } from "./usage-invoice-periods";
+import {
+	materializeUsageInvoicePeriod,
+	recordUsageInvoicePeriodAdjustment,
+} from "./usage-invoice-periods";
 import {
 	expireUsageOperationResults,
 	lookupUsageOperation,
@@ -1444,85 +1446,18 @@ async function recordClosedUsageInvoiceAdjustment(
 		periodEndAt: expectedEnd,
 	});
 	if (materialized === null) return null;
-	const { period, pricingModel } = materialized;
-	const prior = await executeOne<{ quantity: unknown }>(
-		executor,
-		drizzleSql`
-			SELECT COALESCE(sum(quantity), 0)::text AS quantity
-			FROM usage_invoice_adjustments
-			WHERE project_id = ${input.projectId} AND closed_period_id = ${period.id}
-		`,
-	);
-	const effectiveUsageUnits =
-		decimalToUnits(databaseDecimal(period.usage_quantity, "closed period usage", 9), 9) +
-		signedDecimalToUnits(String(prior?.quantity ?? "0"), 9);
-	const correctedUsageUnits = effectiveUsageUnits - decimalToUnits(input.quantity, 9);
-	if (correctedUsageUnits < 0n) {
-		throw new Error("Closed-period correction exceeds invoiceable usage");
-	}
-	const commonPrice = {
-		includedQuantity: String(period.included_quantity),
-		billingUnits: String(period.billing_units),
-		unitAmountMinor: BigInt(period.unit_amount_minor),
-	};
-	const before = await calculatePersistedPriceCharge(executor, {
+	const adjustment = await recordUsageInvoicePeriodAdjustment(executor, {
 		projectId: input.projectId,
-		priceComponentId: String(period.price_component_id),
-		pricingModel,
-		...commonPrice,
-		usageQuantity: unitsToDecimal(effectiveUsageUnits, 9),
+		period: materialized.period,
+		pricingModel: materialized.pricingModel,
+		usageEventId: input.correctionEventId,
+		usageEventRecordedAtExact: input.correctionRecordedAtExact,
+		quantityDelta: negativeDecimal(input.quantity),
 	});
-	const after = await calculatePersistedPriceCharge(executor, {
-		projectId: input.projectId,
-		priceComponentId: String(period.price_component_id),
-		pricingModel,
-		...commonPrice,
-		usageQuantity: unitsToDecimal(correctedUsageUnits, 9),
-	});
-	const amountDelta = after.amountMinor - before.amountMinor;
-	await executeRows(
-		executor,
-		drizzleSql`
-			INSERT INTO usage_invoice_adjustments (
-				project_id, closed_period_id, usage_event_id, usage_event_recorded_at,
-				quantity, amount_minor, currency, status, invoiced_at
-			)
-			VALUES (
-				${input.projectId}, ${period.id}, ${input.correctionEventId},
-				${input.correctionRecordedAtExact}::timestamptz,
-				${negativeDecimal(input.quantity)}::numeric, ${amountDelta.toString()},
-				${period.currency}, ${amountDelta === 0n ? "credited" : "pending"},
-				${amountDelta === 0n ? new Date().toISOString() : null}
-			)
-			ON CONFLICT (project_id, usage_event_recorded_at, usage_event_id) DO NOTHING
-		`,
-	);
 	return {
-		spendMinorReduction: (before.amountMinor - after.amountMinor).toString(),
-		currency: period.currency.toUpperCase(),
+		spendMinorReduction: (-adjustment.amountDelta).toString(),
+		currency: adjustment.currency.toUpperCase(),
 	};
-}
-
-async function calculatePersistedPriceCharge(
-	executor: QueryExecutor,
-	input: {
-		projectId: string;
-		priceComponentId: string;
-		pricingModel: "flat" | "graduated" | "volume";
-		usageQuantity: string;
-		includedQuantity: string;
-		billingUnits: string;
-		unitAmountMinor: bigint;
-	},
-) {
-	if (input.pricingModel === "flat") return calculateUsageCharge(input);
-	return calculateTieredUsageCharge({
-		usageQuantity: input.usageQuantity,
-		includedQuantity: input.includedQuantity,
-		billingUnits: input.billingUnits,
-		pricingModel: input.pricingModel,
-		tiers: await readPriceTiers(executor, input.projectId, input.priceComponentId),
-	});
 }
 
 function negativeDecimal(value: string): string {
