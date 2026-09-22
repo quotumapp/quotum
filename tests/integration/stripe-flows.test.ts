@@ -20,6 +20,7 @@ import {
 	expectTableCounts,
 } from "./helpers/db-assertions";
 import {
+	createFakeStripeBillingClient,
 	stripeCheckoutSessionObject,
 	stripeEvent,
 	stripeRefundedChargeObject,
@@ -1470,6 +1471,118 @@ localDescribe("Stripe route flows integration", () => {
 
 		expect(entitlements.status).toBe(200);
 		expectActivePremiumSnapshot((await entitlements.json()).data, "integration_user");
+	});
+
+	it("keeps the upgraded price when a later invoice still carries Checkout metadata", async () => {
+		const project = integrationProjectContext("voysee");
+		const service = new StripeBillingService({
+			config: {
+				projectKey: "voysee",
+				checkoutSuccessUrl:
+					"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
+				checkoutCancelUrl: "https://app.integration.test/billing",
+				portalReturnUrl: "https://app.integration.test/account/billing",
+			},
+			client: createFakeStripeBillingClient().client,
+			repository: context.repository.forProject(project),
+		});
+		await context.sql`
+			INSERT INTO store_products (
+				project_id, product_id, provider, channel, external_product_id, external_price_id,
+				billing_period, currency, price_amount
+			)
+			SELECT project_id, product_id, provider, channel, 'prod_upgrade', 'price_upgrade',
+				billing_period, currency, 1999
+			FROM store_products
+			WHERE external_price_id = 'price_premium_monthly'
+		`;
+		const periodStart = Math.floor(Date.now() / 1000) - 86_400;
+		const periodEnd = periodStart + 30 * 86_400;
+		// Stripe keeps the Checkout metadata on the subscription after the price change.
+		const upgraded = await service.handleVerifiedAppEvent({
+			id: "evt_upgrade_subscription",
+			type: "customer.subscription.updated",
+			created: periodStart + 100,
+			data: {
+				object: stripeSubscriptionObject({
+					current_period_start: periodStart,
+					current_period_end: periodEnd,
+					items: {
+						data: [
+							{
+								id: "si_integration",
+								quantity: 1,
+								price: { id: "price_upgrade", product: "prod_upgrade" },
+								current_period_start: periodStart,
+								current_period_end: periodEnd,
+							},
+						],
+					},
+				}),
+			},
+		});
+		expect(upgraded.status).toBe("processed");
+		const subscriptionRow = () => context.sql<
+			Array<{ external_price_id: string; external_product_id: string; store_price: string }>
+		>`
+			SELECT subscription.external_price_id, subscription.external_product_id,
+				store.external_price_id AS store_price
+			FROM subscriptions subscription
+			JOIN store_products store ON store.id = subscription.store_product_id
+			WHERE subscription.external_subscription_id = 'sub_1'
+		`;
+		expect((await subscriptionRow())[0]).toEqual({
+			external_price_id: "price_upgrade",
+			external_product_id: "prod_upgrade",
+			store_price: "price_upgrade",
+		});
+
+		const invoiced = await service.handleVerifiedAppEvent({
+			id: "evt_upgrade_invoice",
+			type: "invoice.paid",
+			created: periodStart + 101,
+			data: {
+				object: {
+					id: "in_upgrade",
+					object: "invoice",
+					customer: "cus_integration",
+					subscription: "sub_1",
+					status: "paid",
+					created: periodStart,
+					amount_paid: 1999,
+					currency: "usd",
+					parent: {
+						subscription_details: {
+							subscription: "sub_1",
+							metadata: stripeSubscriptionObject().metadata,
+						},
+					},
+					lines: {
+						data: [
+							{
+								id: "il_upgrade",
+								parent: {
+									subscription_item_details: {
+										subscription: "sub_1",
+										subscription_item: "si_integration",
+										proration: false,
+									},
+								},
+								pricing: { price_details: { product: "prod_upgrade", price: "price_upgrade" } },
+								period: { start: periodStart, end: periodEnd },
+							},
+						],
+					},
+				},
+			},
+		});
+		expect(invoiced.status).toBe("processed");
+		expect((await subscriptionRow())[0]).toEqual({
+			external_price_id: "price_upgrade",
+			external_product_id: "prod_upgrade",
+			store_price: "price_upgrade",
+		});
+		await expectTableCounts(context.sql, { subscriptions: 1, billing_invoices: 1 });
 	});
 
 	// capability: refund.sync

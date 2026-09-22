@@ -281,18 +281,26 @@ export function normalizeStripeInvoice(
 	const status = requireString(input.invoice.status, "Stripe invoice status");
 	const currentPeriodStart = invoiceStartsAt(input.invoice, subscriptionLine);
 	const currentPeriodEnd = invoiceExpiresAt(input.invoice, subscriptionLine);
-	const externalProductId =
-		optionalString(metadata.externalProductId) ??
-		optionalString(subscriptionLineMetadata.externalProductId) ??
-		optionalString(parentSubscriptionMetadata.externalProductId) ??
-		optionalString(subscriptionMetadata.externalProductId) ??
-		invoiceLineProductId(subscriptionLine);
-	const externalPriceId =
-		optionalString(metadata.externalPriceId) ??
-		optionalString(subscriptionLineMetadata.externalPriceId) ??
-		optionalString(parentSubscriptionMetadata.externalPriceId) ??
-		optionalString(subscriptionMetadata.externalPriceId) ??
-		invoiceLinePriceId(subscriptionLine);
+	// The subscription line names what was actually invoiced. Metadata is only a hint: Checkout
+	// stamps the first price on the subscription, Stripe merges later metadata updates and copies
+	// the result onto every invoice, so after a plan change it still names the original price.
+	const lineProductId = invoiceLineProductId(subscriptionLine);
+	const linePriceId = invoiceLinePriceId(subscriptionLine);
+	const lineIdentifiesPrice = lineProductId !== null && linePriceId !== null;
+	const externalProductId = lineIdentifiesPrice
+		? lineProductId
+		: (optionalString(metadata.externalProductId) ??
+			optionalString(subscriptionLineMetadata.externalProductId) ??
+			optionalString(parentSubscriptionMetadata.externalProductId) ??
+			optionalString(subscriptionMetadata.externalProductId) ??
+			lineProductId);
+	const externalPriceId = lineIdentifiesPrice
+		? linePriceId
+		: (optionalString(metadata.externalPriceId) ??
+			optionalString(subscriptionLineMetadata.externalPriceId) ??
+			optionalString(parentSubscriptionMetadata.externalPriceId) ??
+			optionalString(subscriptionMetadata.externalPriceId) ??
+			linePriceId);
 
 	return {
 		kind: "subscription",
@@ -568,22 +576,24 @@ function firstInvoiceSubscriptionLine(
 	subscriptionId: string,
 ): Record<string, unknown> | null {
 	const lines = recordArray(optionalRecord(invoice.lines)?.data);
-	const currentSubscriptionItemLine = lines.find(
-		(line) => invoiceLineCurrentSubscriptionItemId(line) === subscriptionId,
+	const currentSubscriptionItemLine = purchasedSubscriptionLine(
+		lines.filter((line) => invoiceLineCurrentSubscriptionItemId(line) === subscriptionId),
 	);
 
-	if (currentSubscriptionItemLine !== undefined) {
+	if (currentSubscriptionItemLine !== null) {
 		return currentSubscriptionItemLine;
 	}
 
-	const legacySubscriptionLine = lines.find(
-		(line) =>
-			invoiceLineCurrentSubscriptionItemId(line) === null &&
-			isLegacyRecurringSubscriptionLine(line) &&
-			optionalId(line.subscription) === subscriptionId,
+	const legacySubscriptionLine = purchasedSubscriptionLine(
+		lines.filter(
+			(line) =>
+				invoiceLineCurrentSubscriptionItemId(line) === null &&
+				isLegacyRecurringSubscriptionLine(line) &&
+				optionalId(line.subscription) === subscriptionId,
+		),
 	);
 
-	if (legacySubscriptionLine !== undefined) {
+	if (legacySubscriptionLine !== null) {
 		return legacySubscriptionLine;
 	}
 
@@ -595,6 +605,43 @@ function firstInvoiceSubscriptionLine(
 	});
 
 	return lineWithPeriodEnd ?? lines.find((line) => !isInvoiceItemLine(line)) ?? null;
+}
+
+/**
+ * Picks the line that carries the purchased price when several belong to the subscription. A plan
+ * change invoice lists the removed price's proration credit before the added price, so lines Stripe
+ * marks as prorations lose, then the latest period wins, and the last listed line breaks ties.
+ */
+function purchasedSubscriptionLine(
+	lines: Record<string, unknown>[],
+): Record<string, unknown> | null {
+	const settled = lines.filter((line) => invoiceLineIsProration(line) !== true);
+	const candidates = settled.length > 0 ? settled : lines;
+	let chosen = candidates[candidates.length - 1];
+	if (chosen === undefined) {
+		return null;
+	}
+	let chosenPeriodEnd = invoiceLinePeriodEnd(chosen);
+	for (const line of candidates) {
+		const periodEnd = invoiceLinePeriodEnd(line);
+		if (periodEnd !== null && (chosenPeriodEnd === null || periodEnd > chosenPeriodEnd)) {
+			chosen = line;
+			chosenPeriodEnd = periodEnd;
+		}
+	}
+	return chosen;
+}
+
+function invoiceLineIsProration(line: Record<string, unknown>): boolean | null {
+	const subscriptionItemDetails = optionalRecord(
+		optionalRecord(line.parent)?.subscription_item_details,
+	);
+	return optionalBoolean(subscriptionItemDetails?.proration) ?? optionalBoolean(line.proration);
+}
+
+function invoiceLinePeriodEnd(line: Record<string, unknown>): number | null {
+	const end = optionalRecord(line.period)?.end;
+	return typeof end === "number" && Number.isFinite(end) ? end : null;
 }
 
 function invoiceExpiresAt(
