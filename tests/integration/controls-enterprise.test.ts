@@ -211,6 +211,112 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		});
 	});
 
+	it("refunds a tax-inclusive auto top-up against the settled amount, not the list price", async () => {
+		await prepareAutoTopupAccount("topup-account");
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "topup-account",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "operator",
+			sourceKey: "fixture:topup-account",
+		});
+		await context.repository.controlsEnterprise.upsertAutoTopupPolicy(project, {
+			billingAccountId: "topup-account",
+			featureKey: "ai_credits",
+			topupKey: "credits_10",
+			provider: "stripe",
+			thresholdQuantity: "5",
+			cooldownSeconds: 30,
+			limitIntervalSeconds: 86_400,
+			maxPurchasesPerInterval: 2,
+			maxSpendMinor: 1_000,
+			maxConsecutiveFailures: 3,
+			actor: "integration-test",
+		});
+		await consume("topup-account", "6", "topup:trigger");
+		const [job] = await context.repository.claimAutoTopupJobs(
+			"auto-worker",
+			10,
+			new Date(Date.now() - 300_000),
+		);
+		if (job === undefined) throw new Error("Expected a claimed auto top-up job");
+
+		// Tax raises the settled charge above the 499 list price.
+		for (let attempt = 0; attempt < 2; attempt += 1) {
+			await context.repository.markAutoTopupSucceeded(job.projectId, job.jobId, "auto-worker", {
+				status: "succeeded",
+				externalInvoiceId: "in_auto_taxed",
+				externalPaymentId: "pi_auto_taxed",
+				amountPaidMinor: 600,
+				currency: "USD",
+			});
+		}
+		const [purchase] = await context.sql<
+			Array<{ amount_paid_minor: string; currency: string; status: string }>
+		>`
+			SELECT amount_paid_minor::text, currency, status
+			FROM purchases WHERE transaction_id = 'pi_auto_taxed'
+		`;
+		expect(purchase).toEqual({ amount_paid_minor: "600", currency: "USD", status: "completed" });
+		expect(
+			await context.repository.getMeteringBalance(project, "topup-account", "ai_credits"),
+		).toMatchObject({ granted: "20", consumed: "6", available: "14" });
+
+		const reversal = (reversalId: string, reversalAmount: number) =>
+			context.repository.recordStripeCreditReversalAndEnqueueProjection(project, {
+				reversalReason: "refund",
+				reversalId,
+				reversalAmount,
+				reversalCurrency: "usd",
+				paymentIntentId: "pi_auto_taxed",
+				chargeId: "ch_auto_taxed",
+				reversedAt: new Date(),
+				rawPayload: {},
+				eventType: "refund.created",
+				externalEventId: `evt_${reversalId}`,
+				projectionIdempotencyKey: `stripe:refund:${reversalId}:reversal`,
+			});
+
+		// Half of the settled amount reverses half of the purchased credits.
+		expect(await reversal("re_auto_partial", 300)).toMatchObject({
+			processingStatus: "processed",
+			billingAccountId: "topup-account",
+		});
+		expect(
+			await context.repository.getMeteringBalance(project, "topup-account", "ai_credits"),
+		).toMatchObject({ granted: "15", consumed: "6", available: "9" });
+
+		// The remainder completes the refund instead of being skipped as exceeding the list price.
+		expect(await reversal("re_auto_rest", 300)).toMatchObject({
+			processingStatus: "processed",
+			billingAccountId: "topup-account",
+		});
+		expect(
+			await context.repository.getMeteringBalance(project, "topup-account", "ai_credits"),
+		).toMatchObject({ granted: "10", consumed: "6", available: "4" });
+		const [reversed] = await context.sql<
+			Array<{
+				status: string;
+				reversed_amount: string;
+				reversed_credit_amount: number;
+				skipped_events: number;
+			}>
+		>`
+			SELECT pu.status, pu.reversed_amount::text, pu.reversed_credit_amount,
+				(
+					SELECT count(*)::integer FROM store_events
+					WHERE processing_status = 'skipped' AND event_type = 'refund.created'
+				) AS skipped_events
+			FROM purchases pu WHERE pu.transaction_id = 'pi_auto_taxed'
+		`;
+		expect(reversed).toEqual({
+			status: "refunded",
+			reversed_amount: "600",
+			reversed_credit_amount: 10,
+			skipped_events: 0,
+		});
+	});
+
 	it("retries a Stripe 429 auto top-up through the worker and then charges once", async () => {
 		await prepareAutoTopupAccount("topup-account");
 		await context.repository.grantAllocation(project, {
