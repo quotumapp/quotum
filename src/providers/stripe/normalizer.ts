@@ -609,14 +609,17 @@ function firstInvoiceSubscriptionLine(
 
 /**
  * Picks the line that carries the purchased price when several belong to the subscription. A plan
- * change invoice lists the removed price's proration credit before the added price, so lines Stripe
- * marks as prorations lose, then the latest period wins, and the last listed line breaks ties.
+ * change can contain both a removed-price credit and an added-price debit in either order. Prefer
+ * non-credit lines, then non-prorated lines and the latest period. This is an invoice identity hint
+ * for initial discovery; an existing subscription keeps its authoritative commercial snapshot.
  */
 function purchasedSubscriptionLine(
 	lines: Record<string, unknown>[],
 ): Record<string, unknown> | null {
-	const settled = lines.filter((line) => invoiceLineIsProration(line) !== true);
-	const candidates = settled.length > 0 ? settled : lines;
+	const nonCredits = lines.filter((line) => typeof line.amount !== "number" || line.amount >= 0);
+	const purchased = nonCredits.length > 0 ? nonCredits : lines;
+	const settled = purchased.filter((line) => invoiceLineIsProration(line) !== true);
+	const candidates = settled.length > 0 ? settled : purchased;
 	let chosen = candidates[candidates.length - 1];
 	if (chosen === undefined) {
 		return null;

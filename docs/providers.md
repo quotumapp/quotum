@@ -197,6 +197,13 @@ Checkout flow:
 
 Portal sessions come from `POST .../providers/stripe/portal-sessions` and return `{url}`.
 
+For an existing subscription, invoice webhooks record payment history and may update its payment
+status, but cannot replace its product, price, purchased items, plan version, period, or subscription
+event ordering. Those commercial fields come from subscription events and reconciliation reads.
+Paying an older invoice or a proration credit therefore cannot undo an upgrade. Invoice history
+retains its own event order, including invoices delivered after newer subscription events.
+
+
 Subscription changes are queued with
 `POST /v1/billing-accounts/:billingAccountId/subscriptions/:subscriptionId/changes`; upgrades and
 quantity changes apply immediately by default, downgrades at period end. Base and licensed prices

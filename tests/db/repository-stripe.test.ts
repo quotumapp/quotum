@@ -202,6 +202,7 @@ describe("BillingRepository Stripe", () => {
 			[
 				[{ id: "customer-id", billing_account_id: "user-1" }],
 				[{ id: "provider-customer-id" }],
+				[],
 				[
 					{
 						id: "store-product-id",
@@ -211,7 +212,6 @@ describe("BillingRepository Stripe", () => {
 						credit_amount: 0,
 					},
 				],
-				[],
 				[{ id: "store-event-id" }],
 				[{ id: "subscription-id" }],
 				[],
@@ -258,6 +258,7 @@ describe("BillingRepository Stripe", () => {
 		const database = new FakeDatabase([
 			[{ id: "customer-id", billing_account_id: "user-1" }],
 			[{ id: "provider-customer-id" }],
+			[],
 			[
 				{
 					id: "store-product-id",
@@ -267,7 +268,6 @@ describe("BillingRepository Stripe", () => {
 					credit_amount: 0,
 				},
 			],
-			[],
 			[{ id: "store-event-id" }],
 			[{ id: "subscription-id" }],
 			[],
