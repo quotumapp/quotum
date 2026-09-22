@@ -219,6 +219,13 @@ operator key; `admin.storeEvent` never requests the raw provider payload. On a 4
 `BillingApiError.rateLimitResetAt` carries the `ratelimit-reset` timestamp. The read-only
 [MCP server](mcp.md) for coding agents is built on these reads.
 
+An applied catalog migration settles once when the subscription is synchronized. Later updates,
+including an explicit downgrade or a provider-side return to an earlier plan, cannot replay that
+historical migration. Stripe subscription-item IDs can remain unchanged across plan versions;
+Quotum transfers their live association to the target price component and retains the inactive
+source component rows and existing license-pool references. Returning to an earlier version reuses
+its component rows.
+
 ## Provider capability errors
 
 Each provider declares which operations it supports and under which conditions; see

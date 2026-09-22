@@ -1330,12 +1330,17 @@ export const subscriptionChanges = pgTable(
 		lockedAt: timestamp("locked_at", { withTimezone: true }),
 		lockedBy: text("locked_by"),
 		appliedAt: timestamp("applied_at", { withTimezone: true }),
+		synchronizedAt: timestamp("synchronized_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
 	(table) => [
 		check(
 			"subscription_changes_provider_check",
 			sql`${table.provider} IN ('apple', 'google', 'stripe')`,
+		),
+		check(
+			"subscription_changes_synchronization_check",
+			sql`${table.synchronizedAt} IS NULL OR ${table.status} = 'applied'`,
 		),
 		unique("subscription_changes_project_id_id_unique").on(table.projectId, table.id),
 		uniqueIndex("idx_billing_subscription_changes_idempotency").on(

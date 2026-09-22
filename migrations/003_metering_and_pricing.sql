@@ -990,6 +990,7 @@ CREATE TABLE IF NOT EXISTS subscription_changes (
 	locked_at TIMESTAMPTZ,
 	locked_by TEXT,
 	applied_at TIMESTAMPTZ,
+	synchronized_at TIMESTAMPTZ,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	CONSTRAINT subscription_changes_project_id_id_unique UNIQUE (project_id, id),
@@ -1004,6 +1005,9 @@ CREATE TABLE IF NOT EXISTS subscription_changes (
 	CONSTRAINT subscription_changes_project_to_plan_fk
 		FOREIGN KEY (project_id, to_plan_version_id)
 		REFERENCES plan_versions(project_id, id),
+	CONSTRAINT subscription_changes_synchronization_check CHECK (
+		synchronized_at IS NULL OR status = 'applied'
+	),
 	CONSTRAINT subscription_changes_state_check CHECK (
 		(status = 'applied' AND applied_at IS NOT NULL AND last_error IS NULL)
 		OR (status = 'failed' AND last_error IS NOT NULL AND applied_at IS NULL)
