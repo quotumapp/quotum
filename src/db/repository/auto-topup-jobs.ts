@@ -144,6 +144,9 @@ export class AutoTopupJobRepository extends RepositoryModule {
 				purchasedAt,
 				invalidatedAt: null,
 				invalidationReason: null,
+				// The settled charge (tax included) is the refund baseline, not the catalog list price.
+				amountPaidMinor: amountPaid,
+				currency,
 				rawPayload: {
 					source: "auto_topup",
 					autoTopupJobId: jobId,
