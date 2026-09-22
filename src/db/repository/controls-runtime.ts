@@ -2,6 +2,7 @@ import { sql as drizzleSql } from "drizzle-orm";
 import type { EffectiveControl } from "../../billing/controls";
 import {
 	canonicalDecimal,
+	canonicalSignedDecimal,
 	decimalToUnits,
 	signedDecimalToUnits,
 	unitsToDecimal,
@@ -104,11 +105,14 @@ async function evaluateControls(
 		delta: string;
 	}> = [];
 	for (const control of controls) {
+		// Spend deltas are signed: volume pricing can lower the total charge at a tier boundary. A
+		// falling charge is never denied; only a consume records the lower exposure.
 		const delta =
 			control.controlKind === "usage_limit"
 				? canonicalDecimal(input.usageDelta, "usage control delta", 9)
-				: canonicalDecimal(input.spendMinorDelta ?? "0", "spend control delta", 9);
-		if (decimalToUnits(delta, 9) === 0n) continue;
+				: canonicalSignedDecimal(input.spendMinorDelta ?? "0", "spend control delta", 9);
+		const deltaUnits = signedDecimalToUnits(delta, 9);
+		if (deltaUnits === 0n || (deltaUnits < 0n && mode !== "consume")) continue;
 		const bounds = controlWindowBounds(control.interval, now);
 		let window: {
 			id: string | number | bigint;
@@ -158,8 +162,7 @@ async function evaluateControls(
 		const limitUnits = decimalToUnits(control.limitValue, 9);
 		const consumedUnits = decimalToUnits(consumed, 9);
 		const heldUnits = decimalToUnits(held, 9);
-		const deltaUnits = decimalToUnits(delta, 9);
-		if (consumedUnits + heldUnits + deltaUnits > limitUnits) {
+		if (deltaUnits > 0n && consumedUnits + heldUnits + deltaUnits > limitUnits) {
 			const remaining = limitUnits - consumedUnits - heldUnits;
 			return {
 				denial: {
@@ -188,15 +191,29 @@ async function evaluateControls(
 	if (mode === "check") return { denial: null, entries: [] };
 	const entries: ControlConsumptionEntry[] = [];
 	for (const item of locked) {
+		if (mode === "consume") {
+			// Exposure never drops below zero: a falling charge only reverses what this window holds.
+			const updated = await executeOne<{ consumed_value: unknown }>(
+				executor,
+				drizzleSql`
+				UPDATE control_windows
+				SET consumed_value = GREATEST(consumed_value + ${item.delta}::numeric, 0),
+					updated_at = now()
+				WHERE project_id = ${input.projectId} AND id = ${item.windowId}::bigint
+				RETURNING consumed_value::text AS consumed_value
+			`,
+			);
+			if (updated === null) throw new Error("Control window disappeared during consumption");
+			const applied =
+				decimalToUnits(String(updated.consumed_value), 9) - decimalToUnits(item.consumed, 9);
+			if (applied !== 0n) {
+				entries.push({ controlWindowId: item.windowId, value: unitsToDecimal(applied, 9) });
+			}
+			continue;
+		}
 		await executeOne(
 			executor,
-			mode === "consume"
-				? drizzleSql`
-				UPDATE control_windows SET consumed_value = consumed_value + ${item.delta}::numeric,
-					updated_at = now()
-				WHERE project_id = ${input.projectId} AND id = ${item.windowId}::bigint RETURNING id
-			`
-				: drizzleSql`
+			drizzleSql`
 				UPDATE control_windows SET held_value = held_value + ${item.delta}::numeric,
 					updated_at = now()
 				WHERE project_id = ${input.projectId} AND id = ${item.windowId}::bigint RETURNING id
@@ -213,9 +230,6 @@ async function evaluateControls(
 				) RETURNING reservation_id
 			`,
 			);
-		}
-		if (mode === "consume") {
-			entries.push({ controlWindowId: item.windowId, value: item.delta });
 		}
 	}
 	return { denial: null, entries };
@@ -311,18 +325,24 @@ export async function confirmControlHolds(
 			revision: control.revision,
 		});
 	}
-	const changes: Array<{ windowId: string; held: string; target: string; hasHold: boolean }> = [];
+	const changes: Array<{
+		windowId: string;
+		held: string;
+		target: string;
+		hasHold: boolean;
+		consumed: bigint;
+	}> = [];
 	for (const hold of existingHolds.sort((left, right) =>
 		BigInt(left.control_policy_id) < BigInt(right.control_policy_id) ? -1 : 1,
 	)) {
-		const target = canonicalDecimal(
-			hold.control_kind === "usage_limit" ? input.usageDelta : (input.spendMinorDelta ?? "0"),
-			"confirmed control value",
-			9,
-		);
+		// A confirmed spend target is signed for the same reason as a consume delta.
+		const target =
+			hold.control_kind === "usage_limit"
+				? canonicalDecimal(input.usageDelta, "confirmed control value", 9)
+				: canonicalSignedDecimal(input.spendMinorDelta ?? "0", "confirmed control value", 9);
 		const ownHeld = decimalToUnits(String(hold.held_value), 9);
 		const totalHeld = decimalToUnits(String(hold.window_held_value), 9);
-		const targetUnits = decimalToUnits(target, 9);
+		const targetUnits = signedDecimalToUnits(target, 9);
 		const consumed = await executeOne<{ consumed_value: unknown }>(
 			executor,
 			drizzleSql`
@@ -335,7 +355,7 @@ export async function confirmControlHolds(
 		const limitUnits = decimalToUnits(String(hold.limit_value), 9);
 		const nextExposure =
 			consumedUnits + (totalHeld > ownHeld ? totalHeld - ownHeld : 0n) + targetUnits;
-		if (nextExposure > limitUnits) {
+		if (targetUnits > 0n && nextExposure > limitUnits) {
 			const remaining =
 				limitUnits - consumedUnits - (totalHeld > ownHeld ? totalHeld - ownHeld : 0n);
 			return {
@@ -357,39 +377,43 @@ export async function confirmControlHolds(
 			held: canonicalDecimal(String(hold.held_value), "held control value", 9),
 			target,
 			hasHold: ownHeld > 0n,
+			consumed: consumedUnits,
 		});
 	}
+	const entries: ControlConsumptionEntry[] = [];
 	for (const change of changes) {
-		await executeOne(
+		const updated = await executeOne<{ consumed_value: unknown }>(
 			executor,
 			drizzleSql`
 			UPDATE control_windows control_window SET
 				held_value = GREATEST(control_window.held_value - ${change.held}::numeric, 0),
-				consumed_value = control_window.consumed_value + ${change.target}::numeric,
+				consumed_value = GREATEST(control_window.consumed_value + ${change.target}::numeric, 0),
 				updated_at = now()
 			WHERE control_window.project_id = ${input.projectId}
 				AND control_window.id = ${change.windowId}::bigint
-			RETURNING id
+			RETURNING consumed_value::text AS consumed_value
 		`,
 		);
+		if (updated === null) throw new Error("Control window disappeared during confirmation");
+		const applied = decimalToUnits(String(updated.consumed_value), 9) - change.consumed;
 		if (change.hasHold) {
+			// The hold row records what the hold turned into; a falling charge converts nothing.
 			await executeOne(
 				executor,
 				drizzleSql`
-				UPDATE reservation_control_holds SET consumed_value = ${change.target}::numeric
+				UPDATE reservation_control_holds
+				SET consumed_value = ${unitsToDecimal(applied > 0n ? applied : 0n, 9)}::numeric
 				WHERE project_id = ${input.projectId} AND reservation_id = ${input.reservationId}
 					AND control_window_id = ${change.windowId}::bigint
 				RETURNING reservation_id
 			`,
 			);
 		}
+		if (applied !== 0n) {
+			entries.push({ controlWindowId: change.windowId, value: unitsToDecimal(applied, 9) });
+		}
 	}
-	return {
-		denial: null,
-		entries: changes
-			.filter((change) => decimalToUnits(change.target, 9) > 0n)
-			.map((change) => ({ controlWindowId: change.windowId, value: change.target })),
-	};
+	return { denial: null, entries };
 }
 
 export async function recordUsageControlEntries(
@@ -402,7 +426,8 @@ export async function recordUsageControlEntries(
 	},
 ): Promise<void> {
 	for (const entry of input.entries) {
-		if (decimalToUnits(entry.value, 9) === 0n) continue;
+		// A falling charge records a negative entry so a later correction finds the window.
+		if (signedDecimalToUnits(entry.value, 9) === 0n) continue;
 		await executeRows(
 			executor,
 			drizzleSql`

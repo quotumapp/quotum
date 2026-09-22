@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import fc from "fast-check";
 import {
 	canonicalDecimal,
+	canonicalSignedDecimal,
 	databaseDecimal,
 	decimalToUnits,
 	positiveDecimal,
@@ -50,6 +51,31 @@ describe("canonicalDecimal", () => {
 		);
 		expect(() => canonicalDecimal("1.12", "amount", 1)).toThrow(
 			new InvalidRequestError("amount supports at most 1 decimal places"),
+		);
+	});
+});
+
+describe("canonicalSignedDecimal", () => {
+	it("keeps the sign of a canonical negative and folds negative zero", () => {
+		expect(canonicalSignedDecimal("-39", "delta")).toBe("-39");
+		expect(canonicalSignedDecimal(" -1.50 ", "delta")).toBe("-1.5");
+		expect(canonicalSignedDecimal("-0", "delta")).toBe("0");
+		expect(canonicalSignedDecimal("-0.000", "delta")).toBe("0");
+		expect(canonicalSignedDecimal("12.5", "delta")).toBe("12.5");
+	});
+
+	it("rejects malformed signed strings", () => {
+		expect(() => canonicalSignedDecimal("--1", "delta")).toThrow(
+			new InvalidRequestError("delta must be a non-negative decimal string"),
+		);
+		expect(() => canonicalSignedDecimal("+1", "delta")).toThrow(
+			new InvalidRequestError("delta must be a non-negative decimal string"),
+		);
+		expect(() => canonicalSignedDecimal("-", "delta")).toThrow(
+			new InvalidRequestError("delta must be a non-negative decimal string"),
+		);
+		expect(() => canonicalSignedDecimal("-1.005", "delta", 2)).toThrow(
+			new InvalidRequestError("delta supports at most 2 decimal places"),
 		);
 	});
 });
