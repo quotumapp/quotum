@@ -1,6 +1,6 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError, PersistenceConflictError } from "../../billing/errors";
-import type { PurchaseStatus } from "../../billing/types";
+import type { PurchaseStatus, SubscriptionStatus } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import type { StripeCatalog } from "../../providers/stripe/types";
 import { RepositoryModule } from "./base";
@@ -1092,6 +1092,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				input.expiresAt ??
 				existingSubscription?.current_period_end ??
 				null;
+			const lifecycle = stripeSubscriptionLifecycleState(input, existingSubscription);
 
 			const subscriptionRecordId = await upsertSubscription(tx, projectId, {
 				customerId: resolved.id,
@@ -1103,15 +1104,15 @@ export class StripeBillingRepository extends RepositoryModule {
 				externalSubscriptionId: input.stripeSubscriptionId,
 				externalProductId: effectiveProduct.external_product_id,
 				externalPriceId: effectiveProduct.external_price_id,
-				status: input.subscriptionStatus,
+				status: lifecycle.status,
 				startsAt: input.startsAt ?? input.purchasedAt,
 				expiresAt: input.expiresAt,
-				autoRenew: input.autoRenew ?? false,
+				autoRenew: lifecycle.autoRenew,
 				latestTransactionId: transactionId,
-				providerStatus: input.providerStatus ?? input.subscriptionStatus,
+				providerStatus: lifecycle.providerStatus,
 				currentPeriodStart,
 				currentPeriodEnd,
-				cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,
+				cancelAtPeriodEnd: lifecycle.cancelAtPeriodEnd,
 				latestProviderObjectId: input.invoiceId,
 				lastProviderEventCreated: input.providerEventCreated ?? 0,
 				enforceProviderEventOrder: input.externalEventId !== null,
@@ -1129,7 +1130,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				customerId: resolved.id,
 				storeProductId: effectiveProduct.store_product_id,
 				subscriptionId: subscriptionRecordId,
-				status: input.subscriptionStatus,
+				status: lifecycle.status,
 				periodStartAt: currentPeriodStart,
 				periodEndAt: currentPeriodEnd,
 			});
@@ -1144,8 +1145,8 @@ export class StripeBillingRepository extends RepositoryModule {
 				drizzleSql`
 					UPDATE subscriptions
 					SET
-						trial_start_at = ${input.trialStart?.toISOString() ?? null},
-						trial_end_at = ${input.trialEnd?.toISOString() ?? null},
+						trial_start_at = ${lifecycle.trialStart?.toISOString() ?? null},
+						trial_end_at = ${lifecycle.trialEnd?.toISOString() ?? null},
 						billing_anchor_at = COALESCE(billing_anchor_at, ${currentPeriodStart.toISOString()}),
 						updated_at = now()
 					WHERE project_id = ${projectId} AND id = ${subscriptionRecordId}
@@ -1419,9 +1420,91 @@ interface StripeOperationSubscriptionRow {
 	credit_amount: number;
 	external_product_id: string;
 	external_price_id: string | null;
+	status: SubscriptionStatus;
+	provider_status: string | null;
+	auto_renew: boolean;
+	cancel_at_period_end: boolean;
+	trial_start_at: Date | null;
+	trial_end_at: Date | null;
 	current_period_start: Date | null;
 	current_period_end: Date | null;
 	last_provider_event_created: number;
+}
+
+interface StripeSubscriptionLifecycleState {
+	status: SubscriptionStatus;
+	providerStatus: string;
+	autoRenew: boolean;
+	cancelAtPeriodEnd: boolean;
+	trialStart: Date | null;
+	trialEnd: Date | null;
+}
+
+/** The statuses an invoice's payment outcome may move a subscription between. */
+const invoiceAdjustableStatuses = new Set<SubscriptionStatus>([
+	"active",
+	"grace_period",
+	"billing_retry",
+]);
+
+/** The statuses a paid invoice recovers to active; a paid invoice changes nothing else. */
+const invoiceRecoverableStatuses = new Set<SubscriptionStatus>(["grace_period", "billing_retry"]);
+
+function isStripeInvoiceEvent(input: {
+	eventType: string;
+	invoiceStatus?: string | null;
+}): boolean {
+	return typeof input.invoiceStatus === "string" || input.eventType.startsWith("invoice.");
+}
+
+/**
+ * Invoice events describe a payment, not the subscription's lifecycle. A Stripe invoice carries no
+ * cancellation, renewal or trial facts and the normalizer derives its status from the payment
+ * alone, so an existing subscription keeps those fields. Its status moves only where a payment
+ * outcome is the fact: a failed invoice puts a live subscription into billing retry and a paid
+ * invoice recovers a retrying one to active. A paid invoice on an already active subscription
+ * changes nothing (a paid trial invoice does not end the trial), and cancelled, expired, refunded
+ * and revoked subscriptions stay as they are; only subscription events and provider reads move
+ * them.
+ */
+function stripeSubscriptionLifecycleState(
+	input: {
+		eventType: string;
+		subscriptionStatus: SubscriptionStatus;
+		providerStatus?: string;
+		autoRenew: boolean | null;
+		cancelAtPeriodEnd?: boolean;
+		trialStart?: Date | null;
+		trialEnd?: Date | null;
+		invoiceStatus?: string | null;
+	},
+	existing: StripeOperationSubscriptionRow | null,
+): StripeSubscriptionLifecycleState {
+	const fromEvent: StripeSubscriptionLifecycleState = {
+		status: input.subscriptionStatus,
+		providerStatus: input.providerStatus ?? input.subscriptionStatus,
+		autoRenew: input.autoRenew ?? false,
+		cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,
+		trialStart: input.trialStart ?? null,
+		trialEnd: input.trialEnd ?? null,
+	};
+	if (existing === null || !isStripeInvoiceEvent(input)) {
+		return fromEvent;
+	}
+	const paymentFailed = fromEvent.status === "billing_retry";
+	const paymentMovesStatus =
+		invoiceAdjustableStatuses.has(existing.status) &&
+		(paymentFailed || invoiceRecoverableStatuses.has(existing.status));
+	return {
+		status: paymentMovesStatus ? fromEvent.status : existing.status,
+		providerStatus: paymentMovesStatus
+			? fromEvent.providerStatus
+			: (existing.provider_status ?? existing.status),
+		autoRenew: existing.auto_renew,
+		cancelAtPeriodEnd: existing.cancel_at_period_end,
+		trialStart: existing.trial_start_at,
+		trialEnd: existing.trial_end_at,
+	};
 }
 
 async function getStripeOperationSubscription(
@@ -1437,6 +1520,12 @@ async function getStripeOperationSubscription(
 		credit_amount: number;
 		external_product_id: string;
 		external_price_id: string | null;
+		status: SubscriptionStatus;
+		provider_status: string | null;
+		auto_renew: boolean;
+		cancel_at_period_end: boolean;
+		trial_start_at: Date | string | null;
+		trial_end_at: Date | string | null;
 		current_period_start: Date | string | null;
 		current_period_end: Date | string | null;
 		last_provider_event_created: number | string;
@@ -1451,6 +1540,12 @@ async function getStripeOperationSubscription(
 				p.credit_amount,
 				s.external_product_id,
 				s.external_price_id,
+				s.status,
+				s.provider_status,
+				s.auto_renew,
+				s.cancel_at_period_end,
+				s.trial_start_at,
+				s.trial_end_at,
 				s.current_period_start,
 				s.current_period_end,
 				s.last_provider_event_created
@@ -1467,6 +1562,8 @@ async function getStripeOperationSubscription(
 	}
 	return {
 		...row,
+		trial_start_at: dateOrNull(row.trial_start_at),
+		trial_end_at: dateOrNull(row.trial_end_at),
 		current_period_start: dateOrNull(row.current_period_start),
 		current_period_end: dateOrNull(row.current_period_end),
 		last_provider_event_created: Number(row.last_provider_event_created),

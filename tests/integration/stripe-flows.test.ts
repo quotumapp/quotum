@@ -20,6 +20,7 @@ import {
 	expectTableCounts,
 } from "./helpers/db-assertions";
 import {
+	createFakeStripeBillingClient,
 	stripeCheckoutSessionObject,
 	stripeEvent,
 	stripeRefundedChargeObject,
@@ -1713,7 +1714,300 @@ localDescribe("Stripe route flows integration", () => {
 		);
 		expectProjectionPurchase(projectionJob.payload);
 	});
+
+	// capability: subscription.sync
+	it("keeps cancellation and trial state when a paid invoice arrives", async () => {
+		const service = createVerifiedEventService();
+		const start = Math.floor(Date.now() / 1000) - 86_400;
+		const end = start + 30 * 86_400;
+
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.updated",
+				stripeSubscriptionObject({
+					status: "trialing",
+					cancel_at_period_end: true,
+					trial_start: start,
+					trial_end: end,
+					current_period_start: start,
+					current_period_end: end,
+				}),
+				start + 100,
+				"evt_trial_cancel",
+			),
+		);
+		expect(await stripeSubscriptionLifecycle(context.sql)).toEqual({
+			status: "active",
+			provider_status: "trialing",
+			cancel_at_period_end: true,
+			auto_renew: false,
+			trial_start_at: new Date(start * 1000),
+			trial_end_at: new Date(end * 1000),
+		});
+
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"invoice.paid",
+				stripeSubscriptionInvoiceObject({ start, end }, { amount_paid: 0 }),
+				start + 101,
+				"evt_trial_invoice",
+			),
+		);
+
+		expect(await stripeSubscriptionLifecycle(context.sql)).toEqual({
+			status: "active",
+			provider_status: "trialing",
+			cancel_at_period_end: true,
+			auto_renew: false,
+			trial_start_at: new Date(start * 1000),
+			trial_end_at: new Date(end * 1000),
+		});
+		await expectTableCounts(context.sql, { subscriptions: 1, billing_invoices: 1 });
+	});
+
+	// capability: subscription.sync
+	it("does not revive an expired subscription when an old usage invoice is paid", async () => {
+		const service = createVerifiedEventService();
+		const start = Math.floor(Date.now() / 1000) - 86_400;
+		const oldStart = start - 60 * 86_400;
+		const oldEnd = start - 30 * 86_400;
+
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.deleted",
+				stripeSubscriptionObject({
+					status: "canceled",
+					current_period_start: oldStart,
+					current_period_end: oldEnd,
+					items: {
+						data: [
+							{
+								current_period_start: oldStart,
+								current_period_end: oldEnd,
+								id: "si_integration",
+								price: { id: "price_premium_monthly", product: "prod_stripe_premium" },
+							},
+						],
+					},
+				}),
+				start + 100,
+				"evt_expired",
+			),
+		);
+		expect(await stripeSubscriptionLifecycle(context.sql)).toMatchObject({
+			status: "expired",
+			provider_status: "cancelled",
+			auto_renew: false,
+		});
+
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"invoice.paid",
+				stripeSubscriptionInvoiceObject(
+					{ start: oldStart, end: oldEnd },
+					{
+						id: "in_old_usage",
+						metadata: {
+							billingAccountId: "integration_user",
+							usageInvoicePeriodId: "period-old-usage",
+						},
+						lines: {
+							data: [
+								{
+									id: "il_old_usage",
+									parent: {
+										invoice_item_details: { subscription: "sub_1", invoice_item: "ii_usage" },
+									},
+									pricing: { price_details: { product: "prod_stripe_premium" } },
+									period: { start: oldStart, end: oldEnd },
+								},
+							],
+						},
+					},
+				),
+				start + 101,
+				"evt_old_usage_paid",
+			),
+		);
+
+		const [row] = await context.sql<
+			Array<{ status: string; provider_status: string | null; expires_at: Date }>
+		>`
+			SELECT status, provider_status, expires_at FROM subscriptions
+		`;
+		expect(row).toEqual({
+			status: "expired",
+			provider_status: "cancelled",
+			expires_at: new Date(oldEnd * 1000),
+		});
+		await expectTableCounts(context.sql, { subscriptions: 1, billing_invoices: 1 });
+	});
+
+	// capability: subscription.sync
+	it("moves a live subscription between payment states on invoice outcomes only", async () => {
+		const service = createVerifiedEventService();
+		const start = Math.floor(Date.now() / 1000) - 86_400;
+		const end = start + 30 * 86_400;
+		const period = { start, end };
+
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.updated",
+				stripeSubscriptionObject({ current_period_start: start, current_period_end: end }),
+				start + 100,
+				"evt_live",
+			),
+		);
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"invoice.payment_failed",
+				stripeSubscriptionInvoiceObject(period, { id: "in_failed", status: "open" }),
+				start + 101,
+				"evt_payment_failed",
+			),
+		);
+		expect(await stripeSubscriptionLifecycle(context.sql)).toMatchObject({
+			status: "billing_retry",
+			provider_status: "past_due",
+			cancel_at_period_end: false,
+			auto_renew: true,
+		});
+
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"invoice.paid",
+				stripeSubscriptionInvoiceObject(period, { id: "in_failed" }),
+				start + 102,
+				"evt_payment_recovered",
+			),
+		);
+		expect(await stripeSubscriptionLifecycle(context.sql)).toMatchObject({
+			status: "active",
+			provider_status: "active",
+			cancel_at_period_end: false,
+			auto_renew: true,
+		});
+
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.updated",
+				stripeSubscriptionObject({
+					cancel_at_period_end: true,
+					current_period_start: start,
+					current_period_end: end,
+				}),
+				start + 103,
+				"evt_scheduled_cancel",
+			),
+		);
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"invoice.payment_failed",
+				stripeSubscriptionInvoiceObject(period, { id: "in_failed_again", status: "open" }),
+				start + 104,
+				"evt_payment_failed_again",
+			),
+		);
+		expect(await stripeSubscriptionLifecycle(context.sql)).toMatchObject({
+			status: "billing_retry",
+			provider_status: "past_due",
+			cancel_at_period_end: true,
+			auto_renew: false,
+		});
+	});
 });
+
+function createVerifiedEventService(): StripeBillingService {
+	return new StripeBillingService({
+		config: {
+			projectKey: "voysee",
+			checkoutSuccessUrl:
+				"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
+			checkoutCancelUrl: "https://app.integration.test/billing",
+			portalReturnUrl: "https://app.integration.test/account/billing",
+		},
+		client: createFakeStripeBillingClient().client,
+		repository: context.repository.forProject(integrationProjectContext("voysee")),
+	});
+}
+
+function verifiedStripeEvent(
+	type: string,
+	object: Record<string, unknown>,
+	created: number,
+	id: string,
+): Record<string, unknown> {
+	return { id, type, created, data: { object } };
+}
+
+/** A paid subscription invoice for sub_1 carrying the original Checkout metadata. */
+function stripeSubscriptionInvoiceObject(
+	period: { start: number; end: number },
+	overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+	const metadata = {
+		billingAccountId: "integration_user",
+		externalProductId: "prod_stripe_premium",
+		externalPriceId: "price_premium_monthly",
+		productKey: "premium_monthly",
+		purchaseKind: "subscription",
+	};
+	return {
+		id: "in_subscription",
+		object: "invoice",
+		customer: "cus_integration",
+		subscription: "sub_1",
+		status: "paid",
+		created: period.start,
+		amount_paid: 999,
+		currency: "usd",
+		parent: { subscription_details: { subscription: "sub_1", metadata } },
+		lines: {
+			data: [
+				{
+					id: "il_subscription",
+					parent: {
+						subscription_item_details: {
+							subscription: "sub_1",
+							subscription_item: "si_integration",
+						},
+					},
+					pricing: {
+						price_details: { product: "prod_stripe_premium", price: "price_premium_monthly" },
+					},
+					period,
+				},
+			],
+		},
+		...overrides,
+	};
+}
+
+async function stripeSubscriptionLifecycle(sql: SQL): Promise<{
+	status: string;
+	provider_status: string | null;
+	cancel_at_period_end: boolean;
+	auto_renew: boolean;
+	trial_start_at: Date | null;
+	trial_end_at: Date | null;
+}> {
+	const rows = await sql<
+		Array<{
+			status: string;
+			provider_status: string | null;
+			cancel_at_period_end: boolean;
+			auto_renew: boolean;
+			trial_start_at: Date | null;
+			trial_end_at: Date | null;
+		}>
+	>`
+		SELECT status, provider_status, cancel_at_period_end, auto_renew, trial_start_at, trial_end_at
+		FROM subscriptions
+		WHERE provider = 'stripe' AND external_subscription_id = 'sub_1'
+	`;
+	expect(rows).toHaveLength(1);
+	return rows[0];
+}
 
 async function postStripeWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
