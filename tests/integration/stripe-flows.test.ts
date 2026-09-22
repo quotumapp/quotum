@@ -1644,6 +1644,136 @@ localDescribe("Stripe route flows integration", () => {
 		expectProjectionReversal(projectionJob.payload);
 	});
 
+	it("records an invoice delivered after a newer subscription event", async () => {
+		const service = new StripeBillingService({
+			config: {
+				projectKey: "voysee",
+				checkoutSuccessUrl:
+					"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
+				checkoutCancelUrl: "https://app.integration.test/billing",
+				portalReturnUrl: "https://app.integration.test/account/billing",
+			},
+			client: createFakeStripeBillingClient().client,
+			repository: context.repository.forProject(integrationProjectContext("voysee")),
+		});
+		const start = Math.floor(Date.now() / 1000) - 86_400;
+		const end = start + 30 * 86_400;
+		const metadata = {
+			billingAccountId: "integration_user",
+			externalProductId: "prod_stripe_premium",
+			externalPriceId: "price_premium_monthly",
+			productKey: "premium_monthly",
+			purchaseKind: "subscription",
+		};
+		const invoiceEvent = (id: string, created: number, amountPaid: number) => ({
+			id,
+			type: "invoice.paid",
+			created,
+			data: {
+				object: {
+					id: "in_out_of_order",
+					object: "invoice",
+					customer: "cus_integration",
+					subscription: "sub_1",
+					status: "paid",
+					created,
+					amount_paid: amountPaid,
+					currency: "usd",
+					parent: { subscription_details: { subscription: "sub_1", metadata } },
+					lines: {
+						data: [
+							{
+								id: "il_out_of_order",
+								parent: {
+									subscription_item_details: {
+										subscription: "sub_1",
+										subscription_item: "si_integration",
+									},
+								},
+								pricing: {
+									price_details: { product: "prod_stripe_premium", price: "price_premium_monthly" },
+								},
+								period: { start, end },
+							},
+						],
+					},
+				},
+			},
+		});
+		const readSubscription = async () => {
+			const [row] = await context.sql<
+				Array<{ id: string; last_provider_event_created: string; current_period_end: Date }>
+			>`
+				SELECT id, last_provider_event_created::text, current_period_end
+				FROM subscriptions
+				WHERE external_subscription_id = 'sub_1'
+			`;
+			if (row === undefined) throw new Error("Expected the Stripe subscription row");
+			return row;
+		};
+		const readInvoices = () =>
+			context.sql<
+				Array<{
+					subscription_id: string | null;
+					status: string;
+					amount_paid: number;
+					last_provider_event_created: string;
+				}>
+			>`
+				SELECT subscription_id, status, amount_paid::integer AS amount_paid,
+					last_provider_event_created::text
+				FROM billing_invoices
+				WHERE external_invoice_id = 'in_out_of_order'
+			`;
+
+		const newer = await service.handleVerifiedAppEvent({
+			id: "evt_newer_subscription",
+			type: "customer.subscription.updated",
+			created: start + 200,
+			data: {
+				object: stripeSubscriptionObject({
+					current_period_start: start,
+					current_period_end: end,
+				}),
+			},
+		});
+		expect(newer.status).toBe("processed");
+		const before = await readSubscription();
+		expect(before.last_provider_event_created).toBe(String(start + 200));
+
+		// The invoice event is older than the stored subscription state, so the subscription
+		// snapshot is kept, but the invoice itself is a fact that belongs in the history.
+		const older = await service.handleVerifiedAppEvent(
+			invoiceEvent("evt_older_invoice", start + 100, 999),
+		);
+		expect(older.status).toBe("processed");
+		expect(await readInvoices()).toEqual([
+			{
+				subscription_id: before.id,
+				status: "paid",
+				amount_paid: 999,
+				last_provider_event_created: String(start + 100),
+			},
+		]);
+		expect(await readSubscription()).toEqual(before);
+
+		// Redelivering the same event id is idempotent.
+		await service.handleVerifiedAppEvent(invoiceEvent("evt_older_invoice", start + 100, 999));
+		expect(await readInvoices()).toHaveLength(1);
+
+		// A newer event for the same invoice updates it; a later-delivered older one does not.
+		await service.handleVerifiedAppEvent(invoiceEvent("evt_newest_invoice", start + 300, 1099));
+		const newest = {
+			subscription_id: before.id,
+			status: "paid",
+			amount_paid: 1099,
+			last_provider_event_created: String(start + 300),
+		};
+		expect(await readInvoices()).toEqual([newest]);
+		await service.handleVerifiedAppEvent(invoiceEvent("evt_stale_invoice", start + 150, 500));
+		expect(await readInvoices()).toEqual([newest]);
+	});
+
 	// capability: catalog.product.non_consumable
 	// capability: refund.sync
 	it("grants and fully refunds a Stripe non-consumable one-time purchase", async () => {
