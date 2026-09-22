@@ -46,6 +46,13 @@ alert: a read-only key used for writes is either a misconfigured tool or a leake
 
 ## Metering
 
+Meter-limit balances and capped usage remain scoped to the requested entity and canonical filter.
+Monetary spend for postpaid overage is rated across every scoped window belonging to the same
+subscription, purchased plan item, and billing period, exactly as the usage invoice is rated.
+The included allowance and price tiers apply once to that combined quantity. Checks, consumes,
+reservations, confirmations, and corrections use this shared monetary scope; selecting another
+filter or entity does not create another included monetary allowance.
+
 Trusted backends authorize work through these routes:
 
 ```http
