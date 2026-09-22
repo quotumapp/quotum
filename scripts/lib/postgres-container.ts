@@ -12,11 +12,28 @@ export interface EphemeralPostgresOptions {
 }
 
 export function createPostgresContainer(options: EphemeralPostgresOptions): PostgreSqlContainer {
-	return new PostgreSqlContainer(postgresImage)
-		.withDatabase(options.postgresDatabase)
-		.withUsername(postgresUser)
-		.withPassword(postgresPassword)
-		.withWaitStrategy(Wait.forLogMessage(/database system is ready to accept connections/, 2));
+	return (
+		new PostgreSqlContainer(postgresImage)
+			.withDatabase(options.postgresDatabase)
+			.withUsername(postgresUser)
+			.withPassword(postgresPassword)
+			// The database is disposable. PostgreSQL 18 keeps its versioned data
+			// below /var/lib/postgresql, so put that directory on bounded tmpfs and
+			// avoid the storage-constrained nested-Docker overlay in CI.
+			.withTmpFs({ "/var/lib/postgresql": "rw,nosuid,nodev,size=512m" })
+			.withHealthCheck({
+				// The image starts a temporary server during initdb. PID 1 becomes
+				// postgres only after the entrypoint hands off to the final server.
+				test: [
+					"CMD-SHELL",
+					'test "$(cat /proc/1/comm)" = postgres && pg_isready --host localhost --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"',
+				],
+				interval: 250,
+				timeout: 1_000,
+				retries: 1_000,
+			})
+			.withWaitStrategy(Wait.forHealthCheck())
+	);
 }
 
 export function startPostgresContainer(

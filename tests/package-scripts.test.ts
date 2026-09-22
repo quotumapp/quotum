@@ -30,7 +30,10 @@ describe("package scripts", () => {
 		expect(postgresLib).not.toContain("docker inspect");
 		expect(postgresLib).not.toContain("docker rm");
 		expect(postgresLib).not.toContain("SELECT 1");
-		expect(postgresLib).not.toContain("pg_isready");
+		expect(postgresLib).toContain('.withTmpFs({ "/var/lib/postgresql"');
+		expect(postgresLib).toContain("/proc/1/comm");
+		expect(postgresLib).toContain("pg_isready");
+		expect(postgresLib).toContain("Wait.forHealthCheck()");
 		expect(runner).toContain("POSTGRES_URI");
 		expect(runner).toContain("getConnectionUri");
 		expect(runner).toContain("container.stop");
