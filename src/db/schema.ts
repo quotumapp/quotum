@@ -17,6 +17,7 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
+import type { PaymentSetupStatus } from "../billing/payment-setup";
 import type {
 	BillingChannel,
 	BillingProvider,
@@ -890,7 +891,14 @@ export const commercialActionPreviews = pgTable(
 		billingAccountId: text("billing_account_id").notNull(),
 		previewToken: uuid("preview_token").notNull(),
 		intentKind: text("intent_kind")
-			.$type<"checkout_plan" | "checkout_product" | "subscription_change" | "cancel" | "uncancel">()
+			.$type<
+				| "checkout_plan"
+				| "checkout_product"
+				| "subscription_change"
+				| "cancel"
+				| "uncancel"
+				| "setup_payment"
+			>()
 			.notNull(),
 		intentHash: text("intent_hash").notNull(),
 		stateFingerprint: text("state_fingerprint").notNull(),
@@ -919,6 +927,158 @@ export const commercialActionPreviews = pgTable(
 			table.projectId,
 			table.billingAccountId,
 			table.createdAt,
+		),
+	],
+);
+
+/**
+ * Hosted payment-method setup. The SQL baseline is authoritative; this mirrors it, including the
+ * partial unique index that keeps one unresolved setup per billing account and provider identity.
+ */
+export const paymentSetupSessions = pgTable(
+	"payment_setup_sessions",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		customerId: uuid("customer_id")
+			.notNull()
+			.references(() => customers.id, { onDelete: "cascade" }),
+		billingAccountId: text("billing_account_id").notNull(),
+		provider: text("provider").$type<"stripe">().notNull(),
+		providerAccountId: text("provider_account_id"),
+		providerCustomerId: text("provider_customer_id").notNull(),
+		previewToken: uuid("preview_token").notNull(),
+		providerIdempotencyKey: text("provider_idempotency_key").notNull(),
+		requestHash: text("request_hash").notNull(),
+		currency: text("currency").notNull(),
+		email: text("email"),
+		successUrl: text("success_url").notNull(),
+		cancelUrl: text("cancel_url").notNull(),
+		status: text("status").$type<PaymentSetupStatus>().notNull().default("creating"),
+		externalSessionId: text("external_session_id"),
+		sessionUrl: text("session_url"),
+		externalSetupIntentId: text("external_setup_intent_id"),
+		intendedPaymentMethodId: text("intended_payment_method_id"),
+		defaultPaymentMethodId: text("default_payment_method_id"),
+		cardBrand: text("card_brand"),
+		cardLast4: text("card_last4"),
+		cardExpMonth: integer("card_exp_month"),
+		cardExpYear: integer("card_exp_year"),
+		attentionReason: text("attention_reason"),
+		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+		claimedBy: text("claimed_by"),
+		claimedAt: timestamp("claimed_at", { withTimezone: true }),
+		...timestampColumns(),
+	},
+	(table) => [
+		check("payment_setup_sessions_provider_check", sql`${table.provider} = 'stripe'`),
+		check(
+			"payment_setup_sessions_billing_account_id_check",
+			sql`char_length(${table.billingAccountId}) BETWEEN 1 AND 200`,
+		),
+		check(
+			"payment_setup_sessions_provider_customer_id_check",
+			sql`char_length(${table.providerCustomerId}) BETWEEN 1 AND 200`,
+		),
+		check(
+			"payment_setup_sessions_provider_idempotency_key_check",
+			sql`char_length(${table.providerIdempotencyKey}) BETWEEN 1 AND 255`,
+		),
+		check("payment_setup_sessions_request_hash_check", sql`char_length(${table.requestHash}) = 64`),
+		check("payment_setup_sessions_currency_check", sql`${table.currency} ~ '^[a-z]{3}$'`),
+		check(
+			"payment_setup_sessions_email_check",
+			sql`${table.email} IS NULL OR char_length(${table.email}) BETWEEN 1 AND 320`,
+		),
+		check(
+			"payment_setup_sessions_success_url_check",
+			sql`char_length(${table.successUrl}) BETWEEN 1 AND 2000`,
+		),
+		check(
+			"payment_setup_sessions_cancel_url_check",
+			sql`char_length(${table.cancelUrl}) BETWEEN 1 AND 2000`,
+		),
+		check(
+			"payment_setup_sessions_status_check",
+			sql`${table.status} IN ('creating', 'awaiting_customer', 'applying_default', 'completed', 'expired', 'needs_attention')`,
+		),
+		check(
+			"payment_setup_sessions_external_session_id_check",
+			sql`${table.externalSessionId} IS NULL OR char_length(${table.externalSessionId}) BETWEEN 1 AND 200`,
+		),
+		check(
+			"payment_setup_sessions_card_brand_check",
+			sql`${table.cardBrand} IS NULL OR char_length(${table.cardBrand}) BETWEEN 1 AND 40`,
+		),
+		check(
+			"payment_setup_sessions_card_last4_check",
+			sql`${table.cardLast4} IS NULL OR ${table.cardLast4} ~ '^[0-9]{4}$'`,
+		),
+		check(
+			"payment_setup_sessions_card_exp_month_check",
+			sql`${table.cardExpMonth} IS NULL OR ${table.cardExpMonth} BETWEEN 1 AND 12`,
+		),
+		check(
+			"payment_setup_sessions_card_exp_year_check",
+			sql`${table.cardExpYear} IS NULL OR ${table.cardExpYear} BETWEEN 2000 AND 2200`,
+		),
+		check(
+			"payment_setup_sessions_attention_reason_check",
+			sql`${table.attentionReason} IS NULL OR char_length(${table.attentionReason}) BETWEEN 1 AND 500`,
+		),
+		check(
+			"payment_setup_sessions_claimed_by_check",
+			sql`${table.claimedBy} IS NULL OR char_length(${table.claimedBy}) BETWEEN 1 AND 200`,
+		),
+		check(
+			"payment_setup_sessions_claim_check",
+			sql`(${table.claimedBy} IS NULL AND ${table.claimedAt} IS NULL) OR (${table.claimedBy} IS NOT NULL AND ${table.claimedAt} IS NOT NULL)`,
+		),
+		check(
+			"payment_setup_sessions_state_check",
+			sql`
+				(${table.status} = 'creating' AND ${table.completedAt} IS NULL AND ${table.defaultPaymentMethodId} IS NULL)
+				OR (${table.status} = 'awaiting_customer' AND ${table.externalSessionId} IS NOT NULL
+					AND ${table.sessionUrl} IS NOT NULL AND ${table.completedAt} IS NULL AND ${table.defaultPaymentMethodId} IS NULL)
+				OR (${table.status} = 'applying_default' AND ${table.externalSessionId} IS NOT NULL
+					AND ${table.intendedPaymentMethodId} IS NOT NULL AND ${table.completedAt} IS NULL AND ${table.defaultPaymentMethodId} IS NULL)
+				OR (${table.status} = 'completed' AND ${table.externalSessionId} IS NOT NULL
+					AND ${table.defaultPaymentMethodId} IS NOT NULL AND ${table.completedAt} IS NOT NULL)
+				OR (${table.status} = 'expired' AND ${table.completedAt} IS NULL AND ${table.defaultPaymentMethodId} IS NULL)
+				OR (${table.status} = 'needs_attention' AND ${table.attentionReason} IS NOT NULL AND ${table.completedAt} IS NULL)
+			`,
+		),
+		check(
+			"payment_setup_sessions_card_check",
+			sql`${table.defaultPaymentMethodId} IS NOT NULL OR (${table.cardBrand} IS NULL AND ${table.cardLast4} IS NULL AND ${table.cardExpMonth} IS NULL AND ${table.cardExpYear} IS NULL)`,
+		),
+		unique("payment_setup_sessions_project_id_id_unique").on(table.projectId, table.id),
+		unique("payment_setup_sessions_project_preview_unique").on(table.projectId, table.previewToken),
+		foreignKey({
+			name: "payment_setup_sessions_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		uniqueIndex("idx_billing_payment_setup_active")
+			.on(
+				table.projectId,
+				table.customerId,
+				table.provider,
+				sql`COALESCE(${table.providerAccountId}, '')`,
+			)
+			.where(
+				sql`${table.status} IN ('creating', 'awaiting_customer', 'applying_default', 'needs_attention')`,
+			),
+		uniqueIndex("idx_billing_payment_setup_external_session")
+			.on(table.projectId, table.externalSessionId)
+			.where(sql`${table.externalSessionId} IS NOT NULL`),
+		index("idx_billing_payment_setup_account_created").on(
+			table.projectId,
+			table.billingAccountId,
+			table.createdAt.desc(),
 		),
 	],
 );

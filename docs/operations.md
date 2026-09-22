@@ -38,7 +38,7 @@ The current schema is initialized from these ordered baseline files:
 | --- | --- |
 | [001_platform.sql](../migrations/001_platform.sql) | Organizations, projects, instances, credentials and customer connections |
 | [002_billing_core.sql](../migrations/002_billing_core.sql) | Billing accounts, purchases, subscriptions, entitlements and provider/projection jobs |
-| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions and promotions |
+| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup and promotions |
 | [004_merchant.sql](../migrations/004_merchant.sql) | Merchant identity, authentication, sessions, membership, audit and connection OAuth state |
 <!-- migration-inventory:end -->
 
@@ -322,6 +322,40 @@ retention guarantee or an implemented versioned privacy policy.
 
 Automatic top-up failures require resolving the payment/configuration cause before a protected
 circuit reset. Use replay/retry routes for durable work; do not manually advance job state.
+
+### Hosted payment setup recovery
+
+Hosted payment-method setups ride the provider event replay worker. The webhook route only records
+the setup's completion or expiry as a pending store event, so the work always happens under a
+worker lease, outside the request and outside any transaction. Each setup also gets one internal
+task of its own, a `quotum.payment_setup.reconcile` store event, committed atomically with the
+setup reservation before any provider request. It:
+
+- re-issues a creation whose response was lost, with the setup's frozen provider idempotency key —
+  creation is attempted only within the provider's 24-hour idempotency retention window and
+  with more than one hour remaining before the frozen expiry. Outside either bound it marks
+  the setup `needs_attention` instead of sending an expired or potentially duplicated request;
+- applies a completion whose webhook never arrived;
+- confirms expiry with the provider before the account's single setup slot is released.
+
+A task that is only waiting reports a **deferred** outcome: the job is rescheduled with a new
+`next_attempt_at` and its `attempts` count is left alone, so an open hosted session can never
+exhaust the retry budget a real failure needs. Provider failures still consume attempts; once a
+setup's task has spent its budget, the setup is marked `needs_attention` with the reason, keeps the
+account's slot, and is retried every six hours. This transition uses the smaller of five failures
+and the worker's configured attempt limit. Unresolved ordinary polling runs every 30 minutes,
+including after the local expiry; local time alone cannot prove provider expiry.
+
+A setup in `creating`, `applying_default` or `needs_attention` holds the account's slot on purpose:
+an uncertain setup stays visible instead of being replaced. Do not clear `payment_setup_sessions`
+rows by hand. A setup whose creation response and webhook were both lost may have no provider
+session identifier; after its safe retry window it requires operator investigation in Stripe.
+The reconciler cannot automatically prove completion or expiry in that case.
+
+Customer creation now scopes its Stripe idempotency key to the project. Before rolling this
+change out, reconcile any provider customer creations whose response or local linkage was lost
+under the previous unscoped key; otherwise a retry can create a duplicate customer. Existing
+linked customers are reused without creating another provider customer.
 
 ## Load lane
 

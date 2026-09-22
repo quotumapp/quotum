@@ -13,6 +13,10 @@ import { priceCommercialLines } from "../../billing/commercial-pricing";
 import { sha256Hex, stableJson } from "../../billing/decimal";
 import { BillingError } from "../../billing/errors";
 import {
+	normalizePaymentSetupCurrency,
+	type PaymentSetupSession,
+} from "../../billing/payment-setup";
+import {
 	type CommercialPromotion,
 	normalizePromotionCode,
 	type PromotionStripeSyncJob,
@@ -45,6 +49,7 @@ import type {
 	StripeRecurringCheckoutPlan,
 	StripeWebStoreProductRow,
 } from "../../db/repository";
+import { paymentSetupReconcileEventType } from "../../db/repository/store-events";
 import type { AutoTopupWorkerProvider } from "../../workers/auto-topup";
 import type { PromotionStripeProvider } from "../../workers/promotion-maintenance";
 import type { RecurringBillingWorkerProvider } from "../../workers/recurring-billing";
@@ -56,6 +61,7 @@ import type { SubscriptionReconciliationProvider } from "../../workers/subscript
 import { commercialPreviewProvider } from "../capabilities";
 import { requireNonBlank } from "../validation";
 import { stripeCapabilities } from "./capabilities";
+import type { StripeCheckoutSessionCreateParams } from "./client";
 import {
 	normalizeStripeCheckoutSession,
 	normalizeStripeCheckoutSessionTermination,
@@ -64,6 +70,20 @@ import {
 	normalizeStripeRefund,
 	normalizeStripeSubscription,
 } from "./normalizer";
+import {
+	applyPaymentSetupEvent,
+	createPaymentSetup,
+	enqueuePaymentSetupEvent,
+	type NormalizedPaymentSetupEvent,
+	normalizePaymentSetupEvent,
+	type PaymentSetupClientDependency,
+	type PaymentSetupContext,
+	type PaymentSetupCreation,
+	type PaymentSetupRepositoryDependency,
+	type PaymentSetupRequestParameters,
+	paymentSetupPreviewFacts,
+	reconcilePaymentSetup,
+} from "./payment-setup";
 import { type StripePromotionClient, syncPromotionStripeObject } from "./promotions";
 import type {
 	NormalizedStripeCheckoutPromotion,
@@ -89,13 +109,14 @@ export interface StripeBillingServiceConfig {
 	projectionContract?: ProjectionContract;
 }
 
-export interface StripeBillingClientDependency {
+export interface StripeBillingClientDependency extends PaymentSetupClientDependency {
 	createCustomer(input: {
 		billingAccountId: string;
 		email: string | null;
+		idempotencyScope?: string | null;
 	}): Promise<{ id: string }>;
 	createCheckoutSession(
-		params: Stripe.Checkout.SessionCreateParams,
+		params: StripeCheckoutSessionCreateParams,
 		idempotencyKey?: string,
 	): Promise<{ id: string; url: string | null }>;
 	expireCheckoutSession?(sessionId: string): Promise<unknown>;
@@ -140,7 +161,7 @@ export interface StripeBillingClientDependency {
 	findPromotionCodes?: StripePromotionClient["findPromotionCodes"];
 }
 
-interface StripeBillingRepositoryDependency {
+interface StripeBillingRepositoryDependency extends PaymentSetupRepositoryDependency {
 	listStripeCatalog(): Promise<StripeCatalog>;
 
 	getStripeBillingAccountSummary(billingAccountId: string): Promise<StripeBillingAccountSummary>;
@@ -676,7 +697,7 @@ export class StripeBillingService
 			}
 			return stored.executionResult;
 		}
-		const current = await this.commercialPreviewDraft(billingAccountId, stored.intent);
+		const current = await this.commercialPreviewDraft(billingAccountId, stored.intent, false);
 		const claimed = await repository.beginCommercialActionExecution({
 			billingAccountId,
 			previewToken,
@@ -686,6 +707,21 @@ export class StripeBillingService
 		});
 		if (claimed.status === "executed" && claimed.executionResult !== null) {
 			return claimed.executionResult;
+		}
+
+		if (current.intent.kind === "setup_payment") {
+			const creation = await this.executePaymentSetup({
+				billingAccountId,
+				previewToken,
+				idempotencyKey,
+				intent: current.intent,
+			});
+			return await repository.completeCommercialActionExecution({
+				billingAccountId,
+				previewToken,
+				idempotencyKey,
+				result: { kind: "payment_setup", ...creation },
+			});
 		}
 
 		if (current.intent.kind === "cancel" || current.intent.kind === "uncancel") {
@@ -787,11 +823,20 @@ export class StripeBillingService
 	private async commercialPreviewDraft(
 		billingAccountId: string,
 		intent: CommercialActionIntent,
+		checkSetupConflict = true,
 	): Promise<CommercialPreviewDraft> {
 		const normalized = normalizeCommercialIntent(intent);
 		const intentHash = sha256Hex(stableJson(normalized));
 		if (normalized.kind === "cancel" || normalized.kind === "uncancel") {
 			return await this.cancellationPreviewDraft(billingAccountId, normalized, intentHash);
+		}
+		if (normalized.kind === "setup_payment") {
+			return this.paymentSetupPreviewDraft(
+				billingAccountId,
+				normalized,
+				intentHash,
+				checkSetupConflict,
+			);
 		}
 		if (normalized.kind === "subscription_change") {
 			const repository = this.dependencies.repository;
@@ -869,6 +914,7 @@ export class StripeBillingService
 								}
 							: renewal.nextCycle,
 					cancellation: null,
+					paymentSetup: null,
 					effectiveMode: change.effectiveMode,
 					effectiveAt: change.effectiveAt,
 					prorationBehavior: change.prorationBehavior,
@@ -924,6 +970,7 @@ export class StripeBillingService
 					...priced,
 					currency: product.currency,
 					cancellation: null,
+					paymentSetup: null,
 					effectiveMode: null,
 					effectiveAt: null,
 					prorationBehavior: null,
@@ -989,6 +1036,7 @@ export class StripeBillingService
 				...priced,
 				currency,
 				cancellation: null,
+				paymentSetup: null,
 				effectiveMode: "immediate",
 				effectiveAt: new Date().toISOString(),
 				prorationBehavior: null,
@@ -998,6 +1046,144 @@ export class StripeBillingService
 				targetId: plan.planVersionId,
 			},
 		};
+	}
+
+	/**
+	 * Builds the preview for a hosted payment-method setup. A setup binds no catalog item, plan or
+	 * subscription, so there is no customer or catalog state that could drift between the preview
+	 * and its execution: the fingerprint covers the intent alone, and whether an unfinished setup
+	 * is reused is decided by the execution against the live record.
+	 */
+	private async paymentSetupPreviewDraft(
+		billingAccountId: string,
+		intent: Extract<CommercialActionIntent, { kind: "setup_payment" }>,
+		intentHash: string,
+		checkConflict: boolean,
+	): Promise<CommercialPreviewDraft> {
+		const facts = await paymentSetupPreviewFacts(
+			this.paymentSetupContext(),
+			this.paymentSetupParameters(billingAccountId, intent),
+			checkConflict,
+		);
+		const stateFingerprint = sha256Hex(
+			stableJson({ kind: intent.kind, billingAccountId, currency: intent.currency }),
+		);
+		const active = facts.setup;
+		return {
+			billingAccountId,
+			intent,
+			intentHash,
+			stateFingerprint,
+			providerStateFingerprint: stateFingerprint,
+			promotion: null,
+			preview: {
+				schemaVersion: 1,
+				intentHash,
+				stateFingerprint,
+				billingAccountId,
+				action: intent.kind,
+				provider: commercialPreviewProvider(stripeCapabilities, intent.kind),
+				lineItems: [],
+				estimatedTotalMinor: 0,
+				subtotalMinor: 0,
+				discountTotalMinor: 0,
+				currency: intent.currency,
+				amountStatus: "exact",
+				promotionCodeEntry: "none",
+				promotion: null,
+				nextCycle: null,
+				cancellation: null,
+				paymentSetup: {
+					currency: intent.currency,
+					appliesTo: "account_default",
+					preservesSubscriptionPaymentMethods: true,
+					reusesExistingSetup: facts.reusesExistingSetup,
+					existingSetupId: active === null ? null : active.id,
+					existingSetupExpiresAt:
+						active === null ? null : new Date(active.expires_at).toISOString(),
+				},
+				effectiveMode: "immediate",
+				effectiveAt: new Date().toISOString(),
+				prorationBehavior: null,
+				changeKind: null,
+				fromPlanVersionId: null,
+				toPlanVersionId: null,
+				targetId: `payment_setup:${billingAccountId}`,
+				warnings: paymentSetupWarnings(facts.reusesExistingSetup),
+			},
+		};
+	}
+
+	/**
+	 * Creates, resumes or reuses the hosted setup link. Everything the provider call needs is frozen
+	 * on the setup record first, and the call itself runs outside every transaction.
+	 */
+	private async executePaymentSetup(input: {
+		billingAccountId: string;
+		previewToken: string;
+		idempotencyKey: string;
+		intent: Extract<CommercialActionIntent, { kind: "setup_payment" }>;
+	}): Promise<PaymentSetupCreation> {
+		const executionKey = commercialExecutionKey(input.previewToken, input.idempotencyKey);
+		const parameters = this.paymentSetupParameters(input.billingAccountId, input.intent);
+		const providerCustomerId = await this.getOrCreateCustomer(
+			input.billingAccountId,
+			input.intent.email ?? null,
+		);
+		return await createPaymentSetup(this.paymentSetupContext(), {
+			previewToken: input.previewToken,
+			providerCustomerId,
+			providerIdempotencyKey: stripePaymentSetupIdempotencyKey(
+				this.dependencies.config.projectKey ?? "project",
+				executionKey,
+			),
+			parameters,
+		});
+	}
+
+	/** The persisted setup, read back without a provider call. */
+	async getPaymentSetupSession(input: {
+		billingAccountId: string;
+		sessionId: string;
+	}): Promise<PaymentSetupSession> {
+		const read = this.dependencies.repository.getPaymentSetupSession;
+		if (read === undefined) {
+			throw new BillingError(
+				"Payment method setup is not configured",
+				"STRIPE_NOT_CONFIGURED",
+				503,
+			);
+		}
+		return await read.call(
+			this.dependencies.repository,
+			requireNonBlank(input.billingAccountId, "billingAccountId"),
+			requireNonBlank(input.sessionId, "sessionId"),
+		);
+	}
+
+	private paymentSetupParameters(
+		billingAccountId: string,
+		intent: Extract<CommercialActionIntent, { kind: "setup_payment" }>,
+	): PaymentSetupRequestParameters {
+		return {
+			billingAccountId,
+			currency: intent.currency,
+			email: intent.email ?? null,
+			// Hosted setup returns to the configured customer application, checked against the
+			// connection's approved origins exactly as Checkout and portal returns are.
+			successUrl: this.returnUrl(intent.successUrl, this.dependencies.config.checkoutSuccessUrl),
+			cancelUrl: this.returnUrl(intent.cancelUrl, this.dependencies.config.checkoutCancelUrl),
+			providerAccountId: this.providerAccountIdentity(),
+			integrationIdentifier: this.dependencies.config.integrationIdentifier ?? "qfmxzjpa",
+		};
+	}
+
+	private paymentSetupContext(): PaymentSetupContext {
+		return { client: this.dependencies.client, repository: this.dependencies.repository };
+	}
+
+	private providerAccountIdentity(): string | null {
+		return this.dependencies.config.accountIdentity ?? null;
 	}
 
 	/**
@@ -1047,6 +1233,7 @@ export class StripeBillingService
 				promotion: null,
 				nextCycle: null,
 				cancellation,
+				paymentSetup: null,
 				effectiveMode: intent.kind === "cancel" ? intent.effectiveMode : null,
 				effectiveAt: cancellation.accessEndsAt,
 				prorationBehavior: intent.kind === "cancel" ? "none" : null,
@@ -1548,12 +1735,28 @@ export class StripeBillingService
 		return this.processEvent(event);
 	}
 
-	async replayStoreEvent(event: StoreEventReplayJobRow): Promise<StoreEventReplayProviderResult> {
+	async replayStoreEvent(
+		event: StoreEventReplayJobRow,
+		options?: { maxAttempts: number },
+	): Promise<StoreEventReplayProviderResult> {
 		if (event.provider !== "stripe" || event.channel !== "web") {
 			throw new BillingError("Store event is not a Stripe web event", "INVALID_REQUEST", 400);
 		}
 
-		const result = await this.processEvent(stripeEventFromStoredEvent(event), event.id);
+		if (event.event_type === paymentSetupReconcileEventType) {
+			return await this.runPaymentSetupReconciliation(event, options?.maxAttempts);
+		}
+
+		const storedEvent = stripeEventFromStoredEvent(event);
+		const paymentSetup = normalizePaymentSetupEvent(parseStripeEvent(storedEvent));
+		if (paymentSetup !== null) {
+			return await applyPaymentSetupEvent(this.paymentSetupContext(), {
+				event: paymentSetup,
+				workerId: workerIdOf(event),
+			});
+		}
+
+		const result = await this.processEvent(storedEvent, event.id);
 
 		if (result.status === "processed") {
 			return { status: "processed" };
@@ -1600,6 +1803,23 @@ export class StripeBillingService
 		return { status: result.processingStatus === "processed" ? "processed" : "skipped" };
 	}
 
+	/** The internal task that watches one setup until it completes or its expiry is confirmed. */
+	private async runPaymentSetupReconciliation(
+		event: StoreEventReplayJobRow,
+		maxAttempts?: number,
+	): Promise<StoreEventReplayProviderResult> {
+		const setupId = optionalNonBlankString(event.raw_payload.quotumPaymentSetupId);
+		if (setupId === null) {
+			return { status: "ignored", reason: "payment_setup_reconciliation_without_target" };
+		}
+		return await reconcilePaymentSetup(this.paymentSetupContext(), {
+			setupId,
+			workerId: workerIdOf(event),
+			attempts: event.attempts,
+			maxAttempts,
+		});
+	}
+
 	private async getOrCreateCustomer(
 		billingAccountId: string,
 		email: string | null,
@@ -1612,7 +1832,11 @@ export class StripeBillingService
 			return existingCustomerId;
 		}
 
-		const customer = await this.dependencies.client.createCustomer({ billingAccountId, email });
+		const customer = await this.dependencies.client.createCustomer({
+			billingAccountId,
+			email,
+			idempotencyScope: this.dependencies.config.projectKey ?? null,
+		});
 		return this.dependencies.repository.linkStripeProviderCustomer({
 			billingAccountId,
 			stripeCustomerId: customer.id,
@@ -1626,6 +1850,11 @@ export class StripeBillingService
 		replayStoreEventId?: string,
 	): Promise<StripeWebhookResult> {
 		const parsedEvent = parseStripeEvent(event);
+		const paymentSetup = normalizePaymentSetupEvent(parsedEvent);
+		if (paymentSetup !== null) {
+			// The ingress only puts the event on disk; a lease-holding worker does the provider work.
+			return await this.enqueuePaymentSetupEvent(parsedEvent, paymentSetup, event);
+		}
 		let command: NormalizedStripeCommand | null;
 
 		try {
@@ -1639,6 +1868,20 @@ export class StripeBillingService
 		}
 
 		return this.recordCommand(command, replayStoreEventId);
+	}
+
+	private async enqueuePaymentSetupEvent(
+		parsed: ParsedStripeEvent,
+		setup: NormalizedPaymentSetupEvent,
+		rawEvent: unknown,
+	): Promise<StripeWebhookResult> {
+		await enqueuePaymentSetupEvent(this.paymentSetupContext(), {
+			externalEventId: parsed.id,
+			eventType: parsed.type,
+			setup,
+			rawEvent: requireRecord(rawEvent, "Stripe event"),
+		});
+		return { status: "processed", eventType: parsed.type, entitlements: null };
 	}
 
 	private async recordCommand(
@@ -2170,6 +2413,15 @@ function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialAc
 				: { promotionCode: normalizePromotionCode(intent.promotionCode) }),
 		};
 	}
+	if (intent.kind === "setup_payment") {
+		return {
+			kind: intent.kind,
+			currency: normalizePaymentSetupCurrency(intent.currency),
+			email: optionalNonBlankString(intent.email) ?? null,
+			successUrl: optionalNonBlankString(intent.successUrl) ?? null,
+			cancelUrl: optionalNonBlankString(intent.cancelUrl) ?? null,
+		};
+	}
 	const promotionCode =
 		intent.promotionCode === undefined || intent.promotionCode === null
 			? null
@@ -2503,6 +2755,23 @@ function checkoutRequestHash(value: {
 	allowPromotionCodes?: boolean;
 }): string {
 	return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+/** Hosted setup keeps its own key namespace, so it never collides with a Checkout purchase. */
+function stripePaymentSetupIdempotencyKey(projectKey: string, idempotencyKey: string): string {
+	const digest = createHash("sha256").update(idempotencyKey).digest("hex");
+	return `billing:payment-setup:${projectKey}:${digest}`;
+}
+
+/** The claim the replay worker already holds on the row, reused as the setup's claim identity. */
+function workerIdOf(event: StoreEventReplayJobRow): string {
+	return event.locked_by ?? `store-event:${event.id}`;
+}
+
+function paymentSetupWarnings(reusesExistingSetup: boolean): string[] {
+	return reusesExistingSetup
+		? ["An unfinished setup link already exists; executing returns that link unchanged."]
+		: [];
 }
 
 function stripeCheckoutIdempotencyKey(projectKey: string, idempotencyKey: string): string {

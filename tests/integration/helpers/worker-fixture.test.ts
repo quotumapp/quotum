@@ -96,6 +96,7 @@ describe("worker fixture helpers", () => {
 			processed: 1,
 			ignored: 0,
 			retryable: 0,
+			deferred: 0,
 			failed: 0,
 		});
 		expect(calls).toEqual(["claim:worker-b:3", "replay:event-1", "succeed:worker-b"]);

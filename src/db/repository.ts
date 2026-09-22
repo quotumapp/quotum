@@ -35,6 +35,7 @@ import type {
 	WorkerConsumeUsageResult,
 	WorkerMeteringMutationInput,
 } from "../billing/metering";
+import type { PaymentSetupCard, PaymentSetupSession } from "../billing/payment-setup";
 import type {
 	SubscriptionCancellationContext,
 	SubscriptionChangeInput,
@@ -42,7 +43,12 @@ import type {
 	SubscriptionChangePreview,
 	UsageInvoiceJob,
 } from "../billing/recurring";
-import type { BillingProvider, EntitlementSnapshot, ProjectionJobPayload } from "../billing/types";
+import type {
+	BillingChannel,
+	BillingProvider,
+	EntitlementSnapshot,
+	ProjectionJobPayload,
+} from "../billing/types";
 import type {
 	UsageOperationLookupInput,
 	UsageOperationLookupResult,
@@ -66,6 +72,12 @@ import { CoreBillingRepository } from "./repository/core";
 import { GoogleBillingRepository } from "./repository/google";
 import { BillingInsightsRepository } from "./repository/insights";
 import { type GrantAllocationInput, MeteringBillingRepository } from "./repository/metering";
+import {
+	PaymentSetupRepository,
+	type PaymentSetupReservation,
+	type PaymentSetupRow,
+	type ReservePaymentSetupInput,
+} from "./repository/payment-setup";
 import { ProjectScopedBillingRepository } from "./repository/project-scoped";
 import { ProjectionJobBillingRepository } from "./repository/projection-jobs";
 import { PromotionProviderObjectRepository } from "./repository/promotion-provider-objects";
@@ -78,6 +90,10 @@ import {
 	type UsageInvoiceClaimOptions,
 } from "./repository/recurring-pricing";
 import { StoreEventReplayBillingRepository } from "./repository/store-event-replay";
+import {
+	enqueueStoreEventForReplay,
+	schedulePaymentSetupReconciliation,
+} from "./repository/store-events";
 import { StripeBillingRepository } from "./repository/stripe";
 import { SubscriptionReconciliationBillingRepository } from "./repository/subscription-reconciliation";
 import type {
@@ -108,6 +124,11 @@ import type {
 } from "./repository/types";
 
 export type { GrantAllocationInput } from "./repository/metering";
+export type {
+	PaymentSetupReservation,
+	PaymentSetupRow,
+	ReservePaymentSetupInput,
+} from "./repository/payment-setup";
 export { ProjectScopedBillingRepository } from "./repository/project-scoped";
 export type {
 	ClaimedSubscriptionChange,
@@ -149,6 +170,7 @@ export class BillingRepository {
 	private readonly apple: AppleBillingRepository;
 	private readonly autoTopupJobs: AutoTopupJobRepository;
 	private readonly commercialActions: CommercialActionRepository;
+	private readonly paymentSetups: PaymentSetupRepository;
 	private readonly google: GoogleBillingRepository;
 	private readonly insights: BillingInsightsRepository;
 	private readonly stripe: StripeBillingRepository;
@@ -159,9 +181,12 @@ export class BillingRepository {
 	readonly promotions: PromotionRepository;
 	readonly promotionProviders: PromotionProviderObjectRepository;
 
+	private readonly database: TransactionalQueryExecutor;
+
 	constructor(
 		database: TransactionalQueryExecutor = defaultDb as unknown as TransactionalQueryExecutor,
 	) {
+		this.database = database;
 		this.core = new CoreBillingRepository(database);
 		this.projectionJobs = new ProjectionJobBillingRepository(database);
 		this.storeEventReplay = new StoreEventReplayBillingRepository(database);
@@ -169,6 +194,7 @@ export class BillingRepository {
 		this.apple = new AppleBillingRepository(database);
 		this.autoTopupJobs = new AutoTopupJobRepository(database);
 		this.commercialActions = new CommercialActionRepository(database);
+		this.paymentSetups = new PaymentSetupRepository(database);
 		this.google = new GoogleBillingRepository(database);
 		this.insights = new BillingInsightsRepository(database);
 		this.stripe = new StripeBillingRepository(database);
@@ -856,5 +882,125 @@ export class BillingRepository {
 		input: CatalogPublishInput,
 	): Promise<CatalogPublishResult> {
 		return await this.catalog.publish(project, input);
+	}
+
+	async findActivePaymentSetup(
+		project: ProjectInstanceContext,
+		input: { billingAccountId: string; providerAccountId: string | null },
+	): Promise<PaymentSetupRow | null> {
+		return await this.paymentSetups.findActivePaymentSetup(project, input);
+	}
+
+	async reservePaymentSetup(
+		project: ProjectInstanceContext,
+		input: ReservePaymentSetupInput,
+	): Promise<PaymentSetupReservation> {
+		return await this.paymentSetups.reservePaymentSetup(project, input);
+	}
+
+	async recordPaymentSetupLink(
+		project: ProjectInstanceContext,
+		input: {
+			setupId: string;
+			externalSessionId: string;
+			sessionUrl: string;
+			externalSetupIntentId: string | null;
+			expiresAt: Date;
+		},
+	): Promise<PaymentSetupRow> {
+		return await this.paymentSetups.recordPaymentSetupLink(project, input);
+	}
+
+	async claimPaymentSetup(
+		project: ProjectInstanceContext,
+		input: { setupId: string; workerId: string },
+	): Promise<PaymentSetupRow | null> {
+		return await this.paymentSetups.claimPaymentSetup(project, input);
+	}
+
+	async releasePaymentSetupClaim(
+		project: ProjectInstanceContext,
+		input: { setupId: string; workerId: string },
+	): Promise<void> {
+		await this.paymentSetups.releasePaymentSetupClaim(project, input);
+	}
+
+	async recordPaymentSetupIntent(
+		project: ProjectInstanceContext,
+		input: {
+			setupId: string;
+			workerId: string;
+			externalSetupIntentId: string;
+			paymentMethodId: string;
+			externalSessionId: string | null;
+		},
+	): Promise<PaymentSetupRow> {
+		return await this.paymentSetups.recordPaymentSetupIntent(project, input);
+	}
+
+	async completePaymentSetup(
+		project: ProjectInstanceContext,
+		input: {
+			setupId: string;
+			workerId: string;
+			paymentMethodId: string;
+			card: PaymentSetupCard | null;
+		},
+	): Promise<PaymentSetupRow> {
+		return await this.paymentSetups.completePaymentSetup(project, input);
+	}
+
+	async expirePaymentSetup(
+		project: ProjectInstanceContext,
+		input: { setupId: string; workerId: string },
+	): Promise<PaymentSetupRow> {
+		return await this.paymentSetups.expirePaymentSetup(project, input);
+	}
+
+	async flagPaymentSetupAttention(
+		project: ProjectInstanceContext,
+		input: { setupId: string; workerId: string; reason: string },
+	): Promise<PaymentSetupRow | null> {
+		return await this.paymentSetups.flagPaymentSetupAttention(project, input);
+	}
+
+	async getPaymentSetupSession(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		sessionId: string,
+	): Promise<PaymentSetupSession> {
+		return await this.paymentSetups.getPaymentSetupSession(project, billingAccountId, sessionId);
+	}
+
+	async findPaymentSetupById(
+		project: ProjectInstanceContext,
+		setupId: string,
+	): Promise<PaymentSetupRow | null> {
+		return await this.paymentSetups.findPaymentSetupById(project, setupId);
+	}
+
+	async schedulePaymentSetupReconciliation(
+		project: ProjectInstanceContext,
+		input: { setupId: string; nextAttemptAt: Date },
+	): Promise<string> {
+		return await schedulePaymentSetupReconciliation(
+			this.database,
+			project.projectInstanceId,
+			input,
+		);
+	}
+
+	async enqueueProviderStoreEvent(
+		project: ProjectInstanceContext,
+		input: {
+			provider: BillingProvider;
+			channel: BillingChannel;
+			externalEventId: string | null;
+			eventType: string;
+			transactionId: string | null;
+			rawPayload: Record<string, unknown>;
+		},
+	): Promise<{ storeEventId: string; enqueued: boolean }> {
+		return await enqueueStoreEventForReplay(this.database, project.projectInstanceId, input);
 	}
 }

@@ -253,13 +253,57 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 		idempotencyKey: string;
 	}> = [];
 	const subscriptionCancellations: Array<{ subscriptionId: string; idempotencyKey: string }> = [];
+	const setupSessions = new Map<
+		string,
+		{
+			id: string;
+			customerId: string;
+			setupIntentId: string;
+			status: "open" | "complete" | "expired";
+			paymentMethod: JsonRecord | null;
+		}
+	>();
+	const setupSessionsByIdempotencyKey = new Map<string, string>();
+	const defaultPaymentMethodWrites: Array<{
+		customerId: string;
+		paymentMethodId: string;
+		idempotencyKey: string;
+	}> = [];
+	const invoiceCreateParams: Stripe.InvoiceCreateParams[] = [];
 	const subscriptionDiscounts = new Map<string, Array<{ id: string; couponId: string | null }>>();
-	const event =
+	let event =
 		options.event ?? stripeEvent("customer.subscription.updated", stripeSubscriptionObject());
+
+	const requireSetupSession = (sessionId: string) => {
+		const session = setupSessions.get(sessionId);
+		if (session === undefined) throw new Error(`Unknown fake Stripe setup session: ${sessionId}`);
+		return session;
+	};
 
 	return attachFailNext({
 		calls,
 		checkoutSessionParams,
+		defaultPaymentMethodWrites,
+		invoiceCreateParams,
+		/** The event the next verified webhook delivers; the signature check itself is faked. */
+		setWebhookEvent(next: JsonRecord) {
+			event = next;
+		},
+		/** Drives the fake through a customer finishing hosted setup with a saved card. */
+		completeSetupSession(sessionId: string) {
+			const session = requireSetupSession(sessionId);
+			session.status = "complete";
+			session.paymentMethod = {
+				id: `pm_setup_${sessionId}`,
+				type: "card",
+				card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2031 },
+			};
+			return { setupIntentId: session.setupIntentId, paymentMethodId: `pm_setup_${sessionId}` };
+		},
+		/** Drives the fake through a hosted link the customer never finished. */
+		expireSetupSession(sessionId: string) {
+			requireSetupSession(sessionId).status = "expired";
+		},
 		promotions: promotions.state,
 		subscriptionUpdates,
 		subscriptionCancellations,
@@ -288,20 +332,78 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			createPromotionCode: promotions.createPromotionCode,
 			updatePromotionCode: promotions.updatePromotionCode,
 			findPromotionCodes: promotions.findPromotionCodes,
-			async createCheckoutSession(params: Stripe.Checkout.SessionCreateParams) {
+			async createCheckoutSession(
+				params: Stripe.Checkout.SessionCreateParams,
+				idempotencyKey?: string,
+			) {
 				calls.push("createCheckoutSession");
 				checkoutSessionParams.push(params);
 				if (checkoutSessionFailuresRemaining > 0) {
 					checkoutSessionFailuresRemaining -= 1;
 					throw new Error("Fake Stripe Checkout is temporarily unavailable");
 				}
-
+				if (params.mode !== "setup") {
+					return {
+						id: "cs_test_integration",
+						url: "https://checkout.stripe.test/session/cs_test_integration",
+					};
+				}
+				// Stripe replays the original session for a repeated idempotency key.
+				const existing =
+					idempotencyKey === undefined
+						? undefined
+						: setupSessionsByIdempotencyKey.get(idempotencyKey);
+				const id = existing ?? `cs_setup_integration_${setupSessions.size + 1}`;
+				if (existing === undefined) {
+					setupSessions.set(id, {
+						id,
+						customerId: String(params.customer ?? ""),
+						setupIntentId: `seti_${id}`,
+						status: "open",
+						paymentMethod: null,
+					});
+					if (idempotencyKey !== undefined) setupSessionsByIdempotencyKey.set(idempotencyKey, id);
+				}
+				return { id, url: `https://checkout.stripe.test/setup/${id}` };
+			},
+			async retrieveSetupCheckoutSession(sessionId: string) {
+				calls.push(`retrieveSetupCheckoutSession:${sessionId}`);
+				const session = requireSetupSession(sessionId);
 				return {
-					id: "cs_test_integration",
-					url: "https://checkout.stripe.test/session/cs_test_integration",
+					id: session.id,
+					mode: "setup",
+					status: session.status,
+					setup_intent: session.setupIntentId,
 				};
 			},
-			async createCustomer(input: { billingAccountId: string; email: string | null }) {
+			async retrieveSetupIntent(setupIntentId: string) {
+				calls.push(`retrieveSetupIntent:${setupIntentId}`);
+				const session = [...setupSessions.values()].find(
+					(entry) => entry.setupIntentId === setupIntentId,
+				);
+				if (session === undefined) {
+					throw new Error(`Unknown fake Stripe setup intent: ${setupIntentId}`);
+				}
+				return {
+					id: setupIntentId,
+					status: session.paymentMethod === null ? "requires_payment_method" : "succeeded",
+					customer: session.customerId,
+					payment_method: session.paymentMethod,
+				};
+			},
+			async updateCustomerDefaultPaymentMethod(input: {
+				customerId: string;
+				paymentMethodId: string;
+				idempotencyKey: string;
+			}) {
+				calls.push(`updateCustomerDefaultPaymentMethod:${input.idempotencyKey}`);
+				defaultPaymentMethodWrites.push(input);
+			},
+			async createCustomer(input: {
+				billingAccountId: string;
+				email: string | null;
+				idempotencyScope?: string | null;
+			}) {
 				const { billingAccountId } = input;
 				calls.push(`createCustomer:${billingAccountId}`);
 
@@ -346,10 +448,15 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			},
 			async retrieveDefaultPaymentMethod(customerId: string) {
 				calls.push(`retrieveDefaultPaymentMethod:${customerId}`);
-				return "pm_integration";
+				// A completed hosted setup is what puts a card here, exactly as Stripe would.
+				const saved = defaultPaymentMethodWrites.findLast(
+					(write) => write.customerId === customerId,
+				);
+				return saved?.paymentMethodId ?? "pm_integration";
 			},
 			async createInvoice(params: Stripe.InvoiceCreateParams, idempotencyKey: string) {
 				calls.push(`createInvoice:${idempotencyKey}`);
+				invoiceCreateParams.push(params);
 				const id = `in_integration_${idempotencyKey}`;
 				invoices.set(id, {
 					id,

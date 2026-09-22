@@ -203,6 +203,7 @@ export const commercialActionOperations: Record<CommercialActionIntent["kind"], 
 		subscription_change: "subscription.change.preview",
 		cancel: "subscription.cancel",
 		uncancel: "subscription.uncancel",
+		setup_payment: "payment_method.setup",
 	};
 
 /**

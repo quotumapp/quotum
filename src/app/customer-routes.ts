@@ -68,6 +68,10 @@ const stripeSubscriptionChangeParamsSchema = stripeCustomerRouteParamsSchema.ext
 	subscriptionId: z.string().trim().min(1),
 });
 
+const paymentSetupSessionRouteParamsSchema = stripeCustomerRouteParamsSchema.extend({
+	sessionId: z.string().trim().min(1),
+});
+
 const stripeSubscriptionChangeBodySchema = z
 	.object({
 		targetPlanKey: z.string().trim().min(1),
@@ -140,6 +144,19 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 		.object({
 			kind: z.literal("uncancel"),
 			externalSubscriptionId: z.string().trim().min(1),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("setup_payment"),
+			/** Selects the eligible setup methods; it does not bind the account to this currency. */
+			currency: z
+				.string()
+				.trim()
+				.regex(/^[A-Za-z]{3}$/),
+			email: z.string().trim().min(1).max(320).nullable().optional(),
+			successUrl: z.string().trim().max(2000).check(z.url()).nullable().optional(),
+			cancelUrl: z.string().trim().max(2000).check(z.url()).nullable().optional(),
 		})
 		.strict(),
 ]);
@@ -344,6 +361,40 @@ export function registerCustomerRoutes({
 				responses: {
 					200: responses.postV1BillingAccountsByBillingAccountIdCommercialActionsResponse200Schema,
 					202: responses.postV1BillingAccountsByBillingAccountIdCommercialActionsResponse202Schema,
+				},
+			}),
+		},
+	);
+
+	app.get(
+		"/v1/billing-accounts/:billingAccountId/payment-setup-sessions/:sessionId",
+		async ({ params, project }) => {
+			const getPaymentSetupSession = requireProviderMethod(
+				requireStripeBillingService(
+					await providerServices.stripeBillingService(privateProject(project)),
+				),
+				"stripe",
+				"paymentMethods.setupSession",
+				"Payment method setup is not available",
+			);
+			return {
+				success: true,
+				data: await getPaymentSetupSession({
+					billingAccountId: params.billingAccountId,
+					sessionId: params.sessionId,
+				}),
+			};
+		},
+		{
+			params: paymentSetupSessionRouteParamsSchema,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdPaymentSetupSessionsBySessionId",
+				tags: ["customer"],
+				path: "/v1/billing-accounts/:billingAccountId/payment-setup-sessions/:sessionId",
+				description:
+					"Persisted state only. While the setup is open the response carries the reusable hosted link, so it needs full project credentials; a read-only credential is refused.",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdPaymentSetupSessionsBySessionIdResponse200Schema,
 				},
 			}),
 		},

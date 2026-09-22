@@ -41,6 +41,12 @@ export function merchantBillingRoute(
 		return null;
 	const suffix = pathname.slice("/api/billing/".length);
 	const path = `/v1/${suffix.replace(/^admin\/billing-accounts\//, "billing-accounts/")}`;
+	// The setup session read hands back an actionable hosted link, so it is a write-level action.
+	if (
+		method === "GET" &&
+		new RegExp(`^admin/billing-accounts/${account}/payment-setup-sessions/[^/]+$`).test(suffix)
+	)
+		return { path, capability: "operations.write", action: null, sensitive: false };
 	if (method === "GET" && readPatterns.some((pattern) => new RegExp(`^${pattern}$`).test(suffix)))
 		return { path, capability: "billing.read", action: null, sensitive: false };
 	if (method === "POST" && suffix === "admin/catalog/preview")

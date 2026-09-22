@@ -8,6 +8,18 @@ interface FakeCheckoutSession {
 	id: string;
 	clientReferenceId: string | null;
 	metadata: Stripe.Metadata | null;
+	mode: Stripe.Checkout.SessionCreateParams.Mode;
+	currency: string | null;
+	status: "open" | "complete" | "expired";
+	setupIntentId: string | null;
+}
+
+/** A hosted setup that the fake has taken through to a saved card. */
+interface FakeSetupIntent {
+	id: string;
+	customerId: string;
+	status: "requires_payment_method" | "succeeded";
+	paymentMethod: Record<string, unknown> | null;
 }
 
 interface FakeInvoice {
@@ -33,6 +45,13 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	private readonly invoices = new Map<string, FakeInvoice>();
 	private readonly invoicesByIdempotencyKey = new Map<string, FakeInvoice>();
 	private readonly invoiceLineKeys = new Set<string>();
+	private readonly setupIntents = new Map<string, FakeSetupIntent>();
+	/** Every default-payment-method write, so a test can assert exactly what was promoted. */
+	readonly defaultPaymentMethodWrites: Array<{
+		customerId: string;
+		paymentMethodId: string;
+		idempotencyKey: string;
+	}> = [];
 	private readonly subscriptionUpdates = new Map<string, { id: string }>();
 	private readonly subscriptionCancellations = new Map<string, { id: string }>();
 	private readonly subscriptionDiscounts = new Map<
@@ -76,6 +95,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	async createCustomer(input: {
 		billingAccountId: string;
 		email: string | null;
+		idempotencyScope?: string | null;
 	}): Promise<{ id: string }> {
 		this.throwIfFailed("createCustomer");
 		return { id: `cus_fake_${digest(input.billingAccountId).slice(0, 24)}` };
@@ -93,11 +113,24 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		}
 
 		const id = `cs_fake_${digest(idempotencyKey ?? randomUUID()).slice(0, 24)}`;
-		const session = {
+		const mode = params.mode ?? "payment";
+		const session: FakeCheckoutSession = {
 			id,
 			clientReferenceId: params.client_reference_id ?? null,
 			metadata: normalizeMetadata(params.metadata),
+			mode,
+			currency: params.currency ?? null,
+			status: "open",
+			setupIntentId: mode === "setup" ? `seti_fake_${digest(id).slice(0, 24)}` : null,
 		};
+		if (session.setupIntentId !== null) {
+			this.setupIntents.set(session.setupIntentId, {
+				id: session.setupIntentId,
+				customerId: String(params.customer ?? ""),
+				status: "requires_payment_method",
+				paymentMethod: null,
+			});
+		}
 		this.sessions.set(id, session);
 		if (idempotencyKey !== undefined) {
 			this.sessionsByIdempotencyKey.set(idempotencyKey, session);
@@ -112,15 +145,95 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		return { url: `https://billing.stripe.test/session/${id}` };
 	}
 
-	async retrieveCheckoutSession(sessionId: string) {
+	/** Drives the fake through a customer finishing hosted setup and saving a card. */
+	completeSetupSession(
+		sessionId: string,
+		card: { brand: string; last4: string; expMonth: number; expYear: number } = {
+			brand: "visa",
+			last4: "4242",
+			expMonth: 12,
+			expYear: 2031,
+		},
+	): { setupIntentId: string; paymentMethodId: string } {
+		const session = this.requireSession(sessionId);
+		const setupIntentId = session.setupIntentId;
+		if (setupIntentId === null) throw new Error(`Session ${sessionId} is not a setup session`);
+		const paymentMethodId = `pm_fake_${digest(setupIntentId).slice(0, 24)}`;
+		session.status = "complete";
+		this.setupIntents.set(setupIntentId, {
+			id: setupIntentId,
+			customerId: this.setupIntents.get(setupIntentId)?.customerId ?? "",
+			status: "succeeded",
+			paymentMethod: {
+				id: paymentMethodId,
+				type: "card",
+				card: {
+					brand: card.brand,
+					last4: card.last4,
+					exp_month: card.expMonth,
+					exp_year: card.expYear,
+				},
+			},
+		});
+		return { setupIntentId, paymentMethodId };
+	}
+
+	/** Drives the fake through a hosted link the customer never finished. */
+	expireSetupSession(sessionId: string): void {
+		this.requireSession(sessionId).status = "expired";
+	}
+
+	async retrieveSetupCheckoutSession(sessionId: string): Promise<Record<string, unknown>> {
+		this.throwIfFailed("retrieveSetupCheckoutSession");
+		const session = this.requireSession(sessionId);
+		return {
+			id: session.id,
+			mode: session.mode,
+			status: session.status,
+			currency: session.currency,
+			client_reference_id: session.clientReferenceId,
+			metadata: session.metadata,
+			setup_intent: session.setupIntentId,
+		};
+	}
+
+	async retrieveSetupIntent(setupIntentId: string): Promise<Record<string, unknown>> {
+		this.throwIfFailed("retrieveSetupIntent");
+		const intent = this.setupIntents.get(setupIntentId);
+		if (intent === undefined) {
+			throw new Error(`Unknown fake Stripe setup intent: ${setupIntentId}`);
+		}
+		return {
+			id: intent.id,
+			status: intent.status,
+			customer: intent.customerId,
+			payment_method: intent.paymentMethod,
+		};
+	}
+
+	async updateCustomerDefaultPaymentMethod(input: {
+		customerId: string;
+		paymentMethodId: string;
+		idempotencyKey: string;
+	}): Promise<void> {
+		this.throwIfFailed("updateCustomerDefaultPaymentMethod");
+		this.defaultPaymentMethodWrites.push(input);
+	}
+
+	private requireSession(sessionId: string): FakeCheckoutSession {
 		const session = this.sessions.get(sessionId);
 		if (session === undefined) {
 			throw new Error(`Unknown fake Stripe Checkout session: ${sessionId}`);
 		}
+		return session;
+	}
+
+	async retrieveCheckoutSession(sessionId: string) {
+		const session = this.requireSession(sessionId);
 		return {
 			id: session.id,
-			status: "complete",
-			payment_status: "paid",
+			status: session.mode === "setup" ? session.status : "complete",
+			payment_status: session.mode === "setup" ? null : "paid",
 			client_reference_id: session.clientReferenceId,
 			metadata: session.metadata,
 		};

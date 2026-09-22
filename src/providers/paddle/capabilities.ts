@@ -145,6 +145,11 @@ export const paddleCapabilities: ProviderCapabilityDeclaration = {
 			questions: ["Q-PORT-01"],
 			notes: "Portal sessions are created on demand; their authenticated URLs are never stored.",
 		}),
+		"payment_method.setup": awaitingAnswer("Q-SET-02", {
+			questions: ["Q-SET-02"],
+			notes:
+				"Paddle saves a payment method through its own hosted transaction; whether Quotum can start one without a charge and promote the result to the account default is unresolved.",
+		}),
 		"webhook.ingest": inP4({
 			questions: ["Q-WH-01", "Q-WH-02", "Q-WH-03"],
 			notes:

@@ -23,6 +23,7 @@ import type {
 	ReservationResult,
 	ReserveUsageInput,
 } from "../billing/metering";
+import type { PaymentSetupSession } from "../billing/payment-setup";
 import type {
 	CreatePromotionInput,
 	PromotionChannel,
@@ -176,6 +177,14 @@ export class BillingClient {
 			availableActions: (billingAccountId: string) =>
 				this.request<BillingAccountAvailableActions>(
 					`/v1/billing-accounts/${segment(billingAccountId)}/available-actions`,
+				),
+			/**
+			 * The persisted state of one hosted payment-method setup. While the setup is open the
+			 * response carries its reusable link, so this needs a full project credential.
+			 */
+			paymentSetupSession: (billingAccountId: string, sessionId: string) =>
+				this.request<PaymentSetupSession>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/payment-setup-sessions/${segment(sessionId)}`,
 				),
 		};
 		this.usage = {

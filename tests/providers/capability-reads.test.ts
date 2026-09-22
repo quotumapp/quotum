@@ -203,7 +203,7 @@ describe("billing account available actions", () => {
 				condition: {
 					kind: "saved_payment_method",
 					required: true,
-					resolveWith: "topup.customer_initiated",
+					resolveWith: "payment_method.setup",
 				},
 				observed: { savedPaymentMethod: "unknown" },
 				resolution: { kind: "checked_at_execution" },

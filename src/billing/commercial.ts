@@ -1,3 +1,4 @@
+import type { PaymentSetupStatus } from "./payment-setup";
 import type { StripeProrationBehavior } from "./pricing";
 import type { CommercialPromotion, PromotionDiscountDuration } from "./promotions";
 import type { BillingProvider } from "./types";
@@ -42,6 +43,18 @@ export type CommercialActionIntent =
 	| {
 			kind: "uncancel";
 			externalSubscriptionId: string;
+	  }
+	/**
+	 * Saves a payment method for later off-session charges. It needs no catalog item and no
+	 * subscription, and `currency` only selects which setup methods the provider offers; it does not
+	 * bind the account to that currency.
+	 */
+	| {
+			kind: "setup_payment";
+			currency: string;
+			email?: string | null;
+			successUrl?: string | null;
+			cancelUrl?: string | null;
 	  };
 
 /** What a preview says a cancellation would do; `none` when the state already holds. */
@@ -106,6 +119,23 @@ export interface CommercialPreviewCancellation {
 	activeAddOnSubscriptionIds: string[];
 }
 
+/**
+ * What a payment-method setup preview reports. Setting up a method charges nothing and grants
+ * nothing: it only decides which method future automatic charges use.
+ */
+export interface CommercialPreviewPaymentSetup {
+	/** The currency whose eligible setup methods the hosted page will offer. */
+	currency: string;
+	/** The saved method becomes the billing account's default for later off-session charges. */
+	appliesTo: "account_default";
+	/** Payment methods pinned to individual subscriptions keep whatever they already point at. */
+	preservesSubscriptionPaymentMethods: true;
+	/** Whether an unresolved setup exists whose link the execution would hand back unchanged. */
+	reusesExistingSetup: boolean;
+	existingSetupId: string | null;
+	existingSetupExpiresAt: string | null;
+}
+
 export interface CommercialActionPreview {
 	schemaVersion: 1;
 	previewToken: string;
@@ -125,6 +155,7 @@ export interface CommercialActionPreview {
 	promotion: CommercialPreviewPromotion | null;
 	nextCycle: CommercialPreviewNextCycle | null;
 	cancellation: CommercialPreviewCancellation | null;
+	paymentSetup: CommercialPreviewPaymentSetup | null;
 	effectiveMode: "immediate" | "period_end" | null;
 	effectiveAt: string | null;
 	prorationBehavior: StripeProrationBehavior | null;
@@ -158,6 +189,23 @@ export type CommercialActionExecutionResult =
 			effectiveMode: "immediate" | "period_end";
 			effectiveAt: string;
 			promotionRedemption?: { id: string; status: "reserved" | "applied" } | null;
+	  }
+	/**
+	 * A hosted setup link. Creating it does not mean the customer finished setup; the persisted
+	 * record, read back through the payment-setup session route, is what says that.
+	 */
+	| {
+			kind: "payment_setup";
+			setupId: string;
+			status: PaymentSetupStatus;
+			sessionId: string | null;
+			url: string | null;
+			expiresAt: string;
+			/**
+			 * True when this call did not create the link: an unfinished setup's link was handed
+			 * back, or the provider replayed the session an interrupted attempt had already made.
+			 */
+			reused: boolean;
 	  }
 	| {
 			kind: "subscription_cancellation";

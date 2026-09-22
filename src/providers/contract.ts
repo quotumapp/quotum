@@ -120,6 +120,11 @@ export interface ProviderPortalGroup {
 	createSession: StripeMethod<"createPortalSession">;
 }
 
+/** Reads over hosted payment-method setup; the setup itself runs through `commercial.execute`. */
+export interface ProviderPaymentMethodGroup {
+	setupSession?: StripeMethod<"getPaymentSetupSession">;
+}
+
 export interface ProviderCommercialGroup {
 	preview?: StripeMethod<"previewCommercialAction">;
 	execute?: StripeMethod<"executeCommercialAction">;
@@ -170,6 +175,7 @@ export interface ProviderAdapter<P extends BillingProvider = BillingProvider> {
 	readonly checkout?: ProviderCheckoutGroup;
 	readonly portal?: ProviderPortalGroup;
 	readonly commercial?: ProviderCommercialGroup;
+	readonly paymentMethods?: ProviderPaymentMethodGroup;
 	readonly changes?: ProviderChangeGroup;
 	readonly settlement?: ProviderSettlementGroup;
 	readonly topups?: ProviderTopupGroup;
@@ -187,6 +193,7 @@ export const providerAdapterGroups = [
 	"checkout",
 	"portal",
 	"commercial",
+	"paymentMethods",
 	"changes",
 	"settlement",
 	"topups",
@@ -217,6 +224,7 @@ export const providerOperationMethods: Record<ProviderOperation, readonly Provid
 		"checkout.plan": ["checkout.createPlan"],
 		"purchase.verify": ["purchases.verify"],
 		"portal.session": ["portal.createSession"],
+		"payment_method.setup": ["commercial.execute"],
 		"webhook.ingest": ["webhooks.ingest"],
 		"event.replay": ["replay.replayStoreEvent"],
 		"subscription.reconcile": ["reconciliation.reconcileSubscription"],

@@ -40,7 +40,12 @@ const storeEvent = (overrides: Partial<StoreEventReplayJobRow> = {}): StoreEvent
 
 function createRepository(
 	events: StoreEventReplayJobRow[],
-	options: { succeedError?: Error; failError?: Error } = {},
+	options: {
+		succeedError?: Error;
+		failError?: Error;
+		deferError?: Error;
+		omitDeferral?: boolean;
+	} = {},
 ) {
 	const calls: unknown[] = [];
 
@@ -73,6 +78,27 @@ function createRepository(
 					throw options.succeedError;
 				}
 			},
+			markStoreEventReplayJobDeferred:
+				options.omitDeferral === true
+					? undefined
+					: async (
+							_projectId: string,
+							eventId: string,
+							reason: string,
+							nextAttemptAt: Date,
+							workerId: string,
+						) => {
+							calls.push({
+								method: "markStoreEventReplayJobDeferred",
+								eventId,
+								reason,
+								nextAttemptAt: nextAttemptAt.toISOString(),
+								workerId,
+							});
+							if (options.deferError !== undefined) {
+								throw options.deferError;
+							}
+						},
 			markStoreEventReplayJobFailed: async (
 				_projectId: string,
 				eventId: string,
@@ -167,7 +193,14 @@ describe("StoreEventReplayWorker", () => {
 
 		const result = await worker.runOnce();
 
-		expect(result).toEqual({ claimed: 1, processed: 1, ignored: 0, retryable: 0, failed: 0 });
+		expect(result).toEqual({
+			claimed: 1,
+			processed: 1,
+			ignored: 0,
+			retryable: 0,
+			deferred: 0,
+			failed: 0,
+		});
 		expect(providerCalls).toEqual(events);
 		expect(calls).toEqual([
 			{ method: "claimStoreEventReplayJobs", workerId: "worker-a", limit: 5 },
@@ -191,6 +224,7 @@ describe("StoreEventReplayWorker", () => {
 					processed: 1,
 					ignored: 0,
 					retryable: 0,
+					deferred: 0,
 					failed: 0,
 					workerId: "worker-a",
 				},
@@ -250,7 +284,14 @@ describe("StoreEventReplayWorker", () => {
 
 		const result = await worker.runOnce();
 
-		expect(result).toEqual({ claimed: 1, processed: 1, ignored: 0, retryable: 0, failed: 0 });
+		expect(result).toEqual({
+			claimed: 1,
+			processed: 1,
+			ignored: 0,
+			retryable: 0,
+			deferred: 0,
+			failed: 0,
+		});
 		expect(calls).toEqual([
 			{ method: "claimStoreEventReplayJobs", workerId: "worker-a", limit: 5 },
 			{
@@ -285,7 +326,14 @@ describe("StoreEventReplayWorker", () => {
 
 		const result = await worker.runOnce();
 
-		expect(result).toEqual({ claimed: 1, processed: 0, ignored: 1, retryable: 0, failed: 0 });
+		expect(result).toEqual({
+			claimed: 1,
+			processed: 0,
+			ignored: 1,
+			retryable: 0,
+			deferred: 0,
+			failed: 0,
+		});
 		expect(calls).toContainEqual({
 			method: "markStoreEventReplayJobSucceeded",
 			eventId: "event_1",
@@ -350,7 +398,14 @@ describe("StoreEventReplayWorker", () => {
 
 		const result = await worker.runOnce();
 
-		expect(result).toEqual({ claimed: 1, processed: 0, ignored: 0, retryable: 1, failed: 0 });
+		expect(result).toEqual({
+			claimed: 1,
+			processed: 0,
+			ignored: 0,
+			retryable: 1,
+			deferred: 0,
+			failed: 0,
+		});
 		expect(calls).toContainEqual({
 			method: "markStoreEventReplayJobFailed",
 			eventId: "event_1",
@@ -379,7 +434,14 @@ describe("StoreEventReplayWorker", () => {
 
 		const result = await worker.runOnce();
 
-		expect(result).toEqual({ claimed: 2, processed: 0, ignored: 0, retryable: 0, failed: 2 });
+		expect(result).toEqual({
+			claimed: 2,
+			processed: 0,
+			ignored: 0,
+			retryable: 0,
+			deferred: 0,
+			failed: 2,
+		});
 		expect(calls).toContainEqual({
 			method: "markStoreEventReplayJobFailed",
 			eventId: "event_google",
@@ -423,7 +485,14 @@ describe("StoreEventReplayWorker", () => {
 
 		const result = await worker.runOnce();
 
-		expect(result).toEqual({ claimed: 1, processed: 0, ignored: 0, retryable: 0, failed: 1 });
+		expect(result).toEqual({
+			claimed: 1,
+			processed: 0,
+			ignored: 0,
+			retryable: 0,
+			deferred: 0,
+			failed: 1,
+		});
 		expect(calls).toContainEqual({
 			method: "markStoreEventReplayJobFailed",
 			eventId: "event_1",
@@ -477,7 +546,14 @@ describe("StoreEventReplayWorker", () => {
 
 		const result = await worker.runOnce();
 
-		expect(result).toEqual({ claimed: 2, processed: 1, ignored: 0, retryable: 0, failed: 1 });
+		expect(result).toEqual({
+			claimed: 2,
+			processed: 1,
+			ignored: 0,
+			retryable: 0,
+			deferred: 0,
+			failed: 1,
+		});
 		expect(calls).toEqual([
 			{ method: "claimStoreEventReplayJobs", workerId: "worker-a", limit: 5 },
 			{
@@ -612,3 +688,117 @@ describe("StoreEventReplayWorker", () => {
 		});
 	});
 });
+
+describe("StoreEventReplayWorker deferrals", () => {
+	const deferredEvent = storeEvent({ provider: "stripe", channel: "web", attempts: 3 });
+	const nextAttemptAt = new Date("2026-05-31T00:30:00.000Z");
+	const deferringProvider = {
+		replayStoreEvent: async () =>
+			({ status: "deferred", reason: "payment_setup_awaiting_customer", nextAttemptAt }) as const,
+	};
+
+	it("passes the configured failure budget to provider recovery", async () => {
+		const { repository } = createRepository([storeEvent({ provider: "stripe", channel: "web" })]);
+		const budgets: unknown[] = [];
+		const worker = new StoreEventReplayWorker({
+			workerId: "worker-a",
+			maxAttempts: 1,
+			batchSize: 5,
+			repository,
+			providers: {
+				apple: null,
+				google: null,
+				stripe: {
+					replayStoreEvent: async (_event, options) => {
+						budgets.push(options);
+						return { status: "deferred", reason: "payment_setup_needs_attention", nextAttemptAt };
+					},
+				},
+			},
+			projectContextResolver: workerProjectResolver,
+		});
+		expect((await worker.runOnce()).deferred).toBe(1);
+		expect(budgets).toEqual([{ maxAttempts: 1 }]);
+	});
+
+	it("reschedules a waiting job without consuming a retry attempt", async () => {
+		const { calls, repository } = createRepository([deferredEvent]);
+		const worker = new StoreEventReplayWorker({
+			workerId: "worker-a",
+			maxAttempts: 5,
+			batchSize: 5,
+			repository,
+			providers: { apple: null, google: null, stripe: deferringProvider },
+			projectContextResolver: workerProjectResolver,
+			now: () => new Date("2026-05-31T00:00:00.000Z"),
+			jitterMs: () => 0,
+		});
+
+		const result = await worker.runOnce();
+
+		expect(result).toEqual({
+			claimed: 1,
+			processed: 0,
+			ignored: 0,
+			retryable: 0,
+			deferred: 1,
+			failed: 0,
+		});
+		expect(calls).toContainEqual({
+			method: "markStoreEventReplayJobDeferred",
+			eventId: "event_1",
+			reason: "payment_setup_awaiting_customer",
+			nextAttemptAt: nextAttemptAt.toISOString(),
+			workerId: "worker-a",
+		});
+		expect(calls.some((call) => isMethod(call, "markStoreEventReplayJobFailed"))).toBe(false);
+	});
+
+	it("falls back to a retry when the repository cannot defer", async () => {
+		const { calls, repository } = createRepository([deferredEvent], { omitDeferral: true });
+		const worker = new StoreEventReplayWorker({
+			workerId: "worker-a",
+			maxAttempts: 5,
+			batchSize: 5,
+			repository,
+			providers: { apple: null, google: null, stripe: deferringProvider },
+			projectContextResolver: workerProjectResolver,
+			now: () => new Date("2026-05-31T00:00:00.000Z"),
+			jitterMs: () => 0,
+		});
+
+		const result = await worker.runOnce();
+
+		expect(result.deferred).toBe(0);
+		expect(result.retryable).toBe(1);
+		expect(calls.some((call) => isMethod(call, "markStoreEventReplayJobFailed"))).toBe(true);
+	});
+
+	it("falls back to a retry when the deferral write fails", async () => {
+		const { calls, repository } = createRepository([deferredEvent], {
+			deferError: new Error("deferral failed"),
+		});
+		const worker = new StoreEventReplayWorker({
+			workerId: "worker-a",
+			maxAttempts: 5,
+			batchSize: 5,
+			repository,
+			providers: { apple: null, google: null, stripe: deferringProvider },
+			projectContextResolver: workerProjectResolver,
+			now: () => new Date("2026-05-31T00:00:00.000Z"),
+			jitterMs: () => 0,
+			logger: createRecordingLogger().logger,
+		});
+
+		const result = await worker.runOnce();
+
+		expect(result.retryable).toBe(1);
+		expect(calls.some((call) => isMethod(call, "markStoreEventReplayJobFailed"))).toBe(true);
+	});
+});
+
+function isMethod(call: unknown, method: string): boolean {
+	return (
+		typeof call === "object" && call !== null && (call as { method?: string }).method === method
+	);
+}

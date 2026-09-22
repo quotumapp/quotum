@@ -947,7 +947,7 @@ export const postV1AdminStoreEventsByEventIdReplayResponse200Schema = z.object({
 	success: z.literal(true),
 	data: z.object({
 		eventId: z.string(),
-		status: z.enum(["failed", "retryable", "processed", "ignored"]),
+		status: z.enum(["failed", "retryable", "deferred", "processed", "ignored"]),
 	}),
 });
 

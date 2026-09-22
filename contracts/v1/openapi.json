@@ -8205,6 +8205,141 @@
         ],
         "type": "object"
       },
+      "getV1BillingAccountsByBillingAccountIdPaymentSetupSessionsBySessionIdResponse200": {
+        "properties": {
+          "data": {
+            "properties": {
+              "attention": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "billingAccountId": {
+                "type": "string"
+              },
+              "card": {
+                "properties": {
+                  "brand": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "expMonth": {
+                    "type": [
+                      "null",
+                      "number"
+                    ]
+                  },
+                  "expYear": {
+                    "type": [
+                      "null",
+                      "number"
+                    ]
+                  },
+                  "last4": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  }
+                },
+                "required": [
+                  "brand",
+                  "last4",
+                  "expMonth",
+                  "expYear"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "completedAt": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "expiresAt": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "provider": {
+                "enum": [
+                  "stripe"
+                ],
+                "type": "string"
+              },
+              "sessionId": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "setupId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "creating",
+                  "awaiting_customer",
+                  "applying_default",
+                  "completed",
+                  "expired",
+                  "needs_attention"
+                ],
+                "type": "string"
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "url": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "setupId",
+              "billingAccountId",
+              "provider",
+              "status",
+              "currency",
+              "sessionId",
+              "url",
+              "expiresAt",
+              "completedAt",
+              "card",
+              "attention",
+              "createdAt",
+              "updatedAt"
+            ],
+            "type": "object"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ],
+        "type": "object"
+      },
       "getV1BillingAccountsByBillingAccountIdPromotionRedemptionsByRedemptionIdResponse200": {
         "properties": {
           "data": {
@@ -13119,6 +13254,7 @@
                 "enum": [
                   "failed",
                   "retryable",
+                  "deferred",
                   "processed",
                   "ignored"
                 ],
@@ -13155,6 +13291,7 @@
                   "subscription_change",
                   "cancel",
                   "uncancel",
+                  "setup_payment",
                   "none"
                 ],
                 "type": "string"
@@ -13440,6 +13577,52 @@
                   "null"
                 ]
               },
+              "paymentSetup": {
+                "properties": {
+                  "appliesTo": {
+                    "enum": [
+                      "account_default"
+                    ],
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "existingSetupExpiresAt": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "existingSetupId": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "preservesSubscriptionPaymentMethods": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
+                  },
+                  "reusesExistingSetup": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "currency",
+                  "appliesTo",
+                  "preservesSubscriptionPaymentMethods",
+                  "reusesExistingSetup",
+                  "existingSetupId",
+                  "existingSetupExpiresAt"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "previewToken": {
                 "type": "string"
               },
@@ -13611,6 +13794,7 @@
               "promotion",
               "nextCycle",
               "cancellation",
+              "paymentSetup",
               "effectiveMode",
               "effectiveAt",
               "prorationBehavior",
@@ -13747,6 +13931,58 @@
                   "status",
                   "effectiveMode",
                   "effectiveAt"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "expiresAt": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "payment_setup"
+                    ],
+                    "type": "string"
+                  },
+                  "reused": {
+                    "type": "boolean"
+                  },
+                  "sessionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "setupId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "creating",
+                      "awaiting_customer",
+                      "applying_default",
+                      "completed",
+                      "expired",
+                      "needs_attention"
+                    ],
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "setupId",
+                  "status",
+                  "sessionId",
+                  "url",
+                  "expiresAt",
+                  "reused"
                 ],
                 "type": "object"
               },
@@ -13942,6 +14178,58 @@
                   "status",
                   "effectiveMode",
                   "effectiveAt"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "expiresAt": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "payment_setup"
+                    ],
+                    "type": "string"
+                  },
+                  "reused": {
+                    "type": "boolean"
+                  },
+                  "sessionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "setupId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "creating",
+                      "awaiting_customer",
+                      "applying_default",
+                      "completed",
+                      "expired",
+                      "needs_attention"
+                    ],
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "setupId",
+                  "status",
+                  "sessionId",
+                  "url",
+                  "expiresAt",
+                  "reused"
                 ],
                 "type": "object"
               },
@@ -16695,6 +16983,9 @@
               "event.replay": {
                 "$ref": "#/components/schemas/ProviderOperationSupport"
               },
+              "payment_method.setup": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
               "portal.session": {
                 "$ref": "#/components/schemas/ProviderOperationSupport"
               },
@@ -16757,6 +17048,7 @@
               "checkout.plan",
               "purchase.verify",
               "portal.session",
+              "payment_method.setup",
               "webhook.ingest",
               "event.replay",
               "subscription.reconcile",
@@ -16825,6 +17117,7 @@
                     "checkout",
                     "purchases",
                     "portal",
+                    "payment_methods",
                     "events",
                     "subscription_changes",
                     "settlement",
@@ -16891,6 +17184,7 @@
                     "checkout",
                     "purchases",
                     "portal",
+                    "payment_methods",
                     "events",
                     "subscription_changes",
                     "settlement",
@@ -17084,6 +17378,7 @@
           "checkout.plan",
           "purchase.verify",
           "portal.session",
+          "payment_method.setup",
           "webhook.ingest",
           "event.replay",
           "subscription.reconcile",
@@ -21947,6 +22242,50 @@
                           "externalSubscriptionId"
                         ],
                         "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "cancelUrl": {
+                            "format": "uri",
+                            "maxLength": 2000,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "currency": {
+                            "pattern": "^[A-Za-z]{3}$",
+                            "type": "string"
+                          },
+                          "email": {
+                            "maxLength": 320,
+                            "minLength": 1,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "kind": {
+                            "enum": [
+                              "setup_payment"
+                            ],
+                            "type": "string"
+                          },
+                          "successUrl": {
+                            "format": "uri",
+                            "maxLength": 2000,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "currency"
+                        ],
+                        "type": "object"
                       }
                     ]
                   }
@@ -22615,6 +22954,220 @@
           }
         ],
         "summary": "PUT /api/billing/admin/billing-accounts/{billingAccountId}/controls",
+        "tags": [
+          "merchant-billing"
+        ]
+      }
+    },
+    "/api/billing/admin/billing-accounts/{billingAccountId}/payment-setup-sessions/{sessionId}": {
+      "get": {
+        "description": "Requires operations.write in sandbox and operations.write in production.  ",
+        "operationId": "merchantGetV1BillingAccountsByBillingAccountIdPaymentSetupSessionsBySessionId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Organization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Project",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Environment",
+            "required": true,
+            "schema": {
+              "enum": [
+                "sandbox",
+                "production"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Step-Up-Grant",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/getV1BillingAccountsByBillingAccountIdPaymentSetupSessionsBySessionIdResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "GET /api/billing/admin/billing-accounts/{billingAccountId}/payment-setup-sessions/{sessionId}",
         "tags": [
           "merchant-billing"
         ]
@@ -54534,6 +55087,50 @@
                           "externalSubscriptionId"
                         ],
                         "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "cancelUrl": {
+                            "format": "uri",
+                            "maxLength": 2000,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "currency": {
+                            "pattern": "^[A-Za-z]{3}$",
+                            "type": "string"
+                          },
+                          "email": {
+                            "maxLength": 320,
+                            "minLength": 1,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "kind": {
+                            "enum": [
+                              "setup_payment"
+                            ],
+                            "type": "string"
+                          },
+                          "successUrl": {
+                            "format": "uri",
+                            "maxLength": 2000,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "currency"
+                        ],
+                        "type": "object"
                       }
                     ]
                   }
@@ -56444,6 +57041,186 @@
           "controls"
         ],
         "x-quotum-credential-access": "read_only"
+      }
+    },
+    "/v1/billing-accounts/{billingAccountId}/payment-setup-sessions/{sessionId}": {
+      "get": {
+        "description": "Persisted state only. While the setup is open the response carries the reusable hosted link, so it needs full project credentials; a read-only credential is refused.",
+        "operationId": "getV1BillingAccountsByBillingAccountIdPaymentSetupSessionsBySessionId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/getV1BillingAccountsByBillingAccountIdPaymentSetupSessionsBySessionIdResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/billing-accounts/{billingAccountId}/payment-setup-sessions/{sessionId}",
+        "tags": [
+          "customer"
+        ]
       }
     },
     "/v1/billing-accounts/{billingAccountId}/promotion-codes/validate": {
