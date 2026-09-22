@@ -69,6 +69,7 @@ import type {
 import {
 	applyConfirmation,
 	applyDeductions,
+	applyMeterLimitConsumption,
 	balanceFromRows,
 	buildDecision,
 	calculateMeteredOverageCharge,
@@ -77,7 +78,6 @@ import {
 	checkMeterLimit,
 	claimWorkerDelivery,
 	confirmMeterLimitReservation,
-	consumeMeterLimit,
 	controlDeniedDecision,
 	deductedRows,
 	emptyBalance,
@@ -90,6 +90,7 @@ import {
 	insertUsageEvent,
 	lockAllAllocationRows,
 	lockAllocations,
+	lockMeterLimitWindow,
 	lockReservation,
 	lockReservationAllocations,
 	lockReservationById,
@@ -1642,19 +1643,22 @@ async function consumeWithinTransaction(
 	const { feature, entityId, requestedQuantity, filterKey, alerts } = subject;
 	if (subject.meterLimit !== null) {
 		const meterLimit = subject.meterLimit;
-		const preflight = await checkMeterLimit(
-			tx,
+		// The window row is locked before its balance is read, so the meter decision and the spend
+		// delta priced from that balance stay current until the consume commits. The customer
+		// control lock follows the window lock, the same order reserve and confirm use.
+		const meterLimitInput = {
 			projectId,
-			customer.id,
+			customerId: customer.id,
 			entityId,
 			filterKey,
 			meterLimit,
-			requestedQuantity,
-		);
-		if (!preflight.allowed) {
-			return { ...preflight, usageEventId: null, recordedAt: null, deductions: [] };
+			quantity: requestedQuantity,
+		};
+		const locked = await lockMeterLimitWindow(tx, meterLimitInput);
+		if (!locked.decision.allowed) {
+			return { ...locked.decision, usageEventId: null, recordedAt: null, deductions: [] };
 		}
-		const spend = meterLimitSpendDelta(meterLimit, preflight.balance, requestedQuantity);
+		const spend = meterLimitSpendDelta(meterLimit, locked.balance, requestedQuantity);
 		const controls = await consumeControls(tx, {
 			projectId,
 			customerId: customer.id,
@@ -1666,19 +1670,14 @@ async function consumeWithinTransaction(
 		});
 		if (controls.denial !== null) {
 			return {
-				...controlDeniedDecision(preflight, controls.denial),
+				...controlDeniedDecision(locked.decision, controls.denial),
 				usageEventId: null,
 				recordedAt: null,
 				deductions: [],
 			};
 		}
-		const result = await consumeMeterLimit(tx, {
-			projectId,
-			customerId: customer.id,
-			entityId,
-			filterKey,
-			meterLimit,
-			quantity: requestedQuantity,
+		const result = await applyMeterLimitConsumption(tx, locked, {
+			...meterLimitInput,
 			occurredAt: input.occurredAt,
 			metadata: input.metadata,
 			projectionKey: input.projectionKey,

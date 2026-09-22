@@ -460,32 +460,59 @@ export async function checkMeterLimit(
 	};
 }
 
-export async function consumeMeterLimit(
+export interface LockedMeterLimitWindow {
+	window: UsageWindowRow;
+	held: string;
+	balance: MeteringBalance;
+	decision: MeteringDecision;
+}
+
+interface MeterLimitWindowInput {
+	projectId: string;
+	customerId: string;
+	entityId: string | null;
+	filterKey: string | null;
+	meterLimit: MeterLimitDecision;
+	quantity: string;
+}
+
+/**
+ * Locks the current usage window and decides the meter limit from the balance read under that
+ * lock, active holds included. Consume, reserve and confirm all take this row lock before the
+ * customer control lock, so a spend delta priced from `balance` cannot go stale under a
+ * concurrent request on the same window.
+ */
+export async function lockMeterLimitWindow(
 	executor: QueryExecutor,
-	input: {
-		projectId: string;
-		customerId: string;
-		entityId: string | null;
-		filterKey: string | null;
-		meterLimit: MeterLimitDecision;
-		quantity: string;
-		occurredAt: Date | null;
-		metadata: Record<string, unknown>;
-		projectionKey: string;
-	},
-): Promise<ConsumeUsageResult> {
+	input: MeterLimitWindowInput,
+): Promise<LockedMeterLimitWindow> {
 	const window = await upsertUsageWindow(executor, input);
-	const currentBalance = meterLimitBalance(input.meterLimit, window.usage);
+	const held = await readActiveWindowHolds(executor, input.projectId, String(window.id), null);
+	const balance = meterLimitBalance(input.meterLimit, window.usage, held);
 	const decision = await checkMeterLimitFromBalance(
 		executor,
 		input.projectId,
 		input.meterLimit,
 		input.quantity,
-		currentBalance,
+		balance,
 	);
-	if (!decision.allowed) {
-		return { ...decision, usageEventId: null, recordedAt: null, deductions: [] };
+	return { window, held, balance, decision };
+}
+
+/** Applies an allowed, control-cleared consume to the window locked by `lockMeterLimitWindow`. */
+export async function applyMeterLimitConsumption(
+	executor: QueryExecutor,
+	locked: LockedMeterLimitWindow,
+	input: MeterLimitWindowInput & {
+		occurredAt: Date | null;
+		metadata: Record<string, unknown>;
+		projectionKey: string;
+	},
+): Promise<ConsumeUsageResult> {
+	if (!locked.decision.allowed) {
+		return { ...locked.decision, usageEventId: null, recordedAt: null, deductions: [] };
 	}
+	const { window } = locked;
 	const updated = await executeOne<{ usage: unknown }>(
 		executor,
 		drizzleSql`
@@ -534,7 +561,7 @@ export async function consumeMeterLimit(
 	});
 	await enqueueMeteringProjection(executor, input.projectId, input.customerId, input.projectionKey);
 	return {
-		...decision,
+		...locked.decision,
 		balance: meterLimitBalance(input.meterLimit, updated.usage),
 		usageEventId: event.id,
 		recordedAt: toIso(event.recorded_at),
@@ -555,16 +582,7 @@ export async function reserveMeterLimit(
 		projectionKey: string;
 	},
 ): Promise<ReservationResult> {
-	const window = await upsertUsageWindow(executor, input);
-	const held = await readActiveWindowHolds(executor, input.projectId, String(window.id), null);
-	const balance = meterLimitBalance(input.meterLimit, window.usage, held);
-	const decision = await checkMeterLimitFromBalance(
-		executor,
-		input.projectId,
-		input.meterLimit,
-		input.quantity,
-		balance,
-	);
+	const { window, held, balance, decision } = await lockMeterLimitWindow(executor, input);
 	if (!decision.allowed) {
 		return {
 			...decision,
