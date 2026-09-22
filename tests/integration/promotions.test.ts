@@ -1422,6 +1422,49 @@ localDescribe("promotion subscription changes", () => {
 		});
 	});
 
+	it("releases the reserved use when the change is cancelled with its subscription", async () => {
+		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+		const headers = { ...fixture.authHeaders("voysee"), "content-type": "application/json" };
+		const preview = (
+			await (
+				await testRequest(
+					fixture.app,
+					"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+					{ method: "POST", headers, body: JSON.stringify({ intent: intent("UPGRADE") }) },
+				)
+			).json()
+		).data;
+		const executed = await testRequest(
+			fixture.app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "upgrade-cancelled" },
+				body: JSON.stringify({ previewToken: preview.previewToken }),
+			},
+		);
+		const changeId = (await executed.json()).data.changeId;
+		await context.repository.claimSubscriptionChanges("change-worker", 10);
+		// A cancellation is terminal on the first attempt: no later run could apply the change.
+		await context.repository.markSubscriptionChangeCancelled(
+			project.projectInstanceId,
+			changeId,
+			"The subscription is expired and can no longer be changed",
+			"change-worker",
+		);
+
+		const [released] = await context.sql<Array<{ status: string; reserved_count: number }>>`
+			SELECT r.status, c.reserved_count
+			FROM promotion_redemptions r
+			JOIN promotion_codes c ON c.id = r.promotion_code_id
+		`;
+		expect(released).toEqual({ status: "released", reserved_count: 0 });
+		const [change] = await context.sql<Array<{ status: string; attempts: number }>>`
+			SELECT status, attempts FROM subscription_changes WHERE id = ${changeId}
+		`;
+		expect(change).toEqual({ status: "cancelled", attempts: 1 });
+	});
+
 	it("releases the reserved use when the change fails for good", async () => {
 		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
 		const headers = { ...fixture.authHeaders("voysee"), "content-type": "application/json" };

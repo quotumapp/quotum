@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type Stripe from "stripe";
 import type { AutoTopupJob } from "../../../src/billing/auto-topup";
+import type { UsageInvoiceJob } from "../../../src/billing/recurring";
 import type {
 	ProviderSubscriptionReconciliationRow,
 	StoreEventReplayJobRow,
@@ -473,6 +474,34 @@ function reconciliationSubscription(
 	};
 }
 
+function endedSubscriptionUsageJob(overrides: Partial<UsageInvoiceJob> = {}): UsageInvoiceJob {
+	return {
+		jobKind: "period",
+		jobId: "period-1",
+		periodId: "period-1",
+		adjustmentId: null,
+		projectInstanceId: "00000000-0000-4000-8000-000000000003",
+		projectKey: "voysee",
+		provider: "stripe",
+		providerAccountId: null,
+		billingAccountId: "user_1",
+		externalCustomerId: "cus_123",
+		externalSubscriptionId: "sub_123",
+		subscriptionStatus: "expired",
+		externalProductId: "prod_usage",
+		featureKey: "api_calls",
+		periodStartAt: "2026-01-01T00:00:00.000Z",
+		periodEndAt: "2026-02-01T00:00:00.000Z",
+		usageQuantity: "1250",
+		adjustmentQuantity: null,
+		includedQuantity: "1000",
+		billableQuantity: "250",
+		amountMinor: 125,
+		currency: "usd",
+		...overrides,
+	};
+}
+
 function autoTopupJob(): AutoTopupJob {
 	return {
 		jobId: "topup-job-1",
@@ -693,6 +722,7 @@ describe("StripeBillingService", () => {
 				billingAccountId: "user_1",
 				externalCustomerId: "cus_123",
 				externalSubscriptionId: "sub_123",
+				subscriptionStatus: "active",
 				externalProductId: "prod_usage",
 				featureKey: "api_calls",
 				periodStartAt: "2026-01-01T00:00:00.000Z",
@@ -739,6 +769,7 @@ describe("StripeBillingService", () => {
 				billingAccountId: "user_1",
 				externalCustomerId: "cus_123",
 				externalSubscriptionId: "sub_123",
+				subscriptionStatus: "active",
 				externalProductId: "prod_usage",
 				featureKey: "api_calls",
 				periodStartAt: "2026-01-01T00:00:00.000Z",
@@ -759,6 +790,81 @@ describe("StripeBillingService", () => {
 		expect(calls.at(-2)).toMatchObject({
 			params: { lines: [{ amount: -125, quantity: 1 }] },
 		});
+	});
+
+	// capability: settlement.collect_finalized_charge
+	it("bills a late usage invoice to the customer when the subscription has ended", async () => {
+		const { calls, service } = serviceFixture();
+		expect(await service.createUsageInvoice(endedSubscriptionUsageJob())).toBe("in_usage");
+		expect(calls.slice(-5).map((call) => (call as { method: string }).method)).toEqual([
+			"retrieveDefaultPaymentMethod",
+			"createInvoice",
+			"addInvoiceLines",
+			"finalizeInvoice",
+			"payInvoice",
+		]);
+		const created = calls.at(-4) as {
+			params: Stripe.InvoiceCreateParams;
+			idempotencyKey: string;
+		};
+		expect(created.params).toMatchObject({
+			customer: "cus_123",
+			currency: "usd",
+			collection_method: "charge_automatically",
+			default_payment_method: "pm_default",
+			metadata: { usageInvoicePeriodId: "period-1", featureKey: "api_calls" },
+		});
+		expect(created.params.subscription).toBeUndefined();
+		expect(created.idempotencyKey).toBe("billing:usage-invoice:period:period-1:create");
+	});
+
+	// capability: settlement.collect_finalized_charge
+	it("keeps the subscription on a usage invoice while the subscription is still live", async () => {
+		const { calls, service } = serviceFixture();
+		expect(
+			await service.createUsageInvoice(
+				endedSubscriptionUsageJob({ subscriptionStatus: "billing_retry" }),
+			),
+		).toBe("in_usage");
+		expect(calls.map((call) => (call as { method: string }).method)).not.toContain(
+			"retrieveDefaultPaymentMethod",
+		);
+		expect(calls.at(-4)).toMatchObject({
+			params: { subscription: "sub_123" },
+		});
+	});
+
+	// capability: adjustment.issue
+	it("credits a late correction on an ended subscription without a payment method", async () => {
+		const { calls, service } = serviceFixture({ defaultPaymentMethod: null });
+		expect(
+			await service.createUsageInvoice(
+				endedSubscriptionUsageJob({
+					jobKind: "adjustment",
+					jobId: "42",
+					adjustmentId: "42",
+					adjustmentQuantity: "-300",
+					amountMinor: -125,
+				}),
+			),
+		).toBe("in_usage");
+		// A credit is never collected, so no method is looked up and none is required.
+		expect(calls.map((call) => (call as { method: string }).method)).not.toContain(
+			"retrieveDefaultPaymentMethod",
+		);
+		expect(calls.map((call) => (call as { method: string }).method)).not.toContain("payInvoice");
+		const created = calls.at(-3) as { params: Stripe.InvoiceCreateParams };
+		expect(created.params.subscription).toBeUndefined();
+		expect(created.params.default_payment_method).toBeUndefined();
+	});
+
+	// capability: settlement.collect_finalized_charge
+	it("refuses a late usage invoice when the customer has no saved payment method", async () => {
+		const { calls, service } = serviceFixture({ defaultPaymentMethod: null });
+		await expect(service.createUsageInvoice(endedSubscriptionUsageJob())).rejects.toThrow(
+			"A saved default payment method is required to invoice usage after subscription sub_123 ended",
+		);
+		expect(calls.map((call) => (call as { method: string }).method)).not.toContain("createInvoice");
 	});
 
 	// capability: topup.automatic

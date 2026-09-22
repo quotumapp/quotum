@@ -18,7 +18,7 @@ import type {
 	SubscriptionChangePreview,
 	UsageInvoiceJob,
 } from "../../billing/recurring";
-import type { BillingChannel, BillingProvider } from "../../billing/types";
+import type { BillingChannel, BillingProvider, SubscriptionStatus } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import {
@@ -79,6 +79,7 @@ interface ChangeRow {
 	provider: BillingProvider;
 	provider_account_id: string | null;
 	subscription_channel: BillingChannel;
+	subscription_status: SubscriptionStatus;
 	status: "pending" | "processing" | "applied" | "failed" | "cancelled";
 	change_kind: "upgrade" | "downgrade" | "quantity";
 	effective_mode: "immediate" | "period_end";
@@ -428,6 +429,49 @@ export class RecurringPricingRepository extends RepositoryModule {
 					`,
 				);
 			}
+		});
+	}
+
+	/**
+	 * Ends a claimed change that can no longer be applied, because its subscription is gone or a
+	 * cancellation superseded it. Unlike a failure this is terminal on the first attempt: the
+	 * redemption is released and a waiting catalog migration job fails exactly as it would after
+	 * the last retry, because no later attempt can succeed.
+	 */
+	async markSubscriptionChangeCancelled(
+		projectInstanceId: string,
+		changeId: string,
+		reason: string,
+		workerId: string,
+	): Promise<void> {
+		await this.transaction(async (tx) => {
+			const row = await executeOne(
+				tx,
+				drizzleSql`
+					UPDATE subscription_changes
+					SET status = 'cancelled', last_error = ${reason},
+						locked_at = NULL, locked_by = NULL, updated_at = now()
+					WHERE project_id = ${projectInstanceId} AND id = ${changeId}
+						AND status = 'processing' AND locked_by = ${workerId}
+					RETURNING id
+				`,
+			);
+			if (row === null) throw new Error(`Subscription change ${changeId} was not owned by worker`);
+			const redemption = await changeRedemption(tx, projectInstanceId, changeId);
+			if (redemption !== null) {
+				await releasePromotionRedemptionInTx(tx, projectInstanceId, redemption.id);
+			}
+			await executeRows(
+				tx,
+				drizzleSql`
+					UPDATE catalog_migration_jobs
+					SET status = 'failed', last_error = ${reason}, locked_at = NULL,
+						locked_by = NULL, updated_at = now()
+					WHERE project_id = ${projectInstanceId}
+						AND subscription_change_id = ${changeId}
+						AND status = 'waiting_provider'
+				`,
+			);
 		});
 	}
 
@@ -1263,6 +1307,7 @@ async function buildChangeOperation(
 			SELECT
 				changes.id, changes.project_id, project.key AS project_key, changes.provider,
 				changes.provider_account_id, subscription.channel AS subscription_channel,
+				subscription.status AS subscription_status,
 				changes.status, changes.change_kind,
 				changes.effective_mode, changes.effective_at, changes.proration_behavior,
 				subscription.external_subscription_id, changes.to_plan_version_id,
@@ -1366,6 +1411,7 @@ async function buildChangeOperation(
 		provider: change.provider,
 		providerAccountId: change.provider_account_id,
 		status: change.status,
+		subscriptionStatus: change.subscription_status,
 		changeKind: change.change_kind,
 		effectiveMode: change.effective_mode,
 		effectiveAt: new Date(change.effective_at).toISOString(),
@@ -1399,6 +1445,7 @@ async function usageInvoicePeriodJob(
 		billing_account_id: string;
 		external_customer_id: string;
 		external_subscription_id: string;
+		subscription_status: SubscriptionStatus;
 		external_product_id: string;
 		feature_key: string;
 		period_start_at: Date | string;
@@ -1415,7 +1462,8 @@ async function usageInvoicePeriodJob(
 				period.id AS period_id, period.project_id, project.key AS project_key,
 				period.provider, period.provider_account_id,
 				customer.billing_account_id, provider_customer.external_customer_id,
-				subscription.external_subscription_id, store.external_product_id,
+				subscription.external_subscription_id, subscription.status AS subscription_status,
+				store.external_product_id,
 				feature.key AS feature_key, period.period_start_at, period.period_end_at,
 				period.usage_quantity, period.included_quantity, period.billable_quantity,
 				period.amount_minor, period.currency
@@ -1454,6 +1502,7 @@ async function usageInvoicePeriodJob(
 		billingAccountId: row.billing_account_id,
 		externalCustomerId: row.external_customer_id,
 		externalSubscriptionId: row.external_subscription_id,
+		subscriptionStatus: row.subscription_status,
 		externalProductId: row.external_product_id,
 		featureKey: row.feature_key,
 		periodStartAt: new Date(row.period_start_at).toISOString(),
@@ -1565,6 +1614,7 @@ async function usageInvoiceAdjustmentJob(
 		billing_account_id: string;
 		external_customer_id: string;
 		external_subscription_id: string;
+		subscription_status: SubscriptionStatus;
 		external_product_id: string;
 		feature_key: string;
 		period_start_at: Date | string;
@@ -1582,7 +1632,8 @@ async function usageInvoiceAdjustmentJob(
 				adjustment.id AS job_id, period.id AS period_id, adjustment.project_id,
 				project.key AS project_key, period.provider, period.provider_account_id,
 				customer.billing_account_id, provider_customer.external_customer_id,
-				subscription.external_subscription_id, store.external_product_id,
+				subscription.external_subscription_id, subscription.status AS subscription_status,
+				store.external_product_id,
 				feature.key AS feature_key, period.period_start_at, period.period_end_at,
 				period.usage_quantity, adjustment.quantity AS adjustment_quantity,
 				period.included_quantity, period.billable_quantity,
@@ -1628,6 +1679,7 @@ async function usageInvoiceAdjustmentJob(
 		billingAccountId: row.billing_account_id,
 		externalCustomerId: row.external_customer_id,
 		externalSubscriptionId: row.external_subscription_id,
+		subscriptionStatus: row.subscription_status,
 		externalProductId: row.external_product_id,
 		featureKey: row.feature_key,
 		periodStartAt: new Date(row.period_start_at).toISOString(),

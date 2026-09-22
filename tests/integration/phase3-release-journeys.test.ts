@@ -397,6 +397,69 @@ localDescribe("Phase 3 release journeys", () => {
 		expect(adjustment).toEqual({ amount: "-125", status: "invoiced" });
 	});
 
+	// capability: settlement.collect_finalized_charge
+	it("bills a closed overage period to the customer after its subscription ended", async () => {
+		await seedTieredUsageSubscription(context.sql, "ended-account", "graduated");
+		const consumed = await context.repository.consumeUsage(project, {
+			billingAccountId: "ended-account",
+			featureKey: "api_calls_graduated",
+			quantity: "275.5",
+			idempotencyKey: "ended:usage",
+		});
+		expect(consumed).toMatchObject({ allowed: true });
+		await closeUsageWindows(context.sql);
+		// The subscription ends before its last metered window is settled, as an immediate
+		// cancellation through Quotum or the Stripe portal leaves it.
+		await context.sql`
+			UPDATE subscriptions SET status = 'expired'
+			WHERE project_id = ${project.projectInstanceId}::uuid
+				AND external_subscription_id = 'sub_graduated'
+		`;
+		const client = new FakeStripeBillingClient(stripeConfig());
+		const config = stripeConfig();
+		const worker = new RecurringBillingWorker({
+			projectContextResolver: context.projectContextResolver,
+			workerId: "ended-subscription-settlement",
+			repository: context.repository,
+			adapterForJob: () =>
+				wrapStripeService(
+					new StripeBillingService({
+						config: {
+							projectKey: "voysee",
+							checkoutSuccessUrl: config.checkoutSuccessUrl,
+							checkoutCancelUrl: config.checkoutCancelUrl,
+							portalReturnUrl: config.portalReturnUrl,
+						},
+						client,
+						repository: context.repository.forProject(project),
+					}),
+				),
+			logger: {
+				error(_message, error) {
+					throw error;
+				},
+			},
+		});
+
+		expect(await worker.runOnce()).toMatchObject({
+			materializedUsagePeriods: 1,
+			usageInvoicesCreated: 1,
+			failed: 0,
+		});
+		expect(client.invoiceCreateParams).toHaveLength(1);
+		const [invoiced] = client.invoiceCreateParams;
+		expect(invoiced).toMatchObject({
+			customer: "cus_graduated",
+			collection_method: "charge_automatically",
+			default_payment_method: "pm_fake_default",
+		});
+		expect(invoiced?.subscription).toBeUndefined();
+		const [period] = await context.sql<Array<{ status: string; amount: string }>>`
+			SELECT status, amount_minor::text AS amount FROM usage_invoice_periods
+		`;
+		expect(period).toEqual({ status: "invoiced", amount: "406" });
+	});
+
 	it("uses operator HTTP contracts and migrations and customer HTTP license assignments", async () => {
 		await seedPhase3CatalogMigration(context.sql);
 		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });

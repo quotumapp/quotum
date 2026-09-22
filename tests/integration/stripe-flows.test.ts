@@ -450,6 +450,115 @@ localDescribe("Stripe route flows integration", () => {
 		});
 	});
 
+	// capability: subscription.change.period_end
+	it("cancels a due change whose subscription ended before the worker reached it", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		// Rank the published target version below the subscribed one, so the change is a downgrade.
+		await context.sql`
+			UPDATE plan_versions version
+			SET tier_rank = 5
+			FROM plans plan, projects project
+			WHERE version.project_id = plan.project_id AND version.plan_id = plan.id
+				AND plan.project_id = project.id AND project.key = 'voysee'
+				AND plan.key = 'migration-plan' AND version.version = 2
+		`;
+		const project = integrationProjectContext();
+		const { app, stripe, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const periodEnd = new Date(Math.floor(Date.now() / 1000) * 1000 + 29 * 24 * 60 * 60 * 1000);
+		await context.sql`
+			UPDATE subscriptions SET current_period_end = ${periodEnd.toISOString()}::timestamptz
+			WHERE project_id = ${project.projectInstanceId}::uuid
+				AND external_subscription_id = 'sub_migrate_stripe'
+		`;
+		const requested = await testRequest(
+			app,
+			"/v1/billing-accounts/migration-stripe/subscriptions/sub_migrate_stripe/changes",
+			{
+				method: "POST",
+				headers: {
+					...authHeaders("voysee"),
+					"content-type": "application/json",
+					"idempotency-key": "period-end-downgrade:ended",
+				},
+				body: JSON.stringify({
+					targetPlanKey: "migration-plan",
+					quantities: { licensed_seats: 7 },
+				}),
+			},
+		);
+		expect(requested.status).toBe(202);
+		const change = (await requested.json()).data;
+		expect(change).toMatchObject({ status: "pending", effectiveMode: "period_end" });
+
+		// The period ends, and the subscription ends with it: an immediate cancellation here or in
+		// the Stripe portal leaves the queued change with nothing left to apply.
+		await context.sql`
+			UPDATE subscription_changes SET effective_at = now() - interval '1 second'
+			WHERE id = ${change.changeId}::uuid
+		`;
+		await context.sql`
+			UPDATE subscriptions SET status = 'expired'
+			WHERE project_id = ${project.projectInstanceId}::uuid
+				AND external_subscription_id = 'sub_migrate_stripe'
+		`;
+
+		const worker = new RecurringBillingWorker({
+			projectContextResolver: context.projectContextResolver,
+			workerId: "ended-subscription-worker",
+			repository: context.repository,
+			adapterForJob: () =>
+				wrapStripeService(
+					new StripeBillingService({
+						config: {
+							projectKey: "voysee",
+							checkoutSuccessUrl:
+								"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
+							checkoutCancelUrl: "https://app.integration.test/billing",
+							portalReturnUrl: "https://app.integration.test/account/billing",
+						},
+						client: stripe.client,
+						repository: context.repository.forProject(project),
+					}),
+				),
+			logger: {
+				error(_message, error) {
+					throw error;
+				},
+			},
+		});
+
+		expect(await worker.runOnce()).toMatchObject({
+			subscriptionChangesApplied: 0,
+			subscriptionChangesCancelled: 1,
+			failed: 0,
+		});
+		expect(stripe.subscriptionUpdates).toEqual([]);
+		const [row] = await context.sql<
+			Array<{
+				status: string;
+				attempts: number;
+				last_error: string | null;
+				locked_by: string | null;
+			}>
+		>`
+			SELECT status, attempts, last_error, locked_by
+			FROM subscription_changes WHERE id = ${change.changeId}::uuid
+		`;
+		expect(row).toEqual({
+			status: "cancelled",
+			attempts: 1,
+			last_error: "The subscription is expired and can no longer be changed",
+			locked_by: null,
+		});
+
+		// A cancelled change is terminal: the next poll leaves it alone.
+		expect(await worker.runOnce()).toMatchObject({ subscriptionChangesCancelled: 0, failed: 0 });
+	});
+
 	it("rejects expired, drifted, mismatched, and cross-account commercial previews", async () => {
 		const { app, stripe, authHeaders } = createIntegrationApp({
 			env: context.env,

@@ -1,6 +1,7 @@
 import { expect, it } from "bun:test";
 import type { SubscriptionChangeOperation, UsageInvoiceJob } from "../../src/billing/recurring";
 import type { ClaimedSubscriptionChange, ClaimedUsageInvoiceJob } from "../../src/db/repository";
+import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import type { OperationTiming } from "../../src/providers/contract";
 import {
 	RecurringBillingWorker,
@@ -23,6 +24,7 @@ function changeFixture(overrides: Partial<SubscriptionChangeOperation> = {}) {
 		provider: "stripe",
 		providerAccountId: null,
 		status: "processing",
+		subscriptionStatus: "active",
 		changeKind: "upgrade",
 		effectiveMode: "immediate",
 		effectiveAt: new Date().toISOString(),
@@ -49,6 +51,7 @@ function usageFixture(overrides: Partial<UsageInvoiceJob> = {}) {
 		billingAccountId: "account-1",
 		externalCustomerId: "cus_1",
 		externalSubscriptionId: "sub_1",
+		subscriptionStatus: "active",
 		externalProductId: "prod_usage",
 		featureKey: "api_calls",
 		periodStartAt: "2026-01-01T00:00:00.000Z",
@@ -107,6 +110,9 @@ function recordingRepository({
 		},
 		async markSubscriptionChangeFailed(projectInstanceId, changeId, error, workerId) {
 			calls.push({ kind: "change_failed", projectInstanceId, changeId, error, workerId });
+		},
+		async markSubscriptionChangeCancelled(projectInstanceId, changeId, reason, workerId) {
+			calls.push({ kind: "change_cancelled", projectInstanceId, changeId, reason, workerId });
 		},
 		async materializeAndClaimUsageInvoicePeriods() {
 			return { materialized: usage.length, jobs: usage.map(claimedUsageJob) };
@@ -178,6 +184,7 @@ it("applies due changes and invoices closed overage periods", async () => {
 				expect(workerId).toBe("worker-1");
 			},
 			async markSubscriptionChangeFailed() {},
+			async markSubscriptionChangeCancelled() {},
 			async materializeAndClaimUsageInvoicePeriods() {
 				return { materialized: 1, jobs: [claimedUsageJob(usage)] };
 			},
@@ -202,6 +209,7 @@ it("applies due changes and invoices closed overage periods", async () => {
 	expect(await worker.runOnce()).toEqual({
 		materializedUsagePeriods: 1,
 		subscriptionChangesApplied: 1,
+		subscriptionChangesCancelled: 0,
 		usageInvoicesCreated: 1,
 		usageAdjustmentsCreated: 0,
 		failed: 0,
@@ -234,6 +242,7 @@ it("fails claimed recurring-billing work when its project id and key disagree", 
 				expect(workerId).toBe("worker-1");
 				failures.push(error);
 			},
+			async markSubscriptionChangeCancelled() {},
 			async materializeAndClaimUsageInvoicePeriods() {
 				return { materialized: 0, jobs: [] };
 			},
@@ -253,6 +262,7 @@ it("fails claimed recurring-billing work when its project id and key disagree", 
 	expect(await worker.runOnce()).toEqual({
 		materializedUsagePeriods: 0,
 		subscriptionChangesApplied: 0,
+		subscriptionChangesCancelled: 0,
 		usageInvoicesCreated: 0,
 		usageAdjustmentsCreated: 0,
 		failed: 1,
@@ -297,6 +307,7 @@ it("selects each job's adapter by the provider the job stores", async () => {
 
 	expect(await worker.runOnce()).toMatchObject({
 		subscriptionChangesApplied: 1,
+		subscriptionChangesCancelled: 0,
 		usageInvoicesCreated: 1,
 		failed: 0,
 	});
@@ -349,6 +360,7 @@ it("never finalizes an uncertain provider write and fails it for reconciliation"
 	expect(await worker.runOnce()).toEqual({
 		materializedUsagePeriods: 1,
 		subscriptionChangesApplied: 0,
+		subscriptionChangesCancelled: 0,
 		usageInvoicesCreated: 0,
 		usageAdjustmentsCreated: 0,
 		failed: 2,
@@ -446,6 +458,7 @@ it("logs a failing failure marker and still finishes the batch", async () => {
 	expect(await worker.runOnce()).toEqual({
 		materializedUsagePeriods: 2,
 		subscriptionChangesApplied: 1,
+		subscriptionChangesCancelled: 0,
 		usageInvoicesCreated: 1,
 		usageAdjustmentsCreated: 0,
 		failed: 2,
@@ -546,6 +559,7 @@ it("fails only the claimed job that cannot be loaded", async () => {
 	expect(await worker.runOnce()).toEqual({
 		materializedUsagePeriods: 2,
 		subscriptionChangesApplied: 1,
+		subscriptionChangesCancelled: 0,
 		usageInvoicesCreated: 1,
 		usageAdjustmentsCreated: 0,
 		failed: 2,
@@ -618,6 +632,7 @@ it("skips a claimed job whose lease was lost without marking it", async () => {
 	expect(await worker.runOnce()).toEqual({
 		materializedUsagePeriods: 0,
 		subscriptionChangesApplied: 0,
+		subscriptionChangesCancelled: 0,
 		usageInvoicesCreated: 0,
 		usageAdjustmentsCreated: 0,
 		failed: 0,
@@ -669,6 +684,7 @@ it("still invoices usage when the subscription change claim throws", async () =>
 	expect(await worker.runOnce()).toEqual({
 		materializedUsagePeriods: 1,
 		subscriptionChangesApplied: 0,
+		subscriptionChangesCancelled: 0,
 		usageInvoicesCreated: 1,
 		usageAdjustmentsCreated: 0,
 		failed: 1,
@@ -705,6 +721,7 @@ it("still applies changes when the usage invoice claim throws", async () => {
 	expect(await worker.runOnce()).toEqual({
 		materializedUsagePeriods: 0,
 		subscriptionChangesApplied: 1,
+		subscriptionChangesCancelled: 0,
 		usageInvoicesCreated: 0,
 		usageAdjustmentsCreated: 0,
 		failed: 1,
@@ -746,6 +763,7 @@ it("reports staging and materialization failures without abandoning the poll", a
 	expect(await worker.runOnce()).toEqual({
 		materializedUsagePeriods: 1,
 		subscriptionChangesApplied: 0,
+		subscriptionChangesCancelled: 0,
 		usageInvoicesCreated: 0,
 		usageAdjustmentsCreated: 0,
 		failed: 0,
@@ -822,4 +840,150 @@ it("marks every failing job even when the logger throws", async () => {
 
 	expect(await worker.runOnce()).toMatchObject({ failed: 3 });
 	expect(calls.map(({ kind }) => kind)).toEqual(["change_failed", "change_failed", "usage_failed"]);
+});
+
+// capability: subscription.change.apply
+it("ends a due change whose subscription has already expired without calling the provider", async () => {
+	let applyCalls = 0;
+	const { repository, calls } = recordingRepository({
+		changes: [changeFixture({ subscriptionStatus: "expired" })],
+	});
+	const metrics = createInMemoryBillingMetrics();
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository,
+		metrics,
+		adapterForJob: (): RecurringBillingWorkerAdapter => ({
+			changes: {
+				async apply() {
+					applyCalls += 1;
+					return { outcome: "committed", providerRequestId: "sub_1", timing };
+				},
+			},
+		}),
+		logger: { error() {} },
+	});
+
+	expect(await worker.runOnce()).toMatchObject({
+		subscriptionChangesApplied: 0,
+		subscriptionChangesCancelled: 1,
+		failed: 0,
+	});
+	expect(applyCalls).toBe(0);
+	expect(calls).toEqual([
+		{
+			kind: "change_cancelled",
+			projectInstanceId: projectInstanceContext().projectInstanceId,
+			changeId: "change-1",
+			reason: "The subscription is expired and can no longer be changed",
+			workerId: "worker-1",
+		},
+	]);
+	expect(metrics.renderPrometheus()).toContain(
+		'billing_worker_jobs_total{operation="subscription_change",result="cancelled",worker="recurring_billing"} 1',
+	);
+});
+
+// capability: subscription.change.apply
+it("ends a change the provider refuses because the subscription is gone, and retries other errors", async () => {
+	const { repository, calls } = recordingRepository({
+		changes: [
+			changeFixture({ changeId: "gone" }),
+			changeFixture({ changeId: "already-cancelled" }),
+			changeFixture({ changeId: "transient" }),
+		],
+	});
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository,
+		adapterForJob: (): RecurringBillingWorkerAdapter => ({
+			changes: {
+				async apply(operation) {
+					if (operation.changeId === "gone") {
+						throw new Error("No such subscription: 'sub_1'");
+					}
+					if (operation.changeId === "already-cancelled") {
+						throw new Error("You cannot update a canceled subscription");
+					}
+					throw new Error("Stripe is temporarily unavailable");
+				},
+			},
+		}),
+		logger: { error() {}, warn() {} },
+	});
+
+	expect(await worker.runOnce()).toMatchObject({
+		subscriptionChangesApplied: 0,
+		subscriptionChangesCancelled: 2,
+		failed: 1,
+	});
+	expect(calls.map(({ kind, changeId }) => ({ kind, changeId }))).toEqual([
+		{ kind: "change_cancelled", changeId: "gone" },
+		{ kind: "change_cancelled", changeId: "already-cancelled" },
+		{ kind: "change_failed", changeId: "transient" },
+	]);
+});
+
+// capability: subscription.change.apply
+it("counts a failure, not a cancellation, when the terminal mark cannot be written", async () => {
+	const { repository } = recordingRepository({
+		changes: [changeFixture({ subscriptionStatus: "expired" })],
+	});
+	const metrics = createInMemoryBillingMetrics();
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository: {
+			...repository,
+			async markSubscriptionChangeCancelled() {
+				throw new Error("Subscription change change-1 was not owned by worker");
+			},
+		},
+		metrics,
+		adapterForJob: (): RecurringBillingWorkerAdapter => ({
+			changes: {
+				async apply() {
+					return { outcome: "committed", providerRequestId: "sub_1", timing };
+				},
+			},
+		}),
+		logger: { error() {} },
+	});
+
+	// The row stays `processing` for its lease to expire, so the next claim decides its fate.
+	expect(await worker.runOnce()).toMatchObject({
+		subscriptionChangesApplied: 0,
+		subscriptionChangesCancelled: 0,
+		failed: 1,
+	});
+	expect(metrics.renderPrometheus()).toContain(
+		'billing_worker_jobs_total{operation="subscription_change",result="failed",worker="recurring_billing"} 1',
+	);
+	expect(metrics.renderPrometheus()).not.toContain('result="cancelled"');
+});
+
+it("keeps an uncertain provider write retryable even when it mentions a cancelled subscription", async () => {
+	const { repository, calls } = recordingRepository({ changes: [changeFixture()] });
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository,
+		adapterForJob: (): RecurringBillingWorkerAdapter => ({
+			changes: {
+				async apply() {
+					return {
+						outcome: "uncertain",
+						correlation: { requestKey: "no such subscription" },
+						timing,
+					};
+				},
+			},
+		}),
+		logger: { error() {} },
+	});
+
+	expect(await worker.runOnce()).toMatchObject({ subscriptionChangesCancelled: 0, failed: 1 });
+	expect(calls.map(({ kind }) => kind)).toEqual(["change_failed"]);
 });

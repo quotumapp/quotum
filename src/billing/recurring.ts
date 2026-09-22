@@ -1,5 +1,5 @@
 import type { StripeProrationBehavior } from "./pricing";
-import type { BillingProvider } from "./types";
+import type { BillingProvider, SubscriptionStatus } from "./types";
 
 export interface SubscriptionChangeInput {
 	billingAccountId: string;
@@ -45,6 +45,8 @@ export interface SubscriptionChangeOperation {
 	provider: BillingProvider;
 	providerAccountId: string | null;
 	status: "pending" | "processing" | "applied" | "failed" | "cancelled";
+	/** Local status of the subscription the change targets; an ended one can no longer be changed. */
+	subscriptionStatus: SubscriptionStatus;
 	changeKind: "upgrade" | "downgrade" | "quantity";
 	effectiveMode: "immediate" | "period_end";
 	effectiveAt: string;
@@ -74,6 +76,8 @@ export interface UsageInvoiceJob {
 	billingAccountId: string;
 	externalCustomerId: string;
 	externalSubscriptionId: string;
+	/** Local status of the subscription the window belongs to, read when the job was claimed. */
+	subscriptionStatus: SubscriptionStatus;
 	externalProductId: string;
 	featureKey: string;
 	periodStartAt: string;
@@ -89,6 +93,8 @@ export interface UsageInvoiceJob {
 export interface RecurringBillingRunResult {
 	materializedUsagePeriods: number;
 	subscriptionChangesApplied: number;
+	/** Changes ended without being applied because their subscription can no longer change. */
+	subscriptionChangesCancelled: number;
 	usageInvoicesCreated: number;
 	usageAdjustmentsCreated: number;
 	failed: number;

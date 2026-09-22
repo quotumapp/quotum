@@ -94,6 +94,7 @@ const change: SubscriptionChangeOperation = {
 	provider: "stripe",
 	providerAccountId: null,
 	status: "processing",
+	subscriptionStatus: "active",
 	changeKind: "upgrade",
 	effectiveMode: "immediate",
 	effectiveAt: "2026-01-01T00:00:00.000Z",
