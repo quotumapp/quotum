@@ -89,11 +89,61 @@ Usage reads default to the last 30 days, reject ranges over 90 days, and page wi
 (default 50, maximum 200). Series support `hour` or `day` buckets. These reads and `billing-summary`
 never authorize work; product projections are display caches and cannot replace the metering calls.
 
-Commercial preview accepts one complete Stripe intent (`checkout_plan`, `checkout_product`, or
-`subscription_change`) and returns exact or provider-calculated amounts valid for 15 minutes.
-Execution accepts only the `previewToken` with an `Idempotency-Key` and rejects expired previews,
-catalog or customer drift, or a changed target. A Checkout result is HTTP 200; a durable
-subscription-change result is HTTP 202.
+Commercial preview accepts one complete Stripe intent (`checkout_plan`, `checkout_product`,
+`subscription_change`, `cancel`, or `uncancel`) and returns exact or provider-calculated amounts
+valid for 15 minutes. Execution accepts only the `previewToken` with an `Idempotency-Key` and
+rejects expired previews, catalog or customer drift, or a changed target. A durable
+subscription-change result is HTTP 202; every other result, including a cancellation, is HTTP 200.
+
+### Cancelling and uncancelling a subscription
+
+`cancel` names `externalSubscriptionId` and an `effectiveMode`; `uncancel` names the subscription
+alone:
+
+```json
+{ "intent": { "kind": "cancel", "externalSubscriptionId": "sub_123", "effectiveMode": "immediate" } }
+{ "intent": { "kind": "cancel", "externalSubscriptionId": "sub_123", "effectiveMode": "period_end" } }
+{ "intent": { "kind": "uncancel", "externalSubscriptionId": "sub_123" } }
+```
+
+The preview carries no line items and a zero total, because a cancellation moves no money, and adds
+a `cancellation` object: the `action` it would perform (`cancel`, `uncancel`, or `none`), when
+access ends (`accessEndsAt`), the `cancelAtPeriodEnd` state it would leave, whether granted
+allocations are kept, when open postpaid usage settles, the queued change it would supersede, and
+the account's active add-on subscriptions. Asking for a state that already holds previews as
+`none`: a `period_end` cancel on a subscription that already ends at its period end, or an
+`uncancel` with nothing pending. Executing such a preview calls no provider and returns
+`action: "none"`.
+
+Execution returns
+`{ "kind": "subscription_cancellation", "action", "externalSubscriptionId", "effectiveMode",
+"effectiveAt", "cancelAtPeriodEnd", "supersededChangeId" }`.
+
+What a cancellation does, on Stripe and through the customer portal alike:
+
+- An **immediate** cancel ends the subscription and its access entitlements — boolean features,
+  seats and postpaid overage — at once, and asks the provider for no proration credit.
+- Plan **allocations already granted** for the paid period stay spendable until their own expiry.
+  Allocations are reversed only when money goes back, through the existing `refund.sync` reversal.
+- **Postpaid usage is not accelerated.** Overage accrued in the open period settles when that usage
+  window ends, on the schedule it already had; the invoice is then billed to the customer against
+  their saved default payment method, because the subscription is gone.
+- A cancel **supersedes** the subscription's queued change: it is marked `cancelled` and its
+  promotion use released. `uncancel` does not restore it — request the change again.
+- A **base plan with active add-on subscriptions is refused** with `ADDON_SUBSCRIPTIONS_ACTIVE`
+  (409), whose `details.addOnSubscriptionIds` names them; cancel the add-ons first. Cancelling an
+  add-on itself is never held back.
+
+Typed refusals: `SUBSCRIPTION_NOT_CANCELLABLE` (409) when the subscription has already ended, so
+there is nothing left to cancel or to uncancel; `ADDON_SUBSCRIPTIONS_ACTIVE` (409);
+`SUBSCRIPTION_CHANGE_PENDING` (409) while a worker is applying that subscription's change, which is
+retryable; and `SUBSCRIPTION_PERIOD_MISSING` (409) for `period_end` without a known period end.
+
+Local subscription state still arrives only through the provider webhook, so `cancelAtPeriodEnd`
+and the subscription's status change when Stripe reports them, not when execution returns.
+
+Limitation: a Stripe subscription schedule attached outside Quotum is invisible here. Quotum
+cancels the subscription; it does not release or amend a schedule that may recreate it.
 
 ## Usage operation recovery
 

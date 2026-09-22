@@ -136,7 +136,7 @@ describe("provider capability vocabulary", () => {
 		expect(isProviderOperation("checkout")).toBe(false);
 	});
 
-	it("lists exactly the 28 provider operations in contract order", () => {
+	it("lists exactly the 30 provider operations in contract order", () => {
 		expect([...providerOperations]).toEqual([
 			"catalog.product.subscription",
 			"catalog.product.consumable",
@@ -159,6 +159,8 @@ describe("provider capability vocabulary", () => {
 			"subscription.change.preview",
 			"subscription.change.apply",
 			"subscription.change.period_end",
+			"subscription.cancel",
+			"subscription.uncancel",
 			"settlement.collect_finalized_charge",
 			"adjustment.issue",
 			"refund.sync",
@@ -167,7 +169,7 @@ describe("provider capability vocabulary", () => {
 			"promotion.code_entry",
 			"promotion.hosted_code",
 		]);
-		expect(new Set(providerOperations).size).toBe(28);
+		expect(new Set(providerOperations).size).toBe(30);
 	});
 
 	it("defines every operation with a domain, a unique title and a provider-neutral sentence", () => {
@@ -237,6 +239,7 @@ describe("provider capability vocabulary", () => {
 		expect(capabilityConditionKinds.filter((kind) => conditionLayer[kind] === "operation")).toEqual(
 			[
 				"subscription_state",
+				"cancellation_pending",
 				"collection_method",
 				"billing_interval",
 				"uniform_billing_interval",
@@ -421,6 +424,19 @@ const conditionCases: ConditionCase[] = [
 			{ facts: { operation: {} }, observed: { subscriptionState: null } },
 			{ facts: { configuration: configured }, observed: { subscriptionState: null } },
 		],
+	},
+	{
+		name: "cancellation_pending",
+		condition: { kind: "cancellation_pending", required: true },
+		passing: [{ operation: { cancellationPending: true } }],
+		failing: [
+			{
+				facts: { operation: { cancellationPending: false } },
+				observed: { cancellationPending: false },
+				resolution: none,
+			},
+		],
+		missing: [{ facts: { operation: {} }, observed: { cancellationPending: null } }],
 	},
 	{
 		name: "collection_method",
@@ -1443,6 +1459,10 @@ describe("describeCondition", () => {
 		[
 			{ kind: "subscription_state", allowed: ["active", "grace_period"] },
 			"The subscription state must be active or grace_period.",
+		],
+		[
+			{ kind: "cancellation_pending", required: true },
+			"The subscription must have a cancellation pending at its period end.",
 		],
 		[
 			{ kind: "collection_method", allowed: ["automatic"] },

@@ -5,6 +5,7 @@ import type {
 	CommercialActionExecutionResult,
 	CommercialActionIntent,
 	CommercialActionPreview,
+	CommercialPreviewCancellation,
 	CommercialPreviewDraft,
 	StoredCommercialActionPreview,
 } from "../../billing/commercial";
@@ -20,6 +21,7 @@ import {
 	promotionError,
 } from "../../billing/promotions";
 import type {
+	SubscriptionCancellationContext,
 	SubscriptionChangeInput,
 	SubscriptionChangeOperation,
 	SubscriptionChangePreview,
@@ -115,6 +117,7 @@ export interface StripeBillingClientDependency {
 		params: Stripe.SubscriptionUpdateParams,
 		idempotencyKey: string,
 	): Promise<{ id: string }>;
+	cancelSubscription?(subscriptionId: string, idempotencyKey: string): Promise<{ id: string }>;
 	retrieveSubscriptionDiscounts?(
 		subscriptionId: string,
 	): Promise<Array<{ id: string; couponId: string | null }>>;
@@ -163,6 +166,10 @@ interface StripeBillingRepositoryDependency {
 	previewSubscriptionChange?(
 		input: Omit<SubscriptionChangeInput, "idempotencyKey" | "expectedStateFingerprint">,
 	): Promise<SubscriptionChangePreview>;
+	previewSubscriptionCancellation?(input: {
+		billingAccountId: string;
+		externalSubscriptionId: string;
+	}): Promise<SubscriptionCancellationContext>;
 	createCommercialActionPreview?(draft: CommercialPreviewDraft): Promise<CommercialActionPreview>;
 	resolveCommercialPromotion?(input: {
 		billingAccountId: string;
@@ -223,6 +230,15 @@ interface StripeBillingRepositoryDependency {
 		previewToken: string;
 		idempotencyKey: string;
 		result: CommercialActionExecutionResult;
+	}): Promise<CommercialActionExecutionResult>;
+	completeSubscriptionCancellation?(input: {
+		billingAccountId: string;
+		previewToken: string;
+		idempotencyKey: string;
+		externalSubscriptionId: string;
+		supersedeReason: string;
+		supersedesPendingChange: boolean;
+		result: Omit<SubscriptionCancellationResult, "supersededChangeId">;
 	}): Promise<CommercialActionExecutionResult>;
 
 	getStripeProviderCustomer(input: GetStripeProviderCustomerInput): Promise<string | null>;
@@ -292,6 +308,13 @@ export interface StripeWebhookResult {
 }
 
 type StripeCheckoutMode = "payment" | "subscription";
+
+type SubscriptionCancellationResult = Extract<
+	CommercialActionExecutionResult,
+	{ kind: "subscription_cancellation" }
+>;
+
+type CancellationIntent = Extract<CommercialActionIntent, { kind: "cancel" | "uncancel" }>;
 
 interface ParsedStripeEvent {
 	id: string;
@@ -665,6 +688,18 @@ export class StripeBillingService
 			return claimed.executionResult;
 		}
 
+		if (current.intent.kind === "cancel" || current.intent.kind === "uncancel") {
+			const cancellation = current.preview.cancellation;
+			if (cancellation === null) throw new Error("Cancellation preview is missing its effects");
+			// The completion owns the supersede transaction, so it records the execution itself.
+			return await this.executeSubscriptionCancellation({
+				billingAccountId,
+				previewToken,
+				idempotencyKey,
+				intent: current.intent,
+				cancellation,
+			});
+		}
 		let result: CommercialActionExecutionResult;
 		if (current.intent.kind === "subscription_change") {
 			const executionKey = commercialExecutionKey(previewToken, idempotencyKey);
@@ -755,6 +790,9 @@ export class StripeBillingService
 	): Promise<CommercialPreviewDraft> {
 		const normalized = normalizeCommercialIntent(intent);
 		const intentHash = sha256Hex(stableJson(normalized));
+		if (normalized.kind === "cancel" || normalized.kind === "uncancel") {
+			return await this.cancellationPreviewDraft(billingAccountId, normalized, intentHash);
+		}
 		if (normalized.kind === "subscription_change") {
 			const repository = this.dependencies.repository;
 			if (repository.previewSubscriptionChange === undefined) {
@@ -830,6 +868,7 @@ export class StripeBillingService
 									discountStatus: "provider_calculated",
 								}
 							: renewal.nextCycle,
+					cancellation: null,
 					effectiveMode: change.effectiveMode,
 					effectiveAt: change.effectiveAt,
 					prorationBehavior: change.prorationBehavior,
@@ -884,6 +923,7 @@ export class StripeBillingService
 					provider: commercialPreviewProvider(stripeCapabilities, normalized.kind),
 					...priced,
 					currency: product.currency,
+					cancellation: null,
 					effectiveMode: null,
 					effectiveAt: null,
 					prorationBehavior: null,
@@ -948,6 +988,7 @@ export class StripeBillingService
 				provider: commercialPreviewProvider(stripeCapabilities, normalized.kind),
 				...priced,
 				currency,
+				cancellation: null,
 				effectiveMode: "immediate",
 				effectiveAt: new Date().toISOString(),
 				prorationBehavior: null,
@@ -957,6 +998,131 @@ export class StripeBillingService
 				targetId: plan.planVersionId,
 			},
 		};
+	}
+
+	/**
+	 * Builds the preview for a cancel or uncancel from local state alone. Nothing is read from
+	 * Stripe: the subscription row, its queued change and its add-ons are what the action acts on,
+	 * and they are exactly what the fingerprint binds the execution to.
+	 */
+	private async cancellationPreviewDraft(
+		billingAccountId: string,
+		intent: CancellationIntent,
+		intentHash: string,
+	): Promise<CommercialPreviewDraft> {
+		const read = this.dependencies.repository.previewSubscriptionCancellation;
+		if (read === undefined) {
+			throw new BillingError(
+				"Commercial previews are not configured",
+				"STRIPE_NOT_CONFIGURED",
+				503,
+			);
+		}
+		const context = await read.call(this.dependencies.repository, {
+			billingAccountId,
+			externalSubscriptionId: intent.externalSubscriptionId,
+		});
+		const cancellation = resolveCancellationPreview(intent, context);
+		return {
+			billingAccountId,
+			intent,
+			intentHash,
+			stateFingerprint: context.stateFingerprint,
+			providerStateFingerprint: context.stateFingerprint,
+			promotion: null,
+			preview: {
+				schemaVersion: 1,
+				intentHash,
+				stateFingerprint: context.stateFingerprint,
+				billingAccountId,
+				action: cancellation.action === "none" ? "none" : intent.kind,
+				provider: commercialPreviewProvider(stripeCapabilities, intent.kind),
+				lineItems: [],
+				estimatedTotalMinor: 0,
+				subtotalMinor: 0,
+				discountTotalMinor: 0,
+				currency: null,
+				amountStatus: "exact",
+				promotionCodeEntry: "none",
+				promotion: null,
+				nextCycle: null,
+				cancellation,
+				effectiveMode: intent.kind === "cancel" ? intent.effectiveMode : null,
+				effectiveAt: cancellation.accessEndsAt,
+				prorationBehavior: intent.kind === "cancel" ? "none" : null,
+				changeKind: null,
+				fromPlanVersionId: context.planVersionId,
+				toPlanVersionId: null,
+				targetId: context.externalSubscriptionId,
+				warnings: cancellationWarnings(cancellation),
+			},
+		};
+	}
+
+	/**
+	 * Performs a cancellation and records it. The provider call comes first and the local write
+	 * second, so a superseded change is never recorded for a cancellation Stripe refused; replaying
+	 * the same execution key is safe because Stripe is idempotent and the local write is conditional.
+	 */
+	private async executeSubscriptionCancellation(input: {
+		billingAccountId: string;
+		previewToken: string;
+		idempotencyKey: string;
+		intent: CancellationIntent;
+		cancellation: CommercialPreviewCancellation;
+	}): Promise<CommercialActionExecutionResult> {
+		const complete = this.dependencies.repository.completeSubscriptionCancellation;
+		if (complete === undefined) {
+			throw new BillingError("Commercial actions are not configured", "STRIPE_NOT_CONFIGURED", 503);
+		}
+		const { intent, cancellation } = input;
+		const executionKey = commercialExecutionKey(input.previewToken, input.idempotencyKey);
+		const idempotencyKey = `billing:subscription-cancel:${executionKey}`;
+		if (cancellation.action === "cancel" && intent.kind === "cancel") {
+			if (intent.effectiveMode === "immediate") {
+				const cancel = this.dependencies.client.cancelSubscription;
+				if (cancel === undefined) {
+					throw new Error("Stripe subscription cancellation is unavailable");
+				}
+				await cancel.call(this.dependencies.client, intent.externalSubscriptionId, idempotencyKey);
+			} else {
+				await this.updateCancelAtPeriodEnd(intent.externalSubscriptionId, true, idempotencyKey);
+			}
+		} else if (cancellation.action === "uncancel") {
+			await this.updateCancelAtPeriodEnd(intent.externalSubscriptionId, false, idempotencyKey);
+		}
+		return await complete.call(this.dependencies.repository, {
+			billingAccountId: input.billingAccountId,
+			previewToken: input.previewToken,
+			idempotencyKey: input.idempotencyKey,
+			externalSubscriptionId: intent.externalSubscriptionId,
+			supersedeReason: `Superseded by the cancellation of subscription ${intent.externalSubscriptionId}`,
+			supersedesPendingChange:
+				cancellation.action === "cancel" && cancellation.supersedesChangeId !== null,
+			result: {
+				kind: "subscription_cancellation",
+				action: cancellation.action,
+				externalSubscriptionId: intent.externalSubscriptionId,
+				effectiveMode: intent.kind === "cancel" ? intent.effectiveMode : null,
+				effectiveAt: cancellation.accessEndsAt,
+				cancelAtPeriodEnd: cancellation.cancelAtPeriodEnd,
+			},
+		});
+	}
+
+	private async updateCancelAtPeriodEnd(
+		externalSubscriptionId: string,
+		cancelAtPeriodEnd: boolean,
+		idempotencyKey: string,
+	): Promise<void> {
+		if (this.dependencies.client.updateSubscription === undefined) {
+			throw new Error("Stripe subscription updates are unavailable");
+		}
+		await this.dependencies.client.updateSubscription(
+			externalSubscriptionId,
+			{ cancel_at_period_end: cancelAtPeriodEnd },
+			idempotencyKey,
+		);
 	}
 
 	private async commercialPromotion(
@@ -1866,6 +2032,99 @@ function commercialPlanLines(
 	});
 }
 
+/**
+ * Decides what a cancel or uncancel would do, and refuses what it cannot do. A cancellation is a
+ * state, not a queue: asking for a state that already holds is `none` rather than an error, so a
+ * retried request is safe.
+ */
+function resolveCancellationPreview(
+	intent: CancellationIntent,
+	context: SubscriptionCancellationContext,
+): CommercialPreviewCancellation {
+	if (!liveStripeSubscriptionStatuses.has(context.status)) {
+		throw new BillingError(
+			`Subscription ${context.externalSubscriptionId} is ${context.status} and can no longer be cancelled`,
+			"SUBSCRIPTION_NOT_CANCELLABLE",
+			409,
+			{ details: { subscriptionStatus: context.status } },
+		);
+	}
+	const base = {
+		keepsGrantedAllocations: true,
+		postpaidUsageSettlesAt: context.postpaidUsageSettlesAt,
+		activeAddOnSubscriptionIds: context.activeAddOnSubscriptionIds,
+	};
+	if (intent.kind === "uncancel") {
+		return {
+			...base,
+			action: context.cancelAtPeriodEnd ? "uncancel" : "none",
+			accessEndsAt: context.cancelAtPeriodEnd ? null : null,
+			cancelAtPeriodEnd: false,
+			supersedesChangeId: null,
+		};
+	}
+	if (context.planKind === "base" && context.activeAddOnSubscriptionIds.length > 0) {
+		throw new BillingError(
+			"Cancel the account's add-on subscriptions before cancelling its base plan",
+			"ADDON_SUBSCRIPTIONS_ACTIVE",
+			409,
+			{ details: { addOnSubscriptionIds: context.activeAddOnSubscriptionIds } },
+		);
+	}
+	// A change a worker already holds decides its own fate under its lease, so the cancellation
+	// waits rather than racing it.
+	if (context.pendingChange?.status === "processing") {
+		throw new BillingError(
+			"Another subscription change is already being applied",
+			"SUBSCRIPTION_CHANGE_PENDING",
+			409,
+		);
+	}
+	const supersedesChangeId = context.pendingChange?.id ?? null;
+	if (intent.effectiveMode === "immediate") {
+		return {
+			...base,
+			action: "cancel",
+			accessEndsAt: new Date().toISOString(),
+			cancelAtPeriodEnd: false,
+			supersedesChangeId,
+		};
+	}
+	if (context.currentPeriodEnd === null) {
+		throw new BillingError(
+			"Period-end cancellations require a current subscription period end",
+			"SUBSCRIPTION_PERIOD_MISSING",
+			409,
+		);
+	}
+	return {
+		...base,
+		action: context.cancelAtPeriodEnd ? "none" : "cancel",
+		accessEndsAt: context.currentPeriodEnd,
+		cancelAtPeriodEnd: true,
+		supersedesChangeId: context.cancelAtPeriodEnd ? null : supersedesChangeId,
+	};
+}
+
+/** What the caller should know before executing; the approved rules, stated for this subscription. */
+function cancellationWarnings(cancellation: CommercialPreviewCancellation): string[] {
+	if (cancellation.action === "none") return [];
+	if (cancellation.action === "uncancel") {
+		return ["Uncancelling does not restore a subscription change the cancellation superseded."];
+	}
+	return [
+		"Plan allocations already granted for the paid period stay spendable until their own expiry.",
+		...(cancellation.postpaidUsageSettlesAt === null
+			? []
+			: [
+					`Postpaid usage in the open period is not accelerated; it settles at ${cancellation.postpaidUsageSettlesAt}.`,
+				]),
+		...(cancellation.supersedesChangeId === null
+			? []
+			: [`Subscription change ${cancellation.supersedesChangeId} will be cancelled.`]),
+	];
+}
+
 /** Statuses in which Stripe still holds a subscription that can carry an invoice or a change. */
 const liveStripeSubscriptionStatuses: ReadonlySet<SubscriptionStatus> = new Set([
 	"active",
@@ -1874,6 +2133,25 @@ const liveStripeSubscriptionStatuses: ReadonlySet<SubscriptionStatus> = new Set(
 ]);
 
 function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialActionIntent {
+	if (intent.kind === "cancel") {
+		return {
+			kind: intent.kind,
+			externalSubscriptionId: requireNonBlank(
+				intent.externalSubscriptionId,
+				"externalSubscriptionId",
+			),
+			effectiveMode: intent.effectiveMode,
+		};
+	}
+	if (intent.kind === "uncancel") {
+		return {
+			kind: intent.kind,
+			externalSubscriptionId: requireNonBlank(
+				intent.externalSubscriptionId,
+				"externalSubscriptionId",
+			),
+		};
+	}
 	if (intent.kind === "subscription_change") {
 		return {
 			kind: intent.kind,

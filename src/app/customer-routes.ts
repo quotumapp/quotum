@@ -129,6 +129,19 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 				.optional(),
 		})
 		.strict(),
+	z
+		.object({
+			kind: z.literal("cancel"),
+			externalSubscriptionId: z.string().trim().min(1),
+			effectiveMode: z.enum(["immediate", "period_end"]),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("uncancel"),
+			externalSubscriptionId: z.string().trim().min(1),
+		})
+		.strict(),
 ]);
 
 export const commercialActionPreviewBodySchema = z
@@ -315,7 +328,8 @@ export function registerCustomerRoutes({
 				previewToken: body.previewToken,
 				idempotencyKey,
 			});
-			set.status = result.kind === "checkout" ? 200 : 202;
+			// Only a queued subscription change is accepted for later work; a cancellation is done.
+			set.status = result.kind === "subscription_change" ? 202 : 200;
 			return { success: true, data: result };
 		},
 		{

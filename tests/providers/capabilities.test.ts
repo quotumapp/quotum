@@ -582,6 +582,8 @@ describe("declaration helpers the runtime gates read", () => {
 			checkout_plan: "checkout.plan",
 			checkout_product: "checkout.hosted",
 			subscription_change: "subscription.change.preview",
+			cancel: "subscription.cancel",
+			uncancel: "subscription.uncancel",
 		} as const satisfies typeof commercialActionOperations;
 		expect(commercialActionOperations).toEqual(expected);
 

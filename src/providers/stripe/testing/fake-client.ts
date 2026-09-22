@@ -34,6 +34,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	private readonly invoicesByIdempotencyKey = new Map<string, FakeInvoice>();
 	private readonly invoiceLineKeys = new Set<string>();
 	private readonly subscriptionUpdates = new Map<string, { id: string }>();
+	private readonly subscriptionCancellations = new Map<string, { id: string }>();
 	private readonly subscriptionDiscounts = new Map<
 		string,
 		Array<{ id: string; couponId: string | null }>
@@ -180,6 +181,19 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 			);
 		}
 		return updated;
+	}
+
+	/** Cancelled subscriptions end now, as Stripe reports them once `ended_at` is set. */
+	async cancelSubscription(
+		subscriptionId: string,
+		idempotencyKey: string,
+	): Promise<{ id: string }> {
+		this.throwIfFailed("cancelSubscription");
+		const existing = this.subscriptionCancellations.get(idempotencyKey);
+		if (existing !== undefined) return existing;
+		const cancelled = { id: subscriptionId };
+		this.subscriptionCancellations.set(idempotencyKey, cancelled);
+		return cancelled;
 	}
 
 	async retrieveSubscriptionDiscounts(

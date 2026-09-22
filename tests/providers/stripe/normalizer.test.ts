@@ -906,6 +906,26 @@ describe("Stripe normalizer", () => {
 		expect(expired.subscriptionStatus).toBe("expired");
 	});
 
+	it("expires a subscription Stripe ended mid-period, ahead of the period it was paid through", () => {
+		const endedAt = Math.floor(Date.parse("2026-06-05T00:00:00.000Z") / 1000);
+		const immediate = normalizeStripeSubscription({
+			eventId: "evt_cancelled_now",
+			eventType: "customer.subscription.deleted",
+			subscription: subscriptionFixture({
+				status: "canceled",
+				ended_at: endedAt,
+				canceled_at: endedAt,
+				current_period_end: futurePeriodEnd,
+			}),
+			now: new Date("2026-06-06T00:00:00.000Z"),
+		});
+
+		// An immediate cancellation ends access when Stripe ended it, not at the paid period end.
+		expect(immediate.expiresAt?.toISOString()).toBe("2026-06-05T00:00:00.000Z");
+		expect(immediate.subscriptionStatus).toBe("expired");
+		expect(immediate.autoRenew).toBe(false);
+	});
+
 	it("derives subscription product and price from current items before metadata", () => {
 		const command = normalizeStripeSubscription({
 			eventId: "evt_plan_changed",

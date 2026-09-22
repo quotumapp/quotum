@@ -736,6 +736,13 @@ function subscriptionItemPriceId(item: Record<string, unknown> | null): string |
 }
 
 function subscriptionExpiresAt(subscription: Record<string, unknown>): Date | null {
+	// A subscription Stripe has ended expires then, not at the period it was paid through. An
+	// immediate cancellation, here or in the portal, ends access at once while the paid period runs.
+	const endedAt = optionalDateFromStripeSeconds(subscription.ended_at);
+	if (endedAt !== null) {
+		return endedAt;
+	}
+
 	const topLevelPeriodEnd = optionalDateFromStripeSeconds(subscription.current_period_end);
 	if (topLevelPeriodEnd !== null) {
 		return topLevelPeriodEnd;

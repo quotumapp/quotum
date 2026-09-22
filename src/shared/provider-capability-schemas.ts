@@ -26,6 +26,7 @@ export const CapabilityConditionSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("currency"), allowed: z.array(z.string()) }),
 	z.object({ kind: z.literal("catalog_bound") }),
 	z.object({ kind: z.literal("subscription_state"), allowed: z.array(z.string()) }),
+	z.object({ kind: z.literal("cancellation_pending"), required: z.literal(true) }),
 	z.object({
 		kind: z.literal("collection_method"),
 		allowed: z.array(z.enum(capabilityCollectionMethods)),

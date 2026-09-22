@@ -439,7 +439,8 @@ export function createMerchantBillingPort(input: {
 					previewToken: body.previewToken,
 					idempotencyKey: requireKey(command),
 				});
-				return ok(result, result.kind === "checkout" ? 200 : 202);
+				// Mirrors the /v1 route: only a queued subscription change is accepted for later work.
+				return ok(result, result.kind === "subscription_change" ? 202 : 200);
 			}
 		}
 	};

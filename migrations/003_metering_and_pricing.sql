@@ -1696,7 +1696,7 @@ CREATE TABLE IF NOT EXISTS commercial_action_previews (
 	billing_account_id TEXT COLLATE "C" NOT NULL CHECK (char_length(billing_account_id) BETWEEN 1 AND 200),
 	preview_token UUID NOT NULL,
 	intent_kind TEXT NOT NULL CHECK (
-		intent_kind IN ('checkout_plan', 'checkout_product', 'subscription_change')
+		intent_kind IN ('checkout_plan', 'checkout_product', 'subscription_change', 'cancel', 'uncancel')
 	),
 	intent_hash TEXT NOT NULL CHECK (char_length(intent_hash) = 64),
 	state_fingerprint TEXT NOT NULL CHECK (char_length(state_fingerprint) = 64),

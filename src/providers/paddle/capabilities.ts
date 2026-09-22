@@ -166,6 +166,15 @@ export const paddleCapabilities: ProviderCapabilityDeclaration = {
 			notes:
 				"Collecting at the next renewal does not by itself prove that the entitlement change waits for it.",
 		}),
+		"subscription.cancel": inP4({
+			questions: ["Q-SUB-01"],
+			notes:
+				"Paddle cancels immediately or at the next billing period; whether an immediate cancellation refunds the paid period is not assessed.",
+		}),
+		"subscription.uncancel": notEvaluated(
+			"The Paddle assessment does not cover clearing a scheduled cancellation.",
+			["Q-SUB-01"],
+		),
 		"settlement.collect_finalized_charge": awaitingDecision({
 			level: "quotum_composed",
 			composedVia: "one-time subscription charge",

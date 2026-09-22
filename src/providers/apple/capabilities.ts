@@ -109,6 +109,12 @@ export const appleCapabilities: ProviderCapabilityDeclaration = {
 		"subscription.change.period_end": providerManaged(
 			"Downgrades are scheduled in the App Store; Quotum records the renewal preference notification.",
 		),
+		"subscription.cancel": providerManaged(
+			"Cancellation happens in the store's subscription settings; Quotum records the resulting notification.",
+		),
+		"subscription.uncancel": providerManaged(
+			"Resubscribing before the period ends happens in the store's subscription settings; Quotum records the resulting notification.",
+		),
 		"settlement.collect_finalized_charge": unsupported(noUsageInvoices),
 		"adjustment.issue": unsupported(
 			"Adjustments apply to postpaid usage invoices, which App Store purchases cannot carry.",

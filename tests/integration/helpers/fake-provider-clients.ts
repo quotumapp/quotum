@@ -252,6 +252,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 		params: Stripe.SubscriptionUpdateParams;
 		idempotencyKey: string;
 	}> = [];
+	const subscriptionCancellations: Array<{ subscriptionId: string; idempotencyKey: string }> = [];
 	const subscriptionDiscounts = new Map<string, Array<{ id: string; couponId: string | null }>>();
 	const event =
 		options.event ?? stripeEvent("customer.subscription.updated", stripeSubscriptionObject());
@@ -261,6 +262,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 		checkoutSessionParams,
 		promotions: promotions.state,
 		subscriptionUpdates,
+		subscriptionCancellations,
 		subscriptionDiscounts,
 		client: {
 			async retrieveSubscriptionDiscounts(subscriptionId: string) {
@@ -274,6 +276,11 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			) {
 				calls.push(`updateSubscription:${idempotencyKey}`);
 				subscriptionUpdates.push({ subscriptionId, params, idempotencyKey });
+				return { id: subscriptionId };
+			},
+			async cancelSubscription(subscriptionId: string, idempotencyKey: string) {
+				calls.push(`cancelSubscription:${idempotencyKey}`);
+				subscriptionCancellations.push({ subscriptionId, idempotencyKey });
 				return { id: subscriptionId };
 			},
 			createCoupon: promotions.createCoupon,

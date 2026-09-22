@@ -10,7 +10,13 @@ import { InvalidRequestError, PersistenceConflictError } from "../../billing/err
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import { executeOne, jsonb } from "./query";
+import { supersedePendingSubscriptionChangeInTx } from "./recurring-pricing";
 import type { QueryExecutor } from "./types";
+
+type SubscriptionCancellationResult = Extract<
+	CommercialActionExecutionResult,
+	{ kind: "subscription_cancellation" }
+>;
 
 interface PreviewRow {
 	intent: CommercialActionIntent;
@@ -133,31 +139,80 @@ export class CommercialActionRepository extends RepositoryModule {
 			result: CommercialActionExecutionResult;
 		},
 	): Promise<CommercialActionExecutionResult> {
+		return await this.transaction(
+			async (tx) => await completeExecutionInTx(tx, project.projectInstanceId, input),
+		);
+	}
+
+	/**
+	 * Records a cancellation that the provider already performed, and in the same transaction marks
+	 * the subscription's queued change `cancelled` because the cancellation superseded it. Both
+	 * commit together, so a recorded cancellation never leaves a change that would undo it.
+	 */
+	async completeSubscriptionCancellation(
+		project: ProjectInstanceContext,
+		input: {
+			billingAccountId: string;
+			previewToken: string;
+			idempotencyKey: string;
+			externalSubscriptionId: string;
+			supersedeReason: string;
+			supersedesPendingChange: boolean;
+			result: Omit<SubscriptionCancellationResult, "supersededChangeId">;
+		},
+	): Promise<CommercialActionExecutionResult> {
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
-			const row = await executeOne<{ execution_result: CommercialActionExecutionResult }>(
-				tx,
-				drizzleSql`
-					UPDATE commercial_action_previews
-					SET status = 'executed', execution_result = ${jsonb(input.result)},
-						executed_at = now(), updated_at = now()
-					WHERE project_id = ${projectId}
-						AND billing_account_id = ${input.billingAccountId}
-						AND preview_token = ${input.previewToken}
-						AND status IN ('executing', 'executed')
-						AND execution_idempotency_key = ${input.idempotencyKey}
-					RETURNING execution_result
-				`,
-			);
-			if (row === null) {
-				throw new PersistenceConflictError(
-					"Commercial action execution ownership was lost",
-					"COMMERCIAL_EXECUTION_CONFLICT",
-				);
-			}
-			return row.execution_result;
+			const supersededChangeId = input.supersedesPendingChange
+				? await supersedePendingSubscriptionChangeInTx(
+						tx,
+						projectId,
+						{
+							billingAccountId: input.billingAccountId,
+							externalSubscriptionId: input.externalSubscriptionId,
+						},
+						input.supersedeReason,
+					)
+				: null;
+			return await completeExecutionInTx(tx, projectId, {
+				...input,
+				result: { ...input.result, supersededChangeId },
+			});
 		});
 	}
+}
+
+async function completeExecutionInTx(
+	executor: QueryExecutor,
+	projectId: string,
+	input: {
+		billingAccountId: string;
+		previewToken: string;
+		idempotencyKey: string;
+		result: CommercialActionExecutionResult;
+	},
+): Promise<CommercialActionExecutionResult> {
+	const row = await executeOne<{ execution_result: CommercialActionExecutionResult }>(
+		executor,
+		drizzleSql`
+			UPDATE commercial_action_previews
+			SET status = 'executed', execution_result = ${jsonb(input.result)},
+				executed_at = now(), updated_at = now()
+			WHERE project_id = ${projectId}
+				AND billing_account_id = ${input.billingAccountId}
+				AND preview_token = ${input.previewToken}
+				AND status IN ('executing', 'executed')
+				AND execution_idempotency_key = ${input.idempotencyKey}
+			RETURNING execution_result
+		`,
+	);
+	if (row === null) {
+		throw new PersistenceConflictError(
+			"Commercial action execution ownership was lost",
+			"COMMERCIAL_EXECUTION_CONFLICT",
+		);
+	}
+	return row.execution_result;
 }
 
 async function previewRow(

@@ -201,6 +201,8 @@ export const commercialActionOperations: Record<CommercialActionIntent["kind"], 
 		checkout_plan: "checkout.plan",
 		checkout_product: "checkout.hosted",
 		subscription_change: "subscription.change.preview",
+		cancel: "subscription.cancel",
+		uncancel: "subscription.uncancel",
 	};
 
 /**
