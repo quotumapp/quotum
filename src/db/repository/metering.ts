@@ -32,7 +32,6 @@ import type {
 	WorkerMeteringMutationInput,
 } from "../../billing/metering";
 import { calculateTieredUsageCharge, calculateUsageCharge } from "../../billing/pricing";
-import type { BillingProvider } from "../../billing/types";
 import type {
 	UsageOperationInput,
 	UsageOperationKind,
@@ -118,6 +117,7 @@ import {
 } from "./metering-persistence";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
+import { materializeUsageInvoicePeriod, readPriceTiers } from "./usage-invoice-periods";
 import {
 	expireUsageOperationResults,
 	lookupUsageOperation,
@@ -1413,39 +1413,18 @@ async function recordClosedUsageInvoiceAdjustment(
 	) {
 		return null;
 	}
+	// The corrected window only identifies the period. The shared materializer locks every window
+	// of that period in id order, so no window is locked out of order here.
 	const window = await executeOne<{
-		customer_id: string;
 		subscription_id: string;
-		provider: BillingProvider;
-		provider_account_id: string | null;
 		plan_item_id: string | number | bigint;
-		price_component_id: string | number | bigint;
-		period_start_at: Date | string;
-		period_end_at: Date | string;
-		usage_quantity: unknown;
-		included_quantity: unknown;
-		billing_units: unknown;
-		unit_amount_minor: string | number;
-		currency: string;
-		pricing_model: "flat" | "graduated" | "volume";
 	}>(
 		executor,
 		drizzleSql`
-			SELECT
-				uw.customer_id, uw.subscription_id, subscription.provider, subscription.provider_account_id,
-				uw.anchor_plan_item_id AS plan_item_id, price.id AS price_component_id,
-				uw.window_start_at AS period_start_at, uw.window_end_at AS period_end_at,
-				uw.usage::text AS usage_quantity, item.quantity::text AS included_quantity,
-				price.billing_units::text AS billing_units, price.unit_amount_minor, price.currency,
-				price.pricing_model
+			SELECT uw.subscription_id, uw.anchor_plan_item_id AS plan_item_id
 			FROM usage_windows uw
-			JOIN subscriptions subscription
-				ON subscription.project_id = uw.project_id AND subscription.id = uw.subscription_id
 			JOIN plan_items item
 				ON item.project_id = uw.project_id AND item.id = uw.anchor_plan_item_id
-			JOIN price_components price
-				ON price.project_id = item.project_id AND price.plan_item_id = item.id
-				AND price.component_kind = 'metered_overage'
 			WHERE uw.project_id = ${input.projectId}
 				AND uw.id = ${windowId}::bigint
 				AND uw.window_start_at = ${expectedStart}::timestamptz
@@ -1453,65 +1432,18 @@ async function recordClosedUsageInvoiceAdjustment(
 				AND uw.window_end_at <= now()
 				AND uw.subscription_id IS NOT NULL
 				AND item.overage_policy = 'allowed'
-			FOR UPDATE OF uw
 		`,
 	);
 	if (window === null) return null;
-	const originalCharge = await calculatePersistedPriceCharge(executor, {
+	const materialized = await materializeUsageInvoicePeriod(executor, {
 		projectId: input.projectId,
-		priceComponentId: String(window.price_component_id),
-		pricingModel: window.pricing_model,
-		usageQuantity: String(window.usage_quantity),
-		includedQuantity: String(window.included_quantity),
-		billingUnits: String(window.billing_units),
-		unitAmountMinor: BigInt(window.unit_amount_minor),
+		subscriptionId: window.subscription_id,
+		planItemId: String(window.plan_item_id),
+		periodStartAt: expectedStart,
+		periodEndAt: expectedEnd,
 	});
-	await executeRows(
-		executor,
-		drizzleSql`
-			INSERT INTO usage_invoice_periods (
-				project_id, customer_id, subscription_id, provider, provider_account_id, plan_item_id,
-				price_component_id, period_start_at, period_end_at, usage_quantity, included_quantity,
-				billable_quantity, billing_units, unit_amount_minor, amount_minor, currency,
-				status, invoiced_at
-			)
-			VALUES (
-				${input.projectId}, ${window.customer_id}, ${window.subscription_id},
-				${window.provider}, ${window.provider_account_id},
-				${String(window.plan_item_id)}::bigint, ${String(window.price_component_id)}::bigint,
-				${new Date(window.period_start_at).toISOString()},
-				${new Date(window.period_end_at).toISOString()}, ${originalCharge.usageQuantity}::numeric,
-				${originalCharge.includedQuantity}::numeric, ${originalCharge.billableQuantity}::numeric,
-				${String(window.billing_units)}::numeric, ${window.unit_amount_minor},
-				${originalCharge.amountMinor.toString()}, ${window.currency},
-				${originalCharge.amountMinor === 0n ? "credited" : "pending"},
-				${originalCharge.amountMinor === 0n ? new Date().toISOString() : null}
-			)
-			ON CONFLICT (project_id, subscription_id, plan_item_id, period_start_at, period_end_at)
-			DO NOTHING
-		`,
-	);
-	const period = await executeOne<{
-		id: string;
-		usage_quantity: unknown;
-		included_quantity: unknown;
-		billing_units: unknown;
-		unit_amount_minor: string | number;
-		currency: string;
-	}>(
-		executor,
-		drizzleSql`
-			SELECT id, usage_quantity, included_quantity, billing_units, unit_amount_minor, currency
-			FROM usage_invoice_periods
-			WHERE project_id = ${input.projectId}
-				AND subscription_id = ${window.subscription_id}
-				AND plan_item_id = ${String(window.plan_item_id)}::bigint
-				AND period_start_at = ${new Date(window.period_start_at).toISOString()}
-				AND period_end_at = ${new Date(window.period_end_at).toISOString()}
-			FOR UPDATE
-		`,
-	);
-	if (period === null) throw new Error("Closed usage period could not be materialized");
+	if (materialized === null) return null;
+	const { period, pricingModel } = materialized;
 	const prior = await executeOne<{ quantity: unknown }>(
 		executor,
 		drizzleSql`
@@ -1534,15 +1466,15 @@ async function recordClosedUsageInvoiceAdjustment(
 	};
 	const before = await calculatePersistedPriceCharge(executor, {
 		projectId: input.projectId,
-		priceComponentId: String(window.price_component_id),
-		pricingModel: window.pricing_model,
+		priceComponentId: String(period.price_component_id),
+		pricingModel,
 		...commonPrice,
 		usageQuantity: unitsToDecimal(effectiveUsageUnits, 9),
 	});
 	const after = await calculatePersistedPriceCharge(executor, {
 		projectId: input.projectId,
-		priceComponentId: String(window.price_component_id),
-		pricingModel: window.pricing_model,
+		priceComponentId: String(period.price_component_id),
+		pricingModel,
 		...commonPrice,
 		usageQuantity: unitsToDecimal(correctedUsageUnits, 9),
 	});
@@ -1583,30 +1515,12 @@ async function calculatePersistedPriceCharge(
 	},
 ) {
 	if (input.pricingModel === "flat") return calculateUsageCharge(input);
-	const tiers = await executeRows<{
-		up_to_quantity: unknown;
-		unit_amount_minor: string | number;
-		flat_amount_minor: string | number;
-	}>(
-		executor,
-		drizzleSql`
-			SELECT up_to_quantity::text AS up_to_quantity, unit_amount_minor, flat_amount_minor
-			FROM price_tiers
-			WHERE project_id = ${input.projectId}
-				AND price_component_id = ${input.priceComponentId}::bigint
-			ORDER BY ordinal
-		`,
-	);
 	return calculateTieredUsageCharge({
 		usageQuantity: input.usageQuantity,
 		includedQuantity: input.includedQuantity,
 		billingUnits: input.billingUnits,
 		pricingModel: input.pricingModel,
-		tiers: tiers.map((tier) => ({
-			upToQuantity: tier.up_to_quantity === null ? null : String(tier.up_to_quantity),
-			unitAmountMinor: BigInt(tier.unit_amount_minor),
-			flatAmountMinor: BigInt(tier.flat_amount_minor),
-		})),
+		tiers: await readPriceTiers(executor, input.projectId, input.priceComponentId),
 	});
 }
 
