@@ -905,47 +905,7 @@ export class ControlsEnterpriseRepository
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
 			const customer = await requireCustomer(tx, projectId, billingAccountId);
-			await executeOne(
-				tx,
-				drizzleSql`
-					SELECT id FROM customers
-					WHERE project_id = ${projectId} AND id = ${customer.id}
-					FOR UPDATE
-				`,
-			);
-			await executeRows(
-				tx,
-				drizzleSql`
-					UPDATE license_pools SET active = false, updated_at = now()
-					WHERE project_id = ${projectId} AND customer_id = ${customer.id} AND active = true
-				`,
-			);
-			await executeRows(
-				tx,
-				drizzleSql`
-				INSERT INTO license_pools (project_id, customer_id, subscription_id, plan_item_id, feature_id, quantity)
-				SELECT subscription.project_id, subscription.customer_id, subscription.id, item.id, item.feature_id,
-					COALESCE(subscription_item.quantity, item.quantity::integer)
-				FROM subscriptions subscription
-				JOIN plan_items item
-					ON item.project_id = subscription.project_id
-					AND item.plan_version_id = subscription.plan_version_id
-				JOIN price_components price
-					ON price.project_id = item.project_id AND price.plan_item_id = item.id
-					AND price.component_kind = 'licensed'
-				LEFT JOIN subscription_items subscription_item
-					ON subscription_item.project_id = subscription.project_id
-					AND subscription_item.subscription_id = subscription.id
-					AND subscription_item.price_component_id = price.id
-					AND subscription_item.active = true
-				WHERE subscription.project_id = ${projectId} AND subscription.customer_id = ${customer.id}
-					AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-					AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
-					AND item.item_kind = 'licensed_quantity' AND item.allocation_scope = 'license_pool'
-				ON CONFLICT (project_id, subscription_id, plan_item_id) DO UPDATE SET
-					quantity = EXCLUDED.quantity, active = true, updated_at = now()
-			`,
-			);
+			await refreshLicensePools(tx, projectId, customer.id);
 			const rows = await executeRows<{
 				id: string | number | bigint;
 				external_subscription_id: string;
@@ -996,6 +956,9 @@ export class ControlsEnterpriseRepository
 			if (entity === null)
 				throw new NotFoundBillingError("Entity was not found", "ENTITY_NOT_FOUND");
 			const quantity = boundedInteger(input.quantity, "quantity", 1, 1_000_000);
+			// A remembered pool id must not authorize the capacity from before a provider quantity
+			// change, so the pool is refreshed from the subscription items before it is validated.
+			await refreshLicensePools(tx, projectId, customer.id);
 			const pool = await executeOne<{ quantity: number }>(
 				tx,
 				drizzleSql`SELECT quantity FROM license_pools WHERE project_id = ${projectId} AND id = ${input.poolId}::bigint AND customer_id = ${customer.id} AND active = true FOR UPDATE`,
@@ -1100,20 +1063,40 @@ export class ControlsEnterpriseRepository
 		const entity = await resolveEntity(this.database, projectId, customer.id, input.entityId);
 		if (entity === null) throw new NotFoundBillingError("Entity was not found", "ENTITY_NOT_FOUND");
 		const feature = await requireFeature(this.database, projectId, input.featureKey);
+		// Pool capacity is the purchased subscription-item quantity, which a provider downgrade can
+		// move below the seats already assigned. Active assignments are honored in assignment order
+		// until that capacity is exhausted; an assignment beyond it counts only the remaining
+		// capacity, possibly none, so a downgrade cannot leave the old seat count authorized.
 		const row = await executeOne<{ assigned_quantity: number }>(
 			this.database,
 			drizzleSql`
-				SELECT COALESCE(sum(assignment.quantity), 0)::integer AS assigned_quantity
-				FROM license_assignments assignment
-				JOIN license_pools pool
-					ON pool.project_id = assignment.project_id AND pool.id = assignment.license_pool_id
-				JOIN subscriptions subscription
-					ON subscription.project_id = pool.project_id AND subscription.id = pool.subscription_id
-				WHERE assignment.project_id = ${projectId} AND assignment.entity_id = ${entity.id}::bigint
-					AND assignment.revoked_at IS NULL AND pool.active = true
-					AND pool.customer_id = ${customer.id} AND pool.feature_id = ${String(feature.id)}::bigint
-					AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-					AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
+				SELECT COALESCE(sum(honored.quantity), 0)::integer AS assigned_quantity
+				FROM (
+					SELECT assignment.entity_id,
+						LEAST(
+							assignment.quantity,
+							GREATEST(
+								pool.quantity - (
+									sum(assignment.quantity) OVER (
+										PARTITION BY assignment.license_pool_id
+										ORDER BY assignment.assigned_at, assignment.id
+									) - assignment.quantity
+								),
+								0
+							)
+						) AS quantity
+					FROM license_assignments assignment
+					JOIN license_pools pool
+						ON pool.project_id = assignment.project_id AND pool.id = assignment.license_pool_id
+					JOIN subscriptions subscription
+						ON subscription.project_id = pool.project_id AND subscription.id = pool.subscription_id
+					WHERE assignment.project_id = ${projectId}
+						AND assignment.revoked_at IS NULL AND pool.active = true
+						AND pool.customer_id = ${customer.id} AND pool.feature_id = ${String(feature.id)}::bigint
+						AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+						AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
+				) AS honored
+				WHERE honored.entity_id = ${entity.id}::bigint
 			`,
 		);
 		const assignedQuantity = row?.assigned_quantity ?? 0;
@@ -1326,6 +1309,59 @@ interface AssignmentDbRow {
 	quantity: number;
 	assigned_at: Date | string;
 	revoked_at: Date | string | null;
+}
+
+/**
+ * Rebuilds the customer's license pools from the purchased subscription items under the customer
+ * lock. Pool ids are stable across refreshes, so callers that remembered one keep using it while
+ * its capacity follows the provider's current quantity.
+ */
+async function refreshLicensePools(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string,
+): Promise<void> {
+	await executeOne(
+		executor,
+		drizzleSql`
+			SELECT id FROM customers
+			WHERE project_id = ${projectId} AND id = ${customerId}
+			FOR UPDATE
+		`,
+	);
+	await executeRows(
+		executor,
+		drizzleSql`
+			UPDATE license_pools SET active = false, updated_at = now()
+			WHERE project_id = ${projectId} AND customer_id = ${customerId} AND active = true
+		`,
+	);
+	await executeRows(
+		executor,
+		drizzleSql`
+		INSERT INTO license_pools (project_id, customer_id, subscription_id, plan_item_id, feature_id, quantity)
+		SELECT subscription.project_id, subscription.customer_id, subscription.id, item.id, item.feature_id,
+			COALESCE(subscription_item.quantity, item.quantity::integer)
+		FROM subscriptions subscription
+		JOIN plan_items item
+			ON item.project_id = subscription.project_id
+			AND item.plan_version_id = subscription.plan_version_id
+		JOIN price_components price
+			ON price.project_id = item.project_id AND price.plan_item_id = item.id
+			AND price.component_kind = 'licensed'
+		LEFT JOIN subscription_items subscription_item
+			ON subscription_item.project_id = subscription.project_id
+			AND subscription_item.subscription_id = subscription.id
+			AND subscription_item.price_component_id = price.id
+			AND subscription_item.active = true
+		WHERE subscription.project_id = ${projectId} AND subscription.customer_id = ${customerId}
+			AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+			AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
+			AND item.item_kind = 'licensed_quantity' AND item.allocation_scope = 'license_pool'
+		ON CONFLICT (project_id, subscription_id, plan_item_id) DO UPDATE SET
+			quantity = EXCLUDED.quantity, active = true, updated_at = now()
+	`,
+	);
 }
 
 async function requireCustomer(

@@ -696,6 +696,99 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		).toMatchObject({ assignedQuantity: 0, allowed: false });
 	});
 
+	it("stops authorizing seats beyond a downgraded license pool", async () => {
+		await seedCatalogMigration(context.sql);
+		for (const externalId of ["workspace-a", "workspace-b"]) {
+			await context.repository.controlsEnterprise.createEntity(project, {
+				billingAccountId: "migration-stripe",
+				externalId,
+				kind: "workspace",
+			});
+		}
+		const [pool] = await context.repository.controlsEnterprise.listLicensePools(
+			project,
+			"migration-stripe",
+		);
+		expect(pool).toMatchObject({ quantity: 7, availableQuantity: 7 });
+		await context.repository.controlsEnterprise.assignLicense(project, {
+			billingAccountId: "migration-stripe",
+			poolId: pool?.id ?? "",
+			entityId: "workspace-a",
+			quantity: 7,
+			actor: "integration-test",
+		});
+		await downgradeLicensedSeats(context.sql, 1);
+
+		expect(
+			await context.repository.controlsEnterprise.checkEntityLicense(project, {
+				billingAccountId: "migration-stripe",
+				entityId: "workspace-a",
+				featureKey: "licensed_seats",
+				requiredQuantity: 7,
+			}),
+		).toMatchObject({ assignedQuantity: 1, allowed: false });
+		expect(
+			await context.repository.controlsEnterprise.checkEntityLicense(project, {
+				billingAccountId: "migration-stripe",
+				entityId: "workspace-a",
+				featureKey: "licensed_seats",
+				requiredQuantity: 1,
+			}),
+		).toMatchObject({ assignedQuantity: 1, allowed: true });
+		// The remembered pool id validates against the refreshed capacity, not the one it listed.
+		await expect(
+			context.repository.controlsEnterprise.assignLicense(project, {
+				billingAccountId: "migration-stripe",
+				poolId: pool?.id ?? "",
+				entityId: "workspace-b",
+				quantity: 1,
+				actor: "integration-test",
+			}),
+		).rejects.toMatchObject({ code: "LICENSE_POOL_EXHAUSTED" });
+		expect(
+			await context.repository.controlsEnterprise.listLicensePools(project, "migration-stripe"),
+		).toMatchObject([{ id: pool?.id, quantity: 1, assignedQuantity: 7, availableQuantity: 0 }]);
+	});
+
+	it("honors license assignments in assignment order after a partial downgrade", async () => {
+		await seedCatalogMigration(context.sql);
+		for (const externalId of ["workspace-a", "workspace-b"]) {
+			await context.repository.controlsEnterprise.createEntity(project, {
+				billingAccountId: "migration-stripe",
+				externalId,
+				kind: "workspace",
+			});
+		}
+		const [pool] = await context.repository.controlsEnterprise.listLicensePools(
+			project,
+			"migration-stripe",
+		);
+		for (const [entityId, quantity] of [
+			["workspace-a", 4],
+			["workspace-b", 3],
+		] as const) {
+			await context.repository.controlsEnterprise.assignLicense(project, {
+				billingAccountId: "migration-stripe",
+				poolId: pool?.id ?? "",
+				entityId,
+				quantity,
+				actor: "integration-test",
+			});
+		}
+		await downgradeLicensedSeats(context.sql, 5);
+
+		const check = async (entityId: string, requiredQuantity: number) =>
+			await context.repository.controlsEnterprise.checkEntityLicense(project, {
+				billingAccountId: "migration-stripe",
+				entityId,
+				featureKey: "licensed_seats",
+				requiredQuantity,
+			});
+		expect(await check("workspace-a", 4)).toMatchObject({ assignedQuantity: 4, allowed: true });
+		expect(await check("workspace-b", 3)).toMatchObject({ assignedQuantity: 1, allowed: false });
+		expect(await check("workspace-b", 1)).toMatchObject({ assignedQuantity: 1, allowed: true });
+	});
+
 	async function consume(billingAccountId: string, quantity: string, idempotencyKey: string) {
 		return await context.repository.consumeUsage(project, {
 			billingAccountId,
@@ -770,6 +863,18 @@ async function seedControlCatalog(sql: SQL): Promise<void> {
 		JOIN store_products store ON store.project_id = project.id
 			AND store.provider = 'stripe' AND store.external_price_id = 'price_credits_10'
 		WHERE project.key = 'voysee'
+	`;
+}
+
+/** Applies a provider seat change to the Stripe migration subscription's licensed item. */
+async function downgradeLicensedSeats(sql: SQL, quantity: number): Promise<void> {
+	await sql`
+		UPDATE subscription_items item SET quantity = ${quantity}, updated_at = now()
+		FROM subscriptions subscription, price_components price
+		WHERE subscription.project_id = item.project_id AND subscription.id = item.subscription_id
+			AND subscription.external_subscription_id = 'sub_migrate_stripe'
+			AND price.project_id = item.project_id AND price.id = item.price_component_id
+			AND price.component_kind = 'licensed'
 	`;
 }
 
