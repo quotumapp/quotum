@@ -16,6 +16,19 @@ export function canonicalDecimal(value: string, field: string, maxScale = 9): st
 	return canonicalFraction === "" ? whole : `${whole}.${canonicalFraction}`;
 }
 
+/**
+ * A canonical decimal that may carry a leading minus, for monetary deltas that can fall as well
+ * as rise. Negative zero renders as "0".
+ */
+export function canonicalSignedDecimal(value: string, field: string, maxScale = 9): string {
+	const trimmed = value.trim();
+	if (!trimmed.startsWith("-")) {
+		return canonicalDecimal(trimmed, field, maxScale);
+	}
+	const magnitude = canonicalDecimal(trimmed.slice(1), field, maxScale);
+	return magnitude === "0" ? magnitude : `-${magnitude}`;
+}
+
 export function positiveDecimal(value: string, field: string, maxScale = 9): string {
 	const canonical = canonicalDecimal(value, field, maxScale);
 	if (decimalToUnits(canonical, maxScale) <= 0n) {
