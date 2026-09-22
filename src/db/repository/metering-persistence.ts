@@ -395,8 +395,8 @@ export function meterLimitSpendDelta(
 		return { spendMinorDelta: "0", currency: null };
 	}
 	const scale = meterLimit.feature.credit_scale;
-	const currentUnits =
-		decimalToUnits(balance.consumed, scale) + decimalToUnits(balance.held, scale);
+	// Only committed usage earns a volume discount. Monetary holds are separate budget quotes.
+	const currentUnits = decimalToUnits(balance.consumed, scale);
 	const nextUnits = currentUnits + decimalToUnits(quantity, scale);
 	const current = calculateMeteredOverageCharge(meterLimit, unitsToDecimal(currentUnits, scale));
 	const next = calculateMeteredOverageCharge(meterLimit, unitsToDecimal(nextUnits, scale));
@@ -404,6 +404,54 @@ export function meterLimitSpendDelta(
 		spendMinorDelta: String(next.amountMinor - current.amountMinor),
 		currency: meterLimit.overagePrice.currency,
 	};
+}
+
+/**
+ * Quotes a nonnegative budget for a reservation. A volume quote covers the most expensive partial
+ * confirmation at the current committed quantity, including the charge just before a tier drops.
+ * Quotes stay fixed until finalization; confirmation rerates actual usage and rechecks controls.
+ */
+export function meterLimitReservationSpend(
+	meterLimit: MeterLimitDecision,
+	balance: MeteringBalance,
+	quantity: string,
+): { spendMinorDelta: string; currency: string | null } {
+	const price = meterLimit.overagePrice;
+	const scale = meterLimit.feature.credit_scale;
+	if (price?.pricingModel !== "volume") {
+		// Monotone prices can quote the next hold after the quantities already reserved.
+		return meterLimitSpendDelta(
+			meterLimit,
+			{
+				...balance,
+				consumed: unitsToDecimal(
+					decimalToUnits(balance.consumed, scale) + decimalToUnits(balance.held, scale),
+					scale,
+				),
+			},
+			quantity,
+		);
+	}
+	const currentUnits = decimalToUnits(balance.consumed, scale);
+	const lastUnits = currentUnits + decimalToUnits(quantity, scale);
+	const includedUnits = decimalToUnits(meterLimit.limit, scale);
+	const current = calculateMeteredOverageCharge(meterLimit, balance.consumed).amountMinor;
+	let maximum = current;
+	const candidates = [lastUnits];
+	for (const tier of price.tiers) {
+		if (tier.upToQuantity === null) continue;
+		const boundary = includedUnits + decimalToUnits(tier.upToQuantity, scale);
+		if (boundary > currentUnits && boundary < lastUnits) candidates.push(boundary);
+	}
+	// Charges and rounding are monotone within each tier, so interval endpoints contain the peak.
+	for (const candidate of candidates) {
+		const charge = calculateMeteredOverageCharge(
+			meterLimit,
+			unitsToDecimal(candidate, scale),
+		).amountMinor;
+		if (charge > maximum) maximum = charge;
+	}
+	return { spendMinorDelta: (maximum - current).toString(), currency: price.currency };
 }
 
 export function calculateMeteredOverageCharge(
@@ -649,7 +697,7 @@ export async function reserveMeterLimit(
 		`,
 	);
 	if (reservation === null) throw new Error("Meter-limit reservation could not be persisted");
-	const spend = meterLimitSpendDelta(input.meterLimit, spendBalance, input.quantity);
+	const spend = meterLimitReservationSpend(input.meterLimit, spendBalance, input.quantity);
 	const controlDenial = await holdControls(
 		executor,
 		{

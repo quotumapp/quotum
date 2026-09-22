@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
@@ -6,7 +6,11 @@ import {
 	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
-import { overageFeatureKey, seedOverageSubscriber } from "./helpers/overage-fixtures";
+import {
+	closeUsageWindows,
+	overageFeatureKey,
+	seedOverageSubscriber,
+} from "./helpers/overage-fixtures";
 import { seedPhase3ControlCatalog } from "./helpers/phase3-fixtures";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
@@ -30,6 +34,33 @@ localDescribe("spend controls over volume-priced overage", () => {
 
 	afterAll(async () => {
 		await context.sql.close();
+	});
+
+	it("enforces new controls when the API clock trails the database", async () => {
+		const account = "clock-skew";
+		await seedOverageSubscriber(context.sql, {
+			account,
+			provider: "stripe",
+			pricingModel: "volume",
+		});
+		await upsertSpendLimit(account, "200");
+		setSystemTime(new Date(Date.now() - 60_000));
+		try {
+			expect(await consume(account, "125", "first")).toMatchObject({ allowed: true });
+			expect(await spendExposure(account)).toBe("200");
+			expect(
+				await context.repository.checkUsage(project, {
+					billingAccountId: account,
+					featureKey: overageFeatureKey(account),
+					quantity: "100",
+				}),
+			).toMatchObject({ allowed: false, reason: "control_limit_exceeded" });
+			const held = await reserve(account, "1", "hold");
+			expect(await confirm(account, held, "1")).toMatchObject({ allowed: true });
+			expect(await spendExposure(account)).toBe("161");
+		} finally {
+			setSystemTime();
+		}
 	});
 
 	it("records a falling charge as lower exposure and still denies the next real increase", async () => {
@@ -114,6 +145,100 @@ localDescribe("spend controls over volume-priced overage", () => {
 		expect(await spendWindow("volume-hold")).toEqual({ consumed: "161", held: "0", holds: 0 });
 		expect(await controlEntries(confirmation.usageEventId)).toEqual(["-39"]);
 	});
+	it("keeps committed spend exact when consuming across a held discount and then releasing", async () => {
+		const account = "volume-interleaved";
+		await seedOverageSubscriber(context.sql, {
+			account,
+			provider: "stripe",
+			pricingModel: "volume",
+		});
+		await upsertSpendLimit(account, "201");
+		expect(await consume(account, "125", "initial")).toMatchObject({ allowed: true });
+		const reservationId = await reserve(account, "1", "discount");
+		expect(await consume(account, "1", "while-held")).toMatchObject({ allowed: true });
+		expect(await spendExposure(account)).toBe("161");
+		await release(account, reservationId);
+		expect(await spendExposure(account)).toBe("161");
+		expect(await consume(account, "26", "within-cap")).toMatchObject({ allowed: true });
+		expect(await spendExposure(account)).toBe("192");
+		await closeUsageWindows(context.sql);
+		await context.repository.materializeAndClaimUsageInvoicePeriods("volume-worker", 10);
+		const [invoice] =
+			await context.sql`SELECT amount_minor::text AS amount FROM usage_invoice_periods`;
+		expect(invoice?.amount).toBe("192");
+	});
+
+	it("quotes multiple holds conservatively and settles partial confirmation, release, and correction", async () => {
+		const account = "volume-multiple";
+		await seedOverageSubscriber(context.sql, {
+			account,
+			provider: "stripe",
+			pricingModel: "volume",
+		});
+		await upsertSpendLimit(account, "260");
+		expect(await consume(account, "100", "initial")).toMatchObject({ allowed: true });
+		const first = await reserve(account, "50", "first");
+		const second = await reserve(account, "25", "second");
+		// Each quote protects the 125-unit peak, even though confirming all 50 costs only 40 more.
+		expect(await spendWindow(account)).toMatchObject({ consumed: "150", held: "100" });
+		expect(await consume(account, "1", "intervening")).toMatchObject({ allowed: true });
+		expect(await spendWindow(account)).toMatchObject({ consumed: "152", held: "100" });
+		const confirmed = await confirm(account, first, "10");
+		expect(confirmed).toMatchObject({ allowed: true, status: "confirmed" });
+		expect(await spendWindow(account)).toMatchObject({ consumed: "172", held: "50" });
+		await release(account, second);
+		expect(await spendWindow(account)).toMatchObject({ consumed: "172", held: "0" });
+		await correct(account, confirmed, "10");
+		expect(await spendWindow(account)).toMatchObject({ consumed: "152", held: "0" });
+	});
+
+	it("rechecks the actual confirmation charge after a zero quote and intervening usage", async () => {
+		const account = "volume-confirm-budget";
+		await seedOverageSubscriber(context.sql, {
+			account,
+			provider: "stripe",
+			pricingModel: "volume",
+		});
+		await upsertSpendLimit(account, "201");
+		expect(await consume(account, "125", "initial")).toMatchObject({ allowed: true });
+		const reservationId = await reserve(account, "1", "discount");
+		expect(await consume(account, "34", "intervening")).toMatchObject({ allowed: true });
+		expect(await spendExposure(account)).toBe("201");
+		expect(await confirm(account, reservationId, "1")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			status: "active",
+		});
+		expect(await spendExposure(account)).toBe("201");
+		await release(account, reservationId);
+		expect(await spendWindow(account)).toMatchObject({ consumed: "201", held: "0" });
+	});
+
+	for (const operation of ["consume", "confirm"] as const) {
+		it(`retains zero-cost ${operation} provenance for a later correction that raises the volume charge`, async () => {
+			const account = `volume-zero-${operation}`;
+			await seedOverageSubscriber(context.sql, {
+				account,
+				provider: "stripe",
+				pricingModel: "volume",
+			});
+			await upsertSpendLimit(account, "201");
+			const original =
+				operation === "consume"
+					? await consume(account, "1", "free")
+					: await confirm(account, await reserve(account, "1", "free"), "1");
+			expect(original).toMatchObject({ allowed: true });
+			expect(await controlEntries(original.usageEventId)).toEqual(["0"]);
+			expect(await consume(account, "125", "later")).toMatchObject({ allowed: true });
+			expect(await spendExposure(account)).toBe("161");
+			const held = await reserve(account, "1", "pending");
+			await correct(account, original, "1");
+			// Removing the earlier free unit crosses back to the dearer tier: a +39 correction.
+			expect(await spendExposure(account)).toBe("200");
+			await release(account, held);
+			expect(await spendWindow(account)).toMatchObject({ consumed: "200", held: "0" });
+		});
+	}
 });
 
 async function upsertSpendLimit(billingAccountId: string, limitValue: string): Promise<void> {
@@ -176,4 +301,50 @@ async function controlEntries(usageEventId: string | null): Promise<string[]> {
 		ORDER BY control_window_id
 	`;
 	return rows.map((row) => row.value);
+}
+
+async function reserve(account: string, quantity: string, key: string): Promise<string> {
+	const result = await context.repository.reserveUsage(project, {
+		billingAccountId: account,
+		featureKey: overageFeatureKey(account),
+		quantity,
+		idempotencyKey: `${account}:reserve:${key}`,
+		expiresInSeconds: 300,
+	});
+	expect(result).toMatchObject({ allowed: true, status: "active" });
+	if (result.reservationId === null) throw new Error("Expected reservation id");
+	return result.reservationId;
+}
+
+async function confirm(account: string, reservationId: string, quantity: string) {
+	return await context.repository.confirmUsageReservation(project, {
+		billingAccountId: account,
+		reservationId,
+		quantity,
+		idempotencyKey: `${account}:confirm:${reservationId}`,
+	});
+}
+
+async function release(account: string, reservationId: string) {
+	return await context.repository.releaseUsageReservation(project, {
+		billingAccountId: account,
+		reservationId,
+		idempotencyKey: `${account}:release:${reservationId}`,
+	});
+}
+
+async function correct(
+	account: string,
+	original: { usageEventId: string | null; recordedAt: string | null },
+	quantity: string,
+) {
+	return await context.repository.correctUsage(project, {
+		billingAccountId: account,
+		originalUsageEventId: original.usageEventId ?? "",
+		originalRecordedAt: new Date(original.recordedAt ?? ""),
+		quantity,
+		idempotencyKey: `${account}:correct:${original.usageEventId}`,
+		actor: "integration-test",
+		reason: "unused quantity",
+	});
 }

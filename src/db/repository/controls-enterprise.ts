@@ -1110,19 +1110,22 @@ export class ControlsEnterpriseRepository
 	}
 }
 
+/** Match policy activation and window bounds to their authoritative database clock. */
+export async function readControlClock(executor: QueryExecutor, now?: Date): Promise<Date> {
+	if (now !== undefined) return now;
+	const clock = await executeOne<{ current_time: Date | string }>(
+		executor,
+		drizzleSql`SELECT CURRENT_TIMESTAMP AS current_time`,
+	);
+	if (clock === null) throw new Error("Database clock could not be read");
+	return clock.current_time instanceof Date ? clock.current_time : new Date(clock.current_time);
+}
+
 export async function resolveEffectiveControls(
 	executor: QueryExecutor,
 	input: { projectId: string; customerId: string; entityId: string | null; now?: Date },
 ): Promise<EffectiveControl[]> {
-	let now = input.now;
-	if (now === undefined) {
-		const clock = await executeOne<{ current_time: Date | string }>(
-			executor,
-			drizzleSql`SELECT CURRENT_TIMESTAMP AS current_time`,
-		);
-		if (clock === null) throw new Error("Database clock could not be read");
-		now = clock.current_time instanceof Date ? clock.current_time : new Date(clock.current_time);
-	}
+	const now = await readControlClock(executor, input.now);
 	// One statement: the active contract is resolved inline so this read can be pipelined.
 	const rows = await executeRows<EffectiveControlRow>(
 		executor,

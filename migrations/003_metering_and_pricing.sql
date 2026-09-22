@@ -1356,7 +1356,8 @@ CREATE TABLE IF NOT EXISTS usage_event_control_entries (
 	usage_event_recorded_at TIMESTAMPTZ NOT NULL,
 	usage_event_id UUID NOT NULL,
 	control_window_id BIGINT NOT NULL REFERENCES control_windows(id) ON DELETE RESTRICT,
-	value NUMERIC(38, 9) NOT NULL CHECK (value <> 0),
+	-- Zero-valued entries preserve the control association for later usage corrections.
+	value NUMERIC(38, 9) NOT NULL,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	PRIMARY KEY (project_id, usage_event_recorded_at, usage_event_id, control_window_id),
 	CONSTRAINT usage_event_control_entries_event_fk

@@ -9,7 +9,11 @@ import {
 } from "../../billing/decimal";
 import type { BillingProvider } from "../../billing/types";
 import { type ProviderCapabilityLookup, providersImplementing } from "../../providers/capabilities";
-import { controlWindowBounds, resolveEffectiveControls } from "./controls-enterprise";
+import {
+	controlWindowBounds,
+	readControlClock,
+	resolveEffectiveControls,
+} from "./controls-enterprise";
 import { executeOne, executeRows } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -74,7 +78,7 @@ async function evaluateControls(
 	mode: "check" | "consume" | "hold",
 	reservationId: string | null,
 ): Promise<ControlConsumptionResult> {
-	const now = input.now ?? new Date();
+	const now = await readControlClock(executor, input.now);
 	// The customer lock is issued first, so it executes before the pipelined control read.
 	const [, effectiveControls] = await Promise.all([
 		mode === "check"
@@ -112,7 +116,7 @@ async function evaluateControls(
 				? canonicalDecimal(input.usageDelta, "usage control delta", 9)
 				: canonicalSignedDecimal(input.spendMinorDelta ?? "0", "spend control delta", 9);
 		const deltaUnits = signedDecimalToUnits(delta, 9);
-		if (deltaUnits === 0n || (deltaUnits < 0n && mode !== "consume")) continue;
+		if (deltaUnits <= 0n && mode !== "consume") continue;
 		const bounds = controlWindowBounds(control.interval, now);
 		let window: {
 			id: string | number | bigint;
@@ -206,7 +210,7 @@ async function evaluateControls(
 			if (updated === null) throw new Error("Control window disappeared during consumption");
 			const applied =
 				decimalToUnits(String(updated.consumed_value), 9) - decimalToUnits(item.consumed, 9);
-			if (applied !== 0n) {
+			if (applied !== 0n || item.control.controlKind === "spend_limit") {
 				entries.push({ controlWindowId: item.windowId, value: unitsToDecimal(applied, 9) });
 			}
 			continue;
@@ -239,6 +243,7 @@ export async function confirmControlHolds(
 	executor: QueryExecutor,
 	input: ControlDeltaInput & { reservationId: string },
 ): Promise<ControlConsumptionResult> {
+	const now = await readControlClock(executor, input.now);
 	// The customer lock is issued first; the hold and control reads behind it are pipelined.
 	const [, existingHolds, resolvedControls] = await Promise.all([
 		lockCustomerControls(executor, input.projectId, input.customerId),
@@ -273,7 +278,7 @@ export async function confirmControlHolds(
 			projectId: input.projectId,
 			customerId: input.customerId,
 			entityId: input.entityId,
-			now: input.now ?? new Date(),
+			now: now,
 		}),
 	]);
 	const activeControls = resolvedControls.filter(
@@ -287,7 +292,7 @@ export async function confirmControlHolds(
 	const existingPolicyIds = new Set(existingHolds.map((hold) => String(hold.control_policy_id)));
 	for (const control of activeControls) {
 		if (existingPolicyIds.has(control.policyId)) continue;
-		const bounds = controlWindowBounds(control.interval, input.now ?? new Date());
+		const bounds = controlWindowBounds(control.interval, now);
 		await executeRows(
 			executor,
 			drizzleSql`
@@ -330,6 +335,7 @@ export async function confirmControlHolds(
 		held: string;
 		target: string;
 		hasHold: boolean;
+		spend: boolean;
 		consumed: bigint;
 	}> = [];
 	for (const hold of existingHolds.sort((left, right) =>
@@ -377,6 +383,7 @@ export async function confirmControlHolds(
 			held: canonicalDecimal(String(hold.held_value), "held control value", 9),
 			target,
 			hasHold: ownHeld > 0n,
+			spend: hold.control_kind === "spend_limit",
 			consumed: consumedUnits,
 		});
 	}
@@ -409,7 +416,7 @@ export async function confirmControlHolds(
 			`,
 			);
 		}
-		if (applied !== 0n) {
+		if (applied !== 0n || change.spend) {
 			entries.push({ controlWindowId: change.windowId, value: unitsToDecimal(applied, 9) });
 		}
 	}
@@ -426,8 +433,8 @@ export async function recordUsageControlEntries(
 	},
 ): Promise<void> {
 	for (const entry of input.entries) {
-		// A falling charge records a negative entry so a later correction finds the window.
-		if (signedDecimalToUnits(entry.value, 9) === 0n) continue;
+		// Keep even a zero spend delta: after later usage, correcting this event can change the
+		// total charge. The event must retain its control-window association for that rerating.
 		await executeRows(
 			executor,
 			drizzleSql`
