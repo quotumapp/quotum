@@ -1663,8 +1663,11 @@ async function usageInvoiceAdjustmentJob(
 		`,
 	);
 	if (row === null) throw new Error(`Usage invoice adjustment ${adjustmentId} cannot be invoiced`);
+	// The amount carries the sign of the rated difference: a correction usually credits, but volume
+	// pricing can move the corrected usage into a dearer tier and owe more. Zero differences are
+	// stored as credited and never claimed, so only a zero or unsafe amount is unbuildable here.
 	const amountMinor = Number(row.amount_minor);
-	if (!Number.isSafeInteger(amountMinor) || amountMinor >= 0) {
+	if (!Number.isSafeInteger(amountMinor) || amountMinor === 0) {
 		throw new Error(`Usage invoice adjustment ${adjustmentId} has an invalid amount`);
 	}
 	return {

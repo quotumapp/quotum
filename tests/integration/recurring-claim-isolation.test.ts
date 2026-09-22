@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
 import type { OperationTiming } from "../../src/providers/contract";
+import { wrapStripeService } from "../../src/providers/stripe/adapter";
+import { StripeBillingService } from "../../src/providers/stripe/service";
 import {
 	RecurringBillingWorker,
 	type RecurringBillingWorkerAdapter,
 } from "../../src/workers/recurring-billing";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
+import { createFakeStripeBillingClient } from "./helpers/fake-provider-clients";
 import {
 	setSubscriptionChangeAttempts,
 	setUsageInvoiceAdjustmentAttempts,
@@ -85,7 +88,7 @@ localDescribe("Recurring billing claim isolation", () => {
 		]);
 	});
 
-	it("invoices other adjustments while a positive volume adjustment fails on its own", async () => {
+	it("invoices other adjustments while an adjustment without a Stripe customer fails on its own", async () => {
 		await seedPhase3ControlCatalog(context.sql);
 		await seedOverageSubscriber(context.sql, { account: "iso-flat", provider: "stripe" });
 		await seedOverageSubscriber(context.sql, {
@@ -111,6 +114,8 @@ localDescribe("Recurring billing claim isolation", () => {
 			{ account: "iso-volume", amount_minor: "8", status: "pending", attempts: 0 },
 		]);
 
+		// Without its Stripe customer the volume adjustment is claimed and cannot be built.
+		await unlinkStripeCustomer(context.sql, "iso-volume");
 		expect(await runWorkerOnce(failures)).toMatchObject({
 			materializedUsagePeriods: 0,
 			usageInvoicesCreated: 0,
@@ -118,7 +123,7 @@ localDescribe("Recurring billing claim isolation", () => {
 			failed: 1,
 		});
 		const poisoned = await adjustmentId("iso-volume");
-		expect(failures).toEqual([`Usage invoice adjustment ${poisoned} has an invalid amount`]);
+		expect(failures).toEqual([`Usage invoice adjustment ${poisoned} cannot be invoiced`]);
 		expect(await adjustmentRows()).toEqual([
 			{ account: "iso-flat", amount_minor: "-10", status: "invoiced", attempts: 1 },
 			{ account: "iso-volume", amount_minor: "8", status: "pending", attempts: 1 },
@@ -129,6 +134,78 @@ localDescribe("Recurring billing claim isolation", () => {
 		expect(await adjustmentRows()).toEqual([
 			{ account: "iso-flat", amount_minor: "-10", status: "invoiced", attempts: 1 },
 			{ account: "iso-volume", amount_minor: "8", status: "failed", attempts: 8 },
+		]);
+	});
+
+	it("collects a positive volume adjustment with payment and credits a negative one without", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedOverageSubscriber(context.sql, { account: "iso-flat", provider: "stripe" });
+		await seedOverageSubscriber(context.sql, {
+			account: "iso-volume",
+			provider: "stripe",
+			pricingModel: "volume",
+		});
+		const flatUsage = await consumeOverage("iso-flat");
+		const volumeUsage = await consumeOverage("iso-volume");
+		await closeUsageWindows(context.sql);
+		const stripe = createFakeStripeBillingClient();
+		const adapter = wrapStripeService(
+			new StripeBillingService({
+				config: {
+					projectKey: "voysee",
+					checkoutSuccessUrl: "https://app.integration.test/billing/success",
+					checkoutCancelUrl: "https://app.integration.test/billing",
+					portalReturnUrl: "https://app.integration.test/account/billing",
+				},
+				client: stripe.client,
+				repository: context.repository.forProject(project),
+			}),
+		);
+		const failures: string[] = [];
+		expect(await runWorkerOnce(failures, adapter)).toMatchObject({
+			materializedUsagePeriods: 2,
+			usageInvoicesCreated: 2,
+			failed: 0,
+		});
+
+		await correctOverage("iso-flat", flatUsage);
+		await correctOverage("iso-volume", volumeUsage);
+		expect(await runWorkerOnce(failures, adapter)).toMatchObject({
+			materializedUsagePeriods: 0,
+			usageInvoicesCreated: 0,
+			usageAdjustmentsCreated: 2,
+			failed: 0,
+		});
+		expect(failures).toEqual([]);
+		expect(await adjustmentRows()).toEqual([
+			{ account: "iso-flat", amount_minor: "-10", status: "invoiced", attempts: 1 },
+			{ account: "iso-volume", amount_minor: "8", status: "invoiced", attempts: 1 },
+		]);
+
+		// The credit finalizes without collecting; the dearer tier is paid like a period charge.
+		const flat = await adjustmentId("iso-flat");
+		const volume = await adjustmentId("iso-volume");
+		const adjustmentCalls = stripe.calls.filter((call) =>
+			call.includes(":usage-invoice:adjustment:"),
+		);
+		expect(adjustmentCalls).toEqual([
+			`createInvoice:billing:usage-invoice:adjustment:${flat}:create`,
+			`addInvoiceLines:billing:usage-invoice:adjustment:${flat}:line`,
+			`finalizeInvoice:billing:usage-invoice:adjustment:${flat}:finalize`,
+			`createInvoice:billing:usage-invoice:adjustment:${volume}:create`,
+			`addInvoiceLines:billing:usage-invoice:adjustment:${volume}:line`,
+			`finalizeInvoice:billing:usage-invoice:adjustment:${volume}:finalize`,
+			`payInvoice:billing:usage-invoice:adjustment:${volume}:pay`,
+		]);
+		expect(await adjustmentInvoiceIds()).toEqual([
+			{
+				account: "iso-flat",
+				external_invoice_id: `in_integration_billing:usage-invoice:adjustment:${flat}:create`,
+			},
+			{
+				account: "iso-volume",
+				external_invoice_id: `in_integration_billing:usage-invoice:adjustment:${volume}:create`,
+			},
 		]);
 	});
 
@@ -198,13 +275,16 @@ function committedAdapter(): RecurringBillingWorkerAdapter {
 	};
 }
 
-async function runWorkerOnce(failures: string[]) {
+async function runWorkerOnce(
+	failures: string[],
+	adapter: RecurringBillingWorkerAdapter = committedAdapter(),
+) {
 	failures.length = 0;
 	const worker = new RecurringBillingWorker({
 		projectContextResolver: context.projectContextResolver,
 		workerId: "claim-isolation-worker",
 		repository: context.repository,
-		adapterForJob: committedAdapter,
+		adapterForJob: () => adapter,
 		logger: {
 			error(_message, error) {
 				failures.push(error instanceof Error ? error.message : String(error));
@@ -283,6 +363,33 @@ async function adjustmentRows() {
 			ON customer.project_id = period.project_id AND customer.id = period.customer_id
 		WHERE adjustment.project_id = ${project.projectInstanceId}::uuid
 		ORDER BY account
+	`;
+}
+
+async function adjustmentInvoiceIds() {
+	return await context.sql<Array<{ account: string; external_invoice_id: string | null }>>`
+		SELECT customer.billing_account_id AS account, adjustment.external_invoice_id
+		FROM usage_invoice_adjustments adjustment
+		JOIN usage_invoice_periods period
+			ON period.project_id = adjustment.project_id AND period.id = adjustment.closed_period_id
+		JOIN customers customer
+			ON customer.project_id = period.project_id AND customer.id = period.customer_id
+		WHERE adjustment.project_id = ${project.projectInstanceId}::uuid
+		ORDER BY account
+	`;
+}
+
+async function unlinkStripeCustomer(
+	sql: LocalPostgresContext["sql"],
+	account: string,
+): Promise<void> {
+	await sql`
+		DELETE FROM provider_customers provider_customer
+		USING customers customer
+		WHERE provider_customer.project_id = customer.project_id
+			AND provider_customer.customer_id = customer.id
+			AND provider_customer.provider = 'stripe'
+			AND customer.billing_account_id = ${account}
 	`;
 }
 

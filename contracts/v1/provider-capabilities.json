@@ -890,7 +890,7 @@
           "composedVia": "Stripe invoices with a signed correction line",
           "conditions": [],
           "level": "quotum_composed",
-          "notes": "Late usage corrections invoice the rated difference for the closed period; negative corrections finalize without payment.",
+          "notes": "Late usage corrections invoice the rated difference for the closed period: a negative difference finalizes without payment and a positive one is paid like a period charge.",
           "verification": {
             "evidence": {
               "questions": [],
