@@ -10,6 +10,108 @@ const allocationFundingStatuses = new Set<SubscriptionStatus>([
 	"cancelled",
 ]);
 
+/**
+ * Resolves the plan version a synced subscription carries. Publishing a newer version of the same
+ * plan retargets the provider binding, but that must not move existing subscriptions: they stay
+ * grandfathered on their pinned version until an explicit subscription change or catalog migration
+ * has been applied, or the provider reports a product that belongs to another plan.
+ */
+async function resolveSubscriptionPlanVersion(
+	executor: QueryExecutor,
+	input: { projectId: string; customerId: string; storeProductId: string; subscriptionId: string },
+): Promise<{ planVersionId: string; catalogRevisionId: string; changed: boolean } | null> {
+	const row = await executeOne<{
+		current_version_id: string | number | bigint | null;
+		current_revision_id: string | number | bigint | null;
+		current_plan_id: string | number | bigint | null;
+		binding_version_id: string | number | bigint | null;
+		binding_revision_id: string | number | bigint | null;
+		binding_plan_id: string | number | bigint | null;
+		change_version_id: string | number | bigint | null;
+		change_revision_id: string | number | bigint | null;
+	}>(
+		executor,
+		drizzleSql`
+			SELECT
+				subscription.plan_version_id AS current_version_id,
+				current_version.catalog_revision_id AS current_revision_id,
+				current_version.plan_id AS current_plan_id,
+				binding_version.id AS binding_version_id,
+				binding_version.catalog_revision_id AS binding_revision_id,
+				binding_version.plan_id AS binding_plan_id,
+				change_version.id AS change_version_id,
+				change_version.catalog_revision_id AS change_revision_id
+			FROM subscriptions subscription
+			LEFT JOIN plan_versions current_version
+				ON current_version.project_id = subscription.project_id
+				AND current_version.id = subscription.plan_version_id
+			LEFT JOIN provider_plan_bindings binding
+				ON binding.project_id = subscription.project_id
+				AND binding.store_product_id = ${input.storeProductId}
+				AND binding.status = 'published'
+			LEFT JOIN plan_versions binding_version
+				ON binding_version.project_id = binding.project_id
+				AND binding_version.id = binding.plan_version_id
+				AND binding_version.status = 'published'
+			LEFT JOIN LATERAL (
+				SELECT change.to_plan_version_id
+				FROM subscription_changes change
+				WHERE change.project_id = subscription.project_id
+					AND change.subscription_id = subscription.id
+					AND change.status = 'applied'
+					AND change.from_plan_version_id = subscription.plan_version_id
+					AND change.to_plan_version_id <> subscription.plan_version_id
+				ORDER BY change.applied_at DESC, change.id DESC
+				LIMIT 1
+			) applied_change ON subscription.plan_version_id IS NOT NULL
+			LEFT JOIN plan_versions change_version
+				ON change_version.project_id = subscription.project_id
+				AND change_version.id = applied_change.to_plan_version_id
+				AND change_version.status = 'published'
+			WHERE subscription.project_id = ${input.projectId}
+				AND subscription.customer_id = ${input.customerId}
+				AND subscription.id = ${input.subscriptionId}
+		`,
+	);
+	if (row === null) return null;
+	const current =
+		row.current_version_id === null || row.current_revision_id === null
+			? null
+			: {
+					planVersionId: String(row.current_version_id),
+					catalogRevisionId: String(row.current_revision_id),
+				};
+	const binding =
+		row.binding_version_id === null || row.binding_revision_id === null
+			? null
+			: {
+					planVersionId: String(row.binding_version_id),
+					catalogRevisionId: String(row.binding_revision_id),
+				};
+	// 1. A subscription without a version adopts what the purchased product is bound to.
+	if (current === null) {
+		return binding === null ? null : { ...binding, changed: true };
+	}
+	// 2. An applied change or migration staged from the pinned version carries its target.
+	if (row.change_version_id !== null && row.change_revision_id !== null) {
+		return {
+			planVersionId: String(row.change_version_id),
+			catalogRevisionId: String(row.change_revision_id),
+			changed: true,
+		};
+	}
+	// 3. A product of another plan is a provider-side switch, so its bound version applies.
+	if (
+		binding !== null &&
+		row.binding_plan_id !== null &&
+		String(row.binding_plan_id) !== String(row.current_plan_id)
+	) {
+		return { ...binding, changed: binding.planVersionId !== current.planVersionId };
+	}
+	// 4. Otherwise the subscription stays grandfathered on its pinned version.
+	return { ...current, changed: false };
+}
+
 export async function materializeSubscriptionAllocations(
 	executor: QueryExecutor,
 	input: {
@@ -22,40 +124,25 @@ export async function materializeSubscriptionAllocations(
 		periodEndAt: Date | null;
 	},
 ): Promise<number> {
-	const binding = await executeOne<{
-		plan_version_id: string | number | bigint;
-		catalog_revision_id: string | number | bigint;
-	}>(
-		executor,
-		drizzleSql`
-			SELECT ppb.plan_version_id, pv.catalog_revision_id
-			FROM provider_plan_bindings ppb
-			JOIN plan_versions pv
-				ON pv.project_id = ppb.project_id
-				AND pv.id = ppb.plan_version_id
-			WHERE ppb.project_id = ${input.projectId}
-				AND ppb.store_product_id = ${input.storeProductId}
-				AND ppb.status = 'published'
-				AND pv.status = 'published'
-			LIMIT 1
-		`,
-	);
-	if (binding === null) return 0;
+	const version = await resolveSubscriptionPlanVersion(executor, input);
+	if (version === null) return 0;
 
-	await executeOne(
-		executor,
-		drizzleSql`
-			UPDATE subscriptions
-			SET
-				plan_version_id = ${String(binding.plan_version_id)}::bigint,
-				catalog_revision_id = ${String(binding.catalog_revision_id)}::bigint,
-				updated_at = now()
-			WHERE project_id = ${input.projectId}
-				AND customer_id = ${input.customerId}
-				AND id = ${input.subscriptionId}
-			RETURNING id
-		`,
-	);
+	if (version.changed) {
+		await executeOne(
+			executor,
+			drizzleSql`
+				UPDATE subscriptions
+				SET
+					plan_version_id = ${version.planVersionId}::bigint,
+					catalog_revision_id = ${version.catalogRevisionId}::bigint,
+					updated_at = now()
+				WHERE project_id = ${input.projectId}
+					AND customer_id = ${input.customerId}
+					AND id = ${input.subscriptionId}
+				RETURNING id
+			`,
+		);
+	}
 
 	if (!allocationFundingStatuses.has(input.status)) {
 		if (input.status === "refunded" || input.status === "revoked") {
@@ -150,7 +237,7 @@ export async function materializeSubscriptionAllocations(
 				AND pi.plan_version_id = subscription.plan_version_id
 			WHERE pi.project_id = ${input.projectId}
 				AND subscription.id = ${input.subscriptionId}
-				AND pi.plan_version_id = ${String(binding.plan_version_id)}::bigint
+				AND pi.plan_version_id = ${version.planVersionId}::bigint
 				AND pi.item_kind = 'allocation'
 			ON CONFLICT (project_id, feature_id, source_kind, source_key) DO NOTHING
 			RETURNING id
