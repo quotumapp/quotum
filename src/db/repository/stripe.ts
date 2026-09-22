@@ -1053,6 +1053,14 @@ export class StripeBillingRepository extends RepositoryModule {
 						existingSubscription.current_period_end !== null &&
 						incomingPeriodEnd < existingSubscription.current_period_end));
 			if (isStaleSubscriptionEvent) {
+				// Invoice facts carry their own event order in billing_invoices, so an invoice that
+				// arrives after a newer subscription event is still recorded; only the subscription
+				// snapshot keeps the newer state.
+				await upsertSubscriptionInvoiceFact(tx, projectId, {
+					customerId: resolved.id,
+					subscriptionId: existingSubscription.id,
+					input,
+				});
 				const snapshot = await getEntitlementSnapshot(tx, projectId, resolved.billing_account_id);
 				await enqueueProjectionSyncJob(tx, {
 					customerId: resolved.id,
@@ -1151,26 +1159,11 @@ export class StripeBillingRepository extends RepositoryModule {
 					WHERE project_id = ${projectId} AND id = ${subscriptionRecordId}
 				`,
 			);
-			if (
-				input.invoiceId !== null &&
-				input.invoiceStatus !== null &&
-				input.invoiceStatus !== undefined
-			) {
-				await upsertStripeInvoice(tx, {
-					projectId,
-					customerId: resolved.id,
-					subscriptionId: subscriptionRecordId,
-					externalInvoiceId: input.invoiceId,
-					externalSubscriptionId: input.stripeSubscriptionId,
-					status: input.invoiceStatus,
-					amountPaid: input.invoiceAmountPaid ?? 0,
-					currency: input.invoiceCurrency ?? "usd",
-					paidAt: input.invoicePaidAt ?? null,
-					providerCreatedAt: input.purchasedAt,
-					lastProviderEventCreated: input.providerEventCreated ?? 0,
-					rawPayload: input.rawPayload,
-				});
-			}
+			await upsertSubscriptionInvoiceFact(tx, projectId, {
+				customerId: resolved.id,
+				subscriptionId: subscriptionRecordId,
+				input,
+			});
 
 			const snapshot = await recomputeCustomerEntitlements(
 				tx,
@@ -1508,6 +1501,44 @@ async function upsertOneTimeStripeInvoice(
 		paidAt: input.purchasedAt,
 		providerCreatedAt: input.purchasedAt,
 		lastProviderEventCreated: 0,
+		rawPayload: input.rawPayload,
+	});
+}
+
+/**
+ * Records the invoice carried by a subscription event, if any. The invoice row keeps its own
+ * provider event order, so callers may persist it whether or not they apply the subscription
+ * snapshot from the same event.
+ */
+async function upsertSubscriptionInvoiceFact(
+	executor: QueryExecutor,
+	projectId: string,
+	fact: {
+		customerId: string;
+		subscriptionId: string;
+		input: RecordStripeSubscriptionProjectionInput;
+	},
+): Promise<void> {
+	const { input } = fact;
+	if (
+		input.invoiceId === null ||
+		input.invoiceStatus === null ||
+		input.invoiceStatus === undefined
+	) {
+		return;
+	}
+	await upsertStripeInvoice(executor, {
+		projectId,
+		customerId: fact.customerId,
+		subscriptionId: fact.subscriptionId,
+		externalInvoiceId: input.invoiceId,
+		externalSubscriptionId: input.stripeSubscriptionId,
+		status: input.invoiceStatus,
+		amountPaid: input.invoiceAmountPaid ?? 0,
+		currency: input.invoiceCurrency ?? "usd",
+		paidAt: input.invoicePaidAt ?? null,
+		providerCreatedAt: input.purchasedAt,
+		lastProviderEventCreated: input.providerEventCreated ?? 0,
 		rawPayload: input.rawPayload,
 	});
 }
