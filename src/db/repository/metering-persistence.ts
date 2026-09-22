@@ -37,6 +37,10 @@ import { enqueueUsageProjection } from "./entitlements";
 import { addUtcInterval, meterLimitWindowBounds, startOfUtcMonth } from "./meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
+import {
+	lockUsageInvoicePeriod,
+	recordUsageInvoicePeriodAdjustment,
+} from "./usage-invoice-periods";
 
 export interface FeatureRow {
 	id: string | number | bigint;
@@ -1656,9 +1660,13 @@ export async function insertUsageEvent(
 		metadata: Record<string, unknown>;
 		recordedAt?: Date;
 	},
-): Promise<{ id: string; recorded_at: Date | string }> {
+): Promise<{ id: string; recorded_at: Date | string; recorded_at_exact: string }> {
 	const recordedAt = input.recordedAt ?? new Date();
-	const row = await executeOne<{ id: string; recorded_at: Date | string }>(
+	const row = await executeOne<{
+		id: string;
+		recorded_at: Date | string;
+		recorded_at_exact: string;
+	}>(
 		executor,
 		drizzleSql`
 			INSERT INTO usage_events (
@@ -1710,7 +1718,7 @@ export async function insertUsageEvent(
 				${jsonb(input.deductions)},
 				${jsonb(input.metadata)}
 			)
-			RETURNING id, recorded_at
+			RETURNING id, recorded_at, recorded_at::text AS recorded_at_exact
 		`,
 	);
 	if (row === null) {
@@ -2034,10 +2042,17 @@ export async function confirmMeterLimitReservation(
 	) {
 		throw new Error("Meter-limit reservation lost its window identity");
 	}
-	const window = await executeOne<UsageWindowRow & { filter_key: string | null }>(
+	const window = await executeOne<
+		UsageWindowRow & {
+			filter_key: string | null;
+			subscription_id: string | null;
+			anchor_plan_item_id: string | number | bigint | null;
+		}
+	>(
 		executor,
 		drizzleSql`
-			SELECT id, window_start_at, window_end_at, usage, filter_key
+			SELECT id, window_start_at, window_end_at, usage, filter_key, subscription_id,
+				anchor_plan_item_id
 			FROM usage_windows
 			WHERE project_id = ${reservation.project_id}
 				AND id = ${String(reservation.usage_window_id)}::bigint
@@ -2179,6 +2194,15 @@ export async function confirmMeterLimitReservation(
 		usageEventRecordedAt: event.recorded_at,
 		entries: controls.entries,
 	});
+	if (sameWindow) {
+		await recordLateConfirmationAdjustment(executor, {
+			projectId: reservation.project_id,
+			window,
+			usageEventId: event.id,
+			usageEventRecordedAtExact: event.recorded_at_exact,
+			quantity,
+		});
+	}
 	await executeOne(
 		executor,
 		drizzleSql`
@@ -2220,6 +2244,51 @@ export async function confirmMeterLimitReservation(
 		),
 		deductions: [],
 	};
+}
+
+/**
+ * A reservation can outlive its usage window. The recurring worker waits for outstanding
+ * reservations before it invoices a period, so a confirmation normally lands in the window before
+ * the period exists. When a closed-period correction has already materialized the period, the
+ * confirmed usage is billed as a positive adjustment against it instead of being lost.
+ */
+async function recordLateConfirmationAdjustment(
+	executor: QueryExecutor,
+	input: {
+		projectId: string;
+		window: UsageWindowRow & {
+			subscription_id: string | null;
+			anchor_plan_item_id: string | number | bigint | null;
+		};
+		usageEventId: string;
+		usageEventRecordedAtExact: string;
+		quantity: string;
+	},
+): Promise<void> {
+	const { window } = input;
+	if (
+		window.subscription_id === null ||
+		window.anchor_plan_item_id === null ||
+		new Date(window.window_end_at).getTime() > Date.now()
+	) {
+		return;
+	}
+	const locked = await lockUsageInvoicePeriod(executor, {
+		projectId: input.projectId,
+		subscriptionId: window.subscription_id,
+		planItemId: String(window.anchor_plan_item_id),
+		periodStartAt: window.window_start_at,
+		periodEndAt: window.window_end_at,
+	});
+	if (locked === null) return;
+	await recordUsageInvoicePeriodAdjustment(executor, {
+		projectId: input.projectId,
+		period: locked.period,
+		pricingModel: locked.pricingModel,
+		usageEventId: input.usageEventId,
+		usageEventRecordedAtExact: input.usageEventRecordedAtExact,
+		quantityDelta: input.quantity,
+	});
 }
 
 async function insufficientMeterLimitConfirmation(

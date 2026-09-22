@@ -103,15 +103,134 @@ localDescribe("Usage invoice period materialization", () => {
 		`;
 		expect(window?.usage).toBe("90.000000000");
 	});
+
+	it("waits for an outstanding reservation before invoicing the period", async () => {
+		const windowEnd = await closePeriodSoon();
+		await consumeRegion("us");
+		const reservation = await reserveRegion("us", 300);
+		await sleepPast(windowEnd);
+
+		const deferred = await context.repository.materializeAndClaimUsageInvoicePeriods("worker", 10);
+		expect(deferred).toEqual({ materialized: 0, jobs: [] });
+		expect(await periodRows()).toEqual([]);
+
+		const confirmation = await context.repository.confirmUsageReservation(project, {
+			billingAccountId: account,
+			reservationId: reservation,
+			quantity: "50",
+			idempotencyKey: `${account}:confirm`,
+		});
+		expect(confirmation).toMatchObject({ allowed: true, status: "confirmed" });
+		expect(await windowUsage()).toEqual(["150.000000000"]);
+
+		const claim = await context.repository.materializeAndClaimUsageInvoicePeriods("worker", 10);
+		expect(claim.materialized).toBe(1);
+		expect(await periodRows()).toEqual([
+			{ usage_quantity: "150.000000000", amount_minor: "63", status: "processing" },
+		]);
+		expect(await adjustmentRows()).toEqual([]);
+	});
+
+	it("invoices the period once its reservation has expired", async () => {
+		const windowEnd = await closePeriodSoon();
+		await consumeRegion("us");
+		const reservation = await reserveRegion("us", 1);
+		await sleepPast(new Date(Math.max(windowEnd.getTime(), Date.now() + 1000)));
+
+		const claim = await context.repository.materializeAndClaimUsageInvoicePeriods("worker", 10);
+		expect(claim.materialized).toBe(1);
+		expect(await periodRows()).toEqual([
+			{ usage_quantity: "100.000000000", amount_minor: "38", status: "processing" },
+		]);
+
+		const confirmation = await context.repository.confirmUsageReservation(project, {
+			billingAccountId: account,
+			reservationId: reservation,
+			quantity: "50",
+			idempotencyKey: `${account}:confirm-expired`,
+		});
+		expect(confirmation).toMatchObject({ allowed: false, status: "expired" });
+		expect(await windowUsage()).toEqual(["100.000000000"]);
+		expect(await adjustmentRows()).toEqual([]);
+	});
+
+	it("bills a confirmation against a period a correction already materialized", async () => {
+		const windowEnd = await closePeriodSoon();
+		const original = await consumeRegion("us");
+		await consumeRegion("us", "again");
+		const reservation = await reserveRegion("us", 300);
+		await sleepPast(windowEnd);
+
+		await correctTen(original);
+		expect(await periodRows()).toEqual([
+			{ usage_quantity: "200.000000000", amount_minor: "88", status: "pending" },
+		]);
+
+		const confirmation = await context.repository.confirmUsageReservation(project, {
+			billingAccountId: account,
+			reservationId: reservation,
+			quantity: "50",
+			idempotencyKey: `${account}:confirm-late`,
+		});
+		expect(confirmation).toMatchObject({ allowed: true, status: "confirmed" });
+		expect(await windowUsage()).toEqual(["250.000000000"]);
+		// 240 invoiced units rate to 108; the period (88) and its adjustments (-5, +25) add up.
+		expect(await adjustmentRows()).toEqual([
+			{ quantity: "-10.000000000", amount_minor: "-5", status: "pending" },
+			{ quantity: "50.000000000", amount_minor: "25", status: "pending" },
+		]);
+		expect(await periodRows()).toHaveLength(1);
+		expect(
+			(await context.repository.materializeAndClaimUsageInvoicePeriods("worker", 10)).materialized,
+		).toBe(0);
+	});
 });
 
-async function consumeRegion(region: string) {
+/** Ends the subscriber's current period shortly, so its usage window closes on its own. */
+async function closePeriodSoon(): Promise<Date> {
+	const end = new Date(Date.now() + 1500);
+	await context.sql`
+		UPDATE subscriptions SET current_period_end = ${end.toISOString()}
+		WHERE project_id = ${project.projectInstanceId}::uuid
+			AND external_subscription_id = ${`sub_${account}`}
+	`;
+	return end;
+}
+
+async function sleepPast(instant: Date): Promise<void> {
+	await Bun.sleep(Math.max(0, instant.getTime() - Date.now() + 250));
+}
+
+async function reserveRegion(region: string, expiresInSeconds: number): Promise<string> {
+	const reservation = await context.repository.reserveUsage(project, {
+		billingAccountId: account,
+		featureKey: overageFeatureKey(account),
+		quantity: "50",
+		filters: { region },
+		expiresInSeconds,
+		idempotencyKey: `${account}:${region}:reserve`,
+	});
+	expect(reservation).toMatchObject({ allowed: true });
+	if (reservation.reservationId === null) throw new Error("Expected an accepted reservation");
+	return reservation.reservationId;
+}
+
+async function windowUsage(): Promise<string[]> {
+	const rows = await context.sql<Array<{ usage: string }>>`
+		SELECT usage::text AS usage FROM usage_windows
+		WHERE project_id = ${project.projectInstanceId}::uuid
+		ORDER BY id
+	`;
+	return rows.map((row) => row.usage);
+}
+
+async function consumeRegion(region: string, key = region) {
 	const receipt = await context.repository.consumeUsage(project, {
 		billingAccountId: account,
 		featureKey: overageFeatureKey(account),
 		quantity: "100",
 		filters: { region },
-		idempotencyKey: `${account}:${region}`,
+		idempotencyKey: `${account}:${key}`,
 	});
 	expect(receipt).toMatchObject({ allowed: true });
 	if (receipt.usageEventId === null || receipt.recordedAt === null) {
