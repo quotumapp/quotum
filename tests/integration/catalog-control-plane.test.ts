@@ -355,6 +355,158 @@ localDescribe("catalog control plane", () => {
 		expect((await publicCatalog.json()).data.plans).toEqual([]);
 	});
 
+	it("keeps grandfathered subscriptions pinned through ordinary provider syncs", async () => {
+		const errors: unknown[] = [];
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			logger: recordingErrorLogger(errors),
+		});
+		const headers = operatorHeaders(authHeaders());
+		const firstIntent = catalogIntent(1, "0.005");
+		const firstPreview = await previewCatalog(app, headers, null, firstIntent);
+		await publishCatalog(app, headers, null, firstPreview.previewToken, firstIntent, errors);
+
+		const project = integrationProjectContext();
+		const periodStart = new Date();
+		const periodEnd = new Date(periodStart.getTime() + 30 * 86_400_000);
+		const sync = async (
+			eventId: string,
+			providerEventCreated: number,
+			product: { externalProductId: string; externalPriceId: string } = {
+				externalProductId: "prod_stripe_premium",
+				externalPriceId: "price_premium_monthly",
+			},
+		) => {
+			const result = await context.repository.recordStripeSubscriptionAndEnqueueProjection(
+				project,
+				{
+					billingAccountId: "pinned-account",
+					stripeCustomerId: "cus_pinned",
+					stripeSubscriptionId: "sub_pinned",
+					invoiceId: null,
+					...product,
+					subscriptionStatus: "active",
+					purchasedAt: periodStart,
+					startsAt: periodStart,
+					expiresAt: periodEnd,
+					currentPeriodStart: periodStart,
+					currentPeriodEnd: periodEnd,
+					autoRenew: true,
+					rawPayload: {},
+					eventType: "customer.subscription.updated",
+					externalEventId: eventId,
+					projectionReason: "provider_webhook",
+					projectionIdempotencyKey: `${eventId}:projection`,
+					providerEventCreated,
+				},
+			);
+			expect(result.processingStatus).toBe("processed");
+		};
+		const pinnedVersion = async () => {
+			const [row] = await context.sql<
+				Array<{ plan_key: string; version: number; revision: number }>
+			>`
+				SELECT plan.key AS plan_key, version.version, revision.revision
+				FROM subscriptions subscription
+				JOIN plan_versions version ON version.id = subscription.plan_version_id
+				JOIN plans plan ON plan.id = version.plan_id
+				JOIN catalog_revisions revision ON revision.id = subscription.catalog_revision_id
+				WHERE subscription.external_subscription_id = 'sub_pinned'
+			`;
+			return row;
+		};
+		const allocations = async () =>
+			(
+				await context.repository.getMeteringBalance(project, "pinned-account", "ai_credits")
+			).breakdown
+				.map((allocation) => allocation.quantity)
+				.sort();
+
+		await sync("evt_pinned_purchase", 1);
+		expect(await pinnedVersion()).toEqual({ plan_key: "premium", version: 1, revision: 1 });
+		expect(await allocations()).toEqual(["1000"]);
+
+		// A newer version of the same plan rebinds the provider product but leaves the subscription
+		// grandfathered: an ordinary provider sync neither moves it nor grants the new allowance.
+		const secondIntent = catalogIntent(2, "0.01");
+		secondIntent.plans[0].items[0].quantity = "500";
+		const secondPreview = await previewCatalog(app, headers, 1, secondIntent);
+		expect(secondPreview.impact).toMatchObject({
+			planVersionsCreated: 1,
+			existingSubscriptionsGrandfathered: 1,
+		});
+		await publishCatalog(app, headers, 1, secondPreview.previewToken, secondIntent, errors);
+		await sync("evt_pinned_renewal", 2);
+		expect(await pinnedVersion()).toEqual({ plan_key: "premium", version: 1, revision: 1 });
+		expect(await allocations()).toEqual(["1000"]);
+
+		// An applied subscription change staged from the pinned version carries its target.
+		await context.sql`
+			INSERT INTO subscription_changes (
+				project_id, customer_id, subscription_id, provider, from_plan_version_id,
+				to_plan_version_id, change_kind, effective_mode, effective_at, proration_behavior,
+				status, idempotency_key, request_hash, applied_at
+			)
+			SELECT subscription.project_id, subscription.customer_id, subscription.id, 'stripe',
+				source.id, target.id, 'upgrade', 'immediate', now(), 'none', 'applied',
+				'pinned-migration', repeat('b', 64), now()
+			FROM subscriptions subscription
+			JOIN plan_versions source ON source.id = subscription.plan_version_id
+			JOIN plan_versions target
+				ON target.project_id = source.project_id AND target.plan_id = source.plan_id
+				AND target.version = 2
+			WHERE subscription.external_subscription_id = 'sub_pinned'
+		`;
+		await sync("evt_pinned_migrated", 3);
+		expect(await pinnedVersion()).toEqual({ plan_key: "premium", version: 2, revision: 2 });
+		expect(await allocations()).toEqual(["1000", "500"]);
+		// The change was staged from version 1, so it cannot move the subscription again.
+		await sync("evt_pinned_after_migration", 4);
+		expect(await pinnedVersion()).toEqual({ plan_key: "premium", version: 2, revision: 2 });
+
+		// A product of another plan is a provider-side switch and adopts that plan's bound version.
+		await context.sql`
+			INSERT INTO products (project_id, key, entitlement_key, credit_amount, name, type, active)
+			SELECT id, 'pro_monthly', 'pro', 0, 'Pro Monthly', 'subscription', true
+			FROM projects WHERE key = 'voysee'
+		`;
+		await context.sql`
+			INSERT INTO store_products (
+				project_id, product_id, provider, channel, external_product_id, external_price_id,
+				billing_period, currency, price_amount, active
+			)
+			SELECT project.id, product.id, 'stripe', 'web', 'prod_stripe_pro', 'price_pro_monthly',
+				'month', 'usd', 1999, true
+			FROM projects project
+			JOIN products product ON product.project_id = project.id AND product.key = 'pro_monthly'
+			WHERE project.key = 'voysee'
+		`;
+		const thirdIntent = {
+			...secondIntent,
+			plans: [
+				...secondIntent.plans,
+				{
+					...secondIntent.plans[0],
+					key: "pro",
+					name: "Pro",
+					version: 1,
+					baseAmountMinor: 1999,
+					items: [{ ...secondIntent.plans[0].items[0], quantity: "5000" }],
+					providerBindings: [{ productKey: "pro_monthly", provider: "stripe", channel: "web" }],
+				},
+			],
+		};
+		const thirdPreview = await previewCatalog(app, headers, 2, thirdIntent);
+		await publishCatalog(app, headers, 2, thirdPreview.previewToken, thirdIntent, errors);
+		await sync("evt_pinned_switched", 5, {
+			externalProductId: "prod_stripe_pro",
+			externalPriceId: "price_pro_monthly",
+		});
+		expect(await pinnedVersion()).toEqual({ plan_key: "pro", version: 1, revision: 3 });
+		expect(await allocations()).toEqual(["1000", "500", "5000"]);
+	});
+
 	// capability: catalog.product.subscription
 	// capability: catalog.trial
 	// capability: catalog.addon
