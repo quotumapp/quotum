@@ -371,10 +371,15 @@ describe("Stripe adapter wrapper", () => {
 
 	it("maps settlement timing from the invoice amount", () => {
 		// createUsageInvoice keeps only the invoice id, and Stripe can return an open invoice whose payment is processing.
-		expect(stripeSettlementTiming(usageInvoiceJob({ amountMinor: 1 }))).toEqual({
-			payment: { kind: "uncertain" },
-			entitlement: { kind: "unchanged" },
-		});
+		for (const job of [
+			usageInvoiceJob({ amountMinor: 1 }),
+			usageInvoiceJob({ jobKind: "adjustment", amountMinor: 8 }),
+		]) {
+			expect(stripeSettlementTiming(job)).toEqual({
+				payment: { kind: "uncertain" },
+				entitlement: { kind: "unchanged" },
+			});
+		}
 		for (const amountMinor of [0, -250]) {
 			expect(
 				stripeSettlementTiming(usageInvoiceJob({ jobKind: "adjustment", amountMinor })),

@@ -149,7 +149,7 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 		"adjustment.issue": composed(
 			"Stripe invoices with a signed correction line",
 			[serviceTest, phase3JourneysTest],
-			"Late usage corrections invoice the rated difference for the closed period; negative corrections finalize without payment.",
+			"Late usage corrections invoice the rated difference for the closed period: a negative difference finalizes without payment and a positive one is paid like a period charge.",
 		),
 		"refund.sync": native([stripeFlowsTest, serviceTest, normalizerTest], {
 			notes:

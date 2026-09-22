@@ -867,6 +867,51 @@ describe("StripeBillingService", () => {
 		expect(calls.map((call) => (call as { method: string }).method)).not.toContain("createInvoice");
 	});
 
+	// capability: adjustment.issue
+	it("pays a positive late-correction line like a period charge", async () => {
+		const { calls, service } = serviceFixture();
+		expect(
+			await service.createUsageInvoice({
+				jobKind: "adjustment",
+				jobId: "43",
+				subscriptionStatus: "active",
+				periodId: "period-1",
+				adjustmentId: "43",
+				projectInstanceId: "00000000-0000-4000-8000-000000000003",
+				projectKey: "voysee",
+				provider: "stripe",
+				providerAccountId: null,
+				billingAccountId: "user_1",
+				externalCustomerId: "cus_123",
+				externalSubscriptionId: "sub_123",
+				externalProductId: "prod_usage",
+				featureKey: "api_calls",
+				periodStartAt: "2026-01-01T00:00:00.000Z",
+				periodEndAt: "2026-02-01T00:00:00.000Z",
+				usageQuantity: "1250",
+				// Volume pricing: removing usage moved the period into a dearer tier.
+				adjustmentQuantity: "-20",
+				includedQuantity: "1000",
+				billableQuantity: "250",
+				amountMinor: 8,
+				currency: "usd",
+			}),
+		).toBe("in_usage");
+		expect(calls.slice(-4).map((call) => (call as { method: string }).method)).toEqual([
+			"createInvoice",
+			"addInvoiceLines",
+			"finalizeInvoice",
+			"payInvoice",
+		]);
+		expect(calls.at(-3)).toMatchObject({
+			params: { lines: [{ amount: 8, quantity: 1 }] },
+			idempotencyKey: "billing:usage-invoice:adjustment:43:line",
+		});
+		expect(calls.at(-1)).toMatchObject({
+			idempotencyKey: "billing:usage-invoice:adjustment:43:pay",
+		});
+	});
+
 	// capability: topup.automatic
 	it("charges a saved Stripe payment method for one idempotent automatic top-up", async () => {
 		const { calls, service } = serviceFixture();
