@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import type { SQL } from "bun";
 import type { MeteringDecision } from "../../src/billing/metering";
 import { readProjectionBalances } from "../../src/db/repository/entitlements";
+import { addUtcMonths } from "../../src/db/repository/meter-limit-windows";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
@@ -887,6 +888,89 @@ localDescribe("authoritative metering flows", () => {
 		expect(await countRows(context.sql, "usage_windows")).toBe(2);
 	});
 
+	it("resets a monthly meter limit inside an annual billing period", async () => {
+		const now = new Date();
+		// The anchor sits a day in the past so the live clock cannot cross a sub-window boundary
+		// between this expectation and the metering reads that compute the window themselves.
+		const anchor = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+		const anchorDay = anchor.getUTCDate();
+		const periodStart = addUtcMonths(anchor, -2, anchorDay);
+		const periodEnd = addUtcMonths(periodStart, 12, anchorDay);
+		let step = 0;
+		while (addUtcMonths(periodStart, step + 1, anchorDay) <= now) step += 1;
+		const previousStart = addUtcMonths(periodStart, step - 1, anchorDay);
+		const windowStart = addUtcMonths(periodStart, step, anchorDay);
+		const windowEnd = addUtcMonths(periodStart, step + 1, anchorDay);
+		await seedAnnualMeterLimitSubscription(context.sql, "annual_account", periodStart, periodEnd);
+		// Usage from the previous monthly sub-window must not count against the current one.
+		const [previous] = await context.sql<Array<{ customer_id: string }>>`
+			INSERT INTO usage_windows (
+				project_id, customer_id, feature_id, window_start_at, window_end_at, usage
+			)
+			SELECT customer.project_id, customer.id, feature.id,
+				${previousStart.toISOString()}::timestamptz, ${windowStart.toISOString()}::timestamptz, 150
+			FROM customers customer
+			JOIN features feature ON feature.project_id = customer.project_id
+				AND feature.key = 'api_requests'
+			WHERE customer.billing_account_id = 'annual_account'
+			RETURNING customer_id
+		`;
+		if (previous === undefined) throw new Error("previous window was not seeded");
+		const project = integrationProjectContext();
+		const subject = { billingAccountId: "annual_account", featureKey: "api_requests" };
+
+		const checked = await context.repository.checkUsage(project, { ...subject, quantity: "200" });
+		const consumed = await context.repository.consumeUsage(project, {
+			...subject,
+			quantity: "20",
+			idempotencyKey: "annual:consume",
+		});
+		const balances = await readProjectionBalances(
+			context.db as unknown as QueryExecutor,
+			project.projectInstanceId,
+			previous.customer_id,
+		);
+		const windows = await context.sql<
+			Array<{ window_start_at: Date; window_end_at: Date; usage: string }>
+		>`
+			SELECT window_start_at, window_end_at, usage::text AS usage
+			FROM usage_windows
+			ORDER BY window_start_at
+		`;
+
+		expect(checked).toMatchObject({
+			allowed: true,
+			balance: { granted: "200", consumed: "0", available: "200" },
+		});
+		expect(consumed).toMatchObject({
+			allowed: true,
+			balance: { granted: "200", consumed: "20", available: "180" },
+		});
+		expect(
+			windows.map((window) => ({
+				start: new Date(window.window_start_at).toISOString(),
+				end: new Date(window.window_end_at).toISOString(),
+				usage: window.usage,
+			})),
+		).toEqual([
+			{
+				start: previousStart.toISOString(),
+				end: windowStart.toISOString(),
+				usage: "150.000000000",
+			},
+			{ start: windowStart.toISOString(), end: windowEnd.toISOString(), usage: "20.000000000" },
+		]);
+		expect(balances.filter((balance) => balance.featureKey === "api_requests")).toEqual([
+			{
+				featureKey: "api_requests",
+				unit: "request",
+				available: "180",
+				held: "0",
+				periodEndsAt: windowEnd.toISOString(),
+			},
+		]);
+	});
+
 	it("rolls unused subscription allocations once with cap, expiry, and provenance", async () => {
 		await seedMeterLimitSubscription(context.sql, "account_rollover", "workspace_rollover");
 		const [origin] = await context.sql<Array<{ id: string }>>`
@@ -1245,6 +1329,66 @@ async function seedMeterLimitSubscription(
 			date_trunc('month', now()), date_trunc('month', now()) + INTERVAL '1 month',
 			plan_version_id, catalog_revision_id
 		FROM target
+	`;
+}
+
+/**
+ * An annually billed plan whose API cap resets monthly, subscribed for the given provider period.
+ */
+async function seedAnnualMeterLimitSubscription(
+	sql: SQL,
+	billingAccountId: string,
+	periodStart: Date,
+	periodEnd: Date,
+): Promise<void> {
+	await sql`
+		WITH revision AS (
+			SELECT id, published_catalog_revision_id AS revision_id
+			FROM projects WHERE key = 'voysee'
+		), annual_plan AS (
+			INSERT INTO plans (project_id, key, name)
+			SELECT id, 'api_annual', 'API Annual' FROM revision
+			RETURNING id, project_id
+		), annual_version AS (
+			INSERT INTO plan_versions (
+				project_id, plan_id, catalog_revision_id, version, status,
+				currency, base_amount_minor, billing_interval
+			)
+			SELECT annual_plan.project_id, annual_plan.id, revision.revision_id, 1, 'published',
+				'USD', 9990, 'year'
+			FROM annual_plan, revision
+			RETURNING id, project_id, catalog_revision_id
+		), annual_item AS (
+			INSERT INTO plan_items (
+				project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval
+			)
+			SELECT annual_version.project_id, annual_version.id, feature.id, 'meter_limit', 200, 'month'
+			FROM annual_version
+			JOIN features feature ON feature.project_id = annual_version.project_id
+				AND feature.key = 'api_requests'
+		), customer AS (
+			INSERT INTO customers (project_id, billing_account_id)
+			SELECT project_id, ${billingAccountId} FROM annual_version
+			RETURNING id, project_id
+		)
+		INSERT INTO subscriptions (
+			project_id, customer_id, product_id, store_product_id, provider, channel,
+			external_subscription_id, external_product_id, external_price_id, status,
+			starts_at, expires_at, current_period_start, current_period_end,
+			plan_version_id, catalog_revision_id
+		)
+		SELECT
+			customer.project_id, customer.id, products.id, store_products.id, 'stripe', 'web',
+			${`subscription:${billingAccountId}`}, 'prod_stripe_premium', 'price_premium_monthly',
+			'active', ${periodStart.toISOString()}::timestamptz, ${periodEnd.toISOString()}::timestamptz,
+			${periodStart.toISOString()}::timestamptz, ${periodEnd.toISOString()}::timestamptz,
+			annual_version.id, annual_version.catalog_revision_id
+		FROM customer
+		JOIN products ON products.project_id = customer.project_id AND products.key = 'premium_monthly'
+		JOIN store_products ON store_products.project_id = products.project_id
+			AND store_products.product_id = products.id
+			AND store_products.provider = 'stripe'
+		CROSS JOIN annual_version
 	`;
 }
 

@@ -180,6 +180,7 @@ interface MeterLimitRow {
 	quantity: unknown;
 	overage_policy: "blocked" | "allowed";
 	reset_interval: "month" | "year";
+	billing_interval: "month" | "year";
 	period_start_at: Date | string;
 	period_end_at: Date | string | null;
 }
@@ -200,12 +201,16 @@ export function queryMeterLimitRows(
 				pi.quantity,
 				pi.overage_policy,
 				pi.reset_interval,
+				pv.billing_interval,
 				COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
 				COALESCE(s.current_period_end, s.expires_at) AS period_end_at
 			FROM subscriptions s
 			JOIN plan_items pi
 				ON pi.project_id = s.project_id
 				AND pi.plan_version_id = s.plan_version_id
+			JOIN plan_versions pv
+				ON pv.project_id = pi.project_id
+				AND pv.id = pi.plan_version_id
 			WHERE s.project_id = ${projectId}
 				AND s.customer_id = ${customerId}
 				AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
@@ -274,6 +279,7 @@ export async function meterLimitDecision(
 			active.period_end_at,
 			active.reset_interval,
 			new Date(),
+			active.billing_interval,
 		);
 		const overagePrice =
 			active.overage_policy === "allowed"

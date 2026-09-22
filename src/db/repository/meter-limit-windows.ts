@@ -1,35 +1,51 @@
 import { BillingError } from "../../billing/errors";
 
+type WindowInterval = "month" | "year";
+
 /**
  * The usage window a meter limit counts against right now. Metering writes and every balance read
  * use these exact bounds, so a stale or differently anchored window for the same feature is never
  * read by accident.
+ *
+ * The provider period is the window while it is current, except when the item resets more often
+ * than the plan bills (a monthly allowance on an annual plan): the period is then split into reset
+ * sub-windows anchored at the period start, the last one clamped to the period end. Once the period
+ * has ended and no renewal has been recorded yet, windows keep rolling forward from the period end
+ * by the reset interval.
  */
 export function meterLimitWindowBounds(
 	periodStartAt: Date | string,
 	periodEndAt: Date | string | null,
-	interval: "month" | "year",
+	interval: WindowInterval,
 	now: Date,
+	billingInterval: WindowInterval | null = null,
 ): { start: Date; end: Date } {
 	const start = new Date(periodStartAt);
 	const end = periodEndAt === null ? addUtcInterval(start, interval) : new Date(periodEndAt);
+	const usesResetSubWindows =
+		periodEndAt !== null &&
+		billingInterval !== null &&
+		intervalMonths(interval) < intervalMonths(billingInterval);
+	if (usesResetSubWindows) {
+		if (now < end) {
+			return resetSubWindowBounds(start, end, interval, now);
+		}
+		// The period is over and no renewal has been recorded: keep rolling in reset-sized windows
+		// from the period end, anchored on its day, so an unaligned end does not stretch the first
+		// window past one reset interval and the renewal's first sub-window lines up with it.
+		assertPeriodBounds(start, end);
+		return rollWindowBounds(end, addUtcInterval(end, interval), interval, now);
+	}
 	return rollWindowBounds(start, end, interval, now);
 }
 
 export function rollWindowBounds(
 	start: Date,
 	end: Date,
-	interval: "month" | "year",
+	interval: WindowInterval,
 	now: Date,
 ): { start: Date; end: Date } {
-	if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end) {
-		throw new BillingError(
-			"Meter-limit subscription has invalid period bounds",
-			"METERING_CONFIGURATION_ERROR",
-			409,
-			{ classification: "persistence_conflict" },
-		);
-	}
+	assertPeriodBounds(start, end);
 	let currentStart = start;
 	let currentEnd = end;
 	const subscriptionDay = start.getUTCDate();
@@ -40,12 +56,54 @@ export function rollWindowBounds(
 	return { start: currentStart, end: currentEnd };
 }
 
+/**
+ * The reset sub-window of [start, end) that contains `now`. Every sub-window is computed from the
+ * period start and its anchor day, never from a clamped predecessor, so month-end anchors keep
+ * their day.
+ */
+function resetSubWindowBounds(
+	start: Date,
+	end: Date,
+	interval: WindowInterval,
+	now: Date,
+): { start: Date; end: Date } {
+	assertPeriodBounds(start, end);
+	const anchorDay = start.getUTCDate();
+	const months = intervalMonths(interval);
+	let step = 0;
+	let currentStart = start;
+	for (;;) {
+		const nextStart = addUtcMonths(start, months * (step + 1), anchorDay);
+		const currentEnd = nextStart < end ? nextStart : end;
+		if (now < currentEnd || currentEnd >= end) {
+			return { start: currentStart, end: currentEnd };
+		}
+		step += 1;
+		currentStart = nextStart;
+	}
+}
+
+function assertPeriodBounds(start: Date, end: Date): void {
+	if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end) {
+		throw new BillingError(
+			"Meter-limit subscription has invalid period bounds",
+			"METERING_CONFIGURATION_ERROR",
+			409,
+			{ classification: "persistence_conflict" },
+		);
+	}
+}
+
+function intervalMonths(interval: WindowInterval): number {
+	return interval === "month" ? 1 : 12;
+}
+
 export function addUtcInterval(
 	value: Date,
-	interval: "month" | "year",
+	interval: WindowInterval,
 	anchorDay = value.getUTCDate(),
 ): Date {
-	return addUtcMonths(value, interval === "month" ? 1 : 12, anchorDay);
+	return addUtcMonths(value, intervalMonths(interval), anchorDay);
 }
 
 export function addUtcMonths(value: Date, months: number, anchorDay = value.getUTCDate()): Date {
