@@ -810,6 +810,166 @@ describe("Stripe normalizer", () => {
 		});
 	});
 
+	it("prefers the invoiced subscription line over stale Checkout metadata", () => {
+		const staleMetadata = {
+			billingAccountId: "user_1",
+			externalProductId: "prod_premium",
+			externalPriceId: "price_premium_monthly",
+		};
+		const command = normalizeStripeInvoice({
+			eventId: "evt_invoice_after_upgrade",
+			eventType: "invoice.paid",
+			invoice: invoiceFixture({
+				subscription: undefined,
+				metadata: staleMetadata,
+				parent: {
+					subscription_details: {
+						subscription: "sub_123",
+						metadata: staleMetadata,
+					},
+				},
+				lines: {
+					data: [
+						{
+							period: {
+								start: stripeSeconds,
+								end: futurePeriodEnd,
+							},
+							pricing: {
+								price_details: {
+									product: "prod_upgrade",
+									price: "price_upgrade",
+								},
+							},
+							parent: {
+								subscription_item_details: {
+									subscription: "sub_123",
+									subscription_item: "si_123",
+									proration: false,
+								},
+							},
+						},
+					],
+				},
+			}),
+		});
+
+		expect(command).toMatchObject({
+			kind: "subscription",
+			billingAccountId: "user_1",
+			stripeSubscriptionId: "sub_123",
+			externalProductId: "prod_upgrade",
+			externalPriceId: "price_upgrade",
+		});
+	});
+
+	it("chooses the added price among several subscription lines", () => {
+		const changedPeriodEnd = Math.floor(Date.parse("2026-07-31T00:00:00.000Z") / 1000);
+		const subscriptionItemLine = (
+			price: string,
+			proration: boolean,
+			periodEnd: number,
+		): Record<string, unknown> => ({
+			period: { start: stripeSeconds, end: periodEnd },
+			pricing: { price_details: { product: `prod_${price}`, price: `price_${price}` } },
+			parent: { subscription_item_details: { subscription: "sub_123", proration } },
+		});
+		const prorationInvoice = normalizeStripeInvoice({
+			eventId: "evt_invoice_proration",
+			eventType: "invoice.paid",
+			invoice: invoiceFixture({
+				lines: {
+					data: [
+						subscriptionItemLine("old", true, futurePeriodEnd),
+						subscriptionItemLine("new", true, futurePeriodEnd),
+					],
+				},
+			}),
+		});
+		const renewalInvoice = normalizeStripeInvoice({
+			eventId: "evt_invoice_renewal_after_change",
+			eventType: "invoice.paid",
+			invoice: invoiceFixture({
+				lines: {
+					data: [
+						subscriptionItemLine("new", false, changedPeriodEnd),
+						subscriptionItemLine("old", true, futurePeriodEnd),
+					],
+				},
+			}),
+		});
+		const legacyInvoice = normalizeStripeInvoice({
+			eventId: "evt_invoice_legacy_proration",
+			eventType: "invoice.paid",
+			invoice: invoiceFixture({
+				lines: {
+					data: [
+						{
+							type: "subscription",
+							subscription: "sub_123",
+							proration: true,
+							period: { start: stripeSeconds, end: futurePeriodEnd },
+							price: { id: "price_old", product: "prod_old" },
+						},
+						{
+							type: "subscription",
+							subscription: "sub_123",
+							proration: false,
+							period: { start: stripeSeconds, end: changedPeriodEnd },
+							price: { id: "price_new", product: "prod_new" },
+						},
+					],
+				},
+			}),
+		});
+
+		// Both change lines are prorations with one period, so the last listed price is the new one.
+		expect(prorationInvoice).toMatchObject({
+			externalProductId: "prod_new",
+			externalPriceId: "price_new",
+		});
+		expect(renewalInvoice).toMatchObject({
+			externalProductId: "prod_new",
+			externalPriceId: "price_new",
+		});
+		expect(legacyInvoice).toMatchObject({
+			externalProductId: "prod_new",
+			externalPriceId: "price_new",
+		});
+		if (renewalInvoice.kind !== "subscription" || legacyInvoice.kind !== "subscription") {
+			throw new Error("Expected subscription invoice commands");
+		}
+		expect(renewalInvoice.expiresAt?.toISOString()).toBe("2026-07-31T00:00:00.000Z");
+		expect(legacyInvoice.expiresAt?.toISOString()).toBe("2026-07-31T00:00:00.000Z");
+	});
+
+	it("keeps metadata identity when the subscription line carries no price", () => {
+		const command = normalizeStripeInvoice({
+			eventId: "evt_invoice_line_without_price",
+			eventType: "invoice.paid",
+			invoice: invoiceFixture({
+				lines: {
+					data: [
+						{
+							period: { start: stripeSeconds, end: futurePeriodEnd },
+							parent: { subscription_item_details: { subscription: "sub_123" } },
+						},
+					],
+				},
+			}),
+		});
+
+		expect(command).toMatchObject({
+			kind: "subscription",
+			externalProductId: "prod_premium",
+			externalPriceId: "price_premium_monthly",
+		});
+		if (command.kind !== "subscription") {
+			throw new Error("Expected subscription invoice command");
+		}
+		expect(command.expiresAt?.toISOString()).toBe("2026-06-30T00:00:00.000Z");
+	});
+
 	it("maps Stripe subscription statuses to billing subscription statuses", () => {
 		const cases: {
 			stripeStatus: string;
