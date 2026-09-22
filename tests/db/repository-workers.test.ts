@@ -395,11 +395,13 @@ describe("BillingRepository workers", () => {
 
 	it("skips a candidate that cannot be materialized and still claims usage invoice work", async () => {
 		const database = new FakeDatabase([
-			[
-				usageInvoiceCandidate({ subscription_id: "poison", billing_units: "0" }),
-				usageInvoiceCandidate(),
-			],
+			[usageInvoiceCandidate({ subscription_id: "poison" }), usageInvoiceCandidate()],
+			[usageInvoicePricing({ billing_units: "0" })],
+			[{ usage: "10" }],
+			[usageInvoicePricing()],
+			[{ usage: "10" }],
 			[{ id: "materialized-period-id" }],
+			[usageInvoicePeriod()],
 			[{ id: "period-id", project_id: "project-id", project_key: "wiseley" }],
 			[
 				{
@@ -437,17 +439,25 @@ describe("BillingRepository workers", () => {
 			],
 		});
 		expect(skipped).toEqual([{ projectInstanceId: "project-id", subscriptionId: "poison" }]);
-		expect(database.queries[1]).toContain("INSERT INTO usage_invoice_periods");
-		expect(database.queries[1]).toContain("DO NOTHING");
-		expect(database.queries[2]).toContain("RETURNING periods.id, periods.project_id");
-		expect(database.queries[3]).toContain("adjustment.closed_period_id");
+		// The poison candidate fails while pricing, before its period insert.
+		expect(database.queries[2]).toContain("FROM usage_windows");
+		expect(database.queries[2]).toContain("FOR UPDATE");
+		expect(database.queries[5]).toContain("INSERT INTO usage_invoice_periods");
+		expect(database.queries[5]).toContain("DO NOTHING");
+		expect(database.queries[7]).toContain("RETURNING periods.id, periods.project_id");
+		expect(database.queries[8]).toContain("adjustment.closed_period_id");
 	});
 
 	it("materializes each candidate in its own transaction, apart from the claim", async () => {
 		const inner = new FakeDatabase([
 			[usageInvoiceCandidate({ subscription_id: "poison" }), usageInvoiceCandidate()],
+			[usageInvoicePricing()],
+			[{ usage: "10" }],
 			[],
+			[usageInvoicePricing()],
+			[{ usage: "10" }],
 			[{ id: "materialized-period-id" }],
+			[usageInvoicePeriod()],
 			[{ id: "period-id", project_id: "project-id", project_key: "wiseley" }],
 			[],
 		]);
@@ -612,6 +622,37 @@ class TransactionalDatabase {
 		const index = this.statements[statement];
 		return index === null || index === undefined ? null : this.transactions[index];
 	}
+}
+
+function usageInvoicePricing(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+	return {
+		customer_id: "customer-id",
+		provider: "stripe",
+		provider_account_id: null,
+		price_component_id: 2,
+		included_quantity: "0",
+		billing_units: "1",
+		unit_amount_minor: 500,
+		currency: "usd",
+		pricing_model: "flat",
+		...overrides,
+	};
+}
+
+function usageInvoicePeriod(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+	return {
+		id: "materialized-period-id",
+		customer_id: "customer-id",
+		price_component_id: 2,
+		usage_quantity: "10",
+		included_quantity: "0",
+		billing_units: "1",
+		unit_amount_minor: 500,
+		amount_minor: 5000,
+		currency: "usd",
+		status: "pending",
+		...overrides,
+	};
 }
 
 function usageInvoiceCandidate(overrides: Record<string, unknown> = {}): Record<string, unknown> {

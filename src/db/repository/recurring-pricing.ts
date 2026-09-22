@@ -6,8 +6,6 @@ import {
 	PersistenceConflictError,
 } from "../../billing/errors";
 import {
-	calculateTieredUsageCharge,
-	calculateUsageCharge,
 	classifySubscriptionChange,
 	defaultChangeTiming,
 	stripeProrationForChange,
@@ -29,6 +27,7 @@ import {
 } from "./promotions";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
+import { materializeUsageInvoicePeriod } from "./usage-invoice-periods";
 
 interface ChangeContextRow {
 	project_key: string;
@@ -504,8 +503,8 @@ export class RecurringPricingRepository extends RepositoryModule {
 				SELECT
 					uw.project_id, uw.customer_id, uw.subscription_id, s.provider, s.provider_account_id,
 					uw.anchor_plan_item_id AS plan_item_id,
-					pc.id AS price_component_id, uw.window_start_at AS period_start_at,
-					uw.window_end_at AS period_end_at, sum(uw.usage)::text AS usage_quantity,
+					pc.id AS price_component_id, uw.window_start_at::text AS period_start_at,
+					uw.window_end_at::text AS period_end_at, sum(uw.usage)::text AS usage_quantity,
 					pi.quantity::text AS included_quantity, pc.billing_units::text AS billing_units,
 					pc.unit_amount_minor, pc.currency, pc.pricing_model
 				FROM usage_windows uw
@@ -1707,80 +1706,16 @@ async function materializeUsagePeriod(
 	executor: QueryExecutor,
 	candidate: UsageInvoicePeriodCandidateRow,
 ): Promise<boolean> {
-	const commonCharge = {
-		usageQuantity: String(candidate.usage_quantity),
-		includedQuantity: String(candidate.included_quantity),
-		billingUnits: String(candidate.billing_units),
-	};
-	const charge =
-		candidate.pricing_model === "flat"
-			? calculateUsageCharge({
-					...commonCharge,
-					unitAmountMinor: BigInt(candidate.unit_amount_minor),
-				})
-			: calculateTieredUsageCharge({
-					...commonCharge,
-					pricingModel: candidate.pricing_model,
-					tiers: await readPriceTiers(
-						executor,
-						candidate.project_id,
-						String(candidate.price_component_id),
-					),
-				});
-	const inserted = await executeOne(
-		executor,
-		drizzleSql`
-			INSERT INTO usage_invoice_periods (
-				project_id, customer_id, subscription_id, provider, provider_account_id,
-				plan_item_id, price_component_id, period_start_at, period_end_at, usage_quantity,
-				included_quantity, billable_quantity, billing_units, unit_amount_minor,
-				amount_minor, currency, status, invoiced_at
-			)
-			VALUES (
-				${candidate.project_id}, ${candidate.customer_id}, ${candidate.subscription_id},
-				${candidate.provider}, ${candidate.provider_account_id},
-				${String(candidate.plan_item_id)}::bigint, ${String(candidate.price_component_id)}::bigint,
-				${new Date(candidate.period_start_at).toISOString()},
-				${new Date(candidate.period_end_at).toISOString()}, ${charge.usageQuantity}::numeric,
-				${charge.includedQuantity}::numeric, ${charge.billableQuantity}::numeric,
-				${String(candidate.billing_units)}::numeric, ${candidate.unit_amount_minor},
-				${charge.amountMinor.toString()}, ${candidate.currency},
-				${charge.amountMinor === 0n ? "credited" : "pending"},
-				${charge.amountMinor === 0n ? new Date().toISOString() : null}
-			)
-			ON CONFLICT (project_id, subscription_id, plan_item_id, period_start_at, period_end_at)
-			DO NOTHING
-			RETURNING id
-		`,
-	);
-	return inserted !== null;
-}
-
-async function readPriceTiers(
-	executor: QueryExecutor,
-	projectId: string,
-	priceComponentId: string,
-): Promise<
-	Array<{ upToQuantity: string | null; unitAmountMinor: bigint; flatAmountMinor: bigint }>
-> {
-	const rows = await executeRows<{
-		up_to_quantity: unknown;
-		unit_amount_minor: string | number;
-		flat_amount_minor: string | number;
-	}>(
-		executor,
-		drizzleSql`
-			SELECT up_to_quantity::text AS up_to_quantity, unit_amount_minor, flat_amount_minor
-			FROM price_tiers
-			WHERE project_id = ${projectId} AND price_component_id = ${priceComponentId}::bigint
-			ORDER BY ordinal
-		`,
-	);
-	return rows.map((row) => ({
-		upToQuantity: row.up_to_quantity === null ? null : String(row.up_to_quantity),
-		unitAmountMinor: BigInt(row.unit_amount_minor),
-		flatAmountMinor: BigInt(row.flat_amount_minor),
-	}));
+	// The candidate query only selects due periods; the priced quantity is re-read under the
+	// shared window lock so every window of the period is invoiced, whoever materializes it.
+	const materialized = await materializeUsageInvoicePeriod(executor, {
+		projectId: candidate.project_id,
+		subscriptionId: candidate.subscription_id,
+		planItemId: String(candidate.plan_item_id),
+		periodStartAt: candidate.period_start_at,
+		periodEndAt: candidate.period_end_at,
+	});
+	return materialized?.inserted === true;
 }
 
 async function usageInvoiceAdjustmentJob(
