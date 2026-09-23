@@ -237,6 +237,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const sentry = env.sentry.dsn === null ? undefined : dependencies.sentry;
 	const sentryRequestScope = sentry && createSentryRequestScope(sentry, { service: "billing" });
 	const merchantSentryScope = sentry && createSentryRequestScope(sentry, { service: "merchant" });
+	const mcpSentryScope = sentry && createSentryRequestScope(sentry, { service: "mcp" });
 	const staff = createApp({
 		env,
 		entitlementService: new EntitlementService(billingRepository),
@@ -264,6 +265,19 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		config: merchantConfig,
 		staffRequestScope: sentryRequestScope,
 		merchantRequestScope: merchantSentryScope,
+		mcpRequestScope: mcpSentryScope,
+		onMcpUnexpectedError:
+			dependencies.merchant?.onMcpUnexpectedError ??
+			((error, report) => {
+				safelyLogError(logger, "Remote MCP request failed", error, {
+					requestId: report.requestId,
+					method: report.request.method,
+					path: new URL(report.request.url).pathname,
+					route: report.route,
+					status: String(report.status),
+					code: report.code,
+				});
+			}),
 		onMerchantUnexpectedError: (error, report) => {
 			const url = new URL(report.request.url);
 			safelyLogError(logger, "Merchant request failed", error, {

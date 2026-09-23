@@ -46,6 +46,7 @@ interface ChangeContextRow {
 	downgrade_proration_behavior: "always_invoice" | "create_prorations" | "none";
 	subscription_status: string;
 	subscription_updated_at: Date | string;
+	database_now: Date | string;
 }
 
 interface ChangePriceRow {
@@ -1105,6 +1106,7 @@ async function changeContext(
 				subscription.current_period_end,
 				subscription.status AS subscription_status,
 				subscription.updated_at AS subscription_updated_at,
+				now() AS database_now,
 				target_version.upgrade_proration_behavior,
 				target_version.downgrade_proration_behavior
 			FROM projects project
@@ -1329,7 +1331,7 @@ async function resolveSubscriptionChange(
 	const effectiveMode = input.effectiveMode ?? defaultChangeTiming(changeKind);
 	const effectiveAt =
 		effectiveMode === "immediate"
-			? new Date()
+			? new Date(context.database_now)
 			: context.current_period_end === null
 				? null
 				: new Date(context.current_period_end);

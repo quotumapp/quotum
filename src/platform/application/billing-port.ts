@@ -1,5 +1,13 @@
 /** Consumer-owned operation boundary. It carries no credentials, HTTP requests, or database handles. */
 export const merchantBillingOperations = [
+	["GET", "/catalog", "stripe.catalog"],
+	["GET", "/billing-accounts/:billingAccountId/balances/:featureKey", "usage.balance"],
+	[
+		"GET",
+		"/billing-accounts/:billingAccountId/usage/operations/:operation/:operationId",
+		"usage.operation",
+	],
+	["POST", "/billing-accounts/:billingAccountId/usage/check", "usage.check"],
 	["GET", "/admin/stats/summary", "stats"],
 	["GET", "/admin/customers/search", "customers.search"],
 	["GET", "/admin/customers/by-billing-account/:billingAccountId", "customers.account"],

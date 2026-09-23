@@ -9,6 +9,7 @@ import type { MerchantStripeOAuth } from "./connections/oauth";
 import { registerConnectionRoutes } from "./connections/routes";
 import type { MerchantConnections } from "./connections/service";
 import type { MerchantMailer } from "./email";
+import { registerMcpRoutes } from "./mcp/routes";
 import { MerchantOnboarding } from "./onboarding";
 import * as responses from "./platform-responses";
 import {
@@ -46,6 +47,8 @@ const scopeSchema = z.strictObject({
 });
 const INVITE_COOKIE = "__Host-quotum_invite";
 export const MERCHANT_AUTH_POST_PATHS = new Set([
+	"/oauth2/continue",
+	"/oauth2/consent",
 	"/sign-up/email",
 	"/sign-in/email",
 	"/sign-in/social",
@@ -251,6 +254,7 @@ export function createMerchantApp({
 					termsVersion: store.config.termsVersion,
 					privacyVersion: store.config.privacyVersion,
 					publicUrl: store.config.publicUrl,
+					mcp: store.config.mcp ? { url: `${store.config.mcp.origin}/mcp` } : null,
 				},
 			};
 		},
@@ -852,12 +856,16 @@ export function createMerchantApp({
 	);
 
 	if (connections) registerConnectionRoutes(app, store, connections, stripeOAuth);
+	registerMcpRoutes(app, store, auth);
 
 	return app;
 
 	async function handleMerchantAuth(request: Request): Promise<Response> {
 		const path = new URL(request.url).pathname.slice("/api/auth".length);
 		if (request.method === "GET" && path === "/callback/google") return auth.handler(request);
+		if (path.startsWith("/oauth2/") && !store.config.mcp)
+			throw new MerchantError("NOT_FOUND", "Route not found.", 404);
+		if (request.method === "GET" && path === "/oauth2/authorize") return auth.handler(request);
 		if (request.method !== "POST" || !MERCHANT_AUTH_POST_PATHS.has(path))
 			throw new MerchantError("NOT_FOUND", "Route not found.", 404);
 		const input = z.record(z.string(), z.unknown()).parse(await merchantJson(request));

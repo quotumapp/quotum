@@ -53,7 +53,15 @@
       "code": "AUTHENTICATION_INCOMPLETE",
       "sources": [
         "src/platform/app.ts",
+        "src/platform/mcp/authorization.ts",
+        "src/platform/mcp/routes.ts",
         "src/platform/store.ts"
+      ]
+    },
+    {
+      "code": "AUTHORIZATION_IN_PROGRESS",
+      "sources": [
+        "src/platform/mcp/authorization.ts"
       ]
     },
     {
@@ -278,6 +286,7 @@
         "src/composition/merchant-billing.ts",
         "src/platform/billing.ts",
         "src/platform/connections/service.ts",
+        "src/platform/mcp/authorization.ts",
         "src/platform/step-up.ts"
       ]
     },
@@ -381,6 +390,7 @@
     {
       "code": "FORBIDDEN",
       "sources": [
+        "src/platform/mcp/authorization.ts",
         "src/platform/security.ts",
         "src/platform/store.ts"
       ]
@@ -522,6 +532,7 @@
         "src/operations/admin.ts",
         "src/platform/app.ts",
         "src/platform/connections/service.ts",
+        "src/platform/mcp/authorization.ts",
         "src/providers/apple/service.ts",
         "src/providers/google/pubsub.ts",
         "src/providers/google/service.ts",
@@ -580,6 +591,12 @@
       ]
     },
     {
+      "code": "MCP_AUTHORIZATION_REVOKED",
+      "sources": [
+        "src/platform/mcp/authorization.ts"
+      ]
+    },
+    {
       "code": "METER_RATE_NOT_ACTIVATED",
       "sources": [
         "src/db/repository/metering-persistence.ts"
@@ -623,6 +640,8 @@
         "src/billing/errors.ts",
         "src/platform/app.ts",
         "src/platform/billing.ts",
+        "src/platform/mcp/authorization.ts",
+        "src/platform/mcp/routes.ts",
         "src/platform/onboarding.ts",
         "src/platform/team.ts"
       ]
@@ -983,6 +1002,7 @@
     {
       "code": "REQUEST_TOO_LARGE",
       "sources": [
+        "src/composition/remote-mcp.ts",
         "src/platform/app.ts"
       ]
     },

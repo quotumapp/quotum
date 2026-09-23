@@ -303,6 +303,7 @@ test("new literal routes must register OpenAPI detail metadata", async () => {
 	const expectedMounts: Record<string, string[]> = {
 		"src/composition/merchant-runtime.ts": ["/api/*", "/*"],
 		"src/platform/app.ts": ["/api/auth/*", "/api/billing/*"],
+		"src/composition/remote-mcp.ts": ["/mcp"],
 	};
 	for await (const path of new Bun.Glob("src/**/*.ts").scan(process.cwd())) {
 		const source = await readFile(path, "utf8");

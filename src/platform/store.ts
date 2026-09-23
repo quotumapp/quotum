@@ -223,7 +223,7 @@ export class MerchantStore {
 					terms_version: string | null;
 					privacy_version: string | null;
 				}[]
-			>`SELECT s.*,u.email_verified,u.terms_version,u.privacy_version FROM platform_auth_sessions s JOIN platform_auth_users u ON u.id=s.user_id WHERE s.token=${authToken} AND s.expires_at>${now} AND s.proof_at>${new Date(now.getTime() - 5 * 60_000)} FOR UPDATE OF s`;
+			>`SELECT s.*,u.email_verified,u.terms_version,u.privacy_version FROM platform_auth_sessions s JOIN platform_auth_users u ON u.id=s.user_id WHERE s.token=${authToken} AND s.expires_at>${now} AND s.proof_at>${new Date(now.getTime() - 5 * 60_000)} AND s.mcp_request_hash IS NULL FOR UPDATE OF s`;
 			if (!proof?.auth_method || !proof.email_verified)
 				throw new MerchantError(
 					"AUTHENTICATION_INCOMPLETE",

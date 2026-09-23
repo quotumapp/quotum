@@ -17,6 +17,7 @@ import { createConnectionValidation } from "./connection-validation";
 import { createConnectionRepository } from "./connections";
 import { createEnvironmentBillingPort } from "./environment-billing";
 import { merchantAuthDatabase, merchantSql } from "./merchant-persistence";
+import { createRemoteMcpApp, type McpUnexpectedErrorReport } from "./remote-mcp";
 import type { QuotumApp } from "./runtime-lifecycle";
 import { createStripeAppEvents } from "./stripe-app-events";
 import { createStripeOAuthPort } from "./stripe-oauth";
@@ -32,6 +33,7 @@ export interface MerchantRequestScope extends RequestScope {
 }
 
 export interface MerchantRuntimeOptions {
+	onMcpUnexpectedError?: (error: unknown, report: McpUnexpectedErrorReport) => void;
 	registerBackground?: (worker: { runOnce(): Promise<void> }) => void;
 	config?: MerchantConfig;
 	mailer?: MerchantMailer;
@@ -48,6 +50,7 @@ export function attachMerchantRuntime(
 		config: MerchantConfig;
 		staffRequestScope?: RequestScope;
 		merchantRequestScope?: MerchantRequestScope;
+		mcpRequestScope?: MerchantRequestScope;
 		onMerchantUnexpectedError?: (error: unknown, report: MerchantUnexpectedErrorReport) => void;
 	},
 ): QuotumApp {
@@ -68,6 +71,7 @@ export function attachMerchantRuntime(
 		createEnvironmentBillingPort(),
 		oauth,
 	);
+	const auth = (options.createAuth ?? createMerchantAuth)(store, mailer, database);
 	const merchant = createMerchantApp({
 		store,
 		connections,
@@ -75,12 +79,21 @@ export function attachMerchantRuntime(
 			? new MerchantStripeOAuth(store, connections, repository, oauth, validator)
 			: undefined,
 		mailer,
-		auth: (options.createAuth ?? createMerchantAuth)(store, mailer, database),
+		auth,
 		billing: createMerchantBilling(store, billing),
 		requestObservabilityMiddleware: options.merchantRequestScope?.plugin,
 		onUnexpectedError: options.onMerchantUnexpectedError,
 	});
 	const ingress = [createConnectionEventApp(repository)];
+	const remoteMcp = config.mcp
+		? createRemoteMcpApp({
+				auth,
+				store,
+				port: billing,
+				requestObservabilityMiddleware: options.mcpRequestScope?.plugin,
+				onUnexpectedError: options.onMcpUnexpectedError,
+			})
+		: undefined;
 	if (oauth) {
 		const events = createStripeAppEvents(repository, oauth, persistence);
 		ingress.push(events.app);
@@ -90,6 +103,8 @@ export function attachMerchantRuntime(
 		staff,
 		merchant,
 		ingress,
+		remoteMcp,
+		mcpRequestScope: options.mcpRequestScope,
 		staffRequestScope: options.staffRequestScope,
 		merchantRequestScope: options.merchantRequestScope,
 	});
@@ -111,12 +126,38 @@ export function composeRuntimeApp(input: {
 	staff: DispatchTarget;
 	merchant: DispatchTarget;
 	ingress?: readonly AppElysia[];
+	remoteMcp?: DispatchTarget;
+	mcpRequestScope?: RequestScope;
 	staffRequestScope?: RequestScope;
 	merchantRequestScope?: RequestScope;
 }): QuotumApp {
 	const { staff, merchant, staffRequestScope, merchantRequestScope } = input;
 	const app = new Elysia(HTTP_APP_CONFIG);
 	for (const ingress of input.ingress ?? []) app.use(ingress);
+	// Request hooks are global when mounted with use(). Dispatch MCP separately so its
+	// public Host/Origin checks and limiter never run on staff, merchant or health routes.
+	if (input.remoteMcp) {
+		const remoteMcp = input.remoteMcp;
+		for (const path of [
+			"/mcp",
+			"/oauth/token",
+			"/oauth/revoke",
+			"/oauth/jwks",
+			"/.well-known/oauth-authorization-server",
+			"/.well-known/oauth-protected-resource",
+			"/.well-known/oauth-protected-resource/mcp",
+		])
+			app.all(
+				path,
+				({ request, server }) => {
+					attachRequestServer(remoteMcp, server);
+					return input.mcpRequestScope
+						? input.mcpRequestScope.run(request, () => remoteMcp.fetch(request))
+						: remoteMcp.fetch(request);
+				},
+				{ parse: "none" },
+			);
+	}
 	// /api/* precedence over the staff fallback is load-bearing and router-level specific.
 	app.all(
 		"/api/*",

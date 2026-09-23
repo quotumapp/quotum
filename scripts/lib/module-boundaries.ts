@@ -633,7 +633,12 @@ interface DynamicSqlReference {
 }
 
 function collectDynamicSqlReferences(source: string): DynamicSqlReference[] {
-	const sql = maskSqlCommentsAndStrings(source);
+	// CREATE TRIGGER's static EXECUTE FUNCTION clause is not PL/pgSQL dynamic EXECUTE.
+	// Mask only a literal, argument-free platform trigger call; function bodies are still scanned.
+	const sql = maskSqlCommentsAndStrings(source).replace(
+		/\bexecute\s+function\s+platform_[a-z0-9_]+\s*\(\s*\)\s*;/giu,
+		(match) => " ".repeat(match.length),
+	);
 	const pattern = /\bexecute\s+format\s*\(|\bexecute\b|\bformat\s*\(/giu;
 	return [...sql.matchAll(pattern)].map((match) => ({
 		construct: match[0].trim().replace(/\s+/gu, " "),

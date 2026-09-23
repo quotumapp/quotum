@@ -14,7 +14,13 @@ import {
 	usageEventsQuerySchema,
 	usageSeriesQuerySchema,
 } from "../app/insights-routes";
-import { correctionBodySchema } from "../app/metering-routes";
+import {
+	balanceParamsSchema,
+	correctionBodySchema,
+	operationParamsSchema,
+	usageBodySchema,
+	usageInput,
+} from "../app/metering-routes";
 import {
 	addPromotionCodesBodySchema,
 	createPromotionBodySchema,
@@ -95,6 +101,46 @@ export function createMerchantBillingPort(input: {
 		const stripe = async () =>
 			requireStripeBillingService(await providers.stripeBillingService(project));
 		switch (command.operation) {
+			case "stripe.catalog": {
+				const service = await stripe();
+				return ok(
+					await requireProviderMethod(
+						service,
+						"stripe",
+						"reads.catalog",
+						"Stripe catalog is not available",
+					)(),
+				);
+			}
+			case "usage.balance": {
+				const params = parse(balanceParamsSchema, { billingAccountId: id, featureKey: event });
+				return ok(
+					await meter.getBalance(
+						project,
+						params.billingAccountId,
+						params.featureKey,
+						query.get("entityId"),
+					),
+				);
+			}
+			case "usage.operation":
+				return ok(
+					await meter.getOperation(
+						project,
+						parse(operationParamsSchema, {
+							billingAccountId: id,
+							operation: event,
+							operationId: command.parameters[2],
+						}),
+					),
+				);
+			case "usage.check":
+				return ok(
+					await meter.check(project, {
+						billingAccountId: account(),
+						...usageInput(parse(usageBodySchema, command.body)),
+					}),
+				);
 			case "stats":
 				return ok(await reader.getStatsSummary(project, queries.parseStatsSummaryQuery(query)));
 			case "customers.search":

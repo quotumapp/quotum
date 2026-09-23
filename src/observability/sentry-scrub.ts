@@ -73,6 +73,7 @@ const STATIC_AFTER_COLLECTION = new Set([
 	"projection",
 	"publish",
 	"request",
+	"revoke",
 	"run",
 	"search",
 	"stripe",
@@ -252,7 +253,7 @@ function maskSegment(
 	beforePrevious: string,
 	maskedPrevious: string | undefined,
 ): string {
-	if (segment === "" || segment.startsWith(":") || segment === "*") {
+	if (segment === "" || segment.startsWith(":") || segment === "*" || segment === ".well-known") {
 		return segment;
 	}
 	if (!KEEP_SEGMENT_PATTERN.test(segment)) {

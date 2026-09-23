@@ -5,6 +5,8 @@ import { twoFactor } from "better-auth/plugins/two-factor";
 import { verifyGoogleIdToken } from "better-auth/social-providers";
 import type { MerchantEmail, MerchantMailer } from "./email";
 import { linkMessage } from "./email";
+import { createMcpAuthProvider } from "./mcp/auth-provider";
+import { McpAuthorizations } from "./mcp/authorization";
 import { cookieValue, MerchantError, normalizeEmail } from "./security";
 import type { MerchantStore } from "./store";
 
@@ -23,6 +25,7 @@ export function createMerchantAuth(
 	testOptions: { googleAuthorizationEndpoint?: string } = {},
 ) {
 	const { config } = store;
+	const mcpAuth = createMcpAuthProvider(store);
 	const failures = new AsyncLocalStorage<MerchantError[]>();
 	const send = async (message: MerchantEmail) => {
 		try {
@@ -133,6 +136,7 @@ export function createMerchantAuth(
 			},
 			async onPasswordReset({ user }) {
 				await store.sql`UPDATE platform_merchant_sessions SET revoked_at=${store.now()} WHERE principal_id IN (SELECT id FROM platform_principals WHERE auth_user_id=${user.id}) AND revoked_at IS NULL`;
+				await new McpAuthorizations(store).revokeUser(user.id);
 			},
 		},
 		emailVerification: {
@@ -179,6 +183,7 @@ export function createMerchantAuth(
 		},
 		plugins: [
 			verifiedGoogle,
+			...mcpAuth.plugins,
 			twoFactor({
 				totpOptions: { disable: true },
 				twoFactorCookieMaxAge: 600,
@@ -255,6 +260,7 @@ export function createMerchantAuth(
 		},
 		hooks: {
 			before: createAuthMiddleware(async (ctx) => {
+				await mcpAuth.before(ctx);
 				if (ctx.path === "/two-factor/send-otp") {
 					// Check before the plugin replaces an existing code. Better Auth 1.7.2
 					// deliberately swallows sendOTP callback errors, so it cannot own throttling.
@@ -292,6 +298,7 @@ export function createMerchantAuth(
 				}
 			}),
 			after: createAuthMiddleware(async (ctx) => {
+				await mcpAuth.after(ctx);
 				const data = ctx.context.newSession;
 				if (!data) return;
 				const method =

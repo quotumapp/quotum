@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { createApp } from "../../src/app";
 import { PostgresProjectInstanceContextResolver } from "../../src/composition/project-instance-persistence";
 import { createBillingReadinessCheck } from "../../src/composition/runtime-readiness";
@@ -13,9 +13,13 @@ import type {
 import { capabilitiesFor, SESSION_COOKIE } from "../../src/platform/security";
 import { mutationTarget } from "../../src/platform/step-up";
 import type { ProviderEnvironmentCapabilities } from "../../src/providers/capability-read-types";
-import { testRequest, withOpenApiAssertions } from "../../tests/helpers/openapi";
+import {
+	assertOpenApiResponse,
+	testRequest,
+	withOpenApiAssertions,
+} from "../../tests/helpers/openapi";
 import { createIntegrationBillingEnv } from "../../tests/integration/helpers/local-postgres";
-import { MerchantBrowser, merchantFixture, password } from "./fixture";
+import { MerchantBrowser, merchantFixture, password, serviceToken, testConfig } from "./fixture";
 
 const f = merchantFixture();
 beforeEach(() => f.reset());
@@ -441,6 +445,64 @@ describe("merchant platform transactions", () => {
 				).status,
 				path,
 			).toBe(404);
+		}
+	});
+	it("allows actionable setup reads without mutation idempotency while denying viewers", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		const setupId = crypto.randomUUID();
+		const path = `/api/billing/admin/billing-accounts/payer/payment-setup-sessions/${setupId}`;
+		const session = {
+			setupId,
+			billingAccountId: "payer",
+			provider: "stripe",
+			status: "awaiting_customer",
+			currency: "usd",
+			sessionId: "cs_setup",
+			url: "https://checkout.stripe.com/c/pay/cs_setup",
+			card: null,
+			attention: null,
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+			expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+			completedAt: null,
+		};
+		const dispatch = spyOn(f.billingPort, "dispatch").mockResolvedValue({
+			status: 200,
+			body: { success: true, data: session },
+		});
+		const read = () =>
+			f.app.handle(
+				new Request(new URL(path, testConfig.origin), {
+					headers: {
+						"x-quotum-service-token": serviceToken,
+						"x-quotum-client-ip": "192.0.2.10",
+						cookie: [...browser.cookies].map(([name, value]) => `${name}=${value}`).join("; "),
+						"x-quotum-organization": "acme",
+						"x-quotum-project": "example",
+						"x-quotum-environment": "sandbox",
+					},
+				}),
+			);
+		try {
+			const allowed = await read();
+			await assertOpenApiResponse("GET", path, allowed);
+			expect(allowed.status).toBe(200);
+			expect((await allowed.json()).data).toEqual(session);
+			expect(dispatch).toHaveBeenCalledTimes(1);
+			expect(dispatch.mock.calls[0]?.[0]).toMatchObject({
+				operation: "account.payment-setup",
+				parameters: ["payer", setupId],
+				idempotencyKey: null,
+			});
+			await f.sql`UPDATE platform_memberships SET role='Viewer'`;
+			const denied = await read();
+			await assertOpenApiResponse("GET", path, denied);
+			expect(denied.status).toBe(403);
+			expect(dispatch).toHaveBeenCalledTimes(1);
+		} finally {
+			dispatch.mockRestore();
 		}
 	});
 	it("manages promotions through the merchant billing proxy", async () => {

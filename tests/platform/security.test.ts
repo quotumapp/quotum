@@ -103,12 +103,34 @@ describe("merchant security boundaries", () => {
 			).toMatchObject({ capability: "billing.read", sensitive: false });
 		}
 	});
+	it("marks the admitted read-only POST explicitly without relaxing audited previews", () => {
+		for (const environment of ["sandbox", "production"] as const) {
+			expect(
+				merchantBillingRoute(
+					"POST",
+					"/api/billing/admin/billing-accounts/account/usage/check",
+					environment,
+				),
+			).toMatchObject({ readOnly: true, capability: "billing.read", action: null });
+			expect(
+				merchantBillingRoute("POST", "/api/billing/admin/catalog/preview", environment),
+			).toMatchObject({ readOnly: false, capability: "catalog.author" });
+			expect(
+				merchantBillingRoute(
+					"POST",
+					"/api/billing/admin/billing-accounts/account/commercial-actions/preview",
+					environment,
+				),
+			).toMatchObject({ readOnly: false, capability: "operations.write" });
+		}
+	});
 	it("exposes the capability reads to merchants as billing reads", () => {
 		for (const environment of ["sandbox", "production"] as const) {
 			expect(
 				merchantBillingRoute("GET", "/api/billing/admin/providers/capabilities", environment),
 			).toEqual({
 				path: "/v1/admin/providers/capabilities",
+				readOnly: true,
 				capability: "billing.read",
 				action: null,
 				sensitive: false,
@@ -121,6 +143,7 @@ describe("merchant security boundaries", () => {
 				),
 			).toEqual({
 				path: "/v1/billing-accounts/acct_1/available-actions",
+				readOnly: true,
 				capability: "billing.read",
 				action: null,
 				sensitive: false,
@@ -157,6 +180,7 @@ describe("merchant security boundaries", () => {
 				),
 			).toEqual({
 				path: "/v1/billing-accounts/acct_1/payment-setup-sessions/cs_1",
+				readOnly: false,
 				capability: "operations.write",
 				action: null,
 				sensitive: false,

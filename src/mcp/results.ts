@@ -8,7 +8,7 @@ export interface ToolResult {
 	isError?: boolean;
 }
 
-export type DiagnosticLog = (line: string) => void;
+export type DiagnosticLog = (line: string, error?: unknown) => void;
 
 /** Large enough for a 25-row page, small enough to leave an agent's context usable. */
 export const maxResultBytes = 100_000;
@@ -92,10 +92,16 @@ export function describeError(error: unknown, log: DiagnosticLog): ToolErrorBody
 		return { code: "MCP_REQUEST_BLOCKED", message: error.message };
 	}
 	if (error instanceof ContractUnavailableError) {
-		log(`contract unavailable: ${error.cause instanceof Error ? error.cause.message : "unknown"}`);
+		log(
+			`contract unavailable: ${error.cause instanceof Error ? error.cause.message : "unknown"}`,
+			error,
+		);
 		return { code: "CONTRACT_UNAVAILABLE", message: error.message };
 	}
-	log(`tool failure: ${error instanceof Error ? `${error.name}: ${error.message}` : "unknown"}`);
+	log(
+		`tool failure: ${error instanceof Error ? `${error.name}: ${error.message}` : "unknown"}`,
+		error,
+	);
 	return {
 		code: "BILLING_API_UNAVAILABLE",
 		message: "The billing API could not be reached or returned an unreadable response.",

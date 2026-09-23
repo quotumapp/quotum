@@ -3,15 +3,71 @@
 - Document kind: Current behavior
 
 `src/mcp/` is a read-only [Model Context Protocol](https://modelcontextprotocol.io) server for
-coding agents such as Claude Code and Cursor. It answers questions about one project instance, a
+coding agents such as Claude Code, Codex and Cursor. It answers questions about one project instance, a
 sandbox or, with a read-only key, production: why a consume is denied, what an idempotency key
 resolved to, why a product backend is not receiving `billing_state_v1`, and what the catalog
 contains.
 
-It is an HTTP client of the `/v1` API through the bundled SDK. It has no database access, adds no
-route to the service, and holds one project API key and nothing else. It speaks stdio only.
+The shared tools use the bundled SDK and a fixed read-only request allowlist. The stdio transport
+calls `/v1` with a project key. The optional remote transport runs at `/mcp` in the API process and
+dispatches through the merchant billing port with browser-authorized identity, without project keys.
 
-## Run it
+## Connect in a browser
+
+Enable the remote transport with `QUOTUM_MCP_ENABLED=true` and
+`QUOTUM_MCP_PUBLIC_ORIGIN=https://api.example.com`. The latter is the exact public API origin,
+without a path or trailing slash. HTTPS is required (tests may use loopback HTTP). Deploy the
+matching merchant UI and BFF before enabling it; [deployment](deployment.md#remote-mcp) describes
+the public routes and schema ordering.
+
+Add `https://api.example.com/mcp` to a coding client. Authorization opens the merchant application,
+requires a fresh password plus email OTP or Google sign-in, then asks for one organization,
+project, and environment and explicit read-only consent. An existing console session does not
+skip sign-in. Sandbox and production require separate authorizations. The displayed identity is
+the fresh sign-in identity, which may differ from the console identity.
+
+Public clients `quotum-claude-code` and `quotum-cursor` are pre-registered with loopback callback
+URIs `http://localhost:8788/callback` and `http://localhost:8787/callback`, respectively. The
+provider permits variable ports for the registered loopback host/path. Supply the corresponding
+client ID in hosts that need pre-registration. Clients supporting Client ID Metadata Documents
+(CIMD), including the targeted Codex flow, use their HTTPS metadata URL as their client ID.
+Dynamic client registration is disabled. Desktop-client compatibility still requires verification
+against the deployed public origins; the local integration suite exercises protocol and auth flows.
+Callback URIs must use HTTPS or HTTP loopback; private-use schemes are rejected both in
+authorization requests and fetched client metadata, including metadata without an application type.
+
+The server uses authorization code with PKCE S256 and the `/mcp` resource indicator. It issues
+15-minute bearer access tokens and rotating refresh tokens. Authorization expires 30 days after
+environment selection regardless of refreshes. DPoP, client secrets, client credentials grants,
+and MCP write tools are not supported.
+
+In **Developer setup → MCP connections**, view and revoke your connections for the selected
+environment. Revocation immediately invalidates access tokens, refresh tokens, and cached refresh
+responses for that immutable authorization; reconnecting never revives an older authorization.
+Authorization-code replay, including concurrent redemption, revokes the affected authorization.
+Password reset and principal/membership suspension revoke affected authorizations. Every tool
+request and refresh rechecks current principal, membership, environment, and grant access.
+
+Discovery lives on the API origin at `/.well-known/oauth-authorization-server` and
+`/.well-known/oauth-protected-resource/mcp`. The authorization endpoint is on the UI origin;
+`/oauth/token`, `/oauth/revoke`, and `/oauth/jwks` are cookie-free API endpoints. Browser auth and
+selection stay behind the BFF's exact route allowlist, service identity, Origin and CSRF checks.
+An auth proof belongs to one OAuth request and cannot be exchanged for a console session or
+step-up grant. Environment selection and consent require a proof issued within five minutes.
+An accepted authorization code has its own five-minute redemption window. The transient session
+is retained through that window without extending browser proof freshness, then removed after
+issuance, including an issuance rejected by the final access check. Refresh credentials survive
+deletion of the transient proof.
+
+Remote requests reject unexpected Host/Origin headers, cap MCP bodies at 256 KiB and token forms at
+16 KiB, and apply limits of 300 requests per minute per connecting IP and 120 authenticated MCP
+requests per minute per principal. The proxy must preserve the configured Host and pass Bun's
+server object to the runtime so its connection address is available. These checks run only on
+the remote MCP and OAuth endpoints; staff, merchant and health routes use their own policies.
+The transport is stateless,
+with current MCP messages and the SDK's older-protocol fallback; it keeps no cross-request session.
+
+## Run over stdio
 
 Use a sandbox key as in the [quickstart](quickstart.md#2-create-a-project-and-its-credential), or
 issue a [read-only key](operations.md#read-only-credentials) for sandbox or production, then register
@@ -98,20 +154,23 @@ A denied consume records no usage event. Explain a denial with `check_usage`, or
 
 ## Safeguards
 
-- Read-only is enforced in the HTTP layer, not by tool annotations. The server's `fetch` allows a
+- Read-only is enforced at the request boundary, not by tool annotations. The server's `fetch` allows a
   fixed list of `GET` routes plus `POST .../usage/check`, and rejects operator, actor and idempotency
   headers and `includeRawPayload`. `tests/mcp/inventory.test.ts` fails when a tool or an allowed
   route is added without the other.
-- Requests do not follow redirects, time out after 15 seconds and cap the response size.
+- Outbound stdio HTTP requests do not follow redirects, time out after 15 seconds and cap the response size.
 - A failure reaches the model as the API's error code, status and message, plus
   `rateLimitResetAt` on a 429. The server never retries. Anything else (network errors, a proxy's
-  HTML page) becomes a generic message, with the detail on stderr.
+  HTML page) becomes a generic message. Stdio logs diagnostic detail to stderr; remote failures
+  report through the scrubbed service logger and MCP request isolation scope, retaining error
+  diagnostics and a request ID while keeping them out of protocol responses.
 - Usage-event `metadata`, external identifiers and provider fields are supplied by merchants, end
   users or providers. Free-form fields are left out by default, and an agent must treat whatever it
   reads as data, not as instructions.
 - Tool results go to the agent's model provider. Customer email addresses are left out unless a call
   sets `includeEmail`; decide whether production data may go there before using a production key.
-- stdout carries only protocol messages; diagnostics go to stderr with the key redacted. The process
+- For stdio, stdout carries only protocol messages; diagnostics go to stderr with the key redacted. The process
   exits when the host closes stdin.
 
-Requests count against the project's normal rate limits (60 per minute per admin path by default).
+Stdio requests count against the project's normal rate limits (60 per minute per admin path by
+default). Remote requests use the principal/IP limits above.
