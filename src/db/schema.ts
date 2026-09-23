@@ -652,6 +652,8 @@ export const entitlements = pgTable(
 		sourcePurchaseId: uuid("source_purchase_id").references(() => purchases.id, {
 			onDelete: "set null",
 		}),
+		// Composite FK to plan_grants is added after that table in the SQL baseline.
+		sourcePlanGrantId: uuid("source_plan_grant_id"),
 		metadata: metadataColumn(),
 		computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
 		...timestampColumns(),
@@ -680,6 +682,9 @@ export const entitlements = pgTable(
 		),
 		index("idx_billing_entitlements_source_subscription_id").on(table.sourceSubscriptionId),
 		index("idx_billing_entitlements_source_purchase_id").on(table.sourcePurchaseId),
+		index("idx_billing_entitlements_source_plan_grant_id")
+			.on(table.sourcePlanGrantId)
+			.where(sql`${table.sourcePlanGrantId} IS NOT NULL`),
 		index("idx_billing_entitlements_key_customer").on(table.entitlementKey, table.customerId),
 	],
 );
@@ -1740,6 +1745,8 @@ export const balanceAllocations = pgTable(
 		rolloverProcessedAt: timestamp("rollover_processed_at", { withTimezone: true }),
 		// Composite FK to promotion_redemptions is added after that table in the SQL baseline.
 		promotionRedemptionId: uuid("promotion_redemption_id"),
+		// Composite FK to plan_grants is added after that table in the SQL baseline.
+		planGrantId: uuid("plan_grant_id"),
 		...timestampColumns(),
 	},
 	(table) => [
@@ -1757,9 +1764,12 @@ export const balanceAllocations = pgTable(
 		index("idx_billing_balance_allocations_promotion_redemption")
 			.on(table.projectId, table.promotionRedemptionId)
 			.where(sql`${table.promotionRedemptionId} IS NOT NULL`),
+		index("idx_billing_balance_allocations_plan_grant")
+			.on(table.projectId, table.planGrantId)
+			.where(sql`${table.planGrantId} IS NOT NULL`),
 		check(
 			"balance_allocations_reward_provenance_check",
-			sql`(${table.sourceKind} = 'reward') = (${table.promotionRedemptionId} IS NOT NULL)`,
+			sql`(${table.sourceKind} = 'reward') = (${table.promotionRedemptionId} IS NOT NULL OR ${table.planGrantId} IS NOT NULL)`,
 		),
 	],
 );
@@ -3208,6 +3218,98 @@ export const promotionAuditEvents = pgTable(
 	],
 );
 
+export const planGrants = pgTable(
+	"plan_grants",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		customerId: uuid("customer_id").notNull(),
+		planId: bigint("plan_id", { mode: "number" }).notNull(),
+		planVersionId: bigint("plan_version_id", { mode: "number" }).notNull(),
+		planKind: text("plan_kind").$type<"base" | "addon">().notNull(),
+		origin: text("origin").$type<"trial">().notNull(),
+		status: text("status").$type<"active" | "expired" | "ended" | "superseded">().notNull(),
+		durationUnit: text("duration_unit").$type<"day" | "month">().notNull(),
+		durationCount: integer("duration_count").notNull(),
+		startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+		endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+		endedAt: timestamp("ended_at", { withTimezone: true }),
+		entitlementKeys: text("entitlement_keys").array().notNull().default(sql`ARRAY[]::text[]`),
+		nextPeriodAt: timestamp("next_period_at", { withTimezone: true }),
+		endingNotifiedAt: timestamp("ending_notified_at", { withTimezone: true }),
+		supersededBySubscriptionId: uuid("superseded_by_subscription_id"),
+		actor: text("actor").notNull(),
+		endActor: text("end_actor"),
+		endReason: text("end_reason"),
+		metadata: metadataColumn(),
+		idempotencyKey: text("idempotency_key").notNull(),
+		requestHash: text("request_hash").notNull(),
+		endIdempotencyKey: text("end_idempotency_key"),
+		endRequestHash: text("end_request_hash"),
+		...timestampColumns(),
+	},
+	(table) => [
+		unique("plan_grants_project_id_id_unique").on(table.projectId, table.id),
+		unique("plan_grants_idempotency_unique").on(
+			table.projectId,
+			table.customerId,
+			table.idempotencyKey,
+		),
+		foreignKey({
+			name: "plan_grants_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "plan_grants_project_plan_fk",
+			columns: [table.projectId, table.planId],
+			foreignColumns: [plans.projectId, plans.id],
+		}),
+		foreignKey({
+			name: "plan_grants_project_plan_version_fk",
+			columns: [table.projectId, table.planVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}),
+		foreignKey({
+			name: "plan_grants_project_superseding_subscription_fk",
+			columns: [table.projectId, table.supersededBySubscriptionId],
+			foreignColumns: [subscriptions.projectId, subscriptions.id],
+		}),
+		uniqueIndex("idx_billing_plan_grants_one_active_base")
+			.on(table.projectId, table.customerId)
+			.where(sql`${table.status} = 'active' AND ${table.planKind} = 'base'`),
+		uniqueIndex("idx_billing_plan_grants_trial_once")
+			.on(table.projectId, table.customerId, table.planId)
+			.where(sql`${table.origin} = 'trial'`),
+		index("idx_billing_plan_grants_customer_active")
+			.on(table.projectId, table.customerId, table.planVersionId)
+			.where(sql`${table.status} = 'active'`),
+		index("idx_billing_plan_grants_due")
+			.on(table.endsAt, table.id)
+			.where(sql`${table.status} = 'active'`),
+		index("idx_billing_plan_grants_next_period")
+			.on(table.nextPeriodAt, table.id)
+			.where(sql`${table.status} = 'active' AND ${table.nextPeriodAt} IS NOT NULL`),
+		index("idx_billing_plan_grants_customer_created").on(
+			table.projectId,
+			table.customerId,
+			table.createdAt.desc(),
+			table.id.desc(),
+		),
+		index("idx_billing_plan_grants_superseding_subscription")
+			.on(table.projectId, table.supersededBySubscriptionId)
+			.where(sql`${table.supersededBySubscriptionId} IS NOT NULL`),
+		check("plan_grants_plan_kind_check", sql`${table.planKind} IN ('base', 'addon')`),
+		check("plan_grants_origin_check", sql`${table.origin} IN ('trial')`),
+		check(
+			"plan_grants_status_check",
+			sql`${table.status} IN ('active', 'expired', 'ended', 'superseded')`,
+		),
+	],
+);
+
 export type ProjectRow = typeof projects.$inferSelect;
 export type CustomerRow = typeof customers.$inferSelect;
 export type ProductRow = typeof products.$inferSelect;
@@ -3258,3 +3360,4 @@ export type PromotionRow = typeof promotions.$inferSelect;
 export type PromotionCodeRecordRow = typeof promotionCodes.$inferSelect;
 export type PromotionProviderObjectRow = typeof promotionProviderObjects.$inferSelect;
 export type PromotionRedemptionRow = typeof promotionRedemptions.$inferSelect;
+export type PlanGrantRow = typeof planGrants.$inferSelect;

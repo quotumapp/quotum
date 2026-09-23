@@ -3,6 +3,7 @@ import {
 	addUtcInterval,
 	addUtcMonths,
 	meterLimitWindowBounds,
+	planGrantWindowBounds,
 } from "../../src/db/repository/meter-limit-windows";
 
 describe("meter-limit window bounds", () => {
@@ -284,5 +285,58 @@ describe("meter-limit window bounds", () => {
 				new Date("2026-10-11T00:00:00.000Z"),
 			),
 		).toThrow("Meter-limit subscription has invalid period bounds");
+	});
+
+	it("splits a plan grant into reset windows anchored at its start and clamped to its end", () => {
+		const window = (start: string, end: string, interval: "month" | "year", now: string) =>
+			planGrantWindowBounds(start, end, interval, new Date(now));
+
+		// A fourteen-day trial with a monthly allowance is one clamped window.
+		expect(
+			window(
+				"2026-09-10T08:00:00.000Z",
+				"2026-09-24T08:00:00.000Z",
+				"month",
+				"2026-09-12T00:00:00.000Z",
+			),
+		).toEqual({
+			start: new Date("2026-09-10T08:00:00.000Z"),
+			end: new Date("2026-09-24T08:00:00.000Z"),
+		});
+		// A sixty-day grant has a full first month and a clamped second window.
+		expect(
+			window(
+				"2026-01-31T00:00:00.000Z",
+				"2026-04-01T00:00:00.000Z",
+				"month",
+				"2026-03-05T00:00:00.000Z",
+			),
+		).toEqual({
+			start: new Date("2026-02-28T00:00:00.000Z"),
+			end: new Date("2026-03-31T00:00:00.000Z"),
+		});
+		expect(
+			window(
+				"2026-01-31T00:00:00.000Z",
+				"2026-04-01T00:00:00.000Z",
+				"month",
+				"2026-03-31T12:00:00.000Z",
+			),
+		).toEqual({
+			start: new Date("2026-03-31T00:00:00.000Z"),
+			end: new Date("2026-04-01T00:00:00.000Z"),
+		});
+		// A yearly reset inside a shorter grant never passes the grant end, even after it.
+		expect(
+			window(
+				"2026-09-10T00:00:00.000Z",
+				"2026-12-10T00:00:00.000Z",
+				"year",
+				"2027-01-01T00:00:00.000Z",
+			),
+		).toEqual({
+			start: new Date("2026-09-10T00:00:00.000Z"),
+			end: new Date("2026-12-10T00:00:00.000Z"),
+		});
 	});
 });
