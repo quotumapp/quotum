@@ -19,7 +19,12 @@ const allocationFundingStatuses = new Set<SubscriptionStatus>([
 async function resolveSubscriptionPlanVersion(
 	executor: QueryExecutor,
 	input: { projectId: string; customerId: string; storeProductId: string; subscriptionId: string },
-): Promise<{ planVersionId: string; catalogRevisionId: string; changed: boolean } | null> {
+): Promise<{
+	planVersionId: string;
+	catalogRevisionId: string;
+	changed: boolean;
+	changeId: string | null;
+} | null> {
 	const row = await executeOne<{
 		current_version_id: string | number | bigint | null;
 		current_revision_id: string | number | bigint | null;
@@ -27,6 +32,8 @@ async function resolveSubscriptionPlanVersion(
 		binding_version_id: string | number | bigint | null;
 		binding_revision_id: string | number | bigint | null;
 		binding_plan_id: string | number | bigint | null;
+		change_id: string | null;
+		change_synchronized_at: Date | string | null;
 		change_version_id: string | number | bigint | null;
 		change_revision_id: string | number | bigint | null;
 	}>(
@@ -39,6 +46,8 @@ async function resolveSubscriptionPlanVersion(
 				binding_version.id AS binding_version_id,
 				binding_version.catalog_revision_id AS binding_revision_id,
 				binding_version.plan_id AS binding_plan_id,
+				applied_change.id AS change_id,
+				applied_change.synchronized_at AS change_synchronized_at,
 				change_version.id AS change_version_id,
 				change_version.catalog_revision_id AS change_revision_id
 			FROM subscriptions subscription
@@ -54,19 +63,21 @@ async function resolveSubscriptionPlanVersion(
 				AND binding_version.id = binding.plan_version_id
 				AND binding_version.status = 'published'
 			LEFT JOIN LATERAL (
-				SELECT change.to_plan_version_id
+				SELECT change.id, change.from_plan_version_id, change.to_plan_version_id,
+					change.synchronized_at
 				FROM subscription_changes change
 				WHERE change.project_id = subscription.project_id
 					AND change.subscription_id = subscription.id
 					AND change.status = 'applied'
-					AND change.from_plan_version_id = subscription.plan_version_id
-					AND change.to_plan_version_id <> subscription.plan_version_id
 				ORDER BY change.applied_at DESC, change.id DESC
 				LIMIT 1
 			) applied_change ON subscription.plan_version_id IS NOT NULL
 			LEFT JOIN plan_versions change_version
 				ON change_version.project_id = subscription.project_id
 				AND change_version.id = applied_change.to_plan_version_id
+				AND applied_change.synchronized_at IS NULL
+				AND applied_change.from_plan_version_id = subscription.plan_version_id
+				AND applied_change.to_plan_version_id <> subscription.plan_version_id
 				AND change_version.status = 'published'
 			WHERE subscription.project_id = ${input.projectId}
 				AND subscription.customer_id = ${input.customerId}
@@ -74,6 +85,7 @@ async function resolveSubscriptionPlanVersion(
 		`,
 	);
 	if (row === null) return null;
+	const changeId = row.change_synchronized_at === null ? row.change_id : null;
 	const current =
 		row.current_version_id === null || row.current_revision_id === null
 			? null
@@ -90,14 +102,17 @@ async function resolveSubscriptionPlanVersion(
 				};
 	// 1. A subscription without a version adopts what the purchased product is bound to.
 	if (current === null) {
-		return binding === null ? null : { ...binding, changed: true };
+		return binding === null ? null : { ...binding, changed: true, changeId };
 	}
-	// 2. An applied change or migration staged from the pinned version carries its target.
+	// 2. Only the latest applied change can move the pinned version. Filtering by its source
+	// before selecting the latest would replay an old upgrade after a later downgrade returns
+	// to that source, including when a newer quantity-only change supersedes the upgrade.
 	if (row.change_version_id !== null && row.change_revision_id !== null) {
 		return {
 			planVersionId: String(row.change_version_id),
 			catalogRevisionId: String(row.change_revision_id),
 			changed: true,
+			changeId,
 		};
 	}
 	// 3. A product of another plan is a provider-side switch, so its bound version applies.
@@ -106,10 +121,10 @@ async function resolveSubscriptionPlanVersion(
 		row.binding_plan_id !== null &&
 		String(row.binding_plan_id) !== String(row.current_plan_id)
 	) {
-		return { ...binding, changed: binding.planVersionId !== current.planVersionId };
+		return { ...binding, changed: binding.planVersionId !== current.planVersionId, changeId };
 	}
 	// 4. Otherwise the subscription stays grandfathered on its pinned version.
-	return { ...current, changed: false };
+	return { ...current, changed: false, changeId };
 }
 
 export async function materializeSubscriptionAllocations(
@@ -126,6 +141,20 @@ export async function materializeSubscriptionAllocations(
 ): Promise<number> {
 	const version = await resolveSubscriptionPlanVersion(executor, input);
 	if (version === null) return 0;
+
+	if (version.changeId !== null) {
+		// The provider snapshot has settled the latest applied change, even if another provider
+		// switch already superseded its source. Record that once, atomically with allocations and
+		// price items, so returning to the source later cannot replay this historical change.
+		await executeRows(
+			executor,
+			drizzleSql`
+				UPDATE subscription_changes SET synchronized_at = now(), updated_at = now()
+				WHERE project_id = ${input.projectId} AND subscription_id = ${input.subscriptionId}
+					AND id = ${version.changeId} AND status = 'applied' AND synchronized_at IS NULL
+			`,
+		);
+	}
 
 	if (version.changed) {
 		await executeOne(
@@ -278,18 +307,14 @@ export async function syncSubscriptionPriceItems(
 	if (phaseTwoPricing?.configured !== true) return;
 	const activeComponentIds: string[] = [];
 	for (const item of input.items) {
-		const row = await executeOne<{ price_component_id: string | number | bigint }>(
+		const price = await executeOne<{
+			id: string | number | bigint;
+			unit_amount_minor: string | number | bigint;
+			currency: string;
+		}>(
 			executor,
 			drizzleSql`
-				INSERT INTO subscription_items (
-					project_id, subscription_id, price_component_id,
-					provider_subscription_item_id, quantity, unit_amount_minor,
-					currency, active, starts_at, ends_at
-				)
-				SELECT
-					${input.projectId}, ${input.subscriptionId}, pc.id,
-					${item.providerSubscriptionItemId}, ${item.quantity}, pc.unit_amount_minor,
-					pc.currency, true, ${input.periodStartAt.toISOString()}, NULL
+				SELECT pc.id, pc.unit_amount_minor, pc.currency
 				FROM subscriptions s
 				JOIN price_components pc
 					ON pc.project_id = s.project_id AND pc.plan_version_id = s.plan_version_id
@@ -305,6 +330,42 @@ export async function syncSubscriptionPriceItems(
 					AND s.id = ${input.subscriptionId}
 					AND sp.external_product_id = ${item.externalProductId}
 					AND sp.external_price_id = ${item.externalPriceId}
+			`,
+		);
+		if (price === null) {
+			throw new Error(
+				`Stripe subscription item ${item.providerSubscriptionItemId} has no published price binding`,
+			);
+		}
+		// Stripe keeps an item's id when its price changes. Keep the former component row for
+		// history, but release its live provider identity before attaching it to the new component.
+		// Restrict the transfer to this subscription: an id owned by another subscription must
+		// still fail its unique constraint rather than silently taking over that subscription.
+		await executeRows(
+			executor,
+			drizzleSql`
+				UPDATE subscription_items
+				SET provider_subscription_item_id = NULL, active = false,
+					ends_at = COALESCE(ends_at, now()), updated_at = now()
+				WHERE project_id = ${input.projectId}
+					AND subscription_id = ${input.subscriptionId}
+					AND provider_subscription_item_id = ${item.providerSubscriptionItemId}
+					AND price_component_id <> ${String(price.id)}::bigint
+			`,
+		);
+		await executeRows(
+			executor,
+			drizzleSql`
+				INSERT INTO subscription_items (
+					project_id, subscription_id, price_component_id,
+					provider_subscription_item_id, quantity, unit_amount_minor,
+					currency, active, starts_at, ends_at
+				)
+				VALUES (
+					${input.projectId}, ${input.subscriptionId}, ${String(price.id)}::bigint,
+					${item.providerSubscriptionItemId}, ${item.quantity}, ${String(price.unit_amount_minor)}::bigint,
+					${price.currency}, true, ${input.periodStartAt.toISOString()}, NULL
+				)
 				ON CONFLICT (project_id, subscription_id, price_component_id) DO UPDATE SET
 					provider_subscription_item_id = EXCLUDED.provider_subscription_item_id,
 					quantity = EXCLUDED.quantity,
@@ -313,15 +374,9 @@ export async function syncSubscriptionPriceItems(
 					active = true,
 					ends_at = NULL,
 					updated_at = now()
-				RETURNING price_component_id
 			`,
 		);
-		if (row === null) {
-			throw new Error(
-				`Stripe subscription item ${item.providerSubscriptionItemId} has no published price binding`,
-			);
-		}
-		activeComponentIds.push(String(row.price_component_id));
+		activeComponentIds.push(String(price.id));
 	}
 	await executeRows(
 		executor,
