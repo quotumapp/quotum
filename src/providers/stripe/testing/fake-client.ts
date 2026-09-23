@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import Stripe from "stripe";
 import type { StripeBillingConfig } from "../client";
 import type { StripeBillingClientDependency } from "../service";
+import { createFakeStripeIdempotency } from "./fake-idempotency";
 import { createFakeStripePromotions } from "./fake-promotions";
 
 interface FakeCheckoutSession {
@@ -62,7 +63,8 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	/** Every invoice creation, so a test can assert what the charge was attached to. */
 	readonly invoiceCreateParams: Stripe.InvoiceCreateParams[] = [];
 	private readonly failures = new Map<string, Error>();
-	readonly promotions = createFakeStripePromotions();
+	private readonly idempotency = createFakeStripeIdempotency();
+	readonly promotions = createFakeStripePromotions(this.idempotency);
 	readonly createCoupon = this.promotions.createCoupon;
 	readonly retrieveCoupon = this.promotions.retrieveCoupon;
 	readonly createPromotionCode = this.promotions.createPromotionCode;
@@ -106,6 +108,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		idempotencyKey?: string,
 	): Promise<{ id: string; url: string }> {
 		this.throwIfFailed("createCheckoutSession");
+		this.idempotency.claim(idempotencyKey, "POST /v1/checkout/sessions", params);
 		const existing =
 			idempotencyKey === undefined ? undefined : this.sessionsByIdempotencyKey.get(idempotencyKey);
 		if (existing !== undefined) {
@@ -217,6 +220,9 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		idempotencyKey: string;
 	}): Promise<void> {
 		this.throwIfFailed("updateCustomerDefaultPaymentMethod");
+		this.idempotency.claim(input.idempotencyKey, `POST /v1/customers/${input.customerId}`, {
+			invoice_settings: { default_payment_method: input.paymentMethodId },
+		});
 		this.defaultPaymentMethodWrites.push(input);
 	}
 
@@ -272,6 +278,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		idempotencyKey: string,
 	): Promise<{ id: string }> {
 		this.throwIfFailed("updateSubscription");
+		this.idempotency.claim(idempotencyKey, `POST /v1/subscriptions/${subscriptionId}`, params);
 		const existing = this.subscriptionUpdates.get(idempotencyKey);
 		if (existing !== undefined) return existing;
 		const updated = { id: subscriptionId };
@@ -302,6 +309,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		idempotencyKey: string,
 	): Promise<{ id: string }> {
 		this.throwIfFailed("cancelSubscription");
+		this.idempotency.claim(idempotencyKey, `DELETE /v1/subscriptions/${subscriptionId}`);
 		const existing = this.subscriptionCancellations.get(idempotencyKey);
 		if (existing !== undefined) return existing;
 		const cancelled = { id: subscriptionId };
@@ -321,6 +329,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		idempotencyKey: string,
 	): Promise<{ id: string }> {
 		this.throwIfFailed("createInvoice");
+		this.idempotency.claim(idempotencyKey, "POST /v1/invoices", params);
 		this.invoiceCreateParams.push(params);
 		const existing = this.invoicesByIdempotencyKey.get(idempotencyKey);
 		if (existing !== undefined) return { id: existing.id };
@@ -343,21 +352,24 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		idempotencyKey: string,
 	): Promise<unknown> {
 		const invoice = this.requireInvoice(invoiceId);
+		this.idempotency.claim(idempotencyKey, `POST /v1/invoices/${invoiceId}/add_lines`, params);
 		if (this.invoiceLineKeys.has(idempotencyKey)) return invoiceReceipt(invoice);
 		for (const line of params.lines) invoice.total += this.lineAmount(line);
 		this.invoiceLineKeys.add(idempotencyKey);
 		return invoiceReceipt(invoice);
 	}
 
-	async finalizeInvoice(invoiceId: string, _idempotencyKey: string): Promise<unknown> {
+	async finalizeInvoice(invoiceId: string, idempotencyKey: string): Promise<unknown> {
 		const invoice = this.requireInvoice(invoiceId);
+		this.idempotency.claim(idempotencyKey, `POST /v1/invoices/${invoiceId}/finalize`);
 		if (invoice.status === "draft") invoice.status = "open";
 		return invoiceReceipt(invoice);
 	}
 
-	async payInvoice(invoiceId: string, _idempotencyKey: string): Promise<unknown> {
+	async payInvoice(invoiceId: string, idempotencyKey: string): Promise<unknown> {
 		this.throwIfFailed("payInvoice");
 		const invoice = this.requireInvoice(invoiceId);
+		this.idempotency.claim(idempotencyKey, `POST /v1/invoices/${invoiceId}/pay`);
 		if (this.options.paymentBehavior === "action_required") {
 			throw Object.assign(new Error("Customer authentication is required"), {
 				code: "invoice_payment_intent_requires_action",
@@ -371,8 +383,9 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		return invoiceReceipt(invoice);
 	}
 
-	async voidInvoice(invoiceId: string, _idempotencyKey: string): Promise<unknown> {
+	async voidInvoice(invoiceId: string, idempotencyKey: string): Promise<unknown> {
 		const invoice = this.requireInvoice(invoiceId);
+		this.idempotency.claim(idempotencyKey, `POST /v1/invoices/${invoiceId}/void`);
 		invoice.status = "void";
 		return invoiceReceipt(invoice);
 	}

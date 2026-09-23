@@ -4,6 +4,7 @@ import type {
 	StripePromotionClient,
 	StripePromotionCodeLike,
 } from "../promotions";
+import { createFakeStripeIdempotency, type FakeStripeIdempotency } from "./fake-idempotency";
 
 export interface FakeStripePromotionState {
 	coupons: Map<string, StripeCouponLike & { params: Stripe.CouponCreateParams }>;
@@ -16,9 +17,12 @@ export interface FakeStripePromotionState {
 
 /**
  * In-memory coupons and promotion codes with Stripe's uniqueness rules: coupon ids are unique and
- * active promotion codes are unique case-insensitively. Idempotency keys replay the first response.
+ * active promotion codes are unique case-insensitively. Idempotency keys replay the first response
+ * to the same request and reject any other, sharing the key space of the client they belong to.
  */
-export function createFakeStripePromotions(): StripePromotionClient & {
+export function createFakeStripePromotions(
+	idempotency: FakeStripeIdempotency = createFakeStripeIdempotency(),
+): StripePromotionClient & {
 	state: FakeStripePromotionState;
 } {
 	const state: FakeStripePromotionState = {
@@ -32,6 +36,7 @@ export function createFakeStripePromotions(): StripePromotionClient & {
 		state,
 		async createCoupon(params, idempotencyKey) {
 			state.calls.push(`createCoupon:${params.id ?? ""}`);
+			idempotency.claim(idempotencyKey, "POST /v1/coupons", params);
 			const replay = replays.get(idempotencyKey);
 			if (replay !== undefined) return replay as StripeCouponLike;
 			const id = params.id ?? `co_fake_${++sequence}`;
@@ -68,6 +73,7 @@ export function createFakeStripePromotions(): StripePromotionClient & {
 		},
 		async createPromotionCode(params, idempotencyKey) {
 			state.calls.push(`createPromotionCode:${params.code ?? ""}`);
+			idempotency.claim(idempotencyKey, "POST /v1/promotion_codes", params);
 			const replay = replays.get(idempotencyKey);
 			if (replay !== undefined) return replay as StripePromotionCodeLike;
 			const coupon = params.promotion.coupon ?? "";
@@ -101,6 +107,7 @@ export function createFakeStripePromotions(): StripePromotionClient & {
 		},
 		async updatePromotionCode(promotionCodeId, params, idempotencyKey) {
 			state.calls.push(`updatePromotionCode:${promotionCodeId}:${String(params.active)}`);
+			idempotency.claim(idempotencyKey, `POST /v1/promotion_codes/${promotionCodeId}`, params);
 			const replay = replays.get(idempotencyKey);
 			if (replay !== undefined) return replay as StripePromotionCodeLike;
 			const promotionCode = state.promotionCodes.get(promotionCodeId);

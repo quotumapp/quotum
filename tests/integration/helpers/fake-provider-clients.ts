@@ -4,7 +4,9 @@ import type {
 	AppleDecodedRenewalInfoPayload,
 	AppleDecodedTransactionPayload,
 } from "../../../src/providers/apple/types";
+import { createFakeStripeIdempotency } from "../../../src/providers/stripe/testing/fake-idempotency";
 import { createFakeStripePromotions } from "../../../src/providers/stripe/testing/fake-promotions";
+import type { DeepPartial } from "../../helpers/deep-partial";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -252,7 +254,8 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 		}
 	>();
 	let checkoutSessionFailuresRemaining = options.createCheckoutSessionFailures ?? 0;
-	const promotions = createFakeStripePromotions();
+	const idempotency = createFakeStripeIdempotency();
+	const promotions = createFakeStripePromotions(idempotency);
 	const subscriptionUpdates: Array<{
 		subscriptionId: string;
 		params: Stripe.SubscriptionUpdateParams;
@@ -325,11 +328,13 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 				idempotencyKey: string,
 			) {
 				calls.push(`updateSubscription:${idempotencyKey}`);
+				idempotency.claim(idempotencyKey, `POST /v1/subscriptions/${subscriptionId}`, params);
 				subscriptionUpdates.push({ subscriptionId, params, idempotencyKey });
 				return { id: subscriptionId };
 			},
 			async cancelSubscription(subscriptionId: string, idempotencyKey: string) {
 				calls.push(`cancelSubscription:${idempotencyKey}`);
+				idempotency.claim(idempotencyKey, `DELETE /v1/subscriptions/${subscriptionId}`);
 				subscriptionCancellations.push({ subscriptionId, idempotencyKey });
 				return { id: subscriptionId };
 			},
@@ -348,6 +353,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 					checkoutSessionFailuresRemaining -= 1;
 					throw new Error("Fake Stripe Checkout is temporarily unavailable");
 				}
+				idempotency.claim(idempotencyKey, "POST /v1/checkout/sessions", params);
 				if (params.mode !== "setup") {
 					return {
 						id: "cs_test_integration",
@@ -403,6 +409,9 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 				idempotencyKey: string;
 			}) {
 				calls.push(`updateCustomerDefaultPaymentMethod:${input.idempotencyKey}`);
+				idempotency.claim(input.idempotencyKey, `POST /v1/customers/${input.customerId}`, {
+					invoice_settings: { default_payment_method: input.paymentMethodId },
+				});
 				defaultPaymentMethodWrites.push(input);
 			},
 			async createCustomer(input: {
@@ -462,6 +471,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			},
 			async createInvoice(params: Stripe.InvoiceCreateParams, idempotencyKey: string) {
 				calls.push(`createInvoice:${idempotencyKey}`);
+				idempotency.claim(idempotencyKey, "POST /v1/invoices", params);
 				invoiceCreateParams.push(params);
 				const id = `in_integration_${idempotencyKey}`;
 				invoices.set(id, {
@@ -475,10 +485,11 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			},
 			async addInvoiceLines(
 				invoiceId: string,
-				_params: Stripe.InvoiceAddLinesParams,
+				params: Stripe.InvoiceAddLinesParams,
 				idempotencyKey: string,
 			) {
 				calls.push(`addInvoiceLines:${idempotencyKey}`);
+				idempotency.claim(idempotencyKey, `POST /v1/invoices/${invoiceId}/add_lines`, params);
 				const invoice = invoices.get(invoiceId);
 				if (invoice === undefined) throw new Error(`Unknown fake Stripe invoice: ${invoiceId}`);
 				invoice.total = seededStripeEchoCreditsAmount;
@@ -486,6 +497,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			},
 			async finalizeInvoice(invoiceId: string, idempotencyKey: string) {
 				calls.push(`finalizeInvoice:${idempotencyKey}`);
+				idempotency.claim(idempotencyKey, `POST /v1/invoices/${invoiceId}/finalize`);
 				const invoice = invoices.get(invoiceId);
 				if (invoice === undefined) throw new Error(`Unknown fake Stripe invoice: ${invoiceId}`);
 				if (invoice.status === "draft") invoice.status = "open";
@@ -493,6 +505,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			},
 			async payInvoice(invoiceId: string, idempotencyKey: string) {
 				calls.push(`payInvoice:${idempotencyKey}`);
+				idempotency.claim(idempotencyKey, `POST /v1/invoices/${invoiceId}/pay`);
 				const invoice = invoices.get(invoiceId);
 				if (invoice === undefined) throw new Error(`Unknown fake Stripe invoice: ${invoiceId}`);
 				invoice.status = "paid";
@@ -500,6 +513,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			},
 			async voidInvoice(invoiceId: string, idempotencyKey: string) {
 				calls.push(`voidInvoice:${idempotencyKey}`);
+				idempotency.claim(idempotencyKey, `POST /v1/invoices/${invoiceId}/void`);
 				const invoice = invoices.get(invoiceId);
 				if (invoice === undefined) throw new Error(`Unknown fake Stripe invoice: ${invoiceId}`);
 				invoice.status = "void";
@@ -520,33 +534,41 @@ function stripeCustomerIdForBillingAccount(billingAccountId: string): string {
 	return `cus_${sanitized || "customer"}`;
 }
 
-export function stripeEvent(type: string, object: JsonRecord, id = `${type}:evt`) {
+/** The fixture objects below were created at this Stripe time, in seconds. */
+const stripeFixtureCreated = 1_779_840_000;
+let stripeEventSequence = 0;
+
+/**
+ * A Stripe event envelope. Unless the test says otherwise, every call gets its own id and a later
+ * `created` than the call before, so events built in delivery order also arrive in Stripe order.
+ */
+export function stripeEvent(
+	type: Stripe.Event.Type,
+	object: JsonRecord,
+	id?: string,
+	created?: number,
+) {
+	stripeEventSequence += 1;
 	return {
 		data: { object },
-		id,
+		id: id ?? `evt_fixture_${stripeEventSequence}`,
+		object: "event",
 		type,
+		created: created ?? stripeFixtureCreated + 60 + stripeEventSequence,
 	};
 }
 
-export function stripeSubscriptionObject(overrides: JsonRecord = {}) {
+/**
+ * A subscription as the pinned API version sends it: since 2025-03-31.basil the billing period
+ * lives on each subscription item, not on the subscription.
+ */
+export function stripeSubscriptionObject(overrides: DeepPartial<Stripe.Subscription> = {}) {
 	return {
 		cancel_at_period_end: false,
-		created: 1_779_840_000,
-		current_period_end: farFutureSubscriptionPeriodEnd,
+		created: stripeFixtureCreated,
 		customer: "cus_integration",
 		id: "sub_1",
-		items: {
-			data: [
-				{
-					current_period_end: farFutureSubscriptionPeriodEnd,
-					id: "si_integration",
-					price: {
-						id: "price_premium_monthly",
-						product: "prod_stripe_premium",
-					},
-				},
-			],
-		},
+		items: { object: "list", data: [stripeSubscriptionItemObject()] },
 		latest_invoice: "in_integration",
 		metadata: {
 			billingAccountId: "integration_user",
@@ -558,7 +580,32 @@ export function stripeSubscriptionObject(overrides: JsonRecord = {}) {
 		object: "subscription",
 		status: "active",
 		...overrides,
-	};
+	} satisfies DeepPartial<Stripe.Subscription>;
+}
+
+export function stripeSubscriptionItemObject(overrides: DeepPartial<Stripe.SubscriptionItem> = {}) {
+	return {
+		current_period_end: farFutureSubscriptionPeriodEnd,
+		id: "si_integration",
+		object: "subscription_item",
+		price: {
+			id: "price_premium_monthly",
+			product: "prod_stripe_premium",
+		},
+		...overrides,
+	} satisfies DeepPartial<Stripe.SubscriptionItem>;
+}
+
+/** Subscription overrides that put the one default item in the given billing period. */
+export function stripeSubscriptionPeriod(start: number, end: number) {
+	return {
+		items: {
+			object: "list",
+			data: [
+				stripeSubscriptionItemObject({ current_period_start: start, current_period_end: end }),
+			],
+		},
+	} satisfies DeepPartial<Stripe.Subscription>;
 }
 
 function stripeInvoiceReceipt(invoice: {
@@ -570,11 +617,13 @@ function stripeInvoiceReceipt(invoice: {
 }) {
 	return {
 		id: invoice.id,
+		object: "invoice",
 		status: invoice.status,
 		total: invoice.total,
 		amount_paid: invoice.status === "paid" ? invoice.total : 0,
 		currency: invoice.currency,
 		payments: {
+			object: "list",
 			data:
 				invoice.status === "paid"
 					? [
@@ -587,19 +636,21 @@ function stripeInvoiceReceipt(invoice: {
 						]
 					: [],
 		},
-	};
+	} satisfies DeepPartial<Stripe.Invoice>;
 }
 
-export function stripeCheckoutSessionObject(overrides: JsonRecord = {}) {
+/**
+ * A payment Checkout Session. A session has no charge of its own; the charge is the payment
+ * intent's `latest_charge`, which reaches us when the payment intent is expanded.
+ */
+export function stripeCheckoutSessionObject(overrides: DeepPartial<Stripe.Checkout.Session> = {}) {
 	return {
 		amount_total: seededStripeEchoCreditsAmount,
-		charge: "ch_integration",
 		client_reference_id: "integration_user",
-		created: 1_779_840_000,
+		created: stripeFixtureCreated,
 		currency: "usd",
 		customer: "cus_integration",
 		id: "cs_test_integration",
-		latest_charge: "ch_integration",
 		metadata: {
 			billingAccountId: "integration_user",
 			externalPriceId: "price_credits_10",
@@ -615,20 +666,20 @@ export function stripeCheckoutSessionObject(overrides: JsonRecord = {}) {
 			metadata: {
 				billingAccountId: "integration_user",
 			},
+			object: "payment_intent",
 		},
 		payment_status: "paid",
 		status: "complete",
 		...overrides,
-	};
+	} satisfies DeepPartial<Stripe.Checkout.Session>;
 }
 
-export function stripeRefundObject(overrides: JsonRecord = {}) {
+export function stripeRefundObject(overrides: DeepPartial<Stripe.Refund> = {}) {
 	return {
 		amount: seededStripeEchoCreditsAmount,
 		charge: "ch_integration",
-		created: 1_779_840_000,
+		created: stripeFixtureCreated,
 		currency: "usd",
-		customer: "cus_integration",
 		id: "re_integration",
 		metadata: {
 			billingAccountId: "integration_user",
@@ -639,20 +690,20 @@ export function stripeRefundObject(overrides: JsonRecord = {}) {
 		reason: "requested_by_customer",
 		status: "succeeded",
 		...overrides,
-	};
+	} satisfies DeepPartial<Stripe.Refund>;
 }
 
-export function stripeRefundedChargeObject(overrides: JsonRecord = {}) {
+export function stripeRefundedChargeObject(overrides: DeepPartial<Stripe.Charge> = {}) {
 	return {
 		amount_refunded: seededStripeEchoCreditsAmount,
-		created: 1_779_840_000,
+		created: stripeFixtureCreated,
 		currency: "usd",
 		customer: "cus_integration",
 		id: "ch_integration",
 		object: "charge",
 		payment_intent: "pi_integration",
 		...overrides,
-	};
+	} satisfies DeepPartial<Stripe.Charge>;
 }
 
 function appleDateMillis(input: AppleDateInput): number {

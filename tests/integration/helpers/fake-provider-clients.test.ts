@@ -150,12 +150,13 @@ describe("fake provider clients", () => {
 	});
 
 	it("uses seeded Stripe subscription catalog IDs by default", () => {
-		const subscription = stripeSubscriptionObject();
-
-		expect(subscription.metadata.externalProductId).toBe("prod_stripe_premium");
-		expect(subscription.items.data[0].price.product).toBe("prod_stripe_premium");
-		expect(subscription.metadata.externalPriceId).toBe("price_premium_monthly");
-		expect(subscription.items.data[0].price.id).toBe("price_premium_monthly");
+		expect(stripeSubscriptionObject()).toMatchObject({
+			metadata: {
+				externalProductId: "prod_stripe_premium",
+				externalPriceId: "price_premium_monthly",
+			},
+			items: { data: [{ price: { id: "price_premium_monthly", product: "prod_stripe_premium" } }] },
+		});
 	});
 
 	it("normalizes Stripe subscription payloads as active with local catalog IDs", () => {
@@ -172,14 +173,15 @@ describe("fake provider clients", () => {
 	});
 
 	it("uses seeded Stripe checkout catalog IDs and required timestamps by default", () => {
-		const session = stripeCheckoutSessionObject();
-		const refund = stripeRefundObject();
-
-		expect(session.created).toBe(1_779_840_000);
-		expect(session.amount_total).toBe(499);
-		expect(session.metadata.externalProductId).toBe("prod_stripe_credits_10");
-		expect(session.metadata.externalPriceId).toBe("price_credits_10");
-		expect(refund.amount).toBe(499);
+		expect(stripeCheckoutSessionObject()).toMatchObject({
+			created: 1_779_840_000,
+			amount_total: 499,
+			metadata: {
+				externalProductId: "prod_stripe_credits_10",
+				externalPriceId: "price_credits_10",
+			},
+		});
+		expect(stripeRefundObject().amount).toBe(499);
 	});
 
 	it("normalizes Stripe checkout and refund payloads with deterministic fields", () => {
@@ -258,6 +260,38 @@ describe("fake provider clients", () => {
 		await expect(google.client.getProductPurchase("token")).resolves.toBeDefined();
 		await expect(stripe.client.payInvoice(invoice.id, "pay")).resolves.toMatchObject({
 			status: "paid",
+		});
+	});
+
+	it("refuses a Stripe idempotency key reused for a different request", async () => {
+		const stripe = createFakeStripeBillingClient();
+		const invoice = await stripe.client.createInvoice({ currency: "usd" }, "create");
+
+		await expect(stripe.client.payInvoice(invoice.id, "pay")).resolves.toMatchObject({
+			status: "paid",
+		});
+		await expect(stripe.client.payInvoice(invoice.id, "pay")).resolves.toMatchObject({
+			status: "paid",
+		});
+		await expect(stripe.client.createInvoice({ currency: "eur" }, "create")).rejects.toMatchObject({
+			type: "StripeIdempotencyError",
+			rawType: "idempotency_error",
+			statusCode: 400,
+		});
+		await expect(stripe.client.voidInvoice(invoice.id, "pay")).rejects.toMatchObject({
+			type: "StripeIdempotencyError",
+		});
+	});
+
+	it("gives each Stripe event its own id and a later created time", () => {
+		const first = stripeEvent("invoice.paid", {});
+		const second = stripeEvent("invoice.paid", {});
+
+		expect(second.id).not.toBe(first.id);
+		expect(second.created).toBeGreaterThan(first.created);
+		expect(stripeEvent("invoice.paid", {}, "evt_given", 123)).toMatchObject({
+			id: "evt_given",
+			created: 123,
 		});
 	});
 });

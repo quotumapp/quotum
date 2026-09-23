@@ -11,6 +11,7 @@ import type {
 } from "../../../src/db/repository";
 import { StripeBillingService } from "../../../src/providers/stripe/service";
 import type { StripeCatalog } from "../../../src/providers/stripe/types";
+import type { DeepPartial } from "../../helpers/deep-partial";
 
 const config = {
 	checkoutSuccessUrl: "https://app.voysee.com/billing/success?session_id={CHECKOUT_SESSION_ID}",
@@ -334,14 +335,13 @@ function stripeEvent(type: string, object: Record<string, unknown>, id = "evt_12
 	};
 }
 
-function checkoutSessionObject(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function checkoutSessionObject(overrides: DeepPartial<Stripe.Checkout.Session> = {}) {
 	return {
 		id: "cs_123",
 		mode: "payment",
 		payment_status: "paid",
 		customer: "cus_123",
-		payment_intent: "pi_123",
-		charge: "ch_123",
+		payment_intent: { id: "pi_123", object: "payment_intent", latest_charge: "ch_123" },
 		created: 1_780_185_600,
 		metadata: {
 			billingAccountId: "user_1",
@@ -351,42 +351,52 @@ function checkoutSessionObject(overrides: Record<string, unknown> = {}): Record<
 			externalPriceId: "price_credits_100",
 		},
 		...overrides,
-	};
+	} satisfies DeepPartial<Stripe.Checkout.Session>;
 }
 
-function invoiceObject(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function invoiceObject(overrides: DeepPartial<Stripe.Invoice> = {}) {
 	return {
 		id: "in_123",
+		object: "invoice",
 		status: "paid",
 		customer: "cus_123",
-		subscription: "sub_123",
 		created: 1_780_185_600,
-		metadata: {
-			billingAccountId: "user_1",
-			externalProductId: "prod_premium",
-			externalPriceId: "price_premium_monthly",
+		parent: {
+			subscription_details: {
+				subscription: "sub_123",
+				metadata: {
+					billingAccountId: "user_1",
+					externalProductId: "prod_premium",
+					externalPriceId: "price_premium_monthly",
+				},
+			},
 		},
 		lines: {
 			data: [
 				{
-					type: "subscription",
-					period: { end: 1_782_777_600 },
-					price: { id: "price_premium_monthly", product: "prod_premium" },
+					parent: {
+						subscription_item_details: { subscription: "sub_123", subscription_item: "si_123" },
+					},
+					period: { start: 1_780_185_600, end: 1_782_777_600 },
+					pricing: { price_details: { price: "price_premium_monthly", product: "prod_premium" } },
 				},
 			],
 		},
 		...overrides,
-	};
+	} satisfies DeepPartial<Stripe.Invoice>;
 }
 
-function subscriptionObject(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function subscriptionObject(overrides: DeepPartial<Stripe.Subscription> = {}) {
 	return {
 		id: "sub_123",
 		status: "active",
 		customer: "cus_123",
 		latest_invoice: "in_123",
 		created: 1_780_185_600,
-		current_period_end: 1_782_777_600,
+		items: {
+			object: "list",
+			data: [{ id: "si_123", object: "subscription_item", current_period_end: 1_782_777_600 }],
+		},
 		cancel_at_period_end: false,
 		metadata: {
 			billingAccountId: "user_1",
@@ -394,36 +404,34 @@ function subscriptionObject(overrides: Record<string, unknown> = {}): Record<str
 			externalPriceId: "price_premium_monthly",
 		},
 		...overrides,
-	};
+	} satisfies DeepPartial<Stripe.Subscription>;
 }
 
-function refundObject(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function refundObject(overrides: DeepPartial<Stripe.Refund> = {}) {
 	return {
 		id: "re_123",
 		status: "succeeded",
 		amount: 499,
 		currency: "usd",
-		customer: "cus_123",
 		payment_intent: "pi_123",
 		charge: "ch_123",
 		created: 1_780_185_600,
 		metadata: { billingAccountId: "user_1" },
 		...overrides,
-	};
+	} satisfies DeepPartial<Stripe.Refund>;
 }
 
-function disputeObject(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function disputeObject(overrides: DeepPartial<Stripe.Dispute> = {}) {
 	return {
 		id: "dp_123",
 		amount: 499,
 		currency: "usd",
-		customer: "cus_123",
 		payment_intent: "pi_123",
 		charge: "ch_123",
 		created: 1_780_185_600,
 		metadata: { billingAccountId: "user_1" },
 		...overrides,
-	};
+	} satisfies DeepPartial<Stripe.Dispute>;
 }
 
 function storeEvent(overrides: Partial<StoreEventReplayJobRow> = {}): StoreEventReplayJobRow {
@@ -1453,7 +1461,7 @@ describe("StripeBillingService", () => {
 				subscriptionObject({
 					status: "canceled",
 					cancel_at_period_end: false,
-					current_period_end: 1_779_926_400,
+					items: { data: [{ id: "si_123", current_period_end: 1_779_926_400 }] },
 				}),
 				"evt_subscription",
 			),
