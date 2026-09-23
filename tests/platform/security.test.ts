@@ -147,6 +147,38 @@ describe("merchant security boundaries", () => {
 		])
 			expect(merchantBillingRoute("GET", path, "sandbox")).toBeNull();
 	});
+	it("guards the payment setup session read as a write, because it exposes an actionable link", () => {
+		for (const environment of ["sandbox", "production"] as const) {
+			expect(
+				merchantBillingRoute(
+					"GET",
+					"/api/billing/admin/billing-accounts/acct_1/payment-setup-sessions/cs_1",
+					environment,
+				),
+			).toEqual({
+				path: "/v1/billing-accounts/acct_1/payment-setup-sessions/cs_1",
+				capability: "operations.write",
+				action: null,
+				sensitive: false,
+			});
+		}
+		expect(
+			billingOperation("GET", "/v1/billing-accounts/acct%201/payment-setup-sessions/cs_1"),
+		).toEqual({ operation: "account.payment-setup", parameters: ["acct 1", "cs_1"] });
+		for (const path of [
+			"/api/billing/admin/billing-accounts/acct_1/payment-setup-sessions",
+			"/api/billing/admin/billing-accounts/acct_1/payment-setup-sessions/cs_1/extra",
+		])
+			expect(merchantBillingRoute("GET", path, "sandbox")).toBeNull();
+		expect(
+			merchantBillingRoute(
+				"POST",
+				"/api/billing/admin/billing-accounts/acct_1/payment-setup-sessions/cs_1",
+				"sandbox",
+			),
+		).toBeNull();
+	});
+
 	it("does not expose global reconciliation or provider routes to merchants", () => {
 		for (const path of [
 			"/api/billing/admin/reconciliation/subscriptions/run",

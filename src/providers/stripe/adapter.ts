@@ -40,6 +40,9 @@ export function wrapStripeService(
 			execute: service.executeCommercialAction?.bind(service),
 			requestChange: service.requestSubscriptionChange?.bind(service),
 		}),
+		paymentMethods: adapterGroup({
+			setupSession: service.getPaymentSetupSession?.bind(service),
+		}),
 		changes:
 			applySubscriptionChange === undefined
 				? undefined

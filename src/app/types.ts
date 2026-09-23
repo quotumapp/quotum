@@ -16,6 +16,7 @@ import type {
 	UsageSeriesPoint,
 } from "../billing/insights";
 import type { MeteringServiceLike } from "../billing/metering";
+import type { PaymentSetupSession } from "../billing/payment-setup";
 import type { PromotionServiceLike } from "../billing/promotions";
 import type { CatalogControlPlaneLike } from "../catalog/types";
 import type { BillingEnv } from "../env";
@@ -160,6 +161,10 @@ export interface StripeBillingServiceLike {
 		previewToken: string;
 		idempotencyKey: string;
 	}): Promise<CommercialActionExecutionResult>;
+	getPaymentSetupSession?(input: {
+		billingAccountId: string;
+		sessionId: string;
+	}): Promise<PaymentSetupSession>;
 	createPortalSession(input: {
 		billingAccountId: string;
 		returnUrl?: string | null;

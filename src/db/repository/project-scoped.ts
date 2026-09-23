@@ -4,6 +4,7 @@ import type {
 	CommercialPreviewDraft,
 	StoredCommercialActionPreview,
 } from "../../billing/commercial";
+import type { PaymentSetupCard, PaymentSetupSession } from "../../billing/payment-setup";
 import type {
 	CommercialPromotion,
 	PromotionRedemptionStatus,
@@ -17,10 +18,15 @@ import type {
 	SubscriptionChangeOperation,
 	SubscriptionChangePreview,
 } from "../../billing/recurring";
-import type { BillingProvider, EntitlementSnapshot } from "../../billing/types";
+import type { BillingChannel, BillingProvider, EntitlementSnapshot } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import type { StripeCatalog } from "../../providers/stripe/types";
 import type { BillingRepository } from "../repository";
+import type {
+	PaymentSetupReservation,
+	PaymentSetupRow,
+	ReservePaymentSetupInput,
+} from "./payment-setup";
 import type {
 	CompleteStripeCheckoutRequestInput,
 	GetStripeProviderCustomerInput,
@@ -343,5 +349,97 @@ export class ProjectScopedBillingRepository {
 			this.project,
 			input,
 		);
+	}
+
+	async findActivePaymentSetup(input: {
+		billingAccountId: string;
+		providerAccountId: string | null;
+	}): Promise<PaymentSetupRow | null> {
+		return await this.repository.findActivePaymentSetup(this.project, input);
+	}
+
+	async reservePaymentSetup(input: ReservePaymentSetupInput): Promise<PaymentSetupReservation> {
+		return await this.repository.reservePaymentSetup(this.project, input);
+	}
+
+	async recordPaymentSetupLink(input: {
+		setupId: string;
+		externalSessionId: string;
+		sessionUrl: string;
+		externalSetupIntentId: string | null;
+		expiresAt: Date;
+	}): Promise<PaymentSetupRow> {
+		return await this.repository.recordPaymentSetupLink(this.project, input);
+	}
+
+	async claimPaymentSetup(input: {
+		setupId: string;
+		workerId: string;
+	}): Promise<PaymentSetupRow | null> {
+		return await this.repository.claimPaymentSetup(this.project, input);
+	}
+
+	async releasePaymentSetupClaim(input: { setupId: string; workerId: string }): Promise<void> {
+		await this.repository.releasePaymentSetupClaim(this.project, input);
+	}
+
+	async recordPaymentSetupIntent(input: {
+		setupId: string;
+		workerId: string;
+		externalSetupIntentId: string;
+		paymentMethodId: string;
+		externalSessionId: string | null;
+	}): Promise<PaymentSetupRow> {
+		return await this.repository.recordPaymentSetupIntent(this.project, input);
+	}
+
+	async completePaymentSetup(input: {
+		setupId: string;
+		workerId: string;
+		paymentMethodId: string;
+		card: PaymentSetupCard | null;
+	}): Promise<PaymentSetupRow> {
+		return await this.repository.completePaymentSetup(this.project, input);
+	}
+
+	async expirePaymentSetup(input: { setupId: string; workerId: string }): Promise<PaymentSetupRow> {
+		return await this.repository.expirePaymentSetup(this.project, input);
+	}
+
+	async flagPaymentSetupAttention(input: {
+		setupId: string;
+		workerId: string;
+		reason: string;
+	}): Promise<PaymentSetupRow | null> {
+		return await this.repository.flagPaymentSetupAttention(this.project, input);
+	}
+
+	async getPaymentSetupSession(
+		billingAccountId: string,
+		sessionId: string,
+	): Promise<PaymentSetupSession> {
+		return await this.repository.getPaymentSetupSession(this.project, billingAccountId, sessionId);
+	}
+
+	async findPaymentSetupById(setupId: string): Promise<PaymentSetupRow | null> {
+		return await this.repository.findPaymentSetupById(this.project, setupId);
+	}
+
+	async schedulePaymentSetupReconciliation(input: {
+		setupId: string;
+		nextAttemptAt: Date;
+	}): Promise<string> {
+		return await this.repository.schedulePaymentSetupReconciliation(this.project, input);
+	}
+
+	async enqueueProviderStoreEvent(input: {
+		provider: BillingProvider;
+		channel: BillingChannel;
+		externalEventId: string | null;
+		eventType: string;
+		transactionId: string | null;
+		rawPayload: Record<string, unknown>;
+	}): Promise<{ storeEventId: string; enqueued: boolean }> {
+		return await this.repository.enqueueProviderStoreEvent(this.project, input);
 	}
 }

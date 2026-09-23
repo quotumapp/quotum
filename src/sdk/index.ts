@@ -2,7 +2,13 @@ export type {
 	CommercialActionExecutionResult,
 	CommercialActionIntent,
 	CommercialActionPreview,
+	CommercialPreviewPaymentSetup,
 } from "../billing/commercial";
+export type {
+	PaymentSetupCard,
+	PaymentSetupSession,
+	PaymentSetupStatus,
+} from "../billing/payment-setup";
 export type {
 	CreatePromotionInput,
 	PromotionCodeInput,

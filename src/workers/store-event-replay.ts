@@ -17,13 +17,22 @@ import { startLeaseHeartbeat } from "./lease-heartbeat";
 import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface StoreEventReplayProvider {
-	replayStoreEvent(event: StoreEventReplayJobRow): Promise<StoreEventReplayProviderResult>;
+	replayStoreEvent(
+		event: StoreEventReplayJobRow,
+		options?: { maxAttempts: number },
+	): Promise<StoreEventReplayProviderResult>;
 }
 
 export type StoreEventReplayProviderResult =
 	| { status: "processed" }
 	| { status: "ignored"; reason: string }
-	| { status: "retryable"; reason: string };
+	| { status: "retryable"; reason: string }
+	/**
+	 * The job is not done and nothing went wrong: it is waiting on something outside Quotum, such as
+	 * a hosted session the customer has not finished. It is rescheduled without consuming a retry
+	 * attempt, so waiting can never exhaust the job's budget for real failures.
+	 */
+	| { status: "deferred"; reason: string; nextAttemptAt: Date };
 
 export interface StoreEventReplayProviders {
 	apple: StoreEventReplayProvider | null;
@@ -41,12 +50,13 @@ export interface StoreEventReplayRunResult {
 	processed: number;
 	ignored: number;
 	retryable: number;
+	deferred: number;
 	failed: number;
 }
 
 export interface StoreEventReplayOneResult {
 	eventId: string;
-	status: "processed" | "ignored" | "retryable" | "failed";
+	status: "processed" | "ignored" | "retryable" | "deferred" | "failed";
 }
 
 export interface StoreEventReplayRepository {
@@ -69,6 +79,14 @@ export interface StoreEventReplayRepository {
 		eventId: string,
 		errorMessage: string,
 		nextAttemptAt: Date | null,
+		workerId: string,
+	): Promise<void>;
+	/** Reschedules a job that is waiting, leaving its attempt count untouched. */
+	markStoreEventReplayJobDeferred?(
+		projectId: string,
+		eventId: string,
+		reason: string,
+		nextAttemptAt: Date,
 		workerId: string,
 	): Promise<void>;
 	renewStoreEventReplayJobLease?(
@@ -139,6 +157,7 @@ export class StoreEventReplayWorker {
 				processed: 0,
 				ignored: 0,
 				retryable: 0,
+				deferred: 0,
 				failed: 0,
 			};
 
@@ -214,7 +233,7 @@ export class StoreEventReplayWorker {
 	private async processEvent(
 		event: StoreEventReplayJobRow,
 		resolvedProject?: ProjectInstanceContext,
-	): Promise<"processed" | "ignored" | "retryable" | "failed"> {
+	): Promise<"processed" | "ignored" | "retryable" | "deferred" | "failed"> {
 		let result: StoreEventReplayProviderResult;
 
 		try {
@@ -226,11 +245,23 @@ export class StoreEventReplayWorker {
 				}));
 			assertClaimedProjectIdentity(project, event.project_id, event.project_key);
 			const provider = await this.providerFor(event, project);
-			result = await provider.replayStoreEvent(event);
+			result = await provider.replayStoreEvent(event, { maxAttempts: this.maxAttempts });
 		} catch (error) {
 			await this.markFailedSafely(event, error);
 			this.recordEventResult(event, "failed", error);
 			return "failed";
+		}
+
+		if (result.status === "deferred") {
+			const deferred = await this.markDeferredSafely(event, result);
+			// Without a deferral path the wait would burn a retry attempt, so fall back to a failure.
+			if (!deferred) {
+				await this.markFailedSafely(event, result.reason);
+				this.recordEventResult(event, "retryable", new Error(result.reason));
+				return "retryable";
+			}
+			this.recordEventResult(event, "deferred", undefined);
+			return "deferred";
 		}
 
 		if (result.status === "retryable") {
@@ -250,7 +281,7 @@ export class StoreEventReplayWorker {
 
 	private recordEventResult(
 		event: StoreEventReplayJobRow,
-		status: "processed" | "ignored" | "retryable" | "failed",
+		status: "processed" | "ignored" | "retryable" | "deferred" | "failed",
 		failureError: unknown,
 	): void {
 		safelyIncrementBillingMetric(this.metrics, "billing_store_event_replay_jobs_total", {
@@ -315,6 +346,31 @@ export class StoreEventReplayWorker {
 			nextAttemptAt,
 			this.workerId,
 		);
+	}
+
+	private async markDeferredSafely(
+		event: StoreEventReplayJobRow,
+		result: Extract<StoreEventReplayProviderResult, { status: "deferred" }>,
+	): Promise<boolean> {
+		if (this.repository.markStoreEventReplayJobDeferred === undefined) return false;
+		try {
+			await this.repository.markStoreEventReplayJobDeferred(
+				event.project_id,
+				event.id,
+				result.reason,
+				result.nextAttemptAt,
+				this.workerId,
+			);
+			return true;
+		} catch (error) {
+			safelyLogError(this.logger, "Store event replay deferral failed", error, {
+				eventId: event.id,
+				provider: event.provider,
+				workerId: this.workerId,
+				result: "deferred",
+			});
+			return false;
+		}
 	}
 
 	private async markFailedSafely(event: StoreEventReplayJobRow, error: unknown): Promise<void> {

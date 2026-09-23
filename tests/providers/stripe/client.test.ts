@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import Stripe from "stripe";
 import { buildStripeConfig, StripeBillingClient } from "../../../src/providers/stripe/client";
 
@@ -103,6 +104,22 @@ describe("StripeBillingClient", () => {
 				},
 			},
 		]);
+	});
+
+	it("preserves unscoped customer keys and isolates explicit project scopes", async () => {
+		const { client, requestOptions } = stripeFixture();
+		const input = { billingAccountId: "user_1", email: "reader@example.com" };
+		await client.createCustomer(input);
+		await client.createCustomer({ ...input, idempotencyScope: null });
+		await client.createCustomer({ ...input, idempotencyScope: "project_a" });
+		await client.createCustomer({ ...input, idempotencyScope: "project_b" });
+		const keys = requestOptions.map((call) => call.options?.idempotencyKey);
+		const legacyHash = createHash("sha256")
+			.update('{"email":"reader@example.com","metadata":{"billingAccountId":"user_1"}}')
+			.digest("hex");
+		expect(keys[0]).toBe(`quotum-api:customers:create:${legacyHash}`);
+		expect(keys[1]).toBe(keys[0]);
+		expect(new Set([keys[0], keys[2], keys[3]]).size).toBe(3);
 	});
 
 	it("passes Checkout Session creation params through to Stripe", async () => {

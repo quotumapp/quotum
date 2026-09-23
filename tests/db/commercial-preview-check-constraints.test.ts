@@ -16,6 +16,7 @@ const intentKinds = [
 	"subscription_change",
 	"cancel",
 	"uncancel",
+	"setup_payment",
 ] as const;
 
 type IntentKindsCoverUnion = CommercialActionIntent["kind"] extends (typeof intentKinds)[number]

@@ -127,6 +127,40 @@ export class StoreEventReplayBillingRepository extends RepositoryModule {
 		);
 	}
 
+	/**
+	 * Reschedules a job that is waiting on something outside Quotum. `attempts` is untouched on
+	 * purpose: waiting is not a failure, so an open hosted session cannot exhaust the retry budget
+	 * a real failure needs.
+	 */
+	async markStoreEventReplayJobDeferred(
+		projectId: string,
+		eventId: string,
+		reason: string,
+		nextAttemptAt: Date,
+		workerId: string,
+	): Promise<void> {
+		requireNonBlank(reason, "p_processing_error");
+		await assertUpdated(
+			this.database,
+			drizzleSql`
+			UPDATE store_events events
+			SET
+				processing_status = 'pending',
+				processing_error = ${reason},
+				next_attempt_at = ${nextAttemptAt.toISOString()}::timestamptz,
+				locked_at = NULL,
+				locked_by = NULL,
+				updated_at = now()
+			WHERE events.id = ${eventId}
+				AND events.project_id = ${projectId}
+				AND events.processing_status = 'processing'
+				AND events.locked_by = ${workerId}
+			RETURNING events.id
+		`,
+			`store event replay job ${eventId} is not locked by worker ${workerId}`,
+		);
+	}
+
 	async markStoreEventReplayJobFailed(
 		projectId: string,
 		eventId: string,

@@ -250,6 +250,7 @@ localDescribe("Worker concurrency integration", () => {
 			processed: 1,
 			ignored: 0,
 			retryable: 0,
+			deferred: 0,
 			failed: 0,
 		});
 		expect(calls).toEqual([eventId]);

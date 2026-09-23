@@ -1701,7 +1701,7 @@ CREATE TABLE IF NOT EXISTS commercial_action_previews (
 	billing_account_id TEXT COLLATE "C" NOT NULL CHECK (char_length(billing_account_id) BETWEEN 1 AND 200),
 	preview_token UUID NOT NULL,
 	intent_kind TEXT NOT NULL CHECK (
-		intent_kind IN ('checkout_plan', 'checkout_product', 'subscription_change', 'cancel', 'uncancel')
+		intent_kind IN ('checkout_plan', 'checkout_product', 'subscription_change', 'cancel', 'uncancel', 'setup_payment')
 	),
 	intent_hash TEXT NOT NULL CHECK (char_length(intent_hash) = 64),
 	state_fingerprint TEXT NOT NULL CHECK (char_length(state_fingerprint) = 64),
@@ -1736,6 +1736,96 @@ CREATE INDEX IF NOT EXISTS idx_billing_commercial_previews_expiry
 
 CREATE INDEX IF NOT EXISTS idx_billing_commercial_previews_account_created
 	ON commercial_action_previews (project_id, billing_account_id, created_at DESC);
+
+-- Hosted payment-method setup. A setup saves a method for later off-session charges; it records no
+-- purchase, allocation, entitlement or invoice, and the only provider state it changes is which
+-- payment method the customer is charged by default.
+CREATE TABLE IF NOT EXISTS payment_setup_sessions (
+	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+	billing_account_id TEXT COLLATE "C" NOT NULL CHECK (char_length(billing_account_id) BETWEEN 1 AND 200),
+	provider TEXT NOT NULL CHECK (provider = 'stripe'),
+	-- Copied from the connection that created the setup, so recovery picks the same account after a rotation.
+	provider_account_id TEXT,
+	provider_customer_id TEXT NOT NULL CHECK (char_length(provider_customer_id) BETWEEN 1 AND 200),
+	preview_token UUID NOT NULL,
+	-- The exact provider idempotency key the creation call used, so a crashed creation resumes it.
+	provider_idempotency_key TEXT NOT NULL CHECK (char_length(provider_idempotency_key) BETWEEN 1 AND 255),
+	-- The frozen request parameters, hashed: a differing request conflicts instead of reusing the link.
+	request_hash TEXT NOT NULL CHECK (char_length(request_hash) = 64),
+	currency TEXT NOT NULL CHECK (currency ~ '^[a-z]{3}$'),
+	email TEXT CHECK (email IS NULL OR char_length(email) BETWEEN 1 AND 320),
+	success_url TEXT NOT NULL CHECK (char_length(success_url) BETWEEN 1 AND 2000),
+	cancel_url TEXT NOT NULL CHECK (char_length(cancel_url) BETWEEN 1 AND 2000),
+	status TEXT NOT NULL DEFAULT 'creating' CHECK (
+		status IN ('creating', 'awaiting_customer', 'applying_default', 'completed', 'expired', 'needs_attention')
+	),
+	external_session_id TEXT CHECK (external_session_id IS NULL OR char_length(external_session_id) BETWEEN 1 AND 200),
+	session_url TEXT,
+	external_setup_intent_id TEXT,
+	-- Written before the provider default-method call, so a crashed apply retries the same intent.
+	intended_payment_method_id TEXT,
+	-- Written only once the provider confirmed the default-method update.
+	default_payment_method_id TEXT,
+	card_brand TEXT CHECK (card_brand IS NULL OR char_length(card_brand) BETWEEN 1 AND 40),
+	card_last4 TEXT CHECK (card_last4 IS NULL OR card_last4 ~ '^[0-9]{4}$'),
+	card_exp_month INTEGER CHECK (card_exp_month IS NULL OR card_exp_month BETWEEN 1 AND 12),
+	card_exp_year INTEGER CHECK (card_exp_year IS NULL OR card_exp_year BETWEEN 2000 AND 2200),
+	attention_reason TEXT CHECK (attention_reason IS NULL OR char_length(attention_reason) BETWEEN 1 AND 500),
+	expires_at TIMESTAMPTZ NOT NULL,
+	completed_at TIMESTAMPTZ,
+	-- Claim protection: duplicate or out-of-order events cannot apply one setup concurrently.
+	claimed_by TEXT CHECK (claimed_by IS NULL OR char_length(claimed_by) BETWEEN 1 AND 200),
+	claimed_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT payment_setup_sessions_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT payment_setup_sessions_project_preview_unique UNIQUE (project_id, preview_token),
+	CONSTRAINT payment_setup_sessions_project_customer_fk
+		FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id)
+		ON DELETE CASCADE,
+	CONSTRAINT payment_setup_sessions_claim_check CHECK (
+		(claimed_by IS NULL AND claimed_at IS NULL) OR (claimed_by IS NOT NULL AND claimed_at IS NOT NULL)
+	),
+	CONSTRAINT payment_setup_sessions_state_check CHECK (
+		(status = 'creating' AND completed_at IS NULL AND default_payment_method_id IS NULL)
+		OR (
+			status = 'awaiting_customer'
+			AND external_session_id IS NOT NULL AND session_url IS NOT NULL
+			AND completed_at IS NULL AND default_payment_method_id IS NULL
+		)
+		OR (
+			status = 'applying_default'
+			AND external_session_id IS NOT NULL AND intended_payment_method_id IS NOT NULL
+			AND completed_at IS NULL AND default_payment_method_id IS NULL
+		)
+		OR (
+			status = 'completed'
+			AND external_session_id IS NOT NULL AND default_payment_method_id IS NOT NULL
+			AND completed_at IS NOT NULL
+		)
+		OR (status = 'expired' AND completed_at IS NULL AND default_payment_method_id IS NULL)
+		OR (status = 'needs_attention' AND attention_reason IS NOT NULL AND completed_at IS NULL)
+	),
+	CONSTRAINT payment_setup_sessions_card_check CHECK (
+		default_payment_method_id IS NOT NULL
+		OR (card_brand IS NULL AND card_last4 IS NULL AND card_exp_month IS NULL AND card_exp_year IS NULL)
+	)
+);
+
+-- One unresolved setup per billing account and provider identity; completed and expired free the slot.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_payment_setup_active
+	ON payment_setup_sessions (project_id, customer_id, provider, COALESCE(provider_account_id, ''))
+	WHERE status IN ('creating', 'awaiting_customer', 'applying_default', 'needs_attention');
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_payment_setup_external_session
+	ON payment_setup_sessions (project_id, external_session_id)
+	WHERE external_session_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_billing_payment_setup_account_created
+	ON payment_setup_sessions (project_id, billing_account_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS promotions (
 	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

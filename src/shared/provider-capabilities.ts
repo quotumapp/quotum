@@ -46,6 +46,7 @@ export const providerOperations = [
 	"checkout.plan",
 	"purchase.verify",
 	"portal.session",
+	"payment_method.setup",
 	"webhook.ingest",
 	"event.replay",
 	"subscription.reconcile",
@@ -73,6 +74,7 @@ export const providerOperationDomains = [
 	"checkout",
 	"purchases",
 	"portal",
+	"payment_methods",
 	"events",
 	"subscription_changes",
 	"settlement",
@@ -87,6 +89,7 @@ export const providerOperationDomainTitles: Record<ProviderOperationDomain, stri
 	checkout: "Checkout",
 	purchases: "Purchase verification",
 	portal: "Customer portal",
+	payment_methods: "Payment methods",
 	events: "Events and reconciliation",
 	subscription_changes: "Subscription changes",
 	settlement: "Usage settlement",
@@ -192,6 +195,12 @@ export const providerOperationDefinitions: Record<ProviderOperation, ProviderOpe
 			title: "Customer portal session",
 			description:
 				"Quotum creates a provider-hosted self-service session where the customer manages payment methods, invoices and subscriptions, and returns its URL.",
+		},
+		"payment_method.setup": {
+			domain: "payment_methods",
+			title: "Hosted payment method setup",
+			description:
+				"Quotum creates a provider-hosted page where the customer saves a payment method without a charge, and on completion makes it the billing account's default for later off-session charges.",
 		},
 		"webhook.ingest": {
 			domain: "events",

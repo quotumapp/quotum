@@ -16,6 +16,7 @@ const normalizerTest = "tests/providers/stripe/normalizer.test.ts";
 const promotionProvisioningTest = "tests/providers/stripe/promotions.test.ts";
 const serviceTest = "tests/providers/stripe/service.test.ts";
 const cancellationTest = "tests/providers/stripe/commercial-cancellation.test.ts";
+const paymentSetupTest = "tests/providers/stripe/payment-setup.test.ts";
 const autoTopupWorkerTest = "tests/workers/auto-topup.test.ts";
 const recurringBillingWorkerTest = "tests/workers/recurring-billing.test.ts";
 
@@ -113,6 +114,10 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 				"Stripe purchases complete in hosted Checkout and are recorded from signed webhook events; the Checkout Session status route never grants access.",
 		},
 		"portal.session": native([stripeFlowsTest, serviceTest]),
+		"payment_method.setup": native([paymentSetupTest, stripeFlowsTest], {
+			notes:
+				"Hosted Checkout in `setup` mode saves a card without a charge; on the verified completion Quotum sets it as the Stripe customer's invoice default payment method and leaves subscription-specific methods untouched.",
+		}),
 		"webhook.ingest": native([stripeFlowsTest, serviceTest]),
 		"event.replay": native([serviceTest]),
 		"subscription.reconcile": native([serviceTest]),
@@ -160,7 +165,7 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 			"Stripe invoices with a top-up price line",
 			[serviceTest, autoTopupWorkerTest, phase3JourneysTest],
 			"Quotum pays a Stripe invoice with the customer's default payment method; a missing method or an authentication request ends the job as action required.",
-			[{ kind: "saved_payment_method", required: true, resolveWith: "topup.customer_initiated" }],
+			[{ kind: "saved_payment_method", required: true, resolveWith: "payment_method.setup" }],
 		),
 		"promotion.code_entry": composed(
 			"Stripe coupons applied as Checkout and subscription discounts",

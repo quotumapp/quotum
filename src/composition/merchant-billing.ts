@@ -411,6 +411,15 @@ export function createMerchantBillingPort(input: {
 				return ok(
 					await repo.promotions.deactivatePromotionCode(project, id, parse(z.uuid(), event), actor),
 				);
+			case "account.payment-setup": {
+				const getPaymentSetupSession = requireProviderMethod(
+					await stripe(),
+					"stripe",
+					"paymentMethods.setupSession",
+					"Payment method setup is unavailable",
+				);
+				return ok(await getPaymentSetupSession({ billingAccountId: account(), sessionId: event }));
+			}
 			case "commercial.preview": {
 				const body = parse(commercialActionPreviewBodySchema, command.body);
 				const previewCommercialAction = requireProviderMethod(

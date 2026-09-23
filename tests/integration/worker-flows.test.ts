@@ -365,6 +365,7 @@ localDescribe("Worker flows integration", () => {
 			processed: 2,
 			ignored: 0,
 			retryable: 0,
+			deferred: 0,
 			failed: 0,
 		});
 		expect(calls.sort()).toEqual([
@@ -404,6 +405,7 @@ localDescribe("Worker flows integration", () => {
 			processed: 0,
 			ignored: 0,
 			retryable: 1,
+			deferred: 0,
 			failed: 0,
 		});
 		const event = await expectStoreEvent(context.sql, {
@@ -465,6 +467,7 @@ localDescribe("Worker flows integration", () => {
 			processed: 1,
 			ignored: 0,
 			retryable: 0,
+			deferred: 0,
 			failed: 0,
 		});
 		await expectTableCounts(context.sql, {

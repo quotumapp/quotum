@@ -97,6 +97,9 @@ export const googleCapabilities: ProviderCapabilityDeclaration = {
 			"Quotum acknowledges or consumes the purchase after recording it only when publisher mutations are enabled on the connection.",
 		),
 		"portal.session": notEvaluated(),
+		"payment_method.setup": providerManaged(
+			"Google Play owns the account's payment methods; there is no Quotum-hosted setup and nothing for Quotum to make default.",
+		),
 		"webhook.ingest": verified([googleFlows, googleService]),
 		"event.replay": verified([googleService]),
 		"subscription.reconcile": verified([googleService, workerFlows]),

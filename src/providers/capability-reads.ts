@@ -25,6 +25,7 @@ export const accountActionOperations = [
 	"checkout.plan",
 	"purchase.verify",
 	"portal.session",
+	"payment_method.setup",
 	"topup.customer_initiated",
 	"topup.automatic",
 	"promotion.code_entry",

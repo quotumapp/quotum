@@ -567,7 +567,11 @@ describe("StripeBillingService", () => {
 			},
 			{
 				method: "createCustomer",
-				input: { billingAccountId: "user_1", email: "reader@example.com" },
+				input: {
+					billingAccountId: "user_1",
+					email: "reader@example.com",
+					idempotencyScope: null,
+				},
 			},
 			{
 				method: "linkStripeProviderCustomer",
@@ -1051,7 +1055,10 @@ describe("StripeBillingService", () => {
 		expect(calls).toEqual([
 			{ method: "getStripeWebStoreProductByKey", productKey: "credits_100" },
 			{ method: "getStripeProviderCustomer", input: { billingAccountId: "user_1", email: null } },
-			{ method: "createCustomer", input: { billingAccountId: "user_1", email: null } },
+			{
+				method: "createCustomer",
+				input: { billingAccountId: "user_1", email: null, idempotencyScope: null },
+			},
 			{
 				method: "linkStripeProviderCustomer",
 				input: { billingAccountId: "user_1", stripeCustomerId: "cus_loser", email: null },
@@ -1082,7 +1089,10 @@ describe("StripeBillingService", () => {
 		expect(result).toEqual({ url: portalUrl });
 		expect(calls).toEqual([
 			{ method: "getStripeProviderCustomer", input: { billingAccountId: "user_1", email: null } },
-			{ method: "createCustomer", input: { billingAccountId: "user_1", email: null } },
+			{
+				method: "createCustomer",
+				input: { billingAccountId: "user_1", email: null, idempotencyScope: null },
+			},
 			{
 				method: "linkStripeProviderCustomer",
 				input: { billingAccountId: "user_1", stripeCustomerId: "cus_123", email: null },
@@ -1105,7 +1115,10 @@ describe("StripeBillingService", () => {
 		expect(result).toEqual({ url: portalUrl });
 		expect(calls).toEqual([
 			{ method: "getStripeProviderCustomer", input: { billingAccountId: "user_1", email: null } },
-			{ method: "createCustomer", input: { billingAccountId: "user_1", email: null } },
+			{
+				method: "createCustomer",
+				input: { billingAccountId: "user_1", email: null, idempotencyScope: null },
+			},
 			{
 				method: "linkStripeProviderCustomer",
 				input: { billingAccountId: "user_1", stripeCustomerId: "cus_loser", email: null },

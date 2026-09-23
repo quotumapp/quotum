@@ -97,6 +97,9 @@ export const appleCapabilities: ProviderCapabilityDeclaration = {
 			"The transaction's app account token must match the token Quotum issued for the billing account.",
 		),
 		"portal.session": notEvaluated(),
+		"payment_method.setup": providerManaged(
+			"The App Store owns the Apple ID payment method; there is no Quotum-hosted setup and nothing for Quotum to make default.",
+		),
 		"webhook.ingest": verified([appleFlows, appleService]),
 		"event.replay": verified([appleService]),
 		"subscription.reconcile": verified([appleService]),

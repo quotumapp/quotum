@@ -99,6 +99,7 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 				"subscription_change",
 				"cancel",
 				"uncancel",
+				"setup_payment",
 				"none",
 			]),
 			provider: z.literal("stripe"),
@@ -162,6 +163,17 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 					activeAddOnSubscriptionIds: z.array(z.string()),
 				}),
 			]),
+			paymentSetup: z.union([
+				z.null(),
+				z.object({
+					currency: z.string(),
+					appliesTo: z.literal("account_default"),
+					preservesSubscriptionPaymentMethods: z.literal(true),
+					reusesExistingSetup: z.boolean(),
+					existingSetupId: z.union([z.null(), z.string()]),
+					existingSetupExpiresAt: z.union([z.null(), z.string()]),
+				}),
+			]),
 			effectiveMode: z.union([z.null(), z.literal("immediate"), z.literal("period_end")]),
 			effectiveAt: z.union([z.null(), z.string()]),
 			prorationBehavior: z.union([
@@ -206,6 +218,22 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse200
 				.optional(),
 		}),
 		z.object({
+			kind: z.literal("payment_setup"),
+			setupId: z.string(),
+			status: z.enum([
+				"creating",
+				"awaiting_customer",
+				"applying_default",
+				"completed",
+				"expired",
+				"needs_attention",
+			]),
+			sessionId: z.string().nullable(),
+			url: z.string().nullable(),
+			expiresAt: z.string(),
+			reused: z.boolean(),
+		}),
+		z.object({
 			kind: z.literal("subscription_cancellation"),
 			action: z.enum(["cancel", "uncancel", "none"]),
 			externalSubscriptionId: z.string(),
@@ -238,6 +266,22 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse202
 			promotionRedemption: z
 				.union([z.null(), z.object({ id: z.string(), status: z.enum(["reserved", "applied"]) })])
 				.optional(),
+		}),
+		z.object({
+			kind: z.literal("payment_setup"),
+			setupId: z.string(),
+			status: z.enum([
+				"creating",
+				"awaiting_customer",
+				"applying_default",
+				"completed",
+				"expired",
+				"needs_attention",
+			]),
+			sessionId: z.string().nullable(),
+			url: z.string().nullable(),
+			expiresAt: z.string(),
+			reused: z.boolean(),
 		}),
 		z.object({
 			kind: z.literal("subscription_cancellation"),
@@ -280,6 +324,41 @@ export const getV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessio
 			productKey: z.union([z.null(), z.string()]),
 		}),
 	});
+
+export const PaymentSetupSessionSchema = z.object({
+	setupId: z.string(),
+	billingAccountId: z.string(),
+	provider: z.literal("stripe"),
+	status: z.enum([
+		"creating",
+		"awaiting_customer",
+		"applying_default",
+		"completed",
+		"expired",
+		"needs_attention",
+	]),
+	currency: z.string(),
+	sessionId: z.union([z.null(), z.string()]),
+	/** The reusable hosted link while the setup is open; null once it completed or expired. */
+	url: z.union([z.null(), z.string()]),
+	expiresAt: z.union([z.null(), z.string()]),
+	completedAt: z.union([z.null(), z.string()]),
+	card: z.union([
+		z.null(),
+		z.object({
+			brand: z.union([z.null(), z.string()]),
+			last4: z.union([z.null(), z.string()]),
+			expMonth: z.union([z.null(), z.number()]),
+			expYear: z.union([z.null(), z.number()]),
+		}),
+	]),
+	attention: z.union([z.null(), z.string()]),
+	createdAt: z.string(),
+	updatedAt: z.string(),
+});
+
+export const getV1BillingAccountsByBillingAccountIdPaymentSetupSessionsBySessionIdResponse200Schema =
+	z.object({ success: z.literal(true), data: PaymentSetupSessionSchema });
 
 export const postV1PurchasesVerifyResponse200Schema = z.object({
 	success: z.literal(true),

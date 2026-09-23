@@ -71,6 +71,7 @@ const stripeGuardedMethods = {
 	"commercial.execute": "executeCommercialAction",
 	"commercial.requestChange": "requestSubscriptionChange",
 	"checkout.createPlan": "createRecurringCheckoutSession",
+	"paymentMethods.setupSession": "getPaymentSetupSession",
 	"checkout.expire": "expireCheckoutSession",
 } as const satisfies Partial<Record<ProviderAdapterMethod, keyof StripeBillingServiceLike>>;
 

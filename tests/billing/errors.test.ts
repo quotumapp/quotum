@@ -278,7 +278,10 @@ describe("error inventory", () => {
 
 	it("keeps STRIPE_NOT_CONFIGURED to the Stripe service's own dependency guards", async () => {
 		const codes = await inventory();
-		expect(codes.get("STRIPE_NOT_CONFIGURED")).toEqual(["src/providers/stripe/service.ts"]);
+		expect(codes.get("STRIPE_NOT_CONFIGURED")).toEqual([
+			"src/providers/stripe/payment-setup.ts",
+			"src/providers/stripe/service.ts",
+		]);
 		expect(codes.get("BILLING_PROVIDER_NOT_CONFIGURED")).toEqual([
 			"src/app/provider-services.ts",
 			"src/billing/errors.ts",

@@ -81,6 +81,7 @@ DELETE /v1/billing-accounts/:billingAccountId/license-assignments/:assignmentId
 GET    /v1/billing-accounts/:billingAccountId/entities/:entityId/licenses/:featureKey
 POST   /v1/billing-accounts/:billingAccountId/commercial-actions/preview
 POST   /v1/billing-accounts/:billingAccountId/commercial-actions
+GET    /v1/billing-accounts/:billingAccountId/payment-setup-sessions/:sessionId
 GET    /v1/billing-accounts/:billingAccountId/entitlements
 ```
 
@@ -110,7 +111,8 @@ Usage reads default to the last 30 days, reject ranges over 90 days, and page wi
 never authorize work; product projections are display caches and cannot replace the metering calls.
 
 Commercial preview accepts one complete Stripe intent (`checkout_plan`, `checkout_product`,
-`subscription_change`, `cancel`, or `uncancel`) and returns exact or provider-calculated amounts
+`subscription_change`, `cancel`, `uncancel`, or `setup_payment`) and returns exact or
+provider-calculated amounts
 valid for 15 minutes. Execution accepts only the `previewToken` with an `Idempotency-Key` and
 rejects expired previews, catalog or customer drift, or a changed target. A durable
 subscription-change result is HTTP 202; every other result, including a cancellation, is HTTP 200.
@@ -164,6 +166,70 @@ and the subscription's status change when Stripe reports them, not when executio
 
 Limitation: a Stripe subscription schedule attached outside Quotum is invisible here. Quotum
 cancels the subscription; it does not release or amend a schedule that may recreate it.
+
+### Saving a payment method
+
+`setup_payment` sends the customer to a provider-hosted page where they save a payment method for
+later off-session charges. It needs no catalog item and no subscription, and it is not a purchase:
+it records no purchase, allocation, entitlement or invoice, and takes no money. Cards are supported
+first, authentication included.
+
+```json
+{ "intent": { "kind": "setup_payment", "currency": "usd" } }
+{ "intent": { "kind": "setup_payment", "currency": "usd", "email": "payer@example.com",
+              "successUrl": "https://app.example.com/billing",
+              "cancelUrl": "https://app.example.com/billing" } }
+```
+
+`currency` is required and selects which setup methods the hosted page offers; it does not bind the
+account to that currency. `successUrl` and `cancelUrl` default to the connection's configured
+customer-application URLs and are checked against its approved return origins, exactly as Checkout
+and portal returns are (`RETURN_URL_NOT_ALLOWED`, 400). Setup previews reject email addresses longer than 320 characters
+and return URLs longer than 2,000 characters before storing any state.
+
+The preview carries no line items and a zero total, and adds a `paymentSetup` object: the
+`currency`, `appliesTo: "account_default"`, `preservesSubscriptionPaymentMethods: true`, and
+whether executing would reuse an unfinished setup (`reusesExistingSetup`, `existingSetupId`,
+`existingSetupExpiresAt`). A setup binds no catalog or customer state, so a preview cannot go stale
+on drift; it still expires after 15 minutes like every other preview.
+
+Execution returns `{ "kind": "payment_setup", "setupId", "status", "sessionId", "url", "expiresAt", "reused" }`
+with HTTP 200. The link lives for 23 hours, leaving margin within Stripe's expiry window. **Creating the link does not mean setup completed** —
+read the setup session to learn that.
+
+One unresolved setup exists per billing account and provider identity:
+
+- A matching request (same currency, email and return URLs) gets that setup's link back unchanged,
+  with `reused: true`.
+- A differing request is refused during preview with `PAYMENT_SETUP_ALREADY_ACTIVE` (409), whose
+  `details.paymentSetup` names the active `setupId`, its `status` and its `expiresAt`.
+- Only a completed setup or a provider-confirmed expiry frees the slot; a new preview is then
+  required. Replaying a stored execution key returns its original result. If execution outcome
+  persistence was interrupted, recovery returns the original setup's current status without
+  creating another provider session. `sessionId` can be null when creation remains uncertain;
+  `url` is null unless the setup is `awaiting_customer` and its frozen expiry is still in the future.
+
+```
+GET /v1/billing-accounts/:billingAccountId/payment-setup-sessions/:sessionId
+```
+
+`:sessionId` accepts either the `setupId` Quotum issued or the provider session id. The response is
+persisted state only — no provider call — and reports `status`, `currency`, `expiresAt`,
+`completedAt` and, once the default-method update is confirmed, a safe `card` summary
+(`brand`, `last4`, `expMonth`, `expYear`). The reusable `url` is returned only while the setup is
+`awaiting_customer` and unexpired. Because that link is actionable, this read requires a full project credential
+(`READ_ONLY_CREDENTIAL`, 403, for a read-only key) and `operations.write` on the merchant surface.
+
+Statuses: `creating` (the link is being made), `awaiting_customer` (the link is open),
+`applying_default` (the customer finished and the default-method update is owed), `completed`,
+`expired`, and `needs_attention` (work that retries could not finish; the setup stays visible and
+keeps the account's slot until it is reconciled). A customer cancelling in their browser leaves an
+otherwise valid link reusable.
+
+On completion Quotum validates the provider's own record of the setup and then updates only
+`customer.invoice_settings.default_payment_method`. Payment methods pinned to individual
+subscriptions are untouched, and setup starts no charge and retries no old invoice: a suspended
+automatic top-up policy still needs its own explicit reset.
 
 ## Usage operation recovery
 
@@ -324,6 +390,7 @@ A Stripe-backed route whose Stripe service lacks the method it needs returns
 | `GET /v1/billing-accounts/:billingAccountId/billing-account` | `reads.billingAccount` |
 | `POST /v1/billing-accounts/:billingAccountId/commercial-actions/preview` | `commercial.preview` |
 | `POST /v1/billing-accounts/:billingAccountId/commercial-actions` | `commercial.execute` |
+| `GET /v1/billing-accounts/:billingAccountId/payment-setup-sessions/:sessionId` | `paymentMethods.setupSession` |
 | `POST /v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions` with a `planKey` | `checkout.createPlan` |
 | `POST /v1/billing-accounts/:billingAccountId/subscriptions/:subscriptionId/changes` | `commercial.requestChange` |
 | `POST /v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions/:sessionId/expire` | `checkout.expire` |
@@ -440,7 +507,8 @@ abbreviated:
 
 The available-actions read evaluates, for every provider, the operations a billing account can
 start: `checkout.hosted`, `checkout.plan`, `purchase.verify`, `portal.session`,
-`topup.customer_initiated`, `topup.automatic`, and `promotion.code_entry`. `subscriptions` lists
+`payment_method.setup`, `topup.customer_initiated`, `topup.automatic`, and
+`promotion.code_entry`. `subscriptions` lists
 the account's live subscriptions (status `active`, `grace_period`, `billing_retry`, or `cancelled`,
 and not past their expiry), newest first. Each carries its provider subscription `id`, its
 `pendingChange` (the pending or processing change, or `null`), and the
@@ -451,7 +519,8 @@ read never creates a customer.
 
 Only the provider knows whether a customer has a saved payment method, so a condition on it is
 `undetermined` with resolution `checked_at_execution`: the request itself decides. Stripe's
-`topup.automatic` is reported this way. Treat `undetermined` as possible, not as refused.
+`topup.automatic` is reported this way, and its condition's `resolveWith` names
+`payment_method.setup` — the hosted setup that saves a method without charging for it. Treat `undetermined` as possible, not as refused.
 Abbreviated:
 
 ```json
@@ -477,7 +546,7 @@ Abbreviated:
             "condition": {
               "kind": "saved_payment_method",
               "required": true,
-              "resolveWith": "topup.customer_initiated"
+              "resolveWith": "payment_method.setup"
             },
             "observed": { "savedPaymentMethod": "unknown" },
             "resolution": { "kind": "checked_at_execution" }

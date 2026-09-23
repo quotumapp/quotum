@@ -36,6 +36,7 @@ import {
 import { publishAiCreditsCatalog } from "./helpers/metering-catalog";
 import { seedPhase3CatalogMigration, seedPhase3ControlCatalog } from "./helpers/phase3-fixtures";
 import { integrationProjectReadOnlyCredential } from "./helpers/platform-fixture";
+import { runStoreEventReplayWorkerOnce } from "./helpers/worker-fixture";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 let context: LocalPostgresContext;
@@ -295,6 +296,342 @@ localDescribe("Stripe route flows integration", () => {
 			WHERE preview_token = ${preview.previewToken}::uuid
 		`;
 		expect(stored?.intent.expiresAt).toBe(expiresAt);
+	});
+
+	// capability: payment_method.setup
+	it("takes a hosted payment setup from preview to a saved account default", async () => {
+		const { app, stripe, authHeaders, projectProviderServices } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+
+		const previewResponse = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({ intent: { kind: "setup_payment", currency: "USD" } }),
+			},
+		);
+		expect(previewResponse.status).toBe(200);
+		const preview = (await previewResponse.json()).data;
+		expect(preview).toMatchObject({
+			action: "setup_payment",
+			billingAccountId: "integration_user",
+			estimatedTotalMinor: 0,
+			subtotalMinor: 0,
+			discountTotalMinor: 0,
+			currency: "usd",
+			amountStatus: "exact",
+			lineItems: [],
+			paymentSetup: {
+				currency: "usd",
+				appliesTo: "account_default",
+				preservesSubscriptionPaymentMethods: true,
+				reusesExistingSetup: false,
+				existingSetupId: null,
+			},
+		});
+
+		const executed = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "commercial:setup:1" },
+				body: JSON.stringify({ previewToken: preview.previewToken }),
+			},
+		);
+		expect(executed.status).toBe(200);
+		const creation = (await executed.json()).data;
+		expect(creation).toMatchObject({ kind: "payment_setup", reused: false });
+		expect(creation.url).toContain(creation.sessionId);
+		const setupParams = stripe.checkoutSessionParams.find((params) => params.mode === "setup");
+		expect(setupParams).toMatchObject({ mode: "setup", currency: "usd" });
+
+		const open = await testRequest(
+			app,
+			`/v1/billing-accounts/integration_user/payment-setup-sessions/${creation.setupId}`,
+			{ headers: authHeaders("voysee") },
+		);
+		expect(open.status).toBe(200);
+		expect((await open.json()).data).toMatchObject({
+			setupId: creation.setupId,
+			status: "awaiting_customer",
+			url: creation.url,
+			card: null,
+		});
+
+		stripe.completeSetupSession(creation.sessionId);
+		const completionEvent = stripeEvent(
+			"checkout.session.completed",
+			{
+				id: creation.sessionId,
+				mode: "setup",
+				customer: "cus_integration",
+				setup_intent: `seti_${creation.sessionId}`,
+				metadata: { quotumPaymentSetupId: creation.setupId },
+			},
+			"evt_payment_setup_completed",
+		);
+		stripe.setWebhookEvent(completionEvent);
+		const webhook = await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+			method: "POST",
+			headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=test" },
+			body: JSON.stringify(completionEvent),
+		});
+		expect(webhook.status).toBe(200);
+		// The ingress only queues the event; nothing is applied inside the request.
+		expect(stripe.defaultPaymentMethodWrites).toHaveLength(0);
+
+		const run = await runStoreEventReplayWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: {
+				apple: null,
+				google: null,
+				stripe: projectProviderServices.voysee?.stripeBillingService ?? null,
+			},
+		});
+		expect(run.processed).toBeGreaterThanOrEqual(1);
+		expect(stripe.defaultPaymentMethodWrites).toEqual([
+			{
+				customerId: "cus_integration",
+				paymentMethodId: `pm_setup_${creation.sessionId}`,
+				idempotencyKey: `billing:payment-setup-default:${creation.setupId}:pm_setup_${creation.sessionId}`,
+			},
+		]);
+
+		const completed = await testRequest(
+			app,
+			`/v1/billing-accounts/integration_user/payment-setup-sessions/${creation.sessionId}`,
+			{ headers: authHeaders("voysee") },
+		);
+		expect(completed.status).toBe(200);
+		expect((await completed.json()).data).toMatchObject({
+			setupId: creation.setupId,
+			status: "completed",
+			url: null,
+			card: { brand: "visa", last4: "4242", expMonth: 12, expYear: 2031 },
+		});
+
+		// A setup is not a purchase: it creates no financial fact of any kind.
+		await expectTableCounts(context.sql, {
+			purchases: 0,
+			entitlements: 0,
+			balance_allocations: 0,
+			billing_invoices: 0,
+			checkout_requests: 0,
+		});
+		// Only the account default moved; payment methods pinned to subscriptions are untouched.
+		expect(stripe.subscriptionUpdates).toHaveLength(0);
+
+		// A late expiry for the same session cannot undo the completed setup.
+		const expiryEvent = stripeEvent(
+			"checkout.session.expired",
+			{
+				id: creation.sessionId,
+				mode: "setup",
+				customer: "cus_integration",
+				metadata: { quotumPaymentSetupId: creation.setupId },
+			},
+			"evt_payment_setup_expired",
+		);
+		stripe.setWebhookEvent(expiryEvent);
+		await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+			method: "POST",
+			headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=test" },
+			body: JSON.stringify(expiryEvent),
+		});
+		await runStoreEventReplayWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: {
+				apple: null,
+				google: null,
+				stripe: projectProviderServices.voysee?.stripeBillingService ?? null,
+			},
+		});
+		const [row] = await context.sql<Array<{ status: string }>>`
+			SELECT status FROM payment_setup_sessions WHERE id = ${creation.setupId}::uuid
+		`;
+		expect(row?.status).toBe("completed");
+
+		// The saved card is what a later automatic top-up charges.
+		const stripeService = projectProviderServices.voysee?.stripeBillingService;
+		if (stripeService === undefined || stripeService === null) {
+			throw new Error("The integration app did not build a Stripe service");
+		}
+		const charge = await stripeService.createAutoTopupCharge({
+			jobId: "00000000-0000-4000-8000-00000000a001",
+			projectId: "project_1",
+			projectKey: "voysee",
+			provider: "stripe",
+			providerAccountId: null,
+			policyId: "00000000-0000-4000-8000-00000000b001",
+			customerId: "00000000-0000-4000-8000-00000000c001",
+			billingAccountId: "integration_user",
+			externalCustomerId: "cus_integration",
+			storeProductId: "00000000-0000-4000-8000-00000000d001",
+			externalPriceId: "price_credits_10",
+			amountMinor: 499,
+			maximumChargeMinor: 10_000,
+			currency: "usd",
+			attempts: 0,
+			consecutiveFailures: 0,
+			maxConsecutiveFailures: 3,
+		});
+		expect(charge.status).toBe("succeeded");
+		expect(stripe.invoiceCreateParams.at(-1)?.default_payment_method).toBe(
+			`pm_setup_${creation.sessionId}`,
+		);
+	});
+
+	// capability: payment_method.setup
+	it("reuses an unfinished setup link and refuses a differing request", async () => {
+		const { app, stripe, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const setup = async (currency: string, key: string) => {
+			const previewResponse = await testRequest(
+				app,
+				"/v1/billing-accounts/integration_user/commercial-actions/preview",
+				{
+					method: "POST",
+					headers,
+					body: JSON.stringify({ intent: { kind: "setup_payment", currency } }),
+				},
+			);
+			if (previewResponse.status !== 200) return { preview: null, response: previewResponse };
+			const preview = (await previewResponse.json()).data;
+			const executed = await testRequest(
+				app,
+				"/v1/billing-accounts/integration_user/commercial-actions",
+				{
+					method: "POST",
+					headers: { ...headers, "idempotency-key": key },
+					body: JSON.stringify({ previewToken: preview.previewToken }),
+				},
+			);
+			return { preview, response: executed };
+		};
+
+		const first = await setup("usd", "commercial:setup:reuse:1");
+		expect(first.response.status).toBe(200);
+		const created = (await first.response.json()).data;
+
+		const matching = await setup("usd", "commercial:setup:reuse:2");
+		expect(matching.response.status).toBe(200);
+		const reused = (await matching.response.json()).data;
+		expect(reused).toMatchObject({
+			kind: "payment_setup",
+			setupId: created.setupId,
+			sessionId: created.sessionId,
+			reused: true,
+		});
+		expect(matching.preview.paymentSetup).toMatchObject({
+			reusesExistingSetup: true,
+			existingSetupId: created.setupId,
+		});
+		expect(stripe.checkoutSessionParams.filter((params) => params.mode === "setup")).toHaveLength(
+			1,
+		);
+
+		const differing = await setup("eur", "commercial:setup:reuse:3");
+		expect(differing.response.status).toBe(409);
+		const conflict = await differing.response.json();
+		expect(conflict.error.code).toBe("PAYMENT_SETUP_ALREADY_ACTIVE");
+		expect(conflict.error.details.paymentSetup).toMatchObject({
+			setupId: created.setupId,
+			status: "awaiting_customer",
+		});
+	});
+
+	// capability: payment_method.setup
+	it("refuses a hosted setup and its session read from a read-only project credential", async () => {
+		const { app } = createIntegrationApp({ env: context.env, repository: context.repository });
+		const headers = {
+			authorization: `Bearer ${integrationProjectReadOnlyCredential("voysee")}`,
+			"content-type": "application/json",
+		};
+
+		const preview = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({ intent: { kind: "setup_payment", currency: "usd" } }),
+			},
+		);
+		expect(preview.status).toBe(403);
+		expect((await preview.json()).error.code).toBe("READ_ONLY_CREDENTIAL");
+
+		const read = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/payment-setup-sessions/cs_setup_integration_1",
+			{ headers: { authorization: headers.authorization } },
+		);
+		expect(read.status).toBe(403);
+		expect((await read.json()).error.code).toBe("READ_ONLY_CREDENTIAL");
+	});
+
+	// capability: payment_method.setup
+	it("refuses a hosted setup whose return URL is not an approved origin", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+
+		const previewResponse = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: {
+						kind: "setup_payment",
+						currency: "usd",
+						successUrl: "https://evil.example.com/steal",
+					},
+				}),
+			},
+		);
+		expect(previewResponse.status).toBe(400);
+		expect((await previewResponse.json()).error.code).toBe("RETURN_URL_NOT_ALLOWED");
+		await expectTableCounts(context.sql, { payment_setup_sessions: 0 });
+	});
+
+	it.each([
+		{ email: `${"a".repeat(309)}@example.com` },
+		{ successUrl: `https://app.voysee.com/${"a".repeat(2000)}` },
+		{ cancelUrl: `https://app.voysee.com/${"a".repeat(2000)}` },
+	])("rejects oversized setup input before persisting a preview: %j", async (overrides) => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const response = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions/preview",
+			{
+				method: "POST",
+				headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+				body: JSON.stringify({ intent: { kind: "setup_payment", currency: "usd", ...overrides } }),
+			},
+		);
+		expect(response.status).toBe(400);
+		expect((await response.json()).error.code).toBe("INVALID_REQUEST");
+		await expectTableCounts(context.sql, {
+			payment_setup_sessions: 0,
+			commercial_action_previews: 0,
+		});
 	});
 
 	// capability: subscription.change.preview

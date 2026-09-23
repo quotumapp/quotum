@@ -18,6 +18,7 @@ const providerTables = [
 	"purchases",
 	"store_events",
 	"checkout_requests",
+	"payment_setup_sessions",
 	"credit_grant_provider_objects",
 	"catalog_provider_operations",
 	"provider_plan_bindings",
@@ -34,6 +35,7 @@ const providerTables = [
 /** Tables whose Drizzle definition mirrors the provider CHECK as `<table>_provider_check`. */
 const drizzleMirroredTables = [
 	"checkout_requests",
+	"payment_setup_sessions",
 	"credit_grant_provider_objects",
 	"provider_customers",
 	"purchases",
@@ -50,6 +52,7 @@ const shapeCheck = "promotion_provider_objects_shape_check";
 const drizzleProviderColumn = `\${table.provider}`;
 
 const checkoutOperations: ProviderOperation[] = ["checkout.hosted", "checkout.plan"];
+const paymentSetupOperations: ProviderOperation[] = ["payment_method.setup"];
 
 const registry = createProviderRegistry({
 	getRepository: () => {
@@ -119,6 +122,7 @@ describe("provider CHECK constraints", () => {
 		expect(admitted).toEqual([...admittedProviders()].sort());
 		const expected = new Map(providerTables.map((table) => [table, admitted]));
 		expected.set("checkout_requests", checkoutProviders());
+		expected.set("payment_setup_sessions", providersImplementing(paymentSetupOperations));
 		expected.set("promotion_redemptions", [...admitted, "quotum"].sort());
 		expect(Object.fromEntries(providerChecks)).toEqual(Object.fromEntries(expected));
 	});
@@ -168,13 +172,17 @@ describe("provider CHECK constraints", () => {
 });
 
 function checkoutProviders(): string[] {
-	const implementsCheckout = (provider: BillingProvider) =>
-		checkoutOperations.some((operation) => {
+	return providersImplementing(checkoutOperations);
+}
+
+function providersImplementing(operations: ProviderOperation[]): string[] {
+	const implementsAny = (provider: BillingProvider) =>
+		operations.some((operation) => {
 			const declaration = providerCapabilityDeclaration(provider);
 			const verdict = evaluateCapability(declaration, operation, {}, { through: "implementation" });
 			return verdict.outcome !== "blocked";
 		});
-	return registry.admitted().filter(implementsCheckout).sort();
+	return registry.admitted().filter(implementsAny).sort();
 }
 
 function sqlShapeProviders(): string[] {

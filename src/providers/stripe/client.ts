@@ -9,6 +9,16 @@ export interface StripeBillingConfig extends StripeBillingEnv {
 	apiVersion: typeof STRIPE_API_VERSION;
 }
 
+/**
+ * Checkout Session create parameters plus the card-only filter hosted setup needs. The pinned API
+ * reference documents `allowed_payment_method_types` on Checkout Sessions, while stripe-node
+ * 22.6.2 omits it there. Keep this extension narrow until the SDK catches up.
+ * https://docs.stripe.com/api/checkout/sessions/create#allowed_payment_method_types
+ */
+export type StripeCheckoutSessionCreateParams = Stripe.Checkout.SessionCreateParams & {
+	allowed_payment_method_types?: string[];
+};
+
 interface StripeClientLike {
 	customers: {
 		create(
@@ -19,11 +29,22 @@ interface StripeClientLike {
 			customerId: string,
 			params?: Stripe.CustomerRetrieveParams,
 		): Promise<Stripe.Customer | Stripe.DeletedCustomer>;
+		update?(
+			customerId: string,
+			params: Stripe.CustomerUpdateParams,
+			options?: Stripe.RequestOptions,
+		): Promise<Stripe.Customer>;
+	};
+	setupIntents?: {
+		retrieve(
+			setupIntentId: string,
+			params?: Stripe.SetupIntentRetrieveParams,
+		): Promise<Stripe.SetupIntent>;
 	};
 	checkout: {
 		sessions: {
 			create(
-				params: Stripe.Checkout.SessionCreateParams,
+				params: StripeCheckoutSessionCreateParams,
 				options?: Stripe.RequestOptions,
 			): Promise<Stripe.Checkout.Session>;
 			expire?(sessionId: string): Promise<Stripe.Checkout.Session>;
@@ -125,14 +146,58 @@ export class StripeBillingClient {
 	createCustomer(input: {
 		billingAccountId: string;
 		email: string | null;
+		/** Scopes the idempotency key to one tenant, so two projects never share a created customer. */
+		idempotencyScope?: string | null;
 	}): Promise<Stripe.Customer> {
 		const params: Stripe.CustomerCreateParams = {
 			email: input.email ?? undefined,
 			metadata: { billingAccountId: input.billingAccountId },
 		};
 		return this.stripe.customers.create(params, {
-			idempotencyKey: stripeIdempotencyKey("customers:create", params),
+			idempotencyKey: stripeIdempotencyKey(
+				"customers:create",
+				input.idempotencyScope == null
+					? params
+					: {
+							scope: input.idempotencyScope,
+							params,
+						},
+			),
 		});
+	}
+
+	/** Points the customer's invoice default at a saved method; nothing else on the customer moves. */
+	async updateCustomerDefaultPaymentMethod(input: {
+		customerId: string;
+		paymentMethodId: string;
+		idempotencyKey: string;
+	}): Promise<void> {
+		if (this.stripe.customers.update === undefined) {
+			throw new Error("Stripe customer updates are unavailable");
+		}
+		await this.stripe.customers.update(
+			input.customerId,
+			{ invoice_settings: { default_payment_method: input.paymentMethodId } },
+			{ idempotencyKey: input.idempotencyKey },
+		);
+	}
+
+	async retrieveSetupIntent(setupIntentId: string): Promise<Record<string, unknown>> {
+		if (this.stripe.setupIntents === undefined) {
+			throw new Error("Stripe setup intents are unavailable");
+		}
+		const setupIntent = await this.stripe.setupIntents.retrieve(setupIntentId, {
+			expand: ["payment_method"],
+		});
+		return setupIntent as unknown as Record<string, unknown>;
+	}
+
+	/** The hosted setup session with its SetupIntent and saved method, as stored provider facts. */
+	async retrieveSetupCheckoutSession(sessionId: string): Promise<Record<string, unknown>> {
+		const session = await this.stripe.checkout.sessions.retrieve(sessionId, {
+			expand: ["setup_intent", "setup_intent.payment_method"],
+		});
+		return session as unknown as Record<string, unknown>;
 	}
 
 	async retrieveDefaultPaymentMethod(customerId: string): Promise<string | null> {
@@ -148,7 +213,7 @@ export class StripeBillingClient {
 		return paymentMethod?.id ?? null;
 	}
 
-	createCheckoutSession(params: Stripe.Checkout.SessionCreateParams, idempotencyKey?: string) {
+	createCheckoutSession(params: StripeCheckoutSessionCreateParams, idempotencyKey?: string) {
 		return this.stripe.checkout.sessions.create(params, {
 			idempotencyKey: idempotencyKey ?? stripeOperationIdempotencyKey("checkout-sessions:create"),
 		});

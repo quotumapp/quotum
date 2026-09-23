@@ -17,6 +17,10 @@
       "title": "Customer portal"
     },
     {
+      "id": "payment_methods",
+      "title": "Payment methods"
+    },
+    {
       "id": "events",
       "title": "Events and reconciliation"
     },
@@ -178,6 +182,12 @@
       "domain": "portal",
       "id": "portal.session",
       "title": "Customer portal session"
+    },
+    {
+      "description": "Quotum creates a provider-hosted page where the customer saves a payment method without a charge, and on completion makes it the billing account's default for later off-session charges.",
+      "domain": "payment_methods",
+      "id": "payment_method.setup",
+      "title": "Hosted payment method setup"
     },
     {
       "description": "Quotum authenticates provider notifications on the project webhook route, stores each once as a store event, and mirrors the purchase, subscription, refund and reversal state they carry.",
@@ -423,6 +433,14 @@
             },
             "status": "verified",
             "verifiedOn": "2026-09-17"
+          }
+        },
+        "payment_method.setup": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "The App Store owns the Apple ID payment method; there is no Quotum-hosted setup and nothing for Quotum to make default.",
+          "verification": {
+            "status": "not_applicable"
           }
         },
         "portal.session": {
@@ -742,6 +760,14 @@
             },
             "status": "verified",
             "verifiedOn": "2026-09-17"
+          }
+        },
+        "payment_method.setup": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Google Play owns the account's payment methods; there is no Quotum-hosted setup and nothing for Quotum to make default.",
+          "verification": {
+            "status": "not_applicable"
           }
         },
         "portal.session": {
@@ -1172,6 +1198,23 @@
             "verifiedOn": "2026-09-17"
           }
         },
+        "payment_method.setup": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Hosted Checkout in `setup` mode saves a card without a charge; on the verified completion Quotum sets it as the Stripe customer's invoice default payment method and leaves subscription-specific methods untouched.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/stripe/payment-setup.test.ts",
+                "tests/integration/stripe-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
         "portal.session": {
           "conditions": [],
           "level": "native",
@@ -1431,7 +1474,7 @@
             {
               "kind": "saved_payment_method",
               "required": true,
-              "resolveWith": "topup.customer_initiated"
+              "resolveWith": "payment_method.setup"
             }
           ],
           "level": "quotum_composed",
@@ -1785,6 +1828,25 @@
             },
             "status": "planned",
             "trackedBy": "P4"
+          }
+        },
+        "payment_method.setup": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Paddle saves a payment method through its own hosted transaction; whether Quotum can start one without a charge and promote the result to the account default is unresolved.",
+          "verification": {
+            "blockedBy": {
+              "kind": "question",
+              "ref": "Q-SET-02"
+            },
+            "evidence": {
+              "questions": [
+                "Q-SET-02"
+              ],
+              "scenarios": [],
+              "tests": []
+            },
+            "status": "planned"
           }
         },
         "portal.session": {

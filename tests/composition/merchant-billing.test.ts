@@ -116,6 +116,12 @@ describe("merchant billing port", () => {
 					idempotencyKey: "execute-1",
 				},
 			],
+			[
+				"account.payment-setup",
+				"paymentMethods.setupSession",
+				"Payment method setup is unavailable",
+				{ parameters: ["acct_1", "cs_setup_1"] as string[] },
+			],
 		] as const) {
 			expect(await billing.dispatch(command(operation, overrides)), operation).toEqual({
 				status: 503,

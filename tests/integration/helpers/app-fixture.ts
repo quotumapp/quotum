@@ -222,6 +222,8 @@ export function createIntegrationApp({
 		apple,
 		google,
 		stripe,
+		/** The same services the app uses, so a test can drive a worker over identical state. */
+		projectProviderServices,
 		authHeaders(projectKey = "voysee"): HeadersInit {
 			const project = env.connectionFixtures.find(
 				(candidate) => candidate.projectInstanceKey === projectKey,

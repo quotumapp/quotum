@@ -10,7 +10,7 @@ export interface BillingAdminReplayWorker {
 		eventId: string,
 	): Promise<{
 		eventId: string;
-		status: "processed" | "ignored" | "retryable" | "failed";
+		status: "processed" | "ignored" | "retryable" | "deferred" | "failed";
 	}>;
 }
 
