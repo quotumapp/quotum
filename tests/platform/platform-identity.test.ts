@@ -174,7 +174,9 @@ describe("platform bootstrap check", () => {
 				version: 1,
 				credentials: [{ projectInstanceKey: "voysee", credential: token }],
 			});
-			await expect(writePlatformCredentialOutput(path, [])).rejects.toThrow();
+			await expect(writePlatformCredentialOutput(path, [])).rejects.toMatchObject({
+				code: "EEXIST",
+			});
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
@@ -392,8 +394,12 @@ describe("platform bootstrap check", () => {
 			return JSON.stringify(manifest);
 		};
 		expect(() => parsePlatformBootstrapManifest(withFlag("sandbox", "active"))).not.toThrow();
-		expect(() => parsePlatformBootstrapManifest(withFlag("internal", "active"))).toThrow();
-		expect(() => parsePlatformBootstrapManifest(withFlag("production", "inactive"))).toThrow();
+		expect(() => parsePlatformBootstrapManifest(withFlag("internal", "active"))).toThrow(
+			"BILLING_PLATFORM_BOOTSTRAP_JSON is invalid",
+		);
+		expect(() => parsePlatformBootstrapManifest(withFlag("production", "inactive"))).toThrow(
+			"BILLING_PLATFORM_BOOTSTRAP_JSON is invalid",
+		);
 		expect(
 			platformBootstrapCheckExitCode({
 				state: "exact",
@@ -420,7 +426,7 @@ describe("platform bootstrap check", () => {
 					path,
 				),
 			).rejects.toThrow("Bootstrap does not declare a credential for voysee-internal");
-			await expect(readFile(path, "utf8")).rejects.toThrow();
+			await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
@@ -443,7 +449,7 @@ describe("platform bootstrap check", () => {
 					path,
 				),
 			).rejects.toThrow("transaction rolled back");
-			await expect(readFile(path, "utf8")).rejects.toThrow();
+			await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}

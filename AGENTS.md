@@ -81,8 +81,10 @@ skip under plain `bun run test` unless `RUN_POSTGRES_INTEGRATION_TESTS=1` or
 `RUN_BILLING_E2E_TESTS=1` is set; `integration/merchant/` is outside the unit suite. Run them
 through the lane commands instead: they start a disposable Postgres container, verify migration
 checksums, apply migrations and export the `BILLING_TEST_*` settings each lane needs, and they fail
-a lane that runs no tests or skips any. Run `bun run quality` and the relevant test lane before
-handing off.
+a lane that runs no tests or skips any. Every test must make an assertion, which a preload
+enforces, and nothing may be skipped outside those lane gates; see
+[CONTRIBUTING.md](CONTRIBUTING.md#coding-conventions). Run `bun run quality` and the relevant test
+lane before handing off.
 
 ## Commits and pull requests
 

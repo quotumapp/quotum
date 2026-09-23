@@ -104,13 +104,13 @@ describe("operator command secrets", () => {
 			const path = join(directory, "secret.json");
 			const file = await reserveSecretFile(path);
 			expect((await stat(path)).mode & 0o777).toBe(0o600);
-			await expect(reserveSecretFile(path)).rejects.toThrow();
+			await expect(reserveSecretFile(path)).rejects.toMatchObject({ code: "EEXIST" });
 			await file.write("secret\n");
 			expect(await readFile(path, "utf8")).toBe("secret\n");
 
 			const discarded = join(directory, "discarded.json");
 			await (await reserveSecretFile(discarded)).discard();
-			await expect(stat(discarded)).rejects.toThrow();
+			await expect(stat(discarded)).rejects.toMatchObject({ code: "ENOENT" });
 		});
 	});
 });

@@ -3,22 +3,28 @@ import { assertOpenApiResponse, testRequest, withOpenApiAssertions } from "./ope
 
 describe("OpenAPI assertions", () => {
 	it("allows unknown templates and 404/405 for undeclared methods", async () => {
-		await assertOpenApiResponse(
-			"GET",
-			"/not-a-documented-route",
-			new Response("missing", { status: 404 }),
-		);
-		await assertOpenApiResponse(
-			"PATCH",
-			"/v1/billing-accounts/user_1/entitlements",
-			new Response("nope", { status: 405 }),
-		);
-		await assertOpenApiResponse(
-			"PATCH",
-			"/v1/billing-accounts/user_1/entitlements",
-			new Response("nope", { status: 200 }),
-			{ allowUndocumented: true },
-		);
+		await expect(
+			assertOpenApiResponse(
+				"GET",
+				"/not-a-documented-route",
+				new Response("missing", { status: 404 }),
+			),
+		).resolves.toBeUndefined();
+		await expect(
+			assertOpenApiResponse(
+				"PATCH",
+				"/v1/billing-accounts/user_1/entitlements",
+				new Response("nope", { status: 405 }),
+			),
+		).resolves.toBeUndefined();
+		await expect(
+			assertOpenApiResponse(
+				"PATCH",
+				"/v1/billing-accounts/user_1/entitlements",
+				new Response("nope", { status: 200 }),
+				{ allowUndocumented: true },
+			),
+		).resolves.toBeUndefined();
 	});
 
 	it("fails when a documented template is called with an undeclared method", async () => {
@@ -28,7 +34,7 @@ describe("OpenAPI assertions", () => {
 				"/v1/billing-accounts/user_1/entitlements",
 				new Response("nope", { status: 200 }),
 			),
-		).rejects.toThrow();
+		).rejects.toThrow("undocumented method (200)");
 	});
 
 	it("validates 2xx mutation request bodies", async () => {
@@ -48,7 +54,7 @@ describe("OpenAPI assertions", () => {
 				headers: { "content-type": "application/json", "stripe-signature": "sig" },
 				body: JSON.stringify({ id: "evt" }),
 			}),
-		).rejects.toThrow();
+		).rejects.toThrow("data must have required property 'type'");
 		const valid = await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
 			method: "POST",
 			headers: { "content-type": "application/json", "stripe-signature": "sig" },

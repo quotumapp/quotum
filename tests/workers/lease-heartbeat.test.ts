@@ -99,9 +99,11 @@ describe("startLeaseHeartbeat", () => {
 
 	it("swallows rejections when onError is omitted", async () => {
 		const scheduled: Array<{ callback: () => void }> = [];
-		startLeaseHeartbeat({
+		let heartbeats = 0;
+		const stop = startLeaseHeartbeat({
 			intervalMs: 10,
 			heartbeat: async () => {
+				heartbeats += 1;
 				throw new Error("ignored");
 			},
 			timers: {
@@ -116,6 +118,10 @@ describe("startLeaseHeartbeat", () => {
 		scheduled[0]?.callback();
 		await Promise.resolve();
 		await Promise.resolve();
+		// The rejection settled the in-flight heartbeat, so the next tick renews again.
+		scheduled[0]?.callback();
+		expect(heartbeats).toBe(2);
+		await expect(stop()).resolves.toBeUndefined();
 	});
 
 	it("unrefs the interval handle when available", () => {

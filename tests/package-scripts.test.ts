@@ -64,6 +64,20 @@ describe("package scripts", () => {
 		expect(postgresLib).not.toContain("supabase");
 	});
 
+	it("makes every test in every lane assert something", () => {
+		const bunfig = readFileSync(join(process.cwd(), "bunfig.toml"), "utf8");
+		const preload = readFileSync(join(process.cwd(), "tests/preload.ts"), "utf8");
+		const postgresLib = readFileSync(
+			join(process.cwd(), "scripts/lib/postgres-container.ts"),
+			"utf8",
+		);
+
+		expect(bunfig).toContain('preload = ["./tests/preload.ts"]');
+		expect(preload).toContain("beforeEach(() => {\n\texpect.hasAssertions();\n});");
+		// The lane runners start `bun test` in the repository root, where bunfig.toml applies.
+		expect(postgresLib).not.toContain("cwd");
+	});
+
 	it("keeps migration and runtime entrypoints production-safe", () => {
 		const migrate = readFileSync(join(process.cwd(), "src/migrate.ts"), "utf8");
 		const integrity = readFileSync(join(process.cwd(), "src/db/migration-integrity.ts"), "utf8");

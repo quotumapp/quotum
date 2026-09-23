@@ -41,7 +41,7 @@ describe("merchant deployment URLs", () => {
 					QUOTUM_MCP_ENABLED: "true",
 					QUOTUM_MCP_PUBLIC_ORIGIN: origin,
 				}),
-			).toThrow();
+			).toThrow("QUOTUM_MCP_PUBLIC_ORIGIN must be an HTTPS origin");
 		}
 		expect(
 			loadMerchantConfig({
@@ -67,7 +67,7 @@ describe("merchant deployment URLs", () => {
 				QUOTUM_MCP_ENABLED: "true",
 				QUOTUM_MCP_PUBLIC_ORIGIN: "ftp://localhost",
 			}),
-		).toThrow();
+		).toThrow("QUOTUM_MCP_PUBLIC_ORIGIN must be an HTTPS origin");
 	});
 	for (const billingEnv of ["production", undefined]) {
 		for (const name of ["MERCHANT_ORIGIN", "MERCHANT_PUBLIC_URL"]) {

@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import Ajv from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import type { OpenAPIObject, OperationObject } from "openapi3-ts/oas31";
@@ -305,8 +307,12 @@ test("new literal routes must register OpenAPI detail metadata", async () => {
 		"src/platform/app.ts": ["/api/auth/*", "/api/billing/*"],
 		"src/composition/remote-mcp.ts": ["/mcp"],
 	};
-	for await (const path of new Bun.Glob("src/**/*.ts").scan(process.cwd())) {
-		const source = await readFile(path, "utf8");
+	// Scan from the repository root, not the working directory, which may be anywhere.
+	const root = fileURLToPath(new URL("../../", import.meta.url));
+	const scanned: string[] = [];
+	for await (const path of new Bun.Glob("src/**/*.ts").scan(root)) {
+		scanned.push(path);
+		const source = await readFile(join(root, path), "utf8");
 		const wildcardMounts = [...source.matchAll(/\bapp\.all\(\s*"([^"]+)"/g)].map(
 			(match) => match[1],
 		);
@@ -320,6 +326,7 @@ test("new literal routes must register OpenAPI detail metadata", async () => {
 			).toBe(true);
 		}
 	}
+	expect(scanned).toEqual(expect.arrayContaining(Object.keys(expectedMounts)));
 });
 
 function callArguments(source: string, openParen: number): string {

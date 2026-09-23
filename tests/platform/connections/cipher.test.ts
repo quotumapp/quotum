@@ -42,7 +42,7 @@ describe("connection encryption", () => {
 		expect(rotating.decrypt(old, scope)).toBe("private");
 		const current = rotating.encrypt(rotating.decrypt(old, scope), scope);
 		expect(current.keyId).toBe("b");
-		expect(() => cipher.decrypt(current, scope)).toThrow();
+		expect(() => cipher.decrypt(current, scope)).toThrow("Connection secret is unavailable");
 	});
 	it("rejects flipped tag, nonce, or ciphertext bits and a different key under the same keyId", () => {
 		const envelope = cipher.encrypt("private", scope);
@@ -75,10 +75,12 @@ describe("connection encryption", () => {
 	});
 
 	it("requires an external key and rejects incomplete or duplicated key configuration", () => {
-		expect(() => loadConnectionCipher({})).toThrow();
+		const activeKeyRequired =
+			"QUOTUM_SECRETS_KEY_ID and a unique 32-byte QUOTUM_SECRETS_KEY_BASE64 are required";
+		expect(() => loadConnectionCipher({})).toThrow(activeKeyRequired);
 		expect(() =>
 			loadConnectionCipher({ QUOTUM_SECRETS_KEY_ID: "a", QUOTUM_SECRETS_KEY_BASE64: "short" }),
-		).toThrow();
+		).toThrow(activeKeyRequired);
 		expect(() =>
 			loadConnectionCipher({
 				QUOTUM_SECRETS_KEY_ID: "a",
@@ -86,7 +88,9 @@ describe("connection encryption", () => {
 				QUOTUM_SECRETS_PREVIOUS_KEY_ID: "a",
 				QUOTUM_SECRETS_PREVIOUS_KEY_BASE64: key.toString("base64"),
 			}),
-		).toThrow();
+		).toThrow(
+			"QUOTUM_SECRETS_PREVIOUS_KEY_ID and a unique 32-byte QUOTUM_SECRETS_PREVIOUS_KEY_BASE64 are required",
+		);
 	});
 });
 

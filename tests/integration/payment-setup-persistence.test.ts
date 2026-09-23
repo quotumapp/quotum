@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { isBillingError } from "../../src/billing/errors";
+import { sqlstateOf } from "../../src/db/postgres-errors";
 import type { ReservePaymentSetupInput } from "../../src/db/repository";
 import { paymentSetupSessions } from "../../src/db/schema";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -335,11 +336,16 @@ localDescribe("Payment setup persistence", () => {
 
 	it("rolls back a reservation if its durable recovery task cannot be queued", async () => {
 		await context.sql`ALTER TABLE store_events ADD CONSTRAINT payment_setup_test_queue_failure CHECK (event_type <> 'quotum.payment_setup.reconcile') NOT VALID`;
+		let failure: unknown;
 		try {
-			await expect(context.repository.reservePaymentSetup(voysee, reservation())).rejects.toThrow();
+			await context.repository.reservePaymentSetup(voysee, reservation());
+		} catch (error) {
+			failure = error;
 		} finally {
 			await context.sql`ALTER TABLE store_events DROP CONSTRAINT payment_setup_test_queue_failure`;
 		}
+		// A check violation: the injected constraint, not some earlier failure, stopped it.
+		expect(sqlstateOf(failure)).toBe("23514");
 		const rows =
 			await context.sql`SELECT id FROM payment_setup_sessions WHERE project_id = ${voysee.projectInstanceId}`;
 		expect(rows).toHaveLength(0);
@@ -371,7 +377,7 @@ localDescribe("Payment setup persistence", () => {
 				...link,
 				externalSessionId: "cs_different",
 			}),
-		).rejects.toThrow();
+		).rejects.toMatchObject({ code: "PAYMENT_SETUP_SESSION_CONFLICT", status: 409 });
 		await context.sql`UPDATE payment_setup_sessions SET expires_at = now() - interval '1 second' WHERE id = ${created.setup.id}`;
 		expect((await view()).url).toBeNull();
 		await context.sql`UPDATE payment_setup_sessions SET expires_at = ${new Date(created.setup.expires_at).toISOString()} WHERE id = ${created.setup.id}`;

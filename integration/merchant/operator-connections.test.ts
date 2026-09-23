@@ -296,7 +296,7 @@ describe("operator connection commands", () => {
 			// A replay of the same key discloses nothing and leaves no file behind.
 			const replay = await rotate("full", "full-3.json", "--request-key", "rotate-full-2");
 			expect(replay.json).toMatchObject({ credentialDisclosed: false, credentialsOut: null });
-			await expect(stat(replay.path)).rejects.toThrow();
+			await expect(stat(replay.path)).rejects.toMatchObject({ code: "ENOENT" });
 			// An existing output path is refused before anything changes.
 			expect((await rotate("full", "full-2.json")).code).toBe(1);
 			expect((await resolver.resolveCredential(secondToken)).kind).toBe("resolved");

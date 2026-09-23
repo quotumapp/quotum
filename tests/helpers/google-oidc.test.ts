@@ -38,29 +38,29 @@ describe("Google OIDC helper", () => {
 		await expect(verifier(token, audience)).resolves.toMatchObject({ aud: audience });
 
 		const unknownKid = signGoogleOidcToken(keys.privateKey, claims, "other-kid");
-		await expect(verifier(unknownKid, audience)).rejects.toThrow();
+		await expect(verifier(unknownKid, audience)).rejects.toThrow("No pem found for envelope");
 
 		const tampered = tamperGoogleOidcSignature(token);
-		await expect(verifier(tampered, audience)).rejects.toThrow();
+		await expect(verifier(tampered, audience)).rejects.toThrow("Invalid token signature");
 
 		const futureIat = signGoogleOidcToken(keys.privateKey, { ...claims, iat: now + 3600 }, kid);
-		await expect(verifier(futureIat, audience)).rejects.toThrow();
+		await expect(verifier(futureIat, audience)).rejects.toThrow("Token used too early");
 
 		const expired = signGoogleOidcToken(keys.privateKey, { ...claims, exp: now - 3600 }, kid);
-		await expect(verifier(expired, audience)).rejects.toThrow();
+		await expect(verifier(expired, audience)).rejects.toThrow("Token used too late");
 
 		const wrongAud = signGoogleOidcToken(keys.privateKey, { ...claims, aud: "other" }, kid);
-		await expect(verifier(wrongAud, audience)).rejects.toThrow();
+		await expect(verifier(wrongAud, audience)).rejects.toThrow("Wrong recipient");
 
 		const wrongIss = signGoogleOidcToken(
 			keys.privateKey,
 			{ ...claims, iss: "https://example.invalid" },
 			kid,
 		);
-		await expect(verifier(wrongIss, audience)).rejects.toThrow();
+		await expect(verifier(wrongIss, audience)).rejects.toThrow("Invalid issuer");
 
 		const foreign = generateKeyPairSync("rsa", { modulusLength: 2048 });
 		const foreignToken = signGoogleOidcToken(foreign.privateKey, claims, kid);
-		await expect(verifier(foreignToken, audience)).rejects.toThrow();
+		await expect(verifier(foreignToken, audience)).rejects.toThrow("Invalid token signature");
 	});
 });

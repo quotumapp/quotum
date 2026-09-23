@@ -170,7 +170,9 @@ describe("tag-based builds", () => {
 	it("uses stable and prerelease tags regardless of package version", () => {
 		expect(buildVersion("tag", "v1.2.3", "abcdef0")).toBe("1.2.3");
 		expect(buildVersion("tag", "v1.2.3-rc.1", "abcdef0")).toBe("1.2.3-rc.1");
-		expect(() => buildVersion("tag", "v1.2", "abcdef0")).toThrow();
+		expect(() => buildVersion("tag", "v1.2", "abcdef0")).toThrow(
+			"Release tags must be v plus a semantic version: v1.2",
+		);
 		expect(buildVersion("branch", "main", "abcdef0")).toBe("0.0.0-dev.abcdef0");
 	});
 	it("stamps only the OpenAPI version", () => {
@@ -179,7 +181,9 @@ describe("tag-based builds", () => {
 			...document,
 			info: { ...document.info, version: "1.2.3" },
 		});
-		expect(() => versionedContract(JSON.stringify(document), "bad")).toThrow();
+		expect(() => versionedContract(JSON.stringify(document), "bad")).toThrow(
+			"Not a semantic version: bad",
+		);
 	});
 });
 
