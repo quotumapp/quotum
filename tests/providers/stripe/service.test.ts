@@ -664,6 +664,7 @@ describe("StripeBillingService", () => {
 				trialDays: 14,
 				trialRequiresPaymentMethod: false,
 				trialEndBehavior: "pause",
+				trialUsed: false,
 				components: [
 					{
 						priceComponentId: "1",
@@ -716,6 +717,46 @@ describe("StripeBillingService", () => {
 				trial_settings: { end_behavior: { missing_payment_method: "pause" } },
 			},
 		});
+	});
+
+	// capability: catalog.trial
+	it("leaves the plan's trial out of Checkout once the account has had a trial of the plan", async () => {
+		const { calls, service } = serviceFixture({
+			recurringPlan: {
+				planVersionId: "42",
+				planKey: "pro",
+				name: "Pro",
+				kind: "base",
+				trialDays: 14,
+				trialRequiresPaymentMethod: false,
+				trialEndBehavior: "pause",
+				trialUsed: true,
+				components: [
+					{
+						priceComponentId: "1",
+						priceKey: "base",
+						componentKind: "base",
+						featureKey: null,
+						externalProductId: "prod_pro",
+						externalPriceId: "price_pro",
+						defaultQuantity: 1,
+						minimumQuantity: 1,
+						maximumQuantity: 1,
+						unitAmountMinor: 999,
+						pricingModel: "flat",
+						currency: "USD",
+						billingInterval: "month",
+					},
+				],
+			},
+		});
+		await service.createRecurringCheckoutSession({ billingAccountId: "user_1", planKey: "pro" });
+		const call = calls.at(-1) as { params: Stripe.Checkout.SessionCreateParams };
+
+		expect(call.params.mode).toBe("subscription");
+		expect(call.params.subscription_data).not.toHaveProperty("trial_period_days");
+		expect(call.params.subscription_data).not.toHaveProperty("trial_settings");
+		expect(call.params).not.toHaveProperty("payment_method_collection");
 	});
 
 	// capability: settlement.collect_finalized_charge

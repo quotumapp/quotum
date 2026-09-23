@@ -55,6 +55,7 @@ const plan: StripeRecurringCheckoutPlan = {
 	trialDays: null,
 	trialRequiresPaymentMethod: false,
 	trialEndBehavior: "cancel",
+	trialUsed: false,
 	components: [
 		{
 			priceComponentId: "1",
@@ -109,7 +110,10 @@ const cancellation: SubscriptionCancellationContext = {
 	stateFingerprint: "cancellation-fingerprint-1",
 };
 
-function previewService(): { service: StripeBillingService; drafts: CommercialPreviewDraft[] } {
+function previewService(recurringPlan: StripeRecurringCheckoutPlan = plan): {
+	service: StripeBillingService;
+	drafts: CommercialPreviewDraft[];
+} {
 	const drafts: CommercialPreviewDraft[] = [];
 	const repository: Partial<Repository> = {
 		getStripeWebStoreProductByKey(productKey: string) {
@@ -117,8 +121,8 @@ function previewService(): { service: StripeBillingService; drafts: CommercialPr
 			return Promise.resolve(product);
 		},
 		getStripeRecurringCheckoutPlanByKey(planKey: string) {
-			expect(planKey).toBe(plan.planKey);
-			return Promise.resolve(plan);
+			expect(planKey).toBe(recurringPlan.planKey);
+			return Promise.resolve(recurringPlan);
 		},
 		hasActiveBasePlan() {
 			return Promise.resolve(false);
@@ -202,9 +206,11 @@ describe("commercial preview provider", () => {
 			expect(draft.preview.intentHash).toBe(draft.intentHash);
 			expect(draft.preview.stateFingerprint).toBe(draft.stateFingerprint);
 		}
+		// Trial use joins the plan fingerprint only when it removes the plan's trial.
+		const { trialUsed: _trialUsed, ...planFacts } = plan;
 		expect(drafts.map((draft) => draft.stateFingerprint)).toEqual([
 			sha256Hex(stableJson(product)),
-			sha256Hex(stableJson({ plan, hasActiveBasePlan: false })),
+			sha256Hex(stableJson({ plan: planFacts, hasActiveBasePlan: false })),
 			change.stateFingerprint,
 			cancellation.stateFingerprint,
 			cancellation.stateFingerprint,
@@ -246,6 +252,25 @@ describe("commercial preview provider", () => {
 			),
 			sha256Hex(stableJson({ kind: "uncancel", externalSubscriptionId: "sub_123" })),
 		]);
+	});
+
+	// capability: catalog.trial
+	it("previews a plan without its trial once the account has had one", async () => {
+		const trialed = { ...plan, trialDays: 14, trialUsed: true };
+		const { service, drafts } = previewService(trialed);
+
+		const preview = await service.previewCommercialAction({
+			billingAccountId,
+			intent: { kind: "checkout_plan", planKey: plan.planKey, quantities: {} },
+		});
+
+		const { trialUsed: _trialUsed, ...planFacts } = trialed;
+		expect(drafts[0]?.stateFingerprint).toBe(
+			sha256Hex(stableJson({ plan: planFacts, hasActiveBasePlan: false, trialSkipped: true })),
+		);
+		expect(preview.warnings).toContain(
+			"This account already had a trial of the plan; the subscription starts without one.",
+		);
 	});
 
 	it("keeps the wire literal equal to the providers that implement every commercial action", () => {

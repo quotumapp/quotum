@@ -210,6 +210,11 @@ Checkout flow:
    once paid, and the endpoint never grants access. `POST .../checkout-sessions/:sessionId/expire`
    expires open sessions.
 
+A plan's `trialDays` becomes the Checkout subscription's trial only for an account that has not had
+a trial of that plan before, through a [Quotum trial](api.md#trials) or a provider subscription
+that recorded trial bounds; otherwise the subscription starts paid and the `checkout_plan` preview
+warns about it. A trial started between preview and execution makes the preview stale.
+
 Portal sessions come from `POST .../providers/stripe/portal-sessions` and return `{url}`.
 
 For an existing subscription, invoice webhooks record payment history and may update its payment

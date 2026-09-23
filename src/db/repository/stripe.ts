@@ -30,6 +30,7 @@ import {
 } from "./invalidations";
 import { upsertPurchase, upsertSubscription } from "./mutations";
 import { parseNullableNonnegativeInteger, parseStripeWebStoreProductRow } from "./parsers";
+import { planTrialUsedSql } from "./plan-grants";
 import {
 	recordCheckoutPromotionInTx,
 	reversePromotionRedemptionsForPurchaseInTx,
@@ -538,6 +539,7 @@ export class StripeBillingRepository extends RepositoryModule {
 			trial_days: number | null;
 			trial_requires_payment_method: boolean;
 			trial_end_behavior: "cancel" | "pause";
+			trial_used: boolean;
 		}>(
 			this.database,
 			drizzleSql`
@@ -548,7 +550,16 @@ export class StripeBillingRepository extends RepositoryModule {
 					pv.plan_kind,
 					pv.trial_days,
 					pv.trial_requires_payment_method,
-					pv.trial_end_behavior
+					pv.trial_end_behavior,
+					COALESCE(
+						(
+							SELECT ${planTrialUsedSql(projectId, drizzleSql`customer.id`, drizzleSql`p.id`)}
+							FROM customers customer
+							WHERE customer.project_id = ${projectId}
+								AND customer.billing_account_id = ${billingAccountId}
+						),
+						false
+					) AS trial_used
 				FROM plans p
 				JOIN plan_versions pv
 					ON pv.project_id = p.project_id AND pv.id = p.active_version_id
@@ -636,6 +647,7 @@ export class StripeBillingRepository extends RepositoryModule {
 			trialDays: plan.trial_days,
 			trialRequiresPaymentMethod: plan.trial_requires_payment_method,
 			trialEndBehavior: plan.trial_end_behavior,
+			trialUsed: plan.trial_used,
 			components: rows.map((row) => ({
 				priceComponentId: String(row.price_component_id),
 				priceKey: row.price_key,
