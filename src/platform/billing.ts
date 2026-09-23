@@ -1,6 +1,7 @@
 import { merchantJson } from "./app";
 import { billingOperation, type MerchantBillingPort } from "./application/billing-port";
 import type { MerchantCapability, MerchantScope } from "./contracts";
+import type { MerchantSql } from "./database";
 import { idempotencyKey, MerchantError, requireCapability } from "./security";
 import { actionCapability, MerchantStepUp, mutationTarget } from "./step-up";
 import type { MerchantIdentity, MerchantStore } from "./store";
@@ -131,6 +132,10 @@ export function createMerchantBilling(store: MerchantStore, billing: MerchantBil
 		const url = new URL(request.url);
 		const route = merchantBillingRoute(request.method, url.pathname, scope.environment);
 		if (!route) throw new MerchantError("NOT_FOUND", "Route not found.", 404);
+		// Resolved before authorization, so an unmapped or malformed path never consumes a step-up
+		// grant or writes an audit row.
+		const operation = billingOperation(request.method, route.path);
+		if (!operation) throw new MerchantError("NOT_FOUND", "Route not found.", 404);
 		const member = await store.membership(store.sql, identity.principalId, scope.organizationSlug);
 		requireCapability(member.role, route.capability);
 		const [logicalProject] = await store.sql<
@@ -152,58 +157,57 @@ export function createMerchantBilling(store: MerchantStore, billing: MerchantBil
 				404,
 			);
 		const body = request.method === "GET" ? undefined : await merchantJson(request);
+		const dispatch = () =>
+			billing.dispatch({
+				...operation,
+				projectInstanceId: instance.id,
+				actor: `merchant:${identity.principalId}`,
+				query: Object.fromEntries(url.searchParams),
+				body,
+				idempotencyKey: request.headers.get("idempotency-key"),
+			});
 		// Actionable GETs still require write capability, but do not require mutation idempotency.
-		if (!route.readOnly && request.method !== "GET") {
-			await store.idempotent(
-				identity,
-				idempotencyKey(request),
-				[
-					"billing.authorize",
-					scope,
-					request.method,
-					url.pathname,
-					body,
-					route.sensitive ? identity.sessionId : null,
-				],
-				async (tx) => {
-					const latest = await store.membership(
-						tx,
-						identity.principalId,
-						scope.organizationSlug,
-						true,
-					);
-					requireCapability(latest.role, route.capability);
-					if (route.sensitive && route.action)
-						await steps.consume(
-							tx,
-							identity,
-							scope,
-							route.action,
-							mutationTarget(request.method, url.pathname, body),
-							request.headers.get("x-quotum-step-up-grant"),
-						);
-					await store.audit(
-						tx,
-						identity.principalId,
-						latest.organization_id,
-						"billing.action_accepted",
-						instance.id,
-						{ action: route.action, method: request.method, environment: scope.environment },
-					);
-					return { authorized: true };
-				},
-			);
+		if (route.readOnly || request.method === "GET") {
+			const result = await dispatch();
+			return Response.json(result.body, { status: result.status });
 		}
-		const operation = billingOperation(request.method, route.path);
-		if (!operation) throw new MerchantError("NOT_FOUND", "Route not found.", 404);
-		const result = await billing.dispatch({
-			...operation,
-			projectInstanceId: instance.id,
-			actor: `merchant:${identity.principalId}`,
-			query: Object.fromEntries(url.searchParams),
-			body,
-			idempotencyKey: request.headers.get("idempotency-key"),
-		});
+		const authorize = async (tx: MerchantSql) => {
+			const latest = await store.membership(tx, identity.principalId, scope.organizationSlug, true);
+			requireCapability(latest.role, route.capability);
+			if (route.sensitive && route.action)
+				await steps.consume(
+					tx,
+					identity,
+					scope,
+					route.action,
+					mutationTarget(request.method, url.pathname, body),
+					request.headers.get("x-quotum-step-up-grant"),
+				);
+			await store.audit(
+				tx,
+				identity.principalId,
+				latest.organization_id,
+				"billing.action_accepted",
+				instance.id,
+				{ action: route.action, method: request.method, environment: scope.environment },
+			);
+		};
+		// A repeat of this key answers with the stored response: the action, and the step-up grant
+		// it consumed, run once.
+		const result = await store.idempotentDispatch(
+			identity,
+			idempotencyKey(request),
+			[
+				"billing.dispatch",
+				scope,
+				request.method,
+				url.pathname,
+				body,
+				route.sensitive ? identity.sessionId : null,
+			],
+			authorize,
+			dispatch,
+		);
 		return Response.json(result.body, { status: result.status });
 	};
 }

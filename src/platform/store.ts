@@ -61,6 +61,14 @@ export interface MembershipRecord {
 	slug: string;
 	member_limit: number;
 }
+/** A billing dispatch outcome, stored so an idempotent repeat can be answered without re-running. */
+export interface StoredDispatchResponse {
+	status: number;
+	body: unknown;
+}
+type StoredDispatch =
+	| { state: "pending" }
+	| { state: "completed"; response: StoredDispatchResponse };
 export class MerchantStore {
 	readonly sql: MerchantSql;
 	constructor(
@@ -448,5 +456,76 @@ export class MerchantStore {
 			await tx`UPDATE platform_idempotency SET result=${JSON.stringify(result)}::text::jsonb WHERE principal_id=${identity.principalId} AND key=${key}`;
 			return result;
 		});
+	}
+	/**
+	 * Idempotency for work that runs outside the platform transaction, such as a billing dispatch.
+	 * The first request for a key runs `authorize` inside the claim transaction and commits a pending
+	 * claim; `dispatch` then runs once and its response is stored. A repeat with the same principal,
+	 * key and input gets the stored response without authorizing or dispatching again, and a repeat
+	 * while the claim is pending gets 409 OPERATION_IN_PROGRESS. A dispatch that throws or answers
+	 * 5xx releases the key, so a retry authorizes again, including a fresh step-up grant.
+	 */
+	async idempotentDispatch(
+		identity: MerchantIdentity,
+		key: string,
+		input: unknown,
+		authorize: (tx: MerchantSql) => Promise<void>,
+		dispatch: () => Promise<StoredDispatchResponse>,
+	): Promise<StoredDispatchResponse> {
+		const requestHash = digest(JSON.stringify(input));
+		const stored = await this.sql.begin(async (tx) => {
+			const sessions =
+				await tx`SELECT id FROM platform_merchant_sessions WHERE id=${identity.sessionId} AND revoked_at IS NULL AND absolute_expires_at>${this.now()} AND last_seen_at>${new Date(this.now().getTime() - IDLE_MS)} FOR UPDATE`;
+			if (!sessions.length)
+				throw new MerchantError("SESSION_EXPIRED", "Sign in again to continue.", 401);
+			await tx`INSERT INTO platform_idempotency(principal_id,key,request_hash) VALUES(${identity.principalId},${key},${requestHash}) ON CONFLICT DO NOTHING`;
+			const [row] = await tx<
+				{ request_hash: string; result: StoredDispatch | null }[]
+			>`SELECT request_hash,result FROM platform_idempotency WHERE principal_id=${identity.principalId} AND key=${key} FOR UPDATE`;
+			if (!row || row.request_hash !== requestHash)
+				throw new MerchantError(
+					"IDEMPOTENCY_CONFLICT",
+					"Use a new idempotency key when the action changes.",
+					409,
+				);
+			if (row.result?.state === "completed") return row.result.response;
+			if (row.result !== null)
+				throw new MerchantError(
+					"OPERATION_IN_PROGRESS",
+					"This action is still running. Retry the same request shortly.",
+					409,
+				);
+			await authorize(tx);
+			const pending: StoredDispatch = { state: "pending" };
+			await tx`UPDATE platform_idempotency SET result=${JSON.stringify(pending)}::text::jsonb WHERE principal_id=${identity.principalId} AND key=${key}`;
+			return null;
+		});
+		if (stored !== null) return stored;
+		let response: StoredDispatchResponse;
+		try {
+			response = await dispatch();
+		} catch (error) {
+			await this.releaseDispatch(identity, key, requestHash);
+			throw error;
+		}
+		if (response.status >= 500) {
+			await this.releaseDispatch(identity, key, requestHash);
+			return response;
+		}
+		const completed: StoredDispatch = {
+			state: "completed",
+			response: { status: response.status, body: response.body },
+		};
+		await this
+			.sql`UPDATE platform_idempotency SET result=${JSON.stringify(completed)}::text::jsonb WHERE principal_id=${identity.principalId} AND key=${key} AND request_hash=${requestHash} AND result->>'state'='pending'`;
+		return response;
+	}
+	private async releaseDispatch(
+		identity: MerchantIdentity,
+		key: string,
+		requestHash: string,
+	): Promise<void> {
+		await this
+			.sql`DELETE FROM platform_idempotency WHERE principal_id=${identity.principalId} AND key=${key} AND request_hash=${requestHash} AND result->>'state'='pending'`;
 	}
 }

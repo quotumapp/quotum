@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { createMerchantApp } from "../../src/platform/app";
+import type { MerchantBillingCommand } from "../../src/platform/application/billing-port";
 import { createMerchantAuth } from "../../src/platform/auth";
+import { createMerchantBilling } from "../../src/platform/billing";
 import type { MerchantConfig } from "../../src/platform/config";
 import { CSRF_COOKIE } from "../../src/platform/security";
-import { MerchantStore } from "../../src/platform/store";
+import { type MerchantIdentity, MerchantStore } from "../../src/platform/store";
 
 const config: MerchantConfig = {
 	signupEnabled: true,
@@ -205,5 +207,79 @@ describe("merchant observability hooks", () => {
 
 		expect(response.status).toBe(503);
 		expect(body.error.code).toBe("SERVICE_UNAVAILABLE");
+	});
+});
+
+describe("merchant billing proxy paths", () => {
+	/** A signed-in store whose only reachable query is the service-principal lookup. */
+	function proxyApp(reports: string[], dispatched: MerchantBillingCommand[]) {
+		const sql = Object.assign(
+			(strings: TemplateStringsArray) =>
+				strings.join("?").includes("platform_service_principals")
+					? Promise.resolve([{ id: "service-principal" }])
+					: unavailable(),
+			{ begin: unavailable, query: unavailable },
+		);
+		class SignedInStore extends MerchantStore {
+			override async authenticate(): Promise<MerchantIdentity> {
+				return {
+					principalId: "principal-1",
+					authUserId: "user-1",
+					sessionId: "session-1",
+					name: "Viewer",
+					email: "viewer@example.test",
+					authMethod: "password",
+					issuer: "quotum",
+					subject: "user-1",
+					createdAt: new Date(),
+					lastSeenAt: new Date(),
+					absoluteExpiresAt: new Date(Date.now() + 3_600_000),
+				};
+			}
+		}
+		const store = new SignedInStore(sql as never, config);
+		const mailer = { send: unavailable };
+		return createMerchantApp({
+			store,
+			mailer,
+			auth: createMerchantAuth(store, mailer, undefined),
+			billing: createMerchantBilling(store, {
+				dispatch: async (command) => {
+					dispatched.push(command);
+					return { status: 200, body: { success: true, data: null } };
+				},
+			}),
+			onUnexpectedError: (_error, report) => reports.push(`${report.status} ${report.code}`),
+		});
+	}
+	const scope = {
+		"x-quotum-organization": "acme",
+		"x-quotum-project": "example",
+		"x-quotum-environment": "sandbox",
+	};
+
+	it("answers a malformed escape as /v1 does, before any lookup or step-up", async () => {
+		const reports: string[] = [];
+		const dispatched: MerchantBillingCommand[] = [];
+		const app = proxyApp(reports, dispatched);
+
+		const read = await app.handle(
+			getRequest("/api/billing/admin/billing-accounts/%E0%A4%A/billing-summary", scope),
+		);
+		const write = await app.handle(
+			mutation("/api/billing/admin/billing-accounts/%E0%A4%A/commercial-actions", {
+				headers: { ...scope, "content-type": "application/json" },
+				body: JSON.stringify({ previewToken: "a".repeat(64) }),
+			}),
+		);
+
+		for (const response of [read, write]) {
+			expect(response.status).toBe(400);
+			expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+				"INVALID_REQUEST",
+			);
+		}
+		expect(dispatched).toEqual([]);
+		expect(reports).toEqual([]);
 	});
 });
