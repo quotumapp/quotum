@@ -58,6 +58,7 @@ const COLLECTIONS = new Set([
 	"step-up",
 	"store-events",
 	"subscriptions",
+	"trials",
 ]);
 
 /** Path segments followed by two identifiers, e.g. `contracts/:billingAccountId/:contractId`. */

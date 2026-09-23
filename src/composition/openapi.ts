@@ -335,12 +335,18 @@ function headerParameters(route: DocumentedRoute): ParameterObject[] {
 			route.path.endsWith("/commercial-actions") ||
 			route.path.endsWith("/changes") ||
 			route.path.endsWith("/promotion-redemptions") ||
-			route.path.endsWith("/promotion-redemptions/:redemptionId/revoke");
+			route.path.endsWith("/promotion-redemptions/:redemptionId/revoke") ||
+			route.path.endsWith("/trials") ||
+			route.path.endsWith("/trials/:trialId/end");
 		if (actor)
 			headers.push(
 				header("X-Billing-Actor", true, { type: "string", minLength: 1, maxLength: 200 }),
 			);
-		if (route.path.endsWith("/promotion-redemptions"))
+		if (
+			route.path.endsWith("/promotion-redemptions") ||
+			route.path.endsWith("/trials") ||
+			route.path.endsWith("/trials/:trialId/end")
+		)
 			headers.push(
 				header("X-Billing-Actor", false, { type: "string", minLength: 1, maxLength: 200 }),
 			);

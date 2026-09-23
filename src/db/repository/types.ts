@@ -80,6 +80,11 @@ export interface ExpiredSubscriptionReconciliationResult {
 	projectionJobs: number;
 }
 
+export interface PlanGrantReconciliationResult {
+	expiredPlanGrants: number;
+	planGrantPeriods: number;
+}
+
 export interface TrialEndingNoticeResult {
 	noticedTrials: number;
 	affectedCustomers: number;

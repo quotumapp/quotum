@@ -316,9 +316,13 @@ announced again for the new end. The fact names the subscription with `source: "
 plan, `planKey`, and carries `trialStartsAt`, `trialEndsAt` and `autoRenew`, which says whether the
 subscription continues as a paid one unless cancelled. A Stripe trial without a payment method whose
 end behavior cancels or pauses it still reports `autoRenew: true`; Stripe decides at the trial end.
-The schema also admits `event: "ended"` and `source: "plan_grant"` for trials Quotum runs itself.
-Unlike the entitlement metadata, which describes each entitlement's current source, the fact
-describes the one subscription whose trial is ending.
+A [trial Quotum runs itself](api.md#trials) is a plan grant: its entitlements carry
+`source: "plan_grant"`, `origin: "trial"`, `status`, `planKey`, `planGrantId` and the trial bounds,
+and its facts carry `source: "plan_grant"`, `planGrantId`, `planKey` and `autoRenew: false`. It gets
+the same `ending` notice (key `trial_ending:plan_grant:<id>:<trialEndsAt>`) and an `ended` fact when
+it expires (reason `expiry_reconciliation`) or is ended early (a stored `usage_changed`). Unlike the
+entitlement metadata, which describes each entitlement's current source, the fact describes the one
+subscription or grant whose trial is ending or has ended.
 
 Purchase, provider-webhook and reconciliation projections are delivered per event. Usage-driven
 projections are coalesced: one delivery per billing account covers every consume, reservation and

@@ -11,6 +11,7 @@ import { registerMeteringRoutes } from "./app/metering-routes";
 import { registerPromotionRoutes } from "./app/promotion-routes";
 import { projectProviderServiceResolver } from "./app/provider-services";
 import { projectSelectorRejectedError, queryHasCallerProjectSelector } from "./app/request-context";
+import { registerTrialRoutes } from "./app/trial-routes";
 import type {
 	AppDependencies as CreateAppDependencies,
 	PostAuthGuard,
@@ -95,6 +96,7 @@ export function createApp({
 	meteringService,
 	controlsEnterpriseService,
 	promotionService,
+	trialService,
 	catalogControlPlane,
 	billingInsightsService,
 	appleStoreKitService,
@@ -475,6 +477,7 @@ export function createApp({
 		rateLimitKeyOptions,
 		registerPostAuthGuard,
 	});
+	registerTrialRoutes({ app, service: trialService ?? getRepository().planGrants });
 
 	return app;
 

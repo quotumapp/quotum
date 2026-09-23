@@ -2,6 +2,7 @@ import type { ProjectionJobPayload } from "../billing/types";
 import type { ProjectInstanceContext } from "../projects/context";
 import type {
 	ExpiredSubscriptionReconciliationResult,
+	PlanGrantReconciliationResult,
 	ProjectionSyncJobRow,
 	ProviderSubscriptionReconciliationRow,
 	StoreEventReplayJobRow,
@@ -137,6 +138,7 @@ export class StoreEventReplayJobRepository implements StoreEventReplayJobReposit
 export interface ProviderSubscriptionReconciliationRepositorySource {
 	reconcileExpiredSubscriptions(limit: number): Promise<ExpiredSubscriptionReconciliationResult>;
 	enqueueTrialEndingNotices(limit: number): Promise<TrialEndingNoticeResult>;
+	reconcilePlanGrants(limit: number): Promise<PlanGrantReconciliationResult>;
 	claimProviderSubscriptionReconciliations(
 		workerId: string,
 		limit: number,
@@ -174,6 +176,10 @@ export class ProviderSubscriptionReconciliationRepository
 
 	async enqueueTrialEndingNotices(limit: number): Promise<TrialEndingNoticeResult> {
 		return await this.source.enqueueTrialEndingNotices(limit);
+	}
+
+	async reconcilePlanGrants(limit: number): Promise<PlanGrantReconciliationResult> {
+		return await this.source.reconcilePlanGrants(limit);
 	}
 
 	async claimProviderSubscriptionReconciliations(

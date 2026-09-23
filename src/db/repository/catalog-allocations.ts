@@ -1,5 +1,6 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type { SubscriptionStatus } from "../../billing/types";
+import { supersedeBasePlanGrants } from "./plan-grants";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -187,6 +188,13 @@ export async function materializeSubscriptionAllocations(
 		}
 		return 0;
 	}
+	// A paid base plan replaces the account's trial or other base plan grant from now on.
+	await supersedeBasePlanGrants(executor, {
+		projectId: input.projectId,
+		customerId: input.customerId,
+		subscriptionId: input.subscriptionId,
+		planVersionId: version.planVersionId,
+	});
 	const invalidEntityScope = await executeOne<{ invalid: boolean }>(
 		executor,
 		drizzleSql`

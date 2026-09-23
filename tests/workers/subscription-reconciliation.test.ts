@@ -64,6 +64,10 @@ function createRepository({
 				calls.push({ method: "reconcileExpiredSubscriptions", limit });
 				return Promise.resolve(expiredResult);
 			},
+			reconcilePlanGrants(limit: number) {
+				calls.push({ method: "reconcilePlanGrants", limit });
+				return Promise.resolve({ expiredPlanGrants: 0, planGrantPeriods: 0 });
+			},
 			enqueueTrialEndingNotices(limit: number) {
 				calls.push({ method: "enqueueTrialEndingNotices", limit });
 				if (noticeError !== undefined) {
@@ -161,6 +165,8 @@ describe("SubscriptionReconciliationWorker", () => {
 			outcome: "succeeded",
 			expiredSubscriptions: 2,
 			affectedCustomers: 1,
+			expiredPlanGrants: 0,
+			planGrantPeriods: 0,
 			trialEndingNotices: 3,
 			providerClaimed: 0,
 			providerProcessed: 0,
@@ -175,6 +181,7 @@ describe("SubscriptionReconciliationWorker", () => {
 				staleBefore: "2026-05-31T00:05:00.000Z",
 			},
 			{ method: "reconcileExpiredSubscriptions", limit: 10 },
+			{ method: "reconcilePlanGrants", limit: 10 },
 			{ method: "enqueueTrialEndingNotices", limit: 10 },
 		]);
 		expect(metrics.renderPrometheus()).toContain(
@@ -190,6 +197,8 @@ describe("SubscriptionReconciliationWorker", () => {
 					outcome: "succeeded",
 					expiredSubscriptions: 2,
 					affectedCustomers: 1,
+					expiredPlanGrants: 0,
+					planGrantPeriods: 0,
 					trialEndingNotices: 3,
 					providerClaimed: 0,
 					providerProcessed: 0,
@@ -245,6 +254,8 @@ describe("SubscriptionReconciliationWorker", () => {
 			outcome: "succeeded",
 			expiredSubscriptions: 2,
 			affectedCustomers: 1,
+			expiredPlanGrants: 0,
+			planGrantPeriods: 0,
 			trialEndingNotices: 0,
 			providerClaimed: 2,
 			providerProcessed: 1,
@@ -385,6 +396,8 @@ describe("SubscriptionReconciliationWorker", () => {
 			outcome: "failed",
 			expiredSubscriptions: 2,
 			affectedCustomers: 1,
+			expiredPlanGrants: 0,
+			planGrantPeriods: 0,
 			trialEndingNotices: 0,
 			providerClaimed: 2,
 			providerProcessed: 0,
@@ -579,6 +592,9 @@ describe("SubscriptionReconciliationWorker", () => {
 				reconcileExpiredSubscriptions: async () => {
 					throw new Error("database unavailable");
 				},
+				reconcilePlanGrants: async () => {
+					throw new Error("Unexpected plan grant pass");
+				},
 				enqueueTrialEndingNotices: async () => {
 					throw new Error("Unexpected trial notice pass");
 				},
@@ -620,6 +636,7 @@ describe("SubscriptionReconciliationWorker", () => {
 		expect(calls.map((call) => (call as { method: string }).method)).toEqual([
 			"claimProviderSubscriptionReconciliations",
 			"reconcileExpiredSubscriptions",
+			"reconcilePlanGrants",
 			"enqueueTrialEndingNotices",
 		]);
 		expect(metrics.renderPrometheus()).toContain(

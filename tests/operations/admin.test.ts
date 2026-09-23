@@ -111,6 +111,8 @@ describe("BillingAdminOperations", () => {
 			outcome: "succeeded" as const,
 			expiredSubscriptions: 2,
 			affectedCustomers: 1,
+			expiredPlanGrants: 0,
+			planGrantPeriods: 0,
 			trialEndingNotices: 0,
 			providerClaimed: 3,
 			providerProcessed: 2,
