@@ -186,6 +186,9 @@ describe("merchant platform transactions", () => {
 		).toBeNull();
 		const stored = JSON.stringify(await f.sql`SELECT result FROM platform_idempotency`);
 		expect(stored.includes(credential.credential)).toBe(false);
+		// The database dates the key it issued; an application clock running behind it must not make
+		// the replaced key's revocation precede its creation.
+		f.advance(-60_000);
 		const rotated = await browser.json<{ credential: string }>(
 			`/api/platform/provisioning/${operation.id}/rotate`,
 			{},
@@ -741,6 +744,9 @@ describe("merchant platform transactions", () => {
 		await browser.signup();
 		await onboard(browser);
 		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
+		// The proof is dated by the application clock; one running behind the database clock must
+		// still count as fresh.
+		f.advance(-60_000);
 
 		const scope = {
 			kind: "merchant" as const,

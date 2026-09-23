@@ -49,6 +49,9 @@ async function runIntegrationTests(): Promise<void> {
 			"bun",
 			[
 				"test",
+				// Bun's 5 s default fails slow tests under load, and a timed-out test body keeps running
+				// against the database the next test uses.
+				"--timeout=20000",
 				...junitReporterArgs(reportPath),
 				...(testTargets.length === 0 ? ["tests/integration"] : testTargets),
 			],

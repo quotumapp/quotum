@@ -205,11 +205,12 @@ Production rotation requires a fresh step-up grant. Without the merchant applica
 `quotum credentials rotate <instance> --access full --credentials-out <new-file>` with `--actor`.
 It writes the new key in the platform bootstrap's file format and never prints it. If the file
 cannot be written, nothing is rotated. Rotation revokes the previous credential in the same
-transaction, so the replaced key is rejected from the next request. Write the replacement to every
-integration's secret store and redeploy those backends. `platform:bootstrap` issues only the
-declared credential kinds an instance has never held, whether the instance is new or already
-exists, so it does not rotate. To add an environment or a project later, extend the manifest,
-review `--check`, and run `--apply` with a new `--credentials-out` path.
+transaction, so the replaced key is rejected from the next request. The database clock dates both
+the issue and the revocation, so application clock skew cannot fail a rotation. Write the
+replacement to every integration's secret store and redeploy those backends. `platform:bootstrap`
+issues only the declared credential kinds an instance has never held, whether the instance is new
+or already exists, so it does not rotate. To add an environment or a project later, extend the
+manifest, review `--check`, and run `--apply` with a new `--credentials-out` path.
 
 ### Read-only credentials
 

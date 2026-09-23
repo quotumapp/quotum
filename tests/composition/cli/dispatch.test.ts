@@ -202,6 +202,7 @@ describe("quotum healthcheck", () => {
 		let status = 200;
 		const paths: string[] = [];
 		const server = Bun.serve({
+			hostname: "127.0.0.1",
 			port: 0,
 			fetch(request) {
 				paths.push(new URL(request.url).pathname);

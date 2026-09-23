@@ -498,11 +498,16 @@ it("activates only reviewed production readiness and discloses its credential on
 		).status,
 	).toBe(409);
 	await f.sql`UPDATE platform_organizations SET production_limit=1 WHERE slug='acme'`;
+	// A repeated activation replaces the live key, even with the application clock running behind
+	// the database clock that dated it.
+	await f.sql`INSERT INTO platform_project_api_credentials(project_instance_id,access,secret_verifier) SELECT id,'full',sha256('earlier-activation'::bytea) FROM projects WHERE environment='production'`;
+	f.advance(-60_000);
 	const activated = await browser.json<{ credential: string; credentialDisclosed: boolean }>(
 		"/api/platform/environments/activate",
 		{ scope: prod, fingerprint: ready.fingerprint },
 		{ headers: { "x-quotum-step-up-grant": token }, key: "activate-once" },
 	);
+	f.advance(60_000);
 	expect(activated.credentialDisclosed).toBe(true);
 	expect(activated.credential).toMatch(/^pqpk_[A-Za-z0-9_-]{43}$/u);
 	const replay = await browser.json<Record<string, unknown>>(
@@ -736,7 +741,9 @@ it("activates only reviewed production readiness and discloses its credential on
 		readOnlyBody,
 		{ headers: { "x-quotum-step-up-grant": expiringGrant }, key: "rotate-read-only-3" },
 	);
-	await f.sql`UPDATE platform_project_api_credentials SET expires_at=created_at+interval '1 millisecond' WHERE access='read_only' AND revoked_at IS NULL`;
+	// Issued an hour ago: expiry is judged by the host clock, which may run behind the database
+	// clock that dated the key.
+	await f.sql`UPDATE platform_project_api_credentials SET created_at=created_at-interval '1 hour',expires_at=created_at-interval '1 hour'+interval '1 millisecond' WHERE access='read_only' AND revoked_at IS NULL`;
 	expect(await resolver.resolveCredential(expiring.credential)).toEqual({ kind: "ineligible" });
 	expect((await status()).readOnly).toEqual({ live: false, issuedAt: null });
 	const expiredGrant = await grant(browser, "revoke-read-only-3", "credentials.revoke_read_only");
@@ -801,6 +808,29 @@ it("activates only reviewed production readiness and discloses its credential on
 		...stale.blockerDetails.slice(0, stale.blockers.length),
 		{ code: "STRIPE_SECRET_UNAVAILABLE", gating: true, ...stripeSubject },
 	]);
+});
+it("replaces and withdraws a key while the application clock runs behind the database", async () => {
+	const browser = new MerchantBrowser(f);
+	await onboard(browser);
+	const readOnly = { scope, access: "read_only" };
+	await browser.json("/api/platform/environments/credentials/rotate", readOnly, {
+		key: "issue-lagging",
+	});
+	// Keys are dated by the database clock, so their revocation must be too.
+	f.advance(-60_000);
+	await browser.json("/api/platform/environments/credentials/rotate", readOnly, {
+		key: "rotate-lagging",
+	});
+	expect(
+		await browser.json<Record<string, unknown>>(
+			"/api/platform/environments/credentials/revoke",
+			readOnly,
+			{ key: "revoke-lagging" },
+		),
+	).toEqual({ access: "read_only", revoked: true });
+	expect(
+		await f.sql`SELECT id FROM platform_project_api_credentials WHERE access='read_only' AND revoked_at IS NOT NULL`,
+	).toHaveLength(2);
 });
 
 function connectionService() {

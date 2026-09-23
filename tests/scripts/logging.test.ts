@@ -64,7 +64,11 @@ describe("script output contracts", () => {
 	});
 
 	it("logs projection receiver events to stderr without its secret", async () => {
-		const reservation = Bun.serve({ port: 0, fetch: () => new Response("reserved") });
+		const reservation = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: () => new Response("reserved"),
+		});
 		const port = reservation.port;
 		reservation.stop(true);
 		const secret = "receiver-secret-never-log";
@@ -85,15 +89,17 @@ describe("script output contracts", () => {
 		const stderr = new Response(child.stderr).text();
 		try {
 			const url = `http://127.0.0.1:${port}`;
+			// Only the receiver's own stats answer counts: another process may hold the port.
 			let ready = false;
 			for (let attempt = 0; attempt < 50; attempt++) {
 				try {
-					await fetch(url, { signal: AbortSignal.timeout(100) });
-					ready = true;
-					break;
-				} catch {
-					await Bun.sleep(20);
-				}
+					const stats = await fetch(`${url}/__stats`, { signal: AbortSignal.timeout(100) });
+					if (stats.ok && (await stats.json()).accepted === 0) {
+						ready = true;
+						break;
+					}
+				} catch {}
+				await Bun.sleep(20);
 			}
 			expect(ready).toBe(true);
 			const response = await fetch(`${url}/internal/billing/projections`, {

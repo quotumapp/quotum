@@ -11,7 +11,7 @@ export interface BillingServiceProcess {
 
 export async function startBillingService(
 	env: NodeJS.ProcessEnv,
-	options: { entrypoint?: string } = {},
+	options: { entrypoint?: string; startupTimeoutMs?: number } = {},
 ): Promise<BillingServiceProcess> {
 	await seedProcessConnections(env);
 	const port = env.PORT === undefined ? getFreePort() : Number(env.PORT);
@@ -25,7 +25,24 @@ export async function startBillingService(
 	void collect(proc.stderr, logs);
 
 	const baseUrl = `http://127.0.0.1:${port}`;
-	await waitForLivez(baseUrl, () => logs.join(""));
+	const stop = async () => {
+		if ((await Promise.race([proc.exited, sleep(0).then(() => null)])) !== null) {
+			return;
+		}
+		proc.kill("SIGTERM");
+		const exited = await Promise.race([proc.exited, sleep(5000).then(() => null)]);
+		if (exited === null) {
+			proc.kill("SIGKILL");
+			await proc.exited;
+		}
+	};
+	try {
+		await waitForLivez(baseUrl, () => logs.join(""), options.startupTimeoutMs ?? 15_000);
+	} catch (error) {
+		// A service that never became live is still running; leave no orphan behind.
+		await stop();
+		throw error;
+	}
 
 	return {
 		baseUrl,
@@ -51,17 +68,7 @@ export async function startBillingService(
 			proc.kill(signal);
 		},
 		exited: proc.exited,
-		async stop() {
-			if ((await Promise.race([proc.exited, sleep(0).then(() => null)])) !== null) {
-				return;
-			}
-			proc.kill("SIGTERM");
-			const exited = await Promise.race([proc.exited, sleep(5000).then(() => null)]);
-			if (exited === null) {
-				proc.kill("SIGKILL");
-				await proc.exited;
-			}
-		},
+		stop,
 		logs() {
 			return logs.join("");
 		},
@@ -70,6 +77,7 @@ export async function startBillingService(
 
 function getFreePort(): number {
 	const server = Bun.serve({
+		hostname: "127.0.0.1",
 		port: 0,
 		fetch() {
 			return new Response("ok");
@@ -83,8 +91,8 @@ function getFreePort(): number {
 	return port;
 }
 
-async function waitForLivez(baseUrl: string, logs: () => string): Promise<void> {
-	const deadline = Date.now() + 15_000;
+async function waitForLivez(baseUrl: string, logs: () => string, timeoutMs: number): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
 	let lastError = "";
 	while (Date.now() < deadline) {
 		try {

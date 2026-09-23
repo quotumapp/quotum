@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
+	databaseNow,
 	describeLocalPostgres,
 	integrationProjectContext,
 	type LocalPostgresContext,
@@ -135,7 +136,11 @@ localDescribe("Usage invoice period materialization", () => {
 		const windowEnd = await closePeriodSoon();
 		await consumeRegion("us");
 		const reservation = await reserveRegion("us", 1);
-		await sleepPast(new Date(Math.max(windowEnd.getTime(), Date.now() + 1000)));
+		const [held] = await context.sql<Array<{ expires_at: Date }>>`
+			SELECT expires_at FROM reservations WHERE id = ${reservation}::uuid
+		`;
+		if (held === undefined) throw new Error("Expected the reservation row");
+		await sleepPast(new Date(Math.max(windowEnd.getTime(), held.expires_at.getTime())));
 
 		const claim = await context.repository.materializeAndClaimUsageInvoicePeriods("worker", 10);
 		expect(claim.materialized).toBe(1);
@@ -186,9 +191,13 @@ localDescribe("Usage invoice period materialization", () => {
 	});
 });
 
-/** Ends the subscriber's current period shortly, so its usage window closes on its own. */
+/**
+ * Ends the subscriber's current period shortly, so its usage window closes on its own. The end is
+ * still ahead on both clocks, so usage recorded before it lands in the closing window.
+ */
 async function closePeriodSoon(): Promise<Date> {
-	const end = new Date(Date.now() + 1500);
+	const ahead = Math.max(Date.now(), (await databaseNow(context.sql)).getTime());
+	const end = new Date(ahead + 1500);
 	await context.sql`
 		UPDATE subscriptions SET current_period_end = ${end.toISOString()}
 		WHERE project_id = ${project.projectInstanceId}::uuid
@@ -197,8 +206,16 @@ async function closePeriodSoon(): Promise<Date> {
 	return end;
 }
 
+/**
+ * Waits until both clocks have passed `instant`: the database closes windows and expires holds by
+ * `now()`, while metering reads the host clock. Neither is assumed to agree with the other.
+ */
 async function sleepPast(instant: Date): Promise<void> {
-	await Bun.sleep(Math.max(0, instant.getTime() - Date.now() + 250));
+	for (;;) {
+		const behind = Math.min(Date.now(), (await databaseNow(context.sql)).getTime());
+		if (behind > instant.getTime()) return;
+		await Bun.sleep(instant.getTime() - behind + 1);
+	}
 }
 
 async function reserveRegion(region: string, expiresInSeconds: number): Promise<string> {

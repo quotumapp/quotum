@@ -494,7 +494,9 @@ function googlePushBody() {
 				JSON.stringify({
 					version: "1.0",
 					packageName: "com.example.app",
-					eventTimeMillis: String(Date.now()),
+					// Future-dated like the Stripe events: the draft is dated by the database clock, and
+					// an event the host clock dates before it does not verify the draft.
+					eventTimeMillis: String(Date.now() + 30_000),
 					testNotification: { version: "1.0" },
 				}),
 			).toString("base64"),

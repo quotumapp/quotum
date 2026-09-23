@@ -15,6 +15,7 @@ import {
 } from "./helpers/fake-provider-clients";
 import {
 	createLocalPostgresContext,
+	databaseNow,
 	describeLocalPostgres,
 	integrationProjectContext,
 	type LocalPostgresContext,
@@ -321,7 +322,7 @@ localDescribe("promotion repository", () => {
 				customerId: first,
 				billingAccountId: "late-1",
 				promotionCodeId: code,
-				reservedUntil: new Date(Date.now() - 1_000),
+				reservedUntil: new Date((await databaseNow(context.sql)).getTime() - 1_000),
 			}),
 		);
 
@@ -369,7 +370,7 @@ localDescribe("promotion repository", () => {
 				billingAccountId: "retry",
 				promotionCodeId: code,
 				idempotencyKey: "abandoned",
-				reservedUntil: new Date(Date.now() - 1_000),
+				reservedUntil: new Date((await databaseNow(context.sql)).getTime() - 1_000),
 			}),
 		);
 

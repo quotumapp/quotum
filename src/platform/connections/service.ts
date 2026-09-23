@@ -272,7 +272,7 @@ export class MerchantConnections {
 			const generated = generateProjectApiCredential("production", "full");
 			// A first activation finds nothing to revoke. One live key of a kind per instance is a
 			// database invariant, so a repeated activation replaces the key instead of failing.
-			await tx`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND access=${generated.access} AND revoked_at IS NULL`;
+			await tx`UPDATE platform_project_api_credentials SET revoked_at=clock_timestamp() WHERE project_instance_id=${instance.id} AND access=${generated.access} AND revoked_at IS NULL`;
 			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,access,secret_verifier) VALUES(${generated.credentialId},${instance.id},'billing_api',${generated.access},${generated.secretVerifier})`;
 			await this.store.audit(
 				tx,

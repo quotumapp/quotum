@@ -77,15 +77,25 @@ e2eDescribe("E2E HTTP surface", () => {
 	});
 
 	it("rate limits verify requests over real HTTP", async () => {
-		for (let index = 0; index < 3; index += 1) {
-			const response = await invalidVerify();
+		// Limiter windows are epoch-aligned, and a burst that crosses a boundary starts counting
+		// again. When the first request's window is about to close, the burst starts in the next.
+		let first = await invalidVerify();
+		const closesInMs = Date.parse(first.headers.get("ratelimit-reset") ?? "") - Date.now();
+		expect(Number.isNaN(closesInMs)).toBe(false);
+		if (closesInMs < 10_000) {
+			await Bun.sleep(Math.max(0, closesInMs) + 50);
+			first = await invalidVerify();
+		}
+		const resetAt = first.headers.get("ratelimit-reset");
+		for (const response of [first, await invalidVerify(), await invalidVerify()]) {
 			expect(response.status).toBe(400);
+			expect(response.headers.get("ratelimit-reset")).toBe(resetAt);
 		}
 
 		const limited = await invalidVerify();
 		expect(limited.status).toBe(429);
 		expect(limited.headers.get("ratelimit-remaining")).toBe("0");
-		expect(limited.headers.get("ratelimit-reset")).toEqual(expect.any(String));
+		expect(limited.headers.get("ratelimit-reset")).toBe(resetAt);
 		expect(await limited.json()).toEqual({
 			success: false,
 			error: { code: "RATE_LIMITED", message: "Too many requests" },

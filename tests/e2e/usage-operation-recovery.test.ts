@@ -48,6 +48,7 @@ e2eDescribe("E2E usage operation recovery", () => {
 		let committedOutcome: unknown;
 		// Forward the real request, then lose the client response after the service has committed.
 		const proxy = Bun.serve({
+			hostname: "127.0.0.1",
 			port: 0,
 			async fetch(request) {
 				const response = await fetch(`${baseUrl}/v1/billing-accounts/http-recovery/usage/consume`, {

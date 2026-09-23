@@ -36,6 +36,16 @@ export function describeLocalPostgres<T extends (name: string, fn: () => void) =
 	return describeSkipFn;
 }
 
+/**
+ * The database clock. SQL that closes windows or expires holds compares with `now()`, so an
+ * instant a test sets up to be past or near for that SQL must come from here, not the host.
+ */
+export async function databaseNow(sql: SQL): Promise<Date> {
+	const [row] = await sql<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+	if (row === undefined) throw new Error("The database clock could not be read");
+	return row.now;
+}
+
 export async function createLocalPostgresContext(): Promise<LocalPostgresContext> {
 	if (!isPostgresIntegrationEnabled()) {
 		throw new Error("Postgres integration tests are disabled");
