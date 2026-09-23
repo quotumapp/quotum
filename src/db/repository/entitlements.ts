@@ -219,7 +219,15 @@ export async function recomputeCustomerEntitlements(
 					'channel', s.channel,
 					'productId', s.product_id,
 					'storeProductId', s.store_product_id
-				) AS metadata,
+				) || CASE
+					-- Trial bounds are provider facts kept after the trial ends, so a receiver compares
+					-- trialEndsAt with its own clock instead of relying on a stored trialing flag.
+					WHEN s.trial_end_at IS NULL THEN '{}'::jsonb
+					ELSE jsonb_build_object(
+						'trialStartsAt', to_char(s.trial_start_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+						'trialEndsAt', to_char(s.trial_end_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+					)
+				END AS metadata,
 				1 AS source_priority,
 				COALESCE(s.expires_at, s.starts_at) AS source_sort_at,
 				s.id AS source_sort_id
