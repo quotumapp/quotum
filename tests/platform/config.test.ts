@@ -14,6 +14,57 @@ const merchantEnv = {
 };
 
 describe("merchant deployment URLs", () => {
+	it("keeps remote MCP opt-in and requires an exact public HTTPS origin", () => {
+		expect(loadMerchantConfig(merchantEnv).mcp).toBeNull();
+		for (const value of ["", " \t "])
+			expect(loadMerchantConfig({ ...merchantEnv, QUOTUM_MCP_ENABLED: value }).mcp).toBeNull();
+		expect(() => loadMerchantConfig({ ...merchantEnv, QUOTUM_MCP_ENABLED: "yes" })).toThrow(
+			"true or false",
+		);
+		expect(() => loadMerchantConfig({ ...merchantEnv, QUOTUM_MCP_ENABLED: "true" })).toThrow(
+			"QUOTUM_MCP_PUBLIC_ORIGIN",
+		);
+		for (const origin of [
+			"http://api.example.com",
+			"https://api.example.com/",
+			"https://api.example.com/mcp",
+			"https://user:pass@api.example.com",
+			"https://api.example.com?foo=1",
+		]) {
+			expect(() =>
+				loadMerchantConfig({
+					...merchantEnv,
+					QUOTUM_MCP_ENABLED: "true",
+					QUOTUM_MCP_PUBLIC_ORIGIN: origin,
+				}),
+			).toThrow();
+		}
+		expect(
+			loadMerchantConfig({
+				...merchantEnv,
+				QUOTUM_MCP_ENABLED: "true",
+				QUOTUM_MCP_PUBLIC_ORIGIN: "https://api.example.com",
+			}).mcp,
+		).toEqual({ origin: "https://api.example.com" });
+		for (const origin of ["http://localhost:3000", "http://127.0.0.1:3000", "http://[::1]:3000"]) {
+			expect(
+				loadMerchantConfig({
+					...merchantEnv,
+					BILLING_ENV: "test",
+					QUOTUM_MCP_ENABLED: "true",
+					QUOTUM_MCP_PUBLIC_ORIGIN: origin,
+				}).mcp,
+			).toEqual({ origin });
+		}
+		expect(() =>
+			loadMerchantConfig({
+				...merchantEnv,
+				BILLING_ENV: "test",
+				QUOTUM_MCP_ENABLED: "true",
+				QUOTUM_MCP_PUBLIC_ORIGIN: "ftp://localhost",
+			}),
+		).toThrow();
+	});
 	for (const billingEnv of ["production", undefined]) {
 		for (const name of ["MERCHANT_ORIGIN", "MERCHANT_PUBLIC_URL"]) {
 			for (const value of [undefined, "", " \t "]) {

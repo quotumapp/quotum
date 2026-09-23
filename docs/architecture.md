@@ -51,8 +51,14 @@ The policy is deny-by-default:
   from the subscription or provider customer they bill, never from the live connection.
   `src/composition/worker-providers.ts` selects each job's adapter by that stored provider and
   resolves connections for recovery, so queued work still drains after a connection stops
-  accepting new work. Stripe App events are handled outside the registry.
-- `src/mcp/`: the read-only stdio [MCP server](mcp.md), a client of `/v1` through `src/sdk/`.
+  accepting new work. Immediate subscription changes use the database clock for their effective
+  time and worker claims, so application clock skew cannot delay the first claim. Explicit
+  `period_end` changes retain the stored subscription period end. Stripe App events are handled
+  outside the registry.
+- `src/mcp/`: shared read-only [MCP tools and stdio server](mcp.md), a client of `/v1` through
+  `src/sdk/`. The optional remote transport in `composition/remote-mcp.ts` dispatches the same
+  guarded SDK requests through `MerchantBillingPort`; `platform/mcp/` owns browser authorization,
+  immutable grants and live access checks. The tools never import platform or database code.
 - `migrations/`: ordered schema authority.
 - `tests/`: unit, integration, and end-to-end coverage mirroring the source layout.
 - `contracts/v1/`: generated OpenAPI contract, error inventory and provider capability declarations.

@@ -6,6 +6,7 @@ import { actionCapability, MerchantStepUp, mutationTarget } from "./step-up";
 import type { MerchantIdentity, MerchantStore } from "./store";
 
 interface BillingRoute {
+	readOnly: boolean;
 	path: string;
 	capability: MerchantCapability;
 	action: "catalog.publish" | "operations.recover" | "operations.write" | null;
@@ -14,6 +15,9 @@ interface BillingRoute {
 const id = "[0-9a-fA-F-]{36}";
 const account = "[^/]+";
 const readPatterns = [
+	"catalog",
+	`admin/billing-accounts/${account}/balances/[^/]+`,
+	`admin/billing-accounts/${account}/usage/operations/[^/]+/[^/]+`,
 	"admin/stats/summary",
 	"admin/customers/search",
 	`admin/customers/by-billing-account/${account}`,
@@ -46,14 +50,23 @@ export function merchantBillingRoute(
 		method === "GET" &&
 		new RegExp(`^admin/billing-accounts/${account}/payment-setup-sessions/[^/]+$`).test(suffix)
 	)
-		return { path, capability: "operations.write", action: null, sensitive: false };
+		return {
+			path,
+			readOnly: false,
+			capability: "operations.write",
+			action: null,
+			sensitive: false,
+		};
 	if (method === "GET" && readPatterns.some((pattern) => new RegExp(`^${pattern}$`).test(suffix)))
-		return { path, capability: "billing.read", action: null, sensitive: false };
+		return { path, readOnly: true, capability: "billing.read", action: null, sensitive: false };
+	if (method === "POST" && /^admin\/billing-accounts\/[^/]+\/usage\/check$/.test(suffix))
+		return { path, readOnly: true, capability: "billing.read", action: null, sensitive: false };
 	if (method === "POST" && suffix === "admin/catalog/preview")
-		return { path, capability: "catalog.author", action: null, sensitive: false };
+		return { path, readOnly: false, capability: "catalog.author", action: null, sensitive: false };
 	if (method === "POST" && suffix === "admin/catalog/publish")
 		return {
 			path,
+			readOnly: false,
 			capability: actionCapability("catalog.publish", environment),
 			action: "catalog.publish",
 			sensitive: environment === "production",
@@ -64,6 +77,7 @@ export function merchantBillingRoute(
 	)
 		return {
 			path,
+			readOnly: false,
 			capability: "operations.recover",
 			action: "operations.recover",
 			sensitive: true,
@@ -75,7 +89,13 @@ export function merchantBillingRoute(
 			suffix,
 		)
 	)
-		return { path, capability: "operations.write", action: null, sensitive: false };
+		return {
+			path,
+			readOnly: false,
+			capability: "operations.write",
+			action: null,
+			sensitive: false,
+		};
 	if (
 		(method === "POST" &&
 			/^(?:admin\/(?:contracts|catalog-migrations)\/publish|admin\/billing-accounts\/[^/]+\/(?:commercial-actions|usage\/events\/[^/]+\/corrections)|admin\/promotions(?:\/[^/]+\/(?:archive|provider-sync|codes|codes\/[^/]+\/deactivate))?|admin\/promotion-redemptions\/[^/]+\/revoke)$/.test(
@@ -85,6 +105,7 @@ export function merchantBillingRoute(
 	)
 		return {
 			path,
+			readOnly: false,
 			capability: "operations.write",
 			action: "operations.write",
 			sensitive: environment === "production" || suffix.endsWith("/corrections"),
@@ -131,7 +152,8 @@ export function createMerchantBilling(store: MerchantStore, billing: MerchantBil
 				404,
 			);
 		const body = request.method === "GET" ? undefined : await merchantJson(request);
-		if (request.method !== "GET") {
+		// Actionable GETs still require write capability, but do not require mutation idempotency.
+		if (!route.readOnly && request.method !== "GET") {
 			await store.idempotent(
 				identity,
 				idempotencyKey(request),

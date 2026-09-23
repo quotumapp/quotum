@@ -27,6 +27,7 @@ import { errorSchema, OPERATION_DOC, type OperationDoc } from "../shared/http";
 import { generateAuthOpenApi } from "./auth-openapi";
 import { connectionEventDetail } from "./connection-events";
 import { rewriteStaffOperationsForMerchantBilling } from "./merchant-openapi";
+import { remoteMcpOpenApi } from "./remote-mcp-openapi";
 import { stripeAppEventDetail } from "./stripe-app-events";
 
 /** Registration-only environment: doc generation never touches the database or network. */
@@ -442,6 +443,7 @@ export async function generateOpenApi(version: string) {
 		paths,
 		components: {
 			securitySchemes: {
+				mcpBearer: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
 				projectKey: {
 					type: "http",
 					scheme: "bearer",
@@ -488,6 +490,7 @@ export async function generateOpenApi(version: string) {
 		},
 	} as unknown as OpenAPIObject;
 	const auth = await generateAuthOpenApi();
+	document.paths = { ...document.paths, ...remoteMcpOpenApi() };
 	for (const [path, operation] of Object.entries(auth.paths ?? {})) {
 		if (document.paths?.[path]) throw new Error(`Duplicate auth path: ${path}`);
 		document.paths = { ...document.paths, [path]: operation };

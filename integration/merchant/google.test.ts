@@ -1,10 +1,14 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
+import { createHash, randomBytes } from "node:crypto";
+import type { OnboardingDraftView } from "../../src/platform/contracts";
+import { authorizationFingerprint } from "../../src/platform/mcp/authorization";
 import { FakeMerchantGoogle } from "../../src/testing/merchant-fakes";
-import { MerchantBrowser, merchantFixture, testConfig } from "./fixture";
+import { MerchantBrowser, merchantFixture, merchantTestScope, testConfig } from "./fixture";
 
 const google = new FakeMerchantGoogle();
 const f = merchantFixture({
 	google: { clientId: google.clientId, clientSecret: google.clientSecret },
+	mcp: { origin: "https://api.example.test" },
 });
 const restore = google.install();
 beforeEach(async () => {
@@ -40,6 +44,90 @@ async function oauth(browser: MerchantBrowser, signup = true, cancelled = false)
 	return { result, callback };
 }
 describe("Google OAuth using signed local provider tokens", () => {
+	it("binds MCP Google proof before any platform call and completes login and consent once", async () => {
+		const browser = new MerchantBrowser(f);
+		await oauth(browser);
+		await browser.json("/api/platform/session/exchange", {});
+		const organization = await browser.json<OnboardingDraftView>(
+			"/api/platform/onboarding/organization",
+			{ name: "Acme Company", slug: "acme" },
+		);
+		const project = await browser.json<OnboardingDraftView>("/api/platform/onboarding/project", {
+			name: "Example Project",
+			key: "example",
+			revision: organization.revision,
+		});
+		await browser.json("/api/platform/onboarding/provision", { revision: project.revision });
+		const challenge = await browser.json<{ id: string }>("/api/platform/step-up", {
+			scope: merchantTestScope,
+			action: "credentials.rotate_read_only",
+			target: crypto.randomUUID(),
+			returnTo: "/orgs/acme/projects/example/sandbox/mcp",
+		});
+		const query = new URLSearchParams({
+			response_type: "code",
+			client_id: "quotum-claude-code",
+			redirect_uri: "http://localhost:8788/callback",
+			scope: "quotum.read offline_access",
+			resource: "https://api.example.test/mcp",
+			state: crypto.randomUUID(),
+			code_challenge: createHash("sha256")
+				.update(randomBytes(32).toString("base64url"))
+				.digest("base64url"),
+			code_challenge_method: "S256",
+		});
+		const json = { headers: { accept: "application/json" } };
+		const started = await browser.json<{ url: string }>(
+			`/api/auth/oauth2/authorize?${query}`,
+			undefined,
+			json,
+		);
+		const login = new URL(started.url, testConfig.origin);
+		expect(login.pathname).toBe("/sign-in");
+		const oauthQuery = login.search.slice(1);
+		const social = await browser.json<{ url: string }>("/api/auth/sign-in/social", {
+			provider: "google",
+			callbackURL: `${testConfig.origin}/auth/callback`,
+			errorCallbackURL: `${testConfig.origin}/auth/error`,
+			oauth_query: oauthQuery,
+		});
+		const callback = google.authorize(social.url);
+		const response = await browser.request(`${callback.pathname}${callback.search}`, undefined, {
+			headers: { accept: "text/html", "sec-fetch-mode": "navigate" },
+		});
+		expect(response.status).toBe(302);
+		const selection = new URL(response.headers.get("location") ?? "", testConfig.origin);
+		expect(selection.pathname).toBe("/oauth/select");
+		// These checks deliberately precede /oauth/context, which must not be what
+		// first assigns purpose to the callback's already-usable fresh proof.
+		const [proof] = await f.sql`SELECT mcp_request_hash,auth_method FROM platform_auth_sessions`;
+		expect(proof.mcp_request_hash).toBe(authorizationFingerprint(oauthQuery));
+		expect(proof.auth_method).toBe("google");
+		expect((await browser.request("/api/platform/session/exchange", {})).status).toBe(401);
+		expect(
+			(await browser.request(`/api/platform/step-up/${challenge.id}/complete`, {})).status,
+		).toBe(403);
+		await browser.json("/api/platform/oauth/selection", {
+			oauth_query: selection.search.slice(1),
+			scope: merchantTestScope,
+		});
+		const continued = await browser.json<{ url: string }>(
+			"/api/auth/oauth2/continue",
+			{ oauth_query: selection.search.slice(1), postLogin: true },
+			json,
+		);
+		const consent = new URL(continued.url, testConfig.origin);
+		expect(consent.pathname).toBe("/oauth/consent");
+		const accepted = await browser.json<{ url?: string; redirect_uri?: string }>(
+			"/api/auth/oauth2/consent",
+			{ oauth_query: consent.search.slice(1), accept: true },
+			json,
+		);
+		const clientCallback = new URL(accepted.redirect_uri ?? accepted.url ?? "");
+		expect(clientCallback.origin + clientCallback.pathname).toBe("http://localhost:8788/callback");
+		expect(clientCallback.searchParams.get("code")).toBeTruthy();
+		expect(clientCallback.searchParams.get("state")).toBe(query.get("state"));
+	});
 	it("requires state, PKCE and verified nonce-bound Google identity, without email OTP", async () => {
 		const browser = new MerchantBrowser(f);
 		const { result, callback } = await oauth(browser);

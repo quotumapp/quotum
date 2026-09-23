@@ -43,6 +43,7 @@ function loadEmailConfig(
 }
 
 export interface MerchantConfig {
+	mcp?: { origin: string } | null;
 	signupEnabled: boolean;
 	origin: string;
 	publicUrl: string;
@@ -67,6 +68,25 @@ export function loadMerchantConfig(
 		}
 	}
 	const testMode = env.BILLING_ENV === "test";
+	let mcp: MerchantConfig["mcp"] = null;
+	const mcpEnabled = env.QUOTUM_MCP_ENABLED?.trim() || undefined;
+	if (mcpEnabled !== undefined && !["true", "false"].includes(mcpEnabled))
+		throw new Error("QUOTUM_MCP_ENABLED must be true or false");
+	if (mcpEnabled === "true") {
+		const value = required(env, "QUOTUM_MCP_PUBLIC_ORIGIN");
+		const url = new URL(value);
+		if (
+			url.origin !== value ||
+			(url.protocol !== "https:" &&
+				!(
+					testMode &&
+					url.protocol === "http:" &&
+					["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+				))
+		)
+			throw new Error("QUOTUM_MCP_PUBLIC_ORIGIN must be an HTTPS origin");
+		mcp = { origin: value };
+	}
 	const origin = z.url().parse(env.MERCHANT_ORIGIN ?? "https://app.quotum.dev");
 	const originUrl = new URL(origin);
 	if (originUrl.origin !== origin || (!testMode && originUrl.protocol !== "https:"))
@@ -89,6 +109,7 @@ export function loadMerchantConfig(
 			: null;
 	const email = loadEmailConfig(env, testMode);
 	return {
+		mcp,
 		signupEnabled,
 		origin,
 		publicUrl: env.MERCHANT_PUBLIC_URL ?? "https://quotum.dev",

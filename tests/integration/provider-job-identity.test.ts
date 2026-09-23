@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import type { SQL } from "bun";
 import { createApp } from "../../src/app";
 import { EntitlementService } from "../../src/billing/entitlements";
@@ -56,6 +56,47 @@ localDescribe("Provider job identity integration", () => {
 
 	afterAll(async () => {
 		await context.sql.close();
+	});
+
+	it("claims immediate changes with a skewed host clock while preserving period-end previews", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		const input = {
+			billingAccountId: "migration-stripe",
+			externalSubscriptionId: "sub_migrate_stripe",
+			targetPlanKey: "migration-plan",
+			quantities: { licensed_seats: 7 },
+		};
+		const preview = await context.repository.previewSubscriptionChange(project, input);
+		setSystemTime(new Date(Date.now() + 60_000));
+		try {
+			const repeated = await context.repository.previewSubscriptionChange(project, input);
+			expect(repeated.stateFingerprint).toBe(preview.stateFingerprint);
+			const periodEnd = await context.repository.previewSubscriptionChange(project, {
+				...input,
+				effectiveMode: "period_end",
+			});
+			const [subscription] = await context.sql<{ current_period_end: Date }[]>`
+				SELECT current_period_end FROM subscriptions
+				WHERE project_id=${project.projectInstanceId} AND external_subscription_id='sub_migrate_stripe'
+			`;
+			expect(periodEnd.effectiveAt).toBe(subscription?.current_period_end.toISOString());
+			const change = await context.repository.prepareSubscriptionChange(project, {
+				...input,
+				idempotencyKey: "skewed-immediate-change",
+				expectedStateFingerprint: preview.stateFingerprint,
+			});
+			const [clock] = await context.sql<{ now: Date }[]>`SELECT now() AS now`;
+			expect(
+				new Date(change.effectiveAt).getTime(),
+				`effectiveAt=${change.effectiveAt}, database=${clock?.now.toISOString()}, host=${new Date().toISOString()}`,
+			).toBeLessThanOrEqual(clock?.now.getTime() ?? 0);
+			expect(await context.repository.claimSubscriptionChanges("skewed-clock-worker", 25)).toEqual([
+				expect.objectContaining({ changeId: change.changeId }),
+			]);
+		} finally {
+			setSystemTime();
+		}
 	});
 
 	for (const identity of identities) {

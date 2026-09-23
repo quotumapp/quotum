@@ -531,6 +531,27 @@ describe("module boundaries", () => {
 		expect(violations[0]?.message).toContain("path-exact reviewed migrations");
 	});
 
+	it("allows static platform trigger calls while checking their body ownership and dynamic SQL", () => {
+		const trigger =
+			"CREATE TRIGGER platform_revoke AFTER UPDATE OF status ON platform_principals FOR EACH ROW EXECUTE FUNCTION platform_revoke();";
+		expect(
+			analyzeMigrationTableOwnership([source("migrations/004_merchant.sql", trigger)]),
+		).toEqual([]);
+		expect(
+			analyzeMigrationTableOwnership([
+				source(
+					"migrations/004_merchant.sql",
+					`${trigger} CREATE FUNCTION platform_revoke() RETURNS trigger AS $$ BEGIN DELETE FROM customers; RETURN NEW; END $$ LANGUAGE plpgsql;`,
+				),
+			]).map((v) => v.code),
+		).toContain("FORBIDDEN_TABLE_ACCESS");
+		expect(
+			analyzeMigrationTableOwnership([
+				source("migrations/004_merchant.sql", `${trigger} DO $$ BEGIN EXECUTE query; END $$;`),
+			]).map((v) => v.code),
+		).toContain("NON_STATIC_SQL");
+	});
+
 	it("reserves the platform table prefix", () => {
 		expect(platformTablePrefix).toBe("platform_");
 	});

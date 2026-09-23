@@ -71,6 +71,7 @@ export function merchantFixture(
 	options: {
 		now?: () => Date;
 		google?: { clientId: string; clientSecret: string };
+		mcp?: { origin: string };
 		connectionValidation?: ConnectionValidationPort;
 		environmentBilling?: EnvironmentBillingPort;
 	} = {},
@@ -86,7 +87,7 @@ export function merchantFixture(
 	let failEnvironment: "sandbox" | "production" | null = null;
 	const store = new MerchantStore(
 		sql,
-		{ ...testConfig, google: options.google ?? null },
+		{ ...testConfig, google: options.google ?? null, mcp: options.mcp },
 		() => new Date((options.now?.().getTime() ?? Date.now()) + timeOffset),
 	);
 	const auth = createMerchantAuth(store, mailer, merchantAuthDatabase(client));
@@ -100,18 +101,16 @@ export function merchantFixture(
 		connections: fixtureConnections(env.connectionFixtures),
 		getRepository: () => repository,
 	});
-	const billing = createMerchantBilling(
-		store,
-		createMerchantBillingPort({
-			repository,
-			reader: new AdminBillingRepository({
-				providerReconciliationStaleAfterMs: env.providerReconciliationStaleAfterMs,
-			}),
-			resolver,
-			providers: projectProviderServiceResolver(registry),
-			capabilityReads: createProviderCapabilityReads({ registry, facts: repository }),
+	const billingPort = createMerchantBillingPort({
+		repository,
+		reader: new AdminBillingRepository({
+			providerReconciliationStaleAfterMs: env.providerReconciliationStaleAfterMs,
 		}),
-	);
+		resolver,
+		providers: projectProviderServiceResolver(registry),
+		capabilityReads: createProviderCapabilityReads({ registry, facts: repository }),
+	});
+	const billing = createMerchantBilling(store, billingPort);
 	const connectionRepository = new ConnectionRepository(
 		sql,
 		new ConnectionCipher("test", new Map([["test", Buffer.alloc(32, 7)]])),
@@ -127,6 +126,7 @@ export function merchantFixture(
 			: undefined;
 	const app = createMerchantApp({ store, mailer, auth, onboarding, billing, connections });
 	return {
+		billingPort,
 		client,
 		connectionRepository,
 		connections,
@@ -148,6 +148,10 @@ export function merchantFixture(
 			mailer.messages = [];
 			mailer.fail = false;
 			await sql`TRUNCATE platform_idempotency,platform_audit_events,platform_policy_acceptances,platform_service_principals,platform_step_up_grants,platform_project_api_credentials,platform_provisioning_steps,platform_provisioning_operations,platform_projects,platform_onboarding_drafts,platform_invitations,platform_memberships,platform_organizations,platform_merchant_sessions,platform_external_identities,platform_principals,platform_auth_users,platform_auth_verifications,platform_auth_rate_limits,platform_rate_limits,platform_auth_links,projects CASCADE`;
+			// TRUNCATE CASCADE also removes public clients seeded by the baseline migration.
+			await sql`INSERT INTO platform_auth_oauth_clients(client_id,name,redirect_uris,scopes,grant_types,response_types,token_endpoint_auth_method,require_p_k_c_e,skip_consent,created_at,updated_at) VALUES
+			('quotum-claude-code','Claude Code',ARRAY['http://localhost:8788/callback'],ARRAY['quotum.read','offline_access'],ARRAY['authorization_code','refresh_token'],ARRAY['code'],'none',true,false,now(),now()),
+			('quotum-cursor','Cursor',ARRAY['http://localhost:8787/callback'],ARRAY['quotum.read','offline_access'],ARRAY['authorization_code','refresh_token'],ARRAY['code'],'none',true,false,now(),now())`;
 			await sql`INSERT INTO platform_service_principals(name,token_hash) VALUES('merchant-integration',${store.hash(serviceToken)})`;
 		},
 	};

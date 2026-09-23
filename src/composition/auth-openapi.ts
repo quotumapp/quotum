@@ -1,9 +1,10 @@
 import { betterAuth } from "better-auth";
 import { openAPI } from "better-auth/plugins";
-import type { OpenAPIObject } from "openapi3-ts/oas31";
+import type { OpenAPIObject, SchemaObject } from "openapi3-ts/oas31";
 import { z } from "zod";
 import { MERCHANT_AUTH_POST_PATHS, resetPasswordBodySchema } from "../platform/app";
 import { createMerchantAuth } from "../platform/auth";
+import { createMcpAuthProvider } from "../platform/mcp/auth-provider";
 import { MerchantStore } from "../platform/store";
 
 /** Export-only configuration: real auth options/plugins, no persistence or external effects. */
@@ -22,6 +23,7 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 		},
 	});
 	const store = new MerchantStore(sql, {
+		mcp: { origin: "https://api.quotum.invalid" },
 		signupEnabled: true,
 		origin: "https://app.quotum.invalid",
 		publicUrl: "https://quotum.invalid",
@@ -35,15 +37,53 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 	const configured = createMerchantAuth(store, { send: unavailable }, undefined);
 	const exporter = betterAuth({
 		...configured.options,
-		plugins: [...(configured.options.plugins ?? []), openAPI({ disableDefaultReference: true })],
+		// CIMD registers into its provider instance during initialization; never reuse that instance.
+		plugins: [
+			...(configured.options.plugins ?? []).filter(
+				(p) => !["oauth-provider", "cimd", "jwt"].includes(p.id),
+			),
+			...createMcpAuthProvider(store).plugins,
+			openAPI({ disableDefaultReference: true }),
+		],
 	});
 	const generated = await exporter.api.generateOpenAPISchema();
 	// Better Auth and Hono expose different OpenAPI interface packages for the same JSON document.
 	const doc: OpenAPIObject = JSON.parse(JSON.stringify(generated));
 	const paths: OpenAPIObject["paths"] = {};
+	const continuation: SchemaObject = {
+		type: "object",
+		required: ["url", "redirect"],
+		properties: { url: { type: "string" }, redirect: { const: true } },
+	};
+	const oauthError: SchemaObject = {
+		type: "object",
+		required: ["error"],
+		properties: { error: { type: "string" }, error_description: { type: "string" } },
+	};
 	for (const [path, item] of Object.entries(doc.paths ?? {})) {
 		const suffix = path.replace(/^\/api\/auth/, "");
 		if (!item) continue;
+		if (suffix === "/oauth2/authorize" && item.get) {
+			paths[`/api/auth${suffix}`] = {
+				get: {
+					...item.get,
+					operationId: "authOauth2Authorize",
+					tags: ["authentication"],
+					security: [{ serviceToken: [] }],
+					responses: {
+						200: {
+							description: "Browser authorization continuation",
+							content: { "application/json": { schema: continuation } },
+						},
+						302: {
+							description: "Browser redirect",
+							headers: { Location: { schema: { type: "string" } } },
+						},
+						default: { description: "Invalid authorization request" },
+					},
+				},
+			};
+		}
 		if (MERCHANT_AUTH_POST_PATHS.has(suffix) && item.post) {
 			const operation = item.post;
 			operation.operationId =
@@ -111,6 +151,29 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 					},
 				};
 			}
+			if (["/sign-in/email", "/sign-in/social", "/two-factor/verify-otp"].includes(suffix)) {
+				const body = operation.requestBody;
+				if (body && "content" in body) {
+					const schema = body.content["application/json"]?.schema;
+					if (schema && !("$ref" in schema))
+						schema.properties = {
+							...schema.properties,
+							oauth_query: {
+								type: "string",
+								maxLength: 8192,
+								description: "Signed OAuth authorization continuation",
+							},
+						};
+				}
+			}
+			if (["/two-factor/verify-otp", "/oauth2/continue", "/oauth2/consent"].includes(suffix)) {
+				const response = operation.responses?.[200];
+				if (response && "content" in response) {
+					const media = response.content?.["application/json"];
+					if (media)
+						media.schema = media.schema ? { anyOf: [media.schema, continuation] } : continuation;
+				}
+			}
 			for (const status of [400, 401, 403, 404, 409, 410, 413, 415, 422, 429, 500, 503]) {
 				const previous = operation.responses?.[status];
 				const content =
@@ -124,8 +187,8 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 						content: {
 							"application/json": {
 								schema: content
-									? { anyOf: [content, { $ref: "#/components/schemas/QuotumError" }] }
-									: { $ref: "#/components/schemas/QuotumError" },
+									? { anyOf: [content, oauthError, { $ref: "#/components/schemas/QuotumError" }] }
+									: { anyOf: [oauthError, { $ref: "#/components/schemas/QuotumError" }] },
 							},
 						},
 					},
@@ -197,5 +260,24 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 	}
 	normalize(paths);
 	normalize(doc.components);
+	// Provider model schemas describe private persistence. Publish only referenced HTTP types.
+	const referenced = new Set<string>();
+	function collectReferences(value: unknown): void {
+		if (!value || typeof value !== "object") return;
+		const reference = (value as { $ref?: unknown }).$ref;
+		if (typeof reference === "string" && reference.startsWith("#/components/schemas/")) {
+			const name = reference.slice("#/components/schemas/".length);
+			if (!referenced.has(name)) {
+				referenced.add(name);
+				collectReferences(doc.components?.schemas?.[name]);
+			}
+		}
+		for (const child of Object.values(value)) collectReferences(child);
+	}
+	collectReferences(paths);
+	if (doc.components?.schemas)
+		doc.components.schemas = Object.fromEntries(
+			Object.entries(doc.components.schemas).filter(([name]) => referenced.has(name)),
+		);
 	return { ...doc, paths };
 }

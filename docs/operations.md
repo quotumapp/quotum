@@ -53,6 +53,13 @@ changes. For a populated deployment, retain a restorable backup and its matching
 an incompatible schema change needs an explicit data-preserving transition before upgrading.
 Never reset populated production data as a routine upgrade.
 
+Remote MCP extends `004_merchant.sql` with the OAuth provider tables, JWKS storage, immutable
+authorizations, public desktop-client registrations and a transient proof-binding column. Two
+platform status triggers permanently revoke grants and refresh replay responses on principal or
+membership suspension. Deploy the matching schema before an MCP-enabled API; the transport remains
+off unless explicitly enabled. See [remote MCP deployment](deployment.md#remote-mcp). These changes
+do not create project credentials or alter the stdio credential policy.
+
 ### Stored job provider identity
 
 The baselines add a required `provider` column to `subscription_changes` and

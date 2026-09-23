@@ -36,7 +36,7 @@ export function isBodyTooLarge(error: unknown): boolean {
 }
 
 async function readCappedBytes(
-	request: Request,
+	request: Pick<Request, "headers" | "body">,
 	maxBytes: number,
 	tooLarge: TooLargeErrorFactory,
 ): Promise<Uint8Array> {
@@ -82,7 +82,7 @@ async function readCappedBytes(
 }
 
 export async function readCappedText(
-	request: Request,
+	request: Pick<Request, "headers" | "body">,
 	maxBytes: number,
 	tooLarge: TooLargeErrorFactory,
 ): Promise<string> {

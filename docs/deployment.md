@@ -139,6 +139,33 @@ requests, not for global `/ready` to report database/schema health.
 
 ## Optional variables
 
+### Remote MCP
+
+Remote MCP is disabled by default. Set `QUOTUM_MCP_ENABLED=true` and
+`QUOTUM_MCP_PUBLIC_ORIGIN=https://api.example.com` to enable browser authorization and `/mcp`.
+Use an exact HTTPS API origin; keep `MERCHANT_ORIGIN` on the merchant UI origin. The origins may
+be different. The API validates Host and any Origin header against configured origins.
+
+The public API ingress must expose `/mcp`, `/oauth/token`, `/oauth/revoke`, `/oauth/jwks`,
+`/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource` and
+`/.well-known/oauth-protected-resource/mcp` without adding the merchant service token or cookies.
+The UI Worker owns `/oauth/authorize`, sign-in, environment selection and consent; it forwards
+only the exact browser `/api/auth/oauth2/authorize`, `/continue`, `/consent` and platform MCP routes
+in its allowlist. Keep arbitrary `/api/auth/*` routes inaccessible through the Worker.
+
+Upgrade order: prepare the matching baseline schema (see the
+[schema policy](operations.md#schema-and-upgrade-policy)), deploy the API with MCP disabled, deploy
+the matching UI/BFF contract and routes, then set the two MCP variables. `004_merchant.sql` adds
+OAuth provider tables, signing keys, immutable grants, public coding-client registrations, and
+proof binding. Existing populated deployments need a reviewed data-preserving transition; a
+checksum mismatch must not be bypassed or handled by resetting production data. Disable the flag
+to stop the remote ingress and browser authorization if rolling the UI back. The stdio server
+retains its existing independent configuration.
+
+See [MCP server](mcp.md#connect-in-a-browser) for identity, scope, lifetimes and revocation behavior.
+
+### Other optional variables
+
 Defaults in parentheses.
 
 - `BILLING_AUTH_MODE=api_key|gateway` (`api_key`). Use `gateway` only when a trusted gateway

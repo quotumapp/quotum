@@ -206,7 +206,7 @@ export class MerchantStepUp {
 					proof_at: Date;
 					created_at: Date;
 				}[]
-			>`SELECT * FROM platform_auth_sessions WHERE token=${authToken} AND expires_at>${this.store.now()} AND proof_at>=${challenge.created_at} FOR UPDATE`;
+			>`SELECT * FROM platform_auth_sessions WHERE token=${authToken} AND expires_at>${this.store.now()} AND proof_at>=${challenge.created_at} AND mcp_request_hash IS NULL FOR UPDATE`;
 			if (
 				!proof ||
 				proof.user_id !== identity.authUserId ||

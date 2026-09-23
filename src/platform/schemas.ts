@@ -56,6 +56,7 @@ export const MerchantProjectViewSchema = z.object({
 });
 
 export const MerchantConfigurationViewSchema = z.object({
+	mcp: z.object({ url: z.string() }).nullable(),
 	csrfToken: z.string(),
 	signupEnabled: z.boolean(),
 	googleEnabled: z.boolean(),

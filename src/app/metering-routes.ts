@@ -27,12 +27,12 @@ const subjectParamsSchema = z.object({
 	billingAccountId: z.string().trim().min(1).max(256),
 });
 
-const operationParamsSchema = subjectParamsSchema.extend({
+export const operationParamsSchema = subjectParamsSchema.extend({
 	operation: z.enum(usageOperationKinds),
 	operationId: z.string().trim().min(1).max(200),
 });
 
-const balanceParamsSchema = subjectParamsSchema.extend({
+export const balanceParamsSchema = subjectParamsSchema.extend({
 	featureKey: z.string().trim().min(1).max(120),
 });
 
@@ -49,7 +49,7 @@ const filtersSchema = z.record(
 	z.union([z.string().max(256), z.number(), z.boolean()]),
 );
 
-const usageBodySchema = z
+export const usageBodySchema = z
 	.object({
 		featureKey: z.string().trim().min(1).max(120),
 		quantity: z.string().trim().min(1).max(80),
@@ -346,7 +346,7 @@ function meteringOperation(path: string): string {
 	return "unknown";
 }
 
-function usageInput(body: z.infer<typeof usageBodySchema>) {
+export function usageInput(body: z.infer<typeof usageBodySchema>) {
 	return {
 		featureKey: body.featureKey,
 		quantity: body.quantity,
