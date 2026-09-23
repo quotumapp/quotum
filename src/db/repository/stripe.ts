@@ -986,6 +986,21 @@ export class StripeBillingRepository extends RepositoryModule {
 				});
 			}
 
+			const existingSubscription = await getStripeOperationSubscription(
+				tx,
+				projectId,
+				input.stripeSubscriptionId,
+			);
+
+			if (existingSubscription !== null && isStripeInvoiceEvent(input)) {
+				return await recordExistingSubscriptionInvoice(tx, projectId, {
+					customerId: resolved.id,
+					billingAccountId: resolved.billing_account_id,
+					subscription: existingSubscription,
+					input,
+				});
+			}
+
 			const storeProduct = await getStripeStoreProduct(tx, projectId, {
 				externalProductId: input.externalProductId,
 				externalPriceId: input.externalPriceId,
@@ -1014,12 +1029,6 @@ export class StripeBillingRepository extends RepositoryModule {
 				});
 				return skippedStripeRecordingResult();
 			}
-
-			const existingSubscription = await getStripeOperationSubscription(
-				tx,
-				projectId,
-				input.stripeSubscriptionId,
-			);
 
 			const storeEvent = await recordStoreEventProcessingResult(tx, projectId, {
 				provider: "stripe",
@@ -1100,7 +1109,30 @@ export class StripeBillingRepository extends RepositoryModule {
 				input.expiresAt ??
 				existingSubscription?.current_period_end ??
 				null;
-			const lifecycle = stripeSubscriptionLifecycleState(input, existingSubscription);
+			let lifecycle = stripeSubscriptionLifecycleState(input, existingSubscription);
+			if (existingSubscription !== null && input.externalEventId !== null) {
+				const payment = await latestSubscriptionInvoice(tx, projectId, existingSubscription.id);
+				if (payment !== null && Number(payment.last_event) > incomingProviderOrder) {
+					lifecycle = stripeSubscriptionLifecycleState(
+						{
+							...input,
+							eventType: "invoice.payment_state",
+							invoiceStatus: payment.status,
+							subscriptionStatus: payment.status === "paid" ? "active" : "billing_retry",
+							providerStatus: payment.status === "paid" ? "active" : "past_due",
+						},
+						{
+							...existingSubscription,
+							status: lifecycle.status,
+							provider_status: lifecycle.providerStatus,
+							auto_renew: lifecycle.autoRenew,
+							cancel_at_period_end: lifecycle.cancelAtPeriodEnd,
+							trial_start_at: lifecycle.trialStart,
+							trial_end_at: lifecycle.trialEnd,
+						},
+					);
+				}
+			}
 
 			const subscriptionRecordId = await upsertSubscription(tx, projectId, {
 				customerId: resolved.id,
@@ -1407,6 +1439,7 @@ interface CheckoutRequestRow {
 
 interface StripeOperationSubscriptionRow {
 	id: string;
+	customer_id: string;
 	product_id: string;
 	store_product_id: string;
 	product_key: string;
@@ -1500,6 +1533,99 @@ function stripeSubscriptionLifecycleState(
 	};
 }
 
+async function latestSubscriptionInvoice(
+	executor: QueryExecutor,
+	projectId: string,
+	subscriptionId: string,
+): Promise<{ status: string; last_event: number | string } | null> {
+	return await executeOne(
+		executor,
+		drizzleSql`
+		SELECT status, last_provider_event_created AS last_event
+		FROM billing_invoices
+		WHERE project_id = ${projectId} AND subscription_id = ${subscriptionId}
+		ORDER BY last_provider_event_created DESC, id DESC
+		LIMIT 1
+	`,
+	);
+}
+
+/** Invoice prices describe a past purchase, never the current subscription's commercial state. */
+async function recordExistingSubscriptionInvoice(
+	executor: QueryExecutor,
+	projectId: string,
+	fact: {
+		customerId: string;
+		billingAccountId: string;
+		subscription: StripeOperationSubscriptionRow;
+		input: RecordStripeSubscriptionProjectionInput;
+	},
+): Promise<StripeRecordingResult> {
+	const { subscription, input } = fact;
+	if (subscription.customer_id !== fact.customerId) {
+		throw new Error(
+			`Stripe subscription identity mismatch for subscription ${input.stripeSubscriptionId}`,
+		);
+	}
+	const recorded = await recordStoreEventProcessingResult(executor, projectId, {
+		provider: "stripe",
+		channel: "web",
+		externalEventId: input.externalEventId,
+		eventType: input.eventType,
+		customerId: fact.customerId,
+		storeProductId: subscription.store_product_id,
+		transactionId: input.invoiceId ?? input.stripeSubscriptionId,
+		purchaseKind: "subscription",
+		processingStatus: "processed",
+		processingError: null,
+		rawPayload: input.rawPayload,
+		raiseIdentityMismatch: true,
+		replayStoreEventId: input.replayStoreEventId ?? null,
+	});
+	if (!recorded.applied) {
+		return processedStripeRecordingResult(
+			fact.billingAccountId,
+			await getEntitlementSnapshot(executor, projectId, fact.billingAccountId),
+		);
+	}
+	// The customer/subscription lock serializes invoice and subscription writes. Invoice ordering
+	// belongs to invoice facts: advancing the subscription watermark here would discard a genuine
+	// subscription update created before this payment but delivered afterwards.
+	const previous = await latestSubscriptionInvoice(executor, projectId, subscription.id);
+	await upsertSubscriptionInvoiceFact(executor, projectId, {
+		customerId: fact.customerId,
+		subscriptionId: subscription.id,
+		input,
+	});
+	const eventOrder = input.providerEventCreated ?? 0;
+	if (
+		eventOrder >=
+		Math.max(subscription.last_provider_event_created, Number(previous?.last_event ?? 0))
+	) {
+		const lifecycle = stripeSubscriptionLifecycleState(input, subscription);
+		await executeRows(
+			executor,
+			drizzleSql`
+			UPDATE subscriptions
+			SET status = ${lifecycle.status}, provider_status = ${lifecycle.providerStatus}, updated_at = now()
+			WHERE project_id = ${projectId} AND id = ${subscription.id}
+		`,
+		);
+	}
+	const snapshot = await recomputeCustomerEntitlements(executor, projectId, fact.billingAccountId);
+	await enqueueProjectionSyncJob(executor, {
+		customerId: fact.customerId,
+		idempotencyKey: input.projectionIdempotencyKey,
+		reason: input.projectionReason,
+		payload: {
+			billingAccountId: fact.billingAccountId,
+			reason: input.projectionReason,
+			entitlements: snapshot,
+		},
+	});
+	return processedStripeRecordingResult(fact.billingAccountId, snapshot);
+}
+
 async function getStripeOperationSubscription(
 	executor: QueryExecutor,
 	projectId: string,
@@ -1507,6 +1633,7 @@ async function getStripeOperationSubscription(
 ): Promise<StripeOperationSubscriptionRow | null> {
 	const row = await executeOne<{
 		id: string;
+		customer_id: string;
 		product_id: string;
 		store_product_id: string;
 		product_key: string;
@@ -1527,6 +1654,7 @@ async function getStripeOperationSubscription(
 		drizzleSql`
 			SELECT
 				s.id,
+				s.customer_id,
 				s.product_id,
 				s.store_product_id,
 				p.key AS product_key,

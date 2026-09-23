@@ -943,6 +943,28 @@ describe("Stripe normalizer", () => {
 		expect(legacyInvoice.expiresAt?.toISOString()).toBe("2026-07-31T00:00:00.000Z");
 	});
 
+	it.each([false, true])(
+		"selects a proration debit independently of line order (reversed=%s)",
+		(reversed) => {
+			const line = (price: string, amount: number) => ({
+				amount,
+				period: { start: stripeSeconds, end: futurePeriodEnd },
+				pricing: { price_details: { product: `prod_${price}`, price: `price_${price}` } },
+				parent: { subscription_item_details: { subscription: "sub_123", proration: true } },
+			});
+			const lines = [line("new", 1500), line("old", -500)];
+			const command = normalizeStripeInvoice({
+				eventId: "evt_proration_order",
+				eventType: "invoice.paid",
+				invoice: invoiceFixture({ lines: { data: reversed ? lines.reverse() : lines } }),
+			});
+			expect(command).toMatchObject({
+				externalProductId: "prod_new",
+				externalPriceId: "price_new",
+			});
+		},
+	);
+
 	it("keeps metadata identity when the subscription line carries no price", () => {
 		const command = normalizeStripeInvoice({
 			eventId: "evt_invoice_line_without_price",
