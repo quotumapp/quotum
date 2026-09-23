@@ -1,6 +1,5 @@
 import { type RateLimiter, rateLimitHeaders, requestIpAndPath } from "../http/rate-limit";
 import { bodyTooLargeError, isBodyTooLarge, readCappedText } from "../shared/body-limit";
-import { routedPath } from "../shared/http";
 
 /** Plain JSON response for the setup-only ingresses, which do not use the billing envelope. */
 export function rawJsonResponse(status: number, payload: unknown): Response {
@@ -27,11 +26,30 @@ export async function readCappedRawBody(
 // biome-ignore lint/suspicious/noExplicitAny: Elysia hook contexts are route-inferred.
 type IpRateLimitGate = (context: any) => Response | undefined;
 
-/** Per-client limiter for unauthenticated ingress, keyed by client IP and routed path. */
-export function ipRateLimitGate(limiter: RateLimiter): IpRateLimitGate {
+/**
+ * Per-client limiter for unauthenticated ingress, keyed by client IP and the routed pattern, so
+ * path values cannot mint buckets. `boundedParams` names parameters whose accepted values form a
+ * fixed set: each accepted value keeps its own bucket and anything else shares the pattern's.
+ */
+export function ipRateLimitGate(
+	limiter: RateLimiter,
+	options: {
+		trustProxyHeaders?: boolean;
+		boundedParams?: Readonly<Record<string, readonly string[]>>;
+	} = {},
+): IpRateLimitGate {
+	const boundedParams = options.boundedParams ?? {};
 	return (context) => {
 		const { request, server, set } = context;
-		const result = limiter.check(requestIpAndPath({ request, path: routedPath(context), server }));
+		const route: string = typeof context.route === "string" ? context.route : "unrouted";
+		const path = route.replace(/:(\w+)/g, (placeholder, name: string) => {
+			const accepted = Object.hasOwn(boundedParams, name) ? boundedParams[name] : undefined;
+			const value: unknown = context.params?.[name];
+			return typeof value === "string" && accepted?.includes(value) === true ? value : placeholder;
+		});
+		const result = limiter.check(
+			requestIpAndPath({ request, path, server }, { trustProxyHeaders: options.trustProxyHeaders }),
+		);
 		if (!result.allowed) {
 			Object.assign(set.headers, rateLimitHeaders(result));
 			return rawJsonResponse(429, {

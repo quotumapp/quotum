@@ -55,6 +55,8 @@ export function attachMerchantRuntime(
 		merchantRequestScope?: MerchantRequestScope;
 		mcpRequestScope?: MerchantRequestScope;
 		onMerchantUnexpectedError?: (error: unknown, report: MerchantUnexpectedErrorReport) => void;
+		/** `BILLING_TRUST_PROXY_HEADERS`: key the setup ingress limiters on the forwarded client. */
+		trustProxyHeaders?: boolean;
 	},
 ): QuotumApp {
 	const { config } = options;
@@ -92,6 +94,7 @@ export function attachMerchantRuntime(
 		persistence,
 		oauth,
 		registerBackground: options.registerBackground,
+		trustProxyHeaders: options.trustProxyHeaders,
 	});
 	const remoteMcp = config.mcp
 		? createRemoteMcpApp({
@@ -121,6 +124,8 @@ export function attachHeadlessRuntime(
 	staff: Elysia,
 	options: Pick<MerchantRuntimeOptions, "registerBackground"> & {
 		staffRequestScope?: RequestScope;
+		/** `BILLING_TRUST_PROXY_HEADERS`: key the setup ingress limiters on the forwarded client. */
+		trustProxyHeaders?: boolean;
 	} = {},
 ): QuotumApp {
 	const persistence = merchantSql(sql);
@@ -131,6 +136,7 @@ export function attachHeadlessRuntime(
 			persistence,
 			oauth: createStripeOAuthPort(),
 			registerBackground: options.registerBackground,
+			trustProxyHeaders: options.trustProxyHeaders,
 		}),
 		staffRequestScope: options.staffRequestScope,
 	});
@@ -141,10 +147,14 @@ function createConnectionIngress(input: {
 	persistence: MerchantSql;
 	oauth: StripeOAuthPort | null;
 	registerBackground?: MerchantRuntimeOptions["registerBackground"];
+	trustProxyHeaders?: boolean;
 }): AppElysia[] {
-	const ingress: AppElysia[] = [createConnectionEventApp(input.repository)];
+	const { trustProxyHeaders } = input;
+	const ingress: AppElysia[] = [createConnectionEventApp(input.repository, { trustProxyHeaders })];
 	if (input.oauth) {
-		const events = createStripeAppEvents(input.repository, input.oauth, input.persistence);
+		const events = createStripeAppEvents(input.repository, input.oauth, input.persistence, {
+			trustProxyHeaders,
+		});
 		ingress.push(events.app);
 		input.registerBackground?.(events);
 	}

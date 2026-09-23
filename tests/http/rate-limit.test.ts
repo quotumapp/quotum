@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { Elysia } from "elysia";
+import { createApp } from "../../src/app";
+import { createConnectionEventApp } from "../../src/composition/connection-events";
+import { ipRateLimitGate } from "../../src/composition/ingress-http";
+import { createStripeAppEvents } from "../../src/composition/stripe-app-events";
 import {
 	createFixedWindowRateLimiter,
 	normalizedRateLimitPath,
@@ -14,7 +18,14 @@ import {
 	requestIpAndPath,
 	requestProjectIpAndPath,
 } from "../../src/http/rate-limit";
+import { attachRequestServer } from "../../src/http/server";
+import type { StripeOAuthPort } from "../../src/platform/connections/oauth-port";
+import {
+	type FixtureBillingEnv as BillingEnv,
+	fixtureConnections,
+} from "../../src/testing/connection-fixtures";
 import { testRequest } from "../helpers/openapi";
+import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const RATE_LIMITED_ENVELOPE = {
 	success: false,
@@ -141,7 +152,7 @@ describe("createFixedWindowRateLimiter", () => {
 		).toThrow("maxBuckets must be a positive integer");
 	});
 
-	it("bounds attacker-controlled keys with a shared overflow bucket", () => {
+	it("never rejects a new key because the bucket table is full", () => {
 		const limiter = createFixedWindowRateLimiter({
 			windowMs: 1_000,
 			limit: 2,
@@ -151,10 +162,38 @@ describe("createFixedWindowRateLimiter", () => {
 
 		expect(limiter.check("known-a").allowed).toBe(true);
 		expect(limiter.check("known-b").allowed).toBe(true);
-		expect(limiter.check("attacker-a").allowed).toBe(true);
-		expect(limiter.check("attacker-b").allowed).toBe(true);
-		expect(limiter.check("attacker-c").allowed).toBe(false);
-		expect(limiter.size()).toBe(3);
+		for (let index = 0; index < 1_000; index += 1) {
+			expect(limiter.check(`attacker-${index}`).allowed).toBe(true);
+			expect(limiter.check(`attacker-${index}`).allowed).toBe(true);
+			expect(limiter.check(`attacker-${index}`).allowed).toBe(false);
+		}
+
+		expect(limiter.check("newcomer")).toEqual({
+			allowed: true,
+			remaining: 1,
+			resetAt: new Date(2_000),
+		});
+		expect(limiter.size()).toBe(2);
+	});
+
+	it("evicts the least recently checked key and keeps a hammering key rejected", () => {
+		const limiter = createFixedWindowRateLimiter({
+			windowMs: 1_000,
+			limit: 1,
+			maxBuckets: 2,
+			now: () => 1_000,
+		});
+
+		expect(limiter.check("abuser").allowed).toBe(true);
+		expect(limiter.check("idle").allowed).toBe(true);
+		// A rejected check is still use: "abuser" becomes the most recently checked key.
+		expect(limiter.check("abuser").allowed).toBe(false);
+		expect(limiter.check("newcomer").allowed).toBe(true);
+
+		expect(limiter.check("abuser").allowed).toBe(false);
+		// "idle" was evicted by "newcomer", so it starts over instead of being rejected.
+		expect(limiter.check("idle").allowed).toBe(true);
+		expect(limiter.size()).toBe(2);
 	});
 });
 
@@ -226,7 +265,7 @@ describe("projectScopedRateLimitGuard", () => {
 				return rateLimitResponse(error.result);
 			})
 			.get(path, () => ({ ok: true }), {
-				beforeHandle({ request, path, server, set }) {
+				beforeHandle({ request, path, route, server, set }) {
 					if (!guard.matches(path)) {
 						return;
 					}
@@ -234,6 +273,7 @@ describe("projectScopedRateLimitGuard", () => {
 					guard.guard({
 						request,
 						path,
+						route,
 						server: server ?? null,
 						projectKey,
 						set: { headers: guardHeaders },
@@ -333,6 +373,28 @@ describe("projectScopedRateLimitGuard", () => {
 		expect(key).toBe("project:proj_voysee:198.51.100.30:/limited");
 	});
 
+	it("keys buckets on the route pattern, not the values in the path", async () => {
+		const keys: string[] = [];
+		const guard = projectScopedRateLimitGuard({
+			limiter: {
+				check(key) {
+					keys.push(key);
+					return { allowed: true, remaining: 1, resetAt: new Date(10_000) };
+				},
+			},
+			matches: () => true,
+		});
+		const app = postAuthApp(guard, "/v1/billing-accounts/:billingAccountId/usage/check");
+
+		await testRequest(app, "/v1/billing-accounts/user_1/usage/check");
+		await testRequest(app, "/v1/billing-accounts/user_2/usage/check");
+
+		expect(keys).toEqual([
+			"project:proj_voysee:unknown:/v1/billing-accounts/:billingAccountId/usage/check",
+			"project:proj_voysee:unknown:/v1/billing-accounts/:billingAccountId/usage/check",
+		]);
+	});
+
 	it("skips requests outside its path group", async () => {
 		let checks = 0;
 		const guard = projectScopedRateLimitGuard({
@@ -372,6 +434,60 @@ describe("projectScopedRateLimitGuard", () => {
 
 		expect(error.message).toBe("Too many requests");
 		expect(error.result).toBe(result);
+	});
+});
+
+describe("ipRateLimitGate", () => {
+	function ingressApp(
+		gate: ReturnType<typeof ipRateLimitGate>,
+		route = "/v1/stripe-app/webhooks/:mode",
+	) {
+		return new Elysia().post(route, () => ({ ok: true }), { beforeHandle: gate });
+	}
+	const recording = (keys: string[]): RateLimiter => ({
+		check(key) {
+			keys.push(key);
+			return { allowed: true, remaining: 1, resetAt: new Date(10_000) };
+		},
+	});
+
+	it("keys on the route pattern and keeps only accepted values of bounded parameters", async () => {
+		const keys: string[] = [];
+		const app = ingressApp(
+			ipRateLimitGate(recording(keys), { boundedParams: { mode: ["test", "live"] } }),
+		);
+
+		for (const mode of ["live", "test", "m1", "m2", "constructor", "__proto__"]) {
+			await app.handle(
+				new Request(`http://localhost/v1/stripe-app/webhooks/${mode}`, { method: "POST" }),
+			);
+		}
+
+		expect(keys).toEqual([
+			"unknown:/v1/stripe-app/webhooks/live",
+			"unknown:/v1/stripe-app/webhooks/test",
+			"unknown:/v1/stripe-app/webhooks/:mode",
+			"unknown:/v1/stripe-app/webhooks/:mode",
+			"unknown:/v1/stripe-app/webhooks/:mode",
+			"unknown:/v1/stripe-app/webhooks/:mode",
+		]);
+	});
+
+	it("honours proxy headers only when proxy trust is enabled", async () => {
+		const keys: string[] = [];
+		const headers = { "x-forwarded-for": "198.51.100.30" };
+		const post = (app: ReturnType<typeof ingressApp>) =>
+			app.handle(
+				new Request("http://localhost/v1/stripe-app/webhooks/live", { method: "POST", headers }),
+			);
+
+		await post(ingressApp(ipRateLimitGate(recording(keys))));
+		await post(ingressApp(ipRateLimitGate(recording(keys), { trustProxyHeaders: true })));
+
+		expect(keys).toEqual([
+			"unknown:/v1/stripe-app/webhooks/:mode",
+			"198.51.100.30:/v1/stripe-app/webhooks/:mode",
+		]);
 	});
 });
 
@@ -574,5 +690,337 @@ describe("rate limit envelope helpers", () => {
 		expect(response.headers.get("ratelimit-remaining")).toBe("0");
 		expect(response.headers.get("ratelimit-reset")).toBe(new Date(10_000).toISOString());
 		expect(await response.json()).toEqual(RATE_LIMITED_ENVELOPE);
+	});
+});
+
+/**
+ * Every in-memory limiter the service registers, driven through its real app. A caller chooses
+ * path values (billing accounts, webhook project keys, ingress modes) and, with enough hosts, its
+ * address; neither may reject another project or another client.
+ */
+describe("limiter isolation", () => {
+	/** Enough distinct keys to fill the default 10,000-key table and drain any shared remainder. */
+	const FLOOD = 10_130;
+	const LIMIT = 3;
+	/** An epoch-aligned window that cannot roll over while a test runs. */
+	const WINDOW_MS = 10 ** 13;
+	/** The setup ingresses use a fixed one-minute window. */
+	const INGRESS_WINDOW_MS = 60_000;
+	const PEER_X = "198.51.100.66";
+	const PEER_Z = "203.0.113.9";
+	const validUsage = JSON.stringify({ featureKey: "api_calls", quantity: "1" });
+
+	const env: BillingEnv = {
+		postgresUri: "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+		postgresPreparedStatements: true,
+		authMode: "api_key",
+		operatorApiKey: "operator-secret-key",
+		trustGatewayProjectHeader: false,
+		connectionFixtures: [],
+		runtimeEnvironment: "development",
+		workerId: "worker-a",
+		workerPollIntervalMs: 5000,
+		projectionSyncMaxAttempts: 10,
+		storeEventReplayMaxAttempts: 10,
+		storeEventReplayPollIntervalMs: 5000,
+		subscriptionReconciliationMaxAttempts: 10,
+		subscriptionReconciliationPollIntervalMs: 60000,
+		providerReconciliationStaleAfterMs: 21600000,
+		meteringMaintenancePollIntervalMs: 60000,
+		rateLimit: {
+			windowMs: WINDOW_MS,
+			verifyLimit: 120,
+			webhookLimit: 600,
+			adminLimit: 60,
+			meteringLimit: 6000,
+			trustProxyHeaders: false,
+		},
+		sentry: {
+			dsn: null,
+			environment: "test",
+			release: null,
+			enableLogs: true,
+			tracesSampleRate: 0.01,
+			logLevel: "warn",
+			captureExpectedErrors: false,
+		},
+	};
+
+	type IsolationApp = { server: unknown; handle(request: Request): Promise<Response> };
+
+	function staffApp(rateLimit: Partial<BillingEnv["rateLimit"]>): IsolationApp {
+		const answer = async () => ({ recorded: true }) as never;
+		return createApp({
+			env: { ...env, rateLimit: { ...env.rateLimit, ...rateLimit } },
+			connections: fixtureConnections([]),
+			projectContextResolver: projectContextResolver({
+				contexts: [projectInstanceContext("voysee"), projectInstanceContext("wiseley")],
+				credentials: { voysee: "voysee", wiseley: "wiseley" },
+			}),
+			stripeBillingService: {
+				handleWebhook: async () => ({ status: "ignored", eventType: "ping", entitlements: null }),
+			} as never,
+			meteringService: new Proxy({}, { get: () => answer }) as never,
+			adminBillingReader: new Proxy({}, { get: () => async () => null }) as never,
+			promotionService: new Proxy({}, { get: () => answer }) as never,
+		}) as unknown as IsolationApp;
+	}
+
+	const stripeAppOAuth: StripeOAuthPort = {
+		authorize: () => "",
+		exchange: () => Promise.reject(new Error("unused")),
+		refresh: () => Promise.reject(new Error("unused")),
+		webhookSecret: (environment) => `whsec_${environment}`,
+	};
+	const unusedPersistence = Object.assign(
+		async () => {
+			throw new Error("an unsigned request must not reach persistence");
+		},
+		{ begin: async () => [] },
+	) as never;
+
+	function post(path: string, headers: Record<string, string>, body = "{}"): Request {
+		return new Request(`http://localhost${path}`, { method: "POST", headers, body });
+	}
+	function authenticated(project: string, extra: Record<string, string> = {}) {
+		return { authorization: `Bearer ${project}`, "content-type": "application/json", ...extra };
+	}
+
+	interface IsolationCase {
+		name: string;
+		createApp(): IsolationApp;
+		/** Requests one client may send before this limiter rejects it, whatever values it picks. */
+		budget: number;
+		/** A request carrying the caller-chosen `value`, as `project` where the route authenticates. */
+		request(value: string, project: string): Request;
+		/** The value another client sends, such as a real project's webhook key. */
+		victimValue: string;
+		/** Post-authentication guards also keep another project behind the same address apart. */
+		projectScoped: boolean;
+		windowMs: number;
+	}
+
+	const cases: IsolationCase[] = [
+		{
+			name: "provider webhooks (per-IP ceiling, then per project)",
+			createApp: () => staffApp({ webhookLimit: LIMIT }),
+			// The per-client ceiling is ten per-project budgets; the project key is unauthenticated.
+			budget: 10 * LIMIT,
+			request: (value) =>
+				post(`/v1/projects/${value}/webhooks/stripe`, { "stripe-signature": "t=1,v1=00" }),
+			victimValue: "voysee",
+			projectScoped: false,
+			windowMs: WINDOW_MS,
+		},
+		{
+			name: "/v1 aggregate per-IP gate",
+			// The aggregate is the sum of the verify, admin and metering limits.
+			createApp: () => staffApp({ verifyLimit: 1, adminLimit: 1, meteringLimit: 1 }),
+			budget: 3,
+			request: (value) => new Request(`http://localhost/v1/billing-accounts/${value}/entitlements`),
+			victimValue: "user_victim",
+			projectScoped: false,
+			windowMs: WINDOW_MS,
+		},
+		{
+			name: "metering guard",
+			createApp: () => staffApp({ meteringLimit: LIMIT }),
+			budget: LIMIT,
+			request: (value, project) =>
+				post(`/v1/billing-accounts/${value}/usage/check`, authenticated(project), validUsage),
+			victimValue: "user_victim",
+			projectScoped: true,
+			windowMs: WINDOW_MS,
+		},
+		{
+			name: "admin guard",
+			createApp: () => staffApp({ adminLimit: LIMIT }),
+			budget: LIMIT,
+			request: (value, project) =>
+				new Request(`http://localhost/v1/admin/customers/by-billing-account/${value}`, {
+					headers: authenticated(project, { "x-billing-operator-key": "operator-secret-key" }),
+				}),
+			victimValue: "user_victim",
+			projectScoped: true,
+			windowMs: WINDOW_MS,
+		},
+		{
+			name: "purchase verification guard",
+			createApp: () => staffApp({ verifyLimit: LIMIT }),
+			budget: LIMIT,
+			request: (value, project) =>
+				post(
+					"/v1/purchases/verify",
+					authenticated(project),
+					JSON.stringify({ provider: "apple", billingAccountId: value }),
+				),
+			victimValue: "user_victim",
+			projectScoped: true,
+			windowMs: WINDOW_MS,
+		},
+		{
+			name: "promotion code entry guard",
+			createApp: () => staffApp({ verifyLimit: LIMIT }),
+			budget: LIMIT,
+			request: (value, project) =>
+				post(
+					`/v1/billing-accounts/${value}/promotion-codes/validate`,
+					authenticated(project),
+					JSON.stringify({ code: "SPRING" }),
+				),
+			victimValue: "user_victim",
+			projectScoped: true,
+			windowMs: WINDOW_MS,
+		},
+		{
+			name: "connection setup ingress",
+			createApp: () => createConnectionEventApp({} as never) as unknown as IsolationApp,
+			budget: 120,
+			// An unsupported provider is answered before any lookup, so no repository is needed.
+			request: (value) =>
+				post(`/v1/projects/${value}/connections/${crypto.randomUUID()}/webhooks/paddle`, {}),
+			victimValue: "voysee",
+			projectScoped: false,
+			windowMs: INGRESS_WINDOW_MS,
+		},
+		{
+			name: "Stripe App ingress",
+			createApp: () =>
+				createStripeAppEvents({} as never, stripeAppOAuth, unusedPersistence)
+					.app as unknown as IsolationApp,
+			budget: 120,
+			request: (value) =>
+				post(`/v1/stripe-app/webhooks/${value}`, { "stripe-signature": "t=1,v1=00" }),
+			victimValue: "live",
+			projectScoped: false,
+			windowMs: INGRESS_WINDOW_MS,
+		},
+	];
+
+	function send(app: IsolationApp, request: Request, address: string): Promise<Response> {
+		attachRequestServer(app, { requestIP: () => ({ address }) });
+		return app.handle(request);
+	}
+
+	/** Waits out the last two seconds of a fixed window so a burst cannot straddle a reset. */
+	async function awayFromWindowEdge(windowMs: number): Promise<void> {
+		const remaining = windowMs - (Date.now() % windowMs);
+		if (remaining < 2_000) await Bun.sleep(remaining + 10);
+	}
+
+	/** What the other client, and another project behind the flooding address, get back. */
+	async function bystanders(app: IsolationApp, testCase: IsolationCase) {
+		const otherPeer = await send(app, testCase.request(testCase.victimValue, "voysee"), PEER_Z);
+		const otherProject = testCase.projectScoped
+			? (await send(app, testCase.request(testCase.victimValue, "wiseley"), PEER_X)).status
+			: null;
+		return { otherPeer: otherPeer.status, otherProject };
+	}
+
+	for (const testCase of cases) {
+		describe(testCase.name, () => {
+			it("does not let path values multiply one client's budget", async () => {
+				const baseline = await bystanders(testCase.createApp(), testCase);
+				expect(baseline.otherPeer).not.toBe(429);
+				expect(baseline.otherProject).not.toBe(429);
+				await awayFromWindowEdge(testCase.windowMs);
+
+				const app = testCase.createApp();
+				const statuses: number[] = [];
+				for (let index = 0; index <= testCase.budget; index += 1) {
+					const request = testCase.request(`value-${index}`, "voysee");
+					statuses.push((await send(app, request, PEER_X)).status);
+				}
+
+				expect(statuses.slice(0, testCase.budget)).not.toContain(429);
+				expect(statuses[testCase.budget]).toBe(429);
+				expect(await bystanders(app, testCase)).toEqual(baseline);
+			});
+
+			it("never rejects another client once its bucket table is full", async () => {
+				const baseline = await bystanders(testCase.createApp(), testCase);
+				await awayFromWindowEdge(testCase.windowMs);
+
+				const app = testCase.createApp();
+				for (let index = 0; index < FLOOD; index += 1) {
+					const address = `10.${(index >> 16) & 255}.${(index >> 8) & 255}.${index & 255}`;
+					await send(app, testCase.request(`value-${index}`, "voysee"), address);
+				}
+
+				expect(await bystanders(app, testCase)).toEqual(baseline);
+			}, 30_000);
+		});
+	}
+
+	it("caps the project lookups one client can cause with unknown webhook project keys", async () => {
+		let lookups = 0;
+		const resolver = projectContextResolver({ contexts: [projectInstanceContext("voysee")] });
+		const app = createApp({
+			env: { ...env, rateLimit: { ...env.rateLimit, webhookLimit: LIMIT } },
+			connections: fixtureConnections([]),
+			projectContextResolver: {
+				...resolver,
+				resolveInstanceKey(key) {
+					lookups += 1;
+					return resolver.resolveInstanceKey(key);
+				},
+			},
+		}) as unknown as IsolationApp;
+
+		let rejected: Response | undefined;
+		for (let index = 0; index < 1_000; index += 1) {
+			const response = await send(
+				app,
+				post(`/v1/projects/k${index}/webhooks/stripe`, { "stripe-signature": "t=1,v1=00" }),
+				PEER_X,
+			);
+			if (response.status === 429) rejected ??= response;
+		}
+
+		expect(lookups).toBe(10 * LIMIT);
+		expect(rejected?.headers.get("ratelimit-remaining")).toBe("0");
+		expect(await rejected?.json()).toEqual(RATE_LIMITED_ENVELOPE);
+	});
+
+	describe("setup ingress behind a trusted proxy", () => {
+		const ingresses: Array<{ name: string; create(trustProxyHeaders: boolean): IsolationApp }> = [
+			{
+				name: "connection setup ingress",
+				create: (trustProxyHeaders) =>
+					createConnectionEventApp({} as never, { trustProxyHeaders }) as unknown as IsolationApp,
+			},
+			{
+				name: "Stripe App ingress",
+				create: (trustProxyHeaders) =>
+					createStripeAppEvents({} as never, stripeAppOAuth, unusedPersistence, {
+						trustProxyHeaders,
+					}).app as unknown as IsolationApp,
+			},
+		];
+		const path = {
+			"connection setup ingress": `/v1/projects/voysee/connections/${crypto.randomUUID()}/webhooks/paddle`,
+			"Stripe App ingress": "/v1/stripe-app/webhooks/live",
+		} as const;
+
+		for (const ingress of ingresses) {
+			it(`keys the ${ingress.name} on the forwarded client only when trusted`, async () => {
+				await awayFromWindowEdge(INGRESS_WINDOW_MS);
+				const lastStatus = async (trustProxyHeaders: boolean) => {
+					const app = ingress.create(trustProxyHeaders);
+					// Every request arrives from the ingress controller's socket.
+					const from = (client: string) =>
+						send(
+							app,
+							post(path[ingress.name as keyof typeof path], { "x-forwarded-for": client }),
+							"10.0.0.2",
+						);
+					for (let index = 0; index < 121; index += 1) await from(PEER_X);
+					return (await from(PEER_Z)).status;
+				};
+
+				expect(await lastStatus(true)).not.toBe(429);
+				expect(await lastStatus(false)).toBe(429);
+			});
+		}
 	});
 });

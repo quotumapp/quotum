@@ -39,6 +39,7 @@ export function createStripeAppEvents(
 	repository: ConnectionRepository,
 	oauth: StripeOAuthPort,
 	persistence: MerchantSql,
+	options: { trustProxyHeaders?: boolean } = {},
 ) {
 	const events = new StripeAppEvents(persistence);
 	const resolver = new PostgresProjectInstanceContextResolver();
@@ -119,7 +120,10 @@ export function createStripeAppEvents(
 		},
 		{
 			parse: "none",
-			beforeHandle: ipRateLimitGate(limiter),
+			beforeHandle: ipRateLimitGate(limiter, {
+				trustProxyHeaders: options.trustProxyHeaders,
+				boundedParams: { mode: ["test", "live"] },
+			}),
 			detail: stripeAppEventDetail(),
 		},
 	);

@@ -5,6 +5,7 @@ import {
 	type RateLimiter,
 	rateLimitHeaders,
 	rateLimitResponse,
+	requestIp,
 	requestProjectIpAndPath,
 } from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
@@ -59,20 +60,27 @@ const stripeWebhookSchema = z
 const tooLargeError = (): BillingError =>
 	new BillingError("Request body is too large", "REQUEST_BODY_TOO_LARGE", 413);
 
-/** Pre-authentication limiter for provider webhooks, mirroring their historical middleware. */
+/**
+ * Pre-authentication limiters for provider webhooks. The per-IP limiter runs first: the project key
+ * in the URL is unauthenticated, so it bounds how many project buckets one client can create per
+ * window, and it rejects before any project lookup. The project limiter keeps each project's budget
+ * per client IP and provider, since one provider address delivers for every project.
+ */
 export function webhookRateLimitPreAuthGate(
-	limiter: RateLimiter,
+	limiters: { perIp: RateLimiter; perProject: RateLimiter },
 	rateLimitKeyOptions: { trustProxyHeaders?: boolean },
 ): PreAuthGate {
 	return {
 		matches: (path) => WEBHOOK_PATH_PATTERN.test(path),
 		gate({ request, path, server, set }: PreAuthGateInput) {
+			const keyOptions = { trustProxyHeaders: rateLimitKeyOptions.trustProxyHeaders };
+			const ipResult = limiters.perIp.check(requestIp({ request, server }, keyOptions));
+			if (!ipResult.allowed) {
+				return rateLimitResponse(ipResult);
+			}
 			const projectKey = WEBHOOK_PATH_PATTERN.exec(path)?.[1] ?? null;
-			const result = limiter.check(
-				requestProjectIpAndPath(
-					{ request, path, server, projectKey },
-					{ trustProxyHeaders: rateLimitKeyOptions.trustProxyHeaders },
-				),
+			const result = limiters.perProject.check(
+				requestProjectIpAndPath({ request, path, server, projectKey }, keyOptions),
 			);
 			if (!result.allowed) {
 				return rateLimitResponse(result);
@@ -89,6 +97,7 @@ export function registerWebhookRoutes(input: {
 	registerPreAuthGate: (gate: PreAuthGate) => void;
 	rateLimitKeyOptions: { trustProxyHeaders?: boolean };
 	webhookLimiter: RateLimiter;
+	webhookIpLimiter: RateLimiter;
 	providerServices: ProjectProviderServiceResolver;
 	billingMetrics: BillingMetrics;
 	billingLogger: BillingLogger;
@@ -99,12 +108,18 @@ export function registerWebhookRoutes(input: {
 		registerPreAuthGate,
 		rateLimitKeyOptions,
 		webhookLimiter,
+		webhookIpLimiter,
 		providerServices,
 		billingMetrics,
 		billingLogger,
 	} = input;
 
-	registerPreAuthGate(webhookRateLimitPreAuthGate(webhookLimiter, rateLimitKeyOptions));
+	registerPreAuthGate(
+		webhookRateLimitPreAuthGate(
+			{ perIp: webhookIpLimiter, perProject: webhookLimiter },
+			rateLimitKeyOptions,
+		),
+	);
 
 	const webhookProject = async (projectKey: string): Promise<ProjectInstanceContext> => {
 		const resolution = await contextResolver.resolveInstanceKey(projectKey);

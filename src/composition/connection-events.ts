@@ -44,6 +44,7 @@ export function createConnectionEventApp(
 	options: {
 		stripeHttpClient?: NonNullable<Stripe.StripeConfig["httpClient"]>;
 		googleOidcVerifier?: GoogleOidcVerifier;
+		trustProxyHeaders?: boolean;
 	} = {},
 ) {
 	const limiter = createFixedWindowRateLimiter({
@@ -138,7 +139,10 @@ export function createConnectionEventApp(
 		},
 		{
 			parse: "none",
-			beforeHandle: ipRateLimitGate(limiter),
+			beforeHandle: ipRateLimitGate(limiter, {
+				trustProxyHeaders: options.trustProxyHeaders,
+				boundedParams: { provider: ["stripe", "apple", "google"] },
+			}),
 			detail: connectionEventDetail(),
 		},
 	);
