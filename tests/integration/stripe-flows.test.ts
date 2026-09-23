@@ -1420,6 +1420,7 @@ localDescribe("Stripe route flows integration", () => {
 		expect(body.data.status).toBe("processed");
 		expect(body.data.eventType).toBe("customer.subscription.created");
 		expectActivePremiumSnapshot(body.data.entitlements, "integration_user");
+		expect(body.data.entitlements.entitlements[0].metadata).not.toHaveProperty("trialEndsAt");
 		await expectTableCounts(context.sql, {
 			customers: 1,
 			provider_customers: 1,
@@ -2425,6 +2426,72 @@ localDescribe("Stripe route flows integration", () => {
 			trial_end_at: new Date(end * 1000),
 		});
 		await expectTableCounts(context.sql, { subscriptions: 1, billing_invoices: 1 });
+	});
+
+	// capability: catalog.trial
+	// capability: subscription.sync
+	it("projects the trial bounds of a subscription entitlement", async () => {
+		const service = createVerifiedEventService();
+		const now = Math.floor(Date.now() / 1000);
+		const trialStart = now - 86_400;
+		const trialEnd = now + 13 * 86_400;
+		const trialMetadata = (end: number) => ({
+			trialStartsAt: new Date(trialStart * 1000).toISOString(),
+			trialEndsAt: new Date(end * 1000).toISOString(),
+		});
+
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.created",
+				stripeSubscriptionObject({
+					status: "trialing",
+					trial_start: trialStart,
+					trial_end: trialEnd,
+				}),
+				now - 120,
+				"evt_trial_created",
+			),
+		);
+
+		const snapshot = await context.repository.getEntitlementSnapshot(
+			integrationProjectContext("voysee"),
+			"integration_user",
+		);
+		expect(snapshot.entitlements).toEqual([
+			{
+				key: "premium",
+				active: true,
+				expiresAt: "2099-06-30T00:00:00.000Z",
+				metadata: expect.objectContaining({ status: "active", ...trialMetadata(trialEnd) }),
+			},
+		]);
+		const created = await expectProjectionJobByKey(
+			context.sql,
+			"stripe:subscription:sub_1:customer.subscription.created:evt_trial_created:projection",
+		);
+		expect(created.payload.entitlements.entitlements[0]?.metadata).toMatchObject(
+			trialMetadata(trialEnd),
+		);
+
+		// Ending the trial early moves trial_end to now; Stripe keeps both bounds on the subscription.
+		const endedAt = now - 60;
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.updated",
+				stripeSubscriptionObject({ trial_start: trialStart, trial_end: endedAt }),
+				now - 30,
+				"evt_trial_ended",
+			),
+		);
+
+		const ended = await expectProjectionJobByKey(
+			context.sql,
+			"stripe:subscription:sub_1:customer.subscription.updated:evt_trial_ended:projection",
+		);
+		expect(ended.payload.entitlements.entitlements[0]?.metadata).toMatchObject({
+			status: "active",
+			...trialMetadata(endedAt),
+		});
 	});
 
 	// capability: subscription.sync

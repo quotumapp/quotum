@@ -1116,6 +1116,7 @@
               "questions": [],
               "scenarios": [],
               "tests": [
+                "tests/integration/stripe-flows.test.ts",
                 "tests/integration/catalog-control-plane.test.ts",
                 "tests/providers/stripe/service.test.ts"
               ]

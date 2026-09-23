@@ -90,7 +90,7 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 			notes:
 				"Non-consumable products are provisioned Stripe web store products sold through product Checkout.",
 		}),
-		"catalog.trial": native([catalogControlPlaneTest, serviceTest]),
+		"catalog.trial": native([stripeFlowsTest, catalogControlPlaneTest, serviceTest]),
 		"catalog.addon": native([catalogControlPlaneTest], {
 			notes: "An add-on is a separate Stripe subscription and requires an active base plan.",
 		}),
