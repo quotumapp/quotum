@@ -157,6 +157,9 @@ export const paddleCapabilities: ProviderCapabilityDeclaration = {
 		}),
 		"event.replay": inP4({ questions: ["Q-WH-03"] }),
 		"subscription.reconcile": inP4({ questions: ["Q-RET-02", "Q-RATE-01"] }),
+		"trial.ending_notice": notEvaluated(
+			"The Paddle assessment does not cover trial-ending notices.",
+		),
 		"subscription.change.preview": notEvaluated(
 			"The Paddle assessment does not cover previewing subscription updates.",
 			["Q-SUB-07"],

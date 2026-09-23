@@ -80,6 +80,12 @@ export interface ExpiredSubscriptionReconciliationResult {
 	projectionJobs: number;
 }
 
+export interface TrialEndingNoticeResult {
+	noticedTrials: number;
+	affectedCustomers: number;
+	projectionJobs: number;
+}
+
 export interface RecordPurchaseProjectionInput {
 	billingAccountId: string;
 	provider: BillingProvider;
@@ -316,6 +322,8 @@ export interface RecordStripeSubscriptionProjectionInput {
 	currentPeriodEnd?: Date | null;
 	trialStart?: Date | null;
 	trialEnd?: Date | null;
+	/** `ending` asks for the trial-ending fact when the subscription is still in that trial. */
+	trialNotice?: "ending" | null;
 	cancelAtPeriodEnd?: boolean;
 	providerEventCreated?: number;
 	invoiceStatus?: string | null;

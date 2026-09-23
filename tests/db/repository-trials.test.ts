@@ -14,14 +14,15 @@ describe("recordSubscriptionTrial", () => {
 		database.assertConsumed();
 		const [query] = database.queries;
 		expect(query).toMatch(
-			/SET trial_start_at = \$\d+::timestamptz, trial_end_at = \$\d+::timestamptz/,
+			/trial_start_at = \$\d+::timestamptz,\s+trial_end_at = \$\d+::timestamptz/,
 		);
+		expect(query).toContain("trial_ending_notified_at = NULL");
 		expect(query).toContain("trial_end_at IS NULL");
 		expect(query).toMatch(/OR \$\d+::timestamptz >= trial_end_at/);
 		expect(query).toMatch(
 			/OR \(trial_start_at = \$\d+::timestamptz AND trial_end_at <> \$\d+::timestamptz\)/,
 		);
-		expect(query).not.toContain("NULL,");
+		expect(query).not.toMatch(/trial_(start|end)_at = NULL/);
 		expect(database.boundParameter("project_id")).toBe("project-id");
 		expect(database.boundParameter("id")).toBe("subscription-id");
 		expect(database.params[0]).toContain("2026-06-07T00:00:00.000Z");

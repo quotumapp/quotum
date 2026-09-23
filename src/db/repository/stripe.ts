@@ -40,6 +40,7 @@ import {
 	recordStoreEventProcessingResult,
 	recordStripeSkippedEventInTransaction,
 } from "./store-events";
+import { claimStripeTrialEndingNotice } from "./trials";
 import type {
 	CompleteStripeCheckoutRequestInput,
 	GetStripeProviderCustomerInput,
@@ -1071,6 +1072,13 @@ export class StripeBillingRepository extends RepositoryModule {
 					input,
 				});
 				const snapshot = await getEntitlementSnapshot(tx, projectId, resolved.billing_account_id);
+				const staleTrial =
+					input.trialNotice === "ending"
+						? await claimStripeTrialEndingNotice(tx, projectId, {
+								subscriptionId: existingSubscription.id,
+								trialEnd: input.trialEnd ?? null,
+							})
+						: null;
 				await enqueueProjectionSyncJob(tx, {
 					customerId: resolved.id,
 					idempotencyKey: input.projectionIdempotencyKey,
@@ -1079,13 +1087,16 @@ export class StripeBillingRepository extends RepositoryModule {
 						billingAccountId: resolved.billing_account_id,
 						reason: input.projectionReason,
 						entitlements: snapshot,
+						...(staleTrial === null ? {} : { trial: staleTrial }),
 					},
 				});
 				return processedStripeRecordingResult(resolved.billing_account_id, snapshot);
 			}
 
+			// trial_will_end carries the whole subscription, like an update.
 			const deferredDowngrade =
-				input.eventType === "customer.subscription.updated" &&
+				(input.eventType === "customer.subscription.updated" ||
+					input.eventType === "customer.subscription.trial_will_end") &&
 				input.cancelAtPeriodEnd === true &&
 				existingSubscription !== null &&
 				storeProduct.credit_amount < existingSubscription.credit_amount;
@@ -1187,6 +1198,10 @@ export class StripeBillingRepository extends RepositoryModule {
 					SET
 						trial_start_at = ${lifecycle.trialStart?.toISOString() ?? null},
 						trial_end_at = ${lifecycle.trialEnd?.toISOString() ?? null},
+						trial_ending_notified_at = CASE
+							WHEN trial_end_at IS NOT DISTINCT FROM ${lifecycle.trialEnd?.toISOString() ?? null}::timestamptz
+								THEN trial_ending_notified_at
+						END,
 						billing_anchor_at = COALESCE(billing_anchor_at, ${currentPeriodStart.toISOString()}),
 						updated_at = now()
 					WHERE project_id = ${projectId} AND id = ${subscriptionRecordId}
@@ -1203,6 +1218,13 @@ export class StripeBillingRepository extends RepositoryModule {
 				projectId,
 				resolved.billing_account_id,
 			);
+			const trial =
+				input.trialNotice === "ending"
+					? await claimStripeTrialEndingNotice(tx, projectId, {
+							subscriptionId: subscriptionRecordId,
+							trialEnd: lifecycle.trialEnd,
+						})
+					: null;
 			await enqueueProjectionSyncJob(tx, {
 				customerId: resolved.id,
 				idempotencyKey: input.projectionIdempotencyKey,
@@ -1211,6 +1233,7 @@ export class StripeBillingRepository extends RepositoryModule {
 					billingAccountId: resolved.billing_account_id,
 					reason: input.projectionReason,
 					entitlements: snapshot,
+					...(trial === null ? {} : { trial }),
 				},
 			});
 			return processedStripeRecordingResult(resolved.billing_account_id, snapshot);

@@ -1169,6 +1169,34 @@ describe("Stripe normalizer", () => {
 		expect(active.projectionIdempotencyKey).not.toBe(retry.projectionIdempotencyKey);
 	});
 
+	// capability: trial.ending_notice
+	it("asks for a trial-ending fact only on trial_will_end", () => {
+		const trial = { status: "trialing", trial_start: 1_780_000_000, trial_end: 1_781_209_600 };
+		const ending = normalizeStripeSubscription({
+			eventId: "evt_trial_will_end",
+			eventType: "customer.subscription.trial_will_end",
+			subscription: subscriptionFixture(trial),
+			now,
+		});
+		const updated = normalizeStripeSubscription({
+			eventId: "evt_subscription_updated",
+			eventType: "customer.subscription.updated",
+			subscription: subscriptionFixture(trial),
+			now,
+		});
+
+		expect(ending).toMatchObject({
+			trialNotice: "ending",
+			subscriptionStatus: "active",
+			providerStatus: "trialing",
+			projectionReason: "provider_webhook",
+			projectionIdempotencyKey:
+				"stripe:subscription:sub_123:customer.subscription.trial_will_end:evt_trial_will_end:projection",
+		});
+		expect(ending.trialEnd?.toISOString()).toBe("2026-06-11T20:26:40.000Z");
+		expect(updated.trialNotice).toBeNull();
+	});
+
 	it("uses deterministic state keys for subscription reconciliation", () => {
 		const active = normalizeStripeSubscription({
 			eventId: "evt_reconcile_active",

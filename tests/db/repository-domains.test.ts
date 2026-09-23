@@ -103,10 +103,15 @@ describe("repository domain adapters", () => {
 				return Promise.resolve();
 			},
 		});
+		const notices = { noticedTrials: 1, affectedCustomers: 1, projectionJobs: 1 };
 		const reconciliation = new ProviderSubscriptionReconciliationRepository({
 			reconcileExpiredSubscriptions(limit) {
 				calls.push({ method: "reconcileExpiredSubscriptions", limit });
 				return Promise.resolve(expired);
+			},
+			enqueueTrialEndingNotices(limit) {
+				calls.push({ method: "enqueueTrialEndingNotices", limit });
+				return Promise.resolve(notices);
 			},
 			claimProviderSubscriptionReconciliations(workerId, limit, staleBefore) {
 				calls.push({
@@ -148,6 +153,7 @@ describe("repository domain adapters", () => {
 
 		expect(await replay.claimStoreEventReplayJobs("worker-a", 3)).toBe(replayRows);
 		expect(await reconciliation.reconcileExpiredSubscriptions(10)).toBe(expired);
+		expect(await reconciliation.enqueueTrialEndingNotices(10)).toBe(notices);
 		expect(
 			await reconciliation.claimProviderSubscriptionReconciliations("worker-a", 10, staleBefore),
 		).toBe(reconciliationRows);
@@ -155,6 +161,7 @@ describe("repository domain adapters", () => {
 		expect(calls).toEqual([
 			{ method: "claimStoreEventReplayJobs", workerId: "worker-a", limit: 3 },
 			{ method: "reconcileExpiredSubscriptions", limit: 10 },
+			{ method: "enqueueTrialEndingNotices", limit: 10 },
 			{
 				method: "claimProviderSubscriptionReconciliations",
 				workerId: "worker-a",

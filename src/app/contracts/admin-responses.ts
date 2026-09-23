@@ -3,6 +3,21 @@ import { billingProviderValues } from "./provider-enum";
 import { ProviderEnvironmentCapabilitiesSchema } from "./provider-responses";
 
 /** Authored HTTP wire schemas. Update these with the handlers; OpenAPI is generated from them. */
+
+/** A projection payload's trial event, as stored on a projection job. */
+const projectionTrialSchema = z.object({
+	event: z.enum(["ending", "ended"]),
+	source: z.enum(["subscription", "plan_grant"]),
+	provider: z.enum(billingProviderValues()).optional(),
+	channel: z.enum(["ios", "android", "web"]).optional(),
+	externalSubscriptionId: z.string().optional(),
+	planGrantId: z.string().optional(),
+	productKey: z.string().optional(),
+	planKey: z.string().optional(),
+	trialStartsAt: z.string(),
+	trialEndsAt: z.string(),
+	autoRenew: z.boolean(),
+});
 export const getV1AdminCustomersSearchResponse200Schema = z.object({
 	success: z.literal(true),
 	data: z.array(
@@ -225,6 +240,7 @@ export const getV1AdminCustomersByBillingAccountByBillingAccountIdResponse200Sch
 								reversedAt: z.string(),
 							})
 							.optional(),
+						trial: projectionTrialSchema.optional(),
 					}),
 				]),
 				createdAt: z.string(),
@@ -414,6 +430,7 @@ export const getV1AdminCustomersByCustomerIdProjectionJobsResponse200Schema = z.
 							reversedAt: z.string(),
 						})
 						.optional(),
+					trial: projectionTrialSchema.optional(),
 				}),
 			]),
 			createdAt: z.string(),
@@ -617,6 +634,7 @@ export const getV1AdminCustomersByCustomerIdResponse200Schema = z.object({
 								reversedAt: z.string(),
 							})
 							.optional(),
+						trial: projectionTrialSchema.optional(),
 					}),
 				]),
 				createdAt: z.string(),
@@ -835,6 +853,7 @@ export const getV1AdminProjectionJobsResponse200Schema = z.object({
 							reversedAt: z.string(),
 						})
 						.optional(),
+					trial: projectionTrialSchema.optional(),
 				}),
 			]),
 			createdAt: z.string(),
@@ -957,6 +976,7 @@ export const postV1AdminReconciliationSubscriptionsRunResponse200Schema = z.obje
 		outcome: z.enum(["succeeded", "failed", "partial"]),
 		expiredSubscriptions: z.number(),
 		affectedCustomers: z.number(),
+		trialEndingNotices: z.number(),
 		providerClaimed: z.number(),
 		providerProcessed: z.number(),
 		providerSkipped: z.number(),

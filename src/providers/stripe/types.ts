@@ -125,6 +125,8 @@ export interface NormalizedStripeSubscriptionCommand {
 	externalEventId: string;
 	projectionReason: Extract<ProjectionSyncReason, "provider_webhook" | "provider_reconciliation">;
 	projectionIdempotencyKey: string;
+	/** `ending` for `customer.subscription.trial_will_end`, which asks for a trial-ending fact. */
+	trialNotice: "ending" | null;
 }
 
 export interface NormalizedStripeSubscriptionItem {

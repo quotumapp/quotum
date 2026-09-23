@@ -228,6 +228,7 @@ export const providerOperationMethods: Record<ProviderOperation, readonly Provid
 		"webhook.ingest": ["webhooks.ingest"],
 		"event.replay": ["replay.replayStoreEvent"],
 		"subscription.reconcile": ["reconciliation.reconcileSubscription"],
+		"trial.ending_notice": ["webhooks.ingest"],
 		"subscription.change.preview": ["commercial.preview"],
 		"subscription.change.apply": ["changes.apply"],
 		"subscription.change.period_end": ["changes.apply"],

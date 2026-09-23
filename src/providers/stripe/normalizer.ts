@@ -340,6 +340,7 @@ export function normalizeStripeInvoice(
 		externalEventId: input.eventId,
 		projectionReason: "provider_webhook",
 		projectionIdempotencyKey: `stripe:invoice:${invoiceId}:${input.eventType}:${input.eventId}:projection`,
+		trialNotice: null,
 	};
 }
 
@@ -410,6 +411,7 @@ export function normalizeStripeSubscription(
 			expiresAt,
 			autoRenew,
 		}),
+		trialNotice: input.eventType === "customer.subscription.trial_will_end" ? "ending" : null,
 	};
 }
 

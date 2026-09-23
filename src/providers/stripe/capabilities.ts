@@ -121,6 +121,10 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 		"webhook.ingest": native([stripeFlowsTest, serviceTest]),
 		"event.replay": native([serviceTest]),
 		"subscription.reconcile": native([serviceTest]),
+		"trial.ending_notice": native([stripeFlowsTest], {
+			notes:
+				"Attached to customer.subscription.trial_will_end, which the webhook endpoint or Stripe App event destination must send.",
+		}),
 		"subscription.change.preview": native([stripeFlowsTest], {
 			conditions: [changeableSubscription],
 			notes: `${changeTargets} Stripe calculates the final proration amount during execution.`,

@@ -16,6 +16,7 @@ export interface BillingProjectionInput {
 	reason: ProjectionSyncReason;
 	purchase?: ProjectionPayload["purchase"];
 	reversal?: ProjectionPayload["reversal"];
+	trial?: ProjectionPayload["trial"];
 	/** Per-account order of state snapshots; receivers may ignore a lower value. */
 	sequence?: number;
 }

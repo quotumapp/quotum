@@ -2,6 +2,7 @@ import type { BillingProvider } from "../billing/types";
 import type {
 	ExpiredSubscriptionReconciliationResult,
 	ProviderSubscriptionReconciliationRow,
+	TrialEndingNoticeResult,
 } from "../db/repository";
 import {
 	type BillingLogger,
@@ -38,6 +39,7 @@ export type SubscriptionReconciliationProviderSelector = (
 
 export interface SubscriptionReconciliationRepository {
 	reconcileExpiredSubscriptions(limit: number): Promise<ExpiredSubscriptionReconciliationResult>;
+	enqueueTrialEndingNotices(limit: number): Promise<TrialEndingNoticeResult>;
 	claimProviderSubscriptionReconciliations(
 		workerId: string,
 		limit: number,
@@ -81,6 +83,7 @@ export interface SubscriptionReconciliationRunResult {
 	outcome: "succeeded" | "partial" | "failed";
 	expiredSubscriptions: number;
 	affectedCustomers: number;
+	trialEndingNotices: number;
 	providerClaimed: number;
 	providerProcessed: number;
 	providerSkipped: number;
@@ -144,6 +147,7 @@ export class SubscriptionReconciliationWorker {
 				outcome: "succeeded",
 				expiredSubscriptions: 0,
 				affectedCustomers: 0,
+				trialEndingNotices: 0,
 				providerClaimed: subscriptions.length,
 				providerProcessed: 0,
 				providerSkipped: 0,
@@ -172,6 +176,8 @@ export class SubscriptionReconciliationWorker {
 			const expired = await this.repository.reconcileExpiredSubscriptions(this.batchSize);
 			result.expiredSubscriptions = expired.expiredSubscriptions;
 			result.affectedCustomers = expired.affectedCustomers;
+			const notices = await this.repository.enqueueTrialEndingNotices(this.batchSize);
+			result.trialEndingNotices = notices.noticedTrials;
 			result.outcome = reconciliationOutcome(result);
 
 			safelyIncrementBillingMetric(this.metrics, "billing_subscription_reconciliation_runs_total", {

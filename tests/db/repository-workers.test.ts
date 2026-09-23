@@ -22,6 +22,28 @@ describe("BillingRepository workers", () => {
 		);
 	});
 
+	it("locks trial notice customers before subscriptions and claims only unnotified trials", async () => {
+		const database = new FakeDatabase([[]]);
+		const repository = new BillingRepository(database as never);
+
+		await expect(repository.enqueueTrialEndingNotices(10)).resolves.toEqual({
+			noticedTrials: 0,
+			affectedCustomers: 0,
+			projectionJobs: 0,
+		});
+
+		const query = database.queries[0] ?? "";
+		expect(query).toContain("s.trial_ending_notified_at IS NULL");
+		expect(query).toContain("SET trial_ending_notified_at = now()");
+		expect(query).toMatch(/s\.trial_end_at <= now\(\) \+ make_interval\(secs => \$\d+\)/);
+		expect(query).toMatch(/s\.provider IN \(\$\d+, \$\d+\)/);
+		expect(query.indexOf("FOR UPDATE OF c")).toBeLessThan(
+			query.indexOf("FOR UPDATE OF s SKIP LOCKED"),
+		);
+		expect(database.params[0]).toEqual(expect.arrayContaining(["apple", "google", 259_200]));
+		expect(database.params[0]).not.toContain("stripe");
+	});
+
 	it("claims projection jobs with skip-locked processing locks", async () => {
 		const database = new FakeDatabase([
 			[

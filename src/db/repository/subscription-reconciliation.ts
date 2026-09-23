@@ -1,13 +1,20 @@
 import { sql as drizzleSql } from "drizzle-orm";
+import { trialEndingNoticeLeadMs } from "../../billing/trials";
+import { providersComposing } from "../../providers/capabilities";
 import { RepositoryModule } from "./base";
 import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
 import { parseProviderSubscriptionReconciliationRow } from "./parsers";
 import { assertUpdated, executeRows } from "./query";
+import { type SubscriptionTrialRow, subscriptionTrialFact } from "./trials";
 import type {
 	ExpiredSubscriptionReconciliationResult,
 	ProviderSubscriptionReconciliationRow,
+	TrialEndingNoticeResult,
 } from "./types";
 import { formatUtcTimestamp, requireNonBlank, requirePositiveLimit } from "./validation";
+
+/** Providers whose trial-ending notice Quotum composes from recorded bounds, per their declarations. */
+const composedTrialNoticeProviders = providersComposing("trial.ending_notice");
 
 export class SubscriptionReconciliationBillingRepository extends RepositoryModule {
 	async reconcileExpiredSubscriptions(
@@ -91,6 +98,124 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 
 			return {
 				expiredSubscriptions: rows.length,
+				affectedCustomers: customerIds.size,
+				projectionJobs,
+			};
+		});
+	}
+
+	/**
+	 * Sends one `ending` fact per trial that no provider notification announces, once its recorded
+	 * end is within the notice lead. The marker is set with the enqueue, so a later pass skips the
+	 * trial without touching the customer's projection sequence.
+	 */
+	async enqueueTrialEndingNotices(limit: number): Promise<TrialEndingNoticeResult> {
+		const cappedLimit = requirePositiveLimit(limit);
+		if (composedTrialNoticeProviders.length === 0) {
+			return { noticedTrials: 0, affectedCustomers: 0, projectionJobs: 0 };
+		}
+		const providers = drizzleSql.join(
+			composedTrialNoticeProviders.map((provider) => drizzleSql`${provider}`),
+			drizzleSql`, `,
+		);
+		const leadSeconds = trialEndingNoticeLeadMs / 1000;
+		return await this.transaction(async (tx) => {
+			const rows = await executeRows<
+				SubscriptionTrialRow & {
+					id: string;
+					project_id: string;
+					customer_id: string;
+					billing_account_id: string;
+				}
+			>(
+				tx,
+				drizzleSql`
+				WITH candidates AS MATERIALIZED (
+					SELECT s.id, s.customer_id
+					FROM subscriptions s
+					WHERE s.trial_ending_notified_at IS NULL
+						AND s.trial_end_at IS NOT NULL
+						AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+						AND s.trial_end_at > now()
+						AND s.trial_end_at <= now() + make_interval(secs => ${leadSeconds})
+						AND s.expires_at > now()
+						AND s.provider IN (${providers})
+					ORDER BY s.trial_end_at ASC, s.id ASC
+					LIMIT ${cappedLimit}
+				),
+				locked_customers AS MATERIALIZED (
+					SELECT c.id
+					FROM customers c
+					JOIN (SELECT DISTINCT customer_id FROM candidates) candidate_customers
+						ON candidate_customers.customer_id = c.id
+					ORDER BY c.id
+					FOR UPDATE OF c
+				),
+				due_trials AS MATERIALIZED (
+					SELECT s.id, s.customer_id, p.key AS product_key, pl.key AS plan_key
+					FROM subscriptions s
+					JOIN candidates candidate ON candidate.id = s.id
+					JOIN locked_customers locked_customer ON locked_customer.id = s.customer_id
+					JOIN products p ON p.project_id = s.project_id AND p.id = s.product_id
+					LEFT JOIN plan_versions pv ON pv.project_id = s.project_id AND pv.id = s.plan_version_id
+					LEFT JOIN plans pl ON pl.project_id = pv.project_id AND pl.id = pv.plan_id
+					WHERE s.trial_ending_notified_at IS NULL
+						AND s.trial_end_at IS NOT NULL
+						AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+						AND s.trial_end_at > now()
+						AND s.trial_end_at <= now() + make_interval(secs => ${leadSeconds})
+						AND s.expires_at > now()
+					ORDER BY s.trial_end_at ASC, s.id ASC
+					FOR UPDATE OF s SKIP LOCKED
+				)
+				UPDATE subscriptions s
+				SET trial_ending_notified_at = now()
+				FROM due_trials due
+				JOIN customers c ON c.id = due.customer_id
+				WHERE s.id = due.id
+				RETURNING
+					s.id,
+					s.project_id,
+					s.customer_id,
+					c.billing_account_id,
+					s.provider,
+					s.channel,
+					s.external_subscription_id,
+					due.product_key,
+					due.plan_key,
+					s.trial_start_at,
+					s.trial_end_at,
+					s.auto_renew
+			`,
+			);
+
+			const customerIds = new Set<string>();
+			let projectionJobs = 0;
+			for (const row of rows) {
+				customerIds.add(row.customer_id);
+				const snapshot = await recomputeCustomerEntitlements(
+					tx,
+					row.project_id,
+					row.billing_account_id,
+				);
+				const enqueued = await enqueueProjectionSyncJob(tx, {
+					customerId: row.customer_id,
+					idempotencyKey: `trial_ending:subscription:${row.id}:${formatUtcTimestamp(row.trial_end_at)}`,
+					reason: "expiry_reconciliation",
+					payload: {
+						billingAccountId: row.billing_account_id,
+						reason: "expiry_reconciliation",
+						entitlements: snapshot,
+						trial: subscriptionTrialFact(row, "ending"),
+					},
+				});
+				if (enqueued) {
+					projectionJobs += 1;
+				}
+			}
+
+			return {
+				noticedTrials: rows.length,
 				affectedCustomers: customerIds.size,
 				projectionJobs,
 			};

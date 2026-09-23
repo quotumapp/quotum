@@ -220,6 +220,77 @@ describe("billing type parsers", () => {
 		).toThrow("Invalid projection payload");
 	});
 
+	it("parses trial facts and rejects malformed or combined ones", () => {
+		const base = {
+			billingAccountId: "user_1",
+			generatedAt: "2026-06-01T00:00:00.000Z",
+			balances: [],
+			reason: "provider_webhook",
+			entitlements: {
+				billingAccountId: "user_1",
+				generatedAt: "2026-06-01T00:00:00.000Z",
+				entitlements: [],
+			},
+		};
+		const subscriptionTrial = {
+			event: "ending",
+			source: "subscription",
+			provider: "stripe",
+			channel: "web",
+			externalSubscriptionId: "sub_1",
+			productKey: "premium_monthly",
+			planKey: "pro",
+			trialStartsAt: "2026-06-01T00:00:00.000Z",
+			trialEndsAt: "2026-06-15T00:00:00.000Z",
+			autoRenew: true,
+		};
+		const grantTrial = {
+			event: "ended",
+			source: "plan_grant",
+			planGrantId: "00000000-0000-4000-8000-000000000001",
+			planKey: "pro",
+			trialStartsAt: "2026-06-01T00:00:00.000Z",
+			trialEndsAt: "2026-06-15T00:00:00.000Z",
+			autoRenew: false,
+		};
+
+		expect(parseProjectionPayload({ ...base, trial: subscriptionTrial }).trial).toEqual(
+			subscriptionTrial as never,
+		);
+		expect(parseProjectionPayload({ ...base, trial: grantTrial }).trial).toEqual(
+			grantTrial as never,
+		);
+
+		const invalid = [
+			{ ...subscriptionTrial, provider: undefined },
+			{ ...subscriptionTrial, planGrantId: "grant" },
+			{ ...grantTrial, provider: "stripe" },
+			{ ...grantTrial, planKey: undefined },
+			{ ...subscriptionTrial, trialEndsAt: subscriptionTrial.trialStartsAt },
+			{ ...subscriptionTrial, event: "started" },
+		];
+		for (const trial of invalid) {
+			expect(() => parseProjectionPayload({ ...base, trial })).toThrow(
+				"Invalid projection payload",
+			);
+		}
+		expect(() =>
+			parseProjectionPayload({
+				...base,
+				trial: subscriptionTrial,
+				purchase: {
+					provider: "stripe",
+					channel: "web",
+					purchaseKind: "subscription",
+					transactionId: "in_1",
+					productKey: "premium_monthly",
+					creditAmount: 0,
+					purchasedAt: "2026-06-01T00:00:00.000Z",
+				},
+			}),
+		).toThrow("Invalid projection payload");
+	});
+
 	it("rejects invalid projection payloads", () => {
 		expect(() =>
 			parseProjectionPayload({

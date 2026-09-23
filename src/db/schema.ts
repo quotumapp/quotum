@@ -226,6 +226,7 @@ export const subscriptions = pgTable(
 		cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
 		trialStartAt: timestamp("trial_start_at", { withTimezone: true }),
 		trialEndAt: timestamp("trial_end_at", { withTimezone: true }),
+		trialEndingNotifiedAt: timestamp("trial_ending_notified_at", { withTimezone: true }),
 		billingAnchorAt: timestamp("billing_anchor_at", { withTimezone: true }),
 		providerScheduleId: text("provider_schedule_id"),
 		autoRenew: boolean("auto_renew").notNull().default(true),
@@ -293,6 +294,11 @@ export const subscriptions = pgTable(
 		index("idx_billing_subscriptions_provider_reconciliation_due")
 			.on(table.providerReconciliationNextAttemptAt, table.providerReconciledAt, table.expiresAt)
 			.where(sql`${table.status} IN ('active', 'grace_period', 'billing_retry', 'cancelled')`),
+		index("idx_billing_subscriptions_trial_ending_due")
+			.on(table.trialEndAt)
+			.where(
+				sql`${table.trialEndingNotifiedAt} IS NULL AND ${table.trialEndAt} IS NOT NULL AND ${table.status} IN ('active', 'grace_period', 'billing_retry', 'cancelled')`,
+			),
 		check("subscriptions_provider_check", sql`${table.provider} IN ('apple', 'google', 'stripe')`),
 		check("subscriptions_channel_check", sql`${table.channel} IN ('ios', 'android', 'web')`),
 		check(

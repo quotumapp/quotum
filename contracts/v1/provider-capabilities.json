@@ -208,6 +208,12 @@
       "title": "Subscription reconciliation"
     },
     {
+      "description": "Quotum delivers one trial-ending fact on the billing state projection shortly before a subscription's trial ends, from the provider's own notice or from the recorded trial bounds.",
+      "domain": "events",
+      "id": "trial.ending_notice",
+      "title": "Trial ending notice"
+    },
+    {
       "description": "Quotum previews a plan or quantity change on an existing provider subscription, returning line items, effective time and proration policy, without a provider write.",
       "domain": "subscription_changes",
       "id": "subscription.change.preview",
@@ -596,6 +602,23 @@
             "verifiedOn": "2026-09-17"
           }
         },
+        "trial.ending_notice": {
+          "composedVia": "App Store free-trial transactions",
+          "conditions": [],
+          "level": "quotum_composed",
+          "notes": "App Store sends no trial-ending notification; the subscription reconciliation worker sends the notice three days before the recorded trial end.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/worker-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
         "webhook.ingest": {
           "conditions": [],
           "level": "native",
@@ -928,6 +951,23 @@
               "scenarios": [],
               "tests": [
                 "tests/integration/google-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "trial.ending_notice": {
+          "composedVia": "Play free-trial offer phases",
+          "conditions": [],
+          "level": "quotum_composed",
+          "notes": "Play sends no trial-ending notification; the subscription reconciliation worker sends the notice three days before the recorded trial end.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/worker-flows.test.ts"
               ]
             },
             "status": "verified",
@@ -1516,6 +1556,22 @@
         "topup.customer_initiated": {
           "conditions": [],
           "level": "native",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
+        "trial.ending_notice": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Attached to customer.subscription.trial_will_end, which the webhook endpoint or Stripe App event destination must send.",
           "verification": {
             "evidence": {
               "questions": [],
@@ -2149,6 +2205,14 @@
               "tests": []
             },
             "status": "planned"
+          }
+        },
+        "trial.ending_notice": {
+          "conditions": [],
+          "level": "not_evaluated",
+          "notes": "The Paddle assessment does not cover trial-ending notices.",
+          "verification": {
+            "status": "not_applicable"
           }
         },
         "webhook.ingest": {

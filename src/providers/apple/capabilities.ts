@@ -7,6 +7,7 @@ const verifiedOn = "2026-09-17";
 const appleFlows = "tests/integration/apple-flows.test.ts";
 const appleNormalizer = "tests/providers/apple/normalizer.test.ts";
 const appleService = "tests/providers/apple/service.test.ts";
+const workerFlows = "tests/integration/worker-flows.test.ts";
 
 function verified(tests: string[], notes?: string): OperationSupport {
 	return {
@@ -32,6 +33,20 @@ function providerManaged(notes: string, tests: string[] = []): OperationSupport 
 						verifiedOn,
 						evidence: { tests, scenarios: [], questions: [] },
 					},
+		conditions: [],
+		notes,
+	};
+}
+
+function composed(composedVia: string, tests: string[], notes: string): OperationSupport {
+	return {
+		level: "quotum_composed",
+		composedVia,
+		verification: {
+			status: "verified",
+			verifiedOn,
+			evidence: { tests, scenarios: [], questions: [] },
+		},
 		conditions: [],
 		notes,
 	};
@@ -104,6 +119,11 @@ export const appleCapabilities: ProviderCapabilityDeclaration = {
 		"webhook.ingest": verified([appleFlows, appleService]),
 		"event.replay": verified([appleService]),
 		"subscription.reconcile": verified([appleService]),
+		"trial.ending_notice": composed(
+			"App Store free-trial transactions",
+			[workerFlows],
+			"App Store sends no trial-ending notification; the subscription reconciliation worker sends the notice three days before the recorded trial end.",
+		),
 		"subscription.change.preview": unsupported(
 			"Upgrades, downgrades and crossgrades are priced in the App Store purchase sheet; Quotum has no preview for them and records no preview outcome.",
 		),

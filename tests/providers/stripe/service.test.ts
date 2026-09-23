@@ -1529,6 +1529,62 @@ describe("StripeBillingService", () => {
 		});
 	});
 
+	// capability: trial.ending_notice
+	it("records trial_will_end webhooks as subscription events that ask for a trial fact", async () => {
+		const { repositoryInputs, service } = serviceFixture({
+			webhookEvent: stripeEvent(
+				"customer.subscription.trial_will_end",
+				subscriptionObject({
+					status: "trialing",
+					trial_start: 1_780_000_000,
+					trial_end: 1_781_209_600,
+				}),
+				"evt_trial_will_end",
+			),
+		});
+
+		const result = await service.handleWebhook({
+			rawBody: "{}",
+			signatureHeader: "stripe-signature",
+		});
+
+		expect(result).toMatchObject({
+			status: "processed",
+			eventType: "customer.subscription.trial_will_end",
+		});
+		expect(repositoryInputs[0]).toMatchObject({
+			stripeSubscriptionId: "sub_123",
+			eventType: "customer.subscription.trial_will_end",
+			externalEventId: "evt_trial_will_end",
+			projectionReason: "provider_webhook",
+			trialNotice: "ending",
+			trialEnd: new Date(1_781_209_600 * 1000),
+		});
+	});
+
+	it("stores a trial_will_end event it cannot normalize as a retryable subscription event", async () => {
+		const { repositoryInputs, service } = serviceFixture({
+			webhookEvent: stripeEvent(
+				"customer.subscription.trial_will_end",
+				subscriptionObject({ status: undefined }),
+				"evt_trial_will_end_broken",
+			),
+		});
+
+		const result = await service.handleWebhook({
+			rawBody: "{}",
+			signatureHeader: "stripe-signature",
+		});
+
+		expect(result.status).toBe("skipped");
+		expect(repositoryInputs[0]).toMatchObject({
+			eventType: "customer.subscription.trial_will_end",
+			externalEventId: "evt_trial_will_end_broken",
+			transactionId: "sub_123",
+			purchaseKind: "subscription",
+		});
+	});
+
 	it("records subscription created webhooks through subscription recording", async () => {
 		const { repositoryInputs, service } = serviceFixture({
 			webhookEvent: stripeEvent(

@@ -70,6 +70,31 @@ export interface ProjectionReversalPayload {
 	reversedAt: string;
 }
 
+export const projectionTrialEvents = ["ending", "ended"] as const;
+export const projectionTrialSources = ["subscription", "plan_grant"] as const;
+export type ProjectionTrialEvent = (typeof projectionTrialEvents)[number];
+export type ProjectionTrialSource = (typeof projectionTrialSources)[number];
+
+/**
+ * A trial event for one trial: `ending` shortly before its end, `ended` when a trial without a
+ * paid successor stops. A provider subscription names its provider identity and product; a plan
+ * grant names the grant and its plan.
+ */
+export interface ProjectionTrialPayload {
+	event: ProjectionTrialEvent;
+	source: ProjectionTrialSource;
+	provider?: BillingProvider;
+	channel?: BillingChannel;
+	externalSubscriptionId?: string;
+	planGrantId?: string;
+	productKey?: string;
+	planKey?: string;
+	trialStartsAt: string;
+	trialEndsAt: string;
+	/** Whether the subscription continues as a paid one after the trial unless cancelled. */
+	autoRenew: boolean;
+}
+
 export interface ProjectionPayload {
 	billingAccountId: string;
 	generatedAt: string;
@@ -95,6 +120,7 @@ export interface ProjectionPayload {
 		purchasedAt: string;
 	};
 	reversal?: ProjectionReversalPayload;
+	trial?: ProjectionTrialPayload;
 	/** Per-account order of state snapshots; receivers may ignore a lower value. */
 	sequence?: number;
 }
@@ -125,6 +151,47 @@ const projectionReversalPayloadSchema = z.object({
 	quantity: z.number().int().positive().optional(),
 	reversedAt: z.string().min(1),
 });
+
+const projectionTrialPayloadSchema = z
+	.object({
+		event: z.enum(projectionTrialEvents),
+		source: z.enum(projectionTrialSources),
+		provider: z.enum(billingProviders).optional(),
+		channel: z.enum(billingChannels).optional(),
+		externalSubscriptionId: z.string().min(1).optional(),
+		planGrantId: z.string().min(1).optional(),
+		productKey: z.string().min(1).optional(),
+		planKey: z.string().min(1).optional(),
+		trialStartsAt: z.iso.datetime({ offset: true }),
+		trialEndsAt: z.iso.datetime({ offset: true }),
+		autoRenew: z.boolean(),
+	})
+	.superRefine((trial, context) => {
+		const subscription = trial.source === "subscription";
+		const required: Array<keyof typeof trial> = subscription
+			? ["provider", "channel", "externalSubscriptionId", "productKey"]
+			: ["planGrantId", "planKey"];
+		const absent: Array<keyof typeof trial> = subscription
+			? ["planGrantId"]
+			: ["provider", "channel", "externalSubscriptionId"];
+		for (const field of required) {
+			if (trial[field] === undefined) {
+				context.addIssue({ code: "custom", message: `${field} is required`, path: [field] });
+			}
+		}
+		for (const field of absent) {
+			if (trial[field] !== undefined) {
+				context.addIssue({ code: "custom", message: `${field} is not allowed`, path: [field] });
+			}
+		}
+		if (Date.parse(trial.trialEndsAt) <= Date.parse(trial.trialStartsAt)) {
+			context.addIssue({
+				code: "custom",
+				message: "Trial must end after it starts",
+				path: ["trialEndsAt"],
+			});
+		}
+	});
 
 export const projectionPayloadSchema = z
 	.object({
@@ -158,6 +225,7 @@ export const projectionPayloadSchema = z
 			})
 			.optional(),
 		reversal: projectionReversalPayloadSchema.optional(),
+		trial: projectionTrialPayloadSchema.optional(),
 		sequence: z.number().int().nonnegative().optional(),
 	})
 	.superRefine((payload, context) => {
@@ -182,6 +250,18 @@ export const projectionPayloadSchema = z
 				code: "custom",
 				message: "Projection payload cannot include both purchase and reversal context",
 				path: ["reversal"],
+			});
+		}
+
+		if (
+			payload.trial !== undefined &&
+			(payload.purchase !== undefined || payload.reversal !== undefined)
+		) {
+			context.addIssue({
+				code: "custom",
+				message:
+					"Projection payload cannot include trial context with purchase or reversal context",
+				path: ["trial"],
 			});
 		}
 	});

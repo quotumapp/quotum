@@ -2005,6 +2005,7 @@ function normalizeSupportedEvent(event: ParsedStripeEvent): NormalizedStripeComm
 		case "customer.subscription.created":
 		case "customer.subscription.updated":
 		case "customer.subscription.deleted":
+		case "customer.subscription.trial_will_end":
 			return normalizeStripeSubscription({
 				eventId: event.id,
 				eventType: event.type,
@@ -2111,6 +2112,7 @@ function toStripeSubscriptionRepositoryInput(
 		projectionIdempotencyKey: command.projectionIdempotencyKey,
 		projectionContract: options.projectionContract,
 		replayStoreEventId: options.replayStoreEventId,
+		trialNotice: command.trialNotice,
 	};
 }
 
@@ -2588,6 +2590,7 @@ function skippedEventTransactionId(event: ParsedStripeEvent): string | null {
 			return optionalId(event.object.id) ?? optionalId(event.object.subscription);
 		case "customer.subscription.updated":
 		case "customer.subscription.deleted":
+		case "customer.subscription.trial_will_end":
 			return optionalId(event.object.id);
 		case "refund.created":
 		case "refund.updated":
@@ -2610,6 +2613,7 @@ function skippedEventPurchaseKind(event: ParsedStripeEvent): PurchaseKind | null
 		case "invoice.payment_failed":
 		case "customer.subscription.updated":
 		case "customer.subscription.deleted":
+		case "customer.subscription.trial_will_end":
 			return "subscription";
 		case "refund.created":
 		case "refund.updated":

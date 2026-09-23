@@ -121,6 +121,7 @@ import type {
 	StripeRecurringCheckoutPlan,
 	StripeWebStoreProductRow,
 	TransactionalQueryExecutor,
+	TrialEndingNoticeResult,
 } from "./repository/types";
 import {
 	ensureUsageEventPartitions,
@@ -165,6 +166,7 @@ export type {
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,
 	StripeWebStoreProductRow,
+	TrialEndingNoticeResult,
 } from "./repository/types";
 
 export class BillingRepository {
@@ -351,6 +353,10 @@ export class BillingRepository {
 		limit: number,
 	): Promise<ExpiredSubscriptionReconciliationResult> {
 		return await this.subscriptionReconciliation.reconcileExpiredSubscriptions(limit);
+	}
+
+	async enqueueTrialEndingNotices(limit: number): Promise<TrialEndingNoticeResult> {
+		return await this.subscriptionReconciliation.enqueueTrialEndingNotices(limit);
 	}
 
 	async claimProviderSubscriptionReconciliations(
