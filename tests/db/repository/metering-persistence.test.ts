@@ -1,10 +1,14 @@
 import { describe, expect, it } from "bun:test";
 import type { MeteringBalance } from "../../../src/billing/metering";
 import {
+	calculateWalletQuantity,
+	type FeatureRow,
 	type MeterLimitDecision,
 	meterLimitReservationSpend,
 	meterLimitSpendDelta,
+	type RateDecision,
 } from "../../../src/db/repository/metering-persistence";
+import { FakeDatabase } from "../repository-fixture";
 
 const meter: MeterLimitDecision = {
 	feature: {
@@ -89,5 +93,43 @@ describe("meter-limit spend rating", () => {
 
 	it("never quotes a negative hold across a discount", () => {
 		expect(meterLimitReservationSpend(meter, balance("125.3"), "1").spendMinorDelta).toBe("0");
+	});
+});
+
+describe("rate-card wallet charges", () => {
+	function feature(key: string): FeatureRow {
+		return {
+			id: key,
+			key,
+			unit: key,
+			credit_scale: 0,
+			kind: "metered",
+			meter_kind: "consumable",
+			filter_dimensions: [],
+		};
+	}
+
+	it("restarts graduated tiers on every request", async () => {
+		const rate: RateDecision = {
+			meter: feature("tokens"),
+			wallet: feature("credits"),
+			path: "additive",
+			revision: 1,
+			revisionId: "1",
+			entryId: "1",
+			pricingModel: "graduated",
+			ratePerUnit: "2",
+			tiers: [
+				{ upToQuantity: "10", ratePerUnit: "2" },
+				{ upToQuantity: null, ratePerUnit: "1" },
+			],
+		};
+		// Strict with nothing scripted: the charge cannot read earlier usage in the period.
+		const database = new FakeDatabase([], { strict: true });
+		expect(await calculateWalletQuantity(database as never, rate, "20")).toBe("30");
+		// Two requests of 10 each start in the first tier, so together they cost 40, not 30.
+		expect(await calculateWalletQuantity(database as never, rate, "10")).toBe("20");
+		expect(await calculateWalletQuantity(database as never, rate, "10")).toBe("20");
+		expect(database.queries).toHaveLength(0);
 	});
 });

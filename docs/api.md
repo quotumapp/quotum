@@ -95,6 +95,18 @@ reservation defaults to 300. License pools follow the purchased subscription-ite
 entity license check honors active assignments in assignment order up to that capacity, so a seat
 downgrade stops authorizing the assignments beyond it until they are revoked.
 
+A meter priced by a rate card charges its wallet feature once per request, rounded up to the
+wallet's `creditScale`. Any positive quantity therefore costs at least one wallet unit: at 0.001
+credits per token and a wallet scale of 0, one to 1,000 tokens cost 1 credit. Splitting usage into
+smaller requests never lowers a flat rate-card charge. Graduated rate-card tiers apply to each
+request's quantity alone and restart on the next request: they do not accumulate over a period, and
+splitting usage changes which tiers it reaches. A reservation holds the charge for the reserved
+quantity, and confirming that quantity or less never charges more than the hold. A correction
+reverses the wallet charge recorded on the original event rather than rating the corrected quantity
+again: a partial correction returns its proportional share, rounded to the wallet scale and capped
+by what remains, and correcting the rest of the usage returns the remainder, so corrections
+together return exactly what was charged.
+
 Spend-control activation and window boundaries use the database clock by default, so API clock
 skew cannot bypass a newly active policy. Spend controls rate committed usage independently of pending reservations: held quantities never
 unlock volume discounts on consumed usage. A monetary reservation hold is a fixed budget quote,
