@@ -474,6 +474,7 @@ export interface LockedMeterLimitWindow {
 	window: UsageWindowRow;
 	held: string;
 	balance: MeteringBalance;
+	spendBalance: MeteringBalance;
 	decision: MeteringDecision;
 }
 
@@ -486,16 +487,17 @@ interface MeterLimitWindowInput {
 	quantity: string;
 }
 
-/**
- * Locks the current usage window and decides the meter limit from the balance read under that
- * lock, active holds included. Consume, reserve and confirm all take this row lock before the
- * customer control lock, so a spend delta priced from `balance` cannot go stale under a
- * concurrent request on the same window.
- */
+/** Serializes invoice-group spend before locking the selected scoped usage window. */
 export async function lockMeterLimitWindow(
 	executor: QueryExecutor,
 	input: MeterLimitWindowInput,
 ): Promise<LockedMeterLimitWindow> {
+	await lockMeterLimitSpend(
+		executor,
+		input.projectId,
+		input.customerId,
+		featureId(input.meterLimit.feature),
+	);
 	const window = await upsertUsageWindow(executor, input);
 	const held = await readActiveWindowHolds(executor, input.projectId, String(window.id), null);
 	const balance = meterLimitBalance(input.meterLimit, window.usage, held);
@@ -506,7 +508,13 @@ export async function lockMeterLimitWindow(
 		input.quantity,
 		balance,
 	);
-	return { window, held, balance, decision };
+	const spendBalance = await readMeterLimitSpendBalance(
+		executor,
+		input.projectId,
+		input.customerId,
+		input.meterLimit,
+	);
+	return { window, held, balance, spendBalance, decision };
 }
 
 /** Applies an allowed, control-cleared consume to the window locked by `lockMeterLimitWindow`. */
@@ -592,7 +600,7 @@ export async function reserveMeterLimit(
 		projectionKey: string;
 	},
 ): Promise<ReservationResult> {
-	const { window, held, balance, decision } = await lockMeterLimitWindow(executor, input);
+	const { window, held, spendBalance, decision } = await lockMeterLimitWindow(executor, input);
 	if (!decision.allowed) {
 		return {
 			...decision,
@@ -641,7 +649,7 @@ export async function reserveMeterLimit(
 		`,
 	);
 	if (reservation === null) throw new Error("Meter-limit reservation could not be persisted");
-	const spend = meterLimitSpendDelta(input.meterLimit, balance, input.quantity);
+	const spend = meterLimitSpendDelta(input.meterLimit, spendBalance, input.quantity);
 	const controlDenial = await holdControls(
 		executor,
 		{
@@ -745,6 +753,55 @@ export async function readMeterLimitBalance(
 		`,
 	);
 	return meterLimitBalance(meterLimit, row?.usage ?? "0", row?.held ?? "0");
+}
+
+/** Matches invoice rating: one allowance across every entity/filter in the purchased period. */
+export async function readMeterLimitSpendBalance(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string,
+	meterLimit: MeterLimitDecision,
+	excludeReservationId: string | null = null,
+): Promise<MeteringBalance> {
+	if (meterLimit.overagePrice === null) return meterLimitBalance(meterLimit, "0");
+	if (meterLimit.subscriptionId === null || meterLimit.planItemId === null) {
+		throw new Error("Meter-limit spend balance requires a subscription and plan item");
+	}
+	const row = await executeOne<{ usage: unknown; held: unknown }>(
+		executor,
+		drizzleSql`
+		SELECT COALESCE(sum(w.usage), 0)::text AS usage,
+			COALESCE(sum(h.held), 0)::text AS held
+		FROM usage_windows w
+		LEFT JOIN LATERAL (
+			SELECT sum(r.held_quantity) AS held FROM reservations r
+			WHERE r.project_id = w.project_id AND r.usage_window_id = w.id
+				AND r.status = 'active' AND r.expires_at > now()
+				AND (${excludeReservationId}::uuid IS NULL OR r.id <> ${excludeReservationId}::uuid)
+		) h ON true
+		WHERE w.project_id = ${projectId} AND w.customer_id = ${customerId}
+			AND w.subscription_id = ${meterLimit.subscriptionId}::uuid
+			AND w.anchor_plan_item_id = ${meterLimit.planItemId}::bigint
+			AND w.window_start_at = ${meterLimit.windowStartAt.toISOString()}::timestamptz
+			AND w.window_end_at = ${meterLimit.windowEndAt.toISOString()}::timestamptz
+	`,
+	);
+	return meterLimitBalance(meterLimit, row?.usage ?? "0", row?.held ?? "0");
+}
+
+/** Also protects windows that do not exist yet when another filter/entity starts consuming. */
+export async function lockMeterLimitSpend(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string,
+	meterFeatureId: string,
+): Promise<void> {
+	await executeRows(
+		executor,
+		drizzleSql`
+		SELECT pg_advisory_xact_lock(hashtextextended(${`meter-spend:${projectId}:${customerId}:${meterFeatureId}`}, 0))
+	`,
+	);
 }
 
 async function readActiveWindowHolds(
@@ -2042,6 +2099,12 @@ export async function confirmMeterLimitReservation(
 	) {
 		throw new Error("Meter-limit reservation lost its window identity");
 	}
+	await lockMeterLimitSpend(
+		executor,
+		reservation.project_id,
+		reservation.customer_id,
+		String(reservation.meter_feature_id),
+	);
 	const window = await executeOne<
 		UsageWindowRow & {
 			filter_key: string | null;
@@ -2120,11 +2183,23 @@ export async function confirmMeterLimitReservation(
 			);
 		}
 	}
-	const spend = meterLimitSpendDelta(
-		meterLimit,
-		meterLimitBalance(meterLimit, window.usage, otherHolds),
-		quantity,
-	);
+	const spendBalance =
+		window.subscription_id === null || window.anchor_plan_item_id === null
+			? meterLimitBalance(meterLimit, window.usage, otherHolds)
+			: await readMeterLimitSpendBalance(
+					executor,
+					reservation.project_id,
+					reservation.customer_id,
+					{
+						...meterLimit,
+						subscriptionId: window.subscription_id,
+						planItemId: String(window.anchor_plan_item_id),
+						windowStartAt: new Date(window.window_start_at),
+						windowEndAt: new Date(window.window_end_at),
+					},
+					reservation.id,
+				);
+	const spend = meterLimitSpendDelta(meterLimit, spendBalance, quantity);
 	const controls = await confirmControlHolds(executor, {
 		projectId: reservation.project_id,
 		customerId: reservation.customer_id,

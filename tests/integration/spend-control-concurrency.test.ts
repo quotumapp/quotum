@@ -71,7 +71,7 @@ localDescribe("spend controls under concurrent metered consumption", () => {
 		const lockKey = `billing-controls:${project.projectInstanceId}:${customer?.id}`;
 		let pending: Promise<ConsumeUsageResult>[] = [];
 		// Holding the customer control lock parks the first consume behind it while it already
-		// owns the usage-window row, and parks the second consume behind that row lock. Releasing
+		// owns the meter spend lock, and parks the second consume behind that lock. Releasing
 		// the control lock then lets both proceed in that order.
 		await context.sql.begin(async (tx) => {
 			await tx`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
@@ -81,7 +81,7 @@ localDescribe("spend controls under concurrent metered consumption", () => {
 				SELECT count(*)::integer AS waiting
 				FROM pg_locks WHERE locktype = 'advisory' AND granted = false
 			`;
-			expect(advisory?.waiting).toBe(1);
+			expect(advisory?.waiting).toBe(2);
 		});
 		const results = await Promise.all(pending);
 

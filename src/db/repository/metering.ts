@@ -88,6 +88,7 @@ import {
 	insertUsageEvent,
 	lockAllAllocationRows,
 	lockAllocations,
+	lockMeterLimitSpend,
 	lockMeterLimitWindow,
 	lockReservation,
 	lockReservationAllocations,
@@ -105,6 +106,7 @@ import {
 	rateFromReservation,
 	readBalance,
 	readMeterLimitBalance,
+	readMeterLimitSpendBalance,
 	releaseReservationHolds,
 	requireMeteredFeature,
 	reserveMeterLimit,
@@ -288,7 +290,11 @@ export class MeteringBillingRepository extends RepositoryModule {
 				requestedQuantity,
 			);
 			if (!decision.allowed || customer === null) return decision;
-			const spend = meterLimitSpendDelta(meterLimit, decision.balance, requestedQuantity);
+			const spend = meterLimitSpendDelta(
+				meterLimit,
+				await readMeterLimitSpendBalance(this.database, projectId, customer.id, meterLimit),
+				requestedQuantity,
+			);
 			const denial = await checkControls(this.database, {
 				projectId,
 				customerId: customer.id,
@@ -1280,10 +1286,15 @@ async function reverseMeterLimitUsageIfEligible(
 	};
 	const meterLimit = await resolveMeterLimit(executor, projectId, customerId, feature);
 	if (meterLimit === null) return null;
-	const window = await executeOne<{ usage: unknown }>(
+	await lockMeterLimitSpend(executor, projectId, customerId, featureId(feature));
+	const window = await executeOne<{
+		usage: unknown;
+		subscription_id: string | null;
+		anchor_plan_item_id: string | number | bigint | null;
+	}>(
 		executor,
 		drizzleSql`
-			SELECT usage::text AS usage FROM usage_windows
+			SELECT usage::text AS usage, subscription_id, anchor_plan_item_id FROM usage_windows
 			WHERE project_id = ${projectId}
 				AND id = ${windowId}::bigint
 				AND window_start_at = ${expectedStart}::timestamptz
@@ -1300,8 +1311,26 @@ async function reverseMeterLimitUsageIfEligible(
 			decimalToUnits(walletQuantity, feature.credit_scale),
 		feature.credit_scale,
 	);
-	const before = calculateMeteredOverageCharge(meterLimit, usage);
-	const after = calculateMeteredOverageCharge(meterLimit, correctedUsage);
+	const spendBalance =
+		meterLimit.overagePrice === null ||
+		window.subscription_id === null ||
+		window.anchor_plan_item_id === null
+			? { consumed: usage }
+			: await readMeterLimitSpendBalance(executor, projectId, customerId, {
+					...meterLimit,
+					subscriptionId: window.subscription_id,
+					planItemId:
+						window.anchor_plan_item_id === null ? null : String(window.anchor_plan_item_id),
+					windowStartAt: new Date(expectedStart),
+					windowEndAt: new Date(expectedEnd),
+				});
+	const correctedSpendUsage = unitsToDecimal(
+		decimalToUnits(spendBalance.consumed, feature.credit_scale) -
+			decimalToUnits(walletQuantity, feature.credit_scale),
+		feature.credit_scale,
+	);
+	const before = calculateMeteredOverageCharge(meterLimit, spendBalance.consumed);
+	const after = calculateMeteredOverageCharge(meterLimit, correctedSpendUsage);
 	await executeOne(
 		executor,
 		drizzleSql`
@@ -1492,9 +1521,8 @@ async function consumeWithinTransaction(
 	const { feature, entityId, requestedQuantity, filterKey, alerts } = subject;
 	if (subject.meterLimit !== null) {
 		const meterLimit = subject.meterLimit;
-		// The window row is locked before its balance is read, so the meter decision and the spend
-		// delta priced from that balance stay current until the consume commits. The customer
-		// control lock follows the window lock, the same order reserve and confirm use.
+		// Serialize all filters/entities in the invoice group before reading spend, then lock the
+		// scoped usage window and customer controls in the same order as reserve and confirm.
 		const meterLimitInput = {
 			projectId,
 			customerId: customer.id,
@@ -1507,7 +1535,7 @@ async function consumeWithinTransaction(
 		if (!locked.decision.allowed) {
 			return { ...locked.decision, usageEventId: null, recordedAt: null, deductions: [] };
 		}
-		const spend = meterLimitSpendDelta(meterLimit, locked.balance, requestedQuantity);
+		const spend = meterLimitSpendDelta(meterLimit, locked.spendBalance, requestedQuantity);
 		const controls = await consumeControls(tx, {
 			projectId,
 			customerId: customer.id,
