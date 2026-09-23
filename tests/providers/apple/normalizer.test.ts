@@ -560,4 +560,77 @@ describe("StoreKit normalizer", () => {
 			}),
 		).toThrow("Apple transaction bundle mismatch");
 	});
+
+	// capability: catalog.trial
+	it("records a free-trial transaction's period as the trial for every offer type", () => {
+		for (const offerType of [1, 2, 3, 4]) {
+			const command = normalizeVerifiedStoreKitTransaction({
+				billingAccountId: "user_1",
+				transaction: subscriptionTransaction({ offerType, offerDiscountType: "FREE_TRIAL" }),
+				renewalInfo: renewalInfo(),
+				expectedBundleId: "com.voysee.app",
+				expectedEnvironment: "sandbox",
+				now,
+			});
+
+			expect({
+				offerType,
+				trialStart: command.trialStart?.toISOString(),
+				trialEnd: command.trialEnd?.toISOString(),
+			}).toEqual({
+				offerType,
+				trialStart: "2026-05-31T00:00:00.000Z",
+				trialEnd: "2026-06-30T00:00:00.000Z",
+			});
+		}
+	});
+
+	it("ends a trial at the transaction expiry when a grace period extends access", () => {
+		const command = normalizeStoreKitNotification({
+			notification: notification("DID_FAIL_TO_RENEW"),
+			transaction: subscriptionTransaction({ offerType: 1, offerDiscountType: "FREE_TRIAL" }),
+			renewalInfo: renewalInfo({
+				gracePeriodExpiresDate: Date.parse("2026-07-05T00:00:00.000Z"),
+				isInBillingRetryPeriod: true,
+			}),
+			expectedBundleId: "com.voysee.app",
+			expectedEnvironment: "sandbox",
+			now,
+		});
+
+		expect(command?.expiresAt?.toISOString()).toBe("2026-07-05T00:00:00.000Z");
+		expect(command?.trialEnd?.toISOString()).toBe("2026-06-30T00:00:00.000Z");
+	});
+
+	it("records no trial for paid offers, plain renewals and one-time purchases", () => {
+		const transactions = [
+			subscriptionTransaction({ offerType: 1, offerDiscountType: "PAY_AS_YOU_GO" }),
+			subscriptionTransaction({ offerType: 1, offerDiscountType: "PAY_UP_FRONT" }),
+			subscriptionTransaction(),
+			subscriptionTransaction({
+				productId: "echo_credits_10",
+				type: "CONSUMABLE",
+				originalTransactionId: undefined,
+				webOrderLineItemId: undefined,
+				expiresDate: undefined,
+				offerDiscountType: "FREE_TRIAL",
+			}),
+		];
+
+		for (const transaction of transactions) {
+			const command = normalizeVerifiedStoreKitTransaction({
+				billingAccountId: "user_1",
+				transaction,
+				renewalInfo: renewalInfo(),
+				expectedBundleId: "com.voysee.app",
+				expectedEnvironment: "sandbox",
+				now,
+			});
+
+			expect({ trialStart: command.trialStart, trialEnd: command.trialEnd }).toEqual({
+				trialStart: null,
+				trialEnd: null,
+			});
+		}
+	});
 });

@@ -423,6 +423,105 @@ localDescribe("Apple route flows integration", () => {
 		expect(invalidation).toEqual([{ invalidated_at: null, invalidation_reason: null }]);
 	});
 
+	// capability: catalog.trial
+	it("records an App Store free trial and keeps it until a later trial replaces it", async () => {
+		const day = 86_400_000;
+		const trialStart = new Date(Math.floor(Date.now() / 1000) * 1000 - day);
+		const trialEnd = new Date(trialStart.getTime() + 7 * day);
+		const renewalEnd = new Date(trialEnd.getTime() + 30 * day);
+		const record = (input: {
+			transactionId: string;
+			purchasedAt: Date;
+			expiresAt: Date;
+			trial: { start: Date; end: Date } | null;
+			eventId: string;
+		}) =>
+			context.repository.recordStoreKitTransactionAndEnqueueProjection(
+				integrationProjectContext(),
+				{
+					billingAccountId: "integration_user",
+					appAccountToken: null,
+					channel: "ios",
+					externalProductId: "premium_monthly",
+					purchaseKind: "subscription",
+					transactionId: input.transactionId,
+					originalTransactionId: "100000000000001",
+					webOrderLineItemId: `${input.transactionId}_line`,
+					purchaseStatus: "completed",
+					subscriptionStatus: "active",
+					purchasedAt: input.purchasedAt,
+					expiresAt: input.expiresAt,
+					trialStart: input.trial?.start ?? null,
+					trialEnd: input.trial?.end ?? null,
+					autoRenew: true,
+					invalidatedAt: null,
+					invalidationReason: null,
+					rawPayload: { event: input.eventId },
+					eventType: "SUBSCRIBED",
+					externalEventId: input.eventId,
+					projectionReason: "provider_webhook",
+					projectionIdempotencyKey: `apple:${input.eventId}`,
+				},
+			);
+		const recordedTrial = async () => {
+			const rows = await context.sql<{ trial_start_at: Date | null; trial_end_at: Date | null }[]>`
+				SELECT trial_start_at, trial_end_at FROM subscriptions
+				WHERE provider = 'apple' AND external_subscription_id = '100000000000001'
+			`;
+			expect(rows).toHaveLength(1);
+			return rows[0];
+		};
+
+		await record({
+			transactionId: "200000000000001",
+			purchasedAt: trialStart,
+			expiresAt: trialEnd,
+			trial: { start: trialStart, end: trialEnd },
+			eventId: "apple_trial_event",
+		});
+		expect(await recordedTrial()).toEqual({ trial_start_at: trialStart, trial_end_at: trialEnd });
+		const snapshot = await context.repository.getEntitlementSnapshot(
+			integrationProjectContext(),
+			"integration_user",
+		);
+		expect(snapshot.entitlements[0]?.metadata).toMatchObject({
+			provider: "apple",
+			trialStartsAt: trialStart.toISOString(),
+			trialEndsAt: trialEnd.toISOString(),
+		});
+
+		// A paid renewal carries no offer, and the trial it followed stays recorded.
+		await record({
+			transactionId: "200000000000002",
+			purchasedAt: trialEnd,
+			expiresAt: renewalEnd,
+			trial: null,
+			eventId: "apple_renewal_event",
+		});
+		expect(await recordedTrial()).toEqual({ trial_start_at: trialStart, trial_end_at: trialEnd });
+
+		// A win-back free trial after the recorded one replaces it.
+		const winBackEnd = new Date(renewalEnd.getTime() + 7 * day);
+		await record({
+			transactionId: "200000000000003",
+			purchasedAt: renewalEnd,
+			expiresAt: winBackEnd,
+			trial: { start: renewalEnd, end: winBackEnd },
+			eventId: "apple_win_back_event",
+		});
+		expect(await recordedTrial()).toEqual({ trial_start_at: renewalEnd, trial_end_at: winBackEnd });
+
+		// The first trial delivered again out of order changes nothing.
+		await record({
+			transactionId: "200000000000001",
+			purchasedAt: trialStart,
+			expiresAt: trialEnd,
+			trial: { start: trialStart, end: trialEnd },
+			eventId: "apple_trial_event_redelivered",
+		});
+		expect(await recordedTrial()).toEqual({ trial_start_at: renewalEnd, trial_end_at: winBackEnd });
+	});
+
 	it("keeps Apple verification idempotent for duplicate transactions", async () => {
 		const { app, apple, authHeaders } = createIntegrationApp({
 			env: context.env,

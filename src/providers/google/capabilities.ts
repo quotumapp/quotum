@@ -5,6 +5,7 @@ import type {
 
 const verifiedOn = "2026-09-17";
 const googleFlows = "tests/integration/google-flows.test.ts";
+const googleNormalizer = "tests/providers/google/normalizer.test.ts";
 const googleService = "tests/providers/google/service.test.ts";
 const workerFlows = "tests/integration/worker-flows.test.ts";
 
@@ -75,7 +76,8 @@ export const googleCapabilities: ProviderCapabilityDeclaration = {
 			"Play normalization accepts non-consumable products, but no test exercises a completed one.",
 		),
 		"catalog.trial": providerManaged(
-			"Free trials are offers on Play base plans and Quotum mirrors the subscription; the catalog rejects plan trial days on Google bindings.",
+			"Free trials are offers on Play base plans; Quotum records the trial bounds while the subscription is in its free-trial offer phase. The catalog rejects plan trial days on Google bindings.",
+			[googleNormalizer, googleService, googleFlows],
 		),
 		"catalog.addon": notEvaluated(
 			"The catalog accepts add-on plans only when every binding is Stripe.",

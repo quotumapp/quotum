@@ -102,7 +102,10 @@ describe("renderProviderCapabilityBlock", () => {
 		);
 		expect(paddle).toContain('The connection setting "spmConsent" must be true.');
 		expect(paddle).toContain("Questions: Q-SET-02");
-		expect(row("catalog.trial")[1]?.trim()).toBe("Managed by provider, mirrored by Quotum");
+		expect(row("subscription.cancel")[1]?.trim()).toBe("Managed by provider, mirrored by Quotum");
+		expect(row("catalog.trial")[1]).toContain(
+			"Managed by provider, mirrored by Quotum<br>Tests: [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts)",
+		);
 		const [, applePreview, googlePreview, stripePreview] = row("subscription.change.preview");
 		expect([applePreview?.trim(), googlePreview?.trim()]).toEqual(["Unsupported", "Unsupported"]);
 		expect(stripePreview).toContain("active, grace_period, billing_retry or cancelled.");

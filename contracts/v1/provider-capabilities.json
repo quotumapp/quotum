@@ -399,9 +399,19 @@
         "catalog.trial": {
           "conditions": [],
           "level": "provider_managed",
-          "notes": "Introductory offers run in the App Store and Quotum mirrors the subscription; the catalog rejects plan trial days on Apple bindings.",
+          "notes": "Free-trial offers (introductory, promotional, offer code or win-back) run in the App Store; Quotum records the trial bounds from the signed transaction. The catalog rejects plan trial days on Apple bindings.",
           "verification": {
-            "status": "not_applicable"
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/apple/normalizer.test.ts",
+                "tests/providers/apple/service.test.ts",
+                "tests/integration/apple-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
           }
         },
         "checkout.hosted": {
@@ -726,9 +736,19 @@
         "catalog.trial": {
           "conditions": [],
           "level": "provider_managed",
-          "notes": "Free trials are offers on Play base plans and Quotum mirrors the subscription; the catalog rejects plan trial days on Google bindings.",
+          "notes": "Free trials are offers on Play base plans; Quotum records the trial bounds while the subscription is in its free-trial offer phase. The catalog rejects plan trial days on Google bindings.",
           "verification": {
-            "status": "not_applicable"
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/providers/google/normalizer.test.ts",
+                "tests/providers/google/service.test.ts",
+                "tests/integration/google-flows.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
           }
         },
         "checkout.hosted": {

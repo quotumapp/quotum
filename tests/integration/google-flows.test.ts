@@ -128,6 +128,39 @@ localDescribe("Google route flows integration", () => {
 		expect(projectionJob.payload.purchase).toBeUndefined();
 	});
 
+	// capability: catalog.trial
+	it("records the free-trial phase of a verified Google subscription", async () => {
+		const { app, google, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const trialEnd = new Date(Math.floor(Date.now() / 1000) * 1000 + 6 * 86_400_000);
+		google.setSubscriptionLineItem({
+			expiryTime: trialEnd.toISOString(),
+			offerDetails: { basePlanId: "monthly-base", offerId: "trial-7d" },
+			offerPhase: { freeTrial: {} },
+		});
+
+		const response = await withIsoDateSqlParameters(() =>
+			verifyGoogleSubscription(app, authHeaders),
+		);
+		const body = await response.json();
+
+		expect(response.status).toBe(200);
+		expect(body.data.entitlements[0].metadata).toMatchObject({
+			provider: "google",
+			trialStartsAt: "2026-05-31T00:00:00.000Z",
+			trialEndsAt: trialEnd.toISOString(),
+		});
+		const [subscription] = await context.sql<
+			{ trial_start_at: Date | null; trial_end_at: Date | null }[]
+		>`SELECT trial_start_at, trial_end_at FROM subscriptions WHERE provider = 'google'`;
+		expect(subscription).toEqual({
+			trial_start_at: new Date("2026-05-31T00:00:00.000Z"),
+			trial_end_at: trialEnd,
+		});
+	});
+
 	// capability: catalog.product.consumable
 	// capability: purchase.verify
 	it("verifies Google consumables and consumes them", async () => {

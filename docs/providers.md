@@ -47,7 +47,7 @@ connections cannot serve. See
 | Subscription products<br>`catalog.product.subscription` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts) | Planned · Native<br>Questions: Q-CHK-01 |
 | Consumable products<br>`catalog.product.consumable` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts), [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Requires policy decision (DEC-14) · Native<br>Questions: Q-ELIG-03 |
 | Non-consumable products<br>`catalog.product.non_consumable` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-CHK-03 |
-| Trials<br>`catalog.trial` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-SUB-06 |
+| Trials<br>`catalog.trial` | Managed by provider, mirrored by Quotum<br>Tests: [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts), [providers/apple/service](../tests/providers/apple/service.test.ts), [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Managed by provider, mirrored by Quotum<br>Tests: [providers/google/normalizer](../tests/providers/google/normalizer.test.ts), [providers/google/service](../tests/providers/google/service.test.ts), [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-SUB-06 |
 | Add-on plans<br>`catalog.addon` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts) | Conditional; not implemented · Native<br>All recurring prices must share one billing interval.<br>Questions: Q-SUB-04 |
 | Top-up options<br>`catalog.topup` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Requires policy decision (DEC-14) · Native<br>Questions: Q-ELIG-03 |
 | Flat price components<br>`catalog.price.flat` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native |
@@ -131,6 +131,12 @@ Configure App Store Server Notifications V2 to
 change entitlements (`TEST`, `REFUND_DECLINED`, `CONSUMPTION_REQUEST`, renewal-extension summaries,
 external purchase token events, Advanced Commerce metadata) are acknowledged without durable writes.
 
+A transaction whose `offerDiscountType` is `FREE_TRIAL`, under any offer type (introductory,
+promotional, offer code or win-back), records its purchase date and transaction expiry as the
+subscription's trial. A billing grace period after the trial does not move the trial end. Later
+renewals keep the recorded trial; only a later free trial that starts at or after its end replaces
+it.
+
 ## Google Play Billing
 
 - `googlePlay.packageName`.
@@ -157,6 +163,11 @@ Configure the Real-time Developer Notifications push subscription to
 `https://<billing-host>/v1/projects/<projectKey>/webhooks/google`. Quotum verifies the Pub/Sub OIDC
 token issuer, audience, authorized party, service-account email, and expiry. Voided purchases use a
 stable `google:voided:<purchaseToken>:<eventTimeMillis>:...` event id.
+
+While a subscription's line item is in a free-trial offer phase (`offerPhase.freeTrial`), Quotum
+records the subscription start and the item expiry as its trial. Play reports only the current
+phase, so the recorded trial stays after conversion. A new purchase token from an upgrade or
+resubscription starts without the previous token's trial.
 
 ## Stripe
 
@@ -286,8 +297,10 @@ Each entitlement's `metadata` names its source. A subscription source carries `s
 `provider`, `channel`, `productId` and `storeProductId`, plus `trialStartsAt` and `trialEndsAt`
 (UTC ISO timestamps) when the subscription has a trial. A trialing Stripe subscription reports
 `status: "active"`, and both bounds stay after the trial ends, so treat the subscription as
-trialing while `trialEndsAt` is in the future. Apple and Google run trials as store offers that
-Quotum does not record yet, so their entitlements carry no trial bounds.
+trialing while `trialEndsAt` is in the future. Apple and Google trials are store offers that the
+catalog cannot declare; Quotum records their bounds from the store's purchase data (see
+[Apple StoreKit](#apple-storekit) and [Google Play Billing](#google-play-billing)). A trial is
+recorded only from a purchase Quotum sees while it runs.
 
 Purchase, provider-webhook and reconciliation projections are delivered per event. Usage-driven
 projections are coalesced: one delivery per billing account covers every consume, reservation and

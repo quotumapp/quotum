@@ -176,6 +176,33 @@ describe("AppleStoreKitService", () => {
 		});
 	});
 
+	// capability: catalog.trial
+	it("passes a verified free trial to the recording repository", async () => {
+		const { calls, service } = createService({
+			clientOverrides: {
+				verifyTransaction(transactionId: string) {
+					calls.push({ method: "verifyTransaction", transactionId });
+					return Promise.resolve({
+						environment: "sandbox" as const,
+						signedTransactionInfo: "signed-transaction",
+						transaction: transaction({ offerType: 1, offerDiscountType: "FREE_TRIAL" }),
+						renewalInfo: { autoRenewStatus: 1 },
+					});
+				},
+			},
+		});
+
+		await service.verifyPurchase({ billingAccountId: "user_1", transactionId: "200000000000001" });
+
+		expect(calls[2]).toMatchObject({
+			method: "recordStoreKitTransactionAndEnqueueProjection",
+			input: {
+				trialStart: new Date("2026-05-31T00:00:00.000Z"),
+				trialEnd: new Date("2026-06-30T00:00:00.000Z"),
+			},
+		});
+	});
+
 	it("fails when verified transaction has a mismatched app account token", async () => {
 		const { service } = createService({
 			clientOverrides: {

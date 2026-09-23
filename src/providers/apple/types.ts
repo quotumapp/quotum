@@ -36,6 +36,13 @@ export interface AppleDecodedTransactionPayload {
 	expiresDate?: number;
 	revocationDate?: number;
 	revocationReason?: number;
+	/** 1 introductory, 2 promotional, 3 offer code, 4 win-back. */
+	offerType?: number;
+	/** FREE_TRIAL, PAY_AS_YOU_GO, PAY_UP_FRONT or ONE_TIME. */
+	offerDiscountType?: string;
+	offerIdentifier?: string;
+	/** ISO 8601 duration of the offer, such as P1W. */
+	offerPeriod?: string;
 }
 
 export interface AppleDecodedRenewalInfoPayload {
@@ -71,6 +78,9 @@ export interface NormalizedStoreKitTransaction {
 	subscriptionStatus: SubscriptionStatus | null;
 	purchasedAt: Date;
 	expiresAt: Date | null;
+	/** Bounds of a free-trial transaction; both null for any other transaction. */
+	trialStart: Date | null;
+	trialEnd: Date | null;
 	autoRenew: boolean | null;
 	invalidatedAt: Date | null;
 	invalidationReason: string | null;
