@@ -26,6 +26,15 @@ const changeableSubscription: CapabilityCondition = {
 	allowed: ["active", "grace_period", "billing_retry", "cancelled"],
 };
 
+/**
+ * Cancelling and uncancelling act on a subscription Stripe still holds. A `cancelled` one has
+ * already ended at Stripe, whatever access its period leaves, so there is nothing left to change.
+ */
+const liveSubscription: CapabilityCondition = {
+	kind: "subscription_state",
+	allowed: ["active", "grace_period", "billing_retry"],
+};
+
 /** Uncancelling needs something to clear: a period-end cancellation that has not run yet. */
 const cancellationPending: CapabilityCondition = { kind: "cancellation_pending", required: true };
 
@@ -141,12 +150,12 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 			notes: `${changeTargets} Downgrades default to the end of the current period, when the recurring billing worker applies them.`,
 		}),
 		"subscription.cancel": native([stripeFlowsTest, cancellationTest], {
-			conditions: [changeableSubscription],
+			conditions: [liveSubscription],
 			notes:
 				"An immediate cancellation ends the Stripe subscription with no proration credit and no closing invoice; a period-end cancellation sets `cancel_at_period_end`. A queued change for the subscription is superseded, and a base plan cannot be cancelled while add-on subscriptions are active.",
 		}),
 		"subscription.uncancel": native([stripeFlowsTest, cancellationTest], {
-			conditions: [changeableSubscription, cancellationPending],
+			conditions: [liveSubscription, cancellationPending],
 			notes:
 				"Clearing `cancel_at_period_end` only restores renewal; it does not restore a subscription change the cancellation superseded, and a subscription Stripe already ended cannot be cleared.",
 		}),

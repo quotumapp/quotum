@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import fc from "fast-check";
 import type {
 	CommercialActionExecutionResult,
 	CommercialActionIntent,
@@ -8,10 +9,13 @@ import type {
 } from "../../../src/billing/commercial";
 import { sha256Hex, stableJson } from "../../../src/billing/decimal";
 import type { SubscriptionCancellationContext } from "../../../src/billing/recurring";
+import { type SubscriptionStatus, subscriptionStatuses } from "../../../src/billing/types";
+import { stripeCapabilities } from "../../../src/providers/stripe/capabilities";
 import {
 	StripeBillingService,
 	type StripeBillingServiceDependencies,
 } from "../../../src/providers/stripe/service";
+import { evaluateCapability } from "../../../src/shared/provider-capabilities";
 
 type Repository = StripeBillingServiceDependencies["repository"];
 type Client = StripeBillingServiceDependencies["client"];
@@ -449,5 +453,102 @@ describe("commercial cancellation execution", () => {
 		expect(calls.map((call) => call.method)).not.toContain("cancelSubscription");
 		expect(calls.map((call) => call.method)).not.toContain("updateSubscription");
 		expect(calls.at(-1)).toMatchObject({ supersedesPendingChange: false });
+	});
+});
+
+type CancellationRequest = "cancel-immediate" | "cancel-period_end" | "uncancel";
+type PendingChangeStatus = "pending" | "processing" | null;
+
+const cancellationRequests: CancellationRequest[] = [
+	"cancel-immediate",
+	"cancel-period_end",
+	"uncancel",
+];
+const pendingChangeStatuses: PendingChangeStatus[] = [null, "pending", "processing"];
+
+function cancellationIntent(request: CancellationRequest): CommercialActionIntent {
+	return request === "uncancel"
+		? { kind: "uncancel", externalSubscriptionId: "sub_123" }
+		: {
+				kind: "cancel",
+				externalSubscriptionId: "sub_123",
+				effectiveMode: request === "cancel-immediate" ? "immediate" : "period_end",
+			};
+}
+
+/** Previews and executes the request against one subscription state; null when neither refuses. */
+async function refusal(
+	subscription: SubscriptionCancellationContext,
+	request: CancellationRequest,
+): Promise<string | null> {
+	const { service } = cancellationService(subscription);
+	try {
+		const preview = await service.previewCommercialAction({
+			billingAccountId,
+			intent: cancellationIntent(request),
+		});
+		await service.executeCommercialAction({
+			billingAccountId,
+			previewToken: preview.previewToken,
+			idempotencyKey: "property-1",
+		});
+		return null;
+	} catch (error) {
+		return (error as { code?: string }).code ?? String(error);
+	}
+}
+
+describe("commercial cancellation capability reads", () => {
+	// capability: subscription.cancel
+	it("never reports available a cancel or uncancel that execution refuses", async () => {
+		const combinations = subscriptionStatuses.flatMap((status) =>
+			[false, true].flatMap((cancelAtPeriodEnd) =>
+				pendingChangeStatuses.flatMap((pendingChange) =>
+					cancellationRequests.map(
+						(request) => [status, cancelAtPeriodEnd, pendingChange, request] as const,
+					),
+				),
+			),
+		);
+		await fc.assert(
+			fc.asyncProperty(
+				fc.constantFrom<SubscriptionStatus>(...subscriptionStatuses),
+				fc.boolean(),
+				fc.constantFrom(...pendingChangeStatuses),
+				fc.constantFrom(...cancellationRequests),
+				async (status, cancelAtPeriodEnd, pendingChange, request) => {
+					const verdict = evaluateCapability(
+						stripeCapabilities,
+						request === "uncancel" ? "subscription.uncancel" : "subscription.cancel",
+						{ operation: { subscriptionState: status, cancellationPending: cancelAtPeriodEnd } },
+					);
+					const refused = await refusal(
+						context({
+							status,
+							cancelAtPeriodEnd,
+							pendingChange:
+								pendingChange === null ? null : { id: "change-1", status: pendingChange },
+						}),
+						request,
+					);
+					const stateBlocked = verdict.reasons.some(
+						(reason) => reason.code === "SUBSCRIPTION_STATE",
+					);
+					// Both sides agree on which subscription states Stripe can still cancel.
+					expect(stateBlocked).toBe(refused === "SUBSCRIPTION_NOT_CANCELLABLE");
+					if (verdict.outcome === "available") {
+						// A change a worker holds is a transient lease the declaration does not model: the
+						// read reports it as the subscription's pending change, and a retry succeeds.
+						expect(refused).toBe(
+							request !== "uncancel" && pendingChange === "processing"
+								? "SUBSCRIPTION_CHANGE_PENDING"
+								: null,
+						);
+					}
+				},
+			),
+			// Every combination runs as an example first; fast-check counts examples within numRuns.
+			{ examples: combinations, numRuns: combinations.length + 100 },
+		);
 	});
 });
