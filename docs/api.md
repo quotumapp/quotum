@@ -94,6 +94,17 @@ reservation defaults to 300. License pools follow the purchased subscription-ite
 entity license check honors active assignments in assignment order up to that capacity, so a seat
 downgrade stops authorizing the assignments beyond it until they are revoked.
 
+Spend-control activation and window boundaries use the database clock by default, so API clock
+skew cannot bypass a newly active policy. Spend controls rate committed usage independently of pending reservations: held quantities never
+unlock volume discounts on consumed usage. A monetary reservation hold is a fixed budget quote,
+released on confirmation, release, or expiry. For volume pricing it covers the highest charge over
+all partial quantities up to the reservation at the current committed usage, including intermediate
+tier boundaries. Separate quotes can conservatively reserve more than the combined eventual charge.
+Confirmation rerates actual committed usage and checks the cap again; intervening usage or a
+correction can therefore make confirmation return `control_limit_exceeded`. A denied confirmation
+keeps its reservation active and can still be released. A new confirmation after conditions change
+uses a new idempotency key; replaying the denied operation returns its recorded denial.
+
 Usage reads default to the last 30 days, reject ranges over 90 days, and page with an opaque cursor
 (default 50, maximum 200). Series support `hour` or `day` buckets. These reads and `billing-summary`
 never authorize work; product projections are display caches and cannot replace the metering calls.
