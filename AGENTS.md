@@ -51,8 +51,8 @@ Use Bun `>=1.4.0 <1.5.0`. Docker is required for every Postgres-backed lane.
   (`src/shared/provider-capabilities.ts`). Commit the regenerated `contracts/v1` files and the
   generated capability table in `docs/providers.md`; `openapi:check` fails CI when any is stale.
 - `bun run quotum <command>` runs the operator CLI (`src/cli.ts`, on the image's `PATH` as
-  `quotum`): migrations, bootstrap, catalog, key rotation, `healthcheck` and `init`; see
-  [docs/deployment.md](docs/deployment.md#operator-cli).
+  `quotum`): migrations, bootstrap, catalog, connections and credentials, key rotation,
+  `healthcheck` and `init`; see [docs/deployment.md](docs/deployment.md#operator-cli).
 - `bun run platform:bootstrap`, `catalog:provision` and `catalog` for operator workflows (see
   [docs/quickstart.md](docs/quickstart.md)); `bun run connections:rotate-secrets` re-encrypts
   stored connection secrets with the active key.
@@ -123,12 +123,12 @@ Never commit a `.env` file, `POSTGRES_URI`, project or operator credentials, pro
 provider or email-provider credentials, `QUOTUM_AUTH_SECRET`, or the `QUOTUM_SECRETS_KEY_BASE64`
 key. Project credentials are issued once by `platform:bootstrap` into an owner-only file; move them
 to a secret store and delete the file. Provider and projection settings are encrypted,
-database-owned connections managed through the merchant application;
-`BILLING_PROJECT_RUNTIME_JSON` and `BILLING_PROJECTS_JSON` are rejected. Schema files are
-checksum-verified; before 1.0 they evolve in place and disposable databases are recreated. Never
-bypass migration integrity checks or reset populated production data as a routine upgrade. Treat
-migrations, bootstrap output, credential handling, and provider webhook verification as
-security-sensitive code and add focused tests when changing them.
+database-owned connections managed through the merchant application or, headless, the
+`quotum connections` commands; `BILLING_PROJECT_RUNTIME_JSON` and `BILLING_PROJECTS_JSON` are
+rejected. Schema files are checksum-verified; before 1.0 they evolve in place and disposable
+databases are recreated. Never bypass migration integrity checks or reset populated production data
+as a routine upgrade. Treat migrations, bootstrap output, credential handling, and provider webhook
+verification as security-sensitive code and add focused tests when changing them.
 
 ## Documentation with implementation changes
 

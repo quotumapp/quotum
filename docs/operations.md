@@ -169,13 +169,15 @@ lost response cannot be recovered; rotate instead.
 
 Rotate through merchant management: `POST /api/platform/provisioning/{id}/rotate` for onboarding
 sandbox credentials, or `POST /api/platform/environments/credentials/rotate` for either environment.
-Production rotation requires a fresh step-up grant. Rotation revokes the previous credential in the
-same transaction, so the replaced key is rejected from the next request. Write the replacement to
-every integration's secret store and redeploy those backends. `platform:bootstrap` issues only for
-instances that have never had a credential, so it does not rotate. To add an environment or a
-project later, extend the manifest, review `--check`, and run `--apply` with a new
-`--credentials-out` path. It issues only the declared credential kinds an instance has never held,
-whether the instance is new or already exists.
+Production rotation requires a fresh step-up grant. Without the merchant application, run
+`quotum credentials rotate <instance> --access full --credentials-out <new-file>` with `--actor`.
+It writes the new key in the platform bootstrap's file format and never prints it. If the file
+cannot be written, nothing is rotated. Rotation revokes the previous credential in the same
+transaction, so the replaced key is rejected from the next request. Write the replacement to every
+integration's secret store and redeploy those backends. `platform:bootstrap` issues only the
+declared credential kinds an instance has never held, whether the instance is new or already
+exists, so it does not rotate. To add an environment or a project later, extend the manifest,
+review `--check`, and run `--apply` with a new `--credentials-out` path.
 
 ### Read-only credentials
 

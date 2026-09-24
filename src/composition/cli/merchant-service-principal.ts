@@ -1,6 +1,6 @@
 import { createBillingDatabaseConnection } from "../../db/client";
 import { loadEnv } from "../../env";
-import { loadMerchantConfig } from "../../platform/config";
+import { loadMerchantConfig, merchantPlatformEnabled } from "../../platform/config";
 import { MerchantStore } from "../../platform/store";
 import { writeStdout } from "../../shared/cli-output";
 import { merchantSql } from "../merchant-persistence";
@@ -12,6 +12,10 @@ if (import.meta.main) {
 async function createServicePrincipal(name: string | undefined): Promise<void> {
 	if (!name || !/^[a-z0-9-]{3,64}$/.test(name))
 		throw new Error("Usage: quotum merchant service-principal <service-name>");
+	if (!merchantPlatformEnabled())
+		throw new Error(
+			"The merchant platform is off (QUOTUM_MERCHANT_ENABLED=false), so there is no merchant proxy to authorize",
+		);
 	const config = loadMerchantConfig();
 	const connection = createBillingDatabaseConnection(loadEnv());
 	try {

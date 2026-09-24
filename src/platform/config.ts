@@ -77,6 +77,16 @@ function booleanSetting(
  * The merchant platform (`/api`, sign-in, onboarding and remote MCP) is on unless
  * `QUOTUM_MERCHANT_ENABLED=false` selects a headless process that serves `/v1` and workers only.
  */
+/**
+ * The HMAC key for sessions, request fingerprints and receipts. Operator commands that write the
+ * same receipts use it too, so their fingerprints match the merchant platform's.
+ */
+export function loadAuthSecret(env: Record<string, string | undefined> = process.env): string {
+	const secret = required(env, "QUOTUM_AUTH_SECRET");
+	if (secret.length < 32) throw new Error("QUOTUM_AUTH_SECRET must be at least 32 characters");
+	return secret;
+}
+
 export function merchantPlatformEnabled(
 	env: Record<string, string | undefined> = process.env,
 ): boolean {
@@ -126,8 +136,7 @@ export function loadMerchantConfig(
 	const originUrl = new URL(origin);
 	if (originUrl.origin !== origin || (!testMode && originUrl.protocol !== "https:"))
 		throw new Error("MERCHANT_ORIGIN must be an HTTPS origin");
-	const secret = required(env, "QUOTUM_AUTH_SECRET");
-	if (secret.length < 32) throw new Error("QUOTUM_AUTH_SECRET must be at least 32 characters");
+	const secret = loadAuthSecret(env);
 	const termsVersion = z.string().min(1).parse(env.MERCHANT_TERMS_VERSION);
 	const privacyVersion = z.string().min(1).parse(env.MERCHANT_PRIVACY_VERSION);
 	const signupEnabled =

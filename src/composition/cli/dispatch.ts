@@ -12,6 +12,8 @@ export interface QuotumCommand {
 	readonly summary: string;
 	/** Settings the command reads, shown by `quotum <command> --help`. */
 	readonly environment: string;
+	/** Further usage lines for `quotum <command> --help`. */
+	readonly details?: readonly string[];
 	/**
 	 * Whether the entry file understands these arguments. Checked before the process starts:
 	 * some entries ignore unexpected arguments, and `migrate.ts` applies pending migrations for
@@ -71,6 +73,43 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		environment:
 			"POSTGRES_URI, QUOTUM_SECRETS_KEY_ID, QUOTUM_SECRETS_KEY_BASE64, QUOTUM_SECRETS_PREVIOUS_KEY_ID, QUOTUM_SECRETS_PREVIOUS_KEY_BASE64",
 		accepts: none,
+	},
+	{
+		path: ["connections"],
+		file: "composition/cli/connections.ts",
+		usage: "connections list|draft|validate|commit|disable <instance> ...",
+		summary: "Configure an instance's Stripe, Apple, Google and projection connections",
+		environment:
+			"POSTGRES_URI, QUOTUM_SECRETS_KEY_ID, QUOTUM_SECRETS_KEY_BASE64, QUOTUM_AUTH_SECRET, optional QUOTUM_ACTOR and BILLING_PROJECTION_* receiver settings",
+		details: [
+			"  connections list <instance>",
+			"  connections draft <instance> <stripe|apple|google|projection> --settings <file>",
+			"      [--secrets-file <file>|-] [--secret-out <new-file>] [--expected-revision <n>]",
+			"  connections validate <instance> <kind> <draft-id>",
+			"  connections commit <instance> <kind> <draft-id> [--wait-for-event <90s|10m>]",
+			"  connections disable <instance> <kind> --expected-revision <n>",
+			"Changes take --actor <name> (or QUOTUM_ACTOR) and an optional --request-key <key> for safe",
+			"retries. Secrets come only from --secrets-file or stdin (-). A projection draft writes the",
+			"generated receiver secret to --secret-out.",
+		],
+		accepts: (args) => ["list", "draft", "validate", "commit", "disable"].includes(args[0] ?? ""),
+	},
+	{
+		path: ["credentials"],
+		file: "composition/cli/credentials.ts",
+		usage: "credentials status|rotate|revoke <instance> ...",
+		summary: "Inspect, rotate or revoke an instance's project API credentials",
+		environment:
+			"POSTGRES_URI, QUOTUM_SECRETS_KEY_ID, QUOTUM_SECRETS_KEY_BASE64, QUOTUM_AUTH_SECRET, optional QUOTUM_ACTOR",
+		details: [
+			"  credentials status <instance>",
+			"  credentials rotate <instance> --access full|read_only --credentials-out <new-file>",
+			"  credentials revoke <instance> --access read_only",
+			"Changes take --actor <name> (or QUOTUM_ACTOR) and an optional --request-key <key> for safe",
+			"retries. Rotation revokes the replaced key at once and writes the new one only to",
+			"--credentials-out, in the platform bootstrap's format.",
+		],
+		accepts: (args) => ["status", "rotate", "revoke"].includes(args[0] ?? ""),
 	},
 	{
 		path: ["merchant", "service-principal"],
@@ -137,6 +176,7 @@ export function resolveQuotumCommand(argv: readonly string[]): QuotumCliResoluti
 export function quotumCommandHelp(command: QuotumCommand): string {
 	return [
 		`Usage: quotum ${command.usage}`,
+		...(command.details === undefined ? [] : ["", ...command.details]),
 		"",
 		command.summary,
 		`Environment: ${command.environment}`,

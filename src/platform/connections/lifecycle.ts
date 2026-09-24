@@ -62,11 +62,17 @@ export class ConnectionLifecycle {
 		return { connections: await this.deps.repository.list(instance.id) };
 	}
 
+	/**
+	 * Stores a new version for validation and commit. A projection draft generates its receiver
+	 * secret; `deliver` stores it before commit, so if it fails, the draft rolls back and a retry
+	 * with the same key drafts again instead of replaying a draft whose secret nobody holds.
+	 */
 	async draft(
 		gate: ConnectionGate,
 		kind: ConnectionKind,
 		key: string,
 		input: ConnectionInput & { expectedRevision: number },
+		deliver?: (projectionSecret: string) => Promise<void>,
 	) {
 		const normalized = this.deps.validator.normalize(kind, gate.environment, input);
 		const fingerprint = this.deps.hash(canonicalJson({ kind, ...input }));
@@ -105,6 +111,8 @@ export class ConnectionLifecycle {
 				normalized.secrets,
 			);
 			await this.audit(tx, gate, "connection.draft_created", id, { kind });
+			// Last before commit, so once the secret is stored only the commit itself can still fail.
+			if (generated) await deliver?.(generated);
 			return {
 				draftId: id,
 				secretDisclosed: generated !== undefined,
@@ -252,9 +260,15 @@ export class ConnectionLifecycle {
 	/**
 	 * Replaces the instance's live credential of one kind, or issues the first read-only one. The two
 	 * kinds never revoke each other. The receipt and the confirmation are bound to the kind, so a
-	 * confirmation given for a read-only key cannot replace the backend's full key.
+	 * confirmation given for a read-only key cannot replace the backend's full key. `deliver` stores
+	 * the new key before commit: if it fails, the rotation rolls back and the old key stays live.
 	 */
-	async rotateCredential(gate: ConnectionGate, key: string, access: CredentialAccess = "full") {
+	async rotateCredential(
+		gate: ConnectionGate,
+		key: string,
+		access: CredentialAccess = "full",
+		deliver?: (credential: string) => Promise<void>,
+	) {
 		const receiptAction = access === "full" ? "credential.rotate" : `credential.rotate:${access}`;
 		const confirmAction = access === "full" ? "credentials.rotate" : "credentials.rotate_read_only";
 		let credential: string | null = null;
@@ -285,6 +299,8 @@ export class ConnectionLifecycle {
 			);
 			const result = { access, credentialDisclosed: false };
 			await this.saveReceipt(tx, instance.id, key, receiptAction, result);
+			// Last before commit, so once the key is stored only the commit itself can still fail.
+			await deliver?.(generated.token);
 			credential = generated.token;
 			return result;
 		});

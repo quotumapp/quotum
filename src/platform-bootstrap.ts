@@ -135,11 +135,11 @@ export async function applyPlatformBootstrap(
 /**
  * Full keys keep their `credentials` array, one entry per instance, so existing readers are
  * unaffected. Read-only keys go to `readOnlyCredentials`, present only when any were issued.
+ * `quotum credentials rotate` writes the same format.
  */
-export async function writePlatformCredentialOutput(
-	path: string,
+export function renderPlatformCredentialOutput(
 	credentials: readonly { projectInstanceKey: string; token: string; access?: CredentialAccess }[],
-): Promise<void> {
+): string {
 	const entries = (access: CredentialAccess) =>
 		credentials
 			.filter((credential) => (credential.access ?? "full") === access)
@@ -148,21 +148,25 @@ export async function writePlatformCredentialOutput(
 				credential: credential.token,
 			}));
 	const readOnly = entries("read_only");
+	return `${JSON.stringify(
+		{
+			version: 1,
+			credentials: entries("full"),
+			...(readOnly.length === 0 ? {} : { readOnlyCredentials: readOnly }),
+		},
+		null,
+		2,
+	)}\n`;
+}
+
+export async function writePlatformCredentialOutput(
+	path: string,
+	credentials: readonly { projectInstanceKey: string; token: string; access?: CredentialAccess }[],
+): Promise<void> {
 	let output: Awaited<ReturnType<typeof open>> | undefined;
 	try {
 		output = await open(path, "wx", 0o600);
-		await output.writeFile(
-			`${JSON.stringify(
-				{
-					version: 1,
-					credentials: entries("full"),
-					...(readOnly.length === 0 ? {} : { readOnlyCredentials: readOnly }),
-				},
-				null,
-				2,
-			)}\n`,
-			{ encoding: "utf8" },
-		);
+		await output.writeFile(renderPlatformCredentialOutput(credentials), { encoding: "utf8" });
 		await output.sync();
 	} catch (error) {
 		if (output !== undefined) await unlink(path).catch(() => undefined);

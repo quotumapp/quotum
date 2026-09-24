@@ -246,6 +246,30 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 	};
 }
 
+/** The projection receiver settings alone, for operator commands that need nothing else. */
+export function loadProjectionReceivers(
+	source: Record<string, string | undefined> = process.env,
+): DestinationPolicy | undefined {
+	const parsed = envSchema
+		.pick({
+			BILLING_PROJECTION_ALLOWED_NETWORKS: true,
+			BILLING_PROJECTION_ALLOW_INSECURE_HTTP: true,
+		})
+		.parse(source);
+	return parseProjectionReceivers(
+		parsed.BILLING_PROJECTION_ALLOWED_NETWORKS,
+		parsed.BILLING_PROJECTION_ALLOW_INSECURE_HTTP === "true",
+	);
+}
+
+/** Whether an operator command's Postgres client may use prepared statements, as the server's may. */
+export function loadPostgresPreparedStatements(
+	source: Record<string, string | undefined> = process.env,
+): boolean {
+	const parsed = envSchema.pick({ BILLING_POSTGRES_PREPARED_STATEMENTS: true }).parse(source);
+	return parsed.BILLING_POSTGRES_PREPARED_STATEMENTS !== "false";
+}
+
 function parseProjectionReceivers(
 	networks: string | undefined,
 	allowInsecureHttp: boolean,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { isProductionProjectionUrlSafe, loadEnv } from "../src/env";
+import { isProductionProjectionUrlSafe, loadEnv, loadPostgresPreparedStatements } from "../src/env";
 
 const postgresUri = "postgresql://postgres:postgres@127.0.0.1:5432/postgres";
 const operatorApiKey = "billing-operator-key-secret";
@@ -385,6 +385,21 @@ describe("projection receiver networks", () => {
 		);
 		expect(() =>
 			loadEnv({ ...developmentSource, BILLING_PROJECTION_ALLOW_INSECURE_HTTP: "yes" }),
+		).toThrow();
+	});
+});
+
+describe("loadPostgresPreparedStatements", () => {
+	it("follows BILLING_POSTGRES_PREPARED_STATEMENTS as the server does", () => {
+		expect(loadPostgresPreparedStatements({})).toBe(true);
+		expect(loadPostgresPreparedStatements({ BILLING_POSTGRES_PREPARED_STATEMENTS: "true" })).toBe(
+			true,
+		);
+		expect(loadPostgresPreparedStatements({ BILLING_POSTGRES_PREPARED_STATEMENTS: "false" })).toBe(
+			false,
+		);
+		expect(() =>
+			loadPostgresPreparedStatements({ BILLING_POSTGRES_PREPARED_STATEMENTS: "no" }),
 		).toThrow();
 	});
 });

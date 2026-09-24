@@ -44,8 +44,10 @@ usage and the settings it reads without running it; an unknown command or unexpe
 | `quotum bootstrap --check` / `--apply [--credentials-out <path>]` | The [platform bootstrap](#first-start). |
 | `quotum catalog provision` | Import the store products in `BILLING_CATALOG_IMPORT_JSON`. |
 | `quotum catalog status` / `diff <file>` / `push <file>` | [Catalog automation](api.md#catalog-publication) over HTTP. |
+| `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play and projections. |
+| `quotum credentials status` / `rotate` / `revoke` | Inspect, [rotate](operations.md#project-credentials) or revoke an instance's project API keys. |
 | `quotum connections rotate-secrets` | [Encryption-key rotation](#encryption-key-rotation). |
-| `quotum merchant service-principal <name>` | The [merchant proxy service principal](#merchant-proxy-service-principal). |
+| `quotum merchant service-principal <name>` | The [merchant proxy service principal](#merchant-proxy-service-principal). Refused in headless mode. |
 | `quotum mcp` | The read-only [stdio MCP server](mcp.md#run-over-stdio). |
 | `quotum healthcheck` | Exit `0` only when this instance's `/ready` answers `200`, for container health checks. |
 | `quotum init` | Print a newly generated `QUOTUM_SECRETS_KEY_*`, `QUOTUM_AUTH_SECRET` and `BILLING_OPERATOR_API_KEY`. |
@@ -122,14 +124,17 @@ API, the provider webhooks and every worker, and nothing else.
 - `/api/*`, merchant sign-in, onboarding, teams, step-up confirmation and merchant email do not
   exist; those paths answer like any other unknown path. Remote MCP needs merchant sign-in, so
   `QUOTUM_MCP_ENABLED=true` is refused at startup. The stdio [MCP server](mcp.md) still works.
-- `QUOTUM_AUTH_SECRET`, `MERCHANT_*` and `QUOTUM_EMAIL_*` become optional. When set they are ignored,
-  except that the retired names in the next section are still refused.
+- `QUOTUM_AUTH_SECRET`, `MERCHANT_*` and `QUOTUM_EMAIL_*` become optional for the server, which
+  ignores them when set, except that the retired names in the next section are still refused. The
+  `quotum connections` and `quotum credentials` commands still need `QUOTUM_AUTH_SECRET`, which keys
+  their request fingerprints.
 - Everything else is unchanged: `POSTGRES_URI`, `BILLING_OPERATOR_API_KEY` in production, and the
   `QUOTUM_SECRETS_KEY_*` key, which still decrypts stored connections. Provider webhooks, the
   connection-version verification route and, when `STRIPE_APP_*` is configured, the Stripe App
   event ingress keep working.
-- Connections are created and changed on the merchant platform's **Integrations** screens, so a
-  headless process serves the connections already stored in its database and cannot change them.
+- There are no **Integrations** screens: configure connections with the
+  [`quotum connections`](providers.md#headless-connection-setup) commands and manage project API
+  keys with `quotum credentials`.
 
 The flag is read at startup and accepts only `true` or `false`; unset or blank means `true`. Switching
 modes needs a restart and no migration.
@@ -193,10 +198,12 @@ cannot restart against new-only settings. This change needs no database migratio
 A fresh deployment needs no customer bootstrap. Start the service, then let merchants onboard
 through the merchant application and configure providers and projections under **Integrations**.
 A [headless](#headless-mode) deployment has no merchant application; it creates its topology and
-credentials with the bootstrap below.
+credentials with the bootstrap below, and its connections with
+[`quotum connections`](providers.md#headless-connection-setup).
 Each environment is configured independently: save a draft, verify provider access or the signed
-projection challenge, then commit. Production commits require a fresh step-up grant. Changes take
-effect without restarts, and one customer's setup never affects global readiness.
+projection challenge, then commit. In the merchant application, production commits require a fresh
+step-up grant. Changes take effect without restarts, and one customer's setup never affects global
+readiness.
 
 The `platform:bootstrap` manifest used in the [quickstart](quickstart.md) remains available as an
 operator fixture for development and internal environments; it is not a sign-up prerequisite. The

@@ -237,6 +237,39 @@ Stripe App OAuth events instead use `/v1/stripe-app/webhooks/test` or `/v1/strip
 when OAuth is enabled. These signed app-level events resolve the connection by Stripe account and
 mode; they are not addressed by a project key.
 
+## Headless connection setup
+
+Without the merchant application, operators configure connections with `quotum connections` (see
+the [operator CLI](deployment.md#operator-cli)). A change goes through the same draft, validation
+and commit steps as the **Integrations** screens, and audit events name the operator given by
+`--actor` (or `QUOTUM_ACTOR`).
+
+1. **Write the fields to files.** Put the provider's non-secret fields (see its section above) in
+   one JSON object. Put its write-only fields in another:
+   - Stripe: `secretKey` (a restricted `rk_test_` or `rk_live_` key) and `webhookSecret`;
+   - Apple: `privateKey`;
+   - Google Play: `serviceAccountJson` and `obfuscatedAccountIdSecret`.
+
+   A projection needs only `projectionUrl` and an optional `usageDelivery`, because Quotum generates
+   its secret.
+2. **Draft.** Run `quotum connections draft <instance> <kind> --settings settings.json --secrets-file -`.
+   The `-` reads the secrets from stdin, so they never appear in the process list or shell history.
+   - A projection draft takes `--secret-out <new-file>` instead. The generated receiver secret is
+     written there, readable only by you. If the file cannot be written, nothing is drafted.
+   - A provider draft prints its `setupWebhookPath`.
+3. **Verify events (active production only).** An active production provider must deliver an event
+   first. Point the provider's webhook at the setup path and send a test event. Then commit with
+   `--wait-for-event 10m`, which waits for that event. Sandbox and inactive environments commit
+   without one.
+4. **Commit.** `quotum connections commit <instance> <kind> <draft-id>` validates again and
+   activates the version. Then point the provider's webhook at the regular path
+   `/v1/projects/<instance>/webhooks/<provider>`.
+
+These commands, and `quotum credentials`, read `QUOTUM_AUTH_SECRET` even in headless mode. It keys
+their request fingerprints the way it does for the merchant platform. While the merchant platform
+runs, they refuse organizations that have members, who manage their own connections. Stripe App
+OAuth needs a merchant session, so it is available only in the merchant application.
+
 ## Projections
 
 Quotum never writes your database. It delivers signed HTTP `billing_state_v1` projections with
