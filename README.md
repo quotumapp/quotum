@@ -19,8 +19,8 @@ customer list is required. The operator UI is the sibling `quotum-ui` applicatio
 - [Operations](docs/operations.md): backup, restore, upgrade, rollback, workers, support policy.
 - [MCP server](docs/mcp.md): read-only browser authorization or stdio access for coding agents.
 - [Architecture](docs/architecture.md): module boundaries and source map.
-- [Releases](https://github.com/quotumapp/quotum/releases), [CHANGELOG.md](CHANGELOG.md) (up to 0.10.1),
-  [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md).
+- [Releases](https://github.com/quotumapp/quotum/releases), [SECURITY.md](SECURITY.md),
+  [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [contracts/v1/openapi.json](contracts/v1/openapi.json) owns implemented HTTP structures;
 [contracts/v1/errors.json](contracts/v1/errors.json) lists known errors. The public `@quotum/sdk`,

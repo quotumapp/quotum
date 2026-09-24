@@ -97,8 +97,8 @@ same form; the `PR title` check enforces it, and merged pull requests are labell
 release notes. Pull requests describe the change, list the verification commands run, call out
 migration and environment variable changes with their upgrade order, and include request and
 response examples when HTTP behavior changes. Release notes list pull requests by title only, so
-the description is the detailed record; `CHANGELOG.md` is frozen at 0.10.1 and takes no new
-entries. Do not bump the `package.json` version in feature pull requests.
+the description is the detailed record; do not add a changelog file. Do not bump the
+`package.json` version in feature pull requests.
 
 ## Releases and container publishing
 
