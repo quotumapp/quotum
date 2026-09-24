@@ -139,6 +139,27 @@ describe("ensureUsageEventPartitions", () => {
 		database.assertConsumed();
 	});
 
+	it("reports its creations and bound when another process takes the lock mid-run", async () => {
+		const database = new FakeDatabase(
+			[
+				[],
+				locked,
+				[{ covered_until: "2027-09-01T00:00:00.000Z", ready: false }],
+				[{ occupied: false }],
+				[],
+				[],
+				[{ acquired: false }],
+			],
+			{ strict: true },
+		);
+		expect(await ensureUsageEventPartitions(database as never)).toEqual({
+			status: "created",
+			created: ["usage_events_2027_09"],
+			coveredUntil: "2027-10-01T00:00:00.000Z",
+		});
+		database.assertConsumed();
+	});
+
 	it("leaves an occupied default partition to an operator instead of scanning it under a lock", async () => {
 		const database = new FakeDatabase(
 			[

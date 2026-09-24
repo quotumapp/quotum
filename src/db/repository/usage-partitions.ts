@@ -79,8 +79,9 @@ export async function ensureUsageEventPartitions(
 			if (status === null) throw error;
 			return { status, created, coveredUntil };
 		}
-		coveredUntil = step.coveredUntil;
-		if (step.status === "current" && created.length > 0)
+		// A locked step reads no bound; after a creation it only means another process took over.
+		if (step.coveredUntil !== null) coveredUntil = step.coveredUntil;
+		if ((step.status === "current" || step.status === "locked") && created.length > 0)
 			return { status: "created", created, coveredUntil };
 		if (step.status !== "created") return { status: step.status, created, coveredUntil };
 		created.push(step.name);
