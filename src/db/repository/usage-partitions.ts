@@ -37,6 +37,19 @@ export interface UsagePartition {
 	to: Date;
 }
 
+export interface UsagePartitionCoverage {
+	/** Monthly partitions, oldest first, with UTC ISO bounds. */
+	partitions: Array<{ name: string; from: string; to: string }>;
+	/** Exclusive upper bound of the last monthly partition, or null if there is none. */
+	coveredUntil: string | null;
+	/** The database's current time plus the horizon; the partitions must reach past it. */
+	horizon: string;
+	/** Whether the partitions reach past the horizon, so the upkeep has nothing to add. */
+	current: boolean;
+	/** Whether `usage_events_default` holds rows, which stops the upkeep. */
+	defaultPartitionHasRows: boolean;
+}
+
 /**
  * The partition after `coveredUntil`: the rest of that UTC month, or the whole next month when
  * `coveredUntil` is a UTC month boundary. Migration 003 created its partitions in the session
@@ -59,13 +72,86 @@ export function nextUsagePartition(coveredUntil: Date): UsagePartition {
 const migrationAdvisoryLockNamespace = 760_911;
 const migrationAdvisoryLockKey = 520_384_001;
 
+// Bounds are read and written as UTC ISO text; lock_timeout keeps a waiting DDL from stalling
+// the metering writes queued behind it.
+const upkeepSessionSettings = drizzleSql`
+	SELECT
+		set_config('lock_timeout', '1s', true),
+		set_config('statement_timeout', '15s', true),
+		set_config('TimeZone', 'UTC', true),
+		set_config('DateStyle', 'ISO, YMD', true)
+`;
+
+const defaultPartitionOccupied = drizzleSql`SELECT EXISTS (SELECT 1 FROM usage_events_default) AS occupied`;
+
+function assertHorizon(horizonMonths: number): void {
+	if (!Number.isInteger(horizonMonths) || horizonMonths < 1 || horizonMonths > 120)
+		throw new Error("Usage partition horizon must be between 1 and 120 months");
+}
+
+/** Reads the monthly `usage_events` partitions and how far ahead they reach, changing nothing. */
+export async function inspectUsageEventPartitions(
+	database: TransactionalQueryExecutor,
+	{ horizonMonths = 12 }: Pick<UsagePartitionUpkeepOptions, "horizonMonths"> = {},
+): Promise<UsagePartitionCoverage> {
+	assertHorizon(horizonMonths);
+	return await database.transaction(async (tx) => {
+		await tx.execute(upkeepSessionSettings);
+		const rows = await executeRows<{
+			name: string;
+			lower_bound: string | Date;
+			upper_bound: string | Date;
+		}>(
+			tx,
+			drizzleSql`
+				SELECT child.relname AS name, bounds.lower_bound, bounds.upper_bound
+				FROM pg_inherits inherits
+				JOIN pg_class child ON child.oid = inherits.inhrelid
+				CROSS JOIN LATERAL (
+					SELECT
+						(regexp_match(pg_get_expr(child.relpartbound, child.oid), 'FROM [(]''([^'']+)''[)]'))[1]::timestamptz AS lower_bound,
+						(regexp_match(pg_get_expr(child.relpartbound, child.oid), 'TO [(]''([^'']+)''[)]'))[1]::timestamptz AS upper_bound
+				) bounds
+				WHERE inherits.inhparent = 'usage_events'::regclass AND bounds.upper_bound IS NOT NULL
+				ORDER BY bounds.lower_bound
+			`,
+		);
+		const [clock] = await executeRows<{ horizon: string | Date }>(
+			tx,
+			drizzleSql`SELECT now() + make_interval(months => ${horizonMonths}::integer) AS horizon`,
+		);
+		const [defaultRows] = await executeRows<{ occupied: boolean }>(tx, defaultPartitionOccupied);
+		if (clock === undefined) throw new Error("The database did not report its time");
+		const partitions = rows.map((row) => ({
+			name: row.name,
+			from: new Date(row.lower_bound),
+			to: new Date(row.upper_bound),
+		}));
+		const coveredUntil = partitions.reduce<Date | null>(
+			(latest, { to }) => (latest === null || to > latest ? to : latest),
+			null,
+		);
+		const horizon = new Date(clock.horizon);
+		return {
+			partitions: partitions.map(({ name, from, to }) => ({
+				name,
+				from: from.toISOString(),
+				to: to.toISOString(),
+			})),
+			coveredUntil: coveredUntil?.toISOString() ?? null,
+			horizon: horizon.toISOString(),
+			current: coveredUntil !== null && coveredUntil > horizon,
+			defaultPartitionHasRows: defaultRows?.occupied !== false,
+		};
+	});
+}
+
 /** Creates missing monthly `usage_events` partitions ahead of time; see docs/operations.md. */
 export async function ensureUsageEventPartitions(
 	database: TransactionalQueryExecutor,
 	{ horizonMonths = 12, maxCreates = 3 }: UsagePartitionUpkeepOptions = {},
 ): Promise<UsagePartitionUpkeepResult> {
-	if (!Number.isInteger(horizonMonths) || horizonMonths < 1 || horizonMonths > 120)
-		throw new Error("Usage partition horizon must be between 1 and 120 months");
+	assertHorizon(horizonMonths);
 	if (!Number.isInteger(maxCreates) || maxCreates < 1 || maxCreates > 120)
 		throw new Error("Usage partition creations per run must be between 1 and 120");
 	const created: string[] = [];
@@ -94,15 +180,7 @@ type StepResult =
 	| { status: "current" | "locked" | "blocked"; coveredUntil: string | null };
 
 async function createNextPartition(tx: QueryExecutor, horizonMonths: number): Promise<StepResult> {
-	// Bounds are read and written as UTC ISO text; lock_timeout keeps a waiting DDL from stalling
-	// the metering writes queued behind it.
-	await tx.execute(drizzleSql`
-		SELECT
-			set_config('lock_timeout', '1s', true),
-			set_config('statement_timeout', '15s', true),
-			set_config('TimeZone', 'UTC', true),
-			set_config('DateStyle', 'ISO, YMD', true)
-	`);
+	await tx.execute(upkeepSessionSettings);
 	const [lock] = await executeRows<{ acquired: boolean }>(
 		tx,
 		drizzleSql`
@@ -143,10 +221,7 @@ async function createNextPartition(tx: QueryExecutor, horizonMonths: number): Pr
 		throw new Error("usage_events has no monthly partitions; apply migrations first");
 	// Creating a partition scans the default partition under a table lock and fails when it holds
 	// rows in the new range, so only an empty default partition is safe to extend automatically.
-	const [defaultRows] = await executeRows<{ occupied: boolean }>(
-		tx,
-		drizzleSql`SELECT EXISTS (SELECT 1 FROM usage_events_default) AS occupied`,
-	);
+	const [defaultRows] = await executeRows<{ occupied: boolean }>(tx, defaultPartitionOccupied);
 	if (defaultRows?.occupied !== false) return { status: "blocked", coveredUntil };
 	const partition = nextUsagePartition(new Date(coveredUntil));
 	await tx.execute(drizzleSql.raw(createPartitionStatement(partition)));

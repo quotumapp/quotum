@@ -6,6 +6,7 @@ import { runConnectionsCommand } from "../../../src/composition/cli/connections"
 import { runCredentialsCommand } from "../../../src/composition/cli/credentials";
 import {
 	CliUsageError,
+	CommandReport,
 	openOperatorContext,
 	operatorActor,
 	parseArguments,
@@ -145,6 +146,29 @@ describe("operator command results", () => {
 			),
 		).toBe(1);
 		expect(refused.err).toEqual(["CONNECTION_CHANGED: Refresh this connection."]);
+	});
+
+	it("lets a report set its exit code and add a note on stderr", async () => {
+		const attention = captured();
+		expect(
+			await runOperatorCommand(
+				async () => new CommandReport({ current: false }, 2, "Run the fix."),
+				"quotum x --help",
+				attention.output,
+			),
+		).toBe(2);
+		expect(JSON.parse(attention.out.join(""))).toEqual({ current: false });
+		expect(attention.err).toEqual(["Run the fix."]);
+
+		const quiet = captured();
+		expect(
+			await runOperatorCommand(
+				async () => new CommandReport({ current: true }, 0),
+				"quotum x --help",
+				quiet.output,
+			),
+		).toBe(0);
+		expect(quiet.err).toEqual([]);
 	});
 
 	it("refuses unsafe settings before connecting to the database", async () => {

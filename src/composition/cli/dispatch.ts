@@ -34,6 +34,21 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		accepts: (args) => none(args) || (args.length === 1 && args[0] === "status"),
 	},
 	{
+		path: ["partitions"],
+		file: "composition/cli/partitions.ts",
+		usage: "partitions status|ensure [--months <n>]",
+		summary: "Report or extend the monthly usage_events partitions",
+		environment: "POSTGRES_URI, optional BILLING_POSTGRES_PREPARED_STATEMENTS",
+		details: [
+			"  partitions status [--months <n>]",
+			"  partitions ensure [--months <n>]",
+			"Partitions should reach at least <n> months ahead (default 12, at most 120). status exits 2",
+			"when they do not or when usage_events_default holds rows. ensure adds the missing months",
+			"as the upkeep worker does and exits 1 when it cannot finish.",
+		],
+		accepts: (args) => args[0] === "status" || args[0] === "ensure",
+	},
+	{
 		path: ["bootstrap"],
 		file: "platform-bootstrap.ts",
 		usage: "bootstrap --check | --apply [--credentials-out <path>]",

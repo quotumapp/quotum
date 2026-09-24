@@ -356,12 +356,17 @@ runner holds their advisory lock. Each run counts its outcome in
 
 Alert on `blocked`, `forbidden` and `failed`; while upkeep is stopped, usage that arrives after the
 last partition lands in `usage_events_default`. The job runs at least a year before partitions run
-out, so there is time to act:
+out, so there is time to act.
+
+`quotum partitions status` lists the monthly partitions and how far ahead they reach. It exits `2`
+when they end less than 12 months ahead (or `--months <n>`, at most 120) or when
+`usage_events_default` holds rows. `quotum partitions ensure` runs the same upkeep on demand until
+the partitions reach that horizon and lists what it created. It exits `1` and names the reason when
+it stops early with `locked`, `lock_timeout`, `blocked` or `forbidden`. Both read `POSTGRES_URI`.
 
 - `forbidden`: run the service with the role that owns the schema, as the documented single
-  `POSTGRES_URI` does, or set `BILLING_USAGE_PARTITION_UPKEEP=false` and have the owner create each
-  missing month with `CREATE TABLE usage_events_YYYY_MM PARTITION OF usage_events FOR VALUES FROM
-  ('<last upper bound>') TO ('<next UTC month>')`.
+  `POSTGRES_URI` does, or set `BILLING_USAGE_PARTITION_UPKEEP=false` and have the owner run
+  `quotum partitions ensure` with its own `POSTGRES_URI`, for example from a monthly job.
 - `blocked`: rows usually reach the default partition through a data-only restore of usage older
   than the baseline's first partition. Raw-usage retention deletes them after
   `raw_usage_retention_days`, and upkeep resumes by itself once the default partition is empty.
