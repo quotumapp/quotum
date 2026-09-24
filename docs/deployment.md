@@ -172,8 +172,22 @@ effect without restarts, and one customer's setup never affects global readiness
 
 The `platform:bootstrap` manifest used in the [quickstart](quickstart.md) remains available as an
 operator fixture for development and internal environments; it is not a sign-up prerequisite. The
-bootstrap is empty-or-exact and idempotent: it refuses undeclared rows or topology drift, and
-`--check` exits nonzero until both the topology and every declared credential exist.
+bootstrap is declarative, additive and idempotent:
+
+- It creates the declared organizations, logical projects and project instances that do not exist
+  yet, so a later run can add an environment, a project or an organization.
+- Every row already in the database must be declared with the same name, project, environment and
+  lifecycle status. Any other difference, including a row the manifest omits, is refused before
+  anything is written.
+- It never updates or deletes a row. It never adds rows or credentials to an organization that has
+  members (one onboarded through the merchant application) or is not active, and it does not apply
+  the organization's production limit, which only gates merchant activation.
+- It issues each declared credential once, into the `--credentials-out` file, so every run that
+  issues one needs a new path.
+
+`--check` prints the plan (`organizationsToCreate`, `logicalProjectsToCreate`,
+`projectInstancesToCreate`, `credentialsToIssue`, `readOnlyCredentialsToIssue`) and exits `2` while
+`--apply` has work to do, `0` once everything declared exists, and `1` when it refuses.
 
 ## Merchant proxy service principal
 

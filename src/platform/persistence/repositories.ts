@@ -7,6 +7,12 @@ export interface PlatformOrganizationRecord {
 	name: string;
 }
 
+export interface PlatformOrganizationListing extends PlatformOrganizationRecord {
+	status: "active" | "suspended" | "removed";
+	/** Whether any principal ever joined. Merchant onboarding always adds the organization's owner. */
+	hasMembers: boolean;
+}
+
 export interface PlatformLogicalProjectRecord {
 	id: string;
 	organizationId: string;
@@ -24,20 +30,37 @@ export interface PlatformProjectCredentialRecord {
 export class PlatformOrganizationRepository {
 	constructor(private readonly executor: PlatformQueryExecutor) {}
 
-	async list(): Promise<readonly PlatformOrganizationRecord[]> {
+	async list(): Promise<readonly PlatformOrganizationListing[]> {
 		const rows = await this.executor.query<{
 			id: string;
 			slug: string;
 			name: string;
+			status: PlatformOrganizationListing["status"];
+			has_members: boolean;
 		}>({
 			text: `
-				SELECT id, slug, name
-				FROM platform_organizations
-				ORDER BY slug
+				SELECT
+					o.id,
+					o.slug,
+					o.name,
+					o.status,
+					EXISTS (
+						SELECT 1
+						FROM platform_memberships m
+						WHERE m.organization_id = o.id
+					) AS has_members
+				FROM platform_organizations o
+				ORDER BY o.slug
 			`,
 			values: [],
 		});
-		return rows;
+		return rows.map((row) => ({
+			id: row.id,
+			slug: row.slug,
+			name: row.name,
+			status: row.status,
+			hasMembers: row.has_members,
+		}));
 	}
 
 	async create(input: { slug: string; name: string }): Promise<PlatformOrganizationRecord> {

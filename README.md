@@ -58,7 +58,7 @@ customer integrations and production activation have separate checks.
 | Generate / check / lint HTTP artifacts | `bun run openapi:generate`, `bun run openapi:check`, `bun run openapi:lint` |
 | Operator CLI (also on the image's `PATH` as `quotum`) | `bun run quotum help` |
 | Apply / inspect migrations | `bun run migrate`, `bun run migrate:status` |
-| Optional exact-topology bootstrap | `bun run platform:bootstrap -- --check` or `--apply --credentials-out <new-file>` |
+| Optional declarative topology bootstrap | `bun run platform:bootstrap -- --check` or `--apply --credentials-out <new-file>` |
 | Development catalog import | `bun run catalog:provision` |
 | Catalog automation | `bun run catalog status`, `bun run catalog diff <file>`, `bun run catalog push <file>` |
 | Read-only MCP server (stdio, read-only or sandbox key) | `bun run mcp` |

@@ -25,7 +25,15 @@ class RecordingExecutor implements PlatformQueryExecutor {
 describe("platform schema-neutral repositories", () => {
 	it("lists and creates organizations with bound values", async () => {
 		const executor = new RecordingExecutor([
-			[{ id: "organization-id", slug: "voysee", name: "Voysee" }],
+			[
+				{
+					id: "organization-id",
+					slug: "voysee",
+					name: "Voysee",
+					status: "active",
+					has_members: false,
+				},
+			],
 			[{ id: "created-id", slug: "wiseley", name: "Wiseley" }],
 			[{ id: "other-id" }],
 			[],
@@ -34,14 +42,21 @@ describe("platform schema-neutral repositories", () => {
 		const repository = new PlatformOrganizationRepository(executor);
 
 		await expect(repository.list()).resolves.toEqual([
-			{ id: "organization-id", slug: "voysee", name: "Voysee" },
+			{
+				id: "organization-id",
+				slug: "voysee",
+				name: "Voysee",
+				status: "active",
+				hasMembers: false,
+			},
 		]);
 		await expect(repository.create({ slug: "wiseley", name: "Wiseley" })).resolves.toEqual({
 			id: "created-id",
 			slug: "wiseley",
 			name: "Wiseley",
 		});
-		expect(executor.calls[0]?.text).toContain("FROM platform_organizations");
+		expect(executor.calls[0]?.text).toContain("FROM platform_organizations o");
+		expect(executor.calls[0]?.text).toContain("WHERE m.organization_id = o.id");
 		expect(executor.calls[1]?.text).toContain("VALUES ($1, $2)");
 		expect(executor.calls[1]?.values).toEqual(["wiseley", "Wiseley"]);
 		await expect(
