@@ -138,8 +138,8 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
 (`src/workers/runtime.ts`) unless a distribution supplies its own scheduler: projection sync,
 store-event replay, subscription reconciliation, metering maintenance, recurring billing, auto
 top-up, promotion maintenance, usage partition upkeep (`src/workers/usage-partition-upkeep.ts`,
-which adds monthly `usage_events` partitions ahead of time), plus Stripe App event processing when
-Apps OAuth is configured.
+which adds monthly `usage_events` partitions ahead of time; `quotum partitions` runs it on demand),
+plus Stripe App event processing when Apps OAuth is configured.
 Workers lease job rows by `worker_id` (`locked_by` columns, refreshed by
 `src/workers/lease-heartbeat.ts`) and retry with `src/workers/backoff.ts`, so a worker must only
 touch rows it holds. Projection sync delivers signed `billing_state_v1` payloads to each project's

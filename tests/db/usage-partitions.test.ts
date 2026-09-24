@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
 	createPartitionStatement,
 	ensureUsageEventPartitions,
+	inspectUsageEventPartitions,
 	nextUsagePartition,
 } from "../../src/db/repository/usage-partitions";
 import { FakeDatabase } from "./repository-fixture";
@@ -213,5 +214,98 @@ describe("ensureUsageEventPartitions", () => {
 		const migrate = readFileSync(join(process.cwd(), "src/migrate.ts"), "utf8");
 		expect(migrate).toContain("const migrationAdvisoryLockNamespace = 760_911;");
 		expect(migrate).toContain("const migrationAdvisoryLockKey = 520_384_001;");
+	});
+});
+
+describe("inspectUsageEventPartitions", () => {
+	it("lists the monthly partitions and compares their end with the horizon, taking no lock", async () => {
+		const database = new FakeDatabase(
+			[
+				[],
+				[
+					{
+						name: "usage_events_2028_08",
+						lower_bound: "2028-08-01 00:00:00+00",
+						upper_bound: "2028-09-01 00:00:00+00",
+					},
+					{
+						name: "usage_events_2028_09",
+						lower_bound: new Date("2028-09-01T00:00:00.000Z"),
+						upper_bound: new Date("2028-10-01T00:00:00.000Z"),
+					},
+				],
+				[{ horizon: "2027-09-24 12:00:00+00" }],
+				[{ occupied: false }],
+			],
+			{ strict: true },
+		);
+		expect(await inspectUsageEventPartitions(database as never)).toEqual({
+			partitions: [
+				{
+					name: "usage_events_2028_08",
+					from: "2028-08-01T00:00:00.000Z",
+					to: "2028-09-01T00:00:00.000Z",
+				},
+				{
+					name: "usage_events_2028_09",
+					from: "2028-09-01T00:00:00.000Z",
+					to: "2028-10-01T00:00:00.000Z",
+				},
+			],
+			coveredUntil: "2028-10-01T00:00:00.000Z",
+			horizon: "2027-09-24T12:00:00.000Z",
+			current: true,
+			defaultPartitionHasRows: false,
+		});
+		expect(database.queries[0]).toContain("set_config('TimeZone', 'UTC', true)");
+		expect(database.queries[1]).toContain("inherits.inhparent = 'usage_events'::regclass");
+		expect(database.queries[1]).toContain("bounds.upper_bound IS NOT NULL");
+		expect(database.params[2]).toEqual([12]);
+		expect(database.queries[3]).toStartWith(
+			"SELECT EXISTS (SELECT 1 FROM usage_events_default) AS occupied",
+		);
+		expect(database.queries.some((query) => query.includes("pg_try_advisory"))).toBe(false);
+		database.assertConsumed();
+	});
+
+	it("reports partitions that end before the horizon and rows in the default partition", async () => {
+		const database = new FakeDatabase(
+			[
+				[],
+				[
+					{
+						name: "usage_events_2027_08",
+						lower_bound: "2027-08-01 00:00:00+00",
+						upper_bound: "2027-09-01 00:00:00+00",
+					},
+				],
+				[{ horizon: "2028-09-24 12:00:00+00" }],
+				[{ occupied: true }],
+			],
+			{ strict: true },
+		);
+		expect(
+			await inspectUsageEventPartitions(database as never, { horizonMonths: 24 }),
+		).toMatchObject({
+			coveredUntil: "2027-09-01T00:00:00.000Z",
+			current: false,
+			defaultPartitionHasRows: true,
+		});
+		expect(database.params[2]).toEqual([24]);
+	});
+
+	it("reports no coverage without monthly partitions and rejects an unbounded horizon", async () => {
+		const database = new FakeDatabase(
+			[[], [], [{ horizon: "2027-09-24 12:00:00+00" }], [{ occupied: false }]],
+			{ strict: true },
+		);
+		expect(await inspectUsageEventPartitions(database as never)).toMatchObject({
+			partitions: [],
+			coveredUntil: null,
+			current: false,
+		});
+		await expect(
+			inspectUsageEventPartitions(database as never, { horizonMonths: 121 }),
+		).rejects.toThrow("horizon");
 	});
 });

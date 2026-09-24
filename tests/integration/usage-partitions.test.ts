@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { sql as drizzleSql } from "drizzle-orm";
+import { createSanitizedProcessEnv } from "../../scripts/lib/sanitized-env";
+import { runPartitionsCommand } from "../../src/composition/cli/partitions";
 import type { TransactionalQueryExecutor } from "../../src/db/repository/types";
 import { ensureUsageEventPartitions } from "../../src/db/repository/usage-partitions";
 import {
@@ -109,5 +111,60 @@ localDescribe("usage partition upkeep", () => {
 			await context.sql.unsafe(`DROP OWNED BY ${role}`);
 			await context.sql.unsafe(`DROP ROLE ${role}`);
 		}
+	});
+
+	// Last: it extends coverage past every horizon the tests above use.
+	it("reports and extends coverage through quotum partitions", async () => {
+		const env = { POSTGRES_URI: process.env.POSTGRES_URI };
+		const partitions = async (...argv: string[]) => {
+			const stdout: string[] = [];
+			const stderr: string[] = [];
+			const code = await runPartitionsCommand(argv, env, {
+				output: { stdout: (value) => stdout.push(value), stderr: (value) => stderr.push(value) },
+			});
+			return { code, json: JSON.parse(stdout.join("\n")), stderr };
+		};
+
+		const status = await partitions("status");
+		expect(status).toMatchObject({
+			code: 0,
+			json: { current: true, defaultPartitionHasRows: false },
+		});
+		const listed = await monthlyPartitions();
+		expect(status.json.partitions).toEqual(
+			listed.map(({ name, from, to }) => ({
+				name,
+				from: from.toISOString(),
+				to: to.toISOString(),
+			})),
+		);
+		expect(status.json.coveredUntil).toBe(listed.at(-1)?.to.toISOString());
+
+		const short = await partitions("status", "--months", "54");
+		expect(short).toMatchObject({ code: 2, json: { horizonMonths: 54, current: false } });
+		const ensured = await partitions("ensure", "--months", "54");
+		expect(ensured).toMatchObject({ code: 0, json: { status: "current", horizonMonths: 54 } });
+		expect(ensured.json.created.length).toBeGreaterThan(0);
+		await expectContiguousUntil(54);
+		expect(await partitions("ensure", "--months", "54")).toMatchObject({
+			code: 0,
+			json: { status: "current", created: [], coveredUntil: ensured.json.coveredUntil },
+		});
+
+		// The same through the executable operators run.
+		const child = Bun.spawn(
+			["bun", "--no-env-file", "src/cli.ts", "partitions", "status", "--months", "54"],
+			{
+				env: { ...createSanitizedProcessEnv(), ...env },
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		const [code, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
+		expect(code).toBe(0);
+		expect(JSON.parse(stdout)).toMatchObject({
+			current: true,
+			coveredUntil: ensured.json.coveredUntil,
+		});
 	});
 });

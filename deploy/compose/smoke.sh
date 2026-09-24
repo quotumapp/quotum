@@ -55,6 +55,8 @@ until curl --silent --fail "http://127.0.0.1:$port/ready" >/dev/null; do
 	sleep 2
 done
 compose exec -T api quotum healthcheck
+# Migrations create partitions two years ahead, so the status check passes on a new database.
+compose exec -T api quotum partitions status >/dev/null
 
 manifest='{"version":1,"organizations":[{"slug":"smoke","name":"Smoke Test","projects":[{"key":"smoke","name":"Smoke Test","instances":[{"key":"smoke-sandbox","environment":"sandbox","lifecycleStatus":"active","issueCredential":true}]}]}]}'
 compose exec -T --env BILLING_PLATFORM_BOOTSTRAP_JSON="$manifest" api \

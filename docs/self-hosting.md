@@ -166,7 +166,8 @@ to send them plain http. Read the
     The old key stops working at once, so update your backends right away.
   - Re-encrypt connections under a new key with `quotum connections rotate-secrets`, following
     [encryption-key rotation](deployment.md#encryption-key-rotation).
-- **Usage partitions.** Upkeep runs automatically. Alert on
+- **Usage partitions.** Upkeep runs automatically, and `quotum partitions status` shows how far
+  ahead the partitions reach. Alert on
   `billing_usage_partition_upkeep_runs_total{result=~"blocked|forbidden|failed"}`, as described in
   [usage partitions](operations.md#usage-partitions).
 - **Metrics.** Scrape `api:3000/metrics` from inside the Compose network. The TLS proxy never

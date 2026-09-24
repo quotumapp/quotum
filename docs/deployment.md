@@ -41,6 +41,7 @@ usage and the settings it reads without running it; an unknown command or unexpe
 | Command | Purpose |
 | --- | --- |
 | `quotum migrate` / `quotum migrate status` | Apply pending migrations, or verify the applied checksums. |
+| `quotum partitions status` / `ensure [--months <n>]` | Report or extend the monthly [usage partitions](operations.md#usage-partitions). |
 | `quotum bootstrap --check` / `--apply [--credentials-out <path>]` | The [platform bootstrap](#first-start). |
 | `quotum catalog provision` | Import the store products in `BILLING_CATALOG_IMPORT_JSON`. |
 | `quotum catalog status` / `diff <file>` / `push <file>` | [Catalog automation](api.md#catalog-publication) over HTTP. |
@@ -84,7 +85,8 @@ docker compose up -d
   - Caddy strips `Cf-Connecting-Ip`, which Quotum would otherwise trust.
   - Caddy answers `/metrics` with `404`. Scrape metrics from the private network instead.
 - **Smoke test.** `smoke.sh` starts a fresh stack and checks it end to end: migrations, readiness,
-  bootstrap and an authenticated `/v1` call. CI runs it against every image it builds.
+  usage partitions, bootstrap and an authenticated `/v1` call. CI runs it against every image it
+  builds.
 
 ## Required variables
 

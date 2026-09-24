@@ -44,6 +44,12 @@ describe("quotum command resolution", () => {
 	it.each([
 		[["migrate"], "migrate.ts", []],
 		[["migrate", "status"], "migrate.ts", ["status"]],
+		[["partitions", "status"], "composition/cli/partitions.ts", ["status"]],
+		[
+			["partitions", "ensure", "--months", "24"],
+			"composition/cli/partitions.ts",
+			["ensure", "--months", "24"],
+		],
 		[["bootstrap", "--check"], "platform-bootstrap.ts", ["--check"]],
 		[["catalog", "provision"], "composition/cli/catalog-provision.ts", []],
 		[["catalog", "push", "catalog.ts"], "composition/cli/catalog.ts", ["push", "catalog.ts"]],
@@ -86,6 +92,8 @@ describe("quotum command resolution", () => {
 		for (const argv of [
 			["migrate", "up"],
 			["migrate", "status", "now"],
+			["partitions"],
+			["partitions", "prune"],
 			["bootstrap"],
 			["bootstrap", "--apply", "--credentials-out"],
 			["bootstrap", "--apply", "--credentials-out", " "],

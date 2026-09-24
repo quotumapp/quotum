@@ -266,6 +266,15 @@ export interface CommandOutput {
 	stderr(value: string): void;
 }
 
+/** A result whose exit code says what it found, with an optional note for the operator. */
+export class CommandReport {
+	constructor(
+		readonly value: unknown,
+		readonly exitCode: 0 | 1 | 2,
+		readonly notice?: string,
+	) {}
+}
+
 /** Prints the result as JSON on stdout and any failure on stderr; returns the exit code. */
 export async function runOperatorCommand(
 	run: () => Promise<unknown>,
@@ -273,8 +282,11 @@ export async function runOperatorCommand(
 	output: CommandOutput = { stdout: writeStdout, stderr: writeStderr },
 ): Promise<number> {
 	try {
-		output.stdout(JSON.stringify(await run(), null, 2));
-		return 0;
+		const result = await run();
+		const report = result instanceof CommandReport ? result : new CommandReport(result, 0);
+		output.stdout(JSON.stringify(report.value, null, 2));
+		if (report.notice !== undefined) output.stderr(report.notice);
+		return report.exitCode;
 	} catch (error) {
 		if (error instanceof CliUsageError) {
 			output.stderr(`${error.message} Run \`${help}\` for usage.`);
