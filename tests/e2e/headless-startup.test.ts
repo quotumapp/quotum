@@ -16,6 +16,9 @@ e2eDescribe("E2E headless startup", () => {
 				if (/^(MERCHANT_|QUOTUM_EMAIL_|QUOTUM_AUTH_SECRET$|QUOTUM_MCP_)/.test(name))
 					delete env[name];
 			env.QUOTUM_MERCHANT_ENABLED = "false";
+			// Headless operators may approve private projection receivers.
+			env.BILLING_PROJECTION_ALLOWED_NETWORKS = "10.20.0.0/16";
+			env.BILLING_PROJECTION_ALLOW_INSECURE_HTTP = "true";
 			run("bun", ["run", "migrate"], { env });
 			const service = await startBillingService(env, { entrypoint: "src/index.ts" });
 			try {
@@ -38,5 +41,29 @@ e2eDescribe("E2E headless startup", () => {
 		} finally {
 			await container.stop();
 		}
+	}, 60_000);
+
+	it("refuses private projection receivers while the merchant platform is on", async () => {
+		// Composition fails before any connection is opened, so no database is needed.
+		const env = e2eServiceEnv({
+			postgresUri: "postgres://quotum@127.0.0.1:9/unused",
+			overrides: { BILLING_PROJECTION_ALLOWED_NETWORKS: "10.20.0.0/16" },
+		});
+		delete env.BILLING_TEST_CONNECTIONS_JSON;
+		const proc = Bun.spawn(["bun", "src/index.ts"], { env, stdout: "pipe", stderr: "pipe" });
+		const exited = await Promise.race([
+			proc.exited,
+			Bun.sleep(30_000).then(() => {
+				proc.kill();
+				return "timeout" as const;
+			}),
+		]);
+		expect(exited).not.toBe(0);
+		expect(exited).not.toBe("timeout");
+		// The runtime reports the refusal through its fatal-error log line.
+		const output = `${await new Response(proc.stdout).text()}${await new Response(proc.stderr).text()}`;
+		expect(output).toContain(
+			"BILLING_PROJECTION_ALLOWED_NETWORKS and BILLING_PROJECTION_ALLOW_INSECURE_HTTP require QUOTUM_MERCHANT_ENABLED=false",
+		);
 	}, 60_000);
 });

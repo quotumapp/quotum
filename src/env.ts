@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 import { z } from "zod";
 import { type BillingLogLevel, billingLogLevelSchema } from "./observability/log-level";
+import { type DestinationPolicy, parseAllowedNetworks } from "./shared/safe-http";
 
 export type AppleEnvironmentName = "sandbox" | "production";
 export type BillingRuntimeEnvironment = "development" | "test" | "production";
@@ -88,6 +89,11 @@ export interface BillingEnv {
 	usagePartitionUpkeep?: boolean;
 	rateLimit: BillingRateLimitEnv;
 	sentry: SentryEnv;
+	/**
+	 * Operator-approved private networks for projection receivers, present only when configured.
+	 * Composition accepts it only for a headless deployment.
+	 */
+	projectionReceivers?: DestinationPolicy;
 }
 
 const envSchema = z.object({
@@ -123,6 +129,8 @@ const envSchema = z.object({
 	BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS: positiveIntegerString(
 		"BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS",
 	).default("60000"),
+	BILLING_PROJECTION_ALLOWED_NETWORKS: optionalString(),
+	BILLING_PROJECTION_ALLOW_INSECURE_HTTP: z.enum(["true", "false"]).default("false"),
 	BILLING_USAGE_PARTITION_UPKEEP: z.enum(["true", "false"]).default("true"),
 	BILLING_RATE_LIMIT_WINDOW_MS: positiveIntegerString("BILLING_RATE_LIMIT_WINDOW_MS").default(
 		"60000",
@@ -184,6 +192,10 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 	if (parsed.BILLING_ENV === "production") {
 		assertProductionOperatorApiKey(operatorApiKey);
 	}
+	const projectionReceivers = parseProjectionReceivers(
+		parsed.BILLING_PROJECTION_ALLOWED_NETWORKS,
+		parsed.BILLING_PROJECTION_ALLOW_INSECURE_HTTP === "true",
+	);
 
 	return {
 		logLevel: parsed.BILLING_LOG_LEVEL,
@@ -230,7 +242,26 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 			trustProxyHeaders: parsed.BILLING_TRUST_PROXY_HEADERS === "true",
 		},
 		sentry,
+		...(projectionReceivers === undefined ? {} : { projectionReceivers }),
 	};
+}
+
+function parseProjectionReceivers(
+	networks: string | undefined,
+	allowInsecureHttp: boolean,
+): DestinationPolicy | undefined {
+	let allowedNetworks: string[];
+	try {
+		allowedNetworks = networks === undefined ? [] : parseAllowedNetworks(networks);
+	} catch (error) {
+		throw new Error(`BILLING_PROJECTION_ALLOWED_NETWORKS: ${(error as Error).message}`);
+	}
+	if (allowedNetworks.length > 0) return { allowedNetworks, allowInsecureHttp };
+	if (allowInsecureHttp)
+		throw new Error(
+			"BILLING_PROJECTION_ALLOW_INSECURE_HTTP=true requires BILLING_PROJECTION_ALLOWED_NETWORKS",
+		);
+	return undefined;
 }
 
 function assertProductionOperatorApiKey(operatorApiKey: string | null): void {

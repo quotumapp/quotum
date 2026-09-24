@@ -14,6 +14,7 @@ import {
 	type MerchantRuntimeOptions,
 } from "./composition/merchant-runtime";
 import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
+import { projectionDestinationPolicy } from "./composition/projection-destinations";
 import {
 	createRuntimeLifecycle,
 	type QuotumRuntimeScheduler,
@@ -39,7 +40,7 @@ import {
 } from "./observability/sentry";
 import { BillingAdminOperations } from "./operations/admin";
 import { loadOptionalMerchantConfig, type MerchantConfig } from "./platform/config";
-import { ProjectionHttpClient } from "./projections/http-client";
+import { createProjectionFetch, ProjectionHttpClient } from "./projections/http-client";
 import type { ApiProjectProjectionFetch } from "./projections/http-types";
 import type { RuntimeConnectionResolver } from "./projects/connections";
 import type { ProjectInstanceContextResolver } from "./projects/context";
@@ -101,8 +102,10 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const connectionRepository = createConnectionRepository(persistence);
 	const connections =
 		dependencies.connections ?? createRuntimeConnectionResolver(connectionRepository, persistence);
+	// Checked even when a fetch is injected, so a merchant runtime never starts with private receivers.
+	const projectionPolicy = projectionDestinationPolicy(env, merchantConfig !== null);
 	const projectionDelivery = new ProjectionHttpClient({
-		fetch: dependencies.projectionFetch,
+		fetch: dependencies.projectionFetch ?? createProjectionFetch({ policy: projectionPolicy }),
 		async resolveProject(key) {
 			const lookup = await projectContextResolver.resolveInstanceKey(key);
 			if (lookup.kind !== "resolved") return null;

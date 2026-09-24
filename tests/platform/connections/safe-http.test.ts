@@ -1,8 +1,14 @@
 import { expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
-import type { IncomingMessage } from "node:http";
+import type { request as httpRequest, IncomingMessage } from "node:http";
 import type { request as httpsRequest } from "node:https";
-import { isPublicAddress, publicHttpsPost } from "../../../src/shared/safe-http";
+import {
+	type DestinationPolicy,
+	isPublicAddress,
+	parseAllowedNetworks,
+	postToDestination,
+	publicHttpsPost,
+} from "../../../src/shared/safe-http";
 
 it("denies private, metadata, mapped, reserved and non-global addresses", () => {
 	for (const address of [
@@ -257,4 +263,189 @@ it("rejects oversized responses, request errors, and timeouts", async () => {
 			},
 		),
 	).rejects.toThrow("Receiver request failed");
+});
+
+it("approves only private networks for receivers", () => {
+	expect(
+		parseAllowedNetworks(
+			" 10.20.0.0/16, 192.168.1.10 ,172.16.0.0/12,100.64.0.0/10, fd12:3456::/48, ",
+		),
+	).toEqual([
+		"10.20.0.0/16",
+		"192.168.1.10/32",
+		"172.16.0.0/12",
+		"100.64.0.0/10",
+		"fd12:3456::/48",
+	]);
+	for (const entry of [
+		"127.0.0.1",
+		"::1",
+		"169.254.169.254",
+		"fe80::1",
+		"fe80::1%eth0",
+		"::ffff:10.0.0.1",
+		"64:ff9b::a00:1",
+		"8.8.8.8",
+		"0.0.0.0/0",
+		"::/0",
+		"10.0.0.0/7",
+		"172.16.0.0/11",
+		"fc00::/6",
+		"10.0.0.0/33",
+		"10.0.0.0/8/8",
+		"10.0.0.0/x",
+		"receiver.internal",
+	])
+		expect(() => parseAllowedNetworks(entry)).toThrow(
+			`${entry} is not a private network receivers may use`,
+		);
+});
+
+/** A request double that answers `status` and reports what it was asked to send. */
+function answering(status: number, sent: Array<{ url: string; pinned: string }>) {
+	return ((
+		url: URL,
+		options: Parameters<typeof httpsRequest>[1],
+		onResponse?: (res: IncomingMessage) => void,
+	) => {
+		const req = new EventEmitter() as EventEmitter & {
+			end: () => void;
+			destroy: (error?: Error) => void;
+		};
+		req.destroy = (error) => {
+			req.emit("error", error ?? new Error("destroyed"));
+		};
+		req.end = () => {
+			options?.lookup?.(url.hostname, {}, (_error, address) => {
+				sent.push({ url: url.toString(), pinned: String(address) });
+			});
+			const res = new EventEmitter() as EventEmitter & { statusCode: number; destroy: () => void };
+			res.statusCode = status;
+			res.destroy = () => undefined;
+			onResponse?.(res as IncomingMessage);
+			res.emit("end");
+		};
+		return req;
+	}) as unknown as typeof httpsRequest & typeof httpRequest;
+}
+
+const refuse = (() => {
+	throw new Error("request should not run");
+}) as unknown as typeof httpsRequest & typeof httpRequest;
+
+it("reaches approved private networks over HTTPS and keeps every other address out", async () => {
+	const policy: DestinationPolicy = { allowedNetworks: ["10.20.0.0/16"], allowInsecureHttp: false };
+	const sent: Array<{ url: string; pinned: string }> = [];
+	await expect(
+		postToDestination(
+			"https://receiver.internal/hook",
+			"body",
+			{},
+			{
+				policy,
+				lookup: async () => [{ address: "10.20.1.5", family: 4 }],
+				request: answering(200, sent),
+				httpRequest: refuse,
+			},
+		),
+	).resolves.toEqual({ status: 200, body: "" });
+	expect(sent).toEqual([{ url: "https://receiver.internal/hook", pinned: "10.20.1.5" }]);
+	// Public addresses stay reachable; unapproved private, loopback, metadata and IPv4-mapped forms
+	// of an approved network do not.
+	await expect(
+		postToDestination(
+			"https://example.com",
+			"body",
+			{},
+			{
+				policy,
+				lookup: async () => [{ address: "1.1.1.1", family: 4 }],
+				request: answering(200, sent),
+			},
+		),
+	).resolves.toEqual({ status: 200, body: "" });
+	for (const [address, family] of [
+		["10.30.0.1", 4],
+		["127.0.0.1", 4],
+		["169.254.169.254", 4],
+		["::ffff:10.20.0.1", 6],
+	] as const)
+		await expect(
+			postToDestination(
+				"https://receiver.internal",
+				"body",
+				{},
+				{ policy, lookup: async () => [{ address, family }], request: refuse },
+			),
+		).rejects.toThrow("A public or approved private HTTPS destination is required");
+});
+
+it("sends plain http only when every address is in an approved network", async () => {
+	const policy: DestinationPolicy = { allowedNetworks: ["10.20.0.0/16"], allowInsecureHttp: true };
+	const sent: Array<{ url: string; pinned: string }> = [];
+	await expect(
+		postToDestination(
+			"http://receiver.internal:8080/hook",
+			"body",
+			{},
+			{
+				policy,
+				lookup: async () => [{ address: "10.20.0.9", family: 4 }],
+				request: refuse,
+				httpRequest: answering(204, sent),
+			},
+		),
+	).resolves.toEqual({ status: 204, body: "" });
+	expect(sent).toEqual([{ url: "http://receiver.internal:8080/hook", pinned: "10.20.0.9" }]);
+	for (const addresses of [
+		[{ address: "1.1.1.1", family: 4 }],
+		[
+			{ address: "10.20.0.9", family: 4 },
+			{ address: "1.1.1.1", family: 4 },
+		],
+		[{ address: "10.30.0.1", family: 4 }],
+	])
+		await expect(
+			postToDestination(
+				"http://receiver.internal",
+				"body",
+				{},
+				{ policy, lookup: async () => addresses, request: refuse, httpRequest: refuse },
+			),
+		).rejects.toThrow("An approved private destination is required for http");
+});
+
+it("refuses http unless the policy allows it, and never trusts an unvalidated policy", async () => {
+	let lookups = 0;
+	const lookup = async () => {
+		lookups += 1;
+		return [{ address: "10.20.0.9", family: 4 }];
+	};
+	await expect(
+		postToDestination(
+			"http://receiver.internal",
+			"body",
+			{},
+			{
+				policy: { allowedNetworks: ["10.20.0.0/16"], allowInsecureHttp: false },
+				lookup,
+				request: refuse,
+				httpRequest: refuse,
+			},
+		),
+	).rejects.toThrow("A public HTTPS URL is required");
+	await expect(
+		postToDestination(
+			"http://receiver.internal",
+			"body",
+			{},
+			{
+				policy: { allowedNetworks: ["127.0.0.0/8"], allowInsecureHttp: true },
+				lookup,
+				request: refuse,
+				httpRequest: refuse,
+			},
+		),
+	).rejects.toThrow("127.0.0.0/8 is not a private network receivers may use");
+	expect(lookups).toBe(0);
 });

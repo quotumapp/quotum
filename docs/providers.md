@@ -268,6 +268,31 @@ current. Set
 `usageDelivery` to `off` on the projection connection when your backend takes balances from the
 consume response and only needs purchase and provider events.
 
+### Private receivers (headless only)
+
+Receivers must be public HTTPS by default. Quotum resolves the receiver's hostname, refuses the
+delivery unless every resolved address is public, and pins the request to the address it checked,
+so a later lookup cannot redirect it. Loopback, link-local and cloud metadata addresses, private
+ranges and IPv4-mapped or NAT64 forms of them are refused.
+
+A [headless](deployment.md#headless-mode) deployment can run its backends on a private network
+next to Quotum. `BILLING_PROJECTION_ALLOWED_NETWORKS` approves private networks for receivers,
+such as `10.20.0.0/16` or `fd00::/8`. Each network must lie inside `10.0.0.0/8`, `100.64.0.0/10`,
+`172.16.0.0/12`, `192.168.0.0/16` or `fc00::/7`. Loopback, link-local and metadata addresses can
+never be approved, and an IPv4-mapped address never matches an approved IPv4 network.
+`BILLING_PROJECTION_ALLOW_INSECURE_HTTP=true` also accepts `http://` receiver URLs, but only when
+every resolved address is in an approved network. Public receivers always need HTTPS.
+
+- **Server-side requests.** Quotum can then send requests into the approved networks. Anyone who
+  can set a projection URL can direct them there, including through a hostname that resolves into
+  those networks. Approve the narrowest networks that hold your receivers.
+- **Cleartext.** Over `http://`, the projection secret travels as a bearer token and payloads
+  travel unencrypted. Use it only on a network segment you trust, such as a private container
+  network.
+- **Headless only.** Both settings are for headless deployments. The service refuses to start
+  with either of them while the merchant platform is on (`QUOTUM_MERCHANT_ENABLED` is not
+  `false`), because merchants' receivers must stay on public HTTPS.
+
 ## Adding a provider
 
 1. Complete a provider assessment from the template in the Quotum documentation repository. It

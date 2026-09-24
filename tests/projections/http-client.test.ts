@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
+import { EventEmitter } from "node:events";
+import type { request as httpRequest, IncomingMessage } from "node:http";
 import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
+import { createProjectionFetch } from "../../src/projections/http-client";
 import { verifyProjectionSignature } from "../../src/projections/http-types";
 import type { ProjectConnectionFixture as ProjectRuntimeConfig } from "../../src/testing/connection-fixtures";
 import { FixtureProjectionHttpClient as ProjectionHttpClient } from "../../src/testing/connection-fixtures";
@@ -257,3 +260,54 @@ function createExpectedProjectionSignature(
 		.digest("hex");
 	return `sha256=${digest}`;
 }
+
+describe("createProjectionFetch", () => {
+	it("delivers over plain http only to a receiver the policy approves", async () => {
+		const sent: Array<{ url: string; address: string; body: string }> = [];
+		const httpReceiver = ((
+			url: URL,
+			options: {
+				lookup?: (host: string, opts: object, done: (e: null, a: string) => void) => void;
+			},
+			onResponse?: (res: IncomingMessage) => void,
+		) => {
+			const req = new EventEmitter() as EventEmitter & {
+				end: (payload: string) => void;
+				destroy: () => void;
+			};
+			req.destroy = () => undefined;
+			req.end = (payload) => {
+				options.lookup?.(url.hostname, {}, (_error, address) => {
+					sent.push({ url: url.toString(), address, body: payload });
+				});
+				const res = new EventEmitter() as EventEmitter & {
+					statusCode: number;
+					destroy: () => void;
+				};
+				res.statusCode = 200;
+				res.destroy = () => undefined;
+				onResponse?.(res as IncomingMessage);
+				res.emit("data", Buffer.from('{"success":true}'));
+				res.emit("end");
+			};
+			return req;
+		}) as unknown as typeof httpRequest;
+		const lookup = async () => [{ address: "10.20.0.9", family: 4 }];
+		const url = "http://receiver.internal:8080/internal/billing/projections";
+
+		const approved = createProjectionFetch({
+			policy: { allowedNetworks: ["10.20.0.0/16"], allowInsecureHttp: true },
+			lookup,
+			httpRequest: httpReceiver,
+		});
+		const response = await approved(url, { method: "POST", body: "{}" });
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ success: true });
+		expect(sent).toEqual([{ url, address: "10.20.0.9", body: "{}" }]);
+
+		await expect(
+			createProjectionFetch({ lookup, httpRequest: httpReceiver })(url, { body: "{}" }),
+		).rejects.toThrow("A public HTTPS URL is required");
+		expect(sent).toHaveLength(1);
+	});
+});
