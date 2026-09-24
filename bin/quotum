@@ -1,0 +1,3 @@
+#!/bin/sh
+# Operator commands (`quotum help`). Settings come from the environment, never a .env file.
+exec bun --no-env-file "$(dirname "$0")/../src/cli.ts" "$@"

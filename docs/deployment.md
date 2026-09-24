@@ -5,8 +5,8 @@
 ## Container image
 
 The [Dockerfile](../Dockerfile) builds a multi-stage image on `oven/bun:1.4.2` containing `src/`,
-`migrations/`, and production dependencies. It listens on `PORT` (default `3000`) and runs
-`bun run src/index.ts`.
+`migrations/`, `contracts/`, the `quotum` operator CLI, and production dependencies. It listens on
+`PORT` (default `3000`) and runs `bun run src/index.ts`.
 
 Released images are published to `ghcr.io/quotumapp/quotum` for `linux/amd64` and `linux/arm64`.
 Each [GitHub Release](https://github.com/quotumapp/quotum/releases) records the image digest in its
@@ -25,8 +25,36 @@ docker run --rm --env-file .env -p 3000:3000 quotum-api:local
 Run migrations from the same image before starting a new version:
 
 ```sh
-docker run --rm --env-file .env quotum-api:local bun run migrate
+docker run --rm --env-file .env quotum-api:local quotum migrate
 ```
+
+### Operator CLI
+
+Operator commands ship in the image as `quotum` on its `PATH`. Run them in a one-off container
+(`docker run --rm --env-file .env <image> quotum <command>`) or in a running one (`docker exec`). In
+a source checkout, `bun run quotum <command>` is equivalent, and the existing package scripts keep
+working. Each command runs as its own process, reads its settings from the environment only (never a
+`.env` file), and exits with that command's status. `quotum <command> --help` prints a command's
+usage and the settings it reads without running it; an unknown command or unexpected arguments exit
+`64` before anything runs.
+
+| Command | Purpose |
+| --- | --- |
+| `quotum migrate` / `quotum migrate status` | Apply pending migrations, or verify the applied checksums. |
+| `quotum bootstrap --check` / `--apply [--credentials-out <path>]` | The [platform bootstrap](#first-start). |
+| `quotum catalog provision` | Import the store products in `BILLING_CATALOG_IMPORT_JSON`. |
+| `quotum catalog status` / `diff <file>` / `push <file>` | [Catalog automation](api.md#catalog-publication) over HTTP. |
+| `quotum connections rotate-secrets` | [Encryption-key rotation](#encryption-key-rotation). |
+| `quotum merchant service-principal <name>` | The [merchant proxy service principal](#merchant-proxy-service-principal). |
+| `quotum mcp` | The read-only [stdio MCP server](mcp.md#run-over-stdio). |
+| `quotum healthcheck` | Exit `0` only when this instance's `/ready` answers `200`, for container health checks. |
+| `quotum init` | Print a newly generated `QUOTUM_SECRETS_KEY_*`, `QUOTUM_AUTH_SECRET` and `BILLING_OPERATOR_API_KEY`. |
+| `quotum version`, `quotum help` | Build version and command list. |
+
+`quotum init` prints secrets on purpose: redirect it to a file only you can read
+(`umask 077; quotum init > quotum.env`) and move the values to your secret manager. The image's
+working directory is not writable by its `bun` user, so point `--credentials-out` at a mounted
+directory that user can write, or at `/tmp` in the running container, and copy the file out.
 
 ## Required variables
 
@@ -38,7 +66,7 @@ required value is missing or unsafe for the selected environment.
 | `POSTGRES_URI` | Direct Postgres connection string. Neon-compatible Postgres works. |
 | `BILLING_ENV` | `development`, `test`, or `production` (default). Production enforces HTTPS projection and Stripe URLs and requires the operator key; the merchant settings below are required in every environment. |
 | `BILLING_OPERATOR_API_KEY` | Operator credential for catalog publication, replay, reconciliation, and admin metrics. At least 16 characters, separate from project credentials. Required in production. |
-| `QUOTUM_SECRETS_KEY_ID`, `QUOTUM_SECRETS_KEY_BASE64` | Identifier and base64 32-byte AES key that encrypts stored provider and projection connections. Keep the key outside Postgres and its backups. Rotate with `bun run connections:rotate-secrets`. |
+| `QUOTUM_SECRETS_KEY_ID`, `QUOTUM_SECRETS_KEY_BASE64` | Identifier and base64 32-byte AES key that encrypts stored provider and projection connections. Keep the key outside Postgres and its backups. Rotate with `quotum connections rotate-secrets`. |
 | `MERCHANT_ORIGIN`, `MERCHANT_PUBLIC_URL` | Merchant origin and public/legal-page URL. Both must be explicitly set to nonblank values in production, including when `BILLING_ENV` is unset. Development and test defaults are `https://app.quotum.dev` and `https://quotum.dev`. The merchant origin must be exact HTTPS outside tests. |
 | `QUOTUM_AUTH_SECRET` | Operator-owned secret for Quotum sessions and token HMACs, at least 32 characters. Never reuse another secret. |
 | `MERCHANT_TERMS_VERSION`, `MERCHANT_PRIVACY_VERSION` | Approved legal document versions. Signup outside test mode refuses draft versions. |
@@ -109,7 +137,7 @@ injected environment, and retain the previous configuration securely for rollbac
 image. If the deployment uses a shared mutable Secret, coordinate the switch so old instances
 cannot restart against new-only settings. This change needs no database migration.
 
-
+## First start
 
 A fresh deployment needs no customer bootstrap. Start the service, then let merchants onboard
 through the merchant application and configure providers and projections under **Integrations**.
@@ -129,7 +157,7 @@ Browsers never receive billing credentials. A separate merchant proxy forwards a
 principal. Create it once after migrations:
 
 ```sh
-bun run scripts/merchant-service-principal.ts <worker-name>
+quotum merchant service-principal <worker-name>
 ```
 
 Configure merchant authentication before running the command. The token is printed exactly once;
@@ -233,7 +261,7 @@ scrubbed.
 
 Deploy a new active key while retaining the old key in the paired
 `QUOTUM_SECRETS_PREVIOUS_KEY_ID`/`QUOTUM_SECRETS_PREVIOUS_KEY_BASE64` settings. Run
-`bun run connections:rotate-secrets` against the target database and verify every envelope now uses
+`quotum connections rotate-secrets` against the target database and verify every envelope now uses
 the active key before retiring the previous runtime key. Keep keys needed by retained backups in
 recovery secret storage. Rotation is restartable; missing or wrong keys fail closed.
 

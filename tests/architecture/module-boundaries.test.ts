@@ -97,10 +97,8 @@ describe("module boundaries", () => {
 				"src/composition/wire-platform.ts",
 				'import "../billing/example"; import "../platform/example"; export {};',
 			),
-			source(
-				"scripts/provision-catalog.ts",
-				'import "../src/composition/wire-platform"; export {};',
-			),
+			source("scripts/openapi.ts", 'import "../src/composition/wire-platform"; export {};'),
+			source("src/cli.ts", 'import "./composition/wire-platform"; export {};'),
 			source("src/platform-bootstrap.ts", 'import "./composition/wire-platform"; export {};'),
 			source("tests/example.test.ts", 'import "../src/app"; export {};'),
 		]);
@@ -277,7 +275,7 @@ describe("module boundaries", () => {
 		expect(
 			await violationCodes([
 				source("src/platform/example.ts", "void import(moduleName);"),
-				source("scripts/billing-catalog.ts", "void import(catalogFileUrl);"),
+				source("src/composition/cli/catalog.ts", "void import(catalogFileUrl);"),
 			]),
 		).toEqual(["NON_LITERAL_MODULE_REFERENCE"]);
 	});

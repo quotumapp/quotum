@@ -123,7 +123,7 @@ describe("connection secret rotation", () => {
 			QUOTUM_SECRETS_PREVIOUS_KEY_ID: "b",
 			QUOTUM_SECRETS_PREVIOUS_KEY_BASE64: key9.toString("base64"),
 		};
-		const first = Bun.spawn(["bun", "scripts/rotate-connection-secrets.ts"], {
+		const first = Bun.spawn(["bun", "src/cli.ts", "connections", "rotate-secrets"], {
 			env,
 			stdout: "pipe",
 			stderr: "pipe",
@@ -131,7 +131,7 @@ describe("connection secret rotation", () => {
 		const firstStdout = await new Response(first.stdout).text();
 		expect(await first.exited).toBe(0);
 		expect(firstStdout).toContain("Re-encrypted 3 connection secrets with key c.");
-		const second = Bun.spawn(["bun", "scripts/rotate-connection-secrets.ts"], {
+		const second = Bun.spawn(["bun", "src/cli.ts", "connections", "rotate-secrets"], {
 			env,
 			stdout: "pipe",
 			stderr: "pipe",

@@ -54,6 +54,7 @@ customer integrations and production activation have separate checks.
 | Service-process E2E | `bun run test:e2e` |
 | Merchant database integration | `bun run test:merchant:integration` |
 | Generate / check / lint HTTP artifacts | `bun run openapi:generate`, `bun run openapi:check`, `bun run openapi:lint` |
+| Operator CLI (also on the image's `PATH` as `quotum`) | `bun run quotum help` |
 | Apply / inspect migrations | `bun run migrate`, `bun run migrate:status` |
 | Optional exact-topology bootstrap | `bun run platform:bootstrap -- --check` or `--apply --credentials-out <new-file>` |
 | Development catalog import | `bun run catalog:provision` |

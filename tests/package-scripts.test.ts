@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 describe("package scripts", () => {
@@ -17,6 +17,15 @@ describe("package scripts", () => {
 		expect(packageJson.scripts?.test).toBe("bun test tests");
 		expect(packageJson.scripts?.migrate).toBe("bun run src/migrate.ts");
 		expect(packageJson.scripts?.["migrate:status"]).toBe("bun run src/migrate.ts status");
+		// Operator commands take their settings from the environment only, never a checkout's .env.
+		expect(packageJson.scripts?.quotum).toBe("bun --no-env-file src/cli.ts");
+		expect(packageJson.scripts?.catalog).toBe("bun run src/composition/cli/catalog.ts");
+		expect(packageJson.scripts?.["catalog:provision"]).toBe(
+			"bun run src/composition/cli/catalog-provision.ts",
+		);
+		expect(packageJson.scripts?.["connections:rotate-secrets"]).toBe(
+			"bun src/composition/cli/connections-rotate-secrets.ts",
+		);
 		expect(packageJson.scripts?.["test:e2e"]).toBe("bun run scripts/test-e2e.ts");
 		expect(packageJson.scripts?.["test:integration"]).toBe("bun run scripts/test-integration.ts");
 		expect(packageJson.scripts?.["check:boundaries"]).toBe(
@@ -81,6 +90,20 @@ describe("package scripts", () => {
 		// src/mcp reads the generated contract at ../../contracts/v1 relative to itself.
 		expect(dockerfile).toContain(
 			"COPY --from=prerelease --chown=bun /usr/src/app/contracts ./contracts",
+		);
+	});
+
+	it("puts the quotum operator CLI on the image path", () => {
+		const dockerfile = readFileSync(join(process.cwd(), "Dockerfile"), "utf8");
+		const dockerignore = readFileSync(join(process.cwd(), ".dockerignore"), "utf8");
+		const wrapper = join(process.cwd(), "bin/quotum");
+		expect(dockerfile).toContain("COPY --from=prerelease --chown=bun /usr/src/app/bin ./bin");
+		expect(dockerfile).toMatch(/^ENV PATH="\/usr\/src\/app\/bin:\$\{PATH\}"$/m);
+		expect(dockerignore.split("\n")).not.toContain("bin");
+		expect(statSync(wrapper).mode & 0o111).toBe(0o111);
+		// Operator commands take settings from the environment only, like `bun run mcp`.
+		expect(readFileSync(wrapper, "utf8")).toContain(
+			'exec bun --no-env-file "$(dirname "$0")/../src/cli.ts" "$@"',
 		);
 	});
 });

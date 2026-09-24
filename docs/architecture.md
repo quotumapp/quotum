@@ -9,11 +9,11 @@ unclassified or overlapping files and unresolved imports fail the check.
 
 | Owner | Files | May depend on |
 | --- | --- | --- |
-| Billing | `src/admin`, `src/app`, `src/billing`, `src/catalog`, `src/db`, `src/http`, `src/observability`, `src/operations`, `src/projects`, `src/projections`, `src/providers`, `src/sdk`, `src/workers`, `src/env.ts`, `scripts/billing-catalog.ts` | Billing, shared |
+| Billing | `src/admin`, `src/app`, `src/billing`, `src/catalog`, `src/db`, `src/http`, `src/observability`, `src/operations`, `src/projects`, `src/projections`, `src/providers`, `src/sdk`, `src/workers`, `src/env.ts` | Billing, shared |
 | Platform | `src/platform` | Platform, shared |
 | Shared | `src/shared` | Shared |
 | MCP | `src/mcp` | MCP, shared, and `src/sdk` only |
-| Composition | `src/composition`, `src/app.ts`, `src/index.ts`, `src/runtime.ts`, `src/migrate.ts`, `src/platform-bootstrap.ts`, `src/shutdown.ts`, `scripts/openapi.ts`, `scripts/openapi-errors.ts`, `scripts/provision-catalog.ts`, `scripts/merchant-service-principal.ts`, `scripts/rotate-connection-secrets.ts` | Everything |
+| Composition | `src/composition` (including the operator commands in `src/composition/cli`), `src/app.ts`, `src/cli.ts`, `src/index.ts`, `src/runtime.ts`, `src/migrate.ts`, `src/platform-bootstrap.ts`, `src/shutdown.ts`, `scripts/openapi.ts`, `scripts/openapi-errors.ts` | Everything |
 | Test support | `tests`, `integration/merchant`, `src/testing`, scenario runners, release tooling (`scripts/release.ts`), `scripts/check-coverage.ts`, `scripts/check-module-boundaries.ts`, `scripts/projection-receiver.ts`, `scripts/lib` | Everything |
 
 The policy is deny-by-default:

@@ -40,14 +40,14 @@ describe("script output contracts", () => {
 		expect(JSON.parse(result.stderr)).toMatchObject({ level: 50, msg: expect.any(String) });
 	});
 
-	it.each(["scripts/billing-catalog.ts", "scripts/test-load.ts"])(
+	it.each(["src/composition/cli/catalog.ts", "scripts/test-load.ts"])(
 		"keeps %s help as plain stdout",
 		async (script) => {
 			const result = await runScript(script, ["--help"]);
 			expect(result.exitCode).toBe(0);
 			expect(result.stderr).toBe("");
 			expect(result.stdout).toContain(
-				script.includes("billing-catalog") ? "billing-catalog <command>" : "bun run test:load",
+				script.includes("catalog") ? "quotum catalog <command>" : "bun run test:load",
 			);
 			expect(result.stdout).not.toContain('"level":');
 		},

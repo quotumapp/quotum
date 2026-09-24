@@ -35,6 +35,8 @@ COPY --from=prerelease --chown=bun /usr/src/app/migrations ./migrations
 COPY --from=prerelease --chown=bun /usr/src/app/contracts ./contracts
 COPY --from=prerelease --chown=bun /usr/src/app/tsconfig.json .
 COPY --from=prerelease --chown=bun /usr/src/app/package.json .
+# operator commands: `docker run --rm <image> quotum help`
+COPY --from=prerelease --chown=bun /usr/src/app/bin ./bin
 
 # Set environment variables from build args
 ENV BUILD_VERSION=${BUILD_VERSION}
@@ -43,5 +45,6 @@ ENV BUILD_COMMIT=${BUILD_COMMIT}
 # run the app
 USER bun
 ENV PORT=3000
+ENV PATH="/usr/src/app/bin:${PATH}"
 EXPOSE ${PORT}
 CMD [ "bun", "run", "src/index.ts" ]

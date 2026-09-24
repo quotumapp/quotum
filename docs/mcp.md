@@ -86,7 +86,7 @@ The released image carries the server too:
 docker run -i --rm \
   -e QUOTUM_MCP_BASE_URL=https://billing.example.com \
   -e QUOTUM_MCP_API_KEY=sqpk_... \
-  ghcr.io/quotumapp/quotum bun --no-env-file src/mcp/index.ts
+  ghcr.io/quotumapp/quotum quotum mcp
 ```
 
 From a container, `localhost` is the container itself. Reaching a service on the host or in the same
