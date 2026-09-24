@@ -135,8 +135,9 @@ rollback fails closed.
 
 1. Read the target version's [GitHub Release](https://github.com/quotumapp/quotum/releases) and
    the descriptions of the pull requests it lists, starting with **Breaking changes**, and the
-   [schema policy](#schema-and-upgrade-policy). Releases up to 0.10.1 are described in
-   [CHANGELOG.md](../CHANGELOG.md). Establish database compatibility before rollout.
+   [schema policy](#schema-and-upgrade-policy). Releases up to 0.10.1 are described in the
+   [changelog archived at v0.10.1](https://github.com/quotumapp/quotum/blob/v0.10.1/CHANGELOG.md).
+   Establish database compatibility before rollout.
 2. Take a backup.
 3. If the upgrade notes say so, stop usage writers and workers on the old version.
 4. Run `bun run migrate:status` from the target image. Stop if integrity verification fails;
