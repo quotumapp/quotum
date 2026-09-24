@@ -343,3 +343,48 @@ describe("isProductionProjectionUrlSafe", () => {
 		}
 	});
 });
+
+describe("projection receiver networks", () => {
+	it("is absent unless networks are approved", () => {
+		expect(loadEnv(developmentSource).projectionReceivers).toBeUndefined();
+		expect(
+			loadEnv({ ...developmentSource, BILLING_PROJECTION_ALLOWED_NETWORKS: " " })
+				.projectionReceivers,
+		).toBeUndefined();
+		expect(
+			loadEnv({ ...developmentSource, BILLING_PROJECTION_ALLOW_INSECURE_HTTP: "false" })
+				.projectionReceivers,
+		).toBeUndefined();
+	});
+
+	it("parses approved networks and plain http", () => {
+		expect(
+			loadEnv({
+				...developmentSource,
+				BILLING_PROJECTION_ALLOWED_NETWORKS: "10.20.0.0/16, fd00::/8",
+				BILLING_PROJECTION_ALLOW_INSECURE_HTTP: "true",
+			}).projectionReceivers,
+		).toEqual({ allowedNetworks: ["10.20.0.0/16", "fd00::/8"], allowInsecureHttp: true });
+		expect(
+			loadEnv({ ...developmentSource, BILLING_PROJECTION_ALLOWED_NETWORKS: "192.168.1.10" })
+				.projectionReceivers,
+		).toEqual({ allowedNetworks: ["192.168.1.10/32"], allowInsecureHttp: false });
+	});
+
+	it("rejects public, loopback and metadata networks, and http without networks", () => {
+		for (const network of ["8.8.8.8", "127.0.0.1", "169.254.169.254", "0.0.0.0/0"])
+			expect(() =>
+				loadEnv({ ...developmentSource, BILLING_PROJECTION_ALLOWED_NETWORKS: network }),
+			).toThrow(
+				`BILLING_PROJECTION_ALLOWED_NETWORKS: ${network} is not a private network receivers may use`,
+			);
+		expect(() =>
+			loadEnv({ ...developmentSource, BILLING_PROJECTION_ALLOW_INSECURE_HTTP: "true" }),
+		).toThrow(
+			"BILLING_PROJECTION_ALLOW_INSECURE_HTTP=true requires BILLING_PROJECTION_ALLOWED_NETWORKS",
+		);
+		expect(() =>
+			loadEnv({ ...developmentSource, BILLING_PROJECTION_ALLOW_INSECURE_HTTP: "yes" }),
+		).toThrow();
+	});
+});

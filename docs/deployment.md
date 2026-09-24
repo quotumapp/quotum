@@ -64,7 +64,7 @@ required value is missing or unsafe for the selected environment.
 | Variable | Purpose |
 | --- | --- |
 | `POSTGRES_URI` | Direct Postgres connection string. Neon-compatible Postgres works. |
-| `BILLING_ENV` | `development`, `test`, or `production` (default). Production enforces HTTPS projection and Stripe URLs and requires the operator key; the merchant settings below are required in every environment unless `QUOTUM_MERCHANT_ENABLED=false`. |
+| `BILLING_ENV` | `development`, `test`, or `production` (default). Production requires the operator key. Projection receivers and Stripe return URLs need HTTPS in every environment; only a headless deployment can approve [private receivers](providers.md#private-receivers-headless-only). The merchant settings below are required in every environment unless `QUOTUM_MERCHANT_ENABLED=false`. |
 | `BILLING_OPERATOR_API_KEY` | Operator credential for catalog publication, replay, reconciliation, and admin metrics. At least 16 characters, separate from project credentials. Required in production. |
 | `QUOTUM_SECRETS_KEY_ID`, `QUOTUM_SECRETS_KEY_BASE64` | Identifier and base64 32-byte AES key that encrypts stored provider and projection connections. Keep the key outside Postgres and its backups. Rotate with `quotum connections rotate-secrets`. |
 | `QUOTUM_MERCHANT_ENABLED` | `true` (default) runs the merchant platform. `false` runs [headless](#headless-mode) and makes every setting below optional. |
@@ -257,6 +257,14 @@ Defaults in parentheses.
 - `BILLING_AUTH_MODE=api_key|gateway` (`api_key`). Use `gateway` only when a trusted gateway
   enforces access to non-webhook `/v1/*` routes and sends `x-billing-project-key`; it also requires
   `BILLING_TRUST_GATEWAY_PROJECT_HEADER=true`.
+- `BILLING_PROJECTION_ALLOWED_NETWORKS` (unset). Headless only: comma-separated private networks or
+  addresses, such as `10.20.0.0/16,fd00::/8`, that projection receivers may resolve to besides
+  public addresses. See [private receivers](providers.md#private-receivers-headless-only) for the
+  allowed ranges and the risks. Starting with it while the merchant platform is on is an error.
+- `BILLING_PROJECTION_ALLOW_INSECURE_HTTP=true|false` (`false`). Headless only: also accept
+  `http://` receiver URLs when every resolved address is in an approved network. Requires
+  `BILLING_PROJECTION_ALLOWED_NETWORKS`. The projection secret then crosses that network in
+  cleartext.
 - `BILLING_TRUST_PROXY_HEADERS=true|false` (`false`). When `false`, rate-limit keys ignore
   `cf-connecting-ip` and `x-forwarded-for`. Enable only behind trusted ingress that strips client-supplied
   forwarding headers; the flag itself does not authenticate a proxy.

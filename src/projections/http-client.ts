@@ -5,7 +5,7 @@ import {
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
 import type { RuntimeConnectionConfigs } from "../projects/connections";
-import { type PublicHttpsPostDependencies, publicHttpsPost } from "../shared/safe-http";
+import { type DestinationPostDependencies, postToDestination } from "../shared/safe-http";
 
 type ProjectionConfig = RuntimeConnectionConfigs["projection"];
 
@@ -29,11 +29,12 @@ const defaultProjectionTimeoutMs = 10_000;
 const defaultMaxProjectionResponseBytes = 4096;
 const projectionResponseSchema = z.object({ success: z.literal(true) }).strict();
 
-export function createPublicHttpsProjectionFetch(
-	deps: PublicHttpsPostDependencies = {},
+/** Delivers through `postToDestination`: public HTTPS unless `policy` approves private networks. */
+export function createProjectionFetch(
+	deps: DestinationPostDependencies = {},
 ): ApiProjectProjectionFetch {
 	return async (url, init) => {
-		const result = await publicHttpsPost(
+		const result = await postToDestination(
 			String(url),
 			String(init?.body ?? ""),
 			Object.fromEntries(new Headers(init?.headers).entries()),
@@ -53,7 +54,7 @@ export class ProjectionHttpClient implements ProjectionDelivery {
 
 	constructor({
 		resolveProject,
-		fetch = createPublicHttpsProjectionFetch(),
+		fetch = createProjectionFetch(),
 		now = () => new Date(),
 		timeoutMs = defaultProjectionTimeoutMs,
 		maxResponseBytes = defaultMaxProjectionResponseBytes,

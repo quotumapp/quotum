@@ -13,7 +13,12 @@ import {
 	googlePlayProjectConfigSchema,
 	stripeProjectConfigSchema,
 } from "../projects/config";
-import { publicHttpsPost } from "../shared/safe-http";
+import {
+	type DestinationPolicy,
+	type DestinationPostDependencies,
+	postToDestination,
+	publicDestinationPolicy,
+} from "../shared/safe-http";
 
 const secretFields: Record<ConnectionKind, string[]> = {
 	stripe: ["secretKey", "webhookSecret"],
@@ -28,7 +33,17 @@ const projectionSchema = z
 		usageDelivery: z.enum(["coalesced", "off"]).optional(),
 	})
 	.strict();
-export function createConnectionValidation(): ConnectionValidationPort {
+export interface ConnectionValidationOptions {
+	/** Where projection receivers may be. The merchant platform keeps the public HTTPS default. */
+	destinationPolicy?: DestinationPolicy;
+	/** Overrides the receiver lookup and request, for tests. */
+	destinationDependencies?: Omit<DestinationPostDependencies, "policy">;
+}
+
+export function createConnectionValidation({
+	destinationPolicy = publicDestinationPolicy,
+	destinationDependencies = {},
+}: ConnectionValidationOptions = {}): ConnectionValidationPort {
 	return {
 		normalize(kind, environment, input) {
 			const secrets = secretFields[kind];
@@ -107,7 +122,10 @@ export function createConnectionValidation(): ConnectionValidationPort {
 				} else {
 					parsed = projectionSchema.parse(combined);
 					const url = new URL(String(parsed.projectionUrl));
-					if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash)
+					const scheme =
+						url.protocol === "https:" ||
+						(url.protocol === "http:" && destinationPolicy.allowInsecureHttp);
+					if (!scheme || url.username || url.password || url.search || url.hash)
 						throw new Error("Invalid receiver URL");
 				}
 			} catch {
@@ -136,11 +154,16 @@ export function createConnectionValidation(): ConnectionValidationPort {
 				const secret = input.secrets.projectionSecret;
 				if (!secret)
 					throw new MerchantError("CONNECTION_INVALID", "Generate a receiver secret first.");
-				const response = await publicHttpsPost(url.toString(), body, {
-					authorization: `Bearer ${secret}`,
-					"content-type": "application/json",
-					...createProjectionSignatureHeaders({ secret, body, now: () => new Date() }),
-				});
+				const response = await postToDestination(
+					url.toString(),
+					body,
+					{
+						authorization: `Bearer ${secret}`,
+						"content-type": "application/json",
+						...createProjectionSignatureHeaders({ secret, body, now: () => new Date() }),
+					},
+					{ ...destinationDependencies, policy: destinationPolicy },
+				);
 				let result: unknown;
 				try {
 					result = JSON.parse(response.body);

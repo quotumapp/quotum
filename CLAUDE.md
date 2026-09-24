@@ -143,7 +143,9 @@ Apps OAuth is configured.
 Workers lease job rows by `worker_id` (`locked_by` columns, refreshed by
 `src/workers/lease-heartbeat.ts`) and retry with `src/workers/backoff.ts`, so a worker must only
 touch rows it holds. Projection sync delivers signed `billing_state_v1` payloads to each project's
-configured projection URL via `src/projections/http-client.ts`. Provider credentials and
+configured projection URL via `src/projections/http-client.ts`, through `postToDestination` in
+`src/shared/safe-http.ts`: public HTTPS only, unless a headless deployment approves private
+networks (`src/composition/projection-destinations.ts`). Provider credentials and
 projection secrets are encrypted, database-owned connections resolved per project by
 `RuntimeConnectionResolver`; there is no env-level customer list, and
 `BILLING_PROJECT_RUNTIME_JSON` / `BILLING_PROJECTS_JSON` are rejected on purpose.
