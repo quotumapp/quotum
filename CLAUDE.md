@@ -22,7 +22,9 @@ behavior changes. CodeRabbit reviews pull requests against this file and `AGENTS
   merchant app. `composeRuntimeApp` there routes setup-only ingress (connection and Stripe App
   events) first, then the remote MCP and OAuth endpoints when enabled, `/api/*` to the merchant
   app and everything else to the staff app. `runtime.app.fetch(request, server)` must receive
-  Bun's server so client-IP limits work.
+  Bun's server so client-IP limits work. With `QUOTUM_MERCHANT_ENABLED=false` (headless),
+  `loadOptionalMerchantConfig` returns `null` and `attachHeadlessRuntime` mounts only the ingress
+  and the staff app: no `/api/*`, remote MCP or merchant settings.
 - `/v1/*` is the trusted-backend API (`src/app/*-routes.ts`). The staff app's authentication
   `derive` resolves a project credential (`BILLING_AUTH_MODE=api_key`) or the trusted gateway's
   project header (`gateway`) into `project`, a `ProjectInstanceContext` that every repository call

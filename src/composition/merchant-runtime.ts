@@ -8,7 +8,10 @@ import { createMerchantAuth, type MerchantAuth } from "../platform/auth";
 import { createMerchantBilling } from "../platform/billing";
 import type { MerchantConfig } from "../platform/config";
 import { MerchantStripeOAuth } from "../platform/connections/oauth";
+import type { StripeOAuthPort } from "../platform/connections/oauth-port";
+import type { ConnectionRepository } from "../platform/connections/repository";
 import { MerchantConnections } from "../platform/connections/service";
+import type { MerchantSql } from "../platform/database";
 import { createMerchantMailer, type MerchantMailer } from "../platform/email";
 import { MerchantStore } from "../platform/store";
 import { type AppElysia, type ElysiaPluginLike, HTTP_APP_CONFIG } from "../shared/http";
@@ -84,7 +87,12 @@ export function attachMerchantRuntime(
 		requestObservabilityMiddleware: options.merchantRequestScope?.plugin,
 		onUnexpectedError: options.onMerchantUnexpectedError,
 	});
-	const ingress = [createConnectionEventApp(repository)];
+	const ingress = createConnectionIngress({
+		repository,
+		persistence,
+		oauth,
+		registerBackground: options.registerBackground,
+	});
 	const remoteMcp = config.mcp
 		? createRemoteMcpApp({
 				auth,
@@ -94,11 +102,6 @@ export function attachMerchantRuntime(
 				onUnexpectedError: options.onMcpUnexpectedError,
 			})
 		: undefined;
-	if (oauth) {
-		const events = createStripeAppEvents(repository, oauth, persistence);
-		ingress.push(events.app);
-		options.registerBackground?.(events);
-	}
 	return composeRuntimeApp({
 		staff,
 		merchant,
@@ -108,6 +111,44 @@ export function attachMerchantRuntime(
 		staffRequestScope: options.staffRequestScope,
 		merchantRequestScope: options.merchantRequestScope,
 	});
+}
+
+/**
+ * A headless process: the staff API plus the provider-signed setup and Stripe App ingress, which
+ * need connections but no merchant identity. `/api/*` and remote MCP do not exist.
+ */
+export function attachHeadlessRuntime(
+	staff: Elysia,
+	options: Pick<MerchantRuntimeOptions, "registerBackground"> & {
+		staffRequestScope?: RequestScope;
+	} = {},
+): QuotumApp {
+	const persistence = merchantSql(sql);
+	return composeRuntimeApp({
+		staff,
+		ingress: createConnectionIngress({
+			repository: createConnectionRepository(persistence),
+			persistence,
+			oauth: createStripeOAuthPort(),
+			registerBackground: options.registerBackground,
+		}),
+		staffRequestScope: options.staffRequestScope,
+	});
+}
+
+function createConnectionIngress(input: {
+	repository: ConnectionRepository;
+	persistence: MerchantSql;
+	oauth: StripeOAuthPort | null;
+	registerBackground?: MerchantRuntimeOptions["registerBackground"];
+}): AppElysia[] {
+	const ingress: AppElysia[] = [createConnectionEventApp(input.repository)];
+	if (input.oauth) {
+		const events = createStripeAppEvents(input.repository, input.oauth, input.persistence);
+		ingress.push(events.app);
+		input.registerBackground?.(events);
+	}
+	return ingress;
 }
 
 /** A separately composed app that receives whole requests. */
@@ -120,11 +161,12 @@ interface DispatchTarget {
  * One process serves the setup-only ingress routes, `/api/*` through the merchant platform and
  * everything else through the staff API. The staff and merchant apps are separate Elysia
  * instances, so Bun's server is attached to each before dispatch; otherwise their client-IP
- * limiters would all share the "unknown" bucket.
+ * limiters would all share the "unknown" bucket. Without a merchant app (headless), `/api/*`
+ * reaches the staff API's not-found response like any other unknown path.
  */
 export function composeRuntimeApp(input: {
 	staff: DispatchTarget;
-	merchant: DispatchTarget;
+	merchant?: DispatchTarget;
 	ingress?: readonly AppElysia[];
 	remoteMcp?: DispatchTarget;
 	mcpRequestScope?: RequestScope;
@@ -159,16 +201,17 @@ export function composeRuntimeApp(input: {
 			);
 	}
 	// /api/* precedence over the staff fallback is load-bearing and router-level specific.
-	app.all(
-		"/api/*",
-		({ request, server }) => {
-			attachRequestServer(merchant, server);
-			return merchantRequestScope === undefined
-				? merchant.fetch(request)
-				: merchantRequestScope.run(request, () => merchant.fetch(request));
-		},
-		{ parse: "none" },
-	);
+	if (merchant !== undefined)
+		app.all(
+			"/api/*",
+			({ request, server }) => {
+				attachRequestServer(merchant, server);
+				return merchantRequestScope === undefined
+					? merchant.fetch(request)
+					: merchantRequestScope.run(request, () => merchant.fetch(request));
+			},
+			{ parse: "none" },
+		);
 	app.all(
 		"/*",
 		({ request, server }) => {

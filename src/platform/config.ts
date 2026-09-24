@@ -54,13 +54,51 @@ export interface MerchantConfig {
 	email: QuotumEmailConfig | null;
 	testMode: boolean;
 }
-export function loadMerchantConfig(
-	env: Record<string, string | undefined> = process.env,
-): MerchantConfig {
+function rejectRetiredSettings(env: Record<string, string | undefined>): void {
 	for (const [oldName, newName] of Object.entries(retiredSettings)) {
 		if (env[oldName] !== undefined)
 			throw new Error(`${oldName} has been removed; use ${newName} instead`);
 	}
+}
+
+/** Parses a strict opt-in flag: unset or blank selects the default, anything else must be exact. */
+function booleanSetting(
+	env: Record<string, string | undefined>,
+	name: string,
+	fallback: boolean,
+): boolean {
+	const value = env[name]?.trim() || undefined;
+	if (value === undefined) return fallback;
+	if (value !== "true" && value !== "false") throw new Error(`${name} must be true or false`);
+	return value === "true";
+}
+
+/**
+ * The merchant platform (`/api`, sign-in, onboarding and remote MCP) is on unless
+ * `QUOTUM_MERCHANT_ENABLED=false` selects a headless process that serves `/v1` and workers only.
+ */
+export function merchantPlatformEnabled(
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	return booleanSetting(env, "QUOTUM_MERCHANT_ENABLED", true);
+}
+
+/** The merchant settings, or `null` for a headless process, which needs none of them. */
+export function loadOptionalMerchantConfig(
+	env: Record<string, string | undefined> = process.env,
+): MerchantConfig | null {
+	if (merchantPlatformEnabled(env)) return loadMerchantConfig(env);
+	rejectRetiredSettings(env);
+	// Remote MCP authorizes through merchant sign-in, so a headless process cannot serve it.
+	if (booleanSetting(env, "QUOTUM_MCP_ENABLED", false))
+		throw new Error("QUOTUM_MCP_ENABLED=true requires the merchant platform");
+	return null;
+}
+
+export function loadMerchantConfig(
+	env: Record<string, string | undefined> = process.env,
+): MerchantConfig {
+	rejectRetiredSettings(env);
 	const production = (env.BILLING_ENV ?? "production") === "production";
 	if (production) {
 		for (const name of ["MERCHANT_ORIGIN", "MERCHANT_PUBLIC_URL"] as const) {
@@ -69,10 +107,7 @@ export function loadMerchantConfig(
 	}
 	const testMode = env.BILLING_ENV === "test";
 	let mcp: MerchantConfig["mcp"] = null;
-	const mcpEnabled = env.QUOTUM_MCP_ENABLED?.trim() || undefined;
-	if (mcpEnabled !== undefined && !["true", "false"].includes(mcpEnabled))
-		throw new Error("QUOTUM_MCP_ENABLED must be true or false");
-	if (mcpEnabled === "true") {
+	if (booleanSetting(env, "QUOTUM_MCP_ENABLED", false)) {
 		const value = required(env, "QUOTUM_MCP_PUBLIC_ORIGIN");
 		const url = new URL(value);
 		if (

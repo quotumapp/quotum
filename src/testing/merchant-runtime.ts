@@ -8,7 +8,7 @@ import type { QuotumApp, QuotumRuntime } from "../composition/runtime-lifecycle"
 import { BillingRepository } from "../db/repository";
 import { ProjectionSyncJobRepository } from "../db/repository-domains";
 import { createMerchantAuth } from "../platform/auth";
-import { loadMerchantConfig } from "../platform/config";
+import { loadMerchantConfig, merchantPlatformEnabled } from "../platform/config";
 import { secureEqual, tokenHash } from "../platform/security";
 import { FakeStripeBillingClient } from "../providers/stripe/testing/fake-client";
 import { createBillingRuntime } from "../runtime";
@@ -32,6 +32,8 @@ export async function createMerchantTestRuntime(
 		throw new Error(
 			"Merchant test entrypoint requires explicitly enabled test mode and fake providers",
 		);
+	if (!merchantPlatformEnabled())
+		throw new Error("Merchant test entrypoint cannot run with QUOTUM_MERCHANT_ENABLED=false");
 	const env = loadFixtureEnv();
 	const projectServices: NonNullable<AppDependencies["projectProviderServices"]> = {};
 	const config = loadMerchantConfig();

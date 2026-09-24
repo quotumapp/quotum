@@ -51,16 +51,15 @@ BILLING_CATALOG_IMPORT_JSON="$(cat examples/quickstart/catalog-import.json)" bun
 
 The guarded test entrypoint loads project connections from `BILLING_TEST_CONNECTIONS_JSON` in memory
 and replaces Stripe network calls with a deterministic fake. It refuses to start outside
-`BILLING_ENV=test`. Merchant authentication is always on, so it also needs an auth secret and legal
-versions; in test mode merchant mail stays in memory. Run it in a second terminal:
+`BILLING_ENV=test`. This guide only uses `/v1`, so it runs [headless](deployment.md#headless-mode),
+without the merchant platform and its settings. Run it in a second terminal:
 
 ```sh
 export POSTGRES_URI="postgres://postgres:postgres@127.0.0.1:5432/quotum"
 BILLING_ENV=test BILLING_TEST_FAKE_STRIPE=true \
 BILLING_OPERATOR_API_KEY=quickstart-operator-key-0001 \
 QUOTUM_SECRETS_KEY_ID=quickstart QUOTUM_SECRETS_KEY_BASE64="$(head -c 32 /dev/zero | base64)" \
-QUOTUM_AUTH_SECRET=quickstart-merchant-secret-at-least-32-chars \
-MERCHANT_TERMS_VERSION=2026-09-01 MERCHANT_PRIVACY_VERSION=2026-09-01 \
+QUOTUM_MERCHANT_ENABLED=false \
 BILLING_TEST_CONNECTIONS_JSON="$(cat examples/quickstart/connections.json)" \
 bun run test:stripe-entrypoint
 ```

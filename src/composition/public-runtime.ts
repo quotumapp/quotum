@@ -1,6 +1,6 @@
 import * as Sentry from "@sentry/bun";
 import { type BillingEnv, loadEnv } from "../env";
-import { loadMerchantConfig, type MerchantConfig } from "../platform/config";
+import { loadOptionalMerchantConfig, type MerchantConfig } from "../platform/config";
 import { createBillingRuntime } from "../runtime";
 import { registerBillingRuntimeShutdown } from "../shutdown";
 import type { QuotumRuntime, QuotumRuntimeScheduler } from "./runtime-lifecycle";
@@ -16,11 +16,12 @@ export type {
 
 export interface QuotumRuntimeConfig {
 	billing: BillingEnv;
-	merchant: MerchantConfig;
+	/** `null` when `QUOTUM_MERCHANT_ENABLED=false`: the process serves `/v1` and workers only. */
+	merchant: MerchantConfig | null;
 }
 
 export function loadQuotumRuntimeConfig(): QuotumRuntimeConfig {
-	return { billing: loadEnv(), merchant: loadMerchantConfig() };
+	return { billing: loadEnv(), merchant: loadOptionalMerchantConfig() };
 }
 
 export function createQuotumRuntime(
@@ -28,7 +29,7 @@ export function createQuotumRuntime(
 	options: { scheduler?: QuotumRuntimeScheduler } = {},
 ): QuotumRuntime {
 	return createBillingRuntime(config.billing, {
-		merchant: { config: config.merchant },
+		merchant: config.merchant === null ? null : { config: config.merchant },
 		sentry: Sentry,
 		readinessCheck: createBillingReadinessCheck(),
 		scheduler: options.scheduler,
