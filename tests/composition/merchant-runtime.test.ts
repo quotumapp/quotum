@@ -6,6 +6,7 @@ import type { MerchantBillingPort } from "../../src/platform/application/billing
 import type { MerchantAuth } from "../../src/platform/auth";
 import { MerchantError } from "../../src/platform/security";
 import type { MerchantStore } from "../../src/platform/store";
+import type { AppElysia } from "../../src/shared/http";
 import { assertOpenApiResponse } from "../helpers/openapi";
 
 function staffApp() {
@@ -136,5 +137,31 @@ describe("composeRuntimeApp request scopes", () => {
 
 		expect((await app.fetch(new Request("http://localhost/api/ping"))).status).toBe(200);
 		expect((await app.fetch(new Request("http://localhost/v1/ping"))).status).toBe(200);
+	});
+
+	it("sends /api to the staff API's not-found response when headless, keeping ingress", async () => {
+		const calls: string[] = [];
+		const ingress: AppElysia = new Elysia();
+		ingress.post("/v1/setup/ping", () => ({ scope: "ingress" }));
+		const app = composeRuntimeApp({
+			staff: staffApp(),
+			ingress: [ingress],
+			staffRequestScope: {
+				run(request, dispatch) {
+					calls.push(new URL(request.url).pathname);
+					return dispatch();
+				},
+			},
+		});
+
+		expect((await app.fetch(new Request("http://localhost/api/ping"))).status).toBe(404);
+		expect(await (await app.fetch(new Request("http://localhost/v1/ping"))).json()).toEqual({
+			scope: "staff",
+		});
+		const setup = await app.fetch(
+			new Request("http://localhost/v1/setup/ping", { method: "POST" }),
+		);
+		expect(await setup.json()).toEqual({ scope: "ingress" });
+		expect(calls).toEqual(["/api/ping", "/v1/ping"]);
 	});
 });

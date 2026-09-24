@@ -1,6 +1,7 @@
 import { registerQuotumProcessShutdown } from "../composition/public-runtime";
 import { createBillingReadinessCheck } from "../composition/runtime-readiness";
 import { loadEnv } from "../env";
+import { merchantPlatformEnabled } from "../platform/config";
 import { createBillingRuntime } from "../runtime";
 import { MerchantCaptureMailer } from "./merchant-fakes";
 
@@ -10,7 +11,7 @@ const env = loadEnv();
 const runtime = createBillingRuntime(env, {
 	projectionFetch: globalThis.fetch,
 	readinessCheck: createBillingReadinessCheck(),
-	merchant: { mailer: new MerchantCaptureMailer() },
+	merchant: merchantPlatformEnabled() ? { mailer: new MerchantCaptureMailer() } : null,
 });
 
 registerQuotumProcessShutdown(runtime);

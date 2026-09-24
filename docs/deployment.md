@@ -64,9 +64,10 @@ required value is missing or unsafe for the selected environment.
 | Variable | Purpose |
 | --- | --- |
 | `POSTGRES_URI` | Direct Postgres connection string. Neon-compatible Postgres works. |
-| `BILLING_ENV` | `development`, `test`, or `production` (default). Production enforces HTTPS projection and Stripe URLs and requires the operator key; the merchant settings below are required in every environment. |
+| `BILLING_ENV` | `development`, `test`, or `production` (default). Production enforces HTTPS projection and Stripe URLs and requires the operator key; the merchant settings below are required in every environment unless `QUOTUM_MERCHANT_ENABLED=false`. |
 | `BILLING_OPERATOR_API_KEY` | Operator credential for catalog publication, replay, reconciliation, and admin metrics. At least 16 characters, separate from project credentials. Required in production. |
 | `QUOTUM_SECRETS_KEY_ID`, `QUOTUM_SECRETS_KEY_BASE64` | Identifier and base64 32-byte AES key that encrypts stored provider and projection connections. Keep the key outside Postgres and its backups. Rotate with `quotum connections rotate-secrets`. |
+| `QUOTUM_MERCHANT_ENABLED` | `true` (default) runs the merchant platform. `false` runs [headless](#headless-mode) and makes every setting below optional. |
 | `MERCHANT_ORIGIN`, `MERCHANT_PUBLIC_URL` | Merchant origin and public/legal-page URL. Both must be explicitly set to nonblank values in production, including when `BILLING_ENV` is unset. Development and test defaults are `https://app.quotum.dev` and `https://quotum.dev`. The merchant origin must be exact HTTPS outside tests. |
 | `QUOTUM_AUTH_SECRET` | Operator-owned secret for Quotum sessions and token HMACs, at least 32 characters. Never reuse another secret. |
 | `MERCHANT_TERMS_VERSION`, `MERCHANT_PRIVACY_VERSION` | Approved legal document versions. Signup outside test mode refuses draft versions. |
@@ -77,11 +78,33 @@ required value is missing or unsafe for the selected environment.
 | `MERCHANT_SIGNUP_ENABLED` | Defaults to `true`; set `false` to close registration. |
 | `MERCHANT_GOOGLE_CLIENT_ID`, `MERCHANT_GOOGLE_CLIENT_SECRET` | Optional Google sign-in. Register `https://<merchant-origin>/api/auth/callback/google`. |
 
-Merchant authentication is always on. There is no switch to run the service without it, and the
-process refuses to start until the settings above validate, even with signup disabled. Only
-`BILLING_ENV=test` permits absent email configuration, and runtime wiring still requires an injected
-capture mailer. Explicit partial configuration is rejected in tests too. SMTP is not an available
-configuration selector. Close signup explicitly until the deployment is ready.
+While the merchant platform runs, merchant authentication is always on: there is no switch to
+serve `/api` without it, and the process refuses to start until the settings above validate, even
+with signup disabled. Only `BILLING_ENV=test` permits absent email configuration, and runtime wiring
+still requires an injected capture mailer. Explicit partial configuration is rejected in tests too.
+SMTP is not an available configuration selector. Close signup explicitly until the deployment is
+ready.
+
+### Headless mode
+
+`QUOTUM_MERCHANT_ENABLED=false` runs Quotum without the merchant platform. It is for operators who run
+Quotum for their own products and have no merchant web application: the process serves the `/v1`
+API, the provider webhooks and every worker, and nothing else.
+
+- `/api/*`, merchant sign-in, onboarding, teams, step-up confirmation and merchant email do not
+  exist; those paths answer like any other unknown path. Remote MCP needs merchant sign-in, so
+  `QUOTUM_MCP_ENABLED=true` is refused at startup. The stdio [MCP server](mcp.md) still works.
+- `QUOTUM_AUTH_SECRET`, `MERCHANT_*` and `QUOTUM_EMAIL_*` become optional. When set they are ignored,
+  except that the retired names in the next section are still refused.
+- Everything else is unchanged: `POSTGRES_URI`, `BILLING_OPERATOR_API_KEY` in production, and the
+  `QUOTUM_SECRETS_KEY_*` key, which still decrypts stored connections. Provider webhooks, the
+  connection-version verification route and, when `STRIPE_APP_*` is configured, the Stripe App
+  event ingress keep working.
+- Connections are created and changed on the merchant platform's **Integrations** screens, so a
+  headless process serves the connections already stored in its database and cannot change them.
+
+The flag is read at startup and accepts only `true` or `false`; unset or blank means `true`. Switching
+modes needs a restart and no migration.
 
 ### Quotum-owned email delivery
 
@@ -141,6 +164,8 @@ cannot restart against new-only settings. This change needs no database migratio
 
 A fresh deployment needs no customer bootstrap. Start the service, then let merchants onboard
 through the merchant application and configure providers and projections under **Integrations**.
+A [headless](#headless-mode) deployment has no merchant application; it creates its topology and
+credentials with the bootstrap below.
 Each environment is configured independently: save a draft, verify provider access or the signed
 projection challenge, then commit. Production commits require a fresh step-up grant. Changes take
 effect without restarts, and one customer's setup never affects global readiness.
@@ -191,6 +216,25 @@ to stop the remote ingress and browser authorization if rolling the UI back. The
 retains its existing independent configuration.
 
 See [MCP server](mcp.md#connect-in-a-browser) for identity, scope, lifetimes and revocation behavior.
+
+### Stripe Apps OAuth
+
+Optional and part of the merchant platform: merchants can install a Stripe App that the operator
+publishes, based on [`stripe-app/stripe-app.example.json`](../stripe-app/stripe-app.example.json),
+instead of entering a restricted key. `STRIPE_APP_CLIENT_ID` enables it and requires the rest.
+
+| Variable | Purpose |
+| --- | --- |
+| `STRIPE_APP_CLIENT_ID` | The app's OAuth client id. Unset or empty disables Stripe Apps OAuth. |
+| `STRIPE_APP_REDIRECT_URI` | The HTTPS OAuth callback registered with the app, served by the merchant application. |
+| `STRIPE_APP_TEST_AUTHORIZE_URL`, `STRIPE_APP_LIVE_AUTHORIZE_URL` | The app's install links from the Stripe Dashboard, under `https://marketplace.stripe.com/oauth/v2/authorize`. |
+| `STRIPE_APP_TEST_API_KEY`, `STRIPE_APP_LIVE_API_KEY` | The app owner's `sk_test_` and `sk_live_` secret keys, which exchange and refresh OAuth tokens. |
+| `STRIPE_APP_TEST_WEBHOOK_SECRET`, `STRIPE_APP_LIVE_WEBHOOK_SECRET` | Signing secrets for app events delivered to `/v1/stripe-app/webhooks/test` and `/v1/stripe-app/webhooks/live`. |
+
+The client id and redirect URI are checked at startup; each mode's key, secret and install link are
+checked when that mode is first used. Installing the app happens in the merchant application. With
+the settings present, a [headless](#headless-mode) process still refreshes existing OAuth
+connections and processes app events, including deauthorization.
 
 ### Other optional variables
 
@@ -294,8 +338,8 @@ project header, it is trusted only from the gateway, which must strip any copy a
 
 `bun run test:stripe-entrypoint` starts the service with an in-memory connection fixture and a
 network-free fake Stripe client. It requires `BILLING_ENV=test`, `BILLING_TEST_FAKE_STRIPE=true`,
-`QUOTUM_AUTH_SECRET`, and the two legal versions; it refuses external provider traffic and keeps
-merchant mail in memory instead of sending it. It accepts
+and either `QUOTUM_AUTH_SECRET` with the two legal versions or `QUOTUM_MERCHANT_ENABLED=false`; it
+refuses external provider traffic and keeps merchant mail in memory instead of sending it. It accepts
 `BILLING_TEST_FAKE_STRIPE_PAYMENT_BEHAVIOR=succeeded|action_required|retryable_failure`,
 `BILLING_TEST_FAKE_STRIPE_DEFAULT_PAYMENT_METHOD=missing`, and
 `BILLING_TEST_FAKE_STRIPE_PRICE_AMOUNTS_JSON` for deterministic worker scenarios. Never set

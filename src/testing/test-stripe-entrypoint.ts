@@ -1,5 +1,6 @@
 import { registerQuotumProcessShutdown } from "../composition/public-runtime";
 import { createBillingReadinessCheck } from "../composition/runtime-readiness";
+import { merchantPlatformEnabled } from "../platform/config";
 import {
 	FakeStripeBillingClient,
 	type FakeStripeBillingClientOptions,
@@ -21,7 +22,7 @@ const runtime = createBillingRuntime(env, {
 	projectionFetch: globalThis.fetch,
 	stripeClientFactory: (config) => new FakeStripeBillingClient(config, fakeStripeOptions()),
 	readinessCheck: createBillingReadinessCheck(),
-	merchant: { mailer: new MerchantCaptureMailer() },
+	merchant: merchantPlatformEnabled() ? { mailer: new MerchantCaptureMailer() } : null,
 });
 
 registerQuotumProcessShutdown(runtime);

@@ -8,7 +8,11 @@ import {
 } from "./composition/connections";
 import { createMerchantBillingPort } from "./composition/merchant-billing";
 import { merchantSql } from "./composition/merchant-persistence";
-import { attachMerchantRuntime, type MerchantRuntimeOptions } from "./composition/merchant-runtime";
+import {
+	attachHeadlessRuntime,
+	attachMerchantRuntime,
+	type MerchantRuntimeOptions,
+} from "./composition/merchant-runtime";
 import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
 import {
 	createRuntimeLifecycle,
@@ -34,7 +38,7 @@ import {
 	type SentryClientLike,
 } from "./observability/sentry";
 import { BillingAdminOperations } from "./operations/admin";
-import { loadMerchantConfig } from "./platform/config";
+import { loadOptionalMerchantConfig, type MerchantConfig } from "./platform/config";
 import { ProjectionHttpClient } from "./projections/http-client";
 import type { ApiProjectProjectionFetch } from "./projections/http-types";
 import type { RuntimeConnectionResolver } from "./projects/connections";
@@ -56,7 +60,8 @@ export interface BillingRuntimeDependencies {
 	scheduler?: QuotumRuntimeScheduler;
 	projectionFetch?: ApiProjectProjectionFetch;
 	connections?: RuntimeConnectionResolver;
-	merchant?: MerchantRuntimeOptions;
+	/** `null` runs headless (no merchant platform); omitted reads `QUOTUM_MERCHANT_ENABLED`. */
+	merchant?: MerchantRuntimeOptions | null;
 	projectProviderServices?: AppDependencies["projectProviderServices"];
 	sentry?: SentryClientLike;
 	readinessCheck?: () => boolean | Promise<boolean>;
@@ -67,8 +72,16 @@ export interface BillingRuntimeDependencies {
 	) => StripeBillingClientDependency;
 }
 
+function resolveMerchantConfig(options: MerchantRuntimeOptions | null | undefined) {
+	const config: MerchantConfig | null =
+		options === null ? null : (options?.config ?? loadOptionalMerchantConfig());
+	if (config === null && (options?.mailer !== undefined || options?.createAuth !== undefined))
+		throw new Error("A headless runtime has no merchant platform to receive a mailer or auth");
+	return config;
+}
+
 function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDependencies = {}) {
-	const merchantConfig = dependencies.merchant?.config ?? loadMerchantConfig();
+	const merchantConfig = resolveMerchantConfig(dependencies.merchant);
 	const jobs: QuotumScheduledJob[] = [];
 	const billingRepository = new BillingRepository();
 	const baseLogger = createPinoBillingLogger({ level: env.logLevel ?? "info" });
@@ -236,8 +249,6 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 
 	const sentry = env.sentry.dsn === null ? undefined : dependencies.sentry;
 	const sentryRequestScope = sentry && createSentryRequestScope(sentry, { service: "billing" });
-	const merchantSentryScope = sentry && createSentryRequestScope(sentry, { service: "merchant" });
-	const mcpSentryScope = sentry && createSentryRequestScope(sentry, { service: "mcp" });
 	const staff = createApp({
 		env,
 		entitlementService: new EntitlementService(billingRepository),
@@ -250,6 +261,22 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		readinessCheck: dependencies.readinessCheck,
 		requestObservabilityMiddleware: sentryRequestScope?.plugin,
 	});
+	const registerBackground = (worker: { runOnce(): Promise<void> }) => {
+		jobs.push({
+			name: "stripe_app_events",
+			runOnce: () => worker.runOnce(),
+			pollIntervalMs: env.storeEventReplayPollIntervalMs,
+		});
+	};
+	if (merchantConfig === null) {
+		const app = attachHeadlessRuntime(staff, {
+			registerBackground,
+			staffRequestScope: sentryRequestScope,
+		});
+		return { app, jobs, logger };
+	}
+	const merchantSentryScope = sentry && createSentryRequestScope(sentry, { service: "merchant" });
+	const mcpSentryScope = sentry && createSentryRequestScope(sentry, { service: "mcp" });
 	const merchantBilling = createMerchantBillingPort({
 		repository: billingRepository,
 		reader: new AdminBillingRepository({
@@ -289,13 +316,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 				code: report.code,
 			});
 		},
-		registerBackground: (worker) => {
-			jobs.push({
-				name: "stripe_app_events",
-				runOnce: () => worker.runOnce(),
-				pollIntervalMs: env.storeEventReplayPollIntervalMs,
-			});
-		},
+		registerBackground,
 	});
 	return { app, jobs, logger };
 }

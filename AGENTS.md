@@ -34,7 +34,7 @@ Use Bun `>=1.4.0 <1.5.0`. Docker is required for every Postgres-backed lane.
 
 - `bun install --frozen-lockfile`, then `bun run dev` for a hot-reloading server on `PORT`
   (default 3000). Copy `.env.example` first: merchant authentication and an email sender are
-  required outside `BILLING_ENV=test`. [docs/quickstart.md](docs/quickstart.md) runs a complete
+  required outside `BILLING_ENV=test` unless `QUOTUM_MERCHANT_ENABLED=false` runs headless. [docs/quickstart.md](docs/quickstart.md) runs a complete
   local service on the fake Stripe test entrypoint.
 - `POSTGRES_URI=... bun run migrate` applies the ordered migrations; `bun run migrate:status`
   inspects them.

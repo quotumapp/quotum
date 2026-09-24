@@ -74,7 +74,8 @@ coordination and infrastructure scheduler integration belong to that distributio
 and required extension interfaces are implemented here first.
 
 `quotum-api/runtime` exports `loadQuotumRuntimeConfig()`, `createQuotumRuntime(config, options?)`,
-`registerQuotumProcessShutdown(runtime)` and their types. The runtime exposes `app.fetch`, `start()`
+`registerQuotumProcessShutdown(runtime)` and their types. `config.merchant` is `null` when
+`QUOTUM_MERCHANT_ENABLED=false`; the runtime is then headless and serves no `/api` routes. The runtime exposes `app.fetch`, `start()`
 and `stop()`. `app.fetch(request, server)` takes Bun's server as its optional second argument;
 a distribution that wraps it must forward that argument and the original Request object, or every
 client shares one IP rate-limit bucket. Construction performs no background work or signal registration. Startup selects the
