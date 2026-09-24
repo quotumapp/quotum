@@ -1,0 +1,38 @@
+# Adds Caddy with automatic HTTPS for QUOTUM_DOMAIN in front of the API:
+#   docker compose -f compose.yaml -f compose.tls.yaml up -d
+# Ports 80 and 443 must reach this host for the certificate challenge.
+services:
+  api:
+    # Only Caddy reaches the API, so its forwarded client address can be trusted.
+    ports: !reset []
+    environment:
+      BILLING_TRUST_PROXY_HEADERS: "true"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      QUOTUM_DOMAIN: ${QUOTUM_DOMAIN:?Set QUOTUM_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  caddy-data:
+  caddy-config:

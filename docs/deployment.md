@@ -56,6 +56,34 @@ usage and the settings it reads without running it; an unknown command or unexpe
 working directory is not writable by its `bun` user, so point `--credentials-out` at a mounted
 directory that user can write, or at `/tmp` in the running container, and copy the file out.
 
+### Headless Docker Compose
+
+`deploy/compose` runs a [headless](#headless-mode) deployment with its own Postgres:
+
+```sh
+cd deploy/compose
+cp .env.example .env && chmod 600 .env
+docker run --rm ghcr.io/quotumapp/quotum:<version> quotum init >> .env
+# Set QUOTUM_VERSION, ideally pinned by digest, and POSTGRES_PASSWORD in .env.
+docker compose up -d
+```
+
+- **Services.**
+  - `postgres` keeps its data in the `postgres-data` volume. Back it up, and back up
+    `QUOTUM_SECRETS_KEY_BASE64` separately: without it, the stored connections are unreadable.
+  - `migrate` applies pending migrations on every `up`.
+  - `api` starts only after the migrations succeed. It publishes the API on
+    `127.0.0.1:${QUOTUM_PORT:-3000}` and reports its health with `quotum healthcheck`.
+- **Operator commands.** Run them in the API container, such as
+  `docker compose exec api quotum bootstrap --check`.
+- **TLS.** `compose.tls.yaml` adds Caddy with automatic HTTPS for `QUOTUM_DOMAIN`:
+  `docker compose -f compose.yaml -f compose.tls.yaml up -d`.
+  - The API is then reachable only through Caddy, so `BILLING_TRUST_PROXY_HEADERS=true` is safe.
+  - Caddy strips `Cf-Connecting-Ip`, which Quotum would otherwise trust.
+  - Caddy answers `/metrics` with `404`. Scrape metrics from the private network instead.
+- **Smoke test.** `smoke.sh` starts a fresh stack and checks it end to end: migrations, readiness,
+  bootstrap and an authenticated `/v1` call. CI runs it against every image it builds.
+
 ## Required variables
 
 Copy [`.env.example`](../.env.example) and fill in real values. The service refuses to start when a

@@ -1,0 +1,13 @@
+{$QUOTUM_DOMAIN} {
+	encode zstd gzip
+
+	# Prometheus metrics are unauthenticated: scrape them on the private network instead.
+	@metrics path /metrics /metrics/*
+	respond @metrics 404
+
+	reverse_proxy api:3000 {
+		# Quotum trusts Cf-Connecting-Ip before X-Forwarded-For, so clients must never set it.
+		# Caddy replaces X-Forwarded-For with the connecting address by default.
+		header_up -Cf-Connecting-Ip
+	}
+}

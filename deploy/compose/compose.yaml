@@ -1,0 +1,68 @@
+# Headless Quotum: Postgres, a one-shot migration and the API, without the merchant platform.
+# Set QUOTUM_VERSION (ideally pinned by digest) and POSTGRES_PASSWORD in .env; see
+# docs/deployment.md#headless-docker-compose.
+name: quotum
+
+x-quotum: &quotum
+  image: ${QUOTUM_IMAGE:-ghcr.io/quotumapp/quotum}:${QUOTUM_VERSION:?Set QUOTUM_VERSION in .env}
+  env_file: ${QUOTUM_ENV_FILE:-.env}
+  environment:
+    POSTGRES_URI: postgres://quotum:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/quotum
+    QUOTUM_MERCHANT_ENABLED: "false"
+  init: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "5"
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: quotum
+      POSTGRES_USER: quotum
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      # Postgres 18 images keep their data in a versioned directory under /var/lib/postgresql.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username quotum --dbname quotum"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    stop_grace_period: 30s
+    logging: *logging
+
+  # Applies pending migrations, then exits; the API starts only after it succeeds.
+  migrate:
+    <<: *quotum
+    command: ["quotum", "migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *quotum
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # Loopback only. Put a TLS proxy in front (compose.tls.yaml) before exposing it.
+    ports:
+      - "127.0.0.1:${QUOTUM_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "quotum", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    # Lets in-flight requests and worker leases finish on shutdown.
+    stop_grace_period: 15s
+
+volumes:
+  postgres-data:
