@@ -55,6 +55,7 @@ import { RecurringBillingWorker } from "./workers/recurring-billing";
 import { startPollingRuntime } from "./workers/runtime";
 import { StoreEventReplayWorker } from "./workers/store-event-replay";
 import { SubscriptionReconciliationWorker } from "./workers/subscription-reconciliation";
+import { UsagePartitionUpkeepWorker } from "./workers/usage-partition-upkeep";
 
 export interface BillingRuntimeDependencies {
 	scheduler?: QuotumRuntimeScheduler;
@@ -165,6 +166,11 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		logger,
 		metrics,
 	});
+	const usagePartitionUpkeepWorker = new UsagePartitionUpkeepWorker({
+		repository: billingRepository,
+		logger,
+		metrics,
+	});
 	const recurringBillingWorker = new RecurringBillingWorker({
 		workerId: env.workerId,
 		repository: billingRepository,
@@ -231,6 +237,14 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		runOnce: () => meteringMaintenanceWorker.runOnce(),
 		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
 	});
+	if (env.usagePartitionUpkeep !== false)
+		jobs.push({
+			name: "usage_partition_upkeep",
+			runOnce: () => usagePartitionUpkeepWorker.runOnce(),
+			// The horizon is a year ahead, so a slow cadence suffices; it still runs on processes
+			// that restart more often than an hourly job's first poll.
+			pollIntervalMs: 15 * 60_000,
+		});
 	jobs.push({
 		name: "recurring_billing",
 		runOnce: () => recurringBillingWorker.runOnce(),

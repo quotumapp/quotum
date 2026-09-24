@@ -17,7 +17,7 @@ behavior changes. CodeRabbit reviews pull requests against this file and `AGENTS
 
 - `src/index.ts` -> `src/composition/public-runtime.ts` (`createQuotumRuntime`) ->
   `src/runtime.ts` (`createBillingRuntime`) builds everything: repositories, the provider registry,
-  seven polling workers, shutdown hooks, then the "staff" Elysia app from `src/app.ts`
+  eight polling workers, shutdown hooks, then the "staff" Elysia app from `src/app.ts`
   (`createApp`) and, through `attachMerchantRuntime` in `src/composition/merchant-runtime.ts`, the
   merchant app. `composeRuntimeApp` there routes setup-only ingress (connection and Stripe App
   events) first, then the remote MCP and OAuth endpoints when enabled, `/api/*` to the merchant
@@ -137,7 +137,9 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
 `createBillingRuntime` schedules each worker's `runOnce` with `startPollingRuntime`
 (`src/workers/runtime.ts`) unless a distribution supplies its own scheduler: projection sync,
 store-event replay, subscription reconciliation, metering maintenance, recurring billing, auto
-top-up, promotion maintenance, plus Stripe App event processing when Apps OAuth is configured.
+top-up, promotion maintenance, usage partition upkeep (`src/workers/usage-partition-upkeep.ts`,
+which adds monthly `usage_events` partitions ahead of time), plus Stripe App event processing when
+Apps OAuth is configured.
 Workers lease job rows by `worker_id` (`locked_by` columns, refreshed by
 `src/workers/lease-heartbeat.ts`) and retry with `src/workers/backoff.ts`, so a worker must only
 touch rows it holds. Projection sync delivers signed `billing_state_v1` payloads to each project's

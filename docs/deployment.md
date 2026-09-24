@@ -262,6 +262,9 @@ Defaults in parentheses.
   `BILLING_PROVIDER_RECONCILIATION_STALE_AFTER_MS` (`21600000`).
 - `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` (`60000`), shared by metering maintenance,
   recurring billing, automatic top-ups and promotion maintenance.
+- `BILLING_USAGE_PARTITION_UPKEEP=true|false` (`true`). Keeps monthly usage partitions a year
+  ahead; see [usage partitions](operations.md#usage-partitions). Set `false` only when a role that
+  owns `usage_events` creates them instead.
 - `BILLING_RATE_LIMIT_WINDOW_MS` (`60000`), `BILLING_VERIFY_RATE_LIMIT_PER_WINDOW` (`120`),
   `BILLING_WEBHOOK_RATE_LIMIT_PER_WINDOW` (`600`), `BILLING_METERING_RATE_LIMIT_PER_WINDOW`
   (`6000`), `BILLING_ADMIN_RATE_LIMIT_PER_WINDOW` (`60`).
