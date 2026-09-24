@@ -136,3 +136,10 @@ jobs:
           docker run --rm quotum-api:ci quotum help
           docker run --rm quotum-api:ci quotum version
           docker run --rm quotum-api:ci quotum init > /dev/null
+      - name: Lint the compose smoke test
+        run: shellcheck deploy/compose/smoke.sh
+      - name: Headless compose stack smoke test
+        env:
+          QUOTUM_IMAGE: quotum-api
+          QUOTUM_VERSION: ci
+        run: deploy/compose/smoke.sh
