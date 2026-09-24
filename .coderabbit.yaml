@@ -45,8 +45,8 @@ reviews:
       instructions: >-
         Platform code never imports billing modules (src/app, src/billing, src/catalog, src/db,
         src/providers, src/workers, src/projections, src/projects, src/http, src/admin,
-        src/observability, src/operations, src/sdk, src/env.ts, scripts/billing-catalog.ts),
-        Drizzle, or Bun SQL. The one exception is src/platform/persistence/auth-schema.ts, which
+        src/observability, src/operations, src/sdk, src/env.ts), Drizzle, or Bun SQL. The one
+        exception is src/platform/persistence/auth-schema.ts, which
         may import drizzle-orm/pg-core to declare the Better Auth tables. Repositories receive a
         PlatformQueryExecutor and call executor.query({ text, values }) with static inline SQL;
         concatenated SQL is a defect. Platform tables are platform_*.

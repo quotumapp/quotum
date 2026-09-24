@@ -79,10 +79,8 @@ export interface AnalyzeModuleBoundaryOptions {
 const compositionPaths = new Set([
 	"scripts/openapi.ts",
 	"scripts/openapi-errors.ts",
-	"scripts/provision-catalog.ts",
-	"scripts/merchant-service-principal.ts",
-	"scripts/rotate-connection-secrets.ts",
 	"src/app.ts",
+	"src/cli.ts",
 	"src/index.ts",
 	"src/migrate.ts",
 	"src/platform-bootstrap.ts",
@@ -92,7 +90,7 @@ const compositionPaths = new Set([
 
 const compositionPrefixes = ["src/composition/"] as const;
 
-const billingPaths = new Set(["scripts/billing-catalog.ts", "src/env.ts"]);
+const billingPaths = new Set(["src/env.ts"]);
 
 const billingPrefixes = [
 	"src/admin/",
@@ -182,7 +180,7 @@ const ignoredSourceDirectories = new Set([
 	"node_modules",
 	"local-sandbox",
 ]);
-const allowedNonLiteralModuleReferencePaths = new Set(["scripts/billing-catalog.ts"]);
+const allowedNonLiteralModuleReferencePaths = new Set(["src/composition/cli/catalog.ts"]);
 const selfPackageName = "quotum-api";
 // The MCP server reaches billing only as an HTTP client, so the SDK is its single billing import.
 const mcpSdkPrefix = "src/sdk/";

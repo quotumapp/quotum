@@ -23,11 +23,12 @@ to run:
 
 ```sh
 pg_restore --no-owner --dbname "$POSTGRES_URI" quotum-2026-09-09.dump
-bun run migrate:status
+quotum migrate status
 ```
 
 Every applied migration must have a matching local file and checksum. A missing applied file or a
-checksum mismatch fails both `migrate:status` and `migrate`; use the release matching the backup.
+checksum mismatch fails both `quotum migrate status` and `quotum migrate`; use the release matching
+the backup. From a source checkout, `bun run migrate:status` and `bun run migrate` are equivalent.
 
 ## Schema and upgrade policy
 
@@ -73,7 +74,7 @@ again and invoice customers a second time. Move a populated deployment as follow
    workers, and keep it stopped until the new version serves traffic. Anything the old version
    accepts after the dump is lost; while the service is down, providers retry undelivered webhooks.
    Then take a [backup](#backup) with `pg_dump --format=custom`.
-2. Create an empty database and run `bun run migrate` from the target image.
+2. Create an empty database and run `quotum migrate` from the target image.
 3. Let the restore load rows that have no provider:
 
    ```sql
@@ -109,7 +110,7 @@ again and invoice customers a second time. Move a populated deployment as follow
 
 6. Compare the row counts of every table, at least `subscription_changes`,
    `usage_invoice_periods` and `usage_invoice_adjustments`, with the source database. Run
-   `bun run migrate:status`, then start the new version and confirm `/ready`.
+   `quotum migrate status`, then start the new version and confirm `/ready`.
 
 Restored rows keep a null `provider_account_id`. Stripe events fill it on subscriptions and provider
 customers once their connection reports an account identity; jobs copy it when they are created.
@@ -140,9 +141,9 @@ rollback fails closed.
    Establish database compatibility before rollout.
 2. Take a backup.
 3. If the upgrade notes say so, stop usage writers and workers on the old version.
-4. Run `bun run migrate:status` from the target image. Stop if integrity verification fails;
+4. Run `quotum migrate status` from the target image. Stop if integrity verification fails;
    follow the schema policy before proceeding. On a compatible or freshly recreated disposable
-   database, run `bun run migrate`. The runner takes an advisory lock, applies pending files in
+   database, run `quotum migrate`. The runner takes an advisory lock, applies pending files in
    order, and runs each transactionally unless the file contains `CREATE INDEX CONCURRENTLY` or
    opts out with `-- migrate: no-transaction`.
 5. Start the new version and confirm `/ready`.

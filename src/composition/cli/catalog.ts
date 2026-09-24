@@ -1,15 +1,20 @@
 #!/usr/bin/env bun
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { CatalogIntent } from "../src/catalog/types";
-import { BillingClient } from "../src/sdk/client";
-import { writeStdout } from "../src/shared/cli-output";
+import type { CatalogIntent } from "../../catalog/types";
+import { BillingClient } from "../../sdk/client";
+import { writeStdout } from "../../shared/cli-output";
 
-const [command, file] = process.argv.slice(2);
+if (import.meta.main) {
+	await runCatalogCli(process.argv.slice(2));
+}
 
-if (command === undefined || command === "help" || command === "--help") {
-	printHelp();
-} else {
+async function runCatalogCli(argv: readonly string[]): Promise<void> {
+	const [command, file] = argv;
+	if (command === undefined || command === "help" || command === "--help") {
+		printHelp();
+		return;
+	}
 	const client = new BillingClient({
 		baseUrl: requiredEnv("BILLING_BASE_URL"),
 		apiKey: process.env.BILLING_PROJECT_API_KEY,
@@ -107,7 +112,7 @@ function requiredEnv(name: string): string {
 }
 
 function printHelp(): void {
-	writeStdout(`billing-catalog <command> [catalog.ts]
+	writeStdout(`quotum catalog <command> [catalog.ts]
 
 Commands:
   status             Print the currently published catalog intent and revision

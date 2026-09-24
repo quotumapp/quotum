@@ -48,10 +48,10 @@ bite:
 
 - Billing (`src/admin`, `src/app`, `src/billing`, `src/catalog`, `src/db`, `src/http`,
   `src/observability`, `src/operations`, `src/projects`, `src/projections`, `src/providers`,
-  `src/sdk`, `src/workers`, `src/env.ts`, `scripts/billing-catalog.ts`) and Platform
-  (`src/platform`) never import each other, not even through the package's own SDK export. Only
-  composition (`src/composition`, the root entrypoints such as `src/app.ts` and `src/runtime.ts`,
-  and a few scripts) and test support may import both.
+  `src/sdk`, `src/workers`, `src/env.ts`) and Platform (`src/platform`) never import each other,
+  not even through the package's own SDK export. Only composition (`src/composition`, including
+  the operator commands in `src/composition/cli`, the root entrypoints such as `src/app.ts`,
+  `src/cli.ts` and `src/runtime.ts`, and a few scripts) and test support may import both.
 - `src/mcp` is its own owner: it may import only `src/mcp`, `src/shared` and `src/sdk`, and no
   domain module may import it.
 - `src/shared` depends on nothing domain-specific. Production code never imports `src/composition`

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createSanitizedProcessEnv } from "../../scripts/lib/sanitized-env";
+import { createSanitizedProcessEnv } from "../../../scripts/lib/sanitized-env";
 
 interface RecordedCall {
 	method: string;
@@ -11,7 +11,7 @@ interface RecordedCall {
 	body: unknown;
 }
 
-const repositoryRoot = resolve(import.meta.dir, "../..");
+const repositoryRoot = resolve(import.meta.dir, "../../..");
 const temporaryDirectories: string[] = [];
 const servers: Array<ReturnType<typeof Bun.serve>> = [];
 
@@ -22,7 +22,7 @@ afterEach(async () => {
 	}
 });
 
-describe("billing catalog CLI", () => {
+describe("catalog CLI", () => {
 	it("prints status with project authentication only", async () => {
 		const fixture = catalogServer();
 		const result = await runCli(["status"], fixture.baseUrl);
@@ -37,6 +37,17 @@ describe("billing catalog CLI", () => {
 		// operator key.
 		expect(fixture.calls[0]?.headers.has("x-billing-operator-key")).toBe(false);
 		expect(fixture.calls[0]?.headers.has("x-billing-actor")).toBe(false);
+	});
+
+	it("runs the same command through `quotum catalog`", async () => {
+		const fixture = catalogServer();
+		const result = await runCli(["status"], fixture.baseUrl, ["src/cli.ts", "catalog"]);
+
+		expect(result.exitCode).toBe(0);
+		expect(JSON.parse(result.stdout)).toMatchObject({ revision: 3, intentHash: "current-hash" });
+		expect(fixture.calls.map((call) => `${call.method} ${call.pathname}`)).toEqual([
+			"GET /v1/admin/catalog",
+		]);
 	});
 
 	it("diffs and pushes the unchanged catalog snapshot against its declared revision", async () => {
@@ -177,6 +188,7 @@ function catalogServer(options: { previewConflict?: boolean } = {}): {
 async function runCli(
 	args: string[],
 	baseUrl: string,
+	entry: readonly string[] = ["src/composition/cli/catalog.ts"],
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
 	const environment: Record<string, string> = {
 		...createSanitizedProcessEnv(),
@@ -185,15 +197,12 @@ async function runCli(
 		BILLING_OPERATOR_API_KEY: "operator-secret",
 		BILLING_ACTOR: "catalog-test",
 	};
-	const processHandle = Bun.spawn(
-		[process.execPath, "run", "scripts/billing-catalog.ts", ...args],
-		{
-			cwd: repositoryRoot,
-			env: environment,
-			stdout: "pipe",
-			stderr: "pipe",
-		},
-	);
+	const processHandle = Bun.spawn([process.execPath, "run", ...entry, ...args], {
+		cwd: repositoryRoot,
+		env: environment,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
 	const [stdout, stderr, exitCode] = await Promise.all([
 		new Response(processHandle.stdout).text(),
 		new Response(processHandle.stderr).text(),

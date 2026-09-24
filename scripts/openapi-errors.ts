@@ -23,7 +23,9 @@ export async function generateErrorRegistry(root: string) {
 					path.includes("/contracts/") ||
 					path.endsWith("-responses.ts") ||
 					// The MCP server is a client of the API; its tool-result codes never go on the wire.
-					path.startsWith("src/mcp/")
+					path.startsWith("src/mcp/") ||
+					// Operator commands report to a terminal, not over HTTP.
+					path.startsWith("src/composition/cli/")
 				)
 					continue;
 				const source = await project.program.getSourceFile(resolve(root, path));

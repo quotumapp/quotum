@@ -7,17 +7,18 @@
 		"./testing/merchant": "./src/testing/merchant-runtime.ts"
 	},
 	"bin": {
-		"billing-catalog": "./scripts/billing-catalog.ts"
+		"billing-catalog": "./src/composition/cli/catalog.ts"
 	},
 	"scripts": {
 		"dev": "bun run --hot src/index.ts",
 		"migrate": "bun run src/migrate.ts",
 		"migrate:status": "bun run src/migrate.ts status",
-		"connections:rotate-secrets": "bun scripts/rotate-connection-secrets.ts",
+		"connections:rotate-secrets": "bun src/composition/cli/connections-rotate-secrets.ts",
 		"platform:bootstrap": "bun run src/platform-bootstrap.ts",
-		"catalog:provision": "bun run scripts/provision-catalog.ts",
-		"catalog": "bun run scripts/billing-catalog.ts",
+		"catalog:provision": "bun run src/composition/cli/catalog-provision.ts",
+		"catalog": "bun run src/composition/cli/catalog.ts",
 		"mcp": "bun --no-env-file src/mcp/index.ts",
+		"quotum": "bun --no-env-file src/cli.ts",
 		"test": "bun test tests",
 		"test:coverage": "bun test tests --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=coverage && bun run scripts/check-coverage.ts coverage/lcov.info",
 		"test:e2e": "bun run scripts/test-e2e.ts",

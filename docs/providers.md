@@ -9,9 +9,10 @@ mode.
 
 Store product mappings must already exist before a catalog binding can adopt them. Their provisioning
 is an operator prerequisite: the merchant catalog editor does not create `products` or `store_products`
-rows. The development import (`bun run catalog:provision`) currently creates Stripe/web mappings only
-and skips instances with a published catalog. Apple/iOS and Google/Android mappings require separate
-operator provisioning; there is no native-store provisioning command in the current service.
+rows. The development import (`quotum catalog provision`, or `bun run catalog:provision` from a
+checkout) currently creates Stripe/web mappings only and skips instances with a published catalog.
+Apple/iOS and Google/Android mappings require separate operator provisioning; there is no
+native-store provisioning command in the current service.
 
 ## Provider capabilities
 

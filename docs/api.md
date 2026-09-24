@@ -295,6 +295,9 @@ bun run catalog diff ./billing.catalog.ts
 bun run catalog push ./billing.catalog.ts
 ```
 
+The image runs the same commands as `quotum catalog status|diff|push`; mount the catalog file into
+the container to diff or push it.
+
 The backend SDK (`quotum-api/sdk`) wraps catalog, commercial, usage, provider capability, and
 selected admin calls and keeps credentials server-side. Its admin reads (`admin.customer`,
 `admin.searchCustomers`, `admin.storeEvents`, `admin.storeEvent`, `admin.projectionJobs`,

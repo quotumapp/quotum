@@ -124,9 +124,15 @@ jobs:
           context: .
           platforms: linux/amd64
           push: false
+          load: true
           tags: quotum-api:ci
           build-args: |
             BUILD_VERSION=${{ steps.version.outputs.version }}
             BUILD_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Operator CLI runs in the image
+        run: |
+          docker run --rm quotum-api:ci quotum help
+          docker run --rm quotum-api:ci quotum version
+          docker run --rm quotum-api:ci quotum init > /dev/null
