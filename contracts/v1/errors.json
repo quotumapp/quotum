@@ -286,6 +286,7 @@
         "src/composition/environment-billing.ts",
         "src/composition/merchant-billing.ts",
         "src/platform/billing.ts",
+        "src/platform/connections/operator-gate.ts",
         "src/platform/connections/service.ts",
         "src/platform/mcp/authorization.ts",
         "src/platform/step-up.ts"
