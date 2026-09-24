@@ -36,22 +36,24 @@ localDescribe("platform project identity persistence", () => {
 
 	it("keeps bootstrap idempotent and rejects topology drift", async () => {
 		const service = new PlatformBootstrapService(new BunPlatformUnitOfWork(context.sql));
-		await expect(service.inspect(manifest)).resolves.toEqual({
-			state: "exact",
+		const exact = {
+			state: "exact" as const,
 			organizationCount: 2,
 			logicalProjectCount: 3,
 			projectInstanceCount: 5,
+			organizationsToCreate: [],
+			logicalProjectsToCreate: [],
+			projectInstancesToCreate: [],
 			credentialsToIssue: [],
 			readOnlyCredentialsToIssue: [],
-		});
+		};
+		await expect(service.inspect(manifest)).resolves.toEqual(exact);
 		await expect(service.apply(manifest, [])).resolves.toEqual({
-			state: "exact",
-			organizationCount: 2,
-			logicalProjectCount: 3,
-			projectInstanceCount: 5,
-			credentialsToIssue: [],
-			readOnlyCredentialsToIssue: [],
+			...exact,
 			credentialsIssued: 0,
+			organizationsCreated: [],
+			logicalProjectsCreated: [],
+			projectInstancesCreated: [],
 		});
 
 		const unexpected = generateProjectApiCredential("production", "full");

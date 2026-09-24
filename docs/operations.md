@@ -172,7 +172,10 @@ sandbox credentials, or `POST /api/platform/environments/credentials/rotate` for
 Production rotation requires a fresh step-up grant. Rotation revokes the previous credential in the
 same transaction, so the replaced key is rejected from the next request. Write the replacement to
 every integration's secret store and redeploy those backends. `platform:bootstrap` issues only for
-instances that have never had a credential, so it does not rotate.
+instances that have never had a credential, so it does not rotate. To add an environment or a
+project later, extend the manifest, review `--check`, and run `--apply` with a new
+`--credentials-out` path. It issues only the declared credential kinds an instance has never held,
+whether the instance is new or already exists.
 
 ### Read-only credentials
 

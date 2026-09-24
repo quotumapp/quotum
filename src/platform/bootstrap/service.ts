@@ -6,13 +6,19 @@ import type {
 } from "../application/ports";
 import {
 	acquirePlatformBootstrapLock,
-	type PlatformLogicalProjectRecord,
 	PlatformLogicalProjectRepository,
-	type PlatformOrganizationRecord,
 	PlatformOrganizationRepository,
 	PlatformProjectCredentialRepository,
 } from "../persistence/repositories";
 import type { PlatformBootstrapManifest } from "./manifest";
+import {
+	indexPlatformSnapshot,
+	type PlatformBootstrapInspection,
+	type PlatformBootstrapSnapshot,
+	planPlatformBootstrap,
+} from "./plan";
+
+export type { PlatformBootstrapInspection } from "./plan";
 
 export interface PreparedPlatformCredential {
 	credentialId: string;
@@ -22,28 +28,12 @@ export interface PreparedPlatformCredential {
 	secretVerifier: Uint8Array;
 }
 
-export interface PlatformBootstrapInspection {
-	state: "empty" | "exact";
-	organizationCount: number;
-	logicalProjectCount: number;
-	projectInstanceCount: number;
-	/** Instance keys that declare a full credential and have never had one. */
-	credentialsToIssue: readonly string[];
-	/** The same for read-only credentials, planned independently of the full ones. */
-	readOnlyCredentialsToIssue: readonly string[];
-}
-
 export interface PlatformBootstrapResult extends PlatformBootstrapInspection {
 	credentialsIssued: number;
-}
-
-interface PlatformSnapshot {
-	organizations: readonly PlatformOrganizationRecord[];
-	projects: readonly PlatformLogicalProjectRecord[];
-	instances: readonly PlatformProjectInstanceRecord[];
-	credentialInstanceIds: ReadonlySet<string>;
-	/** `${instanceId}:${access}` for every credential ever stored, revoked ones included. */
-	credentialKinds: ReadonlySet<string>;
+	/** What this run created, named as in the inspection's `*ToCreate` lists. */
+	organizationsCreated: readonly string[];
+	logicalProjectsCreated: readonly string[];
+	projectInstancesCreated: readonly string[];
 }
 
 export class PlatformBootstrapService {
@@ -52,30 +42,27 @@ export class PlatformBootstrapService {
 	async inspect(manifest: PlatformBootstrapManifest): Promise<PlatformBootstrapInspection> {
 		return await this.unitOfWork.transaction(async (resources) => {
 			await acquirePlatformBootstrapLock(resources.executor);
-			return await inspectManifest(resources, manifest);
+			return planPlatformBootstrap(manifest, await readSnapshot(resources));
 		});
 	}
 
+	/**
+	 * Plans again under the lock, creates the declared rows that are missing and stores the prepared
+	 * credentials. A concurrent run that already issued a planned credential makes this one fail
+	 * instead of issuing a second.
+	 */
 	async apply(
 		manifest: PlatformBootstrapManifest,
 		preparedCredentials: readonly PreparedPlatformCredential[],
 	): Promise<PlatformBootstrapResult> {
 		return await this.unitOfWork.transaction(async (resources) => {
 			await acquirePlatformBootstrapLock(resources.executor);
-			let inspection = await inspectManifest(resources, manifest);
-			let instancesByKey = new Map<string, PlatformProjectInstanceRecord>();
-
-			if (inspection.state === "empty") {
-				instancesByKey = await createTopology(resources, manifest);
-				inspection = await inspectManifest(resources, manifest);
-			} else {
-				const instances = await resources.projectInstances.list();
-				instancesByKey = new Map(instances.map((instance) => [instance.key, instance]));
-			}
+			const snapshot = await readSnapshot(resources);
+			const plan = planPlatformBootstrap(manifest, snapshot);
 
 			const expectedCredentialKeys = [
-				...inspection.credentialsToIssue.map((key) => `${key}:full`),
-				...inspection.readOnlyCredentialsToIssue.map((key) => `${key}:read_only`),
+				...plan.credentialsToIssue.map((key) => `${key}:full`),
+				...plan.readOnlyCredentialsToIssue.map((key) => `${key}:read_only`),
 			].sort();
 			const preparedCredentialKeys = preparedCredentials
 				.map((credential) => `${credential.projectInstanceKey}:${credential.access}`)
@@ -84,6 +71,7 @@ export class PlatformBootstrapService {
 				throw new Error("Prepared credentials do not match the platform bootstrap plan");
 			}
 
+			const instancesByKey = await createMissingTopology(resources, manifest, snapshot, plan);
 			const credentials = new PlatformProjectCredentialRepository(resources.executor);
 			for (const prepared of preparedCredentials) {
 				const instance = instancesByKey.get(prepared.projectInstanceKey);
@@ -101,84 +89,72 @@ export class PlatformBootstrapService {
 				});
 			}
 
-			const completed = await inspectManifest(resources, manifest);
-			return { ...completed, credentialsIssued: preparedCredentials.length };
+			const completed = planPlatformBootstrap(manifest, await readSnapshot(resources));
+			if (completed.state !== "exact")
+				throw new Error("Platform bootstrap did not create every declared row");
+			return {
+				...completed,
+				credentialsIssued: preparedCredentials.length,
+				organizationsCreated: plan.organizationsToCreate,
+				logicalProjectsCreated: plan.logicalProjectsToCreate,
+				projectInstancesCreated: plan.projectInstancesToCreate,
+			};
 		});
 	}
 }
 
-async function inspectManifest(
+async function readSnapshot(
 	resources: PlatformTransactionResources,
-	manifest: PlatformBootstrapManifest,
-): Promise<PlatformBootstrapInspection> {
-	const organizations = new PlatformOrganizationRepository(resources.executor);
-	const projects = new PlatformLogicalProjectRepository(resources.executor);
+): Promise<PlatformBootstrapSnapshot> {
 	const stored = await new PlatformProjectCredentialRepository(resources.executor).list();
-	const snapshot: PlatformSnapshot = {
-		organizations: await organizations.list(),
-		projects: await projects.list(),
+	return {
+		organizations: await new PlatformOrganizationRepository(resources.executor).list(),
+		projects: await new PlatformLogicalProjectRepository(resources.executor).list(),
 		instances: await resources.projectInstances.list(),
 		credentialInstanceIds: new Set(stored.map((credential) => credential.projectInstanceId)),
 		credentialKinds: new Set(
 			stored.map((credential) => `${credential.projectInstanceId}:${credential.access}`),
 		),
 	};
-	const expected = flattenManifest(manifest);
-	const empty =
-		snapshot.organizations.length === 0 &&
-		snapshot.projects.length === 0 &&
-		snapshot.instances.length === 0 &&
-		snapshot.credentialInstanceIds.size === 0;
-	if (!empty) assertSnapshotMatches(expected, snapshot);
-
-	const instanceIdsByKey = new Map(
-		snapshot.instances.map((instance) => [instance.key, instance.id]),
-	);
-	// Bootstrap issues each declared kind once and never rotates: a revoked row still counts.
-	const toIssue = (access: CredentialAccess) =>
-		expected.instances
-			.filter((instance) => {
-				if (!(access === "full" ? instance.issueCredential : instance.issueReadOnlyCredential))
-					return false;
-				const instanceId = instanceIdsByKey.get(instance.key);
-				return instanceId === undefined || !snapshot.credentialKinds.has(`${instanceId}:${access}`);
-			})
-			.map((instance) => instance.key)
-			.sort();
-	const credentialsToIssue = toIssue("full");
-	const readOnlyCredentialsToIssue = toIssue("read_only");
-
-	return {
-		state: empty ? "empty" : "exact",
-		organizationCount: expected.organizations.length,
-		logicalProjectCount: expected.projects.length,
-		projectInstanceCount: expected.instances.length,
-		credentialsToIssue,
-		readOnlyCredentialsToIssue,
-	};
 }
 
-async function createTopology(
+/** Inserts the planned rows in manifest order, under the organizations and projects that exist. */
+async function createMissingTopology(
 	resources: PlatformTransactionResources,
 	manifest: PlatformBootstrapManifest,
+	snapshot: PlatformBootstrapSnapshot,
+	plan: PlatformBootstrapInspection,
 ): Promise<Map<string, PlatformProjectInstanceRecord>> {
+	const stored = indexPlatformSnapshot(snapshot);
 	const organizations = new PlatformOrganizationRepository(resources.executor);
 	const projects = new PlatformLogicalProjectRepository(resources.executor);
-	const instancesByKey = new Map<string, PlatformProjectInstanceRecord>();
+	const createOrganizations = new Set(plan.organizationsToCreate);
+	const createProjects = new Set(plan.logicalProjectsToCreate);
+	const createInstances = new Set(plan.projectInstancesToCreate);
+	const instancesByKey = new Map(stored.instancesByKey);
 	for (const organizationInput of manifest.organizations) {
-		const organization = await organizations.create({
-			slug: organizationInput.slug,
-			name: organizationInput.name,
-		});
+		const organizationId = createOrganizations.has(organizationInput.slug)
+			? (await organizations.create({ slug: organizationInput.slug, name: organizationInput.name }))
+					.id
+			: stored.organizationsBySlug.get(organizationInput.slug)?.id;
+		if (organizationId === undefined)
+			throw new Error(`Platform organization ${organizationInput.slug} is missing`);
 		for (const projectInput of organizationInput.projects) {
-			const project = await projects.create({
-				organizationId: organization.id,
-				key: projectInput.key,
-				name: projectInput.name,
-			});
+			const path = `${organizationInput.slug}/${projectInput.key}`;
+			const projectId = createProjects.has(path)
+				? (
+						await projects.create({
+							organizationId,
+							key: projectInput.key,
+							name: projectInput.name,
+						})
+					).id
+				: stored.projectsByPath.get(path)?.id;
+			if (projectId === undefined) throw new Error(`Platform logical project ${path} is missing`);
 			for (const instanceInput of projectInput.instances) {
+				if (!createInstances.has(instanceInput.key)) continue;
 				const instance = await resources.projectInstances.create({
-					platformProjectId: project.id,
+					platformProjectId: projectId,
 					key: instanceInput.key,
 					name: projectInput.name,
 					environment: instanceInput.environment,
@@ -190,100 +166,4 @@ async function createTopology(
 		}
 	}
 	return instancesByKey;
-}
-
-function flattenManifest(manifest: PlatformBootstrapManifest) {
-	return {
-		organizations: manifest.organizations.map(({ slug, name }) => ({ slug, name })),
-		projects: manifest.organizations.flatMap((organization) =>
-			organization.projects.map((project) => ({
-				organizationSlug: organization.slug,
-				key: project.key,
-				name: project.name,
-			})),
-		),
-		instances: manifest.organizations.flatMap((organization) =>
-			organization.projects.flatMap((project) =>
-				project.instances.map((instance) => ({
-					organizationSlug: organization.slug,
-					logicalProjectKey: project.key,
-					name: project.name,
-					key: instance.key,
-					environment: instance.environment,
-					lifecycleStatus: instance.lifecycleStatus,
-					internalProject: instance.environment === "internal",
-					issueCredential: instance.issueCredential,
-					issueReadOnlyCredential: instance.issueReadOnlyCredential ?? false,
-				})),
-			),
-		),
-	};
-}
-
-function assertSnapshotMatches(
-	expected: ReturnType<typeof flattenManifest>,
-	snapshot: PlatformSnapshot,
-): void {
-	const organizationsById = new Map(snapshot.organizations.map((item) => [item.id, item]));
-	const projectsById = new Map(snapshot.projects.map((item) => [item.id, item]));
-	const actualOrganizations = snapshot.organizations
-		.map(({ slug, name }) => ({ slug, name }))
-		.sort(compareJson);
-	const actualProjects = snapshot.projects
-		.map((project) => ({
-			organizationSlug: organizationsById.get(project.organizationId)?.slug,
-			key: project.key,
-			name: project.name,
-		}))
-		.sort(compareJson);
-	const actualInstances = snapshot.instances
-		.map((instance) => {
-			const project = projectsById.get(instance.platformProjectId);
-			return {
-				organizationSlug:
-					project === undefined ? undefined : organizationsById.get(project.organizationId)?.slug,
-				logicalProjectKey: project?.key,
-				name: instance.name,
-				key: instance.key,
-				environment: instance.environment,
-				lifecycleStatus: instance.lifecycleStatus,
-				internalProject: instance.internalProject,
-			};
-		})
-		.sort(compareJson);
-	const expectedInstances = expected.instances
-		.map(
-			({
-				issueCredential: _issueCredential,
-				issueReadOnlyCredential: _issueReadOnlyCredential,
-				...instance
-			}) => instance,
-		)
-		.sort(compareJson);
-
-	if (
-		JSON.stringify(actualOrganizations) !==
-			JSON.stringify([...expected.organizations].sort(compareJson)) ||
-		JSON.stringify(actualProjects) !== JSON.stringify([...expected.projects].sort(compareJson)) ||
-		JSON.stringify(actualInstances) !== JSON.stringify(expectedInstances)
-	) {
-		throw new Error("BILLING_PLATFORM_BOOTSTRAP_JSON does not match database state");
-	}
-
-	// By instance, not by kind: a read-only key minted later through merchant management on an
-	// instance that holds a declared credential does not make the database drift from the manifest.
-	const expectedCredentialInstanceIds = new Set(
-		expected.instances
-			.filter((instance) => instance.issueCredential || instance.issueReadOnlyCredential)
-			.map((instance) => snapshot.instances.find((row) => row.key === instance.key)?.id),
-	);
-	for (const credentialInstanceId of snapshot.credentialInstanceIds) {
-		if (!expectedCredentialInstanceIds.has(credentialInstanceId)) {
-			throw new Error("Database contains a project credential not declared by bootstrap manifest");
-		}
-	}
-}
-
-function compareJson(left: unknown, right: unknown): number {
-	return JSON.stringify(left).localeCompare(JSON.stringify(right));
 }

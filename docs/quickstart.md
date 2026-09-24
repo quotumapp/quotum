@@ -23,8 +23,9 @@ bun run migrate:status
 
 ## 2. Create a project and its credential
 
-The platform bootstrap applies an exact topology manifest and issues each declared credential once,
-into a `0600` file that is never printed.
+The platform bootstrap creates the topology a manifest declares and issues each declared credential
+once, into a `0600` file that is never printed. Running it again with an extended manifest adds
+only the missing rows; see [deployment](deployment.md) for the rules.
 
 ```sh
 export BILLING_PLATFORM_BOOTSTRAP_JSON="$(cat examples/quickstart/platform.json)"

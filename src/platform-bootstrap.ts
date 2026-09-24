@@ -7,6 +7,7 @@ import {
 	platformBootstrapCredentialEnvironment,
 } from "./platform/bootstrap/manifest";
 import {
+	type PlatformBootstrapInspection,
 	type PlatformBootstrapResult,
 	PlatformBootstrapService,
 } from "./platform/bootstrap/service";
@@ -47,8 +48,9 @@ async function runPlatformBootstrap(): Promise<void> {
 	}
 }
 
+/** 0 once every declared row and credential exists; 2 while `--apply` has something to do. */
 export function platformBootstrapCheckExitCode(inspection: {
-	state: "empty" | "exact";
+	state: PlatformBootstrapInspection["state"];
 	credentialsToIssue: readonly string[];
 	readOnlyCredentialsToIssue?: readonly string[];
 }): 0 | 2 {
@@ -118,6 +120,9 @@ export async function applyPlatformBootstrap(
 				organizationCount: result.organizationCount,
 				logicalProjectCount: result.logicalProjectCount,
 				projectInstanceCount: result.projectInstanceCount,
+				organizationsCreated: result.organizationsCreated,
+				logicalProjectsCreated: result.logicalProjectsCreated,
+				projectInstancesCreated: result.projectInstancesCreated,
 				credentialsIssued: result.credentialsIssued,
 				credentialsOut: result.credentialsIssued > 0 ? credentialsOut : null,
 			},
