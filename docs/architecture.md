@@ -13,8 +13,8 @@ unclassified or overlapping files and unresolved imports fail the check.
 | Platform | `src/platform` | Platform, shared |
 | Shared | `src/shared` | Shared |
 | MCP | `src/mcp` | MCP, shared, and `src/sdk` only |
-| Composition | `src/composition`, `src/app.ts`, `src/index.ts`, `src/runtime.ts`, `src/migrate.ts`, `src/platform-bootstrap.ts`, `src/shutdown.ts`, `scripts/provision-catalog.ts` | Everything |
-| Test support | `tests`, `src/testing`, scenario runners, release tooling (`scripts/release.ts`), `scripts/lib` | Everything |
+| Composition | `src/composition`, `src/app.ts`, `src/index.ts`, `src/runtime.ts`, `src/migrate.ts`, `src/platform-bootstrap.ts`, `src/shutdown.ts`, `scripts/openapi.ts`, `scripts/openapi-errors.ts`, `scripts/provision-catalog.ts`, `scripts/merchant-service-principal.ts`, `scripts/rotate-connection-secrets.ts` | Everything |
+| Test support | `tests`, `integration/merchant`, `src/testing`, scenario runners, release tooling (`scripts/release.ts`), `scripts/check-coverage.ts`, `scripts/check-module-boundaries.ts`, `scripts/projection-receiver.ts`, `scripts/lib` | Everything |
 
 The policy is deny-by-default:
 
@@ -26,8 +26,10 @@ The policy is deny-by-default:
   `src/sdk`, no domain module may import it, and it is held to the same persistence ban as platform
   and shared code.
 - Platform and shared code cannot import billing persistence, Drizzle, Postgres clients, or Bun SQL.
-  Platform repositories receive a schema-neutral query executor from composition and must pass inline
-  static SQL as `executor.query({ text, values })`; computed or concatenated SQL fails the check.
+  The one exception is `src/platform/persistence/auth-schema.ts`, which may import
+  `drizzle-orm/pg-core` to declare the Better Auth tables. Platform repositories receive a
+  schema-neutral query executor from composition and must pass inline static SQL as
+  `executor.query({ text, values })`; computed or concatenated SQL fails the check.
 - Platform-owned tables use the `platform_` prefix. Static platform SQL may reference only those
   tables; billing source and billing migrations may not. The single cross-domain SQL exception is
   `src/composition/project-instance-persistence.ts`.
