@@ -260,7 +260,7 @@ describe("error inventory", () => {
 			capabilityReasonCodes
 				.filter((code) => codes.has(code))
 				.map((code) => [code, codes.get(code)]),
-		).toEqual([["CONNECTION_VALIDATION_REQUIRED", ["src/platform/connections/service.ts"]]]);
+		).toEqual([["CONNECTION_VALIDATION_REQUIRED", ["src/platform/connections/lifecycle.ts"]]]);
 		const capabilitySources = new Set([
 			"src/shared/provider-capabilities.ts",
 			"src/providers/capabilities.ts",

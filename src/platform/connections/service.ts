@@ -1,23 +1,21 @@
-import { randomUUID } from "node:crypto";
 import type { CredentialAccess } from "../../shared/credential-access";
 import { isBillingProvider } from "../../shared/provider-capabilities";
 import type { PlatformProjectInstanceRecord } from "../application/ports";
-import type { MerchantScope, ReadinessBlockerDetail } from "../contracts";
+import type { MerchantCapability, MerchantScope, ReadinessBlockerDetail } from "../contracts";
 import { generateProjectApiCredential } from "../credentials/project-api-token";
 import type { MerchantSql } from "../database";
-import { MerchantError, randomToken, requireCapability } from "../security";
+import { MerchantError, requireCapability } from "../security";
 import { canonicalJson, MerchantStepUp } from "../step-up";
 import type { MerchantIdentity, MerchantStore } from "../store";
+import { type ConnectionGate, ConnectionLifecycle, validationWindowMs } from "./lifecycle";
 import type { StripeOAuthPort } from "./oauth-port";
-import { resolveStripeOAuth } from "./oauth-runtime";
 import type { ConnectionInput, ConnectionValidationPort, EnvironmentBillingPort } from "./ports";
-import { type ConnectionKind, ConnectionRepository, type ConnectionVersion } from "./repository";
+import { type ConnectionKind, ConnectionRepository } from "./repository";
 
-/** How long a validation stays fresh enough to commit a version or activate an environment. */
-const validationWindowMs = 900_000;
-
+/** Merchant access to connections and credentials: membership, capabilities and step-up. */
 export class MerchantConnections {
 	readonly repository: ConnectionRepository;
+	readonly lifecycle: ConnectionLifecycle;
 	constructor(
 		readonly store: MerchantStore,
 		repository: ConnectionRepository,
@@ -26,6 +24,31 @@ export class MerchantConnections {
 		readonly oauth?: StripeOAuthPort | null,
 	) {
 		this.repository = repository;
+		this.lifecycle = new ConnectionLifecycle({
+			sql: store.sql,
+			repository,
+			validator,
+			oauth,
+			hash: (value) => store.hash(value),
+			now: () => store.now(),
+		});
+	}
+	/** The merchant's hooks into the lifecycle, bound to one member, scope and step-up grant. */
+	private gate(
+		identity: MerchantIdentity,
+		scope: MerchantScope,
+		grant: string | null = null,
+	): ConnectionGate {
+		return {
+			actor: { kind: "principal", principalId: identity.principalId },
+			environment: scope.environment,
+			instance: (sql, write) => this.scope(identity, scope, write, sql),
+			lock: (tx, capability) => this.lock(tx, identity, scope, capability),
+			confirm: (tx, action, target) => this.confirm(tx, identity, scope, action, target, grant),
+			organizationId: async (tx) =>
+				(await this.store.membership(tx, identity.principalId, scope.organizationSlug))
+					.organization_id,
+		};
 	}
 	async scope(
 		identity: MerchantIdentity,
@@ -80,8 +103,7 @@ export class MerchantConnections {
 		});
 	}
 	async list(identity: MerchantIdentity, scope: MerchantScope) {
-		const instance = await this.scope(identity, scope);
-		return { connections: await this.repository.list(instance.id) };
+		return this.lifecycle.list(this.gate(identity, scope));
 	}
 	async draft(
 		identity: MerchantIdentity,
@@ -90,57 +112,7 @@ export class MerchantConnections {
 		key: string,
 		input: ConnectionInput & { expectedRevision: number },
 	) {
-		const normalized = this.validator.normalize(kind, scope.environment, input);
-		const fingerprint = this.store.hash(canonicalJson({ kind, ...input }));
-		return this.store.sql.begin(async (tx) => {
-			const instance = await this.scope(identity, scope, true, tx);
-			await tx`INSERT INTO platform_connections(project_instance_id,kind) VALUES(${instance.id},${kind}) ON CONFLICT(project_instance_id,kind) DO NOTHING`;
-			const [connection] = await tx<
-				{ id: string; revision: number }[]
-			>`SELECT id,revision FROM platform_connections WHERE project_instance_id=${instance.id} AND kind=${kind} FOR UPDATE`;
-			if (!connection) throw new Error("Connection insert failed");
-			const [existing] = await tx<
-				{ id: string; request_fingerprint: string }[]
-			>`SELECT id,request_fingerprint FROM platform_connection_versions WHERE connection_id=${connection.id} AND request_key=${key}`;
-			if (existing) {
-				if (existing.request_fingerprint !== fingerprint)
-					throw new MerchantError(
-						"IDEMPOTENCY_CONFLICT",
-						"Use a new idempotency key for a different request.",
-						409,
-					);
-				return { draftId: existing.id, secretDisclosed: false };
-			}
-			if (connection.revision !== input.expectedRevision)
-				throw new MerchantError(
-					"CONNECTION_CHANGED",
-					"Refresh this connection before editing.",
-					409,
-				);
-			const id = randomUUID();
-			const generated = kind === "projection" ? randomToken() : undefined;
-			if (generated) normalized.secrets.projectionSecret = generated;
-			await tx`INSERT INTO platform_connection_versions(id,connection_id,project_instance_id,expected_revision,settings,request_key,request_fingerprint) VALUES(${id},${connection.id},${instance.id},${input.expectedRevision},${JSON.stringify(normalized.settings)}::text::jsonb,${key},${fingerprint})`;
-			await this.repository.saveSecrets(
-				tx,
-				{ id, connection_id: connection.id, project_instance_id: instance.id },
-				normalized.secrets,
-			);
-			const member = await this.store.membership(tx, identity.principalId, scope.organizationSlug);
-			await this.store.audit(
-				tx,
-				identity.principalId,
-				member.organization_id,
-				"connection.draft_created",
-				id,
-				{ kind },
-			);
-			return {
-				draftId: id,
-				secretDisclosed: generated !== undefined,
-				...(generated ? { projectionSecret: generated } : {}),
-			};
-		});
+		return this.lifecycle.draft(this.gate(identity, scope), kind, key, input);
 	}
 	async validate(
 		identity: MerchantIdentity,
@@ -148,45 +120,7 @@ export class MerchantConnections {
 		kind: ConnectionKind,
 		id: string,
 	) {
-		const instance = await this.scope(identity, scope, true);
-		const version = await this.repository.version(instance.id, id);
-		await this.assertKind(version, kind);
-		if (version.status !== "active") this.assertDraft(version);
-		const resolvedSecrets =
-			version.settings.authMethod === "oauth" && this.oauth
-				? await resolveStripeOAuth(
-						this.repository,
-						version,
-						scope.environment,
-						this.oauth,
-						this.store.sql,
-					)
-				: await this.repository.secrets(version);
-		const result = await this.validator.validate(
-			kind,
-			scope.environment,
-			{ settings: version.settings, secrets: resolvedSecrets },
-			{ instanceId: instance.id, instanceKey: instance.key, versionId: id },
-		);
-		if (kind === "stripe" && version.settings.authMethod === "oauth") {
-			const evidence = await this.store
-				.sql`SELECT e.event_id FROM platform_stripe_app_events e JOIN platform_connection_versions v ON v.id=${id} WHERE e.account_id=${result.identity} AND e.livemode=${scope.environment === "production"} AND e.created_at>=v.created_at AND e.payload->>'type'<>'account.application.deauthorized' LIMIT 1`;
-			result.eventVerified = evidence.length > 0;
-		}
-		if (result.checks.some((check) => !check.passed))
-			throw new MerchantError(
-				"CONNECTION_VALIDATION_FAILED",
-				"Resolve the connection checks before continuing.",
-				409,
-			);
-		return this.store.sql.begin(async (tx) => {
-			await this.scope(identity, scope, true, tx);
-			const updated =
-				await tx`UPDATE platform_connection_versions SET status=CASE WHEN status='active' THEN 'active' ELSE 'validated' END,validation=${JSON.stringify(result)}::text::jsonb,validated_at=${this.store.now()},external_identity=${result.identity},event_verified_at=CASE WHEN ${result.eventVerified} THEN ${this.store.now()} WHEN external_identity IS NOT NULL AND external_identity<>${result.identity} THEN NULL ELSE event_verified_at END WHERE id=${id} AND project_instance_id=${instance.id} AND (status='active' OR (status IN ('draft','validated') AND expires_at>${this.store.now()})) RETURNING id`;
-			if (!updated.length)
-				throw new MerchantError("CONNECTION_CHANGED", "Create a fresh connection draft.", 409);
-			return { draftId: id, ...result };
-		});
+		return this.lifecycle.validate(this.gate(identity, scope), kind, id);
 	}
 	async commit(
 		identity: MerchantIdentity,
@@ -196,83 +130,7 @@ export class MerchantConnections {
 		key: string,
 		grant: string | null,
 	) {
-		return this.store.sql.begin(async (tx) => {
-			const instance = await this.scope(identity, scope, true, tx);
-			await this.lock(tx, identity, scope);
-			const receipt = await this.receipt(tx, instance.id, key, `commit:${id}`);
-			if (receipt) return receipt;
-			const version = await this.repository.version(instance.id, id, tx);
-			await this.assertKind(version, kind, tx);
-			this.assertDraft(version);
-			if (
-				!version.validated_at ||
-				version.validated_at.getTime() < this.store.now().getTime() - validationWindowMs
-			)
-				throw new MerchantError(
-					"CONNECTION_VALIDATION_REQUIRED",
-					"Verify this connection again.",
-					409,
-				);
-			if (
-				scope.environment === "production" &&
-				instance.lifecycleStatus === "active" &&
-				kind !== "projection" &&
-				!version.event_verified_at
-			)
-				throw new MerchantError(
-					"PROVIDER_EVENT_REQUIRED",
-					"Verify provider event delivery before enabling this production connection.",
-					409,
-				);
-			await new ConnectionRepository(tx, this.repository.cipher).secrets(version);
-			if (kind === "stripe") {
-				if (!version.external_identity)
-					throw new MerchantError(
-						"CONNECTION_VALIDATION_REQUIRED",
-						"Verify the Stripe account first.",
-						409,
-					);
-				await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`${version.external_identity}:${scope.environment}`},0))`;
-				const existing =
-					await tx`SELECT id FROM platform_connections WHERE stripe_account_id=${version.external_identity} AND stripe_livemode=${scope.environment === "production"} AND id<>${version.connection_id}`;
-				const changed =
-					await tx`SELECT id FROM platform_connections WHERE id=${version.connection_id} AND stripe_account_id IS NOT NULL AND stripe_account_id<>${version.external_identity}`;
-				if (existing.length || changed.length)
-					throw new MerchantError(
-						"STRIPE_ACCOUNT_CONFLICT",
-						"This account is already assigned, or does not match the environment's existing account.",
-						409,
-					);
-				await tx`UPDATE platform_connections SET stripe_account_id=${version.external_identity},stripe_livemode=${scope.environment === "production"} WHERE id=${version.connection_id}`;
-			}
-			await this.confirm(tx, identity, scope, "connections.manage", id, grant);
-			const rows =
-				await tx`UPDATE platform_connections SET active_version_id=${id},enabled=true,revision=revision+1,updated_at=${this.store.now()} WHERE id=${version.connection_id} AND project_instance_id=${instance.id} AND revision=${version.expected_revision} RETURNING revision`;
-			if (!rows.length)
-				throw new MerchantError(
-					"CONNECTION_CHANGED",
-					"Refresh this connection before committing.",
-					409,
-				);
-			await tx`UPDATE platform_connection_versions SET status='retired' WHERE connection_id=${version.connection_id} AND status='active' AND id<>${id}`;
-			await tx`UPDATE platform_connection_versions SET status='active' WHERE id=${id}`;
-			const result = {
-				connectionId: version.connection_id,
-				revision: Number(rows[0]?.revision),
-				enabled: true,
-			};
-			await this.saveReceipt(tx, instance.id, key, `commit:${id}`, result);
-			const member = await this.store.membership(tx, identity.principalId, scope.organizationSlug);
-			await this.store.audit(
-				tx,
-				identity.principalId,
-				member.organization_id,
-				"connection.committed",
-				version.connection_id,
-				{ kind, versionId: id },
-			);
-			return result;
-		});
+		return this.lifecycle.commit(this.gate(identity, scope, grant), kind, id, key);
 	}
 	async disable(
 		identity: MerchantIdentity,
@@ -282,30 +140,7 @@ export class MerchantConnections {
 		revision: number,
 		grant: string | null,
 	) {
-		return this.store.sql.begin(async (tx) => {
-			const instance = await this.scope(identity, scope, true, tx);
-			await this.lock(tx, identity, scope);
-			const action = `disable:${kind}:${revision}`;
-			const previous = await this.receipt(tx, instance.id, key, action);
-			if (previous) return previous;
-			await this.confirm(tx, identity, scope, "connections.manage", action, grant);
-			const rows =
-				await tx`UPDATE platform_connections SET enabled=false,revision=revision+1,updated_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND kind=${kind} AND revision=${revision} RETURNING id,revision`;
-			if (!rows.length)
-				throw new MerchantError("CONNECTION_CHANGED", "Refresh this connection.", 409);
-			const result = { enabled: false, revision: Number(rows[0]?.revision) };
-			await this.saveReceipt(tx, instance.id, key, action, result);
-			const member = await this.store.membership(tx, identity.principalId, scope.organizationSlug);
-			await this.store.audit(
-				tx,
-				identity.principalId,
-				member.organization_id,
-				"connection.disabled",
-				String(rows[0]?.id),
-				{ kind, revision },
-			);
-			return result;
-		});
+		return this.lifecycle.disable(this.gate(identity, scope, grant), kind, key, revision);
 	}
 	async readiness(identity: MerchantIdentity, scope: MerchantScope) {
 		const instance = await this.scope(identity, scope);
@@ -459,9 +294,8 @@ export class MerchantConnections {
 		};
 	}
 	/**
-	 * Replaces the instance's live credential of one kind, or issues the first read-only one. The two
-	 * kinds never revoke each other. The receipt and the step-up grant are bound to the kind, so a
-	 * confirmation given for a read-only key cannot replace the backend's full key.
+	 * Replaces the instance's live credential of one kind, or issues the first read-only one. The
+	 * production step-up grant is bound to the kind; see `ConnectionLifecycle.rotateCredential`.
 	 */
 	async rotateCredential(
 		identity: MerchantIdentity,
@@ -470,119 +304,26 @@ export class MerchantConnections {
 		grant: string | null,
 		access: CredentialAccess = "full",
 	) {
-		const receiptAction = access === "full" ? "credential.rotate" : `credential.rotate:${access}`;
-		const stepUpAction = access === "full" ? "credentials.rotate" : "credentials.rotate_read_only";
-		let credential: string | null = null;
-		const result = await this.store.sql.begin(async (tx) => {
-			const instance = await this.scope(identity, scope, true, tx);
-			await this.lock(
-				tx,
-				identity,
-				scope,
-				scope.environment === "production"
-					? "production.credentials.rotate"
-					: "sandbox.credentials.rotate",
-			);
-			const saved = await this.receipt(tx, instance.id, key, receiptAction);
-			if (saved) return saved;
-			if (instance.lifecycleStatus !== "active")
-				throw new MerchantError("ENVIRONMENT_INACTIVE", "Activate the environment first.", 409);
-			await this.confirm(tx, identity, scope, stepUpAction, key, grant);
-			const generated = generateProjectApiCredential(scope.environment, access);
-			const replaced = await tx<
-				{ id: string }[]
-			>`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND access=${access} AND revoked_at IS NULL RETURNING id`;
-			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,access,secret_verifier) VALUES(${generated.credentialId},${instance.id},'billing_api',${generated.access},${generated.secretVerifier})`;
-			const member = await this.store.membership(tx, identity.principalId, scope.organizationSlug);
-			await this.store.audit(
-				tx,
-				identity.principalId,
-				member.organization_id,
-				replaced.length === 0 ? "credential.issued" : "credential.rotated",
-				instance.id,
-				{ access },
-			);
-			const result = { access, credentialDisclosed: false };
-			await this.saveReceipt(tx, instance.id, key, receiptAction, result);
-			credential = generated.token;
-			return result;
-		});
-		return {
-			...result,
-			credentialDisclosed: credential !== null,
-			...(credential ? { credential } : {}),
-		};
+		return this.lifecycle.rotateCredential(this.gate(identity, scope, grant), key, access);
 	}
 	/** Whether the environment holds a live key of each kind, and since when. Never any key material. */
 	async credentialStatus(identity: MerchantIdentity, scope: MerchantScope) {
-		const instance = await this.scope(identity, scope);
-		const rows = await this.store.sql<
-			{ access: CredentialAccess; created_at: Date }[]
-		>`SELECT access, created_at FROM platform_project_api_credentials WHERE project_instance_id=${instance.id} AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>${this.store.now()})`;
-		const kind = (access: CredentialAccess) => {
-			const row = rows.find((candidate) => candidate.access === access);
-			return { live: row !== undefined, issuedAt: row?.created_at.toISOString() ?? null };
-		};
-		return { full: kind("full"), readOnly: kind("read_only") };
+		return this.lifecycle.credentialStatus(this.gate(identity, scope));
 	}
-	/**
-	 * Withdraws the read-only key without minting a replacement. The full key has no such operation:
-	 * a backend without a key is an outage, so it is only ever replaced by `rotateCredential`.
-	 */
+	/** Withdraws the read-only key without minting a replacement. */
 	async revokeCredential(
 		identity: MerchantIdentity,
 		scope: MerchantScope,
 		key: string,
 		grant: string | null,
 	) {
-		const access: CredentialAccess = "read_only";
-		const receiptAction = `credential.revoke:${access}`;
-		return await this.store.sql.begin(async (tx) => {
-			const instance = await this.scope(identity, scope, true, tx);
-			await this.lock(
-				tx,
-				identity,
-				scope,
-				scope.environment === "production"
-					? "production.credentials.rotate"
-					: "sandbox.credentials.rotate",
-			);
-			const saved = await this.receipt(tx, instance.id, key, receiptAction);
-			if (saved) return saved;
-			if (instance.lifecycleStatus !== "active")
-				throw new MerchantError("ENVIRONMENT_INACTIVE", "Activate the environment first.", 409);
-			await this.confirm(tx, identity, scope, "credentials.revoke_read_only", key, grant);
-			// The same liveness test as `credentialStatus`: an expired key is already dead, so withdrawing
-			// it is neither reported nor audited. The next issue revokes that row whatever its expiry.
-			const revoked = await tx<
-				{ id: string }[]
-			>`UPDATE platform_project_api_credentials SET revoked_at=${this.store.now()} WHERE project_instance_id=${instance.id} AND access=${access} AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>${this.store.now()}) RETURNING id`;
-			if (revoked.length > 0) {
-				const member = await this.store.membership(
-					tx,
-					identity.principalId,
-					scope.organizationSlug,
-				);
-				await this.store.audit(
-					tx,
-					identity.principalId,
-					member.organization_id,
-					"credential.revoked",
-					instance.id,
-					{ access },
-				);
-			}
-			// Receipted even when nothing was live: a replay of this key never revokes a later key.
-			const result = { access, revoked: revoked.length > 0 };
-			await this.saveReceipt(tx, instance.id, key, receiptAction, result);
-			return result;
-		});
+		return this.lifecycle.revokeCredential(this.gate(identity, scope, grant), key);
 	}
 	private async lock(
 		tx: MerchantSql,
 		identity: MerchantIdentity,
 		scope: MerchantScope,
-		capability?: import("../contracts").MerchantCapability,
+		capability?: MerchantCapability,
 	) {
 		const member = await this.store.membership(
 			tx,
@@ -592,16 +333,6 @@ export class MerchantConnections {
 		);
 		if (capability) requireCapability(member.role, capability);
 		await tx`SELECT id FROM platform_organizations WHERE id=${member.organization_id} FOR UPDATE`;
-	}
-	private assertDraft(version: ConnectionVersion) {
-		if (!["draft", "validated"].includes(version.status) || version.expires_at <= this.store.now())
-			throw new MerchantError("CONNECTION_DRAFT_EXPIRED", "Create a fresh connection draft.", 409);
-	}
-	private async assertKind(version: ConnectionVersion, kind: ConnectionKind, sql = this.store.sql) {
-		const rows =
-			await sql`SELECT id FROM platform_connections WHERE id=${version.connection_id} AND kind=${kind}`;
-		if (!rows.length)
-			throw new MerchantError("CONNECTION_NOT_FOUND", "Connection is unavailable.", 404);
 	}
 	async confirm(
 		tx: MerchantSql,
@@ -614,26 +345,21 @@ export class MerchantConnections {
 		if (scope.environment === "production")
 			await new MerchantStepUp(this.store).consume(tx, identity, scope, action, target, grant);
 	}
-	async receipt(
+	receipt(
 		tx: MerchantSql,
 		instanceId: string,
 		key: string,
 		action: string,
 	): Promise<Record<string, unknown> | null> {
-		const [row] = await tx<
-			{ action: string; result: Record<string, unknown> }[]
-		>`SELECT action,result FROM platform_connection_operations WHERE project_instance_id=${instanceId} AND request_key=${key}`;
-		if (row && row.action !== action)
-			throw new MerchantError("IDEMPOTENCY_CONFLICT", "Use a new idempotency key.", 409);
-		return row?.result ?? null;
+		return this.lifecycle.receipt(tx, instanceId, key, action);
 	}
-	async saveReceipt(
+	saveReceipt(
 		tx: MerchantSql,
 		instanceId: string,
 		key: string,
 		action: string,
 		result: Record<string, unknown>,
 	) {
-		await tx`INSERT INTO platform_connection_operations(project_instance_id,request_key,action,request_fingerprint,result) VALUES(${instanceId},${key},${action},${this.store.hash(action)},${JSON.stringify(result)}::text::jsonb)`;
+		return this.lifecycle.saveReceipt(tx, instanceId, key, action, result);
 	}
 }
