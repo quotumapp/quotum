@@ -21,6 +21,7 @@ describe("loadEnv", () => {
 			BILLING_SUBSCRIPTION_RECONCILIATION_MAX_ATTEMPTS: "9",
 			BILLING_PROVIDER_RECONCILIATION_STALE_AFTER_MS: "5500",
 			BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS: "7500",
+			BILLING_USAGE_PARTITION_UPKEEP: "false",
 			BILLING_RATE_LIMIT_WINDOW_MS: "6500",
 			BILLING_VERIFY_RATE_LIMIT_PER_WINDOW: "12",
 			BILLING_WEBHOOK_RATE_LIMIT_PER_WINDOW: "34",
@@ -45,6 +46,7 @@ describe("loadEnv", () => {
 			subscriptionReconciliationMaxAttempts: 9,
 			providerReconciliationStaleAfterMs: 5500,
 			meteringMaintenancePollIntervalMs: 7500,
+			usagePartitionUpkeep: false,
 			rateLimit: {
 				windowMs: 6500,
 				verifyLimit: 12,
@@ -77,6 +79,7 @@ describe("loadEnv", () => {
 		expect(env.subscriptionReconciliationPollIntervalMs).toBe(60000);
 		expect(env.subscriptionReconciliationMaxAttempts).toBe(10);
 		expect(env.providerReconciliationStaleAfterMs).toBe(21600000);
+		expect(env.usagePartitionUpkeep).toBe(true);
 		expect(env.rateLimit).toEqual({
 			windowMs: 60000,
 			verifyLimit: 120,

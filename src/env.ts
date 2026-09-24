@@ -84,6 +84,8 @@ export interface BillingEnv {
 	subscriptionReconciliationPollIntervalMs: number;
 	providerReconciliationStaleAfterMs: number;
 	meteringMaintenancePollIntervalMs: number;
+	/** Runs the usage partition upkeep job; defaults to true. */
+	usagePartitionUpkeep?: boolean;
 	rateLimit: BillingRateLimitEnv;
 	sentry: SentryEnv;
 }
@@ -121,6 +123,7 @@ const envSchema = z.object({
 	BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS: positiveIntegerString(
 		"BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS",
 	).default("60000"),
+	BILLING_USAGE_PARTITION_UPKEEP: z.enum(["true", "false"]).default("true"),
 	BILLING_RATE_LIMIT_WINDOW_MS: positiveIntegerString("BILLING_RATE_LIMIT_WINDOW_MS").default(
 		"60000",
 	),
@@ -217,6 +220,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 			parsed.BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS,
 			10,
 		),
+		usagePartitionUpkeep: parsed.BILLING_USAGE_PARTITION_UPKEEP === "true",
 		rateLimit: {
 			windowMs: Number.parseInt(parsed.BILLING_RATE_LIMIT_WINDOW_MS, 10),
 			verifyLimit: Number.parseInt(parsed.BILLING_VERIFY_RATE_LIMIT_PER_WINDOW, 10),

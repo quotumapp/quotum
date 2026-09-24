@@ -318,6 +318,7 @@ One process runs the HTTP API and all workers. Each polls on the interval shown:
 | Automatic top-ups | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Promotion maintenance (expired reservation release, Stripe coupons and hosted promotion codes) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Stripe App event processing, only when the Apps OAuth integration is configured | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
+| [Usage partition upkeep](#usage-partitions), unless `BILLING_USAGE_PARTITION_UPKEEP=false` | Fixed, every 15 minutes |
 
 Replicas coordinate through leased jobs with heartbeats; projection delivery claims up to 25 jobs
 per poll from a candidate set bounded by the batch size and delivers five concurrently.
@@ -328,6 +329,39 @@ in [deployment.md](deployment.md#optional-variables).
 Raw usage is partitioned monthly. Technical retention uses `metering_settings.raw_usage_retention_days`
 (default 400); durable monthly rollups outlive deleted raw rows. This default is not a legal
 retention guarantee or an implemented versioned privacy policy.
+
+### Usage partitions
+
+Raw usage (`usage_events`) is partitioned by UTC month of `recorded_at`. The baseline migration
+creates partitions from the month before it ran to 24 months after, plus `usage_events_default`
+for anything outside them. The usage partition upkeep job keeps partitions at least 12 months
+ahead: it adds one month per short transaction, continuing from the last partition's upper bound,
+and never touches existing partitions or rows. A run that waits more than a second for the table
+lock gives up and retries on the next run, and runs skip while another replica or the migration
+runner holds their advisory lock. Each run counts its outcome in
+`billing_usage_partition_upkeep_runs_total{result}`:
+
+| `result` | Meaning |
+| --- | --- |
+| `current`, `created`, `locked` | Nothing to do: coverage reaches the horizon, partitions were added, or another process is running the upkeep or migrations. |
+| `lock_timeout` | The table lock was busy; the next run retries. Alert only if it persists. |
+| `blocked` | `usage_events_default` holds rows. Adding a partition would scan it under a table lock, so upkeep stops and logs a warning. |
+| `forbidden` | The runtime role does not own `usage_events`. |
+| `failed` | Any other error, logged with its cause. |
+
+Alert on `blocked`, `forbidden` and `failed`; while upkeep is stopped, usage that arrives after the
+last partition lands in `usage_events_default`. The job runs at least a year before partitions run
+out, so there is time to act:
+
+- `forbidden`: run the service with the role that owns the schema, as the documented single
+  `POSTGRES_URI` does, or set `BILLING_USAGE_PARTITION_UPKEEP=false` and have the owner create each
+  missing month with `CREATE TABLE usage_events_YYYY_MM PARTITION OF usage_events FOR VALUES FROM
+  ('<last upper bound>') TO ('<next UTC month>')`.
+- `blocked`: rows usually reach the default partition through a data-only restore of usage older
+  than the baseline's first partition. Raw-usage retention deletes them after
+  `raw_usage_retention_days`, and upkeep resumes by itself once the default partition is empty.
+  Do not detach or drop `usage_events_default`: other tables reference usage rows through foreign
+  keys, so moving rows needs a reviewed maintenance plan.
 
 Automatic top-up failures require resolving the payment/configuration cause before a protected
 circuit reset. Use replay/retry routes for durable work; do not manually advance job state.

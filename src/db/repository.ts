@@ -122,6 +122,11 @@ import type {
 	StripeWebStoreProductRow,
 	TransactionalQueryExecutor,
 } from "./repository/types";
+import {
+	ensureUsageEventPartitions,
+	type UsagePartitionUpkeepOptions,
+	type UsagePartitionUpkeepResult,
+} from "./repository/usage-partitions";
 
 export type { GrantAllocationInput } from "./repository/metering";
 export type {
@@ -864,6 +869,12 @@ export class BillingRepository {
 
 	async runMeteringMaintenance(limit: number) {
 		return await this.metering.runMaintenance(limit);
+	}
+
+	async ensureUsageEventPartitions(
+		options?: UsagePartitionUpkeepOptions,
+	): Promise<UsagePartitionUpkeepResult> {
+		return await ensureUsageEventPartitions(this.database, options);
 	}
 
 	async previewCatalog(

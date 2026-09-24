@@ -8,6 +8,7 @@ export type BillingMetricName =
 	| "billing_store_event_replay_jobs_total"
 	| "billing_subscription_reconciliation_runs_total"
 	| "billing_metering_maintenance_runs_total"
+	| "billing_usage_partition_upkeep_runs_total"
 	| "billing_metering_operations_total"
 	| "billing_worker_jobs_total";
 
