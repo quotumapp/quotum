@@ -5,13 +5,19 @@ Billing owns its ledger, catalog, customers, subscriptions, provider events and 
 Product backends call authenticated APIs and consume signed projections into their own read models;
 they do not access Quotum's tables directly.
 
-The current app uses web onboarding and encrypted database-owned integrations. No deployment-level
-customer list is required. The operator UI is the sibling `quotum-ui` application.
+Integrations are encrypted and owned by the database, so no deployment-level customer list is
+required. Run Quotum headless and operate it with the `quotum` CLI, as the
+[self-hosting guide](docs/self-hosting.md) describes. To give merchants a web interface, build one
+on the merchant platform under `/api` (organizations, onboarding and integrations), served through
+your own [merchant proxy](docs/deployment.md#merchant-proxy-service-principal). The
+[HTTP contract](contracts/v1/openapi.json) documents every route.
 
 ## Read first
 
 - [Quickstart](docs/quickstart.md): local Postgres, migrations, bootstrap, catalog, a synthetic
   purchase, and metered usage in five minutes.
+- [Self-hosting](docs/self-hosting.md): run Quotum headless with Docker Compose, from secrets to a
+  published catalog, then operate and upgrade it.
 - [Deployment and configuration](docs/deployment.md): container image, required and optional
   variables, authentication modes, test entrypoints. See [`.env.example`](.env.example).
 - [Provider integrations](docs/providers.md): Apple, Google, Stripe, and signed projections.
