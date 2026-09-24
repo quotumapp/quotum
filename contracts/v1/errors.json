@@ -220,6 +220,7 @@
     {
       "code": "CONNECTION_CHANGED",
       "sources": [
+        "src/platform/connections/lifecycle.ts",
         "src/platform/connections/oauth.ts",
         "src/platform/connections/service.ts"
       ]
@@ -227,7 +228,7 @@
     {
       "code": "CONNECTION_DRAFT_EXPIRED",
       "sources": [
-        "src/platform/connections/service.ts"
+        "src/platform/connections/lifecycle.ts"
       ]
     },
     {
@@ -239,8 +240,8 @@
     {
       "code": "CONNECTION_NOT_FOUND",
       "sources": [
-        "src/platform/connections/repository.ts",
-        "src/platform/connections/service.ts"
+        "src/platform/connections/lifecycle.ts",
+        "src/platform/connections/repository.ts"
       ]
     },
     {
@@ -258,13 +259,13 @@
     {
       "code": "CONNECTION_VALIDATION_FAILED",
       "sources": [
-        "src/platform/connections/service.ts"
+        "src/platform/connections/lifecycle.ts"
       ]
     },
     {
       "code": "CONNECTION_VALIDATION_REQUIRED",
       "sources": [
-        "src/platform/connections/service.ts"
+        "src/platform/connections/lifecycle.ts"
       ]
     },
     {
@@ -365,7 +366,7 @@
       "code": "ENVIRONMENT_INACTIVE",
       "sources": [
         "src/app/webhook-routes.ts",
-        "src/platform/connections/service.ts"
+        "src/platform/connections/lifecycle.ts"
       ]
     },
     {
@@ -452,7 +453,7 @@
         "src/db/repository/recurring-pricing.ts",
         "src/db/repository/stripe.ts",
         "src/db/repository/usage-operations.ts",
-        "src/platform/connections/service.ts",
+        "src/platform/connections/lifecycle.ts",
         "src/platform/store.ts",
         "src/providers/stripe/service.ts"
       ]
@@ -956,7 +957,7 @@
     {
       "code": "PROVIDER_EVENT_REQUIRED",
       "sources": [
-        "src/platform/connections/service.ts"
+        "src/platform/connections/lifecycle.ts"
       ]
     },
     {
@@ -1137,7 +1138,7 @@
     {
       "code": "STRIPE_ACCOUNT_CONFLICT",
       "sources": [
-        "src/platform/connections/service.ts"
+        "src/platform/connections/lifecycle.ts"
       ]
     },
     {

@@ -1,3 +1,4 @@
+import { insertPlatformAuditEvent } from "./audit";
 import type { MerchantConfig } from "./config";
 import type {
 	MerchantAuthMethod,
@@ -80,18 +81,12 @@ export class MerchantStore {
 		target: string | null,
 		metadata: Record<string, unknown> = {},
 	): Promise<void> {
-		await executor.query({
-			text: `
-				INSERT INTO platform_audit_events (
-					principal_id,
-					organization_id,
-					action,
-					target,
-					metadata
-				)
-				VALUES ($1, $2, $3, $4, $5::text::jsonb)
-			`,
-			values: [principal, organization, action, target, JSON.stringify(metadata)],
+		await insertPlatformAuditEvent(executor, {
+			principalId: principal,
+			organizationId: organization,
+			action,
+			target,
+			metadata,
 		});
 	}
 	async createServicePrincipal(name: string): Promise<string> {
