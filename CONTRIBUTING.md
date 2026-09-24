@@ -20,8 +20,7 @@ bun run test
 ```
 
 `bun run quality` runs the repository's static checks: TypeScript, Biome lint and formatting, and
-the module boundary checker where present. Use `bun run quality:fix` to apply lint and formatting
-fixes.
+the module boundary checker. Use `bun run quality:fix` to apply lint and formatting fixes.
 
 Run the Postgres-backed suites when you touch billing behavior, repositories, SQL, workers, or
 provider integrations:
@@ -100,9 +99,9 @@ Pull requests run the shared [standalone validation](.github/workflows/validate.
 checks, unit tests and coverage, OpenAPI checks, Postgres integration tests, end-to-end tests,
 merchant integration tests, and a container build. They also run a bundle size check and an
 advisory dependency audit. Fix failing checks and wait for all required checks to pass on the
-latest revision before merging; a successful branch push alone is not validation. The release
-pull request follows the same process, and release tagging additionally requires successful CI
-on the exact merged `main` commit as described in the publishing checklist.
+latest revision before merging; a successful branch push alone is not validation. Release
+tagging requires successful CI on the exact `main` commit being tagged, as described in the
+publishing checklist.
 
 Keep history linear and prepare one commit per feature branch before merging. Fold follow-up
 changes into the branch commit with `git commit --amend`; squash intermediate commits with an

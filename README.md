@@ -74,6 +74,8 @@ a database from them rather than migrating it.
 - `src/billing/`, `src/catalog/`, `src/db/`: billing domain, catalog and persistence.
 - `src/platform/`: organization, identity, onboarding, connections and audit.
 - `src/providers/`, `src/workers/`, `src/projections/`: external providers and durable delivery.
+- `src/mcp/`: read-only MCP tools and stdio server; the remote transport is
+  `src/composition/remote-mcp.ts`, with browser authorization in `src/platform/mcp/`.
 - `migrations/`: ordered schema authority; `tests/`: mirrored unit/integration/E2E coverage.
 
 Current requirements live in the guides under [docs/](docs/). Update them in place with behavior
