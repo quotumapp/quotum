@@ -3,14 +3,14 @@ name: Pull request
 # The pull request title becomes the squash commit on main and labels the release notes.
 on:
   pull_request:
-    branches: [main]
     types: [opened, edited, reopened, synchronize]
+  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pull-request-${{ github.event.pull_request.number }}
+  group: pull-request-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -25,6 +25,7 @@ jobs:
       - uses: ./.github/actions/setup-bun
 
       - name: Check Conventional Commit title
+        if: github.event_name == 'pull_request'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: bun scripts/release.ts pr-title

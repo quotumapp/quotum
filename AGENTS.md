@@ -93,7 +93,8 @@ follow-up changes into that commit (`git commit --amend`) and squash any existin
 commits. Rebase onto current `main`; never merge `main` into the branch. After rewriting a
 published feature branch, push with `--force-with-lease`. Use squash merge for pull requests;
 never create merge commits. Do not rewrite published `main` except for an explicitly authorized
-history repair.
+history repair. CI runs on pull requests to any base branch, on merge groups and on
+every `main` commit; see [CONTRIBUTING.md](CONTRIBUTING.md#pull-requests) for the merge-queue flow.
 
 Use Conventional Commits with a subject under 72 characters: `feat`, `fix`, `perf`, `refactor`,
 `docs`, `test`, `build`, `ci`, `chore` or `revert`, an optional lowercase scope such as `fix(db):`,
