@@ -535,6 +535,7 @@
         "src/billing/payment-setup.ts",
         "src/operations/admin.ts",
         "src/platform/app.ts",
+        "src/platform/application/billing-port.ts",
         "src/platform/connections/service.ts",
         "src/platform/mcp/authorization.ts",
         "src/providers/apple/service.ts",
@@ -671,7 +672,8 @@
     {
       "code": "OPERATION_IN_PROGRESS",
       "sources": [
-        "src/db/repository/usage-operations.ts"
+        "src/db/repository/usage-operations.ts",
+        "src/platform/store.ts"
       ]
     },
     {

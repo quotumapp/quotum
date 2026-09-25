@@ -13,6 +13,7 @@ import type {
 import { capabilitiesFor, SESSION_COOKIE } from "../../src/platform/security";
 import { mutationTarget } from "../../src/platform/step-up";
 import type { ProviderEnvironmentCapabilities } from "../../src/providers/capability-read-types";
+import { createDeferred } from "../../tests/helpers/deferred";
 import {
 	assertOpenApiResponse,
 	testRequest,
@@ -41,6 +42,19 @@ async function onboard(browser: MerchantBrowser, orgSlug = "acme") {
 	);
 	return { org, draft, operation };
 }
+const sandbox = {
+	"x-quotum-organization": "acme",
+	"x-quotum-project": "example",
+	"x-quotum-environment": "sandbox",
+};
+const promotionBody = {
+	name: "Launch discount",
+	effect: {
+		kind: "discount",
+		discount: { type: "percent", percentOffBps: 1500, duration: "forever" },
+	},
+	codes: [{ code: "LAUNCH" }],
+};
 // The fixture pool is shared by the app and this file, so a blocked request, the transaction
 // holding the lock and each poll each occupy one of its connections.
 async function waitForOrganizationLockWaiter(): Promise<void> {
@@ -555,6 +569,113 @@ describe("merchant platform transactions", () => {
 		expect((await listed.json()).data.map((item: { key: string }) => item.key)).toEqual(["launch"]);
 		expect((await deactivated.json()).data).toMatchObject({ code: "LAUNCH", active: false });
 	});
+	it("answers a repeated billing write from its stored response without dispatching again", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		const path = "/api/billing/admin/promotions";
+		const body = { ...promotionBody, key: "replayed" };
+		const dispatch = spyOn(f.billingPort, "dispatch");
+		try {
+			const first = await browser.request(path, body, { key: "promotion-once", headers: sandbox });
+			const repeat = await browser.request(path, body, { key: "promotion-once", headers: sandbox });
+			const changed = await browser.request(
+				path,
+				{ ...body, name: "Changed" },
+				{ key: "promotion-once", headers: sandbox },
+			);
+
+			expect(first.status).toBe(201);
+			expect(repeat.status).toBe(201);
+			expect(await repeat.json()).toEqual(await first.json());
+			expect(changed.status).toBe(409);
+			expect((await changed.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
+			expect(dispatch).toHaveBeenCalledTimes(1);
+			const [accepted] = await f.sql<
+				{ count: number }[]
+			>`SELECT count(*)::int AS count FROM platform_audit_events WHERE action='billing.action_accepted'`;
+			expect(accepted?.count).toBe(1);
+		} finally {
+			dispatch.mockRestore();
+		}
+	});
+	it("refuses a duplicate that arrives while the first dispatch is running", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		const path = "/api/billing/admin/promotions";
+		const body = { ...promotionBody, key: "concurrent" };
+		const original = f.billingPort.dispatch.bind(f.billingPort);
+		const release = createDeferred();
+		const dispatch = spyOn(f.billingPort, "dispatch").mockImplementation(async (command) => {
+			await release.promise;
+			return await original(command);
+		});
+		try {
+			const first = browser.request(path, body, { key: "promotion-concurrent", headers: sandbox });
+			const deadline = Date.now() + 3_000;
+			while (dispatch.mock.calls.length === 0 && Date.now() < deadline) await Bun.sleep(5);
+			expect(dispatch).toHaveBeenCalledTimes(1);
+
+			const duplicate = await browser.request(path, body, {
+				key: "promotion-concurrent",
+				headers: sandbox,
+			});
+			expect(duplicate.status).toBe(409);
+			expect((await duplicate.json()).error.code).toBe("OPERATION_IN_PROGRESS");
+
+			release.resolve();
+			const completed = await first;
+			const repeat = await browser.request(path, body, {
+				key: "promotion-concurrent",
+				headers: sandbox,
+			});
+			expect(completed.status).toBe(201);
+			expect(repeat.status).toBe(201);
+			expect(await repeat.json()).toEqual(await completed.json());
+			expect(dispatch).toHaveBeenCalledTimes(1);
+		} finally {
+			release.resolve();
+			dispatch.mockRestore();
+		}
+	});
+	it("releases the key when a dispatch fails, so the same request can be retried", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		const path = "/api/billing/admin/promotions";
+		const body = { ...promotionBody, key: "retried" };
+		const dispatch = spyOn(f.billingPort, "dispatch")
+			.mockImplementationOnce(async () => {
+				throw new Error("synthetic dispatch failure");
+			})
+			.mockImplementationOnce(async () => ({
+				status: 503,
+				body: {
+					success: false,
+					error: { code: "BILLING_PROJECT_CONTEXT_UNAVAILABLE", message: "Unavailable" },
+				},
+			}));
+		try {
+			const thrown = await browser.request(path, body, {
+				key: "promotion-retry",
+				headers: sandbox,
+			});
+			const unavailable = await browser.request(path, body, {
+				key: "promotion-retry",
+				headers: sandbox,
+			});
+			const retried = await browser.request(path, body, {
+				key: "promotion-retry",
+				headers: sandbox,
+			});
+
+			expect([thrown.status, unavailable.status, retried.status]).toEqual([503, 503, 201]);
+			expect(dispatch).toHaveBeenCalledTimes(3);
+		} finally {
+			dispatch.mockRestore();
+		}
+	});
 	it("forwards capability error details through the merchant billing proxy", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();
@@ -813,5 +934,62 @@ describe("merchant platform transactions", () => {
 			(await f.sql`SELECT consumed_at FROM platform_step_up_grants WHERE id=${challenge.id}`)[0]
 				.consumed_at,
 		).not.toBeNull();
+	});
+	it("replays a step-up-protected write from its stored response instead of running it again", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
+		const eventId = crypto.randomUUID();
+		const path = `/api/billing/admin/store-events/${eventId}/replay`;
+		const body = {};
+		const headers = { ...sandbox, "x-quotum-environment": "production" };
+		const replayed = { success: true, data: { eventId, status: "processed" } };
+		const challenge = await browser.json<StepUpChallengeView>("/api/platform/step-up", {
+			scope: {
+				kind: "merchant",
+				organizationSlug: "acme",
+				projectKey: "example",
+				environment: "production",
+			},
+			action: "operations.recover",
+			target: mutationTarget("POST", path, body),
+			returnTo: "/orgs/acme/projects/example/production/catalog",
+			request: { method: "POST", path, body, idempotencyKey: "replay-once" },
+		});
+		await f.sql`DELETE FROM platform_rate_limits`;
+		await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
+		await browser.json("/api/auth/two-factor/send-otp", {});
+		await browser.json("/api/auth/two-factor/verify-otp", {
+			code: f.mailer.otp("owner@example.com"),
+			trustDevice: false,
+		});
+		const { grant } = await browser.json<{ grant: string }>(
+			`/api/platform/step-up/${challenge.id}/complete`,
+			{},
+		);
+		// Store-event replay has no downstream idempotency: every dispatch would replay the event.
+		const dispatch = spyOn(f.billingPort, "dispatch").mockResolvedValue({
+			status: 200,
+			body: replayed,
+		});
+		try {
+			const first = await browser.request(path, body, {
+				key: "replay-once",
+				headers: { ...headers, "x-quotum-step-up-grant": grant },
+			});
+			const repeat = await browser.request(path, body, { key: "replay-once", headers });
+			const fresh = await browser.request(path, body, { key: "replay-twice", headers });
+
+			expect(first.status).toBe(200);
+			expect(await first.json()).toEqual(replayed);
+			expect(repeat.status).toBe(200);
+			expect(await repeat.json()).toEqual(replayed);
+			expect(fresh.status).toBe(403);
+			expect((await fresh.json()).error.code).toBe("STEP_UP_REQUIRED");
+			expect(dispatch).toHaveBeenCalledTimes(1);
+		} finally {
+			dispatch.mockRestore();
+		}
 	});
 });

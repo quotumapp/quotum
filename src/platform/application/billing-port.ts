@@ -1,3 +1,5 @@
+import { MerchantError } from "../security";
+
 /** Consumer-owned operation boundary. It carries no credentials, HTTP requests, or database handles. */
 export const merchantBillingOperations = [
 	["GET", "/catalog", "stripe.catalog"],
@@ -95,7 +97,16 @@ export function billingOperation(method: string, path: string) {
 			`^/v1${pattern.replace(/:[A-Za-z][A-Za-z0-9]*/g, "([^/]+)")}$`,
 			"u",
 		).exec(path);
-		if (match) return { operation, parameters: match.slice(1).map(decodeURIComponent) };
+		if (match) return { operation, parameters: match.slice(1).map(decodePathParameter) };
 	}
 	return null;
+}
+
+/** A malformed percent-escape is the caller's error, answered as /v1 answers it. */
+function decodePathParameter(segment: string): string {
+	try {
+		return decodeURIComponent(segment);
+	} catch {
+		throw new MerchantError("INVALID_REQUEST", "Request validation failed.");
+	}
 }

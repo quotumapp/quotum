@@ -157,6 +157,13 @@ describe("merchant security boundaries", () => {
 			operation: "account.actions",
 			parameters: ["acct 1"],
 		});
+		// A malformed escape is the caller's error, as on /v1, never an unexpected failure.
+		for (const segment of ["%E0%A4%A", "%ZZ", "%"])
+			expect(() =>
+				billingOperation("GET", `/v1/billing-accounts/${segment}/available-actions`),
+			).toThrow(
+				expect.objectContaining({ code: "INVALID_REQUEST", status: 400 }) as unknown as Error,
+			);
 		for (const path of [
 			"/api/billing/admin/providers/capabilities",
 			"/api/billing/admin/billing-accounts/acct_1/available-actions",

@@ -241,6 +241,17 @@ store it as the proxy's `MERCHANT_SERVICE_TOKEN`, alongside its `MERCHANT_API_UR
 browser credential. The command refuses an existing name. This principal is required for app
 requests, not for global `/ready` to report database/schema health.
 
+Billing writes through `/api/billing` require an `Idempotency-Key`. The first request for a key
+checks the member's capability, consumes the step-up grant a sensitive action needs, runs the
+operation once and stores its status and body. Repeating the key with the same request, from the
+same principal and, for step-up actions, the same session, returns the stored response without
+running the operation again or needing another grant. A different request under the key is
+`409 IDEMPOTENCY_CONFLICT`, and a repeat while the first is still running is
+`409 OPERATION_IN_PROGRESS`. An operation that fails or answers 5xx releases the key, so a retry is
+authorized again, with a new step-up grant where one is required; if the process stops mid-operation
+the key stays in progress and the action needs a new key. A malformed percent-escape in the path is
+`400 INVALID_REQUEST`, as on `/v1`.
+
 ## Optional variables
 
 ### Remote MCP
