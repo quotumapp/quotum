@@ -536,8 +536,13 @@ start: `checkout.hosted`, `checkout.plan`, `purchase.verify`, `portal.session`,
 the account's live subscriptions (status `active`, `grace_period`, `billing_retry`, or `cancelled`,
 and not past their expiry), newest first. Each carries its provider subscription `id`, its
 `pendingChange` (the pending or processing change, or `null`), and the
-`subscription.change.preview`, `subscription.change.apply`, and `subscription.change.period_end`
-verdicts of its own provider, checked against its status and renewal date. An unknown billing
+`subscription.change.preview`, `subscription.change.apply`, `subscription.change.period_end`,
+`subscription.cancel`, and `subscription.uncancel` verdicts of its own provider, checked against
+its status, pending cancellation and renewal date. A `cancelled` Stripe subscription has already
+ended at Stripe, so its cancel and uncancel verdicts are `blocked` with `SUBSCRIPTION_STATE`, as
+execution refuses them with `SUBSCRIPTION_NOT_CANCELLABLE`. The verdicts do not model a change a
+worker is applying (`SUBSCRIPTION_CHANGE_PENDING`, retryable) or a base plan's active add-ons
+(`ADDON_SUBSCRIPTIONS_ACTIVE`); `pendingChange` shows the former. An unknown billing
 account returns `200` with `customerExists: false`, no subscriptions, and the account verdicts; the
 read never creates a customer.
 

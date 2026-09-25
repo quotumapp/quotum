@@ -73,21 +73,34 @@ localDescribe("Provider capability reads integration", () => {
 		});
 		// A change being applied is reported too; applied and cancelled changes are not.
 		expect(subscription("sub_actions_grace")?.pendingChange).toEqual(processing);
-		expect(subscription("sub_actions_retry")?.pendingChange).toBeNull();
+		expect(subscription("sub_actions_retry")).toMatchObject({
+			cancelAtPeriodEnd: true,
+			pendingChange: null,
+		});
 		expect(subscription("sub_actions_cancelled")).toMatchObject({
 			cancelAtPeriodEnd: true,
 			pendingChange: null,
 		});
 		for (const entry of data.subscriptions) {
-			// Uncancelling needs a pending cancellation, which only the cancelled subscription has.
+			// Stripe already ended the cancelled copy: it still changes until its period ends, but
+			// nothing is left to cancel or uncancel. Uncancelling also needs a pending cancellation.
+			const live = entry.status !== "cancelled";
 			expect(entry.actions.map((action) => [action.operation, action.outcome])).toEqual([
 				["subscription.change.preview", "available"],
 				["subscription.change.apply", "available"],
 				["subscription.change.period_end", "available"],
-				["subscription.cancel", "available"],
-				["subscription.uncancel", entry.cancelAtPeriodEnd ? "available" : "blocked"],
+				["subscription.cancel", live ? "available" : "blocked"],
+				["subscription.uncancel", live && entry.cancelAtPeriodEnd ? "available" : "blocked"],
 			]);
 		}
+		expect(
+			subscription("sub_actions_cancelled")
+				?.actions.slice(-2)
+				.map((action) => action.reasons.map((reason) => [reason.code, reason.observed])),
+		).toEqual([
+			[["SUBSCRIPTION_STATE", { subscriptionState: "cancelled" }]],
+			[["SUBSCRIPTION_STATE", { subscriptionState: "cancelled" }]],
+		]);
 		expect(outcome(data.account, "stripe", "checkout.hosted")).toBe("available");
 		expect(outcome(data.account, "stripe", "topup.automatic")).toBe("undetermined");
 
@@ -253,7 +266,8 @@ function outcome(
 /**
  * Adds grace-period, billing-retry, cancelled, expired, lapsed, revoked and refunded copies of
  * `sub_migrate_stripe` to its account, a pending and an applied change on the original, a
- * processing change on the grace-period copy and a cancelled change on the cancelled copy.
+ * processing change on the grace-period copy and a cancelled change on the cancelled copy. The
+ * billing-retry and cancelled copies carry a period-end cancellation.
  * Returns the pending and processing changes as the read reports them.
  */
 async function seedAccountSubscriptions(): Promise<{
@@ -277,7 +291,7 @@ async function seedAccountSubscriptions(): Promise<{
 		JOIN projects project ON project.id = source.project_id AND project.key = 'voysee'
 		CROSS JOIN (VALUES
 			('sub_actions_grace', 'grace_period', now() + interval '10 days', false, interval '20 minutes'),
-			('sub_actions_retry', 'billing_retry', now() + interval '10 days', false, interval '40 minutes'),
+			('sub_actions_retry', 'billing_retry', now() + interval '10 days', true, interval '40 minutes'),
 			('sub_actions_cancelled', 'cancelled', now() + interval '10 days', true, interval '1 hour'),
 			('sub_actions_expired', 'expired', now() - interval '1 day', false, interval '2 hours'),
 			('sub_actions_lapsed', 'active', now() - interval '1 minute', false, interval '3 hours'),

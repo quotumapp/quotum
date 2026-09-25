@@ -1380,8 +1380,7 @@
               "allowed": [
                 "active",
                 "grace_period",
-                "billing_retry",
-                "cancelled"
+                "billing_retry"
               ],
               "kind": "subscription_state"
             }
@@ -1503,8 +1502,7 @@
               "allowed": [
                 "active",
                 "grace_period",
-                "billing_retry",
-                "cancelled"
+                "billing_retry"
               ],
               "kind": "subscription_state"
             },
