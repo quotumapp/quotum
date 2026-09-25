@@ -46,6 +46,11 @@ describe("package scripts", () => {
 		expect(runner).toContain("POSTGRES_URI");
 		expect(runner).toContain("getConnectionUri");
 		expect(runner).toContain("container.stop");
+		for (const source of [runner, e2eRunner]) {
+			expect(source).toContain("process.env.QUOTUM_TEST_REPORT_DIR");
+			expect(source).toContain("reportDirectory !== undefined && !retainedReportDirectory");
+			expect(source).toContain("assertLaneReport(readJunitSummary");
+		}
 		expect(runner).toContain('"scripts/test-migration-integrity.ts"');
 		expect(runner).toContain('"bun", ["run", "migrate"]');
 		expect(runner).toContain('testTargets.length === 0 ? ["tests/integration"] : testTargets');

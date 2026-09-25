@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -17,6 +17,7 @@ const projectInstanceKeys = ["voysee", "wiseley"] as const;
 const merchantLane = testTargets.some((target) => target.startsWith("integration/merchant"));
 const lane = merchantLane ? "merchant" : "integration";
 
+const retainedReportDirectory = process.env.QUOTUM_TEST_REPORT_DIR;
 const interrupts = trapInterrupts();
 try {
 	await runIntegrationTests();
@@ -43,8 +44,12 @@ async function runIntegrationTests(): Promise<void> {
 		const env = merchantLane
 			? { ...migrationEnv, BILLING_TEST_LANE: lane }
 			: await withBootstrappedProjects(migrationEnv, container.getConnectionUri());
-		reportDirectory = await mkdtemp(join(tmpdir(), "quotum-lane-report-"));
+		reportDirectory =
+			retainedReportDirectory || (await mkdtemp(join(tmpdir(), "quotum-lane-report-")));
+		await mkdir(reportDirectory, { recursive: true });
 		const reportPath = join(reportDirectory, "junit.xml");
+		// A retained directory may hold an earlier run's report; never read that one as this run's.
+		await rm(reportPath, { force: true });
 		run(
 			"bun",
 			[
@@ -66,7 +71,7 @@ async function runIntegrationTests(): Promise<void> {
 				logger.error("Postgres test container cleanup failed", error);
 			}
 		}
-		if (reportDirectory !== undefined) {
+		if (reportDirectory !== undefined && !retainedReportDirectory) {
 			await rm(reportDirectory, { recursive: true, force: true });
 		}
 	}

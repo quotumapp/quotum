@@ -44,6 +44,12 @@ a change regenerate it with `bun scripts/check-coverage.ts --write <unit-lcov> <
 changed executable lines covered. `bun run test:coverage` stays a fast unit-only check with its own
 line and function floor.
 
+Set `QUOTUM_TEST_REPORT_DIR` to keep a Docker lane's `junit.xml` after it passes or fails; use a
+separate directory for concurrent lanes or shards. CI uploads `junit-integration-1`,
+`junit-integration-2`, `junit-merchant` and `junit-e2e` for 30 days, including failed runs that
+produced a report. Empty or skipped lanes still fail. Without the variable the runners delete their
+temporary report as before; credential directories are always removed.
+
 ## Migrations
 
 - SQL files under `migrations/` are the source of truth and are checksum-verified by the migration
