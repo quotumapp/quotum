@@ -107,6 +107,13 @@ again: a partial correction returns its proportional share, rounded to the walle
 by what remains, and correcting the rest of the usage returns the remainder, so corrections
 together return exactly what was charged.
 
+A meter limit counts usage in a window of its item's `resetInterval`. While the provider period is
+current, the window is the period, or a reset sub-window of it when the item resets more often than
+the plan bills (a monthly limit on an annual plan). Once a period has ended without a recorded
+renewal, windows roll on from the period end one reset interval at a time: a period exactly one
+interval long keeps its start's day of the month, so Jan 31 to Feb 28 rolls on to Mar 31, and any
+other period rolls on its end's day. Usage recorded at the exact end of a window counts in the next.
+
 Spend-control activation and window boundaries use the database clock by default, so API clock
 skew cannot bypass a newly active policy. Spend controls rate committed usage independently of pending reservations: held quantities never
 unlock volume discounts on consumed usage. A monetary reservation hold is a fixed budget quote,
@@ -280,18 +287,20 @@ Retiring a plan removes it from new selection without rewriting pinned subscript
 [`examples/quickstart/catalog.json`](../examples/quickstart/catalog.json) for a minimal intent.
 
 Preview and publish validate the intent's structure first and reject the first structural problem,
-including a binding on the wrong channel, with `400 INVALID_REQUEST`. Only then do they check each
-provider binding against its provider's capability declaration: a plan with a trial, an add-on
-plan, every explicit price component (`basePrice` or an item `price`), and every top-up need the
-matching `catalog.*` operations (a top-up needs `catalog.topup`). All incompatible bindings are
-reported together as one `400 PROVIDER_CAPABILITY_UNSUPPORTED` whose
-`details.providerCompatibility` lists them in catalog order; see
-[Provider capability errors](#provider-capability-errors). The whole submitted intent is checked,
-including the plans it keeps unchanged. The published catalog is never re-validated against the
-declarations: it stays readable, and preview still compares a new intent against it. Publish checks
-capabilities after it finds the preview token, so retrying a publish that already succeeded
-returns its stored result with `duplicate: true`. A successful preview also reports
-`providerCompatibility`; see
+including a binding on the wrong channel, with `400 INVALID_REQUEST`. That includes a meter limit or
+allocation that resets less often than its plan bills, such as `resetInterval: "year"` on a
+`billingInterval: "month"` plan: windows and grants reset with every provider period, so the yearly
+quantity would silently become a monthly one. Only then do they check each provider binding against
+its provider's capability declaration: a plan with a trial, an add-on plan, every explicit price
+component (`basePrice` or an item `price`), and every top-up need the matching `catalog.*`
+operations (a top-up needs `catalog.topup`). All incompatible bindings are reported together as one
+`400 PROVIDER_CAPABILITY_UNSUPPORTED` whose `details.providerCompatibility` lists them in catalog
+order; see [Provider capability errors](#provider-capability-errors). The whole submitted intent is
+checked, including the plans it keeps unchanged. The published catalog is never re-validated
+against the declarations or the reset-interval rule: it stays readable, and preview still compares
+a new intent against it. Publish checks reset intervals and capabilities after it finds the preview
+token, so retrying a publish that already succeeded returns its stored result with
+`duplicate: true`. A successful preview also reports `providerCompatibility`; see
 [Provider capabilities and available actions](#provider-capabilities-and-available-actions).
 
 The same contract is available as code:

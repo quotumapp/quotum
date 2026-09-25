@@ -6,6 +6,7 @@ import type {
 	CatalogFeatureIntent,
 	CatalogIntent,
 	CatalogPlanIntent,
+	CatalogPlanItemIntent,
 	CatalogPriceIntent,
 	CatalogProviderBindingIntent,
 	CatalogTopupIntent,
@@ -460,5 +461,165 @@ describe("catalog control plane preview provider compatibility", () => {
 	it("adds no entries for a plain base plan", async () => {
 		const result = await preview([plan({ providerBindings: [stripeBinding] })], []);
 		expect(result.providerCompatibility).toEqual([]);
+	});
+});
+
+function resettingItem(
+	itemKind: "meter_limit" | "allocation",
+	resetInterval: "month" | "year",
+): CatalogPlanItemIntent {
+	return {
+		featureKey: "credits",
+		itemKind,
+		quantity: "12000",
+		resetInterval,
+		expiresAfterSeconds: null,
+		overagePolicy: "blocked",
+		price: null,
+	};
+}
+
+/** A plan billed every `billingInterval` whose one item resets every `resetInterval`. */
+function resettingPlan(
+	itemKind: "meter_limit" | "allocation",
+	resetInterval: "month" | "year",
+	billingInterval: "month" | "year" | null,
+): CatalogPlanIntent {
+	return plan({ billingInterval, items: [resettingItem(itemKind, resetInterval)] });
+}
+
+/** Answers the control plane from one stored intent and one previewed draft; records every write. */
+class StoredCatalogDatabase {
+	readonly writes: string[] = [];
+
+	constructor(private readonly stored: CatalogIntent) {}
+
+	async execute<T>(query: unknown): Promise<T[]> {
+		return this.answer(renderDrizzleSql(query)) as T[];
+	}
+
+	async transaction<T>(callback: (tx: QueryExecutor) => Promise<T>): Promise<T> {
+		return await callback(this);
+	}
+
+	private answer(text: string): Record<string, unknown>[] {
+		if (text.includes("SELECT p.id, cr.id AS revision_id")) {
+			return [{ id: projectInstanceContext().projectInstanceId, revision_id: "7", revision: 1 }];
+		}
+		if (text.includes("SELECT revision.intent_hash")) {
+			return [
+				{
+					intent_hash: "a".repeat(64),
+					published_at: "2026-09-01T00:00:00.000Z",
+					intent: this.stored,
+				},
+			];
+		}
+		if (text.includes("SELECT draft.intent")) return [{ intent: this.stored }];
+		if (text.includes("FROM catalog_drafts")) {
+			return [
+				{
+					intent_hash: "b".repeat(64),
+					intent: this.stored,
+					base_revision: 1,
+					next_revision: 2,
+					status: "previewed",
+					expires_at: "2999-01-01T00:00:00.000Z",
+					published_revision_id: null,
+				},
+			];
+		}
+		if (/^\s*(INSERT|UPDATE|DELETE)\b/i.test(text)) {
+			this.writes.push(text);
+			return [{ id: "1" }];
+		}
+		if (text.includes("SELECT key, active FROM features")) {
+			return this.stored.features.map(({ key }) => ({ key, active: true }));
+		}
+		if (text.includes("SELECT key, active FROM plans")) {
+			return this.stored.plans.map(({ key }) => ({ key, active: true }));
+		}
+		if (text.includes("SELECT DISTINCT key FROM topup_options")) return [];
+		if (text.includes("FROM subscriptions")) return [{ count: "0" }];
+		throw new Error(`Unscripted query: ${text}`);
+	}
+}
+
+describe("catalog control plane reset intervals", () => {
+	it("rejects an item that resets less often than its plan bills", async () => {
+		// Windows and grants reset with every provider period, so a yearly 12,000 on a monthly plan
+		// would silently become 12,000 a month.
+		for (const itemKind of ["meter_limit", "allocation"] as const) {
+			const error = await previewWith(providerCapabilityCatalog, [
+				resettingPlan(itemKind, "year", "month"),
+			]);
+			expect(error).toBeInstanceOf(InvalidRequestError);
+			expect((error as InvalidRequestError).code).toBe("INVALID_REQUEST");
+			expect((error as InvalidRequestError).message).toBe(
+				"Plan pro item credits cannot reset every year on a plan billed every month",
+			);
+		}
+	});
+
+	it("accepts an item that resets as often as or more often than its plan bills", async () => {
+		for (const itemKind of ["meter_limit", "allocation"] as const) {
+			for (const [resetInterval, billingInterval] of [
+				["month", "month"],
+				["month", "year"],
+				["year", "year"],
+				["year", null],
+			] as const) {
+				expect(
+					await previewWith(providerCapabilityCatalog, [
+						resettingPlan(itemKind, resetInterval, billingInterval),
+					]),
+				).toBe("normalized");
+			}
+		}
+	});
+
+	it("keeps a catalog published before the rule readable and replaceable", async () => {
+		const stored: CatalogIntent = {
+			features: [feature],
+			plans: [resettingPlan("meter_limit", "year", "month")],
+			topups: [],
+			rateCards: [],
+		};
+		const controlPlane = new CatalogControlPlane(new StoredCatalogDatabase(stored));
+		const current = await controlPlane.getPublished(projectInstanceContext());
+		expect(current.catalog?.plans[0]?.items[0]?.resetInterval).toBe("year");
+		const replacement = await controlPlane.preview(projectInstanceContext(), {
+			expectedRevision: 1,
+			actor: "test",
+			catalog: {
+				...stored,
+				plans: [{ ...resettingPlan("meter_limit", "month", "month"), version: 2 }],
+			},
+		});
+		expect(replacement.nextRevision).toBe(2);
+	});
+
+	it("rejects publishing a draft previewed before the rule, before writing anything", async () => {
+		const stored: CatalogIntent = {
+			features: [feature],
+			plans: [resettingPlan("allocation", "year", "month")],
+			topups: [],
+			rateCards: [],
+		};
+		const database = new StoredCatalogDatabase(stored);
+		const rejection = await new CatalogControlPlane(database)
+			.publish(projectInstanceContext(), {
+				expectedRevision: 1,
+				actor: "test",
+				previewToken: "c".repeat(64),
+				catalog: stored,
+			})
+			.then(() => null)
+			.catch((error: unknown) => error);
+		expect(rejection).toBeInstanceOf(InvalidRequestError);
+		expect((rejection as InvalidRequestError).message).toBe(
+			"Plan pro item credits cannot reset every year on a plan billed every month",
+		);
+		expect(database.writes).toEqual([]);
 	});
 });

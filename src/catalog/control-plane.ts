@@ -9,6 +9,7 @@ import {
 import { BillingError, InvalidRequestError, PersistenceConflictError } from "../billing/errors";
 import { type BillingProvider, isBillingProvider } from "../billing/types";
 import { RepositoryModule } from "../db/repository/base";
+import { intervalMonths } from "../db/repository/meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "../db/repository/query";
 import type { QueryExecutor, TransactionalQueryExecutor } from "../db/repository/types";
 import type { ProjectInstanceContext } from "../projects/context";
@@ -107,7 +108,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		input: CatalogPreviewInput,
 	): Promise<CatalogPreview> {
 		const catalog = normalizeCatalog(input.catalog, this.capabilities);
-		assertCatalogProviderCompatibility(catalog, this.capabilities);
+		assertNewCatalogIntent(catalog, this.capabilities);
 		const providerCompatibility = catalogProviderCompatibility(catalog, {
 			capabilities: this.capabilities,
 			includeUnbound: true,
@@ -209,9 +210,9 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 					true,
 				);
 			}
-			// After the retry branch: a published draft replays its result even if a declaration
-			// narrowed since, while every new publish is still checked before any write.
-			assertCatalogProviderCompatibility(catalog, this.capabilities);
+			// After the retry branch: a published draft replays its result even if a declaration or
+			// rule narrowed since, while every new publish is still checked before any write.
+			assertNewCatalogIntent(catalog, this.capabilities);
 			if (draft.status !== "previewed" || new Date(draft.expires_at).getTime() <= Date.now()) {
 				throw new PersistenceConflictError(
 					"Catalog preview has expired",
@@ -417,8 +418,40 @@ function assertExpectedRevision(expected: number | null, actual: number | null):
 }
 
 /**
- * Structural checks only: provider capabilities are asserted on new intents in preview and
- * publish, never on stored catalogs. `capabilities` supplies each provider's binding channel.
+ * Checks a new intent in preview and publish, never a stored catalog: a published intent that
+ * predates a rule stays readable, and preview still compares its replacement against it.
+ */
+function assertNewCatalogIntent(
+	catalog: CatalogIntent,
+	capabilities: ProviderCapabilityLookup,
+): void {
+	for (const plan of catalog.plans) assertResetFitsBillingInterval(plan);
+	assertCatalogProviderCompatibility(catalog, capabilities);
+}
+
+/**
+ * Usage windows and plan allocations reset within the provider period, so an item that resets less
+ * often than its plan bills would silently reset every period: a yearly limit on a monthly plan
+ * would become a monthly one.
+ */
+function assertResetFitsBillingInterval(plan: CatalogPlanIntent): void {
+	const billingInterval = plan.billingInterval;
+	if (billingInterval === null) return;
+	for (const item of plan.items) {
+		if (item.itemKind !== "meter_limit" && item.itemKind !== "allocation") continue;
+		if (item.resetInterval === null) continue;
+		if (intervalMonths(item.resetInterval) > intervalMonths(billingInterval)) {
+			throw new InvalidRequestError(
+				`Plan ${plan.key} item ${item.featureKey} cannot reset every ${item.resetInterval} on a plan billed every ${billingInterval}`,
+			);
+		}
+	}
+}
+
+/**
+ * Structural checks only: provider capabilities and reset intervals are asserted on new intents in
+ * preview and publish, never on stored catalogs. `capabilities` supplies each provider's binding
+ * channel.
  */
 function normalizeCatalog(
 	catalog: CatalogIntent,
