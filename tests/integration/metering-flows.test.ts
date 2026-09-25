@@ -713,6 +713,90 @@ localDescribe("authoritative metering flows", () => {
 		});
 	});
 
+	it("charges at least one wallet unit per request and corrects only what was charged", async () => {
+		await seedWholeCreditRate(context.sql);
+		const project = integrationProjectContext();
+		const billingAccountId = "whole_credits_account";
+		await context.repository.grantAllocation(project, {
+			billingAccountId,
+			featureKey: "whole_credits",
+			quantity: "2",
+			sourceKind: "operator",
+			sourceKey: "fixture:whole_credits",
+		});
+		const subject = { billingAccountId, featureKey: "small_tokens" };
+		// At 0.001 credits per token, rounding to nearest charged 499 tokens nothing.
+		const original = await context.repository.consumeUsage(project, {
+			...subject,
+			quantity: "499",
+			idempotencyKey: "whole:consume",
+		});
+		expect(original).toMatchObject({
+			allowed: true,
+			walletQuantity: "1",
+			balance: { consumed: "1", available: "1" },
+		});
+		const reserved = await context.repository.reserveUsage(project, {
+			...subject,
+			quantity: "499",
+			idempotencyKey: "whole:reserve",
+		});
+		expect(reserved).toMatchObject({
+			allowed: true,
+			walletQuantity: "1",
+			balance: { held: "1", available: "0" },
+		});
+		expect(
+			await context.repository.consumeUsage(project, {
+				...subject,
+				quantity: "1",
+				idempotencyKey: "whole:empty",
+			}),
+		).toMatchObject({ allowed: false, reason: "insufficient_balance", walletQuantity: "1" });
+		// The confirmed quantity is below the reserved one, so it fits the hold it was quoted.
+		expect(
+			await context.repository.confirmUsageReservation(project, {
+				billingAccountId,
+				reservationId: reserved.reservationId ?? "",
+				quantity: "1",
+				idempotencyKey: "whole:confirm",
+			}),
+		).toMatchObject({
+			allowed: true,
+			status: "confirmed",
+			balance: { consumed: "2", held: "0", available: "0" },
+		});
+
+		// A correction reverses a share of the stored charge. Rating the one corrected token again
+		// would refund a whole credit while 498 tokens stayed charged.
+		const correct = (quantity: string, idempotencyKey: string) =>
+			context.repository.correctUsage(project, {
+				billingAccountId,
+				originalUsageEventId: original.usageEventId ?? "",
+				originalRecordedAt: new Date(original.recordedAt ?? ""),
+				quantity,
+				idempotencyKey,
+				actor: "billing-test",
+				reason: "tokens were not generated",
+			});
+		expect(await correct("1", "whole:correct-one")).toMatchObject({
+			quantity: "-1",
+			walletQuantity: "0",
+			balance: { consumed: "2", available: "0" },
+		});
+		expect(await correct("498", "whole:correct-rest")).toMatchObject({
+			quantity: "-498",
+			walletQuantity: "-1",
+			balance: { consumed: "1", available: "1" },
+		});
+		const [charged] = await context.sql<Array<{ wallet_quantity: string }>>`
+			SELECT sum(wallet_quantity)::text AS wallet_quantity
+			FROM usage_events
+			WHERE id = ${original.usageEventId} OR original_event_id = ${original.usageEventId}
+		`;
+		expect(charged?.wallet_quantity).toBe("0.000000000");
+	});
+
 	it("coalesces filtered entity caps and serializes consume, reserve, confirm, and correction", async () => {
 		await seedMeterLimitSubscription(context.sql, "cap_account", "workspace_1");
 		const [attachment] = await context.sql<
@@ -1283,6 +1367,37 @@ async function seedMeteringCatalog(sql: SQL): Promise<void> {
 			AND plans.id = plan_versions.plan_id
 			AND plans.key = 'api_monthly'
 			AND plan_versions.version = 1
+	`;
+}
+
+/** A whole-credit wallet charged a thousandth of a credit per token, both at scale 0. */
+async function seedWholeCreditRate(sql: SQL): Promise<void> {
+	await sql`
+		WITH revision AS (
+			SELECT catalog_revisions.id, catalog_revisions.project_id
+			FROM catalog_revisions
+			JOIN projects ON projects.id = catalog_revisions.project_id AND projects.key = 'voysee'
+			WHERE catalog_revisions.revision = 1
+		), wallets AS (
+			INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
+			SELECT project_id, 'whole_credits', 'Whole credits', 'metered', 'consumable', 'credit', 0
+			FROM revision
+			RETURNING id, project_id
+		), meters AS (
+			INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
+			SELECT project_id, 'small_tokens', 'Small tokens', 'metered', 'consumable', 'token', 0
+			FROM revision
+			RETURNING id, project_id
+		)
+		INSERT INTO rate_card_entries (
+			project_id,
+			catalog_revision_id,
+			meter_feature_id,
+			wallet_feature_id,
+			rate_per_unit
+		)
+		SELECT revision.project_id, revision.id, meters.id, wallets.id, 0.001
+		FROM revision, meters, wallets
 	`;
 }
 

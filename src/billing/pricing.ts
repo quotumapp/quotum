@@ -95,13 +95,18 @@ export function calculateRateCardQuantity(input: {
 	return rateNumeratorToQuantity(numerator, meterScale, walletScale);
 }
 
+/**
+ * Each request's wallet charge rounds up to the wallet scale. Rounding to nearest would price
+ * requests below half a wallet unit at zero, so splitting usage into small requests would be free;
+ * rounding up keeps the sum of split charges at or above the charge for the combined quantity.
+ */
 function rateNumeratorToQuantity(
 	numerator: bigint,
 	meterScale: number,
 	walletScale: number,
 ): string {
 	const denominator = 10n ** BigInt(meterScale + 18 - walletScale);
-	return unitsToDecimal((numerator + denominator / 2n) / denominator, walletScale);
+	return unitsToDecimal((numerator + denominator - 1n) / denominator, walletScale);
 }
 
 function normalizeRateCardTiers(

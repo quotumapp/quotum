@@ -214,6 +214,22 @@ describe("recurring pricing", () => {
 		).toBe("3.9");
 	});
 
+	it("rounds a rate-card charge up to the wallet scale", () => {
+		const tokens = (quantity: string) =>
+			calculateRateCardQuantity({
+				quantity,
+				pricingModel: "flat",
+				ratePerUnit: "0.001",
+				meterScale: 0,
+				walletScale: 0,
+			});
+		// Rounding to nearest charged 499 tokens nothing, so small requests were free.
+		expect(tokens("499")).toBe("1");
+		expect(tokens("1")).toBe("1");
+		expect(tokens("1000")).toBe("1");
+		expect(tokens("1001")).toBe("2");
+	});
+
 	// capability: subscription.change.period_end
 	it("classifies tier and quantity changes deterministically", () => {
 		expect(
