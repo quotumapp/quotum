@@ -77,6 +77,11 @@ interface StripeClientLike {
 			params?: Stripe.SubscriptionCancelParams,
 			options?: Stripe.RequestOptions,
 		): Promise<Stripe.Subscription>;
+		create?(
+			params: Stripe.SubscriptionCreateParams,
+			options?: Stripe.RequestOptions,
+		): Promise<Stripe.Subscription>;
+		list?(params: Stripe.SubscriptionListParams): Promise<Stripe.ApiList<Stripe.Subscription>>;
 	};
 	invoices?: {
 		create(
@@ -241,6 +246,29 @@ export class StripeBillingClient {
 		return this.stripe.subscriptions.retrieve(subscriptionId, {
 			expand: ["latest_invoice"],
 		});
+	}
+
+	async createSubscription(
+		params: Stripe.SubscriptionCreateParams,
+		idempotencyKey: string,
+	): Promise<Record<string, unknown>> {
+		if (this.stripe.subscriptions.create === undefined) {
+			throw new Error("Stripe subscription creation is unavailable");
+		}
+		const subscription = await this.stripe.subscriptions.create(params, { idempotencyKey });
+		return subscription as unknown as Record<string, unknown>;
+	}
+
+	async listCustomerSubscriptions(customerId: string): Promise<Array<Record<string, unknown>>> {
+		if (this.stripe.subscriptions.list === undefined) {
+			throw new Error("Stripe subscription listing is unavailable");
+		}
+		const page = await this.stripe.subscriptions.list({
+			customer: customerId,
+			status: "all",
+			limit: 100,
+		});
+		return page.data as unknown as Array<Record<string, unknown>>;
 	}
 
 	/** The subscription's current discounts, so an update can keep them when adding a coupon. */

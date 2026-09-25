@@ -17,6 +17,7 @@ import {
 	type CatalogCapabilityTarget,
 	catalogConstructOperations,
 	commercialActionOperations,
+	commercialActionOperationsFor,
 	commercialPreviewProvider,
 	connectionConfigurationFacts,
 	evaluateRuntimeCapability,
@@ -587,6 +588,16 @@ describe("declaration helpers the runtime gates read", () => {
 			setup_payment: "payment_method.setup",
 		} as const satisfies typeof commercialActionOperations;
 		expect(commercialActionOperations).toEqual(expected);
+		expect(
+			commercialActionOperationsFor({
+				kind: "setup_payment",
+				currency: "usd",
+				plan: { planKey: "pro", quantities: { seats: 5 } },
+			}),
+		).toEqual(["payment_method.setup", "subscription.create"]);
+		expect(commercialActionOperationsFor({ kind: "setup_payment", currency: "usd" })).toEqual([
+			"payment_method.setup",
+		]);
 
 		for (const [action, operation] of Object.entries(expected) as Array<
 			[keyof typeof expected, ProviderOperation]

@@ -189,36 +189,52 @@ cancels the subscription; it does not release or amend a schedule that may recre
 ### Saving a payment method
 
 `setup_payment` sends the customer to a provider-hosted page where they save a payment method for
-later off-session charges. It needs no catalog item and no subscription, and it is not a purchase:
-it records no purchase, allocation, entitlement or invoice, and takes no money. Cards are supported
-first, authentication included.
+later off-session charges. Cards are supported first, authentication included. An optional `plan`
+starts that plan on the saved card once setup completes. There is no promotion code on this path;
+a discount still goes through `checkout_plan`.
 
 ```json
 { "intent": { "kind": "setup_payment", "currency": "usd" } }
 { "intent": { "kind": "setup_payment", "currency": "usd", "email": "payer@example.com",
               "successUrl": "https://app.example.com/billing",
               "cancelUrl": "https://app.example.com/billing" } }
+{ "intent": { "kind": "setup_payment", "currency": "usd",
+              "plan": { "planKey": "pro", "quantities": { "seats": 5 } } } }
 ```
 
-`currency` is required and selects which setup methods the hosted page offers; it does not bind the
-account to that currency. `successUrl` and `cancelUrl` default to the connection's configured
+`currency` is required. Without a plan it only selects which setup methods the hosted page offers
+and does not bind the account to that currency. With a plan it must equal the plan's currency
+(compared case-insensitively); a mismatch is `400 INVALID_REQUEST` with `details.currency` and
+`details.planCurrency`. `successUrl` and `cancelUrl` default to the connection's configured
 customer-application URLs and are checked against its approved return origins, exactly as Checkout
 and portal returns are (`RETURN_URL_NOT_ALLOWED`, 400). Setup previews reject email addresses longer than 320 characters
 and return URLs longer than 2,000 characters before storing any state.
 
-The preview carries no line items and a zero total, and adds a `paymentSetup` object: the
-`currency`, `appliesTo: "account_default"`, `preservesSubscriptionPaymentMethods: true`, and
-whether executing would reuse an unfinished setup (`reusesExistingSetup`, `existingSetupId`,
-`existingSetupExpiresAt`). A setup binds no catalog or customer state, so a preview cannot go stale
-on drift; it still expires after 15 minutes like every other preview.
+Without a plan the preview carries no line items and a zero total. With a plan it carries that
+plan's lines and totals, `toPlanVersionId`, and `paymentSetup.plan`
+(`planKey`, `planVersionId`, `trialDays`, `startsAfterSetup: true`). `trialDays` is the trial that
+will start, or null when the plan has none or this account already used it. Either way the preview adds a
+`paymentSetup` object: the `currency`, `appliesTo: "account_default"`,
+`preservesSubscriptionPaymentMethods: true`, and whether executing would reuse an unfinished setup
+(`reusesExistingSetup`, `existingSetupId`, `existingSetupExpiresAt`). A setup with a plan goes stale
+when the plan version, the account's active base plan, or whether that account already used the
+plan's trial changes before execution
+(`COMMERCIAL_PREVIEW_STALE`, 409). An account that already had the trial starts the subscription
+without one, the same way Checkout does. A setup without a plan has no catalog state to drift. Previews
+still expire after 15 minutes.
 
-Execution returns `{ "kind": "payment_setup", "setupId", "status", "sessionId", "url", "expiresAt", "reused" }`
-with HTTP 200. The link lives for 23 hours, leaving margin within Stripe's expiry window. **Creating the link does not mean setup completed** —
+An add-on without an active base plan is `ADDON_REQUIRES_BASE_PLAN` (409). A base plan when the
+account already has an active one is `BASE_PLAN_ALREADY_ACTIVE` (409): change it with
+`subscription_change`. Checkout can still sell that base plan from a hosted page; this charge cannot.
+
+Execution returns `{ "kind": "payment_setup", "setupId", "status", "sessionId", "url", "expiresAt", "reused", "plan" }`
+with HTTP 200. `plan` is null, or `{ planKey, planVersionId, status }` with `status: "pending"`
+until the customer finishes. The link lives for 23 hours, leaving margin within Stripe's expiry window. **Creating the link does not mean setup completed** —
 read the setup session to learn that.
 
 One unresolved setup exists per billing account and provider identity:
 
-- A matching request (same currency, email and return URLs) gets that setup's link back unchanged,
+- A matching request (same currency, email, return URLs and plan version) gets that setup's link back unchanged,
   with `reused: true`.
 - A differing request is refused during preview with `PAYMENT_SETUP_ALREADY_ACTIVE` (409), whose
   `details.paymentSetup` names the active `setupId`, its `status` and its `expiresAt`.
@@ -234,8 +250,10 @@ GET /v1/billing-accounts/:billingAccountId/payment-setup-sessions/:sessionId
 
 `:sessionId` accepts either the `setupId` Quotum issued or the provider session id. The response is
 persisted state only — no provider call — and reports `status`, `currency`, `expiresAt`,
-`completedAt` and, once the default-method update is confirmed, a safe `card` summary
-(`brand`, `last4`, `expMonth`, `expYear`). The reusable `url` is returned only while the setup is
+`completedAt`, `plan` and, once the default-method update is confirmed, a safe `card` summary
+(`brand`, `last4`, `expMonth`, `expYear`). `plan` is null, or the attached plan's key, version,
+quantities, `status` (`pending`, `started`, `payment_failed`, `plan_changed`, `not_eligible`),
+`externalSubscriptionId`, `failure` (`code` and `message`) and `resolvedAt`. The reusable `url` is returned only while the setup is
 `awaiting_customer` and unexpired. Because that link is actionable, this read requires a full project credential
 (`READ_ONLY_CREDENTIAL`, 403, for a read-only key) and `operations.write` on the merchant surface.
 
@@ -247,8 +265,23 @@ otherwise valid link reusable.
 
 On completion Quotum validates the provider's own record of the setup and then updates only
 `customer.invoice_settings.default_payment_method`. Payment methods pinned to individual
-subscriptions are untouched, and setup starts no charge and retries no old invoice: a suspended
-automatic top-up policy still needs its own explicit reset.
+subscriptions are untouched. Without a plan, setup starts no charge and retries no old invoice: a
+suspended automatic top-up policy still needs its own explicit reset.
+
+With a plan, the row stays `applying_default` until the plan outcome is terminal, then the setup
+completes and releases the slot. Quotum creates the subscription on the customer default card with
+`payment_behavior: error_if_incomplete` and `off_session`. A decline or a card that needs
+authentication (`402`) does not create a subscription: the card stays saved, `plan.status` is
+`payment_failed`, and `plan.failure.code` is Stripe's code. Start the plan afterwards with
+`checkout_plan`. A plan version that changed after the preview was issued leaves `plan_changed`
+and does not start. An add-on that lost its base plan, or a base plan the account gained in the
+meantime, leaves `not_eligible` with that check's code. `started` means the subscription was
+recorded and a projection was queued; a later webhook for the same subscription is idempotent.
+On retry, Quotum first recovers any subscription already created for this setup, even if the catalog
+or eligibility has since changed. Failures recording that subscription or its outcome remain
+retryable; they do not turn an existing purchase into `not_eligible` or `plan_changed`.
+Merchants learn the outcome from the setup session and from that projection. Quotum has no outbound
+merchant event for it.
 
 ## Usage operation recovery
 

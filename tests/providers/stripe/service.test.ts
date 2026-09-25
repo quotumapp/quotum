@@ -175,6 +175,12 @@ function serviceFixture(
 				calls.push({ method: "retrieveSubscription", subscriptionId });
 				return Promise.resolve(overrides.retrievedSubscription ?? subscriptionObject());
 			},
+			createSubscription() {
+				return Promise.reject(new Error("subscriptions.create is not used in this test"));
+			},
+			listCustomerSubscriptions() {
+				return Promise.resolve([]);
+			},
 			retrieveDefaultPaymentMethod(stripeCustomerId) {
 				calls.push({ method: "retrieveDefaultPaymentMethod", stripeCustomerId });
 				return Promise.resolve(

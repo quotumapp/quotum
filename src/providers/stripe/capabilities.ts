@@ -159,6 +159,10 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 			notes:
 				"Clearing `cancel_at_period_end` only restores renewal; it does not restore a subscription change the cancellation superseded, and a subscription Stripe already ended cannot be cleared.",
 		}),
+		"subscription.create": native([paymentSetupTest, stripeFlowsTest], {
+			notes:
+				"After hosted setup saves a card, Quotum calls subscriptions.create with payment_behavior error_if_incomplete and off_session. A decline or authentication requirement leaves the card saved and records payment_failed; no subscription is stored. A plan version that changed after the preview records plan_changed instead of starting.",
+		}),
 		"settlement.collect_finalized_charge": composed(
 			"Stripe invoices with a one-off usage line",
 			[serviceTest, recurringBillingWorkerTest, catalogControlPlaneTest, phase3JourneysTest],

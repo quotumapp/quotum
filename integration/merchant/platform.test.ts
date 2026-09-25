@@ -480,6 +480,7 @@ describe("merchant platform transactions", () => {
 			url: "https://checkout.stripe.com/c/pay/cs_setup",
 			card: null,
 			attention: null,
+			plan: null,
 			createdAt: new Date().toISOString(),
 			updatedAt: new Date().toISOString(),
 			expiresAt: new Date(Date.now() + 3_600_000).toISOString(),

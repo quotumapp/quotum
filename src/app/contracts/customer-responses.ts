@@ -172,6 +172,15 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 					reusesExistingSetup: z.boolean(),
 					existingSetupId: z.union([z.null(), z.string()]),
 					existingSetupExpiresAt: z.union([z.null(), z.string()]),
+					plan: z.union([
+						z.null(),
+						z.object({
+							planKey: z.string(),
+							planVersionId: z.string(),
+							trialDays: z.union([z.null(), z.number()]),
+							startsAfterSetup: z.literal(true),
+						}),
+					]),
 				}),
 			]),
 			effectiveMode: z.union([z.null(), z.literal("immediate"), z.literal("period_end")]),
@@ -232,6 +241,14 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse200
 			url: z.string().nullable(),
 			expiresAt: z.string(),
 			reused: z.boolean(),
+			plan: z.union([
+				z.null(),
+				z.object({
+					planKey: z.string(),
+					planVersionId: z.string(),
+					status: z.enum(["pending", "started", "payment_failed", "plan_changed", "not_eligible"]),
+				}),
+			]),
 		}),
 		z.object({
 			kind: z.literal("subscription_cancellation"),
@@ -282,6 +299,14 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse202
 			url: z.string().nullable(),
 			expiresAt: z.string(),
 			reused: z.boolean(),
+			plan: z.union([
+				z.null(),
+				z.object({
+					planKey: z.string(),
+					planVersionId: z.string(),
+					status: z.enum(["pending", "started", "payment_failed", "plan_changed", "not_eligible"]),
+				}),
+			]),
 		}),
 		z.object({
 			kind: z.literal("subscription_cancellation"),
@@ -353,6 +378,24 @@ export const PaymentSetupSessionSchema = z.object({
 		}),
 	]),
 	attention: z.union([z.null(), z.string()]),
+	plan: z.union([
+		z.null(),
+		z.object({
+			planKey: z.string(),
+			planVersionId: z.string(),
+			quantities: z.record(z.string(), z.number()),
+			status: z.enum(["pending", "started", "payment_failed", "plan_changed", "not_eligible"]),
+			externalSubscriptionId: z.union([z.null(), z.string()]),
+			failure: z.union([
+				z.null(),
+				z.object({
+					code: z.string(),
+					message: z.string(),
+				}),
+			]),
+			resolvedAt: z.union([z.null(), z.string()]),
+		}),
+	]),
 	createdAt: z.string(),
 	updatedAt: z.string(),
 });

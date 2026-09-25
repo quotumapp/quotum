@@ -56,6 +56,7 @@ export const providerOperations = [
 	"subscription.change.period_end",
 	"subscription.cancel",
 	"subscription.uncancel",
+	"subscription.create",
 	"settlement.collect_finalized_charge",
 	"adjustment.issue",
 	"refund.sync",
@@ -256,6 +257,12 @@ export const providerOperationDefinitions: Record<ProviderOperation, ProviderOpe
 			title: "Subscription uncancellation",
 			description:
 				"Quotum clears a pending period-end cancellation on a provider subscription, so it renews again; a cancellation that already ended the subscription cannot be cleared this way.",
+		},
+		"subscription.create": {
+			domain: "subscription_changes",
+			title: "Server-side subscription start",
+			description:
+				"Quotum starts a subscription on the customer's saved payment method without a hosted checkout page, charging that method off session, and records the subscription from the provider response.",
 		},
 		"settlement.collect_finalized_charge": {
 			domain: "settlement",

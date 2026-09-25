@@ -25,6 +25,7 @@ import type { BillingRepository } from "../repository";
 import type {
 	PaymentSetupReservation,
 	PaymentSetupRow,
+	RecordPaymentSetupPlanOutcomeInput,
 	ReservePaymentSetupInput,
 } from "./payment-setup";
 import type {
@@ -400,6 +401,20 @@ export class ProjectScopedBillingRepository {
 		card: PaymentSetupCard | null;
 	}): Promise<PaymentSetupRow> {
 		return await this.repository.completePaymentSetup(this.project, input);
+	}
+
+	async recordPaymentSetupSubscriptionId(input: {
+		setupId: string;
+		workerId: string;
+		externalSubscriptionId: string;
+	}): Promise<PaymentSetupRow> {
+		return await this.repository.recordPaymentSetupSubscriptionId(this.project, input);
+	}
+
+	async recordPaymentSetupPlanOutcome(
+		input: RecordPaymentSetupPlanOutcomeInput,
+	): Promise<PaymentSetupRow> {
+		return await this.repository.recordPaymentSetupPlanOutcome(this.project, input);
 	}
 
 	async expirePaymentSetup(input: { setupId: string; workerId: string }): Promise<PaymentSetupRow> {

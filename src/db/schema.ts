@@ -17,7 +17,7 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
-import type { PaymentSetupStatus } from "../billing/payment-setup";
+import type { PaymentSetupPlanStatus, PaymentSetupStatus } from "../billing/payment-setup";
 import type {
 	BillingChannel,
 	BillingProvider,
@@ -967,6 +967,14 @@ export const paymentSetupSessions = pgTable(
 		email: text("email"),
 		successUrl: text("success_url").notNull(),
 		cancelUrl: text("cancel_url").notNull(),
+		planKey: text("plan_key"),
+		planVersionId: bigint("plan_version_id", { mode: "number" }),
+		planQuantities: jsonb("plan_quantities").$type<Record<string, number>>(),
+		planStatus: text("plan_status").$type<PaymentSetupPlanStatus>(),
+		planFailureCode: text("plan_failure_code"),
+		planFailureMessage: text("plan_failure_message"),
+		externalSubscriptionId: text("external_subscription_id"),
+		planResolvedAt: timestamp("plan_resolved_at", { withTimezone: true }),
 		status: text("status").$type<PaymentSetupStatus>().notNull().default("creating"),
 		externalSessionId: text("external_session_id"),
 		sessionUrl: text("session_url"),
@@ -1011,6 +1019,30 @@ export const paymentSetupSessions = pgTable(
 		check(
 			"payment_setup_sessions_cancel_url_check",
 			sql`char_length(${table.cancelUrl}) BETWEEN 1 AND 2000`,
+		),
+		check(
+			"payment_setup_sessions_plan_key_check",
+			sql`${table.planKey} IS NULL OR char_length(${table.planKey}) BETWEEN 1 AND 200`,
+		),
+		check(
+			"payment_setup_sessions_plan_quantities_check",
+			sql`${table.planQuantities} IS NULL OR jsonb_typeof(${table.planQuantities}) = 'object'`,
+		),
+		check(
+			"payment_setup_sessions_plan_status_check",
+			sql`${table.planStatus} IS NULL OR ${table.planStatus} IN ('pending', 'started', 'payment_failed', 'plan_changed', 'not_eligible')`,
+		),
+		check(
+			"payment_setup_sessions_plan_failure_code_check",
+			sql`${table.planFailureCode} IS NULL OR char_length(${table.planFailureCode}) BETWEEN 1 AND 80`,
+		),
+		check(
+			"payment_setup_sessions_plan_failure_message_check",
+			sql`${table.planFailureMessage} IS NULL OR char_length(${table.planFailureMessage}) BETWEEN 1 AND 500`,
+		),
+		check(
+			"payment_setup_sessions_external_subscription_id_check",
+			sql`${table.externalSubscriptionId} IS NULL OR char_length(${table.externalSubscriptionId}) BETWEEN 1 AND 200`,
 		),
 		check(
 			"payment_setup_sessions_status_check",
@@ -1065,6 +1097,45 @@ export const paymentSetupSessions = pgTable(
 		check(
 			"payment_setup_sessions_card_check",
 			sql`${table.defaultPaymentMethodId} IS NOT NULL OR (${table.cardBrand} IS NULL AND ${table.cardLast4} IS NULL AND ${table.cardExpMonth} IS NULL AND ${table.cardExpYear} IS NULL)`,
+		),
+		check(
+			"payment_setup_sessions_plan_presence_check",
+			sql`(
+				${table.planKey} IS NULL AND ${table.planVersionId} IS NULL
+				AND ${table.planQuantities} IS NULL AND ${table.planStatus} IS NULL
+			) OR (
+				${table.planKey} IS NOT NULL AND ${table.planVersionId} IS NOT NULL
+				AND ${table.planQuantities} IS NOT NULL AND ${table.planStatus} IS NOT NULL
+			)`,
+		),
+		check(
+			"payment_setup_sessions_plan_started_check",
+			sql`${table.planStatus} IS DISTINCT FROM 'started' OR ${table.externalSubscriptionId} IS NOT NULL`,
+		),
+		check(
+			"payment_setup_sessions_plan_resolved_check",
+			sql`(
+				${table.planStatus} IS NULL AND ${table.planResolvedAt} IS NULL
+				AND ${table.planFailureCode} IS NULL AND ${table.planFailureMessage} IS NULL
+			) OR (
+				${table.planStatus} = 'pending' AND ${table.planResolvedAt} IS NULL
+				AND ${table.planFailureCode} IS NULL AND ${table.planFailureMessage} IS NULL
+			) OR (
+				${table.planStatus} = 'started' AND ${table.planResolvedAt} IS NOT NULL
+				AND ${table.externalSubscriptionId} IS NOT NULL
+				AND ${table.planFailureCode} IS NULL AND ${table.planFailureMessage} IS NULL
+			) OR (
+				${table.planStatus} = 'plan_changed' AND ${table.planResolvedAt} IS NOT NULL
+				AND ${table.planFailureCode} IS NULL AND ${table.planFailureMessage} IS NULL
+			) OR (
+				${table.planStatus} IN ('payment_failed', 'not_eligible')
+				AND ${table.planResolvedAt} IS NOT NULL
+				AND ${table.planFailureCode} IS NOT NULL AND ${table.planFailureMessage} IS NOT NULL
+			)`,
+		),
+		check(
+			"payment_setup_sessions_plan_pending_completion_check",
+			sql`${table.status} IS DISTINCT FROM 'completed' OR ${table.planStatus} IS DISTINCT FROM 'pending'`,
 		),
 		unique("payment_setup_sessions_project_id_id_unique").on(table.projectId, table.id),
 		unique("payment_setup_sessions_project_preview_unique").on(table.projectId, table.previewToken),

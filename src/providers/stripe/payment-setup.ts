@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { BillingError } from "../../billing/errors";
 import {
 	type PaymentSetupCard,
+	type PaymentSetupPlanStatus,
 	type PaymentSetupSession,
 	type PaymentSetupStatus,
 	paymentSetupConflict,
@@ -42,6 +43,10 @@ export const PAYMENT_SETUP_OPERATION = "payment_method_setup";
 /** Copy shown on the hosted page, so the payer sees what saving the card is for. */
 const HOSTED_SETUP_SUBMIT_MESSAGE =
 	"This card is saved as the default payment method for this account and is charged for future automatic payments. Nothing is charged now.";
+
+/** Copy when setup will start a plan on the card it saves. A decline does not start the plan. */
+const HOSTED_SETUP_PLAN_SUBMIT_MESSAGE =
+	"This card is saved as the default payment method. The selected plan then starts on this card; a declined payment does not start the plan.";
 
 export interface PaymentSetupClientDependency {
 	createCheckoutSession(
@@ -92,6 +97,19 @@ export interface PaymentSetupRepositoryDependency {
 		reason: string;
 	}): Promise<PaymentSetupRow | null>;
 	findPaymentSetupById?(setupId: string): Promise<PaymentSetupRow | null>;
+	recordPaymentSetupSubscriptionId?(input: {
+		setupId: string;
+		workerId: string;
+		externalSubscriptionId: string;
+	}): Promise<PaymentSetupRow>;
+	recordPaymentSetupPlanOutcome?(input: {
+		setupId: string;
+		workerId: string;
+		status: "started" | "payment_failed" | "plan_changed" | "not_eligible";
+		externalSubscriptionId: string | null;
+		failureCode: string | null;
+		failureMessage: string | null;
+	}): Promise<PaymentSetupRow>;
 	getPaymentSetupSession?(
 		billingAccountId: string,
 		sessionId: string,
@@ -119,6 +137,12 @@ export interface PaymentSetupRequestParameters {
 	cancelUrl: string;
 	providerAccountId: string | null;
 	integrationIdentifier: string;
+	/** The resolved plan, or null when the setup only saves a card. */
+	plan: {
+		planKey: string;
+		planVersionId: string;
+		quantities: Record<string, number>;
+	} | null;
 }
 
 export function paymentSetupRequestHash(parameters: PaymentSetupRequestParameters): string {
@@ -132,9 +156,24 @@ export function paymentSetupRequestHash(parameters: PaymentSetupRequestParameter
 				cancelUrl: parameters.cancelUrl,
 				providerAccountId: parameters.providerAccountId,
 				integrationIdentifier: parameters.integrationIdentifier,
+				plan: hashedSetupPlan(parameters.plan),
 			}),
 		)
 		.digest("hex");
+}
+
+function hashedSetupPlan(plan: PaymentSetupRequestParameters["plan"]): {
+	planKey: string;
+	planVersionId: string;
+	quantities: Record<string, number>;
+} | null {
+	if (plan === null) return null;
+	const quantities: Record<string, number> = {};
+	for (const key of Object.keys(plan.quantities).sort()) {
+		const quantity = plan.quantities[key];
+		if (quantity !== undefined) quantities[key] = quantity;
+	}
+	return { planKey: plan.planKey, planVersionId: plan.planVersionId, quantities };
 }
 
 /** A setup-mode Checkout Session Quotum created, as the events carry it. */
@@ -183,6 +222,12 @@ export interface PaymentSetupCreation {
 	url: string | null;
 	expiresAt: string;
 	reused: boolean;
+	/** Pending while the link is open. Null when the setup only saves a card. */
+	plan: {
+		planKey: string;
+		planVersionId: string;
+		status: PaymentSetupPlanStatus;
+	} | null;
 }
 
 export interface CreatePaymentSetupInput {
@@ -196,6 +241,13 @@ export interface PaymentSetupContext {
 	client: PaymentSetupClientDependency;
 	repository: PaymentSetupRepositoryDependency;
 	now?: () => Date;
+	/** When a plan is attached and tax is on, the hosted page collects a billing address. */
+	taxMode?: "disabled" | "test" | "registered";
+	/**
+	 * Starts the setup's plan after the default card is saved. Required when the row has a pending
+	 * plan; a setup that only saves a card never calls it.
+	 */
+	startPlanOnSavedCard?(setup: PaymentSetupRow, workerId: string): Promise<void>;
 }
 
 /**
@@ -222,6 +274,7 @@ export async function createPaymentSetup(
 		successUrl: input.parameters.successUrl,
 		cancelUrl: input.parameters.cancelUrl,
 		expiresAt,
+		plan: input.parameters.plan,
 	});
 	// Reservation and its task commit together in the SQL repository. Scheduling here also
 	// repairs older reservations and runs before the provider call, which may throw.
@@ -262,8 +315,17 @@ async function issueHostedSetupLink(
 		expires_at: Math.floor(expiresAt.getTime() / 1000),
 		metadata: paymentSetupMetadata(setup),
 		setup_intent_data: { metadata: paymentSetupMetadata(setup) },
-		custom_text: { submit: { message: HOSTED_SETUP_SUBMIT_MESSAGE } },
+		custom_text: {
+			submit: {
+				message:
+					setup.plan_key === null ? HOSTED_SETUP_SUBMIT_MESSAGE : HOSTED_SETUP_PLAN_SUBMIT_MESSAGE,
+			},
+		},
 	};
+	if (setup.plan_key !== null && (context.taxMode ?? "disabled") !== "disabled") {
+		params.billing_address_collection = "required";
+		params.customer_update = { address: "auto" };
+	}
 	const session = await context.client.createCheckoutSession(
 		params,
 		setup.provider_idempotency_key,
@@ -423,6 +485,19 @@ async function completeSetupFromProvider(
 		paymentMethodId: resolved.paymentMethodId,
 		idempotencyKey: `billing:payment-setup-default:${input.setup.id}:${resolved.paymentMethodId}`,
 	});
+	// The row stays applying_default until a pending plan reaches a terminal outcome. A retry
+	// adopts a subscription Stripe already created instead of starting a second one.
+	if (input.setup.plan_status === "pending") {
+		const startPlan = context.startPlanOnSavedCard?.bind(context);
+		if (startPlan === undefined) {
+			throw new BillingError(
+				"Payment method setup is not configured",
+				"STRIPE_NOT_CONFIGURED",
+				503,
+			);
+		}
+		await startPlan(input.setup, input.workerId);
+	}
 	return await repository.completePaymentSetup({
 		setupId: input.setup.id,
 		workerId: input.workerId,
@@ -658,6 +733,18 @@ function creationFrom(setup: PaymentSetupRow, reused: boolean, now: Date): Payme
 		url: open ? setup.session_url : null,
 		expiresAt: new Date(setup.expires_at).toISOString(),
 		reused,
+		plan: setupPlanSummary(setup),
+	};
+}
+
+function setupPlanSummary(setup: PaymentSetupRow): PaymentSetupCreation["plan"] {
+	if (setup.plan_key === null || setup.plan_version_id === null || setup.plan_status === null) {
+		return null;
+	}
+	return {
+		planKey: setup.plan_key,
+		planVersionId: setup.plan_version_id,
+		status: setup.plan_status,
 	};
 }
 

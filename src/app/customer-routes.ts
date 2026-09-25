@@ -149,7 +149,10 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 	z
 		.object({
 			kind: z.literal("setup_payment"),
-			/** Selects the eligible setup methods; it does not bind the account to this currency. */
+			/**
+			 * Selects the eligible setup methods. When `plan` is set it must equal that plan's
+			 * currency; otherwise it does not bind the account to this currency.
+			 */
 			currency: z
 				.string()
 				.trim()
@@ -157,6 +160,13 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 			email: z.string().trim().min(1).max(320).nullable().optional(),
 			successUrl: z.string().trim().max(2000).check(z.url()).nullable().optional(),
 			cancelUrl: z.string().trim().max(2000).check(z.url()).nullable().optional(),
+			plan: z
+				.object({
+					planKey: z.string().trim().min(1),
+					quantities: z.record(z.string().trim().min(1), z.number().int().positive()).default({}),
+				})
+				.strict()
+				.optional(),
 		})
 		.strict(),
 ]);
