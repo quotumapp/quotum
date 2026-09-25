@@ -410,6 +410,9 @@ function replayOnlyStripeClient() {
 		async createPortalSession() {
 			throw new Error("Unexpected Stripe portal creation");
 		},
+		async retrievePaymentIntent() {
+			throw new Error("Unexpected Stripe PaymentIntent retrieval");
+		},
 		async retrieveCheckoutSession() {
 			throw new Error("Unexpected Stripe checkout retrieval");
 		},

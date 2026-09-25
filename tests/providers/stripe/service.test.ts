@@ -68,6 +68,8 @@ function serviceFixture(
 		};
 		webhookEvent?: unknown;
 		constructWebhookError?: unknown;
+		paymentIntentError?: Error;
+		latestCharge?: string | null;
 		expireRace?: boolean;
 		retrievedSubscription?: Record<string, unknown>;
 		recordingResult?: "processed" | "skipped" | "ignored";
@@ -145,6 +147,14 @@ function serviceFixture(
 			createPortalSession(params) {
 				calls.push({ method: "createPortalSession", params });
 				return Promise.resolve(portalSession);
+			},
+			async retrievePaymentIntent(id) {
+				calls.push({ method: "retrievePaymentIntent", id });
+				if (overrides.paymentIntentError) throw overrides.paymentIntentError;
+				return {
+					id,
+					latest_charge: overrides.latestCharge === undefined ? "ch_123" : overrides.latestCharge,
+				};
 			},
 			retrieveCheckoutSession(sessionId) {
 				calls.push({ method: "retrieveCheckoutSession", sessionId });
@@ -1404,6 +1414,78 @@ describe("StripeBillingService", () => {
 			status: 400,
 		});
 		expect(calls).toEqual([]);
+	});
+
+	it.each(["checkout.session.completed", "checkout.session.async_payment_succeeded"])(
+		"resolves an unexpanded PaymentIntent for %s without rewriting the webhook",
+		async (type) => {
+			const session = checkoutSessionObject({ payment_intent: "pi_123", amount_total: 499 });
+			const { calls, repositoryInputs, service } = serviceFixture({
+				webhookEvent: stripeEvent(type, session),
+			});
+			await service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+			expect(calls).toContainEqual({ method: "retrievePaymentIntent", id: "pi_123" });
+			expect(repositoryInputs[0]).toMatchObject({
+				chargeId: "ch_123",
+				rawPayload: { payment_intent: "pi_123" },
+			});
+			expect(session.payment_intent).toBe("pi_123");
+		},
+	);
+
+	it("persists lookup failures for replay and does not fulfill the purchase", async () => {
+		const event = stripeEvent(
+			"checkout.session.completed",
+			checkoutSessionObject({ payment_intent: "pi_123" }),
+		);
+		const { calls, repositoryInputs, service } = serviceFixture({
+			webhookEvent: event,
+			paymentIntentError: new Error("provider offline"),
+		});
+		await expect(
+			service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" }),
+		).rejects.toMatchObject({ code: "BILLING_PROVIDER_UNAVAILABLE", status: 503 });
+		expect(repositoryInputs).toHaveLength(1);
+		expect(
+			calls.some(
+				(call) =>
+					(call as { method: string }).method === "recordStripeCreditPurchaseAndEnqueueProjection",
+			),
+		).toBe(false);
+		expect(calls).toContainEqual({
+			method: "recordStripeSkippedEvent",
+			input: expect.objectContaining({
+				externalEventId: "evt_123",
+				rawPayload: event.data.object,
+				processingError: "provider offline",
+			}),
+		});
+	});
+
+	it.each([
+		{ payment_intent: null, amount_total: 0, payment_status: "no_payment_required" },
+		{ payment_intent: "pi_123", payment_status: "unpaid" },
+		{ payment_intent: { id: "pi_123", latest_charge: "ch_expanded" }, payment_status: "paid" },
+	] as const)("avoids unnecessary charge lookups (%j)", async (overrides) => {
+		const { calls, service } = serviceFixture({
+			webhookEvent: stripeEvent("checkout.session.completed", checkoutSessionObject(overrides)),
+		});
+		await service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+		expect(
+			calls.some((call) => (call as { method: string }).method === "retrievePaymentIntent"),
+		).toBe(false);
+	});
+
+	it("accepts a successful PaymentIntent lookup with no charge", async () => {
+		const { repositoryInputs, service } = serviceFixture({
+			latestCharge: null,
+			webhookEvent: stripeEvent(
+				"checkout.session.completed",
+				checkoutSessionObject({ payment_intent: "pi_123" }),
+			),
+		});
+		await service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+		expect(repositoryInputs[0]).toMatchObject({ chargeId: null, paymentIntentId: "pi_123" });
 	});
 
 	// capability: webhook.ingest

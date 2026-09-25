@@ -2,6 +2,7 @@ import { sql as drizzleSql } from "drizzle-orm";
 import type { SubscriptionStatus } from "../../billing/types";
 import { supersedeBasePlanGrants } from "./plan-grants";
 import { executeOne, executeRows, jsonb } from "./query";
+import { materializeMonthlySubscriptionAllocations } from "./subscription-allocation-periods";
 import type { QueryExecutor } from "./types";
 
 const allocationFundingStatuses = new Set<SubscriptionStatus>([
@@ -276,11 +277,20 @@ export async function materializeSubscriptionAllocations(
 				AND subscription.id = ${input.subscriptionId}
 				AND pi.plan_version_id = ${version.planVersionId}::bigint
 				AND pi.item_kind = 'allocation'
+				AND (pi.reset_interval IS DISTINCT FROM 'month' OR NOT EXISTS (
+					SELECT 1 FROM plan_versions pv WHERE pv.project_id = pi.project_id
+						AND pv.id = pi.plan_version_id AND pv.billing_interval = 'year'
+				))
 			ON CONFLICT (project_id, feature_id, source_kind, source_key) DO NOTHING
 			RETURNING id
 		`,
 	);
-	return inserted.length;
+	const monthly = await materializeMonthlySubscriptionAllocations(
+		executor,
+		input.projectId,
+		input.subscriptionId,
+	);
+	return inserted.length + monthly.granted;
 }
 
 export async function syncSubscriptionPriceItems(

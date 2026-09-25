@@ -11,7 +11,7 @@ import type {
 } from "../../billing/commercial";
 import { priceCommercialLines } from "../../billing/commercial-pricing";
 import { sha256Hex, stableJson } from "../../billing/decimal";
-import { BillingError } from "../../billing/errors";
+import { BillingError, ProviderUnavailableError } from "../../billing/errors";
 import {
 	normalizePaymentSetupCurrency,
 	type PaymentSetupSession,
@@ -121,6 +121,7 @@ export interface StripeBillingClientDependency extends PaymentSetupClientDepende
 	): Promise<{ id: string; url: string | null }>;
 	expireCheckoutSession?(sessionId: string): Promise<unknown>;
 	createPortalSession(params: Stripe.BillingPortal.SessionCreateParams): Promise<{ url: string }>;
+	retrievePaymentIntent(id: string): Promise<Pick<Stripe.PaymentIntent, "id" | "latest_charge">>;
 	retrieveCheckoutSession(sessionId: string): Promise<{
 		id: string;
 		status: string | null;
@@ -1881,6 +1882,26 @@ export class StripeBillingService
 
 		if (command === null) {
 			return { status: "ignored", eventType: parsedEvent.type, entitlements: null };
+		}
+
+		if (
+			command.kind === "credit_purchase" &&
+			command.chargeId === null &&
+			command.paymentIntentId !== null &&
+			command.amountPaidCents !== 0
+		) {
+			try {
+				const intent = await this.dependencies.client.retrievePaymentIntent(
+					command.paymentIntentId,
+				);
+				if (intent.id !== command.paymentIntentId)
+					throw new Error("Stripe PaymentIntent identity mismatch");
+				// Enrich only the command. The signed payload remains the original audit/replay source.
+				command = { ...command, chargeId: optionalId(intent.latest_charge) };
+			} catch (error) {
+				await this.recordNormalizationFailure(parsedEvent, error, replayStoreEventId);
+				throw new ProviderUnavailableError("Stripe Checkout payment lookup failed");
+			}
 		}
 
 		return this.recordCommand(command, replayStoreEventId);

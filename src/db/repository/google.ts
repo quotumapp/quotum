@@ -294,6 +294,8 @@ export class GoogleBillingRepository extends RepositoryModule {
 					status: input.subscriptionStatus ?? "expired",
 					startsAt: input.purchasedAt,
 					expiresAt: input.expiresAt,
+					currentPeriodStart: input.purchasedAt,
+					currentPeriodEnd: input.expiresAt,
 					autoRenew: input.autoRenew ?? false,
 					latestTransactionId: input.orderId,
 					rawState: stripNulls({

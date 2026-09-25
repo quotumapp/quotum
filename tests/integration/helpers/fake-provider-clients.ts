@@ -443,6 +443,10 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 
 				return event;
 			},
+			async retrievePaymentIntent(id: string) {
+				calls.push(`retrievePaymentIntent:${id}`);
+				return { id, latest_charge: "ch_integration" };
+			},
 			async retrieveCheckoutSession(sessionId: string) {
 				calls.push(`retrieveCheckoutSession:${sessionId}`);
 				const expired = expiredSessions.has(sessionId);

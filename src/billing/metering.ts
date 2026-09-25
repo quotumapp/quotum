@@ -173,6 +173,8 @@ export interface UsageCorrectionResult {
 }
 
 export interface MeteringMaintenanceResult {
+	grantedSubscriptionAllocations: number;
+	transitionedSubscriptionAllocations: number;
 	expiredReservations: number;
 	rolledOverAllocations: number;
 	closedPeriods: number;

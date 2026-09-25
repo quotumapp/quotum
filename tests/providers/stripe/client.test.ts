@@ -17,6 +17,12 @@ function stripeFixture(options: { asyncWebhook?: boolean } = {}) {
 	const event = { id: "evt_123", object: "event" } as Stripe.Event;
 	const asyncEvent = { id: "evt_async", object: "event" } as Stripe.Event;
 	const stripe = {
+		paymentIntents: {
+			async retrieve(id: string) {
+				calls.push({ method: "paymentIntents.retrieve", id });
+				return { id, latest_charge: "ch_123" } as Stripe.PaymentIntent;
+			},
+		},
 		customers: {
 			create(params: Stripe.CustomerCreateParams, options?: Stripe.RequestOptions) {
 				calls.push({ method: "customers.create", params });
@@ -78,6 +84,15 @@ function stripeFixture(options: { asyncWebhook?: boolean } = {}) {
 }
 
 describe("StripeBillingClient", () => {
+	it("retrieves the PaymentIntent charge identity without expanding the charge", async () => {
+		const { client, calls } = stripeFixture();
+		expect(await client.retrievePaymentIntent("pi_123")).toMatchObject({
+			id: "pi_123",
+			latest_charge: "ch_123",
+		});
+		expect(calls).toEqual([{ method: "paymentIntents.retrieve", id: "pi_123" }]);
+	});
+
 	it("builds config from Stripe env", () => {
 		const config = buildStripeConfig(stripeEnv);
 
