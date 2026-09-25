@@ -34,7 +34,12 @@ import {
 	releaseControlHolds,
 } from "./controls-runtime";
 import { enqueueUsageProjection } from "./entitlements";
-import { addUtcInterval, meterLimitWindowBounds, startOfUtcMonth } from "./meter-limit-windows";
+import {
+	addUtcInterval,
+	meterLimitWindowBounds,
+	planGrantWindowBounds,
+	startOfUtcMonth,
+} from "./meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import {
@@ -180,7 +185,9 @@ export async function requireMeteredFeature(
 
 interface MeterLimitRow {
 	plan_item_id: string | number | bigint;
-	subscription_id: string;
+	/** Exactly one of the subscription and the plan grant is set. */
+	subscription_id: string | null;
+	plan_grant_id: string | null;
 	quantity: unknown;
 	overage_policy: "blocked" | "allowed";
 	reset_interval: "month" | "year";
@@ -198,30 +205,77 @@ export function queryMeterLimitRows(
 	if (customerId === null) return Promise.resolve([]);
 	return executeRows<MeterLimitRow>(
 		executor,
+		// A paying subscription's limit comes before a plan grant's, which has no payment method and
+		// so never allows overage.
 		drizzleSql`
 			SELECT
-				pi.id AS plan_item_id,
-				s.id AS subscription_id,
-				pi.quantity,
-				pi.overage_policy,
-				pi.reset_interval,
-				pv.billing_interval,
-				COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
-				COALESCE(s.current_period_end, s.expires_at) AS period_end_at
-			FROM subscriptions s
-			JOIN plan_items pi
-				ON pi.project_id = s.project_id
-				AND pi.plan_version_id = s.plan_version_id
-			JOIN plan_versions pv
-				ON pv.project_id = pi.project_id
-				AND pv.id = pi.plan_version_id
-			WHERE s.project_id = ${projectId}
-				AND s.customer_id = ${customerId}
-				AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-				AND (s.expires_at IS NULL OR s.expires_at > now())
-				AND pi.feature_id = ${featureId(feature)}
-				AND pi.item_kind = 'meter_limit'
-			ORDER BY s.created_at, s.id
+				plan_item_id,
+				subscription_id,
+				plan_grant_id,
+				quantity,
+				overage_policy,
+				reset_interval,
+				billing_interval,
+				period_start_at,
+				period_end_at
+			FROM (
+				SELECT
+					pi.id AS plan_item_id,
+					s.id AS subscription_id,
+					NULL::uuid AS plan_grant_id,
+					pi.quantity,
+					pi.overage_policy,
+					pi.reset_interval,
+					pv.billing_interval,
+					COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
+					COALESCE(s.current_period_end, s.expires_at) AS period_end_at,
+					0 AS source_rank,
+					s.created_at AS sort_at,
+					s.id::text AS sort_id
+				FROM subscriptions s
+				JOIN plan_items pi
+					ON pi.project_id = s.project_id
+					AND pi.plan_version_id = s.plan_version_id
+				JOIN plan_versions pv
+					ON pv.project_id = pi.project_id
+					AND pv.id = pi.plan_version_id
+				WHERE s.project_id = ${projectId}
+					AND s.customer_id = ${customerId}
+					AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+					AND (s.expires_at IS NULL OR s.expires_at > now())
+					AND pi.feature_id = ${featureId(feature)}
+					AND pi.item_kind = 'meter_limit'
+
+				UNION ALL
+
+				SELECT
+					pi.id AS plan_item_id,
+					NULL::uuid AS subscription_id,
+					g.id AS plan_grant_id,
+					pi.quantity,
+					'blocked'::text AS overage_policy,
+					pi.reset_interval,
+					pv.billing_interval,
+					g.starts_at AS period_start_at,
+					g.ends_at AS period_end_at,
+					1 AS source_rank,
+					g.created_at AS sort_at,
+					g.id::text AS sort_id
+				FROM plan_grants g
+				JOIN plan_items pi
+					ON pi.project_id = g.project_id
+					AND pi.plan_version_id = g.plan_version_id
+				JOIN plan_versions pv
+					ON pv.project_id = pi.project_id
+					AND pv.id = pi.plan_version_id
+				WHERE g.project_id = ${projectId}
+					AND g.customer_id = ${customerId}
+					AND g.status = 'active'
+					AND g.ends_at > now()
+					AND pi.feature_id = ${featureId(feature)}
+					AND pi.item_kind = 'meter_limit'
+			) sources
+			ORDER BY source_rank, sort_at, sort_id
 			LIMIT 2
 		`,
 	);
@@ -265,9 +319,12 @@ export async function meterLimitDecision(
 	executor: QueryExecutor,
 	projectId: string,
 	feature: FeatureRow,
-	rows: readonly MeterLimitRow[],
+	candidates: readonly MeterLimitRow[],
 	configured: boolean | (() => Promise<boolean>),
 ): Promise<MeterLimitDecision | null> {
+	// A paying subscription takes precedence over a plan grant the moment it starts.
+	const paid = candidates.filter((row) => row.subscription_id !== null);
+	const rows = paid.length > 0 ? paid : candidates;
 	if (rows.length > 1) {
 		throw new BillingError(
 			`Multiple active meter limits apply to feature ${feature.key}`,
@@ -278,13 +335,21 @@ export async function meterLimitDecision(
 	}
 	const active = rows[0];
 	if (active !== undefined) {
-		const bounds = meterLimitWindowBounds(
-			active.period_start_at,
-			active.period_end_at,
-			active.reset_interval,
-			new Date(),
-			active.billing_interval,
-		);
+		const bounds =
+			active.plan_grant_id !== null && active.period_end_at !== null
+				? planGrantWindowBounds(
+						active.period_start_at,
+						active.period_end_at,
+						active.reset_interval,
+						new Date(),
+					)
+				: meterLimitWindowBounds(
+						active.period_start_at,
+						active.period_end_at,
+						active.reset_interval,
+						new Date(),
+						active.billing_interval,
+					);
 		const overagePrice =
 			active.overage_policy === "allowed"
 				? await resolveMeteredOveragePrice(executor, projectId, String(active.plan_item_id))

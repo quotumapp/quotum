@@ -39,7 +39,7 @@ The current schema is initialized from these ordered baseline files:
 | --- | --- |
 | [001_platform.sql](../migrations/001_platform.sql) | Organizations, projects, instances, credentials and customer connections |
 | [002_billing_core.sql](../migrations/002_billing_core.sql) | Billing accounts, purchases, subscriptions, entitlements and provider/projection jobs |
-| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup and promotions |
+| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup, promotions and plan grants |
 | [004_merchant.sql](../migrations/004_merchant.sql) | Merchant identity, authentication, sessions, membership, audit and connection OAuth state |
 <!-- migration-inventory:end -->
 
@@ -131,6 +131,22 @@ returns only `full`. The restore fails on the new unique index if an instance ho
 unrevoked credential; no release creates that state, so revoke the stale rows in the source database
 and dump again. An older image does not recognize `sqrk_` or `pqrk_` tokens and rejects them, so a
 rollback fails closed.
+
+### Plan grants
+
+The metering baseline adds the `plan_grants` table, a nullable `balance_allocations.plan_grant_id`
+with its foreign key, and a reward provenance check that also accepts a plan grant. The billing core
+baseline adds a nullable `entitlements.source_plan_grant_id`, whose foreign key the metering baseline
+adds. Every existing reward already carries its promotion redemption, so the move needs no manual
+SQL: follow steps 1, 2, 4 and 6 above. Afterwards
+
+```sql
+SELECT count(*) FROM plan_grants;
+SELECT count(*) FROM balance_allocations WHERE source_kind = 'reward' AND promotion_redemption_id IS NULL;
+```
+
+both return 0. An older image cannot read the new baselines, so a rollback restores the
+pre-upgrade backup and loses grants created since.
 
 ## Upgrade
 

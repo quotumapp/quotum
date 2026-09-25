@@ -112,6 +112,7 @@ describe("baseline schema files", () => {
 			"promotion_provider_objects",
 			"promotion_redemptions",
 			"promotion_audit_events",
+			"plan_grants",
 		]) {
 			expect(metering).toContain(`CREATE TABLE IF NOT EXISTS ${table} (`);
 		}
@@ -125,6 +126,10 @@ describe("baseline schema files", () => {
 		expect(metering).toContain("commercial_action_previews_project_token_unique");
 		expect(metering).toContain("promotion_codes_hosted_check");
 		expect(metering).toContain("promotion_redemptions_idempotency_unique");
+		expect(metering).toContain("idx_billing_plan_grants_one_active_base");
+		expect(metering).toContain("idx_billing_plan_grants_trial_once");
+		expect(metering).toContain("ADD CONSTRAINT entitlements_project_plan_grant_fk");
+		expect(metering).toContain("ADD CONSTRAINT balance_allocations_project_plan_grant_fk");
 		expect(metering).toContain("ADD CONSTRAINT projects_published_catalog_revision_fk");
 		expect(metering).toContain("ADD CONSTRAINT plans_active_version_fk");
 	});

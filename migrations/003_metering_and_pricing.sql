@@ -410,6 +410,7 @@ CREATE TABLE IF NOT EXISTS balance_allocations (
 	rollover_policy_revision INTEGER,
 	rollover_processed_at TIMESTAMPTZ,
 	promotion_redemption_id UUID,
+	plan_grant_id UUID,
 	CONSTRAINT balance_allocations_project_id_id_unique UNIQUE (project_id, id),
 	CONSTRAINT balance_allocations_source_unique UNIQUE (project_id, feature_id, source_kind, source_key),
 	CONSTRAINT balance_allocations_project_customer_fk FOREIGN KEY (project_id, customer_id)
@@ -438,9 +439,10 @@ CREATE TABLE IF NOT EXISTS balance_allocations (
 		OR (source_kind <> 'rollover' AND rollover_origin_allocation_id IS NULL
 			AND rollover_policy_revision IS NULL)
 	),
-	-- A reward exists only as the effect of one promotion redemption, which carries its provenance.
+	-- A reward exists only as the effect of a promotion redemption or a plan grant, which carries
+	-- its provenance.
 	CONSTRAINT balance_allocations_reward_provenance_check CHECK (
-		(source_kind = 'reward') = (promotion_redemption_id IS NOT NULL)
+		(source_kind = 'reward') = (promotion_redemption_id IS NOT NULL OR plan_grant_id IS NOT NULL)
 	)
 );
 
@@ -2232,6 +2234,108 @@ CREATE TABLE IF NOT EXISTS promotion_audit_events (
 CREATE INDEX IF NOT EXISTS idx_billing_promotion_audit_events_promotion_created
 	ON promotion_audit_events (project_id, promotion_id, created_at DESC);
 
+-- A plan grant holds a published plan version for a fixed time without a payment provider. It is
+-- its own access source, never a subscription; a trial is its first origin. Its allowances are
+-- `reward` allocations linked to it, and none outlives it.
+CREATE TABLE IF NOT EXISTS plan_grants (
+	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	customer_id UUID NOT NULL,
+	plan_id BIGINT NOT NULL,
+	plan_version_id BIGINT NOT NULL,
+	-- The pinned version's kind, kept here so the one-active-base-grant index can use it.
+	plan_kind TEXT NOT NULL CHECK (plan_kind IN ('base', 'addon')),
+	origin TEXT NOT NULL CHECK (origin IN ('trial')),
+	status TEXT NOT NULL CHECK (status IN ('active', 'expired', 'ended', 'superseded')),
+	duration_unit TEXT NOT NULL CHECK (duration_unit IN ('day', 'month')),
+	duration_count INTEGER NOT NULL CHECK (duration_count BETWEEN 1 AND 730),
+	starts_at TIMESTAMPTZ NOT NULL,
+	ends_at TIMESTAMPTZ NOT NULL,
+	ended_at TIMESTAMPTZ,
+	-- Copied at start from the version's published bindings, so a later publish cannot move them.
+	entitlement_keys TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
+	-- Start of the next reset window whose allowances are not materialized yet.
+	next_period_at TIMESTAMPTZ,
+	ending_notified_at TIMESTAMPTZ,
+	superseded_by_subscription_id UUID,
+	actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),
+	end_actor TEXT CHECK (end_actor IS NULL OR char_length(end_actor) BETWEEN 1 AND 200),
+	end_reason TEXT CHECK (end_reason IS NULL OR char_length(end_reason) BETWEEN 1 AND 500),
+	metadata JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (
+		jsonb_typeof(metadata) = 'object' AND octet_length(metadata::text) <= 4096
+	),
+	idempotency_key TEXT COLLATE "C" NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
+	request_hash TEXT COLLATE "C" NOT NULL CHECK (char_length(request_hash) = 64),
+	end_idempotency_key TEXT COLLATE "C" CHECK (
+		end_idempotency_key IS NULL OR char_length(end_idempotency_key) BETWEEN 1 AND 255
+	),
+	end_request_hash TEXT COLLATE "C" CHECK (
+		end_request_hash IS NULL OR char_length(end_request_hash) = 64
+	),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT plan_grants_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT plan_grants_idempotency_unique UNIQUE (project_id, customer_id, idempotency_key),
+	CONSTRAINT plan_grants_project_customer_fk FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id) ON DELETE CASCADE,
+	CONSTRAINT plan_grants_project_plan_fk FOREIGN KEY (project_id, plan_id)
+		REFERENCES plans(project_id, id),
+	CONSTRAINT plan_grants_project_plan_version_fk FOREIGN KEY (project_id, plan_version_id)
+		REFERENCES plan_versions(project_id, id),
+	CONSTRAINT plan_grants_project_superseding_subscription_fk
+		FOREIGN KEY (project_id, superseded_by_subscription_id)
+		REFERENCES subscriptions(project_id, id),
+	CONSTRAINT plan_grants_bounds_check CHECK (
+		starts_at < ends_at AND (ended_at IS NULL OR (ended_at >= starts_at AND ended_at <= ends_at))
+	),
+	CONSTRAINT plan_grants_entitlement_keys_check CHECK (
+		cardinality(entitlement_keys) <= 100 AND array_position(entitlement_keys, NULL) IS NULL
+	),
+	CONSTRAINT plan_grants_trial_duration_check CHECK (origin <> 'trial' OR duration_unit = 'day'),
+	CONSTRAINT plan_grants_end_key_check CHECK (
+		(end_idempotency_key IS NULL) = (end_request_hash IS NULL)
+	),
+	CONSTRAINT plan_grants_state_check CHECK (
+		(status = 'active' AND ended_at IS NULL AND superseded_by_subscription_id IS NULL
+			AND end_idempotency_key IS NULL)
+		OR (status = 'expired' AND ended_at = ends_at AND superseded_by_subscription_id IS NULL
+			AND next_period_at IS NULL)
+		OR (status = 'ended' AND ended_at < ends_at AND end_idempotency_key IS NOT NULL
+			AND superseded_by_subscription_id IS NULL AND next_period_at IS NULL)
+		OR (status = 'superseded' AND ended_at IS NOT NULL
+			AND superseded_by_subscription_id IS NOT NULL AND next_period_at IS NULL)
+	)
+);
+
+-- A base grant is refused while another base grant is active.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_plan_grants_one_active_base
+	ON plan_grants (project_id, customer_id)
+	WHERE status = 'active' AND plan_kind = 'base';
+
+-- An account trials a plan at most once, whatever became of that trial.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_plan_grants_trial_once
+	ON plan_grants (project_id, customer_id, plan_id)
+	WHERE origin = 'trial';
+
+CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_customer_active
+	ON plan_grants (project_id, customer_id, plan_version_id)
+	WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_due
+	ON plan_grants (ends_at, id)
+	WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_next_period
+	ON plan_grants (next_period_at, id)
+	WHERE status = 'active' AND next_period_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_customer_created
+	ON plan_grants (project_id, customer_id, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_superseding_subscription
+	ON plan_grants (project_id, superseded_by_subscription_id)
+	WHERE superseded_by_subscription_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_billing_usage_events_customer_feature_time
 	ON usage_events (project_id, customer_id, meter_feature_id, recorded_at DESC, id DESC);
 
@@ -2248,6 +2352,15 @@ ALTER TABLE balance_allocations
 CREATE INDEX IF NOT EXISTS idx_billing_balance_allocations_promotion_redemption
 	ON balance_allocations (project_id, promotion_redemption_id)
 	WHERE promotion_redemption_id IS NOT NULL;
+
+ALTER TABLE balance_allocations
+	ADD CONSTRAINT balance_allocations_project_plan_grant_fk
+			FOREIGN KEY (project_id, plan_grant_id)
+			REFERENCES plan_grants(project_id, id);
+
+CREATE INDEX IF NOT EXISTS idx_billing_balance_allocations_plan_grant
+	ON balance_allocations (project_id, plan_grant_id)
+	WHERE plan_grant_id IS NOT NULL;
 
 -- Constraints on tables defined in earlier files that reference this file's tables.
 ALTER TABLE projects
@@ -2271,6 +2384,11 @@ ALTER TABLE subscriptions
 ALTER TABLE subscriptions
 	ADD CONSTRAINT subscriptions_project_entity_fk FOREIGN KEY (project_id, entity_id)
 		REFERENCES entities(project_id, id) ON DELETE RESTRICT;
+
+ALTER TABLE entitlements
+	ADD CONSTRAINT entitlements_project_plan_grant_fk
+			FOREIGN KEY (project_id, source_plan_grant_id)
+			REFERENCES plan_grants(project_id, id);
 
 ALTER TABLE checkout_requests
 	ADD CONSTRAINT checkout_requests_plan_version_id_fkey FOREIGN KEY (plan_version_id) REFERENCES plan_versions(id) ON DELETE RESTRICT;

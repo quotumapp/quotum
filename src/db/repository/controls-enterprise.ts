@@ -1146,7 +1146,7 @@ export async function resolveEffectiveControls(
 			AND policy.effective_at <= ${now.toISOString()}
 			AND (policy.expires_at IS NULL OR policy.expires_at > ${now.toISOString()})
 			AND (
-				(policy.source_type = 'plan_default' AND EXISTS (
+				(policy.source_type = 'plan_default' AND (EXISTS (
 					SELECT 1 FROM subscriptions subscription
 					WHERE subscription.project_id = policy.project_id
 						AND subscription.customer_id = ${input.customerId}
@@ -1154,7 +1154,16 @@ export async function resolveEffectiveControls(
 						AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
 						AND (subscription.expires_at IS NULL OR subscription.expires_at > ${now.toISOString()})
 						AND (subscription.entity_id IS NULL OR subscription.entity_id = ${input.entityId}::bigint)
-				))
+				) OR EXISTS (
+					-- An account-wide plan grant carries its pinned version's default controls too.
+					SELECT 1 FROM plan_grants plan_grant
+					WHERE plan_grant.project_id = policy.project_id
+						AND plan_grant.customer_id = ${input.customerId}
+						AND plan_grant.plan_version_id = policy.plan_version_id
+						AND plan_grant.status = 'active'
+						AND plan_grant.starts_at <= ${now.toISOString()}
+						AND plan_grant.ends_at > ${now.toISOString()}
+				)))
 				OR (policy.source_type = 'contract' AND policy.contract_id = (SELECT id FROM active_contract))
 				OR (policy.source_type = 'account' AND policy.customer_id = ${input.customerId})
 				OR (policy.source_type = 'entity' AND policy.customer_id = ${input.customerId}

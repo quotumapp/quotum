@@ -163,6 +163,8 @@ CREATE TABLE IF NOT EXISTS entitlements (
 	expires_at TIMESTAMPTZ,
 	source_subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL,
 	source_purchase_id UUID REFERENCES purchases(id) ON DELETE SET NULL,
+	-- Composite FK to plan_grants is added in 003_metering_and_pricing.sql.
+	source_plan_grant_id UUID,
 	metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
 	computed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -356,6 +358,10 @@ CREATE INDEX IF NOT EXISTS idx_billing_entitlements_source_subscription_id
 
 CREATE INDEX IF NOT EXISTS idx_billing_entitlements_source_purchase_id
 	ON entitlements (source_purchase_id);
+
+CREATE INDEX IF NOT EXISTS idx_billing_entitlements_source_plan_grant_id
+	ON entitlements (source_plan_grant_id)
+	WHERE source_plan_grant_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_billing_entitlements_key_customer
 	ON entitlements (entitlement_key, customer_id);

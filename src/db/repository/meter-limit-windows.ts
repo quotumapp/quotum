@@ -39,6 +39,20 @@ export function meterLimitWindowBounds(
 	return rollWindowBounds(start, end, interval, now);
 }
 
+/**
+ * The reset window of a plan grant that contains `now`. A grant's windows are anchored at its start
+ * and the last one is clamped to its end, so no allowance or limit window outlives the grant; past
+ * the end the last window is returned.
+ */
+export function planGrantWindowBounds(
+	startsAt: Date | string,
+	endsAt: Date | string,
+	interval: WindowInterval,
+	now: Date,
+): { start: Date; end: Date } {
+	return resetSubWindowBounds(new Date(startsAt), new Date(endsAt), interval, now);
+}
+
 export function rollWindowBounds(
 	start: Date,
 	end: Date,

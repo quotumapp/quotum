@@ -6,7 +6,7 @@ import type {
 	ProjectionPayload,
 	ProjectionSyncReason,
 } from "../../billing/types";
-import { meterLimitWindowBounds } from "./meter-limit-windows";
+import { meterLimitWindowBounds, planGrantWindowBounds } from "./meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import { requireNonBlank, toIsoStringOrNull } from "./validation";
@@ -70,7 +70,7 @@ export async function readEntitlementRows(
 			e.active AND (
 				e.source_purchase_id IS NOT NULL
 				OR (
-					e.source_subscription_id IS NOT NULL
+					(e.source_subscription_id IS NOT NULL OR e.source_plan_grant_id IS NOT NULL)
 					AND e.expires_at IS NOT NULL
 					AND e.expires_at > now()
 				)
@@ -212,6 +212,7 @@ export async function recomputeCustomerEntitlements(
 				s.expires_at,
 				s.id AS source_subscription_id,
 				NULL::uuid AS source_purchase_id,
+				NULL::uuid AS source_plan_grant_id,
 				jsonb_build_object(
 					'source', 'subscription',
 					'status', s.status,
@@ -248,6 +249,7 @@ export async function recomputeCustomerEntitlements(
 				NULL::timestamptz AS expires_at,
 				NULL::uuid AS source_subscription_id,
 				pu.id AS source_purchase_id,
+				NULL::uuid AS source_plan_grant_id,
 				jsonb_build_object(
 					'source', 'purchase',
 					'status', pu.status,
@@ -268,13 +270,49 @@ export async function recomputeCustomerEntitlements(
 				AND pu.status = 'completed'
 				AND pu.purchase_kind = 'non_consumable'
 				AND pu.invalidated_at IS NULL
+
+			UNION ALL
+
+			SELECT
+				g.project_id,
+				g.customer_id,
+				grant_key.entitlement_key,
+				g.ends_at AS expires_at,
+				NULL::uuid AS source_subscription_id,
+				NULL::uuid AS source_purchase_id,
+				g.id AS source_plan_grant_id,
+				jsonb_build_object(
+					'source', 'plan_grant',
+					'origin', g.origin,
+					'status', g.status,
+					'planKey', pl.key,
+					'planGrantId', g.id
+				) || CASE
+					WHEN g.origin = 'trial' THEN jsonb_build_object(
+						'trialStartsAt', to_char(g.starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+						'trialEndsAt', to_char(g.ends_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+					)
+					ELSE '{}'::jsonb
+				END AS metadata,
+				3 AS source_priority,
+				g.ends_at AS source_sort_at,
+				g.id AS source_sort_id
+			FROM plan_grants g
+			CROSS JOIN LATERAL unnest(g.entitlement_keys) AS grant_key(entitlement_key)
+			JOIN plans pl ON pl.project_id = g.project_id AND pl.id = g.plan_id
+			WHERE g.customer_id = ${customer.id}
+				AND g.project_id = ${projectId}
+				AND g.status = 'active'
+				AND g.ends_at > now()
 		),
 		ranked_sources AS (
 			SELECT
 				active_sources.*,
 				ROW_NUMBER() OVER (
 					PARTITION BY entitlement_key
+					-- A paid source always wins over a plan grant, however long the grant runs.
 					ORDER BY
+						source_plan_grant_id IS NOT NULL ASC,
 						expires_at IS NULL DESC,
 						expires_at DESC NULLS LAST,
 						source_priority ASC,
@@ -291,6 +329,7 @@ export async function recomputeCustomerEntitlements(
 				expires_at,
 				source_subscription_id,
 				source_purchase_id,
+				source_plan_grant_id,
 				metadata
 			FROM ranked_sources
 			WHERE entitlement_rank = 1
@@ -304,6 +343,7 @@ export async function recomputeCustomerEntitlements(
 				expires_at,
 				source_subscription_id,
 				source_purchase_id,
+				source_plan_grant_id,
 				metadata,
 				computed_at
 			)
@@ -315,6 +355,7 @@ export async function recomputeCustomerEntitlements(
 				expires_at,
 				source_subscription_id,
 				source_purchase_id,
+				source_plan_grant_id,
 				metadata,
 				now()
 			FROM active_entitlements
@@ -323,6 +364,7 @@ export async function recomputeCustomerEntitlements(
 				expires_at = EXCLUDED.expires_at,
 				source_subscription_id = EXCLUDED.source_subscription_id,
 				source_purchase_id = EXCLUDED.source_purchase_id,
+				source_plan_grant_id = EXCLUDED.source_plan_grant_id,
 				metadata = EXCLUDED.metadata,
 				computed_at = now(),
 				updated_at = now()
@@ -333,6 +375,7 @@ export async function recomputeCustomerEntitlements(
 			active = false,
 			source_subscription_id = NULL,
 			source_purchase_id = NULL,
+			source_plan_grant_id = NULL,
 			computed_at = now(),
 			updated_at = now()
 		WHERE e.customer_id = ${customer.id}
@@ -502,27 +545,65 @@ export async function readProjectionBalances(
 		billing_interval: "month" | "year";
 		period_start_at: Date | string;
 		period_end_at: Date | string | null;
+		plan_grant: boolean;
 	}>(
 		executor,
+		// Metering takes a paying subscription's limit before a plan grant's; so does the projection.
 		drizzleSql`
-			SELECT DISTINCT ON (pi.feature_id)
-				pi.feature_id,
-				pi.quantity AS limit_quantity,
-				pi.reset_interval,
-				pv.billing_interval,
-				COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
-				COALESCE(s.current_period_end, s.expires_at) AS period_end_at
-			FROM subscriptions s
-			JOIN plan_items pi
-				ON pi.project_id = s.project_id AND pi.plan_version_id = s.plan_version_id
-			JOIN plan_versions pv
-				ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
-			WHERE s.project_id = ${projectId}
-				AND s.customer_id = ${customerId}
-				AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-				AND (s.expires_at IS NULL OR s.expires_at > now())
-				AND pi.item_kind = 'meter_limit'
-			ORDER BY pi.feature_id, s.created_at, s.id
+			SELECT DISTINCT ON (feature_id)
+				feature_id,
+				limit_quantity,
+				reset_interval,
+				billing_interval,
+				period_start_at,
+				period_end_at,
+				plan_grant
+			FROM (
+				SELECT
+					pi.feature_id,
+					pi.quantity AS limit_quantity,
+					pi.reset_interval,
+					pv.billing_interval,
+					COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
+					COALESCE(s.current_period_end, s.expires_at) AS period_end_at,
+					false AS plan_grant,
+					s.created_at AS sort_at,
+					s.id::text AS sort_id
+				FROM subscriptions s
+				JOIN plan_items pi
+					ON pi.project_id = s.project_id AND pi.plan_version_id = s.plan_version_id
+				JOIN plan_versions pv
+					ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
+				WHERE s.project_id = ${projectId}
+					AND s.customer_id = ${customerId}
+					AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+					AND (s.expires_at IS NULL OR s.expires_at > now())
+					AND pi.item_kind = 'meter_limit'
+
+				UNION ALL
+
+				SELECT
+					pi.feature_id,
+					pi.quantity AS limit_quantity,
+					pi.reset_interval,
+					pv.billing_interval,
+					g.starts_at AS period_start_at,
+					g.ends_at AS period_end_at,
+					true AS plan_grant,
+					g.created_at AS sort_at,
+					g.id::text AS sort_id
+				FROM plan_grants g
+				JOIN plan_items pi
+					ON pi.project_id = g.project_id AND pi.plan_version_id = g.plan_version_id
+				JOIN plan_versions pv
+					ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
+				WHERE g.project_id = ${projectId}
+					AND g.customer_id = ${customerId}
+					AND g.status = 'active'
+					AND g.ends_at > now()
+					AND pi.item_kind = 'meter_limit'
+			) sources
+			ORDER BY feature_id, plan_grant, sort_at, sort_id
 		`,
 	);
 	// Window bounds come from the same rule metering writes with, so only the current window counts.
@@ -546,13 +627,21 @@ export async function readProjectionBalances(
 						FROM (
 							VALUES ${drizzleSql.join(
 								limits.map((limit) => {
-									const bounds = meterLimitWindowBounds(
-										limit.period_start_at,
-										limit.period_end_at,
-										limit.reset_interval,
-										now,
-										limit.billing_interval,
-									);
+									const bounds =
+										limit.plan_grant && limit.period_end_at !== null
+											? planGrantWindowBounds(
+													limit.period_start_at,
+													limit.period_end_at,
+													limit.reset_interval,
+													now,
+												)
+											: meterLimitWindowBounds(
+													limit.period_start_at,
+													limit.period_end_at,
+													limit.reset_interval,
+													now,
+													limit.billing_interval,
+												);
 									return drizzleSql`(
 										${String(limit.feature_id)}::bigint,
 										${String(limit.limit_quantity)}::numeric,
