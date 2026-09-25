@@ -237,6 +237,8 @@ export interface StripeRecurringCheckoutPlan {
 	trialDays: number | null;
 	trialRequiresPaymentMethod: boolean;
 	trialEndBehavior: "cancel" | "pause";
+	/** Whether the billing account already had a trial of this plan, through Quotum or a provider. */
+	trialUsed: boolean;
 	components: Array<{
 		priceComponentId: string;
 		priceKey: string;

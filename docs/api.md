@@ -806,7 +806,8 @@ A trial ends one of three ways, and access stops at that moment without waiting 
   entitlements and limits take over, and no trial fact is sent, since the customer converted.
 
 A trial start delivers a stored `usage_changed` projection keyed `plan_grant:<id>:started`, which
-reaches the receiver even when usage deliveries are off. Trial reads work with a read-only
+reaches the receiver even when usage deliveries are off. The one-trial-per-plan rule also holds at
+checkout: Stripe Checkout leaves out a plan's trial for an account that has had one. Trial reads work with a read-only
 credential. Grants carry no channel restriction; follow the store rules for the apps you unlock
 them in.
 

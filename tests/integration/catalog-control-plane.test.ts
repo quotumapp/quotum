@@ -652,6 +652,50 @@ localDescribe("catalog control plane", () => {
 			},
 		});
 
+		// An account that already had a trial of the plan, here through an earlier Stripe
+		// subscription, checks out without one.
+		await context.sql`
+			INSERT INTO customers (project_id, billing_account_id)
+			SELECT id, 'phase2-trialed-account' FROM projects WHERE key = 'voysee'
+		`;
+		await context.sql`
+			INSERT INTO subscriptions (
+				project_id, customer_id, product_id, store_product_id, provider, channel,
+				external_subscription_id, external_product_id, external_price_id, status,
+				starts_at, expires_at, trial_start_at, trial_end_at, auto_renew,
+				plan_version_id, catalog_revision_id
+			)
+			SELECT
+				project.id, customer.id, product.id, store.id, 'stripe', 'web',
+				'sub_phase2_trialed', store.external_product_id, store.external_price_id, 'expired',
+				now() - interval '60 days', now() - interval '30 days', now() - interval '60 days',
+				now() - interval '46 days', false, plan.active_version_id, version.catalog_revision_id
+			FROM projects project
+			JOIN customers customer ON customer.project_id = project.id
+			JOIN products product ON product.project_id = project.id AND product.key = 'premium_monthly'
+			JOIN store_products store
+				ON store.project_id = product.project_id AND store.product_id = product.id
+				AND store.provider = 'stripe'
+			JOIN plans plan ON plan.project_id = project.id AND plan.key = 'pro'
+			JOIN plan_versions version ON version.id = plan.active_version_id
+			WHERE project.key = 'voysee' AND customer.billing_account_id = 'phase2-trialed-account'
+		`;
+		const trialedCheckout = await testRequest(
+			app,
+			"/v1/billing-accounts/phase2-trialed-account/providers/stripe/checkout-sessions",
+			{
+				method: "POST",
+				headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+				body: JSON.stringify({ planKey: "pro", quantities: { seats: 5 } }),
+			},
+		);
+		expect(trialedCheckout.status).toBe(200);
+		const trialedParams = stripe.checkoutSessionParams.at(-1);
+		expect(trialedParams?.mode).toBe("subscription");
+		expect(trialedParams?.subscription_data).not.toHaveProperty("trial_period_days");
+		expect(trialedParams?.subscription_data).not.toHaveProperty("trial_settings");
+		expect(trialedParams).not.toHaveProperty("payment_method_collection");
+
 		await context.sql`
 			INSERT INTO customers (project_id, billing_account_id)
 			SELECT id, 'phase2-metered-account' FROM projects WHERE key = 'voysee'

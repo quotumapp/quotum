@@ -446,6 +446,8 @@ export class StripeBillingService
 				? {}
 				: { promotionRedemptionId: input.promotionRedemptionId }),
 			...(input.allowPromotionCodes === true ? { allowPromotionCodes: true } : {}),
+			// Last, and only when set, so every request whose trial still applies keeps its hash.
+			...(plan !== null && planTrialSkipped(plan) ? { trialSkipped: true } : {}),
 		});
 		if (idempotencyKey !== null) {
 			const receipt = await this.dependencies.repository.prepareStripeCheckoutRequest({
@@ -508,7 +510,7 @@ export class StripeBillingService
 			params.payment_intent_data = { metadata };
 		} else {
 			params.subscription_data = { metadata };
-			if (plan !== null && plan.trialDays !== null && plan.trialDays > 0) {
+			if (plan !== null && planTrialApplies(plan) && plan.trialDays !== null) {
 				params.subscription_data.trial_period_days = plan.trialDays;
 				params.subscription_data.trial_settings = {
 					end_behavior: { missing_payment_method: plan.trialEndBehavior },
@@ -1002,8 +1004,17 @@ export class StripeBillingService
 			kind: "plan",
 			key: plan.planKey,
 		});
+		// Trial use joins the fingerprint only when it removes the trial, so other previews keep theirs
+		// and a trial started between preview and execution makes the preview stale.
+		const { trialUsed: _trialUsed, ...planFacts } = plan;
 		const stateFingerprint = promotionFingerprint(
-			sha256Hex(stableJson({ plan, hasActiveBasePlan })),
+			sha256Hex(
+				stableJson({
+					plan: planFacts,
+					hasActiveBasePlan,
+					...(planTrialSkipped(plan) ? { trialSkipped: true } : {}),
+				}),
+			),
 			promotion,
 		);
 		const currency = oneCurrency(lines);
@@ -1014,9 +1025,14 @@ export class StripeBillingService
 			promotion,
 			hostedEntry,
 		});
-		if (promotion !== null && plan.trialDays !== null && plan.trialDays > 0) {
+		if (promotion !== null && planTrialApplies(plan)) {
 			priced.warnings.push(
 				"The plan starts with a trial; Stripe applies the discount to invoices from the trial onward.",
+			);
+		}
+		if (planTrialSkipped(plan)) {
+			priced.warnings.push(
+				"This account already had a trial of the plan; the subscription starts without one.",
 			);
 		}
 		const intentWithQuantities = { ...normalized, quantities };
@@ -2745,6 +2761,15 @@ function parseOptionalIdempotencyKey(value: string | null | undefined): string |
 	return value;
 }
 
+/** A plan's own trial applies unless the account already had a trial of that plan. */
+function planTrialApplies(plan: StripeRecurringCheckoutPlan): boolean {
+	return plan.trialDays !== null && plan.trialDays > 0 && !plan.trialUsed;
+}
+
+function planTrialSkipped(plan: StripeRecurringCheckoutPlan): boolean {
+	return plan.trialDays !== null && plan.trialDays > 0 && plan.trialUsed;
+}
+
 function checkoutRequestHash(value: {
 	billingAccountId: string;
 	targetKey: string;
@@ -2757,6 +2782,7 @@ function checkoutRequestHash(value: {
 	discountCoupon?: string;
 	promotionRedemptionId?: string;
 	allowPromotionCodes?: boolean;
+	trialSkipped?: boolean;
 }): string {
 	return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
