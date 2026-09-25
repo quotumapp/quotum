@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
 import type { MeteringDecision } from "../../src/billing/metering";
+import { materializeSubscriptionAllocations } from "../../src/db/repository/catalog-allocations";
 import { readProjectionBalances } from "../../src/db/repository/entitlements";
 import { addUtcMonths } from "../../src/db/repository/meter-limit-windows";
 import type { QueryExecutor } from "../../src/db/repository/types";
@@ -1053,6 +1054,80 @@ localDescribe("authoritative metering flows", () => {
 				periodEndsAt: windowEnd.toISOString(),
 			},
 		]);
+	});
+
+	// Finding, not a fix: a plan allocation is materialized once per provider period, when the
+	// provider syncs the subscription (catalog-allocations.ts), and expires at the period end. A
+	// monthly allocation on an annual plan is therefore granted once a year, and nothing grants the
+	// following months. This states the monthly expectation and fails until that is decided.
+	it.failing("grants a monthly allocation on an annual plan every month", async () => {
+		const now = new Date();
+		const anchor = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+		const anchorDay = anchor.getUTCDate();
+		const periodStart = addUtcMonths(anchor, -2, anchorDay);
+		const periodEnd = addUtcMonths(periodStart, 12, anchorDay);
+		let step = 0;
+		while (addUtcMonths(periodStart, step + 1, anchorDay) <= now) step += 1;
+		const monthEnd = addUtcMonths(periodStart, step + 1, anchorDay);
+		await seedAnnualMeterLimitSubscription(context.sql, "annual_grants", periodStart, periodEnd);
+		await context.sql`
+			INSERT INTO plan_items (
+				project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval
+			)
+			SELECT plan_versions.project_id, plan_versions.id, features.id, 'allocation', 100, 'month'
+			FROM plan_versions
+			JOIN plans ON plans.project_id = plan_versions.project_id
+				AND plans.id = plan_versions.plan_id
+				AND plans.key = 'api_annual'
+			JOIN features ON features.project_id = plan_versions.project_id
+				AND features.key = 'ai_credits'
+		`;
+		const [subscription] = await context.sql<
+			Array<{
+				id: string;
+				project_id: string;
+				customer_id: string;
+				store_product_id: string;
+			}>
+		>`
+			SELECT subscriptions.id, subscriptions.project_id, subscriptions.customer_id,
+				subscriptions.store_product_id::text AS store_product_id
+			FROM subscriptions
+			JOIN customers ON customers.project_id = subscriptions.project_id
+				AND customers.id = subscriptions.customer_id
+			WHERE customers.billing_account_id = 'annual_grants'
+		`;
+		if (subscription === undefined) throw new Error("annual subscription was not seeded");
+		// The same call a provider sync makes for the current period.
+		const granted = await materializeSubscriptionAllocations(
+			context.db as unknown as QueryExecutor,
+			{
+				projectId: subscription.project_id,
+				customerId: subscription.customer_id,
+				storeProductId: subscription.store_product_id,
+				subscriptionId: subscription.id,
+				status: "active",
+				periodStartAt: periodStart,
+				periodEndAt: periodEnd,
+			},
+		);
+		expect(granted).toBe(1);
+		await context.repository.runMeteringMaintenance(50);
+		const balance = await context.repository.getMeteringBalance(
+			integrationProjectContext(),
+			"annual_grants",
+			"ai_credits",
+		);
+
+		// Monthly grants would leave this month's 100 credits, expiring at the next monthly reset;
+		// today the one grant for the year expires at the period end instead.
+		expect(
+			balance.breakdown.map(({ sourceKind, quantity, expiresAt }) => ({
+				sourceKind,
+				quantity,
+				expiresAt,
+			})),
+		).toEqual([{ sourceKind: "subscription", quantity: "100", expiresAt: monthEnd.toISOString() }]);
 	});
 
 	it("rolls unused subscription allocations once with cap, expiry, and provenance", async () => {

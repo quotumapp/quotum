@@ -53,6 +53,12 @@ export function planGrantWindowBounds(
 	return resetSubWindowBounds(new Date(startsAt), new Date(endsAt), interval, now);
 }
 
+/**
+ * The window of [start, end) or, once it has ended, of the reset-sized windows rolling on from its
+ * end. A period exactly one interval long keeps its start's anchor day, so a month-end period that
+ * was clamped (Jan 31 to Feb 28) rolls on to Mar 31. Any other period rolls on its end's day, as a
+ * split period does, so no rolled window is longer or shorter than one reset interval.
+ */
 export function rollWindowBounds(
 	start: Date,
 	end: Date,
@@ -62,10 +68,13 @@ export function rollWindowBounds(
 	assertPeriodBounds(start, end);
 	let currentStart = start;
 	let currentEnd = end;
-	const subscriptionDay = start.getUTCDate();
+	const anchorDay =
+		end.getTime() === addUtcInterval(start, interval).getTime()
+			? start.getUTCDate()
+			: end.getUTCDate();
 	while (currentEnd <= now) {
 		currentStart = currentEnd;
-		currentEnd = addUtcInterval(currentEnd, interval, subscriptionDay);
+		currentEnd = addUtcInterval(currentEnd, interval, anchorDay);
 	}
 	return { start: currentStart, end: currentEnd };
 }
@@ -108,7 +117,7 @@ function assertPeriodBounds(start: Date, end: Date): void {
 	}
 }
 
-function intervalMonths(interval: WindowInterval): number {
+export function intervalMonths(interval: WindowInterval): number {
 	return interval === "month" ? 1 : 12;
 }
 

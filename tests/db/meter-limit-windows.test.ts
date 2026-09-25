@@ -237,7 +237,8 @@ describe("meter-limit window bounds", () => {
 			start: new Date("2026-02-28T00:00:00.000Z"),
 			end: new Date("2026-03-31T00:00:00.000Z"),
 		});
-		// A yearly reset on a monthly plan counts against the current month.
+		// The catalog rejects a yearly reset on a monthly plan; one published before that rule counts
+		// against the current month.
 		expect(
 			meterLimitWindowBounds(
 				"2026-09-10T00:00:00.000Z",
@@ -273,6 +274,66 @@ describe("meter-limit window bounds", () => {
 		).toEqual({
 			start: new Date("2026-09-01T00:00:00.000Z"),
 			end: new Date("2026-10-01T00:00:00.000Z"),
+		});
+	});
+
+	it("moves usage at the exact reset instant into the next window", () => {
+		const subWindow = (now: string) =>
+			meterLimitWindowBounds(
+				"2026-01-01T00:00:00.000Z",
+				"2027-01-01T00:00:00.000Z",
+				"month",
+				new Date(now),
+				"year",
+			);
+		expect(subWindow("2026-01-31T23:59:59.999Z")).toEqual({
+			start: new Date("2026-01-01T00:00:00.000Z"),
+			end: new Date("2026-02-01T00:00:00.000Z"),
+		});
+		expect(subWindow("2026-02-01T00:00:00.000Z")).toEqual({
+			start: new Date("2026-02-01T00:00:00.000Z"),
+			end: new Date("2026-03-01T00:00:00.000Z"),
+		});
+		expect(
+			meterLimitWindowBounds(
+				"2026-09-10T00:00:00.000Z",
+				"2026-10-10T00:00:00.000Z",
+				"month",
+				new Date("2026-10-10T00:00:00.000Z"),
+				"month",
+			),
+		).toEqual({
+			start: new Date("2026-10-10T00:00:00.000Z"),
+			end: new Date("2026-11-10T00:00:00.000Z"),
+		});
+	});
+
+	it("rolls a lapsed unaligned period on its end's day", () => {
+		// Anchored on the start's 30th, the first rolled month ran from Mar 3 to Apr 30: 58 days.
+		expect(
+			meterLimitWindowBounds(
+				"2026-01-30T00:00:00.000Z",
+				"2026-03-03T00:00:00.000Z",
+				"month",
+				new Date("2026-03-10T00:00:00.000Z"),
+				"month",
+			),
+		).toEqual({
+			start: new Date("2026-03-03T00:00:00.000Z"),
+			end: new Date("2026-04-03T00:00:00.000Z"),
+		});
+		// Anchored on the start's 10th, the first rolled year ran to Feb 10: 370 days.
+		expect(
+			meterLimitWindowBounds(
+				"2025-03-10T00:00:00.000Z",
+				"2026-02-05T00:00:00.000Z",
+				"year",
+				new Date("2026-06-01T00:00:00.000Z"),
+				"year",
+			),
+		).toEqual({
+			start: new Date("2026-02-05T00:00:00.000Z"),
+			end: new Date("2027-02-05T00:00:00.000Z"),
 		});
 	});
 
