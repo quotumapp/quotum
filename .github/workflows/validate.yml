@@ -80,10 +80,17 @@ jobs:
     env:
       NODE_ENV: test
       TESTCONTAINERS_RYUK_DISABLED: "false"
+      QUOTUM_TEST_REPORT_DIR: test-reports
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-bun
       - run: bun run test:integration --shard=${{ matrix.shard }}/2 --coverage --coverage-reporter=lcov --coverage-dir=coverage/integration-${{ matrix.shard }} tests/integration
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: junit-integration-${{ matrix.shard }}
+          path: test-reports/junit.xml
+          retention-days: 30
       - uses: actions/upload-artifact@v7
         with:
           name: lcov-integration-${{ matrix.shard }}
@@ -106,10 +113,17 @@ jobs:
     env:
       NODE_ENV: test
       TESTCONTAINERS_RYUK_DISABLED: "false"
+      QUOTUM_TEST_REPORT_DIR: test-reports
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-bun
       - run: bun run test:e2e
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: junit-e2e
+          path: test-reports/junit.xml
+          retention-days: 30
 
   merchant:
     name: Merchant integration tests
@@ -117,10 +131,17 @@ jobs:
     env:
       NODE_ENV: test
       TESTCONTAINERS_RYUK_DISABLED: "false"
+      QUOTUM_TEST_REPORT_DIR: test-reports
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-bun
       - run: bun run test:merchant:integration --coverage --coverage-reporter=lcov --coverage-dir=coverage/merchant
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: junit-merchant
+          path: test-reports/junit.xml
+          retention-days: 30
       - uses: actions/upload-artifact@v7
         with:
           name: lcov-merchant

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -16,6 +16,7 @@ const logger = createCliBillingLogger();
 
 const postgresDatabase = "voysee_billing_e2e";
 
+const retainedReportDirectory = process.env.QUOTUM_TEST_REPORT_DIR;
 const interrupts = trapInterrupts();
 try {
 	await runE2eTests();
@@ -71,8 +72,12 @@ async function runE2eTests(): Promise<void> {
 			BILLING_TEST_PROJECT_CREDENTIALS_JSON: JSON.stringify(credentials),
 			BILLING_TEST_PROJECT_READ_ONLY_CREDENTIALS_JSON: JSON.stringify(readOnlyCredentials),
 		};
-		reportDirectory = await mkdtemp(join(tmpdir(), "quotum-e2e-report-"));
+		reportDirectory =
+			retainedReportDirectory || (await mkdtemp(join(tmpdir(), "quotum-e2e-report-")));
+		await mkdir(reportDirectory, { recursive: true });
 		const reportPath = join(reportDirectory, "junit.xml");
+		// A retained directory may hold an earlier run's report; never read that one as this run's.
+		await rm(reportPath, { force: true });
 		run("bun", ["test", "--timeout=20000", ...junitReporterArgs(reportPath), "tests/e2e"], { env });
 		assertLaneReport(readJunitSummary(await readFile(reportPath, "utf8")), "e2e");
 	} finally {
@@ -86,7 +91,7 @@ async function runE2eTests(): Promise<void> {
 		if (credentialDirectory !== undefined) {
 			await rm(credentialDirectory, { recursive: true, force: true });
 		}
-		if (reportDirectory !== undefined) {
+		if (reportDirectory !== undefined && !retainedReportDirectory) {
 			await rm(reportDirectory, { recursive: true, force: true });
 		}
 	}
