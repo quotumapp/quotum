@@ -105,10 +105,12 @@ characters and explain the why in the body when it is not obvious.
 
 ## Pull requests
 
-Push your feature or fix branch to GitHub and open a draft pull request targeting `main` early
-to get CI feedback. Pushing a branch without an open pull request does not trigger
-[GitHub CI](.github/workflows/ci.yml). Opening a pull request, including a draft, triggers CI;
-subsequent pushes to that pull request's branch rerun it. CI also runs after commits land on `main`.
+Push your feature or fix branch to GitHub and open a draft pull request early to get CI
+feedback. Pushing a branch without an open pull request does not trigger
+[GitHub CI](.github/workflows/ci.yml). Opening a pull request against any base branch, including a
+draft or a pull request stacked on another branch, triggers CI; subsequent pushes to that pull
+request's branch rerun it and cancel the superseded run. CI also runs on merge groups and on every
+commit that lands on `main`, and each `main` commit keeps its own run.
 
 Pull requests run the shared [standalone validation](.github/workflows/validate.yml): static
 checks, unit tests and coverage, OpenAPI checks, Postgres integration tests, end-to-end tests,
@@ -124,7 +126,9 @@ interactive rebase when needed. Rebase the branch onto current `main` instead of
 into it. Update a previously pushed branch with `git push --force-with-lease`. Run the required
 checks on the final amended commit, then use GitHub **Squash and merge**. Merge commits and
 rebase-merging multiple branch commits are not part of this workflow. Published `main` must not
-be rewritten without explicit authorization for a history repair.
+be rewritten without explicit authorization for a history repair. Once the repository merge queue is
+enabled, enqueue with `gh pr merge --squash --auto --match-head-commit <sha>` after rebasing and
+validating the current head; enabling the queue is a separate repository setting change.
 
 The pull request title becomes the squash commit on `main`, so it must be a Conventional Commit
 subject under 72 characters; the `PR title` check fails otherwise. After merge, the pull request is

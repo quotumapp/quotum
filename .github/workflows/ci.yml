@@ -4,15 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+  merge_group:
 
 # Public contributions run with a read-only token and no repository secrets.
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:
