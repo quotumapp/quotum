@@ -104,9 +104,10 @@ and `!` for a breaking change. The pull request title becomes the squash commit 
 same form; the `PR title` check enforces it, and merged pull requests are labelled from it for
 release notes. Pull requests describe the change, list the verification commands run, call out
 migration and environment variable changes with their upgrade order, and include request and
-response examples when HTTP behavior changes. Release notes list pull requests by title only, so
-the description is the detailed record; do not add a changelog file. Do not bump the
-`package.json` version in feature pull requests.
+response examples when HTTP behavior changes. A change to a baseline `migrations/*.sql` file must
+be named in the `Upgrade notes` section; the `Migration upgrade notes` check enforces it. Release
+notes list pull requests by title only, so the description is the detailed record; do not add a
+changelog file. Do not bump the `package.json` version in feature pull requests.
 
 ## Releases and container publishing
 

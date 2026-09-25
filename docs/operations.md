@@ -570,7 +570,12 @@ The release job creates the GitHub Release only after the image is pushed, so a 
 proves the image exists. Its notes are GitHub's generated list of the pull requests merged since
 the previous release tag (the previous stable tag, or the closest lower tag for a prerelease),
 grouped by label through [`.github/release.yml`](../.github/release.yml), with a compare link.
-Details and upgrade notes stay in the pull request descriptions. Labels come from pull request
+Details and upgrade notes stay in the pull request descriptions. PRs changing baseline migrations
+must name every changed SQL file under `Upgrade notes` and describe the upgrade; `None` fails
+the migration notes check. `bun scripts/release.ts meta vX.Y.Z` lists changed baselines since the
+previous tag and warns when a patch changes them. `bun scripts/release.ts unreleased` lists the
+same changes for HEAD; set `NEXT_VERSION=X.Y.Z` to also check a planned version. A warning does
+not authorize a populated database reset or bypass checksum verification. Labels come from pull request
 titles; see [CONTRIBUTING.md](../CONTRIBUTING.md#pull-requests). The release attaches
 `openapi.json` (copied from `contracts/v1/` with only `info.version` stamped), the unchanged
 `errors.json`, and an `image.json` that records the image

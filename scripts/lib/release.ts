@@ -221,3 +221,78 @@ export function versionedContract(contract: string, version: string): string {
 	document.info.version = version;
 	return `${JSON.stringify(document, null, 2)}\n`;
 }
+
+/** Compare content, not timestamps; --no-renames reports both sides of a renamed baseline. */
+export function baselineChanges(base: string, head: string, cwd = process.cwd()): string[] {
+	for (const ref of [base, head]) {
+		if (!ref || ref.startsWith("-")) throw new Error("Invalid baseline comparison revision");
+	}
+	const result = Bun.spawnSync(
+		[
+			"git",
+			"diff",
+			"--no-ext-diff",
+			"--no-renames",
+			"--raw",
+			"--no-abbrev",
+			"-z",
+			base,
+			head,
+			"--",
+			"migrations/*.sql",
+		],
+		{ cwd, stderr: "pipe" },
+	);
+	if (result.exitCode !== 0)
+		throw new Error(`Cannot compare baseline migrations: ${result.stderr.toString().trim()}`);
+	const records = result.stdout.toString().split("\0");
+	const changed: string[] = [];
+	for (let index = 0; index + 1 < records.length; index += 2) {
+		const fields = records[index].split(" ");
+		// A chmod changes tree metadata but leaves the migration checksum unchanged.
+		if (fields[2] !== fields[3]) changed.push(records[index + 1]);
+	}
+	return changed.sort();
+}
+
+export function migrationNoteErrors(body: string, changed: readonly string[]): string[] {
+	if (!changed.length) return [];
+	const lines = body.replace(/<!--[\s\S]*?-->/g, "").split(/\r?\n/);
+	const start = lines.findIndex((line) =>
+		/^\s*(?:#{1,6}\s+)?(?:\*\*)?Upgrade notes(?:\*\*)?\s*:?(?:\s|$)/i.test(line),
+	);
+	if (start < 0)
+		return ["Baseline changes require an Upgrade notes section naming every changed file."];
+	const first = lines[start].replace(/^\s*(?:#{1,6}\s+)?(?:\*\*)?Upgrade notes(?:\*\*)?\s*:?/i, "");
+	const section = [first];
+	for (const line of lines.slice(start + 1)) {
+		if (/^#{1,6}\s|^\*\*[^*]+\*\*\s*:?\s*$/.test(line)) break;
+		section.push(line);
+	}
+	const notes = section.join("\n").trim();
+	if (!notes || /^(?:none|n\/a|no changes)\b/i.test(notes))
+		return ["Upgrade notes must describe baseline changes, not None."];
+	return changed
+		.filter((path) => {
+			const filename = path.split("/").at(-1) ?? path;
+			return !notes
+				.split(/[^\w./-]+/)
+				.some(
+					(token) => token.replace(/\.+$/, "") === path || token.replace(/\.+$/, "") === filename,
+				);
+		})
+		.map((path) => `Upgrade notes must name ${path}.`);
+}
+
+export function baselineReleaseWarning(
+	previous: string | undefined,
+	next: string | undefined,
+	changed: readonly string[],
+): string | undefined {
+	if (!previous || !next || !changed.length) return undefined;
+	const before = parseVersion(previous.replace(/^v/, "")).core;
+	const after = parseVersion(next.replace(/^v/, "")).core;
+	return before[0] === after[0] && before[1] === after[1] && after[2] > before[2]
+		? "Baseline migrations changed in a patch release; checksum changes require explicit database upgrade planning."
+		: undefined;
+}

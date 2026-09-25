@@ -4,7 +4,7 @@
 
 ## Upgrade notes
 
-<!-- Breaking changes, schema or environment changes, and the upgrade order operators must follow. Write "None" if nothing changes for operators. -->
+<!-- Breaking changes, schema or environment changes, and the upgrade order operators must follow. Name each changed migrations/*.sql file and describe the database upgrade action. Write "None" only if no baseline or operator behavior changes. -->
 
 ## Verification
 
