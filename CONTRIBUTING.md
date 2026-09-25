@@ -49,7 +49,13 @@ line and function floor.
 - SQL files under `migrations/` are the source of truth and are checksum-verified by the migration
   runner. Before 1.0 they are baseline files that evolve in place: edit the domain file, recreate
   your database, and describe the change in the pull request. Incremental migrations start at 1.0.
-- Keep the Drizzle schema in `src/db/schema.ts` in step with the SQL.
+- The integration lane compares every billing table in `src/db/schema.ts` with the migrated
+  Postgres catalog (`tests/integration/schema-parity.test.ts`): columns, primary/unique/foreign
+  keys and delete actions, named indexes with column order, direction and predicates, and CHECK
+  names. Keep the mirror in step with SQL. There are no CHECK exceptions; do not add new
+  exclusions. Partition children and migration bookkeeping are excluded. The platform-owned
+  project foreign key is asserted explicitly at the test's composition boundary so billing
+  declares no platform table.
 - Call out every schema change and every environment variable change in the pull request description,
   including upgrade order when workers must be drained first.
 
