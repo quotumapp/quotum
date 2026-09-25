@@ -78,6 +78,7 @@ import {
 	type PaymentSetupRow,
 	type ReservePaymentSetupInput,
 } from "./repository/payment-setup";
+import { PlanGrantRepository } from "./repository/plan-grants";
 import { ProjectScopedBillingRepository } from "./repository/project-scoped";
 import { ProjectionJobBillingRepository } from "./repository/projection-jobs";
 import { PromotionProviderObjectRepository } from "./repository/promotion-provider-objects";
@@ -102,6 +103,7 @@ import type {
 	GetStripeProviderCustomerInput,
 	GooglePlayRecordingResult,
 	LinkStripeProviderCustomerInput,
+	PlanGrantReconciliationResult,
 	PrepareStripeCheckoutRequestInput,
 	ProjectionSyncJobRow,
 	ProviderSubscriptionReconciliationRow,
@@ -148,6 +150,7 @@ export type {
 	GetStripeProviderCustomerInput,
 	GooglePlayRecordingResult,
 	LinkStripeProviderCustomerInput,
+	PlanGrantReconciliationResult,
 	PrepareStripeCheckoutRequestInput,
 	ProjectionSyncJobRow,
 	ProviderSubscriptionReconciliationRow,
@@ -186,6 +189,7 @@ export class BillingRepository {
 	private readonly catalog: CatalogControlPlane;
 	readonly controlsEnterprise: ControlsEnterpriseRepository;
 	readonly promotions: PromotionRepository;
+	readonly planGrants: PlanGrantRepository;
 	readonly promotionProviders: PromotionProviderObjectRepository;
 
 	private readonly database: TransactionalQueryExecutor;
@@ -210,6 +214,7 @@ export class BillingRepository {
 		this.catalog = new CatalogControlPlane(database);
 		this.controlsEnterprise = new ControlsEnterpriseRepository(database);
 		this.promotions = new PromotionRepository(database);
+		this.planGrants = new PlanGrantRepository(database);
 		this.promotionProviders = new PromotionProviderObjectRepository(database);
 	}
 
@@ -355,8 +360,19 @@ export class BillingRepository {
 		return await this.subscriptionReconciliation.reconcileExpiredSubscriptions(limit);
 	}
 
+	/** Ending notices for provider trials that send none, then for trials Quotum runs itself. */
 	async enqueueTrialEndingNotices(limit: number): Promise<TrialEndingNoticeResult> {
-		return await this.subscriptionReconciliation.enqueueTrialEndingNotices(limit);
+		const subscriptions = await this.subscriptionReconciliation.enqueueTrialEndingNotices(limit);
+		const grants = await this.planGrants.enqueuePlanGrantEndingNotices(limit);
+		return {
+			noticedTrials: subscriptions.noticedTrials + grants.noticedTrials,
+			affectedCustomers: subscriptions.affectedCustomers + grants.affectedCustomers,
+			projectionJobs: subscriptions.projectionJobs + grants.projectionJobs,
+		};
+	}
+
+	async reconcilePlanGrants(limit: number): Promise<PlanGrantReconciliationResult> {
+		return await this.planGrants.reconcilePlanGrants(limit);
 	}
 
 	async claimProviderSubscriptionReconciliations(

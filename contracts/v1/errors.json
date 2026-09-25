@@ -96,6 +96,7 @@
       "code": "BILLING_PLAN_NOT_FOUND",
       "sources": [
         "src/db/repository/controls-enterprise.ts",
+        "src/db/repository/plan-grants.ts",
         "src/db/repository/stripe.ts"
       ]
     },
@@ -450,6 +451,7 @@
       "code": "IDEMPOTENCY_CONFLICT",
       "sources": [
         "src/db/repository/commercial-actions.ts",
+        "src/db/repository/plan-grants.ts",
         "src/db/repository/promotions.ts",
         "src/db/repository/recurring-pricing.ts",
         "src/db/repository/stripe.ts",
@@ -1222,6 +1224,48 @@
       "sources": [
         "src/db/repository/recurring-pricing.ts",
         "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "TRIAL_ALREADY_ACTIVE",
+      "sources": [
+        "src/billing/plan-grants.ts"
+      ]
+    },
+    {
+      "code": "TRIAL_ALREADY_USED",
+      "sources": [
+        "src/billing/plan-grants.ts"
+      ]
+    },
+    {
+      "code": "TRIAL_BASE_PLAN_ACTIVE",
+      "sources": [
+        "src/billing/plan-grants.ts"
+      ]
+    },
+    {
+      "code": "TRIAL_DURATION_REQUIRED",
+      "sources": [
+        "src/billing/plan-grants.ts"
+      ]
+    },
+    {
+      "code": "TRIAL_NOT_ACTIVE",
+      "sources": [
+        "src/billing/plan-grants.ts"
+      ]
+    },
+    {
+      "code": "TRIAL_NOT_FOUND",
+      "sources": [
+        "src/billing/plan-grants.ts"
+      ]
+    },
+    {
+      "code": "TRIAL_PLAN_NOT_ELIGIBLE",
+      "sources": [
+        "src/billing/plan-grants.ts"
       ]
     },
     {

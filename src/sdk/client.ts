@@ -24,6 +24,7 @@ import type {
 	ReserveUsageInput,
 } from "../billing/metering";
 import type { PaymentSetupSession } from "../billing/payment-setup";
+import type { TrialEligibility, TrialMutationResult, TrialRecord } from "../billing/plan-grants";
 import type {
 	CreatePromotionInput,
 	PromotionChannel,
@@ -122,6 +123,7 @@ export class BillingClient {
 	readonly usage;
 	readonly purchases;
 	readonly promotions;
+	readonly trials;
 	readonly providers;
 	readonly admin;
 
@@ -281,6 +283,51 @@ export class BillingClient {
 					method: "POST",
 					body: input,
 				}),
+		};
+		this.trials = {
+			/**
+			 * Starts a trial Quotum runs itself, with no provider: the plan's entitlements, allowances
+			 * and blocked limits until the trial ends or a paid base subscription replaces it.
+			 * `durationDays` defaults to the published plan's trial length.
+			 */
+			start: (
+				billingAccountId: string,
+				input: { planKey: string; durationDays?: number; metadata?: Record<string, unknown> },
+				idempotencyKey: string,
+			) =>
+				this.request<TrialMutationResult>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/trials`,
+					{
+						method: "POST",
+						body: input,
+						idempotencyKey,
+					},
+				),
+			list: (billingAccountId: string, query: { limit?: number; cursor?: string } = {}) =>
+				this.requestPage<TrialRecord>(
+					pathWithQuery(`/v1/billing-accounts/${segment(billingAccountId)}/trials`, query),
+				),
+			get: (billingAccountId: string, trialId: string) =>
+				this.request<TrialRecord>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/trials/${segment(trialId)}`,
+				),
+			end: (
+				billingAccountId: string,
+				trialId: string,
+				input: { reason?: string },
+				idempotencyKey: string,
+			) =>
+				this.request<TrialMutationResult>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/trials/${segment(trialId)}/end`,
+					{ method: "POST", body: input, idempotencyKey },
+				),
+			/** Whether the account can trial the plan now; the same checks a start makes. */
+			eligibility: (billingAccountId: string, planKey: string) =>
+				this.request<TrialEligibility>(
+					pathWithQuery(`/v1/billing-accounts/${segment(billingAccountId)}/trial-eligibility`, {
+						planKey,
+					}),
+				),
 		};
 		this.promotions = {
 			create: (input: Omit<CreatePromotionInput, "actor">) =>

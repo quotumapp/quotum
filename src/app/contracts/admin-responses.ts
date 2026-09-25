@@ -976,6 +976,8 @@ export const postV1AdminReconciliationSubscriptionsRunResponse200Schema = z.obje
 		outcome: z.enum(["succeeded", "failed", "partial"]),
 		expiredSubscriptions: z.number(),
 		affectedCustomers: z.number(),
+		expiredPlanGrants: z.number(),
+		planGrantPeriods: z.number(),
 		trialEndingNotices: z.number(),
 		providerClaimed: z.number(),
 		providerProcessed: z.number(),

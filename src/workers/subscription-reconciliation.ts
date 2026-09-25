@@ -1,6 +1,7 @@
 import type { BillingProvider } from "../billing/types";
 import type {
 	ExpiredSubscriptionReconciliationResult,
+	PlanGrantReconciliationResult,
 	ProviderSubscriptionReconciliationRow,
 	TrialEndingNoticeResult,
 } from "../db/repository";
@@ -40,6 +41,7 @@ export type SubscriptionReconciliationProviderSelector = (
 export interface SubscriptionReconciliationRepository {
 	reconcileExpiredSubscriptions(limit: number): Promise<ExpiredSubscriptionReconciliationResult>;
 	enqueueTrialEndingNotices(limit: number): Promise<TrialEndingNoticeResult>;
+	reconcilePlanGrants(limit: number): Promise<PlanGrantReconciliationResult>;
 	claimProviderSubscriptionReconciliations(
 		workerId: string,
 		limit: number,
@@ -83,6 +85,8 @@ export interface SubscriptionReconciliationRunResult {
 	outcome: "succeeded" | "partial" | "failed";
 	expiredSubscriptions: number;
 	affectedCustomers: number;
+	expiredPlanGrants: number;
+	planGrantPeriods: number;
 	trialEndingNotices: number;
 	providerClaimed: number;
 	providerProcessed: number;
@@ -147,6 +151,8 @@ export class SubscriptionReconciliationWorker {
 				outcome: "succeeded",
 				expiredSubscriptions: 0,
 				affectedCustomers: 0,
+				expiredPlanGrants: 0,
+				planGrantPeriods: 0,
 				trialEndingNotices: 0,
 				providerClaimed: subscriptions.length,
 				providerProcessed: 0,
@@ -176,6 +182,9 @@ export class SubscriptionReconciliationWorker {
 			const expired = await this.repository.reconcileExpiredSubscriptions(this.batchSize);
 			result.expiredSubscriptions = expired.expiredSubscriptions;
 			result.affectedCustomers = expired.affectedCustomers;
+			const grants = await this.repository.reconcilePlanGrants(this.batchSize);
+			result.expiredPlanGrants = grants.expiredPlanGrants;
+			result.planGrantPeriods = grants.planGrantPeriods;
 			const notices = await this.repository.enqueueTrialEndingNotices(this.batchSize);
 			result.trialEndingNotices = notices.noticedTrials;
 			result.outcome = reconciliationOutcome(result);

@@ -104,6 +104,7 @@ describe("repository domain adapters", () => {
 			},
 		});
 		const notices = { noticedTrials: 1, affectedCustomers: 1, projectionJobs: 1 };
+		const grants = { expiredPlanGrants: 1, planGrantPeriods: 0 };
 		const reconciliation = new ProviderSubscriptionReconciliationRepository({
 			reconcileExpiredSubscriptions(limit) {
 				calls.push({ method: "reconcileExpiredSubscriptions", limit });
@@ -112,6 +113,10 @@ describe("repository domain adapters", () => {
 			enqueueTrialEndingNotices(limit) {
 				calls.push({ method: "enqueueTrialEndingNotices", limit });
 				return Promise.resolve(notices);
+			},
+			reconcilePlanGrants(limit) {
+				calls.push({ method: "reconcilePlanGrants", limit });
+				return Promise.resolve(grants);
 			},
 			claimProviderSubscriptionReconciliations(workerId, limit, staleBefore) {
 				calls.push({
@@ -154,6 +159,7 @@ describe("repository domain adapters", () => {
 		expect(await replay.claimStoreEventReplayJobs("worker-a", 3)).toBe(replayRows);
 		expect(await reconciliation.reconcileExpiredSubscriptions(10)).toBe(expired);
 		expect(await reconciliation.enqueueTrialEndingNotices(10)).toBe(notices);
+		expect(await reconciliation.reconcilePlanGrants(10)).toBe(grants);
 		expect(
 			await reconciliation.claimProviderSubscriptionReconciliations("worker-a", 10, staleBefore),
 		).toBe(reconciliationRows);
@@ -162,6 +168,7 @@ describe("repository domain adapters", () => {
 			{ method: "claimStoreEventReplayJobs", workerId: "worker-a", limit: 3 },
 			{ method: "reconcileExpiredSubscriptions", limit: 10 },
 			{ method: "enqueueTrialEndingNotices", limit: 10 },
+			{ method: "reconcilePlanGrants", limit: 10 },
 			{
 				method: "claimProviderSubscriptionReconciliations",
 				workerId: "worker-a",

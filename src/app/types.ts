@@ -17,6 +17,7 @@ import type {
 } from "../billing/insights";
 import type { MeteringServiceLike } from "../billing/metering";
 import type { PaymentSetupSession } from "../billing/payment-setup";
+import type { TrialServiceLike } from "../billing/plan-grants";
 import type { PromotionServiceLike } from "../billing/promotions";
 import type { CatalogControlPlaneLike } from "../catalog/types";
 import type { BillingEnv } from "../env";
@@ -207,6 +208,7 @@ export interface AppDependencies {
 	meteringService?: MeteringServiceLike;
 	controlsEnterpriseService?: ControlsEnterpriseRepositoryLike;
 	promotionService?: PromotionServiceLike;
+	trialService?: TrialServiceLike;
 	catalogControlPlane?: CatalogControlPlaneLike;
 	billingInsightsService?: BillingInsightsServiceLike;
 	appleStoreKitService?: AppleStoreKitServiceLike | null;

@@ -723,6 +723,66 @@ limits. Only applied `quotum` redemptions can be revoked (`PROMOTION_REDEMPTION_
 refund Stripe purchases instead. A second revocation with another key returns
 `PROMOTION_REDEMPTION_ALREADY_REVERSED`.
 
+## Trials
+
+Stripe runs the trials a plan declares with `trialDays`, and App Store and Play run their own free
+trial offers; Quotum records those ([providers](providers.md#projections)). A trial Quotum runs
+itself needs no provider and no payment method. It is a plan grant: the account holds the plan's
+published version for a fixed time, with its entitlements, its allowances and its meter limits,
+and no invoice. The trusted backend manages it with project authentication:
+
+```http
+POST /v1/billing-accounts/:billingAccountId/trials
+GET  /v1/billing-accounts/:billingAccountId/trials
+GET  /v1/billing-accounts/:billingAccountId/trials/:trialId
+POST /v1/billing-accounts/:billingAccountId/trials/:trialId/end
+GET  /v1/billing-accounts/:billingAccountId/trial-eligibility?planKey=:planKey
+```
+
+`POST .../trials` takes `planKey`, an optional `durationDays` (1-730) and optional `metadata`
+(at most 4 KB), with an `Idempotency-Key`; `X-Billing-Actor` is optional and defaults to the
+billing account. Without `durationDays` the plan's `trialDays` applies, and a plan without one
+returns `TRIAL_DURATION_REQUIRED`. It creates the customer when needed and returns `201` with the
+trial, or `200` with `duplicate: true` when the key is replayed; reusing the key with other terms
+returns `IDEMPOTENCY_CONFLICT`. Only the plan's active, published, public version of a base plan
+without licensed quantities or entity-scoped allocations can be trialed
+(`TRIAL_PLAN_NOT_ELIGIBLE`); an unknown plan returns `BILLING_PLAN_NOT_FOUND`. An account is
+refused a trial while it has another active base trial (`TRIAL_ALREADY_ACTIVE`) or a funding paid
+base subscription (`TRIAL_BASE_PLAN_ACTIVE`), and gets one trial per plan: a plan it trialed
+through Quotum, or through a provider subscription that recorded trial bounds, returns
+`TRIAL_ALREADY_USED`. The error `details` name the `planKey`.
+`GET .../trial-eligibility` runs the same checks without creating anything and reports
+`eligible`, the refusing `reason` and the plan's `defaultDurationDays`.
+
+During the trial:
+
+- Entitlements come from the keys of the version's published provider bindings, copied when the
+  trial starts, with `metadata.source: "plan_grant"`, the `planKey`, the `planGrantId` and the
+  trial bounds. A paid source for the same key always wins.
+- Allocation items become reward allocations for the reset window the trial is in; the
+  subscription reconciliation worker adds the next window's when it begins. No allowance outlives
+  the trial.
+- Meter limits apply with overage blocked, in windows anchored at the trial start and clamped to
+  its end, and plan-default controls apply. Rate cards, add-on purchases and license pools still
+  need a paid subscription.
+
+A trial ends one of three ways, and access stops at that moment without waiting for a worker:
+
+- At `endsAt`: the worker records it `expired` and delivers an `expiry_reconciliation` projection
+  with `trial: {event: "ended"}`. About three days before, it sends one `trial: {event: "ending"}`
+  fact.
+- `POST .../trials/:trialId/end`, with an optional `reason` and an `Idempotency-Key`, ends it early
+  (`ended`), expires its allowances and delivers a stored `usage_changed` projection with the
+  `ended` fact. Ending a trial that is no longer active returns `TRIAL_NOT_ACTIVE`.
+- A paid base subscription from any provider supersedes it as soon as Quotum records the
+  subscription (`superseded`, with `supersededBy`). Its allowances expire, the subscription's
+  entitlements and limits take over, and no trial fact is sent, since the customer converted.
+
+A trial start delivers a stored `usage_changed` projection keyed `plan_grant:<id>:started`, which
+reaches the receiver even when usage deliveries are off. Trial reads work with a read-only
+credential. Grants carry no channel restriction; follow the store rules for the apps you unlock
+them in.
+
 ## Admin operations
 
 Every admin route requires project authentication. The routes listed under Operator routes also

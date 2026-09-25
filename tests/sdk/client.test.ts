@@ -341,6 +341,47 @@ describe("BillingClient", () => {
 		expect(await calls[4]?.json()).toEqual({ code: "SPRING", channel: "web" });
 	});
 
+	it("starts, reads, ends and checks trials with the project credential", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			fetch: async (input, init) => {
+				const request = new Request(input, init);
+				calls.push(request);
+				return request.method === "GET" && new URL(request.url).pathname.endsWith("/trials")
+					? Response.json({ success: true, data: [], pagination: { nextCursor: null } })
+					: Response.json({ success: true, data: {} });
+			},
+		});
+		const trialId = "33333333-3333-4333-8333-333333333333";
+
+		await client.trials.start("account 1", { planKey: "pro", durationDays: 14 }, "start-1");
+		expect(await client.trials.list("account 1", { limit: 5 })).toEqual({
+			data: [],
+			nextCursor: null,
+		});
+		await client.trials.get("account 1", trialId);
+		await client.trials.end("account 1", trialId, { reason: "Converted offline" }, "end-1");
+		await client.trials.eligibility("account 1", "pro");
+
+		expect(
+			calls.map(
+				(call) => `${call.method} ${new URL(call.url).pathname}${new URL(call.url).search}`,
+			),
+		).toEqual([
+			"POST /v1/billing-accounts/account%201/trials",
+			"GET /v1/billing-accounts/account%201/trials?limit=5",
+			`GET /v1/billing-accounts/account%201/trials/${trialId}`,
+			`POST /v1/billing-accounts/account%201/trials/${trialId}/end`,
+			"GET /v1/billing-accounts/account%201/trial-eligibility?planKey=pro",
+		]);
+		expect(calls[0]?.headers.get("idempotency-key")).toBe("start-1");
+		expect(await calls[0]?.json()).toEqual({ planKey: "pro", durationDays: 14 });
+		expect(calls[3]?.headers.get("idempotency-key")).toBe("end-1");
+		expect(calls.some((call) => call.headers.has("x-billing-operator-key"))).toBe(false);
+	});
+
 	it("redeems codes, reads the account ledger and revokes redemptions", async () => {
 		const calls: Request[] = [];
 		const client = new BillingClient({

@@ -140,6 +140,17 @@ test("documents request bodies, required headers and the named schemas clients i
 	expect(
 		headers(operation("/v1/billing-accounts/{billingAccountId}/promotion-codes/validate", "post")),
 	).toEqual([]);
+	for (const path of [
+		"/v1/billing-accounts/{billingAccountId}/trials",
+		"/v1/billing-accounts/{billingAccountId}/trials/{trialId}/end",
+	])
+		expect(headers(operation(path, "post")), path).toEqual([
+			"X-Billing-Actor?",
+			"Idempotency-Key!",
+		]);
+	expect(
+		headers(operation("/v1/billing-accounts/{billingAccountId}/trial-eligibility", "get")),
+	).toEqual([]);
 	expect(jsonBody(operation("/v1/purchases/verify", "post"))).toBeDefined();
 	const alertEvents = operation(
 		"/v1/billing-accounts/{billingAccountId}/usage-alert-events",

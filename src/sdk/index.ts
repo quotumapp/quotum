@@ -10,6 +10,13 @@ export type {
 	PaymentSetupStatus,
 } from "../billing/payment-setup";
 export type {
+	PlanGrantStatus,
+	TrialEligibility,
+	TrialIneligibility,
+	TrialMutationResult,
+	TrialRecord,
+} from "../billing/plan-grants";
+export type {
 	CreatePromotionInput,
 	PromotionCodeInput,
 	PromotionCodeRecord,

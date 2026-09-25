@@ -349,7 +349,7 @@ One process runs the HTTP API and all workers. Each polls on the interval shown:
 | --- | --- |
 | Projection delivery | `BILLING_WORKER_POLL_INTERVAL_MS` |
 | Provider event replay | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
-| Subscription reconciliation (provider reads, subscription expiry, App Store and Play trial-ending notices) | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
+| Subscription reconciliation (provider reads, subscription and plan grant expiry, plan grant allowances, trial-ending notices) | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
 | Metering maintenance (reservation expiry, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Recurring billing | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Automatic top-ups | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
