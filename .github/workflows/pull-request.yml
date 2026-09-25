@@ -29,3 +29,20 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: bun scripts/release.ts pr-title
+
+  migrations:
+    name: Migration upgrade notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - name: Check baseline upgrade notes
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bun scripts/release.ts pr-migrations

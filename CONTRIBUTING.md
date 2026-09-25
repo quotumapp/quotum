@@ -58,6 +58,11 @@ line and function floor.
   declares no platform table.
 - Call out every schema change and every environment variable change in the pull request description,
   including upgrade order when workers must be drained first.
+- A pull request that changes a baseline `migrations/*.sql` file must name every changed file in
+  its `Upgrade notes` section and describe the operator action; the `Migration upgrade notes`
+  check rejects a missing section, `None`, or an unnamed file. The release `meta` and `unreleased`
+  commands list baseline changes since the previous tag; `meta` warns for a patch release, and
+  `unreleased` warns when `NEXT_VERSION` is set.
 
 ## HTTP contract
 

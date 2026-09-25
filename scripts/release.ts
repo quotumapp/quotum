@@ -2,11 +2,14 @@ import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } 
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { createCliBillingLogger } from "../src/observability/logger";
-import { writeStdout } from "../src/shared/cli-output";
+import { writeStderr, writeStdout } from "../src/shared/cli-output";
 import {
+	baselineChanges,
+	baselineReleaseWarning,
 	buildVersion,
 	classifyPrTitle,
 	latestStableTag,
+	migrationNoteErrors,
 	releaseMeta,
 	renderImageManifest,
 	renderUnreleasedSummary,
@@ -20,6 +23,7 @@ const usage = `Usage:
   bun scripts/release.ts contracts <version> [--out-dir dir]
   bun scripts/release.ts meta <tag>
   bun scripts/release.ts image-manifest <version> --digest sha256:... [--out-dir dir]
+  bun scripts/release.ts pr-migrations       (reads PR_BODY, BASE_SHA, HEAD_SHA)
   bun scripts/release.ts pr-title            (reads PR_TITLE)
   bun scripts/release.ts unreleased`;
 
@@ -59,11 +63,14 @@ function meta(positionals: string[]) {
 		throw new Error(usage);
 	}
 	const result = releaseMeta(tag, releaseTags());
+	const changed = result.previous ? baselineChanges(result.previous, tag) : [];
+	reportBaselines(result.previous, tag, changed);
 	writeOutputs({
 		version: result.version,
 		prerelease: String(result.prerelease),
 		latest: String(result.latest),
 		previous: result.previous ?? "",
+		baseline_changes: changed.join(","),
 	});
 }
 
@@ -102,6 +109,31 @@ function prTitle() {
 	writeStdout(result.labels.join("\n"));
 }
 
+function reportBaselines(
+	previous: string | undefined,
+	next: string | undefined,
+	changed: string[],
+): string {
+	const text = changed.length
+		? `Baseline migrations changed:\n${changed.map((path) => `- ${path}`).join("\n")}\n`
+		: "Baseline migrations changed: none.\n";
+	const warning = baselineReleaseWarning(previous, next, changed);
+	if (warning) writeStderr(`::warning::${warning}`);
+	writeStderr(text);
+	return text + (warning ? `\nWarning: ${warning}\n` : "");
+}
+
+function prMigrations() {
+	const { PR_BODY, BASE_SHA, HEAD_SHA } = process.env;
+	if (PR_BODY === undefined || !BASE_SHA || !HEAD_SHA)
+		throw new Error("PR_BODY, BASE_SHA and HEAD_SHA are required");
+	const changed = baselineChanges(BASE_SHA, HEAD_SHA);
+	const errors = migrationNoteErrors(PR_BODY, changed);
+	for (const error of errors) writeStderr(error);
+	if (errors.length) process.exitCode = 1;
+	else writeStdout(`Migration notes verified (${changed.length} changed baselines).`);
+}
+
 function unreleased() {
 	const tags = releaseTags();
 	const since = latestStableTag(tags);
@@ -112,7 +144,11 @@ function unreleased() {
 					.split("\n")
 					.map((line) => line.trim())
 					.filter(Boolean);
-	const summary = renderUnreleasedSummary({ since, subjects });
+	const changed = since ? baselineChanges(since, "HEAD") : [];
+	const summary =
+		renderUnreleasedSummary({ since, subjects }) +
+		"\n" +
+		reportBaselines(since, process.env.NEXT_VERSION, changed);
 	const summaryPath = process.env.GITHUB_STEP_SUMMARY;
 	if (summaryPath) {
 		appendFileSync(summaryPath, summary);
@@ -155,6 +191,9 @@ try {
 			break;
 		case "image-manifest":
 			imageManifest(rest, values);
+			break;
+		case "pr-migrations":
+			prMigrations();
 			break;
 		case "pr-title":
 			prTitle();
