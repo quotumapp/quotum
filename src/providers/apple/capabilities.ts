@@ -75,7 +75,8 @@ export const appleCapabilities: ProviderCapabilityDeclaration = {
 			"StoreKit normalizes non-consumable transactions, but no test exercises one.",
 		),
 		"catalog.trial": providerManaged(
-			"Introductory offers run in the App Store and Quotum mirrors the subscription; the catalog rejects plan trial days on Apple bindings.",
+			"Free-trial offers (introductory, promotional, offer code or win-back) run in the App Store; Quotum records the trial bounds from the signed transaction. The catalog rejects plan trial days on Apple bindings.",
+			[appleNormalizer, appleService, appleFlows],
 		),
 		"catalog.addon": notEvaluated(
 			"The catalog accepts add-on plans only when every binding is Stripe.",

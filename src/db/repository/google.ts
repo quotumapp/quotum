@@ -34,6 +34,7 @@ import { parseNullableNonnegativeInteger } from "./parsers";
 import { executeOne, executeRows, jsonb } from "./query";
 import { processedGooglePlayRecordingResult, skippedGooglePlayRecordingResult } from "./results";
 import { recordStoreEventProcessingResult } from "./store-events";
+import { recordSubscriptionTrial } from "./trials";
 import type {
 	CustomerIdentityRow,
 	GooglePlayRecordingResult,
@@ -305,6 +306,12 @@ export class GoogleBillingRepository extends RepositoryModule {
 					updateProduct: false,
 					identityError: `subscription identity mismatch for provider google purchase token ${input.purchaseToken}`,
 				});
+				if (input.trialStart && input.trialEnd) {
+					await recordSubscriptionTrial(tx, projectId, subscriptionId, {
+						start: input.trialStart,
+						end: input.trialEnd,
+					});
+				}
 				await materializeSubscriptionAllocations(tx, {
 					projectId,
 					customerId: customer.id,

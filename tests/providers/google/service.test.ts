@@ -220,6 +220,34 @@ describe("GooglePlayBillingService", () => {
 		});
 	});
 
+	// capability: catalog.trial
+	it("passes a free-trial offer phase to the recording repository", async () => {
+		const { service, repositoryInputs } = serviceFixture({
+			subscriptionPurchase: subscriptionPurchase({
+				lineItems: [
+					{
+						productId: "premium_monthly",
+						expiryTime: "2099-06-07T00:00:00.000Z",
+						offerDetails: { basePlanId: "monthly-base", offerId: "trial-7d" },
+						offerPhase: { freeTrial: {} },
+						autoRenewingPlan: { autoRenewEnabled: true },
+					},
+				],
+			}),
+		});
+
+		await service.verifyPurchase({
+			billingAccountId: "user_1",
+			purchaseKind: "subscription",
+			purchaseToken: "purchase_token_1",
+		});
+
+		expect(repositoryInputs[0]).toMatchObject({
+			trialStart: new Date("2026-05-31T00:00:00.000Z"),
+			trialEnd: new Date("2099-06-07T00:00:00.000Z"),
+		});
+	});
+
 	it("rejects purchases with mismatched obfuscated account ids", async () => {
 		const { service } = serviceFixture({
 			subscriptionPurchase: subscriptionPurchase({

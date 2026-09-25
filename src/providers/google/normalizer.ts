@@ -64,6 +64,10 @@ export function normalizeGoogleSubscriptionPurchase(
 	const subscriptionStatus = deriveSubscriptionStatus(state, expiresAt, now);
 	const purchaseToken = requireNonBlank(input.purchaseToken, "purchaseToken");
 	const externalPriceId = optionalString(optionalRecord(lineItem.offerDetails)?.basePlanId);
+	// Play reports only the current offer phase, and a free-trial phase lasts until the item's expiry.
+	const inFreeTrial =
+		optionalRecord(optionalRecord(lineItem.offerPhase)?.freeTrial) !== null &&
+		expiresAt.getTime() > purchasedAt.getTime();
 	const orderId = optionalString(purchase.latestOrderId);
 	const autoRenew = state === "SUBSCRIPTION_STATE_CANCELED" ? false : (autoRenewEnabled ?? false);
 	const projectionReason =
@@ -82,6 +86,8 @@ export function normalizeGoogleSubscriptionPurchase(
 		subscriptionStatus,
 		purchasedAt,
 		expiresAt,
+		trialStart: inFreeTrial ? purchasedAt : null,
+		trialEnd: inFreeTrial ? expiresAt : null,
 		autoRenew,
 		acknowledgementState,
 		consumptionState: null,
@@ -189,6 +195,8 @@ export function normalizeGoogleProductPurchase(
 		subscriptionStatus: null,
 		purchasedAt,
 		expiresAt: null,
+		trialStart: null,
+		trialEnd: null,
 		autoRenew: null,
 		acknowledgementState,
 		consumptionState: quantityState.consumptionState,
@@ -262,6 +270,8 @@ export function normalizeGoogleVoidedPurchase(
 		subscriptionStatus: input.purchaseKind === "subscription" ? "expired" : null,
 		purchasedAt: invalidatedAt,
 		expiresAt: input.purchaseKind === "subscription" ? invalidatedAt : null,
+		trialStart: null,
+		trialEnd: null,
 		autoRenew: input.purchaseKind === "subscription" ? false : null,
 		acknowledgementState: null,
 		consumptionState: null,

@@ -80,6 +80,9 @@ export interface NormalizedGooglePurchase {
 	subscriptionStatus: SubscriptionStatus | null;
 	purchasedAt: Date;
 	expiresAt: Date | null;
+	/** Bounds of a free-trial offer phase; both null in any other phase. */
+	trialStart: Date | null;
+	trialEnd: Date | null;
 	autoRenew: boolean | null;
 	acknowledgementState: string | null;
 	consumptionState: string | null;

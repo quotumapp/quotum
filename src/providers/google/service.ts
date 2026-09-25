@@ -518,6 +518,8 @@ function toRepositoryInput(
 		subscriptionStatus: command.subscriptionStatus,
 		purchasedAt: command.purchasedAt,
 		expiresAt: command.expiresAt,
+		trialStart: command.trialStart,
+		trialEnd: command.trialEnd,
 		autoRenew: command.autoRenew,
 		acknowledgementState: command.acknowledgementState,
 		consumptionState: command.consumptionState,

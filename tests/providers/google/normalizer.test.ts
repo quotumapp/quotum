@@ -349,4 +349,63 @@ describe("Google Play normalizer", () => {
 			}),
 		).toBeNull();
 	});
+
+	// capability: catalog.trial
+	it("records the free-trial offer phase from the subscription start to the item expiry", () => {
+		const trialLineItem = (offerPhase: Record<string, unknown> | undefined) => [
+			{
+				productId: "premium_monthly",
+				expiryTime: "2026-06-07T00:00:00Z",
+				offerDetails: { basePlanId: "monthly-base", offerId: "trial-7d" },
+				autoRenewingPlan: { autoRenewEnabled: true },
+				...(offerPhase === undefined ? {} : { offerPhase }),
+			},
+		];
+		const trialBounds = (offerPhase: Record<string, unknown> | undefined) => {
+			const command = normalizeGoogleSubscriptionPurchase({
+				billingAccountId: "user_1",
+				purchaseToken: "purchase_token_1",
+				purchase: subscriptionPurchase({ lineItems: trialLineItem(offerPhase) }),
+				now: new Date("2026-06-01T00:00:00Z"),
+			});
+			return {
+				trialStart: command?.trialStart?.toISOString() ?? null,
+				trialEnd: command?.trialEnd?.toISOString() ?? null,
+			};
+		};
+
+		expect(trialBounds({ freeTrial: {} })).toEqual({
+			trialStart: "2026-05-31T00:00:00.000Z",
+			trialEnd: "2026-06-07T00:00:00.000Z",
+		});
+		for (const offerPhase of [{ basePrice: {} }, { introductoryPrice: {} }, undefined]) {
+			expect(trialBounds(offerPhase)).toEqual({ trialStart: null, trialEnd: null });
+		}
+	});
+
+	it("records no trial for one-time and voided purchases", () => {
+		const purchased = normalizeGoogleProductPurchase({
+			billingAccountId: "user_1",
+			purchaseToken: "purchase_token_1",
+			purchaseKind: "consumable",
+			productId: "credits_10",
+			purchase: productPurchase(),
+		});
+		const voided = normalizeGoogleVoidedPurchase({
+			billingAccountId: null,
+			obfuscatedAccountId: null,
+			externalProductId: "premium_monthly",
+			purchaseKind: "subscription",
+			purchaseToken: "purchase_token_1",
+			orderId: "GPA.1234-5678-9012-34567",
+			eventTimeMillis: "1780185600000",
+			externalEventId: "google:message_1",
+			rawPayload: { voidedPurchaseNotification: { purchaseToken: "purchase_token_1" } },
+		});
+
+		expect([purchased, voided].map((command) => [command?.trialStart, command?.trialEnd])).toEqual([
+			[null, null],
+			[null, null],
+		]);
+	});
 });

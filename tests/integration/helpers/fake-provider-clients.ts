@@ -153,6 +153,7 @@ export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions)
 	const quantity = options.quantity ?? 1;
 	let refundableQuantity = options.refundableQuantity ?? quantity;
 	let productPurchaseState = "PURCHASED";
+	let subscriptionLineItemOverrides: Record<string, unknown> = {};
 
 	return attachFailNext({
 		calls,
@@ -214,6 +215,7 @@ export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions)
 								basePlanId,
 							},
 							productId: subscriptionProductId,
+							...subscriptionLineItemOverrides,
 						},
 					],
 					startTime: "2026-05-31T00:00:00.000Z",
@@ -226,6 +228,10 @@ export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions)
 		},
 		setRefundableQuantity(value: number) {
 			refundableQuantity = value;
+		},
+		/** Merges fields such as `offerPhase` or `expiryTime` into the subscription line item. */
+		setSubscriptionLineItem(overrides: Record<string, unknown>) {
+			subscriptionLineItemOverrides = overrides;
 		},
 	});
 }

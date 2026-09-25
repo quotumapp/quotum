@@ -1,4 +1,4 @@
-import type { ProjectionSyncReason } from "../../billing/types";
+import type { ProjectionSyncReason, PurchaseKind } from "../../billing/types";
 import type { StoreEventReplayJobRow } from "../../db/repository";
 import type {
 	AppleDecodedNotificationPayload,
@@ -240,6 +240,12 @@ function normalizeTransaction(input: NormalizeTransactionInput): NormalizedStore
 		storeKitStatus: input.storeKitStatus,
 		now: input.now,
 	});
+	const trial = appleFreeTrialBounds(
+		purchaseKind,
+		input.transaction,
+		purchasedAt,
+		transactionExpiresAt,
+	);
 	const autoRenew = normalizeAutoRenew(input.renewalInfo);
 	const eventType = input.notificationType ?? "purchase_verified";
 	const subscriptionStatus =
@@ -267,6 +273,8 @@ function normalizeTransaction(input: NormalizeTransactionInput): NormalizedStore
 		subscriptionStatus,
 		purchasedAt,
 		expiresAt,
+		trialStart: trial?.start ?? null,
+		trialEnd: trial?.end ?? null,
 		autoRenew,
 		invalidatedAt,
 		invalidationReason,
@@ -292,6 +300,28 @@ function normalizeTransaction(input: NormalizeTransactionInput): NormalizedStore
 			invalidationReason,
 		}),
 	};
+}
+
+/**
+ * A free-trial offer of any type (introductory, promotional, offer code or win-back) covers the
+ * transaction's own period. The transaction expiry is the trial end even when a billing grace
+ * period later extends access.
+ */
+function appleFreeTrialBounds(
+	purchaseKind: PurchaseKind,
+	transaction: AppleDecodedTransactionPayload,
+	purchasedAt: Date,
+	transactionExpiresAt: Date | null,
+): { start: Date; end: Date } | null {
+	if (
+		purchaseKind !== "subscription" ||
+		transaction.offerDiscountType !== "FREE_TRIAL" ||
+		transactionExpiresAt === null ||
+		transactionExpiresAt.getTime() <= purchasedAt.getTime()
+	) {
+		return null;
+	}
+	return { start: purchasedAt, end: transactionExpiresAt };
 }
 
 function appleProjectionIdempotencyKey({

@@ -23,6 +23,7 @@ import { findAppleInvalidationTarget } from "./invalidations";
 import { upsertPurchase, upsertSubscription } from "./mutations";
 import { processedStoreKitRecordingResult, skippedStoreKitRecordingResult } from "./results";
 import { recordStoreEventProcessingResult } from "./store-events";
+import { recordSubscriptionTrial } from "./trials";
 import type {
 	CustomerIdentityRow,
 	RecordStoreKitTransactionProjectionInput,
@@ -189,6 +190,12 @@ export class AppleBillingRepository extends RepositoryModule {
 					allowRestoration: isRefundReversal,
 					identityError: `subscription identity mismatch for provider apple original transaction ${input.originalTransactionId}`,
 				});
+				if (input.trialStart && input.trialEnd) {
+					await recordSubscriptionTrial(tx, projectId, subscriptionId, {
+						start: input.trialStart,
+						end: input.trialEnd,
+					});
+				}
 				await materializeSubscriptionAllocations(tx, {
 					projectId,
 					customerId: customer.id,

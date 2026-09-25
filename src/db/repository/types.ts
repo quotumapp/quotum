@@ -111,6 +111,9 @@ export interface RecordStoreKitTransactionProjectionInput {
 	subscriptionStatus: SubscriptionStatus | null;
 	purchasedAt: Date;
 	expiresAt: Date | null;
+	/** Free-trial bounds of the transaction; set together or not at all. */
+	trialStart?: Date | null;
+	trialEnd?: Date | null;
 	autoRenew: boolean | null;
 	invalidatedAt: Date | null;
 	invalidationReason: string | null;
@@ -135,6 +138,9 @@ export interface RecordGooglePurchaseProjectionInput {
 	subscriptionStatus: SubscriptionStatus | null;
 	purchasedAt: Date;
 	expiresAt: Date | null;
+	/** Bounds of a free-trial offer phase; set together or not at all. */
+	trialStart?: Date | null;
+	trialEnd?: Date | null;
 	autoRenew: boolean | null;
 	acknowledgementState: string | null;
 	consumptionState: string | null;
