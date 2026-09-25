@@ -68,6 +68,9 @@ export type { AppDependencies } from "./app/types";
 
 const WEBHOOK_PATH_PATTERN = /^\/v1\/projects\/[^/]+\/webhooks\/(apple|google|stripe)$/;
 
+/** Webhook requests one client IP may send per window, as a multiple of the per-project limit. */
+const WEBHOOK_CLIENT_LIMIT_MULTIPLIER = 10;
+
 const requestIds = new WeakMap<Request, string>();
 
 function aggregateV1RateLimitGate(
@@ -348,6 +351,7 @@ export function createApp({
 		registerPreAuthGate,
 		rateLimitKeyOptions,
 		webhookLimiter: createWebhookLimiter(),
+		webhookIpLimiter: createWebhookIpLimiter(),
 		providerServices,
 		billingMetrics,
 		billingLogger,
@@ -397,6 +401,7 @@ export function createApp({
 			await guard.guard({
 				request,
 				path,
+				route,
 				server: rateLimitServer,
 				projectKey: project.projectInstanceKey,
 				set: set as unknown as { headers: Record<string, string> },
@@ -485,6 +490,17 @@ export function createApp({
 		return createFixedWindowRateLimiter({
 			windowMs: env.rateLimit.windowMs,
 			limit: env.rateLimit.webhookLimit,
+		});
+	}
+	function createWebhookIpLimiter() {
+		return createFixedWindowRateLimiter({
+			windowMs: env.rateLimit.windowMs,
+			// One provider address delivers for every project, so this per-client ceiling is looser
+			// than any one project's webhook budget.
+			limit: Math.min(
+				Number.MAX_SAFE_INTEGER,
+				env.rateLimit.webhookLimit * WEBHOOK_CLIENT_LIMIT_MULTIPLIER,
+			),
 		});
 	}
 	function createVerifyLimiter() {

@@ -326,7 +326,7 @@ Defaults in parentheses.
   owns `usage_events` creates them instead.
 - `BILLING_RATE_LIMIT_WINDOW_MS` (`60000`), `BILLING_VERIFY_RATE_LIMIT_PER_WINDOW` (`120`),
   `BILLING_WEBHOOK_RATE_LIMIT_PER_WINDOW` (`600`), `BILLING_METERING_RATE_LIMIT_PER_WINDOW`
-  (`6000`), `BILLING_ADMIN_RATE_LIMIT_PER_WINDOW` (`60`).
+  (`6000`), `BILLING_ADMIN_RATE_LIMIT_PER_WINDOW` (`60`); see [Rate limits](#rate-limits).
 - `BILLING_LOG_LEVEL` (`info`): `trace`, `debug`, `info`, `warn`, `error`, `fatal`, or `silent`.
   Controls local Pino diagnostics independently of Sentry; invalid or blank values are rejected.
 - Sentry error reporting is optional; see [Sentry (optional)](#sentry-optional).
@@ -334,6 +334,31 @@ Defaults in parentheses.
 Removed and rejected when supplied: `BILLING_PROJECT_RUNTIME_JSON`, `BILLING_PROJECTS_JSON`, and
 `BILLING_PROJECTION_ADAPTER`. Provider and projection settings live in encrypted, versioned
 connections owned by the merchant platform.
+
+### Rate limits
+
+Limits count requests in fixed windows of `BILLING_RATE_LIMIT_WINDOW_MS`, aligned to the Unix epoch,
+and answer `429 RATE_LIMITED` with `ratelimit-remaining` and `ratelimit-reset` headers. Buckets never
+include a path value the caller chooses:
+
+- Purchase verification, promotion code entry (`BILLING_VERIFY_RATE_LIMIT_PER_WINDOW`, counted
+  separately), usage and balance routes (`BILLING_METERING_RATE_LIMIT_PER_WINDOW`) and
+  `/v1/admin/*` (`BILLING_ADMIN_RATE_LIMIT_PER_WINDOW`) are limited per project, client IP and
+  route, after authentication. Identifiers in the path, such as a billing account, share their
+  route's budget.
+- Every `/v1` request except provider webhooks also counts, before authentication, against a
+  per-client-IP ceiling of the verify, metering and admin limits combined.
+- Provider webhooks are limited per project key in the URL, client IP and provider
+  (`BILLING_WEBHOOK_RATE_LIMIT_PER_WINDOW`). Because the project key is unauthenticated, one client
+  IP may first send at most ten times that limit across all webhook paths; beyond it the request is
+  refused before any project lookup. Allow for this when many projects share one provider address.
+- The setup-only connection event route and the Stripe App event routes allow 120 requests per
+  minute per client IP and route; Stripe App test and live events are counted separately.
+
+Each limiter keeps its counts in process memory and tracks up to 10,000 keys per window. Beyond
+that it forgets the least recently used key, so a flood of distinct clients can reset an idle
+client's count but never rejects another client. `BILLING_TRUST_PROXY_HEADERS` decides which
+address counts as the client IP for all of these limits.
 
 ### Sentry (optional)
 

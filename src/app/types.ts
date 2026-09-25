@@ -64,6 +64,8 @@ export interface PostAuthGuardInput {
 	request: Request;
 	/** The path the router matched; see `routedPath`. */
 	path: string;
+	/** The route pattern the router matched, with `:param` placeholders; key limiters on it. */
+	route: string;
 	server: GuardServer;
 	projectKey: string;
 	set: { headers: Record<string, string> };

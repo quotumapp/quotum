@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Elysia } from "elysia";
-import { composeRuntimeApp } from "../../src/composition/merchant-runtime";
+import { attachHeadlessRuntime, composeRuntimeApp } from "../../src/composition/merchant-runtime";
 import { createRemoteMcpApp } from "../../src/composition/remote-mcp";
 import type { MerchantBillingPort } from "../../src/platform/application/billing-port";
 import type { MerchantAuth } from "../../src/platform/auth";
@@ -11,6 +11,23 @@ import { assertOpenApiResponse } from "../helpers/openapi";
 
 function staffApp() {
 	return new Elysia().get("/v1/ping", () => ({ scope: "staff" }));
+}
+
+/** Runs synchronous composition with process settings it reads at construction, then restores them. */
+function withEnv<T>(values: Record<string, string | undefined>, run: () => T): T {
+	const previous = Object.fromEntries(Object.keys(values).map((name) => [name, process.env[name]]));
+	const assign = (entries: Record<string, string | undefined>) => {
+		for (const [name, value] of Object.entries(entries)) {
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+	};
+	assign(values);
+	try {
+		return run();
+	} finally {
+		assign(previous);
+	}
 }
 
 function merchantApp() {
@@ -163,5 +180,36 @@ describe("composeRuntimeApp request scopes", () => {
 		);
 		expect(await setup.json()).toEqual({ scope: "ingress" });
 		expect(calls).toEqual(["/api/ping", "/v1/ping"]);
+	});
+
+	it("keys the headless setup ingress on the forwarded client only when proxy headers are trusted", async () => {
+		// The setup ingress limiter allows 120 per minute; keep the burst inside one window.
+		const remaining = 60_000 - (Date.now() % 60_000);
+		if (remaining < 2_000) await Bun.sleep(remaining + 10);
+		const lastStatus = async (trustProxyHeaders: boolean) => {
+			const app = withEnv(
+				{
+					QUOTUM_SECRETS_KEY_ID: "unit",
+					QUOTUM_SECRETS_KEY_BASE64: Buffer.alloc(32, 7).toString("base64"),
+					STRIPE_APP_CLIENT_ID: undefined,
+				},
+				() => attachHeadlessRuntime(new Elysia(), { trustProxyHeaders }),
+			);
+			// Every request arrives from the proxy's socket; an unsupported provider is answered
+			// before any connection lookup.
+			const from = (client: string) =>
+				app.fetch(
+					new Request(
+						`http://localhost/v1/projects/voysee/connections/${crypto.randomUUID()}/webhooks/paddle`,
+						{ method: "POST", headers: { "x-forwarded-for": client }, body: "{}" },
+					),
+					{ requestIP: () => ({ address: "10.0.0.2" }) },
+				);
+			for (let index = 0; index < 121; index += 1) await from("198.51.100.66");
+			return (await from("203.0.113.9")).status;
+		};
+
+		expect(await lastStatus(true)).toBe(404);
+		expect(await lastStatus(false)).toBe(429);
 	});
 });

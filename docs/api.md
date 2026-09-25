@@ -694,8 +694,9 @@ or takes a use, and returns `200` with `valid` and a `reason` such as `PROMOTION
 `PROMOTION_CODE_EXHAUSTED`, `PROMOTION_CODE_ALREADY_REDEEMED`, or
 `PROMOTION_CODE_NOT_APPLICABLE` for a `target` the promotion does not cover. Unknown codes and codes
 restricted to another account both report `PROMOTION_CODE_NOT_FOUND` without promotion details.
-It is rate limited per project with the purchase-verification limit
-(`BILLING_VERIFY_RATE_LIMIT_PER_WINDOW`), counted separately from verification.
+It is rate limited per project and client IP with the purchase-verification limit
+(`BILLING_VERIFY_RATE_LIMIT_PER_WINDOW`), counted separately from verification and shared by every
+billing account the backend validates codes for; see [rate limits](deployment.md#rate-limits).
 
 Checkout intents (`checkout_plan`, `checkout_product`) accept one discount entry mode:
 

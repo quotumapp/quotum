@@ -172,5 +172,6 @@ A denied consume records no usage event. Explain a denial with `check_usage`, or
 - For stdio, stdout carries only protocol messages; diagnostics go to stderr with the key redacted. The process
   exits when the host closes stdin.
 
-Stdio requests count against the project's normal rate limits (60 per minute per admin path by
-default). Remote requests use the principal/IP limits above.
+Stdio requests count against the project's normal [rate limits](deployment.md#rate-limits) (60 per
+minute per admin route by default, shared by every customer that route reads). Remote requests use
+the principal/IP limits above.

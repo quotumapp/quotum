@@ -289,6 +289,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		const app = attachHeadlessRuntime(staff, {
 			registerBackground,
 			staffRequestScope: sentryRequestScope,
+			trustProxyHeaders: env.rateLimit.trustProxyHeaders,
 		});
 		return { app, jobs, logger };
 	}
@@ -307,6 +308,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const app = attachMerchantRuntime(staff, merchantBilling, {
 		...dependencies.merchant,
 		config: merchantConfig,
+		trustProxyHeaders: env.rateLimit.trustProxyHeaders,
 		staffRequestScope: sentryRequestScope,
 		merchantRequestScope: merchantSentryScope,
 		mcpRequestScope: mcpSentryScope,

@@ -2,6 +2,10 @@
  * Fixed-window rate limiting for the staff surface. Limiters run ahead of request validation:
  * webhook and aggregate gates execute from `onRequest` hooks, and project-keyed group gates run
  * inside the authentication `derive` and signal rejection by throwing `RateLimitExceeded`.
+ *
+ * One client must not be able to mint keys: post-authentication guards key on the routed pattern,
+ * never on path values, and the webhook gate, whose project key comes from the URL, sits behind a
+ * per-IP ceiling. A full key table evicts instead of sharing a bucket between clients.
  */
 
 export interface RateLimitResult {
@@ -23,6 +27,13 @@ interface RequestRateLimitKeyOptions {
 	remoteAddress?: (request: Request) => string | null;
 }
 
+/**
+ * Counts requests per key in epoch-aligned fixed windows. At most `maxBuckets` keys are tracked per
+ * window; a new key beyond that evicts the least recently checked one. Eviction can only hand an
+ * idle key a fresh count, never reject a key because other keys exist, so a flood of distinct keys
+ * cannot rate limit anyone else. A rejected check still counts as use, so a client that keeps
+ * hammering stays tracked and rejected.
+ */
 export function createFixedWindowRateLimiter(options: {
 	windowMs: number;
 	limit: number;
@@ -40,8 +51,9 @@ export function createFixedWindowRateLimiter(options: {
 		throw new Error("maxBuckets must be a positive integer");
 	}
 
+	// Map iteration follows insertion order; re-inserting on every check keeps it least recently
+	// used first.
 	const buckets = new Map<string, RateLimitBucket>();
-	let overflowBucket: RateLimitBucket | null = null;
 	let activeWindowStart: number | null = null;
 
 	return {
@@ -51,21 +63,20 @@ export function createFixedWindowRateLimiter(options: {
 			const resetAt = new Date(windowStart + windowMs);
 			if (activeWindowStart !== windowStart) {
 				buckets.clear();
-				overflowBucket = null;
 				activeWindowStart = windowStart;
 			}
 
 			let bucket = buckets.get(key);
-
 			if (bucket === undefined) {
 				if (buckets.size >= maxBuckets) {
-					overflowBucket ??= { windowStart, count: 0 };
-					bucket = overflowBucket;
-				} else {
-					bucket = { windowStart, count: 0 };
-					buckets.set(key, bucket);
+					const leastRecentlyUsed = buckets.keys().next();
+					if (leastRecentlyUsed.done !== true) buckets.delete(leastRecentlyUsed.value);
 				}
+				bucket = { windowStart, count: 0 };
+			} else {
+				buckets.delete(key);
 			}
+			buckets.set(key, bucket);
 
 			if (bucket.count >= limit) {
 				return { allowed: false, remaining: 0, resetAt };
@@ -79,7 +90,7 @@ export function createFixedWindowRateLimiter(options: {
 			};
 		},
 		size(): number {
-			return buckets.size + (overflowBucket === null ? 0 : 1);
+			return buckets.size;
 		},
 	};
 }
@@ -188,6 +199,8 @@ export interface PostAuthRateLimitGuard {
 	guard(input: {
 		request: Request;
 		path: string;
+		/** The route pattern the router matched, such as `/v1/billing-accounts/:billingAccountId`. */
+		route: string;
 		server: { requestIP(request: Request): { address: string } | null } | null;
 		projectKey: string;
 		set: { headers: Record<string, string> };
@@ -197,6 +210,8 @@ export interface PostAuthRateLimitGuard {
 /**
  * Post-authentication rate-limit guard for path groups; throws `RateLimitExceeded` so the shell
  * renders the 429 envelope, and mirrors limiter headers onto successful responses by default.
+ * Buckets are per project, client IP and route pattern: identifiers in the path, such as a billing
+ * account, share their route's bucket so they cannot multiply a caller's budget or its keys.
  */
 export function projectScopedRateLimitGuard(options: {
 	limiter: RateLimiter;
@@ -211,7 +226,7 @@ export function projectScopedRateLimitGuard(options: {
 				requestProjectIpAndPath(
 					{
 						request: input.request,
-						path: input.path,
+						path: input.route,
 						server: input.server,
 						projectKey: input.projectKey,
 					},
