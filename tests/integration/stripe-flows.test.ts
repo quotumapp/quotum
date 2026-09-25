@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
+import type Stripe from "stripe";
 import type {
 	EntitlementSnapshot,
 	ProjectionPayload,
@@ -10,6 +11,7 @@ import type { RecordStripeCreditReversalProjectionInput } from "../../src/db/rep
 import { wrapStripeService } from "../../src/providers/stripe/adapter";
 import { StripeBillingService } from "../../src/providers/stripe/service";
 import { RecurringBillingWorker } from "../../src/workers/recurring-billing";
+import type { DeepPartial } from "../helpers/deep-partial";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -26,6 +28,7 @@ import {
 	stripeRefundedChargeObject,
 	stripeRefundObject,
 	stripeSubscriptionObject,
+	stripeSubscriptionPeriod,
 } from "./helpers/fake-provider-clients";
 import {
 	createLocalPostgresContext,
@@ -1843,8 +1846,6 @@ localDescribe("Stripe route flows integration", () => {
 			created: periodStart + 100,
 			data: {
 				object: stripeSubscriptionObject({
-					current_period_start: periodStart,
-					current_period_end: periodEnd,
 					items: {
 						data: [
 							{
@@ -1884,7 +1885,6 @@ localDescribe("Stripe route flows integration", () => {
 					id: "in_upgrade",
 					object: "invoice",
 					customer: "cus_integration",
-					subscription: "sub_1",
 					status: "paid",
 					created: periodStart,
 					amount_paid: 1999,
@@ -1911,7 +1911,7 @@ localDescribe("Stripe route flows integration", () => {
 							},
 						],
 					},
-				},
+				} satisfies DeepPartial<Stripe.Invoice>,
 			},
 		});
 		expect(invoiced.status).toBe("processed");
@@ -2012,7 +2012,6 @@ localDescribe("Stripe route flows integration", () => {
 					id: "in_out_of_order",
 					object: "invoice",
 					customer: "cus_integration",
-					subscription: "sub_1",
 					status: "paid",
 					created,
 					amount_paid: amountPaid,
@@ -2035,7 +2034,7 @@ localDescribe("Stripe route flows integration", () => {
 							},
 						],
 					},
-				},
+				} satisfies DeepPartial<Stripe.Invoice>,
 			},
 		});
 		const readSubscription = async () => {
@@ -2069,10 +2068,7 @@ localDescribe("Stripe route flows integration", () => {
 			type: "customer.subscription.updated",
 			created: start + 200,
 			data: {
-				object: stripeSubscriptionObject({
-					current_period_start: start,
-					current_period_end: end,
-				}),
+				object: stripeSubscriptionObject(stripeSubscriptionPeriod(start, end)),
 			},
 		});
 		expect(newer.status).toBe("processed");
@@ -2292,8 +2288,6 @@ localDescribe("Stripe route flows integration", () => {
 				stripeCheckoutSessionObject({
 					id: "cs_fully_discounted",
 					amount_total: 0,
-					charge: null,
-					latest_charge: null,
 					payment_intent: null,
 					payment_status: "no_payment_required",
 				}),
@@ -2729,8 +2723,7 @@ localDescribe("Stripe route flows integration", () => {
 					cancel_at_period_end: true,
 					trial_start: start,
 					trial_end: end,
-					current_period_start: start,
-					current_period_end: end,
+					...stripeSubscriptionPeriod(start, end),
 				}),
 				start + 100,
 				"evt_trial_cancel",
@@ -2939,8 +2932,6 @@ localDescribe("Stripe route flows integration", () => {
 				"customer.subscription.deleted",
 				stripeSubscriptionObject({
 					status: "canceled",
-					current_period_start: oldStart,
-					current_period_end: oldEnd,
 					items: {
 						data: [
 							{
@@ -3015,7 +3006,7 @@ localDescribe("Stripe route flows integration", () => {
 		await service.handleVerifiedAppEvent(
 			verifiedStripeEvent(
 				"customer.subscription.updated",
-				stripeSubscriptionObject({ current_period_start: start, current_period_end: end }),
+				stripeSubscriptionObject(stripeSubscriptionPeriod(start, end)),
 				start + 100,
 				"evt_live",
 			),
@@ -3055,8 +3046,7 @@ localDescribe("Stripe route flows integration", () => {
 				"customer.subscription.updated",
 				stripeSubscriptionObject({
 					cancel_at_period_end: true,
-					current_period_start: start,
-					current_period_end: end,
+					...stripeSubscriptionPeriod(start, end),
 				}),
 				start + 103,
 				"evt_scheduled_cancel",
@@ -3105,8 +3095,8 @@ function verifiedStripeEvent(
 /** A paid subscription invoice for sub_1 carrying the original Checkout metadata. */
 function stripeSubscriptionInvoiceObject(
 	period: { start: number; end: number },
-	overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
+	overrides: DeepPartial<Stripe.Invoice> = {},
+) {
 	const metadata = {
 		billingAccountId: "integration_user",
 		externalProductId: "prod_stripe_premium",
@@ -3118,7 +3108,6 @@ function stripeSubscriptionInvoiceObject(
 		id: "in_subscription",
 		object: "invoice",
 		customer: "cus_integration",
-		subscription: "sub_1",
 		status: "paid",
 		created: period.start,
 		amount_paid: 999,
@@ -3142,7 +3131,7 @@ function stripeSubscriptionInvoiceObject(
 			],
 		},
 		...overrides,
-	};
+	} satisfies DeepPartial<Stripe.Invoice>;
 }
 
 async function stripeSubscriptionLifecycle(sql: SQL): Promise<{

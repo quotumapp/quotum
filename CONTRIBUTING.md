@@ -90,6 +90,11 @@ generated files.
   together with `Promise.all`; they execute in issue order on the connection, so put writes before
   the reads that must observe them, and never feed one statement's result into another in the
   same batch.
+- Stripe test fixtures are written in the pinned API version's shape and checked with
+  `satisfies DeepPartial<Stripe.X>` (`tests/helpers/deep-partial.ts`), so a field the version
+  does not have fails to compile. Older shapes the normalizer still accepts belong in
+  `legacy`-named fixtures in its unit tests. The Stripe fakes reject an idempotency key reused
+  for a different request, as Stripe does.
 
 ## Commit messages
 

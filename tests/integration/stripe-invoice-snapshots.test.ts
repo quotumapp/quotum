@@ -1,9 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import type Stripe from "stripe";
 import { StripeBillingService } from "../../src/providers/stripe/service";
+import type { DeepPartial } from "../helpers/deep-partial";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createFakeStripeBillingClient,
 	stripeSubscriptionObject,
+	stripeSubscriptionPeriod,
 } from "./helpers/fake-provider-clients";
 import {
 	createLocalPostgresContext,
@@ -30,34 +33,37 @@ const event = (type: string, object: unknown, created: number, id: string) => ({
 	created,
 	data: { object },
 });
-const subscription = (extra = {}) =>
-	stripeSubscriptionObject({ current_period_start: start, current_period_end: end, ...extra });
-const invoice = (extra = {}) => ({
-	id: "in_audit",
-	object: "invoice",
-	customer: "cus_integration",
-	subscription: "sub_1",
-	status: "paid",
-	created: start,
-	amount_paid: 999,
-	currency: "usd",
-	parent: { subscription_details: { subscription: "sub_1", metadata } },
-	lines: {
-		data: [
-			{
-				id: "il_audit",
-				parent: {
-					subscription_item_details: { subscription: "sub_1", subscription_item: "si_integration" },
+const subscription = (extra: DeepPartial<Stripe.Subscription> = {}) =>
+	stripeSubscriptionObject({ ...stripeSubscriptionPeriod(start, end), ...extra });
+const invoice = (extra: DeepPartial<Stripe.Invoice> = {}) =>
+	({
+		id: "in_audit",
+		object: "invoice",
+		customer: "cus_integration",
+		status: "paid",
+		created: start,
+		amount_paid: 999,
+		currency: "usd",
+		parent: { subscription_details: { subscription: "sub_1", metadata } },
+		lines: {
+			data: [
+				{
+					id: "il_audit",
+					parent: {
+						subscription_item_details: {
+							subscription: "sub_1",
+							subscription_item: "si_integration",
+						},
+					},
+					pricing: {
+						price_details: { product: "prod_stripe_premium", price: "price_premium_monthly" },
+					},
+					period: { start, end },
 				},
-				pricing: {
-					price_details: { product: "prod_stripe_premium", price: "price_premium_monthly" },
-				},
-				period: { start, end },
-			},
-		],
-	},
-	...extra,
-});
+			],
+		},
+		...extra,
+	}) satisfies DeepPartial<Stripe.Invoice>;
 
 localDescribe("Stripe invoice snapshots", () => {
 	beforeAll(async () => {
@@ -177,11 +183,7 @@ localDescribe("Stripe invoice snapshots", () => {
 		await service.handleVerifiedAppEvent(
 			event(
 				"customer.subscription.deleted",
-				subscription({
-					status: "canceled",
-					current_period_start: oldStart,
-					current_period_end: oldEnd,
-				}),
+				subscription({ status: "canceled", ...stripeSubscriptionPeriod(oldStart, oldEnd) }),
 				start + 100,
 				"evt_expired",
 			),

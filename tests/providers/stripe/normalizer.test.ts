@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import type Stripe from "stripe";
 import type { SubscriptionStatus } from "../../../src/billing/types";
 import {
 	normalizeStripeCheckoutSession,
@@ -8,6 +9,7 @@ import {
 	normalizeStripeRefund,
 	normalizeStripeSubscription,
 } from "../../../src/providers/stripe/normalizer";
+import type { DeepPartial } from "../../helpers/deep-partial";
 
 const stripeSeconds = 1770000000;
 const now = new Date("2026-06-01T00:00:00.000Z");
@@ -25,7 +27,11 @@ function checkoutMetadata(overrides: Record<string, string> = {}) {
 	};
 }
 
-function subscriptionFixture(overrides: Record<string, unknown> = {}) {
+/**
+ * A subscription as it was before 2025-03-31.basil, with the billing period on the subscription.
+ * The normalizer still reads that period first, and these tests keep it working.
+ */
+function legacySubscriptionFixture(overrides: Record<string, unknown> = {}) {
 	return {
 		id: "sub_123",
 		customer: "cus_123",
@@ -43,7 +49,8 @@ function subscriptionFixture(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function invoiceFixture(overrides: Record<string, unknown> = {}) {
+/** A pre-basil invoice: a top-level subscription id and line prices instead of parent details. */
+function legacyInvoiceFixture(overrides: Record<string, unknown> = {}) {
 	return {
 		id: "in_123",
 		customer: "cus_123",
@@ -71,6 +78,29 @@ function invoiceFixture(overrides: Record<string, unknown> = {}) {
 		},
 		...overrides,
 	};
+}
+
+/** A subscription as the pinned API version sends it: the billing period is on each item. */
+function subscriptionFixture(overrides: DeepPartial<Stripe.Subscription> = {}) {
+	return {
+		id: "sub_123",
+		object: "subscription",
+		customer: "cus_123",
+		latest_invoice: "in_123",
+		status: "active",
+		created: stripeSeconds,
+		cancel_at_period_end: false,
+		items: {
+			object: "list",
+			data: [{ id: "si_123", object: "subscription_item", current_period_end: futurePeriodEnd }],
+		},
+		metadata: {
+			billingAccountId: "user_1",
+			externalProductId: "prod_premium",
+			externalPriceId: "price_premium_monthly",
+		},
+		...overrides,
+	} satisfies DeepPartial<Stripe.Subscription>;
 }
 
 describe("Stripe normalizer", () => {
@@ -484,14 +514,14 @@ describe("Stripe normalizer", () => {
 		const paid = normalizeStripeInvoice({
 			eventId: "evt_invoice_paid",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				status: "paid",
 			}),
 		});
 		const failed = normalizeStripeInvoice({
 			eventId: "evt_invoice_failed",
 			eventType: "invoice.payment_failed",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				status: "open",
 			}),
 		});
@@ -517,7 +547,7 @@ describe("Stripe normalizer", () => {
 		const command = normalizeStripeInvoice({
 			eventId: "evt_invoice_line_fallback",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				metadata: {},
 				subscription: {
 					id: "sub_123",
@@ -561,7 +591,7 @@ describe("Stripe normalizer", () => {
 		const command = normalizeStripeInvoice({
 			eventId: "evt_invoice_parent_subscription",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				subscription: undefined,
 				metadata: {},
 				parent: {
@@ -606,7 +636,7 @@ describe("Stripe normalizer", () => {
 		const command = normalizeStripeInvoice({
 			eventId: "evt_invoice_mixed_lines",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				subscription: undefined,
 				metadata: {},
 				parent: undefined,
@@ -665,7 +695,7 @@ describe("Stripe normalizer", () => {
 		const command = normalizeStripeInvoice({
 			eventId: "evt_invoice_legacy_mixed_lines",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				subscription: undefined,
 				metadata: {},
 				parent: undefined,
@@ -718,7 +748,7 @@ describe("Stripe normalizer", () => {
 		const command = normalizeStripeInvoice({
 			eventId: "evt_invoice_legacy_invoice_item_only",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				subscription: undefined,
 				metadata: {
 					billingAccountId: "user_from_invoice_metadata",
@@ -761,7 +791,7 @@ describe("Stripe normalizer", () => {
 		const command = normalizeStripeInvoice({
 			eventId: "evt_invoice_current_invoice_item_only",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				subscription: undefined,
 				metadata: {
 					billingAccountId: "user_from_invoice_metadata",
@@ -819,7 +849,7 @@ describe("Stripe normalizer", () => {
 		const command = normalizeStripeInvoice({
 			eventId: "evt_invoice_after_upgrade",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				subscription: undefined,
 				metadata: staleMetadata,
 				parent: {
@@ -877,7 +907,7 @@ describe("Stripe normalizer", () => {
 		const prorationInvoice = normalizeStripeInvoice({
 			eventId: "evt_invoice_proration",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				lines: {
 					data: [
 						subscriptionItemLine("old", true, futurePeriodEnd),
@@ -889,7 +919,7 @@ describe("Stripe normalizer", () => {
 		const renewalInvoice = normalizeStripeInvoice({
 			eventId: "evt_invoice_renewal_after_change",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				lines: {
 					data: [
 						subscriptionItemLine("new", false, changedPeriodEnd),
@@ -901,7 +931,7 @@ describe("Stripe normalizer", () => {
 		const legacyInvoice = normalizeStripeInvoice({
 			eventId: "evt_invoice_legacy_proration",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				lines: {
 					data: [
 						{
@@ -956,7 +986,7 @@ describe("Stripe normalizer", () => {
 			const command = normalizeStripeInvoice({
 				eventId: "evt_proration_order",
 				eventType: "invoice.paid",
-				invoice: invoiceFixture({ lines: { data: reversed ? lines.reverse() : lines } }),
+				invoice: legacyInvoiceFixture({ lines: { data: reversed ? lines.reverse() : lines } }),
 			});
 			expect(command).toMatchObject({
 				externalProductId: "prod_new",
@@ -969,7 +999,7 @@ describe("Stripe normalizer", () => {
 		const command = normalizeStripeInvoice({
 			eventId: "evt_invoice_line_without_price",
 			eventType: "invoice.paid",
-			invoice: invoiceFixture({
+			invoice: legacyInvoiceFixture({
 				lines: {
 					data: [
 						{
@@ -1019,7 +1049,7 @@ describe("Stripe normalizer", () => {
 			const command = normalizeStripeSubscription({
 				eventId: `evt_${testCase.stripeStatus}_${testCase.expectedStatus}`,
 				eventType: "customer.subscription.updated",
-				subscription: subscriptionFixture({
+				subscription: legacySubscriptionFixture({
 					status: testCase.stripeStatus,
 					current_period_end: testCase.currentPeriodEnd,
 				}),
@@ -1035,7 +1065,7 @@ describe("Stripe normalizer", () => {
 		const scheduledCancellation = normalizeStripeSubscription({
 			eventId: "evt_cancel_at_period_end",
 			eventType: "customer.subscription.updated",
-			subscription: subscriptionFixture({
+			subscription: legacySubscriptionFixture({
 				status: "active",
 				cancel_at_period_end: true,
 				current_period_end: futurePeriodEnd,
@@ -1052,7 +1082,6 @@ describe("Stripe normalizer", () => {
 			eventId: "evt_items_active",
 			eventType: "customer.subscription.updated",
 			subscription: subscriptionFixture({
-				current_period_end: undefined,
 				items: {
 					data: [
 						{
@@ -1069,7 +1098,6 @@ describe("Stripe normalizer", () => {
 			eventType: "customer.subscription.updated",
 			subscription: subscriptionFixture({
 				status: "canceled",
-				current_period_end: undefined,
 				items: {
 					data: [
 						{
@@ -1088,12 +1116,63 @@ describe("Stripe normalizer", () => {
 		expect(expired.subscriptionStatus).toBe("expired");
 	});
 
+	it("spans every item's current period when the subscription carries none of its own", () => {
+		// Since 2025-03-31.basil Stripe sends the billing period on each item only. Items can sit
+		// in different periods: access runs from the earliest start until the last end, and
+		// neither bound comes from the first or the last item here.
+		const mayStart = Math.floor(Date.parse("2026-05-01T00:00:00.000Z") / 1000);
+		const juneStart = Math.floor(Date.parse("2026-06-01T00:00:00.000Z") / 1000);
+		const julyEnd = Math.floor(Date.parse("2026-07-31T00:00:00.000Z") / 1000);
+		const item = (id: string, start: number, end: number) => ({
+			id,
+			current_period_start: start,
+			current_period_end: end,
+		});
+		const command = normalizeStripeSubscription({
+			eventId: "evt_items_multi",
+			eventType: "customer.subscription.updated",
+			subscription: subscriptionFixture({
+				items: {
+					data: [
+						item("si_first", juneStart, futurePeriodEnd),
+						item("si_latest_end", juneStart, julyEnd),
+						item("si_earliest_start", mayStart, futurePeriodEnd),
+						item("si_last", juneStart, futurePeriodEnd),
+					],
+				},
+			}),
+			now,
+		});
+
+		expect(command.expiresAt?.toISOString()).toBe("2026-07-31T00:00:00.000Z");
+		expect(command.currentPeriodStart?.toISOString()).toBe("2026-05-01T00:00:00.000Z");
+		expect(command.subscriptionStatus).toBe("active");
+	});
+
+	it("reads trial bounds from trial_start and trial_end", () => {
+		const trialStart = Math.floor(Date.parse("2026-05-25T00:00:00.000Z") / 1000);
+		const trialEnd = Math.floor(Date.parse("2026-06-08T00:00:00.000Z") / 1000);
+		const command = normalizeStripeSubscription({
+			eventId: "evt_trialing",
+			eventType: "customer.subscription.updated",
+			subscription: subscriptionFixture({
+				status: "trialing",
+				trial_start: trialStart,
+				trial_end: trialEnd,
+			}),
+			now,
+		});
+
+		expect(command.trialStart?.toISOString()).toBe("2026-05-25T00:00:00.000Z");
+		expect(command.trialEnd?.toISOString()).toBe("2026-06-08T00:00:00.000Z");
+	});
+
 	it("expires a subscription Stripe ended mid-period, ahead of the period it was paid through", () => {
 		const endedAt = Math.floor(Date.parse("2026-06-05T00:00:00.000Z") / 1000);
 		const immediate = normalizeStripeSubscription({
 			eventId: "evt_cancelled_now",
 			eventType: "customer.subscription.deleted",
-			subscription: subscriptionFixture({
+			subscription: legacySubscriptionFixture({
 				status: "canceled",
 				ended_at: endedAt,
 				canceled_at: endedAt,
@@ -1112,7 +1191,7 @@ describe("Stripe normalizer", () => {
 		const command = normalizeStripeSubscription({
 			eventId: "evt_plan_changed",
 			eventType: "customer.subscription.updated",
-			subscription: subscriptionFixture({
+			subscription: legacySubscriptionFixture({
 				metadata: {
 					billingAccountId: "user_1",
 					externalProductId: "prod_old",
@@ -1146,7 +1225,7 @@ describe("Stripe normalizer", () => {
 		const active = normalizeStripeSubscription({
 			eventId: "evt_subscription_active",
 			eventType: "customer.subscription.updated",
-			subscription: subscriptionFixture({
+			subscription: legacySubscriptionFixture({
 				status: "active",
 			}),
 			now,
@@ -1154,7 +1233,7 @@ describe("Stripe normalizer", () => {
 		const retry = normalizeStripeSubscription({
 			eventId: "evt_subscription_retry",
 			eventType: "customer.subscription.updated",
-			subscription: subscriptionFixture({
+			subscription: legacySubscriptionFixture({
 				status: "past_due",
 			}),
 			now,
@@ -1202,7 +1281,7 @@ describe("Stripe normalizer", () => {
 			eventId: "evt_reconcile_active",
 			eventType: "provider_reconciliation",
 			projectionReason: "provider_reconciliation",
-			subscription: subscriptionFixture({
+			subscription: legacySubscriptionFixture({
 				status: "active",
 				current_period_end: futurePeriodEnd,
 				cancel_at_period_end: false,
@@ -1213,7 +1292,7 @@ describe("Stripe normalizer", () => {
 			eventId: "evt_reconcile_retry",
 			eventType: "provider_reconciliation",
 			projectionReason: "provider_reconciliation",
-			subscription: subscriptionFixture({
+			subscription: legacySubscriptionFixture({
 				status: "past_due",
 				current_period_end: futurePeriodEnd,
 				cancel_at_period_end: false,
@@ -1224,7 +1303,7 @@ describe("Stripe normalizer", () => {
 			eventId: "evt_reconcile_non_renewing",
 			eventType: "provider_reconciliation",
 			projectionReason: "provider_reconciliation",
-			subscription: subscriptionFixture({
+			subscription: legacySubscriptionFixture({
 				status: "active",
 				current_period_end: futurePeriodEnd,
 				cancel_at_period_end: true,
@@ -1235,7 +1314,7 @@ describe("Stripe normalizer", () => {
 			eventId: "evt_reconcile_later_expiry",
 			eventType: "provider_reconciliation",
 			projectionReason: "provider_reconciliation",
-			subscription: subscriptionFixture({
+			subscription: legacySubscriptionFixture({
 				status: "active",
 				current_period_end: Math.floor(Date.parse("2026-07-31T00:00:00.000Z") / 1000),
 				cancel_at_period_end: false,
@@ -1262,7 +1341,6 @@ describe("Stripe normalizer", () => {
 			eventType: "provider_reconciliation",
 			projectionReason: "provider_reconciliation",
 			subscription: subscriptionFixture({
-				current_period_end: undefined,
 				items: {
 					data: [
 						{
@@ -1279,7 +1357,6 @@ describe("Stripe normalizer", () => {
 			eventType: "provider_reconciliation",
 			projectionReason: "provider_reconciliation",
 			subscription: subscriptionFixture({
-				current_period_end: undefined,
 				items: {
 					data: [
 						{

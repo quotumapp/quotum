@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import type { SQL } from "bun";
+import type Stripe from "stripe";
 import { createApp } from "../../src/app";
 import { EntitlementService } from "../../src/billing/entitlements";
 import { MeteringService } from "../../src/billing/metering";
@@ -134,8 +135,6 @@ localDescribe("Provider job identity integration", () => {
 				const paymentIntentId = `pi_identity_credit_${suffix}`;
 				const session = stripeCheckoutSessionObject({
 					id: `cs_identity_credit_${suffix}`,
-					charge: `ch_${paymentIntentId}`,
-					latest_charge: `ch_${paymentIntentId}`,
 					payment_intent: {
 						id: paymentIntentId,
 						latest_charge: `ch_${paymentIntentId}`,
@@ -471,7 +470,11 @@ localDescribe("Provider job identity integration", () => {
 	});
 
 	it("fills a missing subscription identity from webhooks and never overwrites a stored one", async () => {
-		const deliver = async (accountIdentity: string | null, type: string, eventId: string) => {
+		const deliver = async (
+			accountIdentity: string | null,
+			type: Stripe.Event.Type,
+			eventId: string,
+		) => {
 			const fixture = identityApp(accountIdentity, {
 				event: stripeEvent(type, stripeSubscriptionObject(), eventId),
 			});

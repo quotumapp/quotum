@@ -243,8 +243,6 @@ function checkoutSession(input: {
 }): Record<string, unknown> {
 	return stripeCheckoutSessionObject({
 		id: input.sessionId,
-		charge: input.chargeId,
-		latest_charge: input.chargeId,
 		payment_intent: {
 			id: input.paymentIntentId,
 			latest_charge: input.chargeId,

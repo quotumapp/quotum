@@ -3,6 +3,7 @@ import type { SQL } from "bun";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
+import { stripeCheckoutSessionObject, stripeEvent } from "./helpers/fake-provider-clients";
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
@@ -108,38 +109,18 @@ localDescribe("HTTP edge integration", () => {
 				adminLimit: 10,
 			}),
 			repository: context.repository,
-			stripeEvent: {
-				id: "evt_http_edge_checkout",
-				type: "checkout.session.completed",
-				data: {
-					object: {
-						amount_total: 499,
-						charge: "ch_http_edge",
-						client_reference_id: "integration_user",
-						created: 1_779_840_000,
-						currency: "usd",
-						customer: "cus_integration",
-						id: "cs_http_edge",
+			stripeEvent: stripeEvent(
+				"checkout.session.completed",
+				stripeCheckoutSessionObject({
+					id: "cs_http_edge",
+					payment_intent: {
+						id: "pi_http_edge",
 						latest_charge: "ch_http_edge",
-						metadata: {
-							billingAccountId: "integration_user",
-							externalPriceId: "price_credits_10",
-							externalProductId: "prod_stripe_credits_10",
-							productKey: "echo_credits_10",
-							purchaseKind: "consumable",
-						},
-						mode: "payment",
-						object: "checkout.session",
-						payment_intent: {
-							id: "pi_http_edge",
-							latest_charge: "ch_http_edge",
-							metadata: { billingAccountId: "integration_user" },
-						},
-						payment_status: "paid",
-						status: "complete",
+						metadata: { billingAccountId: "integration_user" },
 					},
-				},
-			},
+				}),
+				"evt_http_edge_checkout",
+			),
 		});
 		await createAppleAccountToken(fixture);
 		await createGoogleAccountLink(fixture, "wiseley");

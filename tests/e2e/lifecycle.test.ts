@@ -85,8 +85,6 @@ e2eDescribe("E2E lifecycle", () => {
 				"checkout.session.completed",
 				stripeCheckoutSessionObject({
 					id: "cs_e2e_shutdown",
-					charge: "ch_e2e_shutdown",
-					latest_charge: "ch_e2e_shutdown",
 					payment_intent: {
 						id: "pi_e2e_shutdown",
 						latest_charge: "ch_e2e_shutdown",
