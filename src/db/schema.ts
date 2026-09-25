@@ -8,6 +8,7 @@ import {
 	integer,
 	jsonb,
 	numeric,
+	type PgTableExtraConfigValue,
 	pgTable,
 	primaryKey,
 	smallint,
@@ -52,7 +53,35 @@ export const projects = pgTable(
 		metadata: metadataColumn(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"projects_key_format_check",
+			sql`((((char_length(key) >= 1) AND (char_length(key) <= 80)) AND (key ~ '^[a-z0-9][a-z0-9_-]*$'::text)))`,
+		),
+		check(
+			"projects_name_check",
+			sql`((((char_length(name) >= 1) AND (char_length(name) <= 120)) AND (name = btrim(name))))`,
+		),
+		check(
+			"projects_environment_check",
+			sql`((environment = ANY (ARRAY['sandbox'::text, 'production'::text, 'internal'::text])))`,
+		),
+		check(
+			"projects_lifecycle_status_check",
+			sql`((lifecycle_status = ANY (ARRAY['inactive'::text, 'active'::text, 'suspended'::text, 'deactivating'::text, 'deactivated'::text])))`,
+		),
+		check(
+			"projects_internal_environment_check",
+			sql`((internal_project = (environment = 'internal'::text)))`,
+		),
+		foreignKey({
+			name: "projects_published_catalog_revision_fk",
+			columns: [table.id, table.publishedCatalogRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}).onDelete("restrict"),
+		index("idx_billing_projects_published_catalog_revision")
+			.on(table.publishedCatalogRevisionId)
+			.where(sql`(published_catalog_revision_id IS NOT NULL)`),
 		uniqueIndex("idx_billing_projects_key").on(table.key),
 		index("idx_billing_projects_platform_project").on(table.platformProjectId),
 		unique("projects_platform_project_environment_unique").on(
@@ -75,7 +104,12 @@ export const customers = pgTable(
 		projectionSequence: bigint("projection_sequence", { mode: "number" }).notNull().default(0),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("customers_projection_sequence_check", sql`((projection_sequence >= 0))`),
+		index("idx_billing_customers_billing_account_id_trgm").using(
+			"gin",
+			table.billingAccountId.op("gin_trgm_ops"),
+		),
 		unique("customers_project_id_id_unique").on(table.projectId, table.id),
 		uniqueIndex("idx_billing_customers_billing_account_id").on(
 			table.projectId,
@@ -101,7 +135,7 @@ export const products = pgTable(
 		metadata: metadataColumn(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
 		unique("products_project_id_id_unique").on(table.projectId, table.id),
 		uniqueIndex("idx_billing_products_key").on(table.projectId, table.key),
 		check("products_credit_amount_check", sql`${table.creditAmount} >= 0`),
@@ -133,7 +167,7 @@ export const storeProducts = pgTable(
 		metadata: metadataColumn(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
 		unique("store_products_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "store_products_project_product_fk",
@@ -162,16 +196,17 @@ export const providerCustomers = pgTable(
 		customerId: uuid("customer_id")
 			.notNull()
 			.references(() => customers.id, { onDelete: "cascade" }),
-		storeProductId: uuid("store_product_id")
-			.notNull()
-			.references(() => storeProducts.id, { onDelete: "restrict" }),
 		provider: text("provider").$type<BillingProvider>().notNull(),
 		providerAccountId: text("provider_account_id"),
 		externalCustomerId: text("external_customer_id").notNull(),
 		metadata: metadataColumn(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		index("idx_billing_provider_customers_external_customer_id_trgm").using(
+			"gin",
+			table.externalCustomerId.op("gin_trgm_ops"),
+		),
 		unique("provider_customers_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "provider_customers_project_customer_fk",
@@ -256,7 +291,52 @@ export const subscriptions = pgTable(
 		providerReconciledAt: timestamp("provider_reconciled_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"subscriptions_trial_bounds_check",
+			sql`((((trial_start_at IS NULL) AND (trial_end_at IS NULL)) OR ((trial_start_at IS NOT NULL) AND (trial_end_at IS NOT NULL) AND (trial_end_at > trial_start_at))))`,
+		),
+		check(
+			"subscriptions_trial_notice_check",
+			sql`(((trial_ending_notified_at IS NULL) OR (trial_end_at IS NOT NULL)))`,
+		),
+		check(
+			"subscriptions_scope_mode_check",
+			sql`((scope_mode = ANY (ARRAY['account'::text, 'entity'::text])))`,
+		),
+		check(
+			"subscriptions_scope_entity_check",
+			sql`((((scope_mode = 'account'::text) AND (entity_id IS NULL)) OR ((scope_mode = 'entity'::text) AND (entity_id IS NOT NULL))))`,
+		),
+		foreignKey({
+			name: "subscriptions_project_plan_version_fk",
+			columns: [table.projectId, table.planVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "subscriptions_project_catalog_revision_fk",
+			columns: [table.projectId, table.catalogRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "subscriptions_project_entity_fk",
+			columns: [table.projectId, table.entityId],
+			foreignColumns: [entities.projectId, entities.id],
+		}).onDelete("restrict"),
+		index("idx_billing_subscriptions_latest_transaction_id_trgm").using(
+			"gin",
+			table.latestTransactionId.op("gin_trgm_ops"),
+		),
+		index("idx_billing_subscriptions_raw_state_order_id")
+			.on(sql`(raw_state ->> 'orderId'::text)`)
+			.where(sql`(raw_state ? 'orderId'::text)`),
+		index("idx_billing_subscriptions_plan_version")
+			.on(table.planVersionId)
+			.where(sql`(plan_version_id IS NOT NULL)`),
+		index("idx_billing_subscriptions_external_subscription_id_trgm").using(
+			"gin",
+			table.externalSubscriptionId.op("gin_trgm_ops"),
+		),
 		unique("subscriptions_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "subscriptions_project_customer_fk",
@@ -343,7 +423,11 @@ export const checkoutRequests = pgTable(
 		sessionUrl: text("session_url"),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"checkout_requests_quantities_check",
+			sql`((jsonb_typeof(requested_quantities) = 'object'::text))`,
+		),
 		unique("checkout_requests_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "checkout_requests_project_customer_fk",
@@ -363,7 +447,10 @@ export const checkoutRequests = pgTable(
 		uniqueIndex("idx_billing_checkout_requests_session")
 			.on(table.projectId, table.provider, table.externalSessionId)
 			.where(sql`${table.externalSessionId} IS NOT NULL`),
-		index("idx_billing_checkout_requests_customer_created").on(table.customerId, table.createdAt),
+		index("idx_billing_checkout_requests_customer_created").on(
+			table.customerId,
+			table.createdAt.desc(),
+		),
 		index("idx_billing_checkout_requests_store_product_id").on(table.storeProductId),
 		check("checkout_requests_provider_check", sql`${table.provider} = 'stripe'`),
 		check(
@@ -401,7 +488,11 @@ export const creditGrants = pgTable(
 		sourceEventId: text("source_event_id").notNull(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"credit_grants_grant_kind_check",
+			sql`((grant_kind = ANY (ARRAY['monthly'::text, 'upgrade'::text, 'topup'::text])))`,
+		),
 		unique("credit_grants_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "credit_grants_project_customer_fk",
@@ -414,11 +505,13 @@ export const creditGrants = pgTable(
 			foreignColumns: [subscriptions.projectId, subscriptions.id],
 		}),
 		uniqueIndex("idx_billing_credit_grants_key").on(table.projectId, table.grantKey),
-		index("idx_billing_credit_grants_customer_created").on(table.customerId, table.createdAt),
+		index("idx_billing_credit_grants_customer_created").on(
+			table.customerId,
+			table.createdAt.desc(),
+		),
 		index("idx_billing_credit_grants_subscription_id")
 			.on(table.subscriptionId)
 			.where(sql`${table.subscriptionId} IS NOT NULL`),
-		check("credit_grants_kind_check", sql`${table.grantKind} IN ('monthly', 'upgrade', 'topup')`),
 		check("credit_grants_credits_check", sql`${table.credits} > 0`),
 		check(
 			"credit_grants_expiry_check",
@@ -442,7 +535,7 @@ export const creditGrantProviderObjects = pgTable(
 		providerObjectId: text("provider_object_id").notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
 		foreignKey({
 			name: "credit_grant_provider_objects_project_grant_fk",
 			columns: [table.projectId, table.grantId],
@@ -481,21 +574,25 @@ export const creditReversals = pgTable(
 		providerObjectId: text("provider_object_id").notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		foreignKey({
+			name: "credit_reversals_project_grant_fk",
+			columns: [table.projectId, table.grantId],
+			foreignColumns: [creditGrants.projectId, creditGrants.id],
+		}).onDelete("restrict"),
 		unique("credit_reversals_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "credit_reversals_project_customer_fk",
 			columns: [table.projectId, table.customerId],
 			foreignColumns: [customers.projectId, customers.id],
 		}).onDelete("cascade"),
-		foreignKey({
-			name: "credit_reversals_project_grant_fk",
-			columns: [table.projectId, table.grantId],
-			foreignColumns: [creditGrants.projectId, creditGrants.id],
-		}),
+
 		uniqueIndex("idx_billing_credit_reversals_key").on(table.projectId, table.reversalKey),
 		uniqueIndex("idx_billing_credit_reversals_first_grant").on(table.projectId, table.grantId),
-		index("idx_billing_credit_reversals_customer_created").on(table.customerId, table.createdAt),
+		index("idx_billing_credit_reversals_customer_created").on(
+			table.customerId,
+			table.createdAt.desc(),
+		),
 		index("idx_billing_credit_reversals_grant_id").on(table.grantId),
 		check("credit_reversals_reason_check", sql`${table.reason} IN ('refund', 'dispute', 'void')`),
 		check("credit_reversals_expected_credits_check", sql`${table.expectedCredits} > 0`),
@@ -528,7 +625,7 @@ export const billingInvoices = pgTable(
 		rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull().default({}),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
 		unique("billing_invoices_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "billing_invoices_project_customer_fk",
@@ -541,7 +638,10 @@ export const billingInvoices = pgTable(
 			foreignColumns: [subscriptions.projectId, subscriptions.id],
 		}),
 		uniqueIndex("idx_billing_invoices_external").on(table.projectId, table.externalInvoiceId),
-		index("idx_billing_invoices_customer_created").on(table.customerId, table.providerCreatedAt),
+		index("idx_billing_invoices_customer_created").on(
+			table.customerId,
+			table.providerCreatedAt.desc(),
+		),
 		index("idx_billing_invoices_subscription_id")
 			.on(table.subscriptionId)
 			.where(sql`${table.subscriptionId} IS NOT NULL`),
@@ -584,7 +684,18 @@ export const purchases = pgTable(
 		rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull().default({}),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		index("idx_billing_purchases_raw_payload_order_id")
+			.on(sql`(raw_payload ->> 'orderId'::text)`)
+			.where(sql`(raw_payload ? 'orderId'::text)`),
+		index("idx_billing_purchases_original_transaction_id_trgm").using(
+			"gin",
+			table.originalTransactionId.op("gin_trgm_ops"),
+		),
+		index("idx_billing_purchases_transaction_id_trgm").using(
+			"gin",
+			table.transactionId.op("gin_trgm_ops"),
+		),
 		unique("purchases_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "purchases_project_customer_fk",
@@ -664,7 +775,16 @@ export const entitlements = pgTable(
 		computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		foreignKey({
+			name: "entitlements_project_plan_grant_fk",
+			columns: [table.projectId, table.sourcePlanGrantId],
+			foreignColumns: [planGrants.projectId, planGrants.id],
+		}),
+		index("idx_billing_entitlements_entitlement_key_trgm").using(
+			"gin",
+			table.entitlementKey.op("gin_trgm_ops"),
+		),
 		unique("entitlements_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "entitlements_project_customer_fk",
@@ -726,7 +846,7 @@ export const storeEvents = pgTable(
 		lockedBy: text("locked_by"),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
 		unique("store_events_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "store_events_project_customer_fk",
@@ -787,7 +907,11 @@ export const projectionSyncJobs = pgTable(
 		lockedBy: text("locked_by"),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"projection_sync_jobs_payload_check",
+			sql`((((payload IS NULL) AND (reason = 'usage_changed'::text)) OR (COALESCE((jsonb_typeof(payload) = 'object'::text), false) AND COALESCE((jsonb_typeof((payload -> 'billingAccountId'::text)) = 'string'::text), false) AND COALESCE((jsonb_typeof((payload -> 'generatedAt'::text)) = 'string'::text), false) AND COALESCE((jsonb_typeof((payload -> 'reason'::text)) = 'string'::text), false) AND COALESCE(((payload ->> 'reason'::text) = reason), false) AND COALESCE(((payload ->> 'generatedAt'::text) = ((payload -> 'entitlements'::text) ->> 'generatedAt'::text)), false) AND COALESCE(((payload ->> 'billingAccountId'::text) = ((payload -> 'entitlements'::text) ->> 'billingAccountId'::text)), false) AND COALESCE((jsonb_typeof((payload -> 'entitlements'::text)) = 'object'::text), false) AND COALESCE((jsonb_typeof(((payload -> 'entitlements'::text) -> 'entitlements'::text)) = 'array'::text), false) AND COALESCE((jsonb_typeof((payload -> 'balances'::text)) = 'array'::text), false) AND (NOT (payload ? 'operation'::text)) AND (NOT ((payload ? 'purchase'::text) AND (payload ? 'reversal'::text))) AND (NOT ((payload ? 'trial'::text) AND ((payload ? 'purchase'::text) OR (payload ? 'reversal'::text)))))))`,
+		),
 		unique("projection_sync_jobs_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "projection_sync_jobs_project_customer_fk",
@@ -820,18 +944,47 @@ const meteringId = (name = "id") =>
 	bigint(name, { mode: "number" }).primaryKey().generatedAlwaysAsIdentity();
 const quantityColumn = (name: string) => numeric(name, { precision: 28, scale: 9 });
 
-export const meteringSettings = pgTable("metering_settings", {
-	projectId: uuid("project_id")
-		.primaryKey()
-		.references(() => projects.id, { onDelete: "cascade" }),
-	clientIdempotencyTtlSeconds: integer("client_idempotency_ttl_seconds").notNull().default(86400),
-	workerDeliveryTtlSeconds: integer("worker_delivery_ttl_seconds").notNull().default(86400),
-	occurredAtMaxSkewSeconds: integer("occurred_at_max_skew_seconds").notNull().default(300),
-	rawUsageRetentionDays: integer("raw_usage_retention_days").notNull().default(400),
-	consumeP99TargetMs: integer("consume_p99_target_ms").notNull().default(50),
-	projectionUsageDebounceMs: integer("projection_usage_debounce_ms").notNull().default(1000),
-	...timestampColumns(),
-});
+export const meteringSettings = pgTable(
+	"metering_settings",
+	{
+		projectId: uuid("project_id")
+			.primaryKey()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		clientIdempotencyTtlSeconds: integer("client_idempotency_ttl_seconds").notNull().default(86400),
+		workerDeliveryTtlSeconds: integer("worker_delivery_ttl_seconds").notNull().default(86400),
+		occurredAtMaxSkewSeconds: integer("occurred_at_max_skew_seconds").notNull().default(300),
+		rawUsageRetentionDays: integer("raw_usage_retention_days").notNull().default(400),
+		consumeP99TargetMs: integer("consume_p99_target_ms").notNull().default(50),
+		projectionUsageDebounceMs: integer("projection_usage_debounce_ms").notNull().default(1000),
+		...timestampColumns(),
+	},
+	(_table): PgTableExtraConfigValue[] => [
+		check(
+			"metering_settings_client_idempotency_ttl_seconds_check",
+			sql`(((client_idempotency_ttl_seconds >= 60) AND (client_idempotency_ttl_seconds <= 604800)))`,
+		),
+		check(
+			"metering_settings_worker_delivery_ttl_seconds_check",
+			sql`(((worker_delivery_ttl_seconds >= 60) AND (worker_delivery_ttl_seconds <= 604800)))`,
+		),
+		check(
+			"metering_settings_occurred_at_max_skew_seconds_check",
+			sql`(((occurred_at_max_skew_seconds >= 0) AND (occurred_at_max_skew_seconds <= 86400)))`,
+		),
+		check(
+			"metering_settings_raw_usage_retention_days_check",
+			sql`(((raw_usage_retention_days >= 30) AND (raw_usage_retention_days <= 3650)))`,
+		),
+		check(
+			"metering_settings_consume_p99_target_ms_check",
+			sql`(((consume_p99_target_ms >= 1) AND (consume_p99_target_ms <= 10000)))`,
+		),
+		check(
+			"metering_settings_projection_usage_debounce_ms_check",
+			sql`(((projection_usage_debounce_ms >= 0) AND (projection_usage_debounce_ms <= 30000)))`,
+		),
+	],
+);
 
 export const catalogRevisions = pgTable(
 	"catalog_revisions",
@@ -850,13 +1003,23 @@ export const catalogRevisions = pgTable(
 		metadata: metadataColumn(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("catalog_revisions_revision_check", sql`((revision > 0))`),
+		check(
+			"catalog_revisions_status_check",
+			sql`((status = ANY (ARRAY['draft'::text, 'validating'::text, 'syncing'::text, 'ready'::text, 'published'::text, 'failed'::text])))`,
+		),
+		check("catalog_revisions_intent_hash_check", sql`((char_length(intent_hash) = 64))`),
+		check(
+			"catalog_revisions_publish_state_check",
+			sql`((((status = 'published'::text) AND (published_at IS NOT NULL)) OR ((status <> 'published'::text) AND (published_at IS NULL))))`,
+		),
 		unique("catalog_revisions_project_id_id_unique").on(table.projectId, table.id),
 		unique("catalog_revisions_project_revision_unique").on(table.projectId, table.revision),
 		index("idx_billing_catalog_revisions_project_status").on(
 			table.projectId,
 			table.status,
-			table.revision,
+			table.revision.desc(),
 		),
 	],
 );
@@ -885,10 +1048,24 @@ export const catalogDrafts = pgTable(
 		),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("catalog_drafts_preview_token_check", sql`((char_length(preview_token) = 64))`),
+		check("catalog_drafts_next_revision_check", sql`((next_revision > 0))`),
+		check("catalog_drafts_intent_hash_check", sql`((char_length(intent_hash) = 64))`),
+		check("catalog_drafts_intent_check", sql`((jsonb_typeof(intent) = 'object'::text))`),
+		check(
+			"catalog_drafts_status_check",
+			sql`((status = ANY (ARRAY['previewed'::text, 'published'::text, 'expired'::text])))`,
+		),
+		check(
+			"catalog_drafts_state_check",
+			sql`((((status = 'published'::text) AND (published_revision_id IS NOT NULL)) OR ((status <> 'published'::text) AND (published_revision_id IS NULL))))`,
+		),
 		unique("catalog_drafts_project_id_id_unique").on(table.projectId, table.id),
 		unique("catalog_drafts_project_token_unique").on(table.projectId, table.previewToken),
-		index("idx_billing_catalog_drafts_expiry").on(table.status, table.expiresAt),
+		index("idx_billing_catalog_drafts_expiry")
+			.on(table.expiresAt)
+			.where(sql`(status = 'previewed'::text)`),
 	],
 );
 
@@ -925,7 +1102,44 @@ export const commercialActionPreviews = pgTable(
 		executedAt: timestamp("executed_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"commercial_action_previews_billing_account_id_check",
+			sql`(((char_length(billing_account_id) >= 1) AND (char_length(billing_account_id) <= 200)))`,
+		),
+		check(
+			"commercial_action_previews_intent_kind_check",
+			sql`((intent_kind = ANY (ARRAY['checkout_plan'::text, 'checkout_product'::text, 'subscription_change'::text, 'cancel'::text, 'uncancel'::text, 'setup_payment'::text])))`,
+		),
+		check("commercial_action_previews_intent_hash_check", sql`((char_length(intent_hash) = 64))`),
+		check(
+			"commercial_action_previews_state_fingerprint_check",
+			sql`((char_length(state_fingerprint) = 64))`,
+		),
+		check(
+			"commercial_action_previews_intent_check",
+			sql`((jsonb_typeof(intent) = 'object'::text))`,
+		),
+		check(
+			"commercial_action_previews_preview_check",
+			sql`((jsonb_typeof(preview) = 'object'::text))`,
+		),
+		check(
+			"commercial_action_previews_status_check",
+			sql`((status = ANY (ARRAY['previewed'::text, 'executing'::text, 'executed'::text])))`,
+		),
+		check(
+			"commercial_action_previews_execution_idempotency_key_check",
+			sql`(((execution_idempotency_key IS NULL) OR ((char_length(execution_idempotency_key) >= 1) AND (char_length(execution_idempotency_key) <= 200))))`,
+		),
+		check(
+			"commercial_action_previews_execution_result_check",
+			sql`(((execution_result IS NULL) OR (jsonb_typeof(execution_result) = 'object'::text)))`,
+		),
+		check(
+			"commercial_action_previews_state_check",
+			sql`((((status = 'previewed'::text) AND (execution_idempotency_key IS NULL) AND (execution_result IS NULL) AND (executed_at IS NULL)) OR ((status = 'executing'::text) AND (execution_idempotency_key IS NOT NULL) AND (execution_result IS NULL) AND (executed_at IS NULL)) OR ((status = 'executed'::text) AND (execution_idempotency_key IS NOT NULL) AND (execution_result IS NOT NULL) AND (executed_at IS NOT NULL))))`,
+		),
 		unique("commercial_action_previews_project_id_id_unique").on(table.projectId, table.id),
 		unique("commercial_action_previews_project_token_unique").on(
 			table.projectId,
@@ -937,7 +1151,7 @@ export const commercialActionPreviews = pgTable(
 		index("idx_billing_commercial_previews_account_created").on(
 			table.projectId,
 			table.billingAccountId,
-			table.createdAt,
+			table.createdAt.desc(),
 		),
 	],
 );
@@ -984,7 +1198,7 @@ export const paymentSetupSessions = pgTable(
 		claimedAt: timestamp("claimed_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
 		check("payment_setup_sessions_provider_check", sql`${table.provider} = 'stripe'`),
 		check(
 			"payment_setup_sessions_billing_account_id_check",
@@ -1118,12 +1332,22 @@ export const catalogAuditLog = pgTable(
 			.notNull(),
 		actor: text("actor").notNull(),
 		intentHash: text("intent_hash").notNull(),
-		details: metadataColumn(),
+		details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("catalog_audit_log_intent_hash_check", sql`((char_length(intent_hash) = 64))`),
+		check(
+			"catalog_audit_log_action_check",
+			sql`((action = ANY (ARRAY['catalog_published'::text, 'plan_migrated'::text, 'catalog_archived'::text, 'contract_published'::text, 'contract_terminated'::text, 'control_changed'::text, 'auto_topup_reset'::text, 'license_changed'::text])))`,
+		),
+		foreignKey({
+			name: "catalog_audit_log_project_revision_fk",
+			columns: [table.projectId, table.catalogRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}),
 		unique("catalog_audit_log_project_id_id_unique").on(table.projectId, table.id),
-		index("idx_billing_catalog_audit_project_created").on(table.projectId, table.createdAt),
+		index("idx_billing_catalog_audit_project_created").on(table.projectId, table.createdAt.desc()),
 	],
 );
 
@@ -1150,10 +1374,43 @@ export const catalogProviderOperations = pgTable(
 		completedAt: timestamp("completed_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"catalog_provider_operations_provider_check",
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+		),
+		check(
+			"catalog_provider_operations_channel_check",
+			sql`((channel = ANY (ARRAY['ios'::text, 'android'::text, 'web'::text])))`,
+		),
+		check(
+			"catalog_provider_operations_status_check",
+			sql`((status = ANY (ARRAY['pending'::text, 'processing'::text, 'ready'::text, 'failed'::text])))`,
+		),
+		check("catalog_provider_operations_attempts_check", sql`((attempts >= 0))`),
+		check(
+			"catalog_provider_operations_state_check",
+			sql`((((status = 'ready'::text) AND (completed_at IS NOT NULL) AND (last_error IS NULL)) OR ((status = 'failed'::text) AND (last_error IS NOT NULL) AND (completed_at IS NULL)) OR ((status = ANY (ARRAY['pending'::text, 'processing'::text])) AND (completed_at IS NULL))))`,
+		),
+		check(
+			"catalog_provider_operations_action_check",
+			sql`((action = ANY (ARRAY['adopt_plan'::text, 'adopt_topup'::text, 'adopt_price'::text])))`,
+		),
+		foreignKey({
+			name: "catalog_provider_operations_project_revision_fk",
+			columns: [table.projectId, table.catalogRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}),
+		foreignKey({
+			name: "catalog_provider_operations_project_store_fk",
+			columns: [table.projectId, table.storeProductId],
+			foreignColumns: [storeProducts.projectId, storeProducts.id],
+		}),
 		unique("catalog_provider_operations_project_id_id_unique").on(table.projectId, table.id),
 		unique("catalog_provider_operations_key_unique").on(table.projectId, table.operationKey),
-		index("idx_billing_catalog_provider_operations_due").on(table.status, table.createdAt),
+		index("idx_billing_catalog_provider_operations_due")
+			.on(table.status, table.createdAt)
+			.where(sql`${table.status} IN ('pending', 'processing', 'failed')`),
 		index("idx_billing_catalog_provider_operations_revision").on(table.catalogRevisionId),
 	],
 );
@@ -1176,7 +1433,21 @@ export const features = pgTable(
 		metadata: metadataColumn(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("features_kind_check", sql`((kind = ANY (ARRAY['boolean'::text, 'metered'::text])))`),
+		check(
+			"features_meter_kind_check",
+			sql`(((meter_kind IS NULL) OR (meter_kind = ANY (ARRAY['consumable'::text, 'non_consumable'::text]))))`,
+		),
+		check("features_credit_scale_check", sql`(((credit_scale >= 0) AND (credit_scale <= 9)))`),
+		check(
+			"features_kind_meter_check",
+			sql`((((kind = 'boolean'::text) AND (meter_kind IS NULL) AND (credit_scale = 0)) OR ((kind = 'metered'::text) AND (meter_kind IS NOT NULL))))`,
+		),
+		check(
+			"features_filter_dimensions_check",
+			sql`(((cardinality(filter_dimensions) <= 8) AND (array_position(filter_dimensions, ''::text) IS NULL)))`,
+		),
 		unique("features_project_id_id_unique").on(table.projectId, table.id),
 		unique("features_project_key_unique").on(table.projectId, table.key),
 	],
@@ -1196,7 +1467,12 @@ export const plans = pgTable(
 		metadata: metadataColumn(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		foreignKey({
+			name: "plans_active_version_fk",
+			columns: [table.projectId, table.activeVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}).onDelete("restrict"),
 		unique("plans_project_id_id_unique").on(table.projectId, table.id),
 		unique("plans_project_key_unique").on(table.projectId, table.key),
 	],
@@ -1225,7 +1501,7 @@ export const planVersions = pgTable(
 			.$type<"public" | "customer_specific">()
 			.notNull()
 			.default("public"),
-		customerId: uuid("customer_id").references(() => customers.id, { onDelete: "restrict" }),
+		customerId: uuid("customer_id"),
 		planKind: text("plan_kind").$type<"base" | "addon">().notNull().default("base"),
 		tierRank: integer("tier_rank").notNull().default(0),
 		trialRequiresPaymentMethod: boolean("trial_requires_payment_method").notNull().default(true),
@@ -1243,7 +1519,68 @@ export const planVersions = pgTable(
 			.default("none"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		foreignKey({
+			name: "plan_versions_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("restrict"),
+		check("plan_versions_version_check", sql`((version > 0))`),
+		check(
+			"plan_versions_status_check",
+			sql`((status = ANY (ARRAY['draft'::text, 'published'::text, 'archived'::text])))`,
+		),
+		check(
+			"plan_versions_base_amount_minor_check",
+			sql`(((base_amount_minor IS NULL) OR (base_amount_minor >= 0)))`,
+		),
+		check(
+			"plan_versions_billing_interval_check",
+			sql`(((billing_interval IS NULL) OR (billing_interval = ANY (ARRAY['month'::text, 'year'::text]))))`,
+		),
+		check(
+			"plan_versions_trial_days_check",
+			sql`(((trial_days IS NULL) OR ((trial_days >= 0) AND (trial_days <= 730))))`,
+		),
+		check(
+			"plan_versions_price_check",
+			sql`((((base_amount_minor IS NULL) AND (currency IS NULL)) OR ((base_amount_minor IS NOT NULL) AND (currency IS NOT NULL))))`,
+		),
+		check(
+			"plan_versions_plan_kind_check",
+			sql`((plan_kind = ANY (ARRAY['base'::text, 'addon'::text])))`,
+		),
+		check(
+			"plan_versions_trial_end_behavior_check",
+			sql`((trial_end_behavior = ANY (ARRAY['cancel'::text, 'pause'::text])))`,
+		),
+		check(
+			"plan_versions_upgrade_proration_check",
+			sql`((upgrade_proration_behavior = ANY (ARRAY['always_invoice'::text, 'create_prorations'::text, 'none'::text])))`,
+		),
+		check(
+			"plan_versions_downgrade_proration_check",
+			sql`((downgrade_proration_behavior = ANY (ARRAY['always_invoice'::text, 'create_prorations'::text, 'none'::text])))`,
+		),
+		check(
+			"plan_versions_visibility_check",
+			sql`((visibility = ANY (ARRAY['public'::text, 'customer_specific'::text])))`,
+		),
+		check(
+			"plan_versions_visibility_customer_check",
+			sql`((((visibility = 'public'::text) AND (customer_id IS NULL)) OR ((visibility = 'customer_specific'::text) AND (customer_id IS NOT NULL))))`,
+		),
+		foreignKey({
+			name: "plan_versions_project_plan_fk",
+			columns: [table.projectId, table.planId],
+			foreignColumns: [plans.projectId, plans.id],
+		}),
+		foreignKey({
+			name: "plan_versions_project_revision_fk",
+			columns: [table.projectId, table.catalogRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}),
+		index("idx_billing_plan_versions_plan").on(table.planId, table.version.desc()),
 		unique("plan_versions_project_id_id_unique").on(table.projectId, table.id),
 		unique("plan_versions_project_plan_version_unique").on(
 			table.projectId,
@@ -1293,7 +1630,61 @@ export const planItems = pgTable(
 		rolloverExpiryMonths: integer("rollover_expiry_months"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"plan_items_reset_interval_check",
+			sql`(((reset_interval IS NULL) OR (reset_interval = ANY (ARRAY['month'::text, 'year'::text]))))`,
+		),
+		check(
+			"plan_items_expires_after_seconds_check",
+			sql`(((expires_after_seconds IS NULL) OR (expires_after_seconds > 0)))`,
+		),
+		check(
+			"plan_items_overage_policy_check",
+			sql`((overage_policy = ANY (ARRAY['blocked'::text, 'allowed'::text])))`,
+		),
+		check(
+			"plan_items_item_kind_check",
+			sql`((item_kind = ANY (ARRAY['access'::text, 'allocation'::text, 'meter_limit'::text, 'licensed_quantity'::text])))`,
+		),
+		check(
+			"plan_items_quantity_check",
+			sql`((((item_kind = 'access'::text) AND (quantity IS NULL) AND (reset_interval IS NULL)) OR ((item_kind = ANY (ARRAY['allocation'::text, 'meter_limit'::text, 'licensed_quantity'::text])) AND (quantity IS NOT NULL) AND (quantity > (0)::numeric))))`,
+		),
+		check(
+			"plan_items_licensed_reset_check",
+			sql`(((item_kind <> 'licensed_quantity'::text) OR (reset_interval IS NULL)))`,
+		),
+		check(
+			"plan_items_overage_check",
+			sql`(((overage_policy = 'blocked'::text) OR (item_kind = 'meter_limit'::text)))`,
+		),
+		check(
+			"plan_items_allocation_scope_check",
+			sql`((allocation_scope = ANY (ARRAY['account'::text, 'entity'::text, 'license_pool'::text])))`,
+		),
+		check(
+			"plan_items_rollover_max_check",
+			sql`(((rollover_max_quantity IS NULL) OR (rollover_max_quantity > (0)::numeric)))`,
+		),
+		check(
+			"plan_items_rollover_expiry_check",
+			sql`((((rollover_enabled = false) AND (rollover_max_quantity IS NULL) AND (rollover_expiry_mode = 'none'::text) AND (rollover_expiry_months IS NULL)) OR ((rollover_enabled = true) AND (rollover_expiry_mode = ANY (ARRAY['forever'::text, 'months'::text])) AND (((rollover_expiry_mode = 'forever'::text) AND (rollover_expiry_months IS NULL)) OR ((rollover_expiry_mode = 'months'::text) AND ((rollover_expiry_months >= 1) AND (rollover_expiry_months <= 120)))))))`,
+		),
+		check(
+			"plan_items_rollover_kind_check",
+			sql`(((rollover_enabled = false) OR (item_kind = 'allocation'::text)))`,
+		),
+		foreignKey({
+			name: "plan_items_project_version_fk",
+			columns: [table.projectId, table.planVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}),
+		foreignKey({
+			name: "plan_items_project_feature_fk",
+			columns: [table.projectId, table.featureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
 		unique("plan_items_project_id_id_unique").on(table.projectId, table.id),
 		unique("plan_items_project_version_feature_unique").on(
 			table.projectId,
@@ -1338,7 +1729,49 @@ export const priceComponents = pgTable(
 			.default("unspecified"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"price_components_component_kind_check",
+			sql`((component_kind = ANY (ARRAY['base'::text, 'licensed'::text, 'metered_overage'::text])))`,
+		),
+		check(
+			"price_components_charge_timing_check",
+			sql`((charge_timing = ANY (ARRAY['in_advance'::text, 'in_arrears'::text])))`,
+		),
+		check("price_components_currency_check", sql`((char_length(currency) = 3))`),
+		check("price_components_unit_amount_minor_check", sql`((unit_amount_minor >= 0))`),
+		check("price_components_billing_units_check", sql`((billing_units > (0)::numeric))`),
+		check(
+			"price_components_billing_interval_check",
+			sql`((billing_interval = ANY (ARRAY['month'::text, 'year'::text])))`,
+		),
+		check("price_components_minimum_quantity_check", sql`((minimum_quantity > 0))`),
+		check(
+			"price_components_check",
+			sql`(((maximum_quantity IS NULL) OR (maximum_quantity >= minimum_quantity)))`,
+		),
+		check(
+			"price_components_tax_behavior_check",
+			sql`((tax_behavior = ANY (ARRAY['inclusive'::text, 'exclusive'::text, 'unspecified'::text])))`,
+		),
+		check(
+			"price_components_shape_check",
+			sql`((((component_kind = 'base'::text) AND (plan_item_id IS NULL) AND (charge_timing = 'in_advance'::text)) OR ((component_kind = 'licensed'::text) AND (plan_item_id IS NOT NULL) AND (charge_timing = 'in_advance'::text)) OR ((component_kind = 'metered_overage'::text) AND (plan_item_id IS NOT NULL) AND (charge_timing = 'in_arrears'::text))))`,
+		),
+		check(
+			"price_components_pricing_model_check",
+			sql`((pricing_model = ANY (ARRAY['flat'::text, 'graduated'::text, 'volume'::text])))`,
+		),
+		foreignKey({
+			name: "price_components_project_version_fk",
+			columns: [table.projectId, table.planVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}),
+		foreignKey({
+			name: "price_components_project_item_fk",
+			columns: [table.projectId, table.planItemId],
+			foreignColumns: [planItems.projectId, planItems.id],
+		}),
 		unique("price_components_project_id_id_unique").on(table.projectId, table.id),
 		unique("price_components_project_version_key_unique").on(
 			table.projectId,
@@ -1371,7 +1804,19 @@ export const priceTiers = pgTable(
 		flatAmountMinor: bigint("flat_amount_minor", { mode: "number" }).notNull().default(0),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("price_tiers_ordinal_check", sql`((ordinal >= 0))`),
+		check(
+			"price_tiers_up_to_quantity_check",
+			sql`(((up_to_quantity IS NULL) OR (up_to_quantity > (0)::numeric)))`,
+		),
+		check("price_tiers_unit_amount_minor_check", sql`((unit_amount_minor >= 0))`),
+		check("price_tiers_flat_amount_minor_check", sql`((flat_amount_minor >= 0))`),
+		foreignKey({
+			name: "price_tiers_project_component_fk",
+			columns: [table.projectId, table.priceComponentId],
+			foreignColumns: [priceComponents.projectId, priceComponents.id],
+		}).onDelete("restrict"),
 		unique("price_tiers_project_id_id_unique").on(table.projectId, table.id),
 		unique("price_tiers_component_ordinal_unique").on(
 			table.projectId,
@@ -1407,7 +1852,29 @@ export const providerPriceBindings = pgTable(
 		error: text("error"),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"provider_price_bindings_provider_check",
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+		),
+		check(
+			"provider_price_bindings_channel_check",
+			sql`((channel = ANY (ARRAY['ios'::text, 'android'::text, 'web'::text])))`,
+		),
+		check(
+			"provider_price_bindings_status_check",
+			sql`((status = ANY (ARRAY['validating'::text, 'syncing'::text, 'ready'::text, 'published'::text, 'failed'::text])))`,
+		),
+		foreignKey({
+			name: "provider_price_bindings_project_component_fk",
+			columns: [table.projectId, table.priceComponentId],
+			foreignColumns: [priceComponents.projectId, priceComponents.id],
+		}),
+		foreignKey({
+			name: "provider_price_bindings_project_store_fk",
+			columns: [table.projectId, table.storeProductId],
+			foreignColumns: [storeProducts.projectId, storeProducts.id],
+		}),
 		unique("provider_price_bindings_project_id_id_unique").on(table.projectId, table.id),
 		unique("provider_price_bindings_component_provider_unique").on(
 			table.projectId,
@@ -1441,7 +1908,21 @@ export const subscriptionItems = pgTable(
 		endsAt: timestamp("ends_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("subscription_items_quantity_check", sql`((quantity > 0))`),
+		check("subscription_items_unit_amount_minor_check", sql`((unit_amount_minor >= 0))`),
+		check("subscription_items_currency_check", sql`((char_length(currency) = 3))`),
+		check("subscription_items_bounds_check", sql`(((ends_at IS NULL) OR (ends_at > starts_at)))`),
+		foreignKey({
+			name: "subscription_items_project_subscription_fk",
+			columns: [table.projectId, table.subscriptionId],
+			foreignColumns: [subscriptions.projectId, subscriptions.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "subscription_items_project_component_fk",
+			columns: [table.projectId, table.priceComponentId],
+			foreignColumns: [priceComponents.projectId, priceComponents.id],
+		}),
 		unique("subscription_items_project_id_id_unique").on(table.projectId, table.id),
 		unique("subscription_items_project_subscription_component_unique").on(
 			table.projectId,
@@ -1504,7 +1985,57 @@ export const subscriptionChanges = pgTable(
 		synchronizedAt: timestamp("synchronized_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"subscription_changes_requested_quantities_check",
+			sql`((jsonb_typeof(requested_quantities) = 'object'::text))`,
+		),
+		check(
+			"subscription_changes_change_kind_check",
+			sql`((change_kind = ANY (ARRAY['upgrade'::text, 'downgrade'::text, 'quantity'::text])))`,
+		),
+		check(
+			"subscription_changes_effective_mode_check",
+			sql`((effective_mode = ANY (ARRAY['immediate'::text, 'period_end'::text])))`,
+		),
+		check(
+			"subscription_changes_proration_behavior_check",
+			sql`((proration_behavior = ANY (ARRAY['always_invoice'::text, 'create_prorations'::text, 'none'::text])))`,
+		),
+		check(
+			"subscription_changes_status_check",
+			sql`((status = ANY (ARRAY['pending'::text, 'processing'::text, 'applied'::text, 'failed'::text, 'cancelled'::text])))`,
+		),
+		check(
+			"subscription_changes_idempotency_key_check",
+			sql`(((char_length(idempotency_key) >= 1) AND (char_length(idempotency_key) <= 200)))`,
+		),
+		check("subscription_changes_request_hash_check", sql`((char_length(request_hash) = 64))`),
+		check("subscription_changes_attempts_check", sql`((attempts >= 0))`),
+		check(
+			"subscription_changes_state_check",
+			sql`((((status = 'applied'::text) AND (applied_at IS NOT NULL) AND (last_error IS NULL)) OR ((status = 'failed'::text) AND (last_error IS NOT NULL) AND (applied_at IS NULL)) OR ((status = ANY (ARRAY['pending'::text, 'processing'::text, 'cancelled'::text])) AND (applied_at IS NULL))))`,
+		),
+		foreignKey({
+			name: "subscription_changes_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "subscription_changes_project_subscription_fk",
+			columns: [table.projectId, table.subscriptionId],
+			foreignColumns: [subscriptions.projectId, subscriptions.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "subscription_changes_project_from_plan_fk",
+			columns: [table.projectId, table.fromPlanVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}),
+		foreignKey({
+			name: "subscription_changes_project_to_plan_fk",
+			columns: [table.projectId, table.toPlanVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}),
 		check(
 			"subscription_changes_provider_check",
 			sql`${table.provider} IN ('apple', 'google', 'stripe')`,
@@ -1551,7 +2082,31 @@ export const rateCardEntries = pgTable(
 		pricingModel: text("pricing_model").$type<"flat" | "graduated">().notNull().default("flat"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("rate_card_entries_rate_per_unit_check", sql`((rate_per_unit > (0)::numeric))`),
+		check(
+			"rate_card_entries_distinct_features_check",
+			sql`((meter_feature_id <> wallet_feature_id))`,
+		),
+		check(
+			"rate_card_entries_pricing_model_check",
+			sql`((pricing_model = ANY (ARRAY['flat'::text, 'graduated'::text])))`,
+		),
+		foreignKey({
+			name: "rate_card_entries_project_revision_fk",
+			columns: [table.projectId, table.catalogRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}),
+		foreignKey({
+			name: "rate_card_entries_project_meter_fk",
+			columns: [table.projectId, table.meterFeatureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
+		foreignKey({
+			name: "rate_card_entries_project_wallet_fk",
+			columns: [table.projectId, table.walletFeatureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
 		unique("rate_card_entries_project_id_id_unique").on(table.projectId, table.id),
 		unique("rate_card_entries_project_meter_unique").on(
 			table.projectId,
@@ -1581,7 +2136,18 @@ export const rateCardTiers = pgTable(
 		ratePerUnit: numeric("rate_per_unit", { precision: 38, scale: 18 }).notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("rate_card_tiers_ordinal_check", sql`((ordinal >= 0))`),
+		check(
+			"rate_card_tiers_up_to_quantity_check",
+			sql`(((up_to_quantity IS NULL) OR (up_to_quantity > (0)::numeric)))`,
+		),
+		check("rate_card_tiers_rate_per_unit_check", sql`((rate_per_unit > (0)::numeric))`),
+		foreignKey({
+			name: "rate_card_tiers_project_entry_fk",
+			columns: [table.projectId, table.rateCardEntryId],
+			foreignColumns: [rateCardEntries.projectId, rateCardEntries.id],
+		}).onDelete("restrict"),
 		unique("rate_card_tiers_project_id_id_unique").on(table.projectId, table.id),
 		unique("rate_card_tiers_entry_ordinal_unique").on(
 			table.projectId,
@@ -1617,7 +2183,29 @@ export const providerPlanBindings = pgTable(
 		error: text("error"),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"provider_plan_bindings_provider_check",
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+		),
+		check(
+			"provider_plan_bindings_channel_check",
+			sql`((channel = ANY (ARRAY['ios'::text, 'android'::text, 'web'::text])))`,
+		),
+		check(
+			"provider_plan_bindings_status_check",
+			sql`((status = ANY (ARRAY['validating'::text, 'syncing'::text, 'ready'::text, 'published'::text, 'failed'::text])))`,
+		),
+		foreignKey({
+			name: "provider_plan_bindings_project_version_fk",
+			columns: [table.projectId, table.planVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}),
+		foreignKey({
+			name: "provider_plan_bindings_project_store_fk",
+			columns: [table.projectId, table.storeProductId],
+			foreignColumns: [storeProducts.projectId, storeProducts.id],
+		}),
 		unique("provider_plan_bindings_project_id_id_unique").on(table.projectId, table.id),
 		unique("provider_plan_bindings_project_store_unique").on(table.projectId, table.storeProductId),
 		index("idx_billing_provider_plan_bindings_version").on(table.planVersionId),
@@ -1642,7 +2230,22 @@ export const topupOptions = pgTable(
 		expiresAfterSeconds: bigint("expires_after_seconds", { mode: "number" }),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		foreignKey({
+			name: "topup_options_project_revision_fk",
+			columns: [table.projectId, table.catalogRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}),
+		check("topup_options_quantity_check", sql`((quantity > (0)::numeric))`),
+		check(
+			"topup_options_expires_after_seconds_check",
+			sql`(((expires_after_seconds IS NULL) OR (expires_after_seconds > 0)))`,
+		),
+		foreignKey({
+			name: "topup_options_project_feature_fk",
+			columns: [table.projectId, table.featureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
 		unique("topup_options_project_id_id_unique").on(table.projectId, table.id),
 		unique("topup_options_project_revision_key_unique").on(
 			table.projectId,
@@ -1674,7 +2277,29 @@ export const providerTopupBindings = pgTable(
 		error: text("error"),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"provider_topup_bindings_provider_check",
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+		),
+		check(
+			"provider_topup_bindings_channel_check",
+			sql`((channel = ANY (ARRAY['ios'::text, 'android'::text, 'web'::text])))`,
+		),
+		check(
+			"provider_topup_bindings_status_check",
+			sql`((status = ANY (ARRAY['validating'::text, 'syncing'::text, 'ready'::text, 'published'::text, 'failed'::text])))`,
+		),
+		foreignKey({
+			name: "provider_topup_bindings_project_option_fk",
+			columns: [table.projectId, table.topupOptionId],
+			foreignColumns: [topupOptions.projectId, topupOptions.id],
+		}),
+		foreignKey({
+			name: "provider_topup_bindings_project_store_fk",
+			columns: [table.projectId, table.storeProductId],
+			foreignColumns: [storeProducts.projectId, storeProducts.id],
+		}),
 		unique("provider_topup_bindings_project_id_id_unique").on(table.projectId, table.id),
 		unique("provider_topup_bindings_project_store_unique").on(
 			table.projectId,
@@ -1699,7 +2324,12 @@ export const entities = pgTable(
 		metadata: metadataColumn(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		foreignKey({
+			name: "entities_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
 		unique("entities_project_id_id_unique").on(table.projectId, table.id),
 		unique("entities_project_customer_external_unique").on(
 			table.projectId,
@@ -1755,7 +2385,94 @@ export const balanceAllocations = pgTable(
 		planGrantId: uuid("plan_grant_id"),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"balance_allocations_source_kind_check",
+			sql`((source_kind = ANY (ARRAY['subscription'::text, 'purchase'::text, 'credit_grant'::text, 'topup'::text, 'reward'::text, 'operator'::text, 'rollover'::text])))`,
+		),
+		check("balance_allocations_quantity_check", sql`((quantity > (0)::numeric))`),
+		check(
+			"balance_allocations_check",
+			sql`(((reversed_quantity >= (0)::numeric) AND (reversed_quantity <= quantity)))`,
+		),
+		check(
+			"balance_allocations_consumed_quantity_check",
+			sql`((consumed_quantity >= (0)::numeric))`,
+		),
+		check("balance_allocations_held_quantity_check", sql`((held_quantity >= (0)::numeric))`),
+		check(
+			"balance_allocations_capacity_check",
+			sql`(((consumed_quantity + held_quantity) <= quantity))`,
+		),
+		check(
+			"balance_allocations_period_check",
+			sql`(((period_start_at IS NULL) OR (period_end_at IS NULL) OR (period_start_at < period_end_at)))`,
+		),
+		check(
+			"balance_allocations_rollover_shape_check",
+			sql`((((source_kind = 'rollover'::text) AND (rollover_origin_allocation_id IS NOT NULL) AND (rollover_policy_revision IS NOT NULL) AND (rollover_policy_revision > 0)) OR ((source_kind <> 'rollover'::text) AND (rollover_origin_allocation_id IS NULL) AND (rollover_policy_revision IS NULL))))`,
+		),
+		foreignKey({
+			name: "balance_allocations_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "balance_allocations_project_entity_fk",
+			columns: [table.projectId, table.entityId],
+			foreignColumns: [entities.projectId, entities.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "balance_allocations_project_feature_fk",
+			columns: [table.projectId, table.featureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
+		foreignKey({
+			name: "balance_allocations_project_plan_item_fk",
+			columns: [table.projectId, table.planItemId],
+			foreignColumns: [planItems.projectId, planItems.id],
+		}).onDelete("set null"),
+		foreignKey({
+			name: "balance_allocations_rollover_origin_fk",
+			columns: [table.projectId, table.rolloverOriginAllocationId],
+			foreignColumns: [table.projectId, table.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "balance_allocations_project_promotion_redemption_fk",
+			columns: [table.projectId, table.promotionRedemptionId],
+			foreignColumns: [promotionRedemptions.projectId, promotionRedemptions.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "balance_allocations_project_plan_grant_fk",
+			columns: [table.projectId, table.planGrantId],
+			foreignColumns: [planGrants.projectId, planGrants.id],
+		}),
+		index("idx_billing_balance_allocations_plan_item")
+			.on(table.planItemId)
+			.where(sql`(plan_item_id IS NOT NULL)`),
+		index("idx_billing_balance_allocations_spend_order")
+			.on(
+				table.projectId,
+				table.customerId,
+				table.featureId,
+				table.entityId,
+				table.expiresAt,
+				table.createdAt,
+				table.id,
+			)
+			.where(sql`(reversed_at IS NULL)`),
+		index("idx_billing_balance_allocations_credit_grant")
+			.on(table.creditGrantId)
+			.where(sql`(credit_grant_id IS NOT NULL)`),
+		index("idx_billing_balance_allocations_purchase")
+			.on(table.purchaseId)
+			.where(sql`(purchase_id IS NOT NULL)`),
+		index("idx_billing_balance_allocations_subscription")
+			.on(table.subscriptionId)
+			.where(sql`(subscription_id IS NOT NULL)`),
+		index("idx_billing_balance_allocations_entity")
+			.on(table.entityId)
+			.where(sql`(entity_id IS NOT NULL)`),
 		unique("balance_allocations_project_id_id_unique").on(table.projectId, table.id),
 		unique("balance_allocations_source_unique").on(
 			table.projectId,
@@ -1801,7 +2518,29 @@ export const clientIdempotencyClaims = pgTable(
 		outcome: jsonb("outcome"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"client_idempotency_claims_idempotency_key_check",
+			sql`(((char_length(idempotency_key) >= 1) AND (char_length(idempotency_key) <= 200)))`,
+		),
+		check(
+			"client_idempotency_claims_request_fingerprint_check",
+			sql`((char_length(request_fingerprint) = 64))`,
+		),
+		check(
+			"client_idempotency_claims_recovery_version_check",
+			sql`((recovery_version = ANY (ARRAY[0, 1])))`,
+		),
+		check(
+			"client_idempotency_claims_retention_policy_version_check",
+			sql`((retention_policy_version = 'usage-recovery-v1'::text))`,
+		),
+		check("client_idempotency_claims_expiry_check", sql`((expires_at > created_at))`),
+		foreignKey({
+			name: "client_idempotency_claims_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
 		unique("client_idempotency_claims_scope_unique").on(
 			table.projectId,
 			table.customerId,
@@ -1843,7 +2582,12 @@ export const workerDeliveryClaims = pgTable(
 		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"worker_delivery_claims_delivery_id_check",
+			sql`(((char_length(delivery_id) >= 1) AND (char_length(delivery_id) <= 256)))`,
+		),
+		check("worker_delivery_claims_expiry_check", sql`((expires_at > created_at))`),
 		unique("worker_delivery_claims_scope_unique").on(table.projectId, table.deliveryId),
 		index("idx_billing_worker_delivery_expiry").on(table.expiresAt),
 	],
@@ -1878,14 +2622,56 @@ export const usageWindows = pgTable(
 		usage: quantityColumn("usage").notNull().default("0"),
 		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("usage_windows_usage_check", sql`((usage >= (0)::numeric))`),
+		check("usage_windows_bounds_check", sql`((window_start_at < window_end_at))`),
+		check(
+			"usage_windows_filter_key_check",
+			sql`(((filter_key IS NULL) OR (filter_key <> ''::text)))`,
+		),
+		foreignKey({
+			name: "usage_windows_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "usage_windows_project_entity_fk",
+			columns: [table.projectId, table.entityId],
+			foreignColumns: [entities.projectId, entities.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "usage_windows_project_feature_fk",
+			columns: [table.projectId, table.featureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
+		foreignKey({
+			name: "usage_windows_project_anchor_fk",
+			columns: [table.projectId, table.anchorPlanItemId],
+			foreignColumns: [planItems.projectId, planItems.id],
+		}).onDelete("set null"),
+		foreignKey({
+			name: "usage_windows_project_subscription_fk",
+			columns: [table.projectId, table.subscriptionId],
+			foreignColumns: [subscriptions.projectId, subscriptions.id],
+		}).onDelete("restrict"),
+		index("idx_billing_usage_windows_customer_feature").on(
+			table.projectId,
+			table.customerId,
+			table.featureId,
+		),
+		index("idx_billing_usage_windows_anchor")
+			.on(table.anchorPlanItemId)
+			.where(sql`(anchor_plan_item_id IS NOT NULL)`),
+		index("idx_billing_usage_windows_entity")
+			.on(table.entityId)
+			.where(sql`(entity_id IS NOT NULL)`),
 		unique("usage_windows_project_id_id_unique").on(table.projectId, table.id),
 		uniqueIndex("idx_billing_usage_windows_scope_period").on(
 			table.projectId,
 			table.customerId,
 			table.featureId,
 			sql`COALESCE(${table.entityId}, 0::bigint)`,
-			sql`COALESCE(${table.filterKey}, '')`,
+			sql`COALESCE(${table.filterKey}, '' COLLATE "C")`,
 			table.windowStartAt,
 			table.windowEndAt,
 		),
@@ -1940,13 +2726,74 @@ export const reservations = pgTable(
 		finalizedAt: timestamp("finalized_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"reservations_rate_card_path_check",
+			sql`((rate_card_path = ANY (ARRAY['direct'::text, 'pinned'::text, 'additive'::text])))`,
+		),
+		check("reservations_requested_quantity_check", sql`((requested_quantity > (0)::numeric))`),
+		check("reservations_held_quantity_check", sql`((held_quantity >= (0)::numeric))`),
+		check(
+			"reservations_status_check",
+			sql`((status = ANY (ARRAY['active'::text, 'confirmed'::text, 'released'::text, 'expired'::text])))`,
+		),
+		check("reservations_expiry_check", sql`((expires_at > effective_at))`),
+		check(
+			"reservations_usage_window_check",
+			sql`((((usage_window_id IS NULL) AND (usage_window_start_at IS NULL) AND (usage_window_end_at IS NULL)) OR ((usage_window_id IS NOT NULL) AND (usage_window_start_at IS NOT NULL) AND (usage_window_end_at IS NOT NULL) AND (usage_window_start_at < usage_window_end_at))))`,
+		),
+		check(
+			"reservations_final_state_check",
+			sql`((((status = 'active'::text) AND (finalized_at IS NULL) AND (confirmed_quantity IS NULL)) OR ((status = 'confirmed'::text) AND (finalized_at IS NOT NULL) AND (confirmed_quantity IS NOT NULL)) OR ((status = ANY (ARRAY['released'::text, 'expired'::text])) AND (finalized_at IS NOT NULL) AND (confirmed_quantity IS NULL))))`,
+		),
+		foreignKey({
+			name: "reservations_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "reservations_project_entity_fk",
+			columns: [table.projectId, table.entityId],
+			foreignColumns: [entities.projectId, entities.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "reservations_project_usage_window_fk",
+			columns: [table.projectId, table.usageWindowId],
+			foreignColumns: [usageWindows.projectId, usageWindows.id],
+		}).onDelete("set null"),
+		foreignKey({
+			name: "reservations_project_meter_feature_fk",
+			columns: [table.projectId, table.meterFeatureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
+		foreignKey({
+			name: "reservations_project_wallet_feature_fk",
+			columns: [table.projectId, table.walletFeatureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
+		foreignKey({
+			name: "reservations_project_rate_entry_fk",
+			columns: [table.projectId, table.rateCardEntryId],
+			foreignColumns: [rateCardEntries.projectId, rateCardEntries.id],
+		}),
+		foreignKey({
+			name: "reservations_project_rate_revision_fk",
+			columns: [table.projectId, table.rateCardRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}),
+		index("idx_billing_reservations_active_expiry")
+			.on(table.expiresAt, table.createdAt)
+			.where(sql`(status = 'active'::text)`),
+		index("idx_billing_reservations_entity").on(table.entityId).where(sql`(entity_id IS NOT NULL)`),
+		index("idx_billing_reservations_usage_window")
+			.on(table.usageWindowId, table.status, table.expiresAt)
+			.where(sql`(usage_window_id IS NOT NULL)`),
 		unique("reservations_project_id_id_unique").on(table.projectId, table.id),
 		index("idx_billing_reservations_customer_feature").on(
 			table.projectId,
 			table.customerId,
 			table.walletFeatureId,
-			table.createdAt,
+			table.createdAt.desc(),
 		),
 	],
 );
@@ -1967,7 +2814,23 @@ export const reservationAllocations = pgTable(
 		consumedQuantity: quantityColumn("consumed_quantity").notNull().default("0"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("reservation_allocations_held_quantity_check", sql`((held_quantity >= (0)::numeric))`),
+		check(
+			"reservation_allocations_consumed_quantity_check",
+			sql`((consumed_quantity >= (0)::numeric))`,
+		),
+		check("reservation_allocations_consumed_check", sql`((consumed_quantity <= held_quantity))`),
+		foreignKey({
+			name: "reservation_allocations_project_reservation_fk",
+			columns: [table.projectId, table.reservationId],
+			foreignColumns: [reservations.projectId, reservations.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "reservation_allocations_project_allocation_fk",
+			columns: [table.projectId, table.allocationId],
+			foreignColumns: [balanceAllocations.projectId, balanceAllocations.id],
+		}).onDelete("restrict"),
 		primaryKey({ columns: [table.projectId, table.reservationId, table.allocationId] }),
 		index("idx_billing_reservation_allocations_allocation").on(table.projectId, table.allocationId),
 	],
@@ -2011,20 +2874,92 @@ export const usageEvents = pgTable(
 		deductions: jsonb("deductions").$type<Array<Record<string, unknown>>>().notNull().default([]),
 		metadata: metadataColumn(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"usage_events_operation_check",
+			sql`((operation = ANY (ARRAY['consume'::text, 'confirm'::text, 'correction'::text])))`,
+		),
+		foreignKey({
+			name: "usage_events_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		check(
+			"usage_events_rate_card_path_check",
+			sql`((rate_card_path = ANY (ARRAY['direct'::text, 'pinned'::text, 'additive'::text])))`,
+		),
+		check(
+			"usage_events_quantity_check",
+			sql`((((operation = ANY (ARRAY['consume'::text, 'confirm'::text])) AND (quantity > (0)::numeric) AND (wallet_quantity >= (0)::numeric)) OR ((operation = 'correction'::text) AND (quantity < (0)::numeric) AND (wallet_quantity <= (0)::numeric))))`,
+		),
+		check(
+			"usage_events_original_check",
+			sql`((((operation = 'correction'::text) AND (original_event_id IS NOT NULL) AND (original_event_recorded_at IS NOT NULL)) OR ((operation <> 'correction'::text) AND (original_event_id IS NULL) AND (original_event_recorded_at IS NULL))))`,
+		),
+		check("usage_events_deductions_check", sql`((jsonb_typeof(deductions) = 'array'::text))`),
+		foreignKey({
+			name: "usage_events_rate_card_entry_id_fkey",
+			columns: [table.rateCardEntryId],
+			foreignColumns: [rateCardEntries.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "usage_events_rate_card_revision_id_fkey",
+			columns: [table.rateCardRevisionId],
+			foreignColumns: [catalogRevisions.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "usage_events_project_entity_fk",
+			columns: [table.projectId, table.entityId],
+			foreignColumns: [entities.projectId, entities.id],
+		}).onDelete("set null"),
+		foreignKey({
+			name: "usage_events_project_meter_feature_fk",
+			columns: [table.projectId, table.meterFeatureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
+		foreignKey({
+			name: "usage_events_project_wallet_feature_fk",
+			columns: [table.projectId, table.walletFeatureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
+		foreignKey({
+			name: "usage_events_project_rate_entry_fk",
+			columns: [table.projectId, table.rateCardEntryId],
+			foreignColumns: [rateCardEntries.projectId, rateCardEntries.id],
+		}),
+		foreignKey({
+			name: "usage_events_project_rate_revision_fk",
+			columns: [table.projectId, table.rateCardRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}),
+		index("idx_billing_usage_events_reservation")
+			.on(table.reservationId, table.recordedAt.desc())
+			.where(sql`(reservation_id IS NOT NULL)`),
+		index("idx_billing_usage_events_feature_time").on(
+			table.projectId,
+			table.meterFeatureId,
+			table.recordedAt.desc(),
+		),
+		index("idx_billing_usage_events_original")
+			.on(table.originalEventRecordedAt, table.originalEventId)
+			.where(sql`(original_event_id IS NOT NULL)`),
 		primaryKey({ columns: [table.recordedAt, table.id] }),
 		index("idx_billing_usage_events_customer_time").on(
 			table.projectId,
 			table.customerId,
-			table.recordedAt,
+			table.recordedAt.desc(),
 		),
-		index("idx_billing_usage_events_project_time").on(table.projectId, table.recordedAt, table.id),
+		index("idx_billing_usage_events_project_time").on(
+			table.projectId,
+			table.recordedAt.desc(),
+			table.id.desc(),
+		),
 		index("idx_billing_usage_events_customer_feature_time").on(
 			table.projectId,
 			table.customerId,
 			table.meterFeatureId,
-			table.recordedAt,
-			table.id,
+			table.recordedAt.desc(),
+			table.id.desc(),
 		),
 	],
 );
@@ -2054,7 +2989,32 @@ export const usageEventRollups = pgTable(
 		closedAt: timestamp("closed_at", { withTimezone: true }),
 		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("usage_event_rollups_event_count_check", sql`((event_count >= 0))`),
+		check(
+			"usage_event_rollups_status_check",
+			sql`((status = ANY (ARRAY['open'::text, 'closed'::text])))`,
+		),
+		check("usage_event_rollups_period_check", sql`((period_start_at < period_end_at))`),
+		check(
+			"usage_event_rollups_state_check",
+			sql`((((status = 'open'::text) AND (closed_at IS NULL)) OR ((status = 'closed'::text) AND (closed_at IS NOT NULL))))`,
+		),
+		foreignKey({
+			name: "usage_event_rollups_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "usage_event_rollups_project_entity_fk",
+			columns: [table.projectId, table.entityId],
+			foreignColumns: [entities.projectId, entities.id],
+		}).onDelete("set null"),
+		foreignKey({
+			name: "usage_event_rollups_project_feature_fk",
+			columns: [table.projectId, table.meterFeatureId],
+			foreignColumns: [features.projectId, features.id],
+		}),
 		unique("usage_event_rollups_project_id_id_unique").on(table.projectId, table.id),
 		uniqueIndex("idx_billing_usage_event_rollups_scope").on(
 			table.projectId,
@@ -2063,7 +3023,9 @@ export const usageEventRollups = pgTable(
 			sql`COALESCE(${table.entityId}, 0::bigint)`,
 			table.periodStartAt,
 		),
-		index("idx_billing_usage_event_rollups_close").on(table.periodEndAt, table.id),
+		index("idx_billing_usage_event_rollups_close")
+			.on(table.periodEndAt, table.id)
+			.where(sql`${table.status} = 'open'`),
 	],
 );
 
@@ -2109,7 +3071,50 @@ export const usageInvoicePeriods = pgTable(
 		invoicedAt: timestamp("invoiced_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("usage_invoice_periods_usage_quantity_check", sql`((usage_quantity >= (0)::numeric))`),
+		check(
+			"usage_invoice_periods_included_quantity_check",
+			sql`((included_quantity >= (0)::numeric))`,
+		),
+		check(
+			"usage_invoice_periods_billable_quantity_check",
+			sql`((billable_quantity >= (0)::numeric))`,
+		),
+		check("usage_invoice_periods_billing_units_check", sql`((billing_units > (0)::numeric))`),
+		check("usage_invoice_periods_unit_amount_minor_check", sql`((unit_amount_minor >= 0))`),
+		check("usage_invoice_periods_amount_minor_check", sql`((amount_minor >= 0))`),
+		check("usage_invoice_periods_currency_check", sql`((char_length(currency) = 3))`),
+		check(
+			"usage_invoice_periods_status_check",
+			sql`((status = ANY (ARRAY['pending'::text, 'processing'::text, 'invoiced'::text, 'credited'::text, 'failed'::text])))`,
+		),
+		check("usage_invoice_periods_attempts_check", sql`((attempts >= 0))`),
+		check("usage_invoice_periods_bounds_check", sql`((period_end_at > period_start_at))`),
+		check(
+			"usage_invoice_periods_state_check",
+			sql`((((status = ANY (ARRAY['invoiced'::text, 'credited'::text])) AND (invoiced_at IS NOT NULL) AND (last_error IS NULL)) OR ((status = 'failed'::text) AND (last_error IS NOT NULL) AND (invoiced_at IS NULL)) OR ((status = ANY (ARRAY['pending'::text, 'processing'::text])) AND (invoiced_at IS NULL))))`,
+		),
+		foreignKey({
+			name: "usage_invoice_periods_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "usage_invoice_periods_project_subscription_fk",
+			columns: [table.projectId, table.subscriptionId],
+			foreignColumns: [subscriptions.projectId, subscriptions.id],
+		}),
+		foreignKey({
+			name: "usage_invoice_periods_project_plan_item_fk",
+			columns: [table.projectId, table.planItemId],
+			foreignColumns: [planItems.projectId, planItems.id],
+		}),
+		foreignKey({
+			name: "usage_invoice_periods_project_component_fk",
+			columns: [table.projectId, table.priceComponentId],
+			foreignColumns: [priceComponents.projectId, priceComponents.id],
+		}),
 		check(
 			"usage_invoice_periods_provider_check",
 			sql`${table.provider} IN ('apple', 'google', 'stripe')`,
@@ -2161,7 +3166,28 @@ export const usageInvoiceAdjustments = pgTable(
 		invoicedAt: timestamp("invoiced_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("usage_invoice_adjustments_quantity_check", sql`((quantity <> (0)::numeric))`),
+		check("usage_invoice_adjustments_currency_check", sql`((char_length(currency) = 3))`),
+		check(
+			"usage_invoice_adjustments_status_check",
+			sql`((status = ANY (ARRAY['pending'::text, 'processing'::text, 'invoiced'::text, 'credited'::text, 'failed'::text])))`,
+		),
+		check("usage_invoice_adjustments_attempts_check", sql`((attempts >= 0))`),
+		check(
+			"usage_invoice_adjustments_state_check",
+			sql`((((status = ANY (ARRAY['invoiced'::text, 'credited'::text])) AND (invoiced_at IS NOT NULL) AND (last_error IS NULL)) OR ((status = 'failed'::text) AND (last_error IS NOT NULL) AND (invoiced_at IS NULL)) OR ((status = ANY (ARRAY['pending'::text, 'processing'::text])) AND (invoiced_at IS NULL))))`,
+		),
+		foreignKey({
+			name: "usage_invoice_adjustments_event_fk",
+			columns: [table.usageEventRecordedAt, table.usageEventId],
+			foreignColumns: [usageEvents.recordedAt, usageEvents.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "usage_invoice_adjustments_project_period_fk",
+			columns: [table.projectId, table.closedPeriodId],
+			foreignColumns: [usageInvoicePeriods.projectId, usageInvoicePeriods.id],
+		}),
 		unique("usage_invoice_adjustments_project_id_id_unique").on(table.projectId, table.id),
 		unique("usage_invoice_adjustments_event_unique").on(
 			table.projectId,
@@ -2206,7 +3232,41 @@ export const enterpriseContracts = pgTable(
 		publishedAt: timestamp("published_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"enterprise_contracts_contract_key_check",
+			sql`(((char_length(contract_key) >= 1) AND (char_length(contract_key) <= 120)))`,
+		),
+		check("enterprise_contracts_version_check", sql`((version > 0))`),
+		check(
+			"enterprise_contracts_status_check",
+			sql`((status = ANY (ARRAY['draft'::text, 'published'::text, 'expired'::text, 'terminated'::text])))`,
+		),
+		check("enterprise_contracts_terms_check", sql`((jsonb_typeof(terms) = 'object'::text))`),
+		check("enterprise_contracts_preview_token_check", sql`((char_length(preview_token) = 64))`),
+		check("enterprise_contracts_intent_hash_check", sql`((char_length(intent_hash) = 64))`),
+		check(
+			"enterprise_contracts_created_by_check",
+			sql`(((char_length(created_by) >= 1) AND (char_length(created_by) <= 200)))`,
+		),
+		check(
+			"enterprise_contracts_bounds_check",
+			sql`(((expires_at IS NULL) OR (expires_at > effective_at)))`,
+		),
+		check(
+			"enterprise_contracts_publish_check",
+			sql`((((status = 'draft'::text) AND (published_at IS NULL)) OR ((status <> 'draft'::text) AND (published_at IS NOT NULL))))`,
+		),
+		foreignKey({
+			name: "enterprise_contracts_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "enterprise_contracts_project_plan_fk",
+			columns: [table.projectId, table.planVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}).onDelete("restrict"),
 		unique("enterprise_contracts_project_id_id_unique").on(table.projectId, table.id),
 		unique("enterprise_contracts_key_version_unique").on(
 			table.projectId,
@@ -2216,12 +3276,12 @@ export const enterpriseContracts = pgTable(
 		),
 		unique("enterprise_contracts_preview_token_unique").on(table.projectId, table.previewToken),
 		index("idx_billing_enterprise_contracts_active")
-			.on(table.projectId, table.customerId, table.effectiveAt, table.version)
-			.where(sql`${table.status} = 'published'`),
+			.on(table.projectId, table.customerId, table.effectiveAt.desc(), table.version.desc())
+			.where(sql`(status = 'published'::text)`),
 		index("idx_billing_enterprise_contracts_customer").on(
 			table.projectId,
 			table.customerId,
-			table.effectiveAt,
+			table.effectiveAt.desc(),
 		),
 	],
 );
@@ -2261,7 +3321,63 @@ export const controlPolicies = pgTable(
 		metadata: metadataColumn(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"control_policies_source_type_check",
+			sql`((source_type = ANY (ARRAY['plan_default'::text, 'contract'::text, 'account'::text, 'entity'::text])))`,
+		),
+		check(
+			"control_policies_control_kind_check",
+			sql`((control_kind = ANY (ARRAY['spend_limit'::text, 'usage_limit'::text])))`,
+		),
+		check("control_policies_limit_value_check", sql`((limit_value >= (0)::numeric))`),
+		check(
+			"control_policies_interval_check",
+			sql`(("interval" = ANY (ARRAY['month'::text, 'year'::text, 'lifetime'::text])))`,
+		),
+		check("control_policies_revision_check", sql`((revision > 0))`),
+		check(
+			"control_policies_created_by_check",
+			sql`(((char_length(created_by) >= 1) AND (char_length(created_by) <= 200)))`,
+		),
+		foreignKey({
+			name: "control_policies_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "control_policies_project_entity_fk",
+			columns: [table.projectId, table.entityId],
+			foreignColumns: [entities.projectId, entities.id],
+		}).onDelete("cascade"),
+		check("control_policies_metadata_check", sql`((jsonb_typeof(metadata) = 'object'::text))`),
+		check(
+			"control_policies_bounds_check",
+			sql`(((expires_at IS NULL) OR (expires_at > effective_at)))`,
+		),
+		check(
+			"control_policies_value_shape_check",
+			sql`((((control_kind = 'spend_limit'::text) AND (currency IS NOT NULL) AND (feature_id IS NULL) AND (trunc(limit_value) = limit_value)) OR ((control_kind = 'usage_limit'::text) AND (currency IS NULL) AND (feature_id IS NOT NULL))))`,
+		),
+		check(
+			"control_policies_source_shape_check",
+			sql`((((source_type = 'plan_default'::text) AND (plan_version_id IS NOT NULL) AND (contract_id IS NULL) AND (customer_id IS NULL) AND (entity_id IS NULL)) OR ((source_type = 'contract'::text) AND (plan_version_id IS NULL) AND (contract_id IS NOT NULL) AND (customer_id IS NULL) AND (entity_id IS NULL)) OR ((source_type = 'account'::text) AND (plan_version_id IS NULL) AND (contract_id IS NULL) AND (customer_id IS NOT NULL) AND (entity_id IS NULL)) OR ((source_type = 'entity'::text) AND (plan_version_id IS NULL) AND (contract_id IS NULL) AND (customer_id IS NOT NULL) AND (entity_id IS NOT NULL))))`,
+		),
+		foreignKey({
+			name: "control_policies_project_plan_fk",
+			columns: [table.projectId, table.planVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "control_policies_project_contract_fk",
+			columns: [table.projectId, table.contractId],
+			foreignColumns: [enterpriseContracts.projectId, enterpriseContracts.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "control_policies_project_feature_fk",
+			columns: [table.projectId, table.featureId],
+			foreignColumns: [features.projectId, features.id],
+		}).onDelete("restrict"),
 		unique("control_policies_project_id_id_unique").on(table.projectId, table.id),
 		index("idx_billing_control_policies_plan")
 			.on(table.projectId, table.planVersionId, table.controlKind)
@@ -2297,7 +3413,28 @@ export const controlWindows = pgTable(
 		heldValue: numeric("held_value", { precision: 38, scale: 9 }).notNull().default("0"),
 		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("control_windows_consumed_value_check", sql`((consumed_value >= (0)::numeric))`),
+		check("control_windows_held_value_check", sql`((held_value >= (0)::numeric))`),
+		check(
+			"control_windows_bounds_check",
+			sql`(((window_end_at IS NULL) OR (window_end_at > window_start_at)))`,
+		),
+		foreignKey({
+			name: "control_windows_project_policy_fk",
+			columns: [table.projectId, table.controlPolicyId],
+			foreignColumns: [controlPolicies.projectId, controlPolicies.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "control_windows_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "control_windows_project_entity_fk",
+			columns: [table.projectId, table.entityId],
+			foreignColumns: [entities.projectId, entities.id],
+		}).onDelete("cascade"),
 		unique("control_windows_project_id_id_unique").on(table.projectId, table.id),
 		unique("control_windows_scope_unique").on(
 			table.projectId,
@@ -2309,7 +3446,7 @@ export const controlWindows = pgTable(
 			table.projectId,
 			table.customerId,
 			table.controlPolicyId,
-			table.windowStartAt,
+			table.windowStartAt.desc(),
 		),
 	],
 );
@@ -2330,7 +3467,22 @@ export const reservationControlHolds = pgTable(
 		consumedValue: numeric("consumed_value", { precision: 38, scale: 9 }).notNull().default("0"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("reservation_control_holds_held_value_check", sql`((held_value >= (0)::numeric))`),
+		check(
+			"reservation_control_holds_consumed_value_check",
+			sql`((consumed_value >= (0)::numeric))`,
+		),
+		foreignKey({
+			name: "reservation_control_holds_project_reservation_fk",
+			columns: [table.projectId, table.reservationId],
+			foreignColumns: [reservations.projectId, reservations.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "reservation_control_holds_project_window_fk",
+			columns: [table.projectId, table.controlWindowId],
+			foreignColumns: [controlWindows.projectId, controlWindows.id],
+		}).onDelete("restrict"),
 		primaryKey({
 			columns: [table.projectId, table.reservationId, table.controlWindowId],
 		}),
@@ -2355,7 +3507,17 @@ export const usageEventControlEntries = pgTable(
 		value: numeric("value", { precision: 38, scale: 9 }).notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		foreignKey({
+			name: "usage_event_control_entries_event_fk",
+			columns: [table.usageEventRecordedAt, table.usageEventId],
+			foreignColumns: [usageEvents.recordedAt, usageEvents.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "usage_event_control_entries_project_window_fk",
+			columns: [table.projectId, table.controlWindowId],
+			foreignColumns: [controlWindows.projectId, controlWindows.id],
+		}).onDelete("restrict"),
 		primaryKey({
 			columns: [
 				table.projectId,
@@ -2400,7 +3562,40 @@ export const usageAlerts = pgTable(
 		metadata: metadataColumn(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"usage_alerts_threshold_type_check",
+			sql`((threshold_type = ANY (ARRAY['absolute'::text, 'percentage'::text])))`,
+		),
+		check("usage_alerts_threshold_value_check", sql`((threshold_value > (0)::numeric))`),
+		check(
+			"usage_alerts_interval_check",
+			sql`(("interval" = ANY (ARRAY['month'::text, 'year'::text, 'lifetime'::text])))`,
+		),
+		check(
+			"usage_alerts_created_by_check",
+			sql`(((char_length(created_by) >= 1) AND (char_length(created_by) <= 200)))`,
+		),
+		check("usage_alerts_metadata_check", sql`((jsonb_typeof(metadata) = 'object'::text))`),
+		check(
+			"usage_alerts_percentage_check",
+			sql`(((threshold_type <> 'percentage'::text) OR (threshold_value <= (100)::numeric)))`,
+		),
+		foreignKey({
+			name: "usage_alerts_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "usage_alerts_project_entity_fk",
+			columns: [table.projectId, table.entityId],
+			foreignColumns: [entities.projectId, entities.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "usage_alerts_project_feature_fk",
+			columns: [table.projectId, table.featureId],
+			foreignColumns: [features.projectId, features.id],
+		}).onDelete("restrict"),
 		unique("usage_alerts_project_id_id_unique").on(table.projectId, table.id),
 		index("idx_billing_usage_alerts_scope")
 			.on(table.projectId, table.customerId, table.featureId, table.entityId)
@@ -2425,7 +3620,19 @@ export const usageAlertStates = pgTable(
 		crossingSequence: integer("crossing_sequence").notNull().default(0),
 		lastEvaluatedAt: timestamp("last_evaluated_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [primaryKey({ columns: [table.projectId, table.alertId] })],
+	(table): PgTableExtraConfigValue[] => [
+		check("usage_alert_states_crossing_sequence_check", sql`((crossing_sequence >= 0))`),
+		check(
+			"usage_alert_states_bounds_check",
+			sql`(((window_end_at IS NULL) OR (window_end_at > window_start_at)))`,
+		),
+		foreignKey({
+			name: "usage_alert_states_project_alert_fk",
+			columns: [table.projectId, table.alertId],
+			foreignColumns: [usageAlerts.projectId, usageAlerts.id],
+		}).onDelete("cascade"),
+		primaryKey({ columns: [table.projectId, table.alertId] }),
+	],
 );
 
 export const usageAlertEvents = pgTable(
@@ -2454,7 +3661,22 @@ export const usageAlertEvents = pgTable(
 		eventType: text("event_type").$type<"threshold_crossed" | "threshold_rearmed">().notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("usage_alert_events_crossing_sequence_check", sql`((crossing_sequence > 0))`),
+		check(
+			"usage_alert_events_event_type_check",
+			sql`((event_type = ANY (ARRAY['threshold_crossed'::text, 'threshold_rearmed'::text])))`,
+		),
+		foreignKey({
+			name: "usage_alert_events_project_alert_fk",
+			columns: [table.projectId, table.alertId],
+			foreignColumns: [usageAlerts.projectId, usageAlerts.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "usage_alert_events_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
 		unique("usage_alert_events_project_id_id_unique").on(table.projectId, table.id),
 		unique("usage_alert_events_crossing_unique").on(
 			table.projectId,
@@ -2466,7 +3688,7 @@ export const usageAlertEvents = pgTable(
 		index("idx_billing_usage_alert_events_customer").on(
 			table.projectId,
 			table.customerId,
-			table.createdAt,
+			table.createdAt.desc(),
 		),
 	],
 );
@@ -2501,7 +3723,59 @@ export const autoTopupPolicies = pgTable(
 		createdBy: text("created_by").notNull(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"auto_topup_policies_provider_check",
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+		),
+		check(
+			"auto_topup_policies_threshold_quantity_check",
+			sql`((threshold_quantity >= (0)::numeric))`,
+		),
+		check(
+			"auto_topup_policies_cooldown_seconds_check",
+			sql`(((cooldown_seconds >= 30) AND (cooldown_seconds <= 86400)))`,
+		),
+		check(
+			"auto_topup_policies_limit_interval_seconds_check",
+			sql`((limit_interval_seconds >= 60))`,
+		),
+		check(
+			"auto_topup_policies_max_purchases_per_interval_check",
+			sql`((max_purchases_per_interval > 0))`,
+		),
+		check(
+			"auto_topup_policies_max_spend_minor_check",
+			sql`(((max_spend_minor IS NULL) OR (max_spend_minor > 0)))`,
+		),
+		check(
+			"auto_topup_policies_max_consecutive_failures_check",
+			sql`((max_consecutive_failures > 0))`,
+		),
+		check(
+			"auto_topup_policies_created_by_check",
+			sql`(((char_length(created_by) >= 1) AND (char_length(created_by) <= 200)))`,
+		),
+		foreignKey({
+			name: "auto_topup_policies_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "auto_topup_policies_project_entity_fk",
+			columns: [table.projectId, table.entityId],
+			foreignColumns: [entities.projectId, entities.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "auto_topup_policies_project_feature_fk",
+			columns: [table.projectId, table.featureId],
+			foreignColumns: [features.projectId, features.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "auto_topup_policies_project_option_fk",
+			columns: [table.projectId, table.topupOptionId],
+			foreignColumns: [topupOptions.projectId, topupOptions.id],
+		}).onDelete("restrict"),
 		unique("auto_topup_policies_project_id_id_unique").on(table.projectId, table.id),
 		uniqueIndex("idx_billing_auto_topup_policies_scope").on(
 			table.projectId,
@@ -2537,7 +3811,25 @@ export const autoTopupStates = pgTable(
 		lastError: text("last_error"),
 		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [primaryKey({ columns: [table.projectId, table.policyId] })],
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"auto_topup_states_status_check",
+			sql`((status = ANY (ARRAY['ready'::text, 'cooldown'::text, 'suspended'::text])))`,
+		),
+		check("auto_topup_states_purchases_in_interval_check", sql`((purchases_in_interval >= 0))`),
+		check("auto_topup_states_spend_minor_in_interval_check", sql`((spend_minor_in_interval >= 0))`),
+		check("auto_topup_states_consecutive_failures_check", sql`((consecutive_failures >= 0))`),
+		check(
+			"auto_topup_states_shape_check",
+			sql`((((status = 'suspended'::text) AND (circuit_opened_at IS NOT NULL)) OR ((status <> 'suspended'::text) AND (circuit_opened_at IS NULL))))`,
+		),
+		foreignKey({
+			name: "auto_topup_states_project_policy_fk",
+			columns: [table.projectId, table.policyId],
+			foreignColumns: [autoTopupPolicies.projectId, autoTopupPolicies.id],
+		}).onDelete("cascade"),
+		primaryKey({ columns: [table.projectId, table.policyId] }),
+	],
 );
 
 export const autoTopupJobs = pgTable(
@@ -2578,7 +3870,47 @@ export const autoTopupJobs = pgTable(
 		completedAt: timestamp("completed_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"auto_topup_jobs_amount_minor_check",
+			sql`(((amount_minor IS NULL) OR (amount_minor >= 0)))`,
+		),
+		check(
+			"auto_topup_jobs_trigger_key_check",
+			sql`(((char_length(trigger_key) >= 1) AND (char_length(trigger_key) <= 256)))`,
+		),
+		check(
+			"auto_topup_jobs_provider_check",
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+		),
+		check(
+			"auto_topup_jobs_status_check",
+			sql`((status = ANY (ARRAY['pending'::text, 'processing'::text, 'succeeded'::text, 'failed'::text, 'provider_action_required'::text])))`,
+		),
+		check(
+			"auto_topup_jobs_charged_amount_minor_check",
+			sql`(((charged_amount_minor IS NULL) OR (charged_amount_minor >= 0)))`,
+		),
+		check("auto_topup_jobs_attempts_check", sql`((attempts >= 0))`),
+		check(
+			"auto_topup_jobs_state_check",
+			sql`((((status = 'succeeded'::text) AND (completed_at IS NOT NULL) AND (charged_amount_minor IS NOT NULL) AND (external_invoice_id IS NOT NULL)) OR ((status = ANY (ARRAY['failed'::text, 'provider_action_required'::text])) AND (completed_at IS NOT NULL) AND (last_error IS NOT NULL)) OR ((status = ANY (ARRAY['pending'::text, 'processing'::text])) AND (completed_at IS NULL))))`,
+		),
+		foreignKey({
+			name: "auto_topup_jobs_project_policy_fk",
+			columns: [table.projectId, table.policyId],
+			foreignColumns: [autoTopupPolicies.projectId, autoTopupPolicies.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "auto_topup_jobs_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "auto_topup_jobs_project_store_product_fk",
+			columns: [table.projectId, table.storeProductId],
+			foreignColumns: [storeProducts.projectId, storeProducts.id],
+		}).onDelete("restrict"),
 		unique("auto_topup_jobs_project_id_id_unique").on(table.projectId, table.id),
 		unique("auto_topup_jobs_trigger_unique").on(table.projectId, table.policyId, table.triggerKey),
 		index("idx_billing_auto_topup_jobs_due")
@@ -2588,7 +3920,7 @@ export const autoTopupJobs = pgTable(
 			.on(table.lockedAt, table.createdAt)
 			.where(sql`${table.status} = 'processing'`),
 		index("idx_billing_auto_topup_jobs_policy").on(table.policyId),
-		index("idx_billing_auto_topup_jobs_customer").on(table.customerId, table.createdAt),
+		index("idx_billing_auto_topup_jobs_customer").on(table.customerId, table.createdAt.desc()),
 		index("idx_billing_auto_topup_jobs_store_product").on(table.storeProductId),
 	],
 );
@@ -2619,7 +3951,40 @@ export const catalogMigrationDrafts = pgTable(
 		publishedAt: timestamp("published_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("catalog_migration_drafts_preview_token_check", sql`((char_length(preview_token) = 64))`),
+		check("catalog_migration_drafts_intent_hash_check", sql`((char_length(intent_hash) = 64))`),
+		check(
+			"catalog_migration_drafts_effective_mode_check",
+			sql`((effective_mode = ANY (ARRAY['immediate'::text, 'period_end'::text])))`,
+		),
+		check(
+			"catalog_migration_drafts_status_check",
+			sql`((status = ANY (ARRAY['previewed'::text, 'published'::text, 'expired'::text])))`,
+		),
+		check("catalog_migration_drafts_impact_check", sql`((jsonb_typeof(impact) = 'object'::text))`),
+		check(
+			"catalog_migration_drafts_created_by_check",
+			sql`(((char_length(created_by) >= 1) AND (char_length(created_by) <= 200)))`,
+		),
+		check(
+			"catalog_migration_drafts_distinct_check",
+			sql`((from_plan_version_id <> to_plan_version_id))`,
+		),
+		check(
+			"catalog_migration_drafts_publish_check",
+			sql`((((status = 'published'::text) AND (published_at IS NOT NULL)) OR ((status <> 'published'::text) AND (published_at IS NULL))))`,
+		),
+		foreignKey({
+			name: "catalog_migration_drafts_project_from_fk",
+			columns: [table.projectId, table.fromPlanVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "catalog_migration_drafts_project_to_fk",
+			columns: [table.projectId, table.toPlanVersionId],
+			foreignColumns: [planVersions.projectId, planVersions.id],
+		}).onDelete("restrict"),
 		unique("catalog_migration_drafts_project_id_id_unique").on(table.projectId, table.id),
 		unique("catalog_migration_drafts_token_unique").on(table.projectId, table.previewToken),
 		index("idx_billing_catalog_migration_drafts_expiry").on(table.status, table.expiresAt),
@@ -2655,7 +4020,35 @@ export const catalogMigrationJobs = pgTable(
 		appliedAt: timestamp("applied_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"catalog_migration_jobs_status_check",
+			sql`((status = ANY (ARRAY['pending'::text, 'processing'::text, 'waiting_provider'::text, 'applied'::text, 'failed'::text, 'skipped'::text])))`,
+		),
+		check(
+			"catalog_migration_jobs_effective_mode_check",
+			sql`((effective_mode = ANY (ARRAY['immediate'::text, 'period_end'::text])))`,
+		),
+		check("catalog_migration_jobs_attempts_check", sql`((attempts >= 0))`),
+		check(
+			"catalog_migration_jobs_state_check",
+			sql`((((status = 'applied'::text) AND (applied_at IS NOT NULL) AND (last_error IS NULL)) OR ((status = ANY (ARRAY['failed'::text, 'skipped'::text])) AND (applied_at IS NULL) AND (last_error IS NOT NULL)) OR ((status = 'waiting_provider'::text) AND (applied_at IS NULL) AND (subscription_change_id IS NOT NULL)) OR ((status = ANY (ARRAY['pending'::text, 'processing'::text])) AND (applied_at IS NULL))))`,
+		),
+		foreignKey({
+			name: "catalog_migration_jobs_project_draft_fk",
+			columns: [table.projectId, table.draftId],
+			foreignColumns: [catalogMigrationDrafts.projectId, catalogMigrationDrafts.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "catalog_migration_jobs_project_subscription_fk",
+			columns: [table.projectId, table.subscriptionId],
+			foreignColumns: [subscriptions.projectId, subscriptions.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "catalog_migration_jobs_project_change_fk",
+			columns: [table.projectId, table.subscriptionChangeId],
+			foreignColumns: [subscriptionChanges.projectId, subscriptionChanges.id],
+		}).onDelete("set null"),
 		unique("catalog_migration_jobs_project_id_id_unique").on(table.projectId, table.id),
 		unique("catalog_migration_jobs_subscription_unique").on(
 			table.projectId,
@@ -2697,7 +4090,28 @@ export const licensePools = pgTable(
 		active: boolean("active").notNull().default(true),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("license_pools_quantity_check", sql`((quantity > 0))`),
+		foreignKey({
+			name: "license_pools_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "license_pools_project_subscription_fk",
+			columns: [table.projectId, table.subscriptionId],
+			foreignColumns: [subscriptions.projectId, subscriptions.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "license_pools_project_plan_item_fk",
+			columns: [table.projectId, table.planItemId],
+			foreignColumns: [planItems.projectId, planItems.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "license_pools_project_feature_fk",
+			columns: [table.projectId, table.featureId],
+			foreignColumns: [features.projectId, features.id],
+		}).onDelete("restrict"),
 		unique("license_pools_project_id_id_unique").on(table.projectId, table.id),
 		unique("license_pools_item_unique").on(table.projectId, table.subscriptionId, table.planItemId),
 		index("idx_billing_license_pools_customer").on(table.projectId, table.customerId, table.active),
@@ -2723,7 +4137,27 @@ export const licenseAssignments = pgTable(
 		revokedAt: timestamp("revoked_at", { withTimezone: true }),
 		metadata: metadataColumn(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("license_assignments_quantity_check", sql`((quantity > 0))`),
+		check(
+			"license_assignments_assigned_by_check",
+			sql`(((char_length(assigned_by) >= 1) AND (char_length(assigned_by) <= 200)))`,
+		),
+		check("license_assignments_metadata_check", sql`((jsonb_typeof(metadata) = 'object'::text))`),
+		check(
+			"license_assignments_bounds_check",
+			sql`(((revoked_at IS NULL) OR (revoked_at >= assigned_at)))`,
+		),
+		foreignKey({
+			name: "license_assignments_project_pool_fk",
+			columns: [table.projectId, table.licensePoolId],
+			foreignColumns: [licensePools.projectId, licensePools.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "license_assignments_project_entity_fk",
+			columns: [table.projectId, table.entityId],
+			foreignColumns: [entities.projectId, entities.id],
+		}).onDelete("cascade"),
 		unique("license_assignments_project_id_id_unique").on(table.projectId, table.id),
 		uniqueIndex("idx_billing_license_assignments_active")
 			.on(table.projectId, table.licensePoolId, table.entityId)
@@ -2764,7 +4198,54 @@ export const promotions = pgTable(
 		archivedAt: timestamp("archived_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("promotions_key_check", sql`(((char_length(key) >= 1) AND (char_length(key) <= 120)))`),
+		check(
+			"promotions_name_check",
+			sql`(((char_length(name) >= 1) AND (char_length(name) <= 200)))`,
+		),
+		check(
+			"promotions_effect_kind_check",
+			sql`((effect_kind = ANY (ARRAY['discount'::text, 'feature_grant'::text, 'plan_grant'::text])))`,
+		),
+		check(
+			"promotions_status_check",
+			sql`((status = ANY (ARRAY['active'::text, 'archived'::text])))`,
+		),
+		check(
+			"promotions_discount_type_check",
+			sql`(((discount_type IS NULL) OR (discount_type = ANY (ARRAY['percent'::text, 'amount'::text]))))`,
+		),
+		check(
+			"promotions_percent_off_bps_check",
+			sql`(((percent_off_bps IS NULL) OR ((percent_off_bps >= 1) AND (percent_off_bps <= 10000))))`,
+		),
+		check(
+			"promotions_discount_duration_check",
+			sql`(((discount_duration IS NULL) OR (discount_duration = ANY (ARRAY['once'::text, 'repeating'::text, 'forever'::text]))))`,
+		),
+		check(
+			"promotions_duration_months_check",
+			sql`(((duration_months IS NULL) OR ((duration_months >= 1) AND (duration_months <= 36))))`,
+		),
+		check(
+			"promotions_grant_duration_unit_check",
+			sql`(((grant_duration_unit IS NULL) OR (grant_duration_unit = ANY (ARRAY['day'::text, 'month'::text]))))`,
+		),
+		check(
+			"promotions_grant_duration_count_check",
+			sql`(((grant_duration_count IS NULL) OR ((grant_duration_count >= 1) AND (grant_duration_count <= 730))))`,
+		),
+		check("promotions_terms_hash_check", sql`((char_length(terms_hash) = 64))`),
+		check("promotions_metadata_check", sql`((jsonb_typeof(metadata) = 'object'::text))`),
+		check(
+			"promotions_created_by_check",
+			sql`(((char_length(created_by) >= 1) AND (char_length(created_by) <= 200)))`,
+		),
+		check(
+			"promotions_archived_by_check",
+			sql`(((archived_by IS NULL) OR ((char_length(archived_by) >= 1) AND (char_length(archived_by) <= 200))))`,
+		),
 		unique("promotions_project_id_id_unique").on(table.projectId, table.id),
 		unique("promotions_project_key_unique").on(table.projectId, table.key),
 		foreignKey({
@@ -2802,7 +4283,9 @@ export const promotionDiscountAmounts = pgTable(
 		currency: text("currency").notNull(),
 		amountOffMinor: bigint("amount_off_minor", { mode: "number" }).notNull(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("promotion_discount_amounts_currency_check", sql`((currency ~ '^[A-Z]{3}$'::text))`),
+		check("promotion_discount_amounts_amount_off_minor_check", sql`((amount_off_minor > 0))`),
 		primaryKey({
 			name: "promotion_discount_amounts_pkey",
 			columns: [table.projectId, table.promotionId, table.currency],
@@ -2827,7 +4310,11 @@ export const promotionTargets = pgTable(
 		planId: bigint("plan_id", { mode: "number" }),
 		productId: uuid("product_id"),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"promotion_targets_target_kind_check",
+			sql`((target_kind = ANY (ARRAY['plan'::text, 'product'::text])))`,
+		),
 		unique("promotion_targets_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "promotion_targets_project_promotion_fk",
@@ -2869,7 +4356,12 @@ export const promotionGrantItems = pgTable(
 		quantity: quantityColumn("quantity").notNull(),
 		expiresAfterSeconds: bigint("expires_after_seconds", { mode: "number" }),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("promotion_grant_items_quantity_check", sql`((quantity > (0)::numeric))`),
+		check(
+			"promotion_grant_items_expires_after_seconds_check",
+			sql`(((expires_after_seconds IS NULL) OR (expires_after_seconds > 0)))`,
+		),
 		unique("promotion_grant_items_project_id_id_unique").on(table.projectId, table.id),
 		unique("promotion_grant_items_project_feature_unique").on(
 			table.projectId,
@@ -2914,7 +4406,34 @@ export const promotionCodes = pgTable(
 		deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check("promotion_codes_code_check", sql`((code ~ '^[A-Za-z0-9-]{3,64}$'::text))`),
+		check(
+			"promotion_codes_normalized_code_check",
+			sql`((normalized_code ~ '^[A-Z0-9-]{3,64}$'::text))`,
+		),
+		check(
+			"promotion_codes_max_redemptions_check",
+			sql`(((max_redemptions IS NULL) OR (max_redemptions > 0)))`,
+		),
+		check(
+			"promotion_codes_max_redemptions_per_customer_check",
+			sql`(((max_redemptions_per_customer IS NULL) OR (max_redemptions_per_customer > 0)))`,
+		),
+		check(
+			"promotion_codes_billing_account_id_check",
+			sql`(((billing_account_id IS NULL) OR ((char_length(billing_account_id) >= 1) AND (char_length(billing_account_id) <= 200))))`,
+		),
+		check("promotion_codes_redeemed_count_check", sql`((redeemed_count >= 0))`),
+		check("promotion_codes_reserved_count_check", sql`((reserved_count >= 0))`),
+		check(
+			"promotion_codes_created_by_check",
+			sql`(((char_length(created_by) >= 1) AND (char_length(created_by) <= 200)))`,
+		),
+		check(
+			"promotion_codes_deactivated_by_check",
+			sql`(((deactivated_by IS NULL) OR ((char_length(deactivated_by) >= 1) AND (char_length(deactivated_by) <= 200))))`,
+		),
 		unique("promotion_codes_project_id_id_unique").on(table.projectId, table.id),
 		unique("promotion_codes_project_code_unique").on(table.projectId, table.normalizedCode),
 		foreignKey({
@@ -2989,7 +4508,53 @@ export const promotionProviderObjects = pgTable(
 		retiredAt: timestamp("retired_at", { withTimezone: true }),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"promotion_provider_objects_provider_check",
+			sql`((provider = ANY (ARRAY['stripe'::text, 'apple'::text, 'google'::text])))`,
+		),
+		check(
+			"promotion_provider_objects_object_kind_check",
+			sql`((object_kind = ANY (ARRAY['coupon'::text, 'promotion_code'::text, 'apple_promotional_offer'::text, 'apple_offer_code'::text, 'google_developer_offer'::text, 'google_promo_code'::text])))`,
+		),
+		check(
+			"promotion_provider_objects_external_id_check",
+			sql`(((external_id IS NULL) OR ((char_length(external_id) >= 1) AND (char_length(external_id) <= 255))))`,
+		),
+		check("promotion_provider_objects_desired_generation_check", sql`((desired_generation >= 0))`),
+		check(
+			"promotion_provider_objects_product_external_id_check",
+			sql`(((product_external_id IS NULL) OR ((char_length(product_external_id) >= 1) AND (char_length(product_external_id) <= 255))))`,
+		),
+		check(
+			"promotion_provider_objects_base_plan_id_check",
+			sql`(((base_plan_id IS NULL) OR ((char_length(base_plan_id) >= 1) AND (char_length(base_plan_id) <= 255))))`,
+		),
+		check(
+			"promotion_provider_objects_redemption_code_check",
+			sql`(((redemption_code IS NULL) OR ((char_length(redemption_code) >= 1) AND (char_length(redemption_code) <= 255))))`,
+		),
+		check(
+			"promotion_provider_objects_applies_to_check",
+			sql`((jsonb_typeof(applies_to) = 'object'::text))`,
+		),
+		check(
+			"promotion_provider_objects_applies_to_hash_check",
+			sql`(((applies_to_hash IS NULL) OR (char_length(applies_to_hash) = 64)))`,
+		),
+		check(
+			"promotion_provider_objects_status_check",
+			sql`((status = ANY (ARRAY['pending'::text, 'ready'::text, 'failed'::text, 'retired'::text])))`,
+		),
+		check("promotion_provider_objects_attempts_check", sql`((attempts >= 0))`),
+		check(
+			"promotion_provider_objects_locked_by_check",
+			sql`(((locked_by IS NULL) OR ((char_length(locked_by) >= 1) AND (char_length(locked_by) <= 200))))`,
+		),
+		check(
+			"promotion_provider_objects_error_check",
+			sql`(((error IS NULL) OR (char_length(error) <= 2000)))`,
+		),
 		unique("promotion_provider_objects_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "promotion_provider_objects_project_promotion_fk",
@@ -3101,7 +4666,84 @@ export const promotionRedemptions = pgTable(
 		reversalResult: jsonb("reversal_result").$type<Record<string, unknown>>(),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"promotion_redemptions_channel_check",
+			sql`((channel = ANY (ARRAY['web'::text, 'ios'::text, 'android'::text])))`,
+		),
+		check(
+			"promotion_redemptions_status_check",
+			sql`((status = ANY (ARRAY['reserved'::text, 'applied'::text, 'released'::text, 'reversed'::text])))`,
+		),
+		check(
+			"promotion_redemptions_provider_check",
+			sql`((provider = ANY (ARRAY['quotum'::text, 'stripe'::text, 'apple'::text, 'google'::text])))`,
+		),
+		check(
+			"promotion_redemptions_source_check",
+			sql`((source = ANY (ARRAY['api_redeem'::text, 'commercial_action'::text, 'stripe_hosted_checkout'::text, 'apple_offer'::text, 'google_offer'::text])))`,
+		),
+		check(
+			"promotion_redemptions_currency_check",
+			sql`(((currency IS NULL) OR (currency ~ '^[A-Z]{3}$'::text)))`,
+		),
+		check(
+			"promotion_redemptions_amount_subtotal_minor_check",
+			sql`(((amount_subtotal_minor IS NULL) OR (amount_subtotal_minor >= 0)))`,
+		),
+		check(
+			"promotion_redemptions_amount_discount_minor_check",
+			sql`(((amount_discount_minor IS NULL) OR (amount_discount_minor >= 0)))`,
+		),
+		check(
+			"promotion_redemptions_amount_total_minor_check",
+			sql`(((amount_total_minor IS NULL) OR (amount_total_minor >= 0)))`,
+		),
+		check(
+			"promotion_redemptions_effect_snapshot_check",
+			sql`((jsonb_typeof(effect_snapshot) = 'object'::text))`,
+		),
+		check(
+			"promotion_redemptions_result_check",
+			sql`(((result IS NULL) OR ((jsonb_typeof(result) = 'object'::text) AND (octet_length((result)::text) <= 16384))))`,
+		),
+		check(
+			"promotion_redemptions_limit_violation_check",
+			sql`(((limit_violation IS NULL) OR (limit_violation = ANY (ARRAY['global'::text, 'first_purchase'::text, 'not_applicable'::text, 'inactive'::text, 'expired'::text]))))`,
+		),
+		check(
+			"promotion_redemptions_actor_check",
+			sql`(((char_length(actor) >= 1) AND (char_length(actor) <= 200)))`,
+		),
+		check(
+			"promotion_redemptions_reason_check",
+			sql`(((reason IS NULL) OR ((char_length(reason) >= 1) AND (char_length(reason) <= 500))))`,
+		),
+		check(
+			"promotion_redemptions_idempotency_key_check",
+			sql`(((char_length(idempotency_key) >= 1) AND (char_length(idempotency_key) <= 255)))`,
+		),
+		check("promotion_redemptions_request_hash_check", sql`((char_length(request_hash) = 64))`),
+		check(
+			"promotion_redemptions_reversal_actor_check",
+			sql`(((reversal_actor IS NULL) OR ((char_length(reversal_actor) >= 1) AND (char_length(reversal_actor) <= 200))))`,
+		),
+		check(
+			"promotion_redemptions_reversal_reason_check",
+			sql`(((reversal_reason IS NULL) OR ((char_length(reversal_reason) >= 1) AND (char_length(reversal_reason) <= 500))))`,
+		),
+		check(
+			"promotion_redemptions_reversal_idempotency_key_check",
+			sql`(((reversal_idempotency_key IS NULL) OR ((char_length(reversal_idempotency_key) >= 1) AND (char_length(reversal_idempotency_key) <= 255))))`,
+		),
+		check(
+			"promotion_redemptions_reversal_request_hash_check",
+			sql`(((reversal_request_hash IS NULL) OR (char_length(reversal_request_hash) = 64)))`,
+		),
+		check(
+			"promotion_redemptions_reversal_result_check",
+			sql`(((reversal_result IS NULL) OR ((jsonb_typeof(reversal_result) = 'object'::text) AND (octet_length((reversal_result)::text) <= 16384))))`,
+		),
 		unique("promotion_redemptions_project_id_id_unique").on(table.projectId, table.id),
 		unique("promotion_redemptions_idempotency_unique").on(
 			table.projectId,
@@ -3204,7 +4846,16 @@ export const promotionAuditEvents = pgTable(
 		details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"promotion_audit_events_action_check",
+			sql`((action = ANY (ARRAY['promotion_created'::text, 'promotion_archived'::text, 'codes_added'::text, 'code_deactivated'::text, 'provider_mapping_added'::text, 'provider_sync_requested'::text])))`,
+		),
+		check(
+			"promotion_audit_events_actor_check",
+			sql`(((char_length(actor) >= 1) AND (char_length(actor) <= 200)))`,
+		),
+		check("promotion_audit_events_details_check", sql`((jsonb_typeof(details) = 'object'::text))`),
 		unique("promotion_audit_events_project_id_id_unique").on(table.projectId, table.id),
 		foreignKey({
 			name: "promotion_audit_events_project_promotion_fk",
@@ -3256,7 +4907,64 @@ export const planGrants = pgTable(
 		endRequestHash: text("end_request_hash"),
 		...timestampColumns(),
 	},
-	(table) => [
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"plan_grants_duration_unit_check",
+			sql`((duration_unit = ANY (ARRAY['day'::text, 'month'::text])))`,
+		),
+		check(
+			"plan_grants_duration_count_check",
+			sql`(((duration_count >= 1) AND (duration_count <= 730)))`,
+		),
+		check(
+			"plan_grants_actor_check",
+			sql`(((char_length(actor) >= 1) AND (char_length(actor) <= 200)))`,
+		),
+		check(
+			"plan_grants_end_actor_check",
+			sql`(((end_actor IS NULL) OR ((char_length(end_actor) >= 1) AND (char_length(end_actor) <= 200))))`,
+		),
+		check(
+			"plan_grants_end_reason_check",
+			sql`(((end_reason IS NULL) OR ((char_length(end_reason) >= 1) AND (char_length(end_reason) <= 500))))`,
+		),
+		check(
+			"plan_grants_metadata_check",
+			sql`(((jsonb_typeof(metadata) = 'object'::text) AND (octet_length((metadata)::text) <= 4096)))`,
+		),
+		check(
+			"plan_grants_idempotency_key_check",
+			sql`(((char_length(idempotency_key) >= 1) AND (char_length(idempotency_key) <= 255)))`,
+		),
+		check("plan_grants_request_hash_check", sql`((char_length(request_hash) = 64))`),
+		check(
+			"plan_grants_end_idempotency_key_check",
+			sql`(((end_idempotency_key IS NULL) OR ((char_length(end_idempotency_key) >= 1) AND (char_length(end_idempotency_key) <= 255))))`,
+		),
+		check(
+			"plan_grants_end_request_hash_check",
+			sql`(((end_request_hash IS NULL) OR (char_length(end_request_hash) = 64)))`,
+		),
+		check(
+			"plan_grants_bounds_check",
+			sql`(((starts_at < ends_at) AND ((ended_at IS NULL) OR ((ended_at >= starts_at) AND (ended_at <= ends_at)))))`,
+		),
+		check(
+			"plan_grants_entitlement_keys_check",
+			sql`(((cardinality(entitlement_keys) <= 100) AND (array_position(entitlement_keys, NULL::text) IS NULL)))`,
+		),
+		check(
+			"plan_grants_trial_duration_check",
+			sql`(((origin <> 'trial'::text) OR (duration_unit = 'day'::text)))`,
+		),
+		check(
+			"plan_grants_end_key_check",
+			sql`(((end_idempotency_key IS NULL) = (end_request_hash IS NULL)))`,
+		),
+		check(
+			"plan_grants_state_check",
+			sql`((((status = 'active'::text) AND (ended_at IS NULL) AND (superseded_by_subscription_id IS NULL) AND (end_idempotency_key IS NULL)) OR ((status = 'expired'::text) AND (ended_at = ends_at) AND (superseded_by_subscription_id IS NULL) AND (next_period_at IS NULL)) OR ((status = 'ended'::text) AND (ended_at < ends_at) AND (end_idempotency_key IS NOT NULL) AND (superseded_by_subscription_id IS NULL) AND (next_period_at IS NULL)) OR ((status = 'superseded'::text) AND (ended_at IS NOT NULL) AND (superseded_by_subscription_id IS NOT NULL) AND (next_period_at IS NULL))))`,
+		),
 		unique("plan_grants_project_id_id_unique").on(table.projectId, table.id),
 		unique("plan_grants_idempotency_unique").on(
 			table.projectId,
