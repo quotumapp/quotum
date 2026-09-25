@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { Wait } from "testcontainers";
+import { getContainerRuntimeClient, ImageName, Wait } from "testcontainers";
 
 const postgresImage =
 	"postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2";
@@ -36,11 +36,58 @@ export function createPostgresContainer(options: EphemeralPostgresOptions): Post
 	);
 }
 
-export function startPostgresContainer(
+export async function startPostgresContainer(
 	options: EphemeralPostgresOptions,
 ): Promise<StartedPostgreSqlContainer> {
+	await ensurePostgresImage();
 	applyTestcontainersDefaults(process.env);
 	return createPostgresContainer(options).start();
+}
+
+export interface ImageRegistry {
+	exists(): Promise<boolean>;
+	pull(): Promise<void>;
+}
+
+export interface EnsureImageOptions {
+	attempts?: number;
+	registry?: ImageRegistry;
+	sleep?: (milliseconds: number) => Promise<void>;
+}
+
+/**
+ * Hosted runners sometimes get a 5xx from the registry or lose a just-pulled image, and
+ * testcontainers then fails the whole lane when it creates the container. Pull the pinned image
+ * up front through the testcontainers runtime client, with bounded exponential backoff, so the
+ * container start finds it locally.
+ */
+export async function ensurePostgresImage(options: EnsureImageOptions = {}): Promise<void> {
+	const attempts = options.attempts ?? 4;
+	const registry = options.registry ?? (await runtimeImageRegistry());
+	const sleep = options.sleep ?? ((milliseconds: number) => Bun.sleep(milliseconds));
+	if (await registry.exists()) return;
+	let failure: unknown;
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		try {
+			await registry.pull();
+			if (await registry.exists()) return;
+			failure = new Error("the pull finished but the image is not present");
+		} catch (error) {
+			failure = error;
+		}
+		if (attempt < attempts) await sleep(1_000 * 2 ** attempt);
+	}
+	const reason = failure instanceof Error ? failure.message : String(failure);
+	throw new Error(`Could not pull ${postgresImage} after ${attempts} attempts: ${reason}`);
+}
+
+async function runtimeImageRegistry(): Promise<ImageRegistry> {
+	const client = await getContainerRuntimeClient();
+	const image = ImageName.fromString(postgresImage);
+	return {
+		exists: () => client.image.exists(image),
+		pull: () => client.image.pull(image),
+	};
 }
 
 export function applyTestcontainersDefaults(env: NodeJS.ProcessEnv): void {

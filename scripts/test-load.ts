@@ -20,6 +20,7 @@ import { evaluateLoadGates } from "./lib/load-gates";
 import {
 	applyTestcontainersDefaults,
 	createPostgresContainer,
+	ensurePostgresImage,
 	run,
 } from "./lib/postgres-container";
 import { createSanitizedProcessEnv } from "./lib/sanitized-env";
@@ -134,6 +135,7 @@ async function main(options: Options): Promise<void> {
 	let container: StartedPostgreSqlContainer | undefined;
 	let postgresUri = options.postgresUri;
 	if (postgresUri === null) {
+		await ensurePostgresImage();
 		applyTestcontainersDefaults(process.env);
 		container = await createPostgresContainer({ postgresDatabase })
 			.withCommand([
