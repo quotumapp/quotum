@@ -53,7 +53,7 @@ describe("createStripeOAuthPort", () => {
 				preconnect: fetch.preconnect,
 			}),
 		});
-		await expect(port?.exchange("sandbox", "code")).rejects.toThrow();
+		await expect(port?.exchange("sandbox", "code")).rejects.toBeInstanceOf(SyntaxError);
 		const missingRefresh = createStripeOAuthPort(env, {
 			fetch: Object.assign(
 				async () =>
@@ -65,7 +65,9 @@ describe("createStripeOAuthPort", () => {
 				{ preconnect: fetch.preconnect },
 			),
 		});
-		await expect(missingRefresh?.exchange("sandbox", "code")).rejects.toThrow();
+		await expect(missingRefresh?.exchange("sandbox", "code")).rejects.toMatchObject({
+			issues: [expect.objectContaining({ path: ["refresh_token"] })],
+		});
 	});
 
 	it("selects production keys and rejects http authorize URLs", () => {
@@ -74,7 +76,7 @@ describe("createStripeOAuthPort", () => {
 				...env,
 				STRIPE_APP_LIVE_AUTHORIZE_URL: "http://marketplace.stripe.com/oauth/v2/authorize",
 			})?.authorize("production", "state"),
-		).toThrow();
+		).toThrow("Use the Stripe Dashboard OAuth install URL");
 		const port = createStripeOAuthPort(env);
 		expect(port?.webhookSecret("production")).toBe("whsec_live");
 		expect(port?.webhookSecret("sandbox")).toBe("whsec_test");

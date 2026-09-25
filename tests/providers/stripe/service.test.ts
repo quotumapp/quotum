@@ -2123,7 +2123,11 @@ describe("checkout expiration", () => {
 		});
 		await expect(
 			service.expireCheckoutSession({ billingAccountId: "user_1", sessionId: "cs_123" }),
-		).rejects.toBeDefined();
+		).rejects.toMatchObject({
+			message: "Stripe Checkout session does not belong to customer",
+			code: "INVALID_REQUEST",
+			status: 403,
+		});
 		expect(
 			calls.filter((call) => (call as { method: string }).method === "expireCheckoutSession"),
 		).toHaveLength(0);

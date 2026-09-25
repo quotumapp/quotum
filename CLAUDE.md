@@ -176,5 +176,7 @@ with loopback projection delivery. Each throws unless `BILLING_ENV=test` plus it
 ## Conventions worth knowing
 
 `tests/package-scripts.test.ts` pins the exact text of several package scripts, the lane runners
-and Postgres container helper, the Dockerfile, and `src/migrate.ts` safety patterns. Changing
-those requires updating that test deliberately.
+and Postgres container helper, the assertion preload in `bunfig.toml` and `tests/preload.ts`, the
+Dockerfile, and `src/migrate.ts` safety patterns. Changing those requires updating that test
+deliberately. `tests/architecture/test-lanes.test.ts` fails on a lane gate outside the directory
+its runner covers and on any skip, todo or conditional test modifier.

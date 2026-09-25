@@ -1253,7 +1253,13 @@ localDescribe("promotion Checkout", () => {
 			),
 		});
 		expect((await postWebhook(completed, "evt_hosted_checkout")).status).toBe(200);
-		expect(await postWebhook(completed, "evt_hosted_checkout")).toBeDefined();
+		// A redelivery answers like the first delivery and records no second redemption.
+		const redelivered = await postWebhook(completed, "evt_hosted_checkout");
+		expect(redelivered.status).toBe(200);
+		expect(await redelivered.json()).toMatchObject({
+			success: true,
+			data: { status: "processed", eventType: "checkout.session.completed" },
+		});
 		const redemptions = await context.repository.promotions.listPromotionRedemptions(
 			project,
 			"hosted-sale",
@@ -1560,7 +1566,9 @@ localDescribe("promotion feature grants", () => {
 
 		expect(granted.status).toBe(200);
 		const grantedData = (await granted.json()).data;
-		expect(grantedData).toMatchObject({
+		// Bun's toMatchObject writes asymmetric matchers into the received value, and the replay
+		// comparison below needs the real expiresAt, so match a copy.
+		expect(structuredClone(grantedData)).toMatchObject({
 			kind: "granted",
 			duplicate: false,
 			redemption: {
@@ -1735,7 +1743,8 @@ localDescribe("promotion feature grants", () => {
 		expect((await foreign.json()).error.code).toBe("PROMOTION_REDEMPTION_NOT_FOUND");
 		expect(revoked.status).toBe(200);
 		const revokedData = (await revoked.json()).data;
-		expect(revokedData).toMatchObject({
+		// Match a copy: the replay comparison below needs the real reversedAt.
+		expect(structuredClone(revokedData)).toMatchObject({
 			duplicate: false,
 			redemption: {
 				id: redeemed.redemption.id,

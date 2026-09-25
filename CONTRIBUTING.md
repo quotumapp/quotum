@@ -71,6 +71,16 @@ generated files.
 - Strict TypeScript, small purpose-specific modules, kebab-case file names.
 - Biome is the formatter and linter: tabs, 100-character lines, double quotes, organized imports.
 - Tests use `bun:test` and live under `tests/` mirroring the source layout. Name files `*.test.ts`.
+- Every test must make at least one assertion: `tests/preload.ts` calls `expect.hasAssertions()`
+  before each test in every lane. Assert the outcome itself rather than guarding an `expect` with
+  a condition that may never hold, and give `toThrow` or `rejects` the error code or message.
+- Do not skip tests. Postgres and end-to-end suites are gated with `describeLocalPostgres` or
+  `describeE2e` inside the directories their lane runs (`tests/integration`, `integration/merchant`,
+  `tests/e2e`), and those runners fail on any skip. `tests/architecture/test-lanes.test.ts` rejects
+  a gate anywhere else and any other skip, todo or conditional modifier; Biome rejects `.skip` and
+  `.only`.
+- Bun's `toMatchObject` writes asymmetric matchers such as `expect.any(String)` into the received
+  object. Match a `structuredClone` when the value is compared again later.
 - Treat migrations, bootstrap output, credential handling, and provider webhook verification as
   security-sensitive code and add focused tests for them.
 - Bind JSON parameters as text and cast on the server: use the `jsonb()` helper or

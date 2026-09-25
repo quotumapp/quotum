@@ -16,13 +16,23 @@
 	},
 	"linter": {
 		"enabled": true,
+		"domains": {
+			"test": "all"
+		},
 		"rules": {
 			"preset": "recommended",
+			"complexity": {
+				"noExcessiveNestedTestSuites": "error"
+			},
+			"style": {
+				"noDoneCallback": "error"
+			},
 			"suspicious": {
 				"noConsole": "error",
+				"noDuplicateTestHooks": "error",
 				"noExportsInTest": "error",
 				"noFocusedTests": "error",
-				"noSkippedTests": "warn"
+				"noSkippedTests": "error"
 			}
 		}
 	},

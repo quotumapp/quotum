@@ -1,4 +1,6 @@
 [test]
+# Every test must make at least one assertion; see tests/preload.ts.
+preload = ["./tests/preload.ts"]
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = ["tests/**", "scripts/**", "src/testing/**"]
 # Do not add coverageThreshold: Bun 1.4 enforces it per file, so any 0%-covered

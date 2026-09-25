@@ -74,7 +74,7 @@ e2eDescribe("E2E usage operation recovery", () => {
 					},
 					body: JSON.stringify({ featureKey: "model_tokens", quantity: "100" }),
 				}),
-			).rejects.toThrow();
+			).rejects.toMatchObject({ name: "AbortError" });
 		} finally {
 			proxy.stop(true);
 		}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { createApp as createBillingApp } from "../../src/app";
 import { EntitlementService } from "../../src/billing/entitlements";
+import { NotFoundBillingError } from "../../src/billing/errors";
 import { createNoopBillingLogger } from "../../src/observability/logger";
 import { BillingAdminOperations } from "../../src/operations/admin";
 import { CREDENTIAL_ACCESS_EXTENSION } from "../../src/shared/http";
@@ -64,7 +65,23 @@ const refusal = {
 	},
 };
 
-function testApp(warnings: Array<{ message: string; context: unknown }> = []) {
+/** Records each call and answers 404, so a handler that runs never touches Postgres. */
+function recordingService<T extends object>(calls: string[]): T {
+	return new Proxy({} as T, {
+		get: (_, method) =>
+			method === "then"
+				? undefined
+				: async () => {
+						calls.push(String(method));
+						throw new NotFoundBillingError("Not found in this test");
+					},
+	});
+}
+
+function testApp(
+	warnings: Array<{ message: string; context: unknown }> = [],
+	calls: string[] = [],
+) {
 	return createBillingApp({
 		env,
 		logger: {
@@ -74,6 +91,8 @@ function testApp(warnings: Array<{ message: string; context: unknown }> = []) {
 			},
 		},
 		connections: fixtureConnections(env.connectionFixtures),
+		meteringService: recordingService(calls),
+		promotionService: recordingService(calls),
 		projectContextResolver: projectContextResolver({
 			contexts: [projectInstanceContext("voysee")],
 			credentials: {
@@ -184,22 +203,31 @@ describe("read-only project credentials", () => {
 	});
 
 	it("leave a full credential untouched on the same routes", async () => {
-		const app = testApp();
+		// Every answer here comes from past the credential gate: the operator-key guard, request
+		// validation, a handler that needs an unconfigured provider, or a handler that reached a
+		// recording service. The read-only refusal and unhandled failures are not among them.
+		const pastTheGate = [
+			"400 INVALID_REQUEST",
+			"401 UNAUTHORIZED",
+			"404 NOT_FOUND",
+			"501 BILLING_PROVIDER_NOT_CONFIGURED",
+			"503 BILLING_PROVIDER_NOT_CONFIGURED",
+		];
+		const calls: string[] = [];
+		const app = withOpenApiAssertions(testApp([], calls));
 		for (const route of gatedRoutes(app).filter((candidate) => !candidate.readOnly)) {
-			// A wrong operator key stops operator routes and an empty body stops the rest, so no
-			// handler runs; the point is only that the read-only refusal never appears.
-			const response = await app.handle(
-				new Request(`http://localhost${route.requestPath}?limit=not-a-number`, {
-					method: route.method,
-					headers: { ...headers("full-key", route.method), "x-billing-operator-key": "wrong" },
-					body: route.method === "GET" ? undefined : "{}",
-				}),
-			);
-			if (response.status === 403) {
-				const body = (await response.json()) as { error?: { code?: string } };
-				expect(body.error?.code, `${route.method} ${route.path}`).not.toBe("READ_ONLY_CREDENTIAL");
-			}
+			// A wrong operator key stops operator routes and an empty body stops most others.
+			const response = await testRequest(app, `${route.requestPath}?limit=not-a-number`, {
+				method: route.method,
+				headers: { ...headers("full-key", route.method), "x-billing-operator-key": "wrong" },
+				body: route.method === "GET" ? undefined : "{}",
+			});
+			const body = (await response.json()) as { error?: { code?: string } };
+			const outcome = `${response.status} ${body.error?.code}`;
+			expect(pastTheGate, `${route.method} ${route.path} answered ${outcome}`).toContain(outcome);
 		}
+		// The two operations an empty request can complete reach their handlers.
+		expect(calls).toEqual(["release", "getAccountRedemption"]);
 	});
 
 	it("never get raw provider payloads, even from a store-event read they may call", async () => {

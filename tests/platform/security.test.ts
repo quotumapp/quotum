@@ -40,11 +40,11 @@ describe("merchant security boundaries", () => {
 				"https://app.quotum.dev",
 			),
 		).not.toThrow();
-		for (const changed of [
-			{ origin: "https://app.quotum.dev.evil.test" },
-			{ "x-csrf-token": "different" },
-			{ cookie: "" },
-		])
+		for (const [changed, code] of [
+			[{ origin: "https://app.quotum.dev.evil.test" }, "ORIGIN_REJECTED"],
+			[{ "x-csrf-token": "different" }, "CSRF_REJECTED"],
+			[{ cookie: "" }, "CSRF_REJECTED"],
+		] as const)
 			expect(() =>
 				assertCsrf(
 					new Request("https://app.quotum.dev/action", {
@@ -53,7 +53,7 @@ describe("merchant security boundaries", () => {
 					}),
 					"https://app.quotum.dev",
 				),
-			).toThrow();
+			).toThrow(expect.objectContaining({ code, status: 403 }));
 		expect(sessionCookie("opaque")).toContain(
 			"__Host-quotum_session=opaque; Path=/; HttpOnly; Secure; SameSite=Lax",
 		);
@@ -266,9 +266,13 @@ describe("merchant security boundaries", () => {
 		).toBeNull();
 	});
 	it("requires merchant configuration everywhere and rejects draft signup policies", () => {
-		expect(() => loadMerchantConfig({})).toThrow();
-		expect(() => loadMerchantConfig({ BILLING_ENV: "test" })).toThrow();
-		expect(() => loadMerchantConfig({ BILLING_ENV: "development" })).toThrow();
+		expect(() => loadMerchantConfig({})).toThrow("MERCHANT_ORIGIN is required in production");
+		expect(() => loadMerchantConfig({ BILLING_ENV: "test" })).toThrow(
+			"QUOTUM_AUTH_SECRET is required",
+		);
+		expect(() => loadMerchantConfig({ BILLING_ENV: "development" })).toThrow(
+			"QUOTUM_AUTH_SECRET is required",
+		);
 		expect(
 			loadMerchantConfig({
 				BILLING_ENV: "test",

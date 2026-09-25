@@ -289,21 +289,34 @@ describe("StripeBillingClient", () => {
 		expect(event.id).toBe("evt_unit");
 		expect(event.type).toBe("checkout.session.completed");
 
+		const signatureMismatch = {
+			type: "StripeSignatureVerificationError",
+			message: expect.stringContaining("No signatures found matching the expected signature"),
+		};
 		const tampered = header.replace(/v1=([0-9a-f]+)$/i, (_match, hex: string) => {
 			const last = hex.at(-1) ?? "0";
 			return `v1=${hex.slice(0, -1)}${last === "0" ? "1" : "0"}`;
 		});
-		await expect(client.constructWebhookEvent(payload, tampered)).rejects.toThrow();
+		await expect(client.constructWebhookEvent(payload, tampered)).rejects.toMatchObject(
+			signatureMismatch,
+		);
 
 		const stale = await stripeTestHeader(payload, secret, {
 			timestamp: Math.floor(Date.now() / 1000) - 400,
 		});
-		await expect(client.constructWebhookEvent(payload, stale)).rejects.toThrow(/tolerance/i);
+		await expect(client.constructWebhookEvent(payload, stale)).rejects.toMatchObject({
+			type: "StripeSignatureVerificationError",
+			message: expect.stringMatching(/tolerance/i),
+		});
 
 		const wrongSecret = await stripeTestHeader(payload, "whsec_other");
-		await expect(client.constructWebhookEvent(payload, wrongSecret)).rejects.toThrow();
+		await expect(client.constructWebhookEvent(payload, wrongSecret)).rejects.toMatchObject(
+			signatureMismatch,
+		);
 
-		await expect(client.constructWebhookEvent(`${payload} `, header)).rejects.toThrow();
+		await expect(client.constructWebhookEvent(`${payload} `, header)).rejects.toMatchObject(
+			signatureMismatch,
+		);
 
 		const valid = await stripeTestHeader(payload, secret);
 		const invalidV1 = valid.replace(/v1=([0-9a-f]+)/i, (_match, hex: string) => {

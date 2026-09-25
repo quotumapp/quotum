@@ -83,7 +83,9 @@ describe("MCP redirect policy", () => {
 					}),
 				),
 		);
-		await expect(guarded(clientId)).rejects.toBeDefined();
+		await expect(guarded(clientId)).rejects.toMatchObject({
+			body: { error: "invalid_client_metadata" },
+		});
 		expect(cancelled).toBe(true);
 	});
 });

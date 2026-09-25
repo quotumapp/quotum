@@ -762,8 +762,9 @@ describe("hosted setup review regressions", () => {
 
 	it("does not create a session when its frozen expiry is too close", async () => {
 		const ctx = context();
-		ctx.client.failNext("createCheckoutSession", new Error("response lost"));
-		await expect(create(ctx)).rejects.toThrow();
+		const lost = new Error("response lost");
+		ctx.client.failNext("createCheckoutSession", lost);
+		await expect(create(ctx)).rejects.toBe(lost);
 		const row = ctx.store.only();
 		row.expires_at = new Date(now.getTime() + 20 * 60_000).toISOString();
 		await expect(create(ctx)).rejects.toMatchObject({ code: "STRIPE_PAYMENT_SETUP_INCOMPLETE" });

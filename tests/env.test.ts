@@ -385,7 +385,7 @@ describe("projection receiver networks", () => {
 		);
 		expect(() =>
 			loadEnv({ ...developmentSource, BILLING_PROJECTION_ALLOW_INSECURE_HTTP: "yes" }),
-		).toThrow();
+		).toThrow("BILLING_PROJECTION_ALLOW_INSECURE_HTTP");
 	});
 });
 
@@ -400,6 +400,6 @@ describe("loadPostgresPreparedStatements", () => {
 		);
 		expect(() =>
 			loadPostgresPreparedStatements({ BILLING_POSTGRES_PREPARED_STATEMENTS: "no" }),
-		).toThrow();
+		).toThrow("BILLING_POSTGRES_PREPARED_STATEMENTS");
 	});
 });
