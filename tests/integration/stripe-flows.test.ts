@@ -637,6 +637,283 @@ localDescribe("Stripe route flows integration", () => {
 		});
 	});
 
+	// capability: subscription.create
+	it("starts the previewed plan on the saved card and records the subscription", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		const { app, stripe, authHeaders, projectProviderServices } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const previewResponse = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: {
+						kind: "setup_payment",
+						currency: "usd",
+						plan: { planKey: "migration-plan", quantities: { licensed_seats: 5 } },
+					},
+				}),
+			},
+		);
+		expect(previewResponse.status).toBe(200);
+		const preview = (await previewResponse.json()).data;
+		expect(preview.paymentSetup.plan).toMatchObject({
+			planKey: "migration-plan",
+			startsAfterSetup: true,
+		});
+		expect(preview.lineItems.length).toBeGreaterThan(0);
+		expect(preview.toPlanVersionId).toEqual(expect.any(String));
+
+		const executed = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "commercial:setup:plan" },
+				body: JSON.stringify({ previewToken: preview.previewToken }),
+			},
+		);
+		expect(executed.status).toBe(200);
+		const creation = (await executed.json()).data;
+		expect(creation.plan).toMatchObject({ planKey: "migration-plan", status: "pending" });
+		stripe.completeSetupSession(creation.sessionId);
+		const completionEvent = stripeEvent(
+			"checkout.session.completed",
+			{
+				id: creation.sessionId,
+				mode: "setup",
+				customer: "cus_integration",
+				setup_intent: `seti_${creation.sessionId}`,
+				metadata: { quotumPaymentSetupId: creation.setupId },
+			},
+			"evt_payment_setup_plan",
+		);
+		stripe.setWebhookEvent(completionEvent);
+		expect(
+			(
+				await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+					method: "POST",
+					headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=test" },
+					body: JSON.stringify(completionEvent),
+				})
+			).status,
+		).toBe(200);
+		await runStoreEventReplayWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: {
+				apple: null,
+				google: null,
+				stripe: projectProviderServices.voysee?.stripeBillingService ?? null,
+			},
+		});
+		expect(stripe.subscriptionCreateParams).toHaveLength(1);
+		expect(stripe.subscriptionCreateParams[0]).toMatchObject({
+			customer: "cus_integration",
+			payment_behavior: "error_if_incomplete",
+			off_session: true,
+			proration_behavior: "none",
+		});
+		const [setup] = await context.sql<
+			Array<{ status: string; plan_status: string; external_subscription_id: string }>
+		>`
+			SELECT status, plan_status, external_subscription_id
+			FROM payment_setup_sessions WHERE id = ${creation.setupId}::uuid
+		`;
+		expect(setup).toMatchObject({
+			status: "completed",
+			plan_status: "started",
+			external_subscription_id: "sub_setup_1",
+		});
+		const [recorded] = await context.sql<Array<{ count: string }>>`
+			SELECT count(*)::text AS count FROM subscriptions
+			WHERE external_subscription_id = 'sub_setup_1'
+		`;
+		const [projectionCount] = await context.sql<Array<{ count: string }>>`
+			SELECT count(*)::text AS count FROM projection_sync_jobs
+		`;
+		const [entitlementCount] = await context.sql<Array<{ count: string }>>`
+			SELECT count(*)::text AS count FROM entitlements
+			WHERE customer_id = (
+				SELECT customer_id FROM subscriptions WHERE external_subscription_id = 'sub_setup_1'
+			)
+		`;
+		expect(Number(recorded?.count)).toBe(1);
+		expect(Number(projectionCount?.count)).toBeGreaterThan(0);
+		expect(Number(entitlementCount?.count)).toBeGreaterThan(0);
+	});
+
+	// capability: subscription.create
+	it("records payment_failed and keeps the card when the plan charge is declined", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		const { app, stripe, authHeaders, projectProviderServices } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const previewResponse = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: {
+						kind: "setup_payment",
+						currency: "usd",
+						plan: { planKey: "migration-plan", quantities: { licensed_seats: 1 } },
+					},
+				}),
+			},
+		);
+		const preview = (await previewResponse.json()).data;
+		const executed = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "commercial:setup:plan:decline" },
+				body: JSON.stringify({ previewToken: preview.previewToken }),
+			},
+		);
+		const creation = (await executed.json()).data;
+		stripe.completeSetupSession(creation.sessionId);
+		stripe.failNext(
+			"createSubscription",
+			Object.assign(new Error("Your card was declined."), {
+				statusCode: 402,
+				code: "card_declined",
+			}),
+		);
+		const completionEvent = stripeEvent(
+			"checkout.session.completed",
+			{
+				id: creation.sessionId,
+				mode: "setup",
+				customer: "cus_integration",
+				setup_intent: `seti_${creation.sessionId}`,
+				metadata: { quotumPaymentSetupId: creation.setupId },
+			},
+			"evt_payment_setup_plan_decline",
+		);
+		stripe.setWebhookEvent(completionEvent);
+		await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+			method: "POST",
+			headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=test" },
+			body: JSON.stringify(completionEvent),
+		});
+		await runStoreEventReplayWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: {
+				apple: null,
+				google: null,
+				stripe: projectProviderServices.voysee?.stripeBillingService ?? null,
+			},
+		});
+		const [setup] = await context.sql<
+			Array<{ status: string; plan_status: string; plan_failure_code: string }>
+		>`
+			SELECT status, plan_status, plan_failure_code
+			FROM payment_setup_sessions WHERE id = ${creation.setupId}::uuid
+		`;
+		expect(setup).toMatchObject({
+			status: "completed",
+			plan_status: "payment_failed",
+			plan_failure_code: "card_declined",
+		});
+		const [recorded] = await context.sql<Array<{ count: string }>>`
+			SELECT count(*)::text AS count FROM subscriptions
+			WHERE external_subscription_id LIKE 'sub_setup_%'
+		`;
+		expect(Number(recorded?.count)).toBe(0);
+	});
+
+	// capability: subscription.create
+	it("records plan_changed when the plan version moves before setup completes", async () => {
+		await seedPhase3ControlCatalog(context.sql);
+		await seedPhase3CatalogMigration(context.sql);
+		const { app, stripe, authHeaders, projectProviderServices } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const previewResponse = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions/preview",
+			{
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					intent: {
+						kind: "setup_payment",
+						currency: "usd",
+						plan: { planKey: "migration-plan", quantities: { licensed_seats: 1 } },
+					},
+				}),
+			},
+		);
+		const preview = (await previewResponse.json()).data;
+		const executed = await testRequest(
+			app,
+			"/v1/billing-accounts/integration_user/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "commercial:setup:plan:changed" },
+				body: JSON.stringify({ previewToken: preview.previewToken }),
+			},
+		);
+		const creation = (await executed.json()).data;
+		await context.sql`
+			UPDATE plans
+			SET active_version_id = version.id
+			FROM plan_versions version
+			WHERE plans.project_id = version.project_id
+				AND plans.id = version.plan_id
+				AND plans.key = 'migration-plan'
+				AND version.version = 1
+		`;
+		stripe.completeSetupSession(creation.sessionId);
+		const completionEvent = stripeEvent(
+			"checkout.session.completed",
+			{
+				id: creation.sessionId,
+				mode: "setup",
+				customer: "cus_integration",
+				setup_intent: `seti_${creation.sessionId}`,
+				metadata: { quotumPaymentSetupId: creation.setupId },
+			},
+			"evt_payment_setup_plan_changed",
+		);
+		stripe.setWebhookEvent(completionEvent);
+		await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+			method: "POST",
+			headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=test" },
+			body: JSON.stringify(completionEvent),
+		});
+		await runStoreEventReplayWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: {
+				apple: null,
+				google: null,
+				stripe: projectProviderServices.voysee?.stripeBillingService ?? null,
+			},
+		});
+		const [setup] = await context.sql<Array<{ status: string; plan_status: string }>>`
+			SELECT status, plan_status FROM payment_setup_sessions WHERE id = ${creation.setupId}::uuid
+		`;
+		expect(setup).toMatchObject({ status: "completed", plan_status: "plan_changed" });
+		expect(stripe.subscriptionCreateParams).toHaveLength(0);
+	});
+
 	// capability: subscription.change.preview
 	it("previews subscription changes through the project-scoped repository", async () => {
 		await seedPhase3ControlCatalog(context.sql);

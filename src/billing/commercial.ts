@@ -1,4 +1,4 @@
-import type { PaymentSetupStatus } from "./payment-setup";
+import type { PaymentSetupPlanStatus, PaymentSetupStatus } from "./payment-setup";
 import type { StripeProrationBehavior } from "./pricing";
 import type { CommercialPromotion, PromotionDiscountDuration } from "./promotions";
 import type { BillingProvider } from "./types";
@@ -45,9 +45,9 @@ export type CommercialActionIntent =
 			externalSubscriptionId: string;
 	  }
 	/**
-	 * Saves a payment method for later off-session charges. It needs no catalog item and no
-	 * subscription, and `currency` only selects which setup methods the provider offers; it does not
-	 * bind the account to that currency.
+	 * Saves a payment method for later off-session charges. Without `plan` it needs no catalog item
+	 * and no subscription, and `currency` only selects which setup methods the provider offers.
+	 * With `plan`, `currency` must be that plan's currency and the saved card starts the plan.
 	 */
 	| {
 			kind: "setup_payment";
@@ -55,6 +55,10 @@ export type CommercialActionIntent =
 			email?: string | null;
 			successUrl?: string | null;
 			cancelUrl?: string | null;
+			plan?: {
+				planKey: string;
+				quantities: Record<string, number>;
+			};
 	  };
 
 /** What a preview says a cancellation would do; `none` when the state already holds. */
@@ -119,9 +123,17 @@ export interface CommercialPreviewCancellation {
 	activeAddOnSubscriptionIds: string[];
 }
 
+/** The plan a setup preview will start once the customer saves a card. */
+export interface CommercialPreviewPaymentSetupPlan {
+	planKey: string;
+	planVersionId: string;
+	trialDays: number | null;
+	startsAfterSetup: true;
+}
+
 /**
- * What a payment-method setup preview reports. Setting up a method charges nothing and grants
- * nothing: it only decides which method future automatic charges use.
+ * What a payment-method setup preview reports. Without a plan it charges nothing and grants
+ * nothing. With a plan, the line items are that plan and the saved card starts it.
  */
 export interface CommercialPreviewPaymentSetup {
 	/** The currency whose eligible setup methods the hosted page will offer. */
@@ -134,6 +146,8 @@ export interface CommercialPreviewPaymentSetup {
 	reusesExistingSetup: boolean;
 	existingSetupId: string | null;
 	existingSetupExpiresAt: string | null;
+	/** The plan started after setup, or null when the setup only saves a card. */
+	plan: CommercialPreviewPaymentSetupPlan | null;
 }
 
 export interface CommercialActionPreview {
@@ -206,6 +220,15 @@ export type CommercialActionExecutionResult =
 			 * back, or the provider replayed the session an interrupted attempt had already made.
 			 */
 			reused: boolean;
+			/**
+			 * The plan this setup will start, still `pending` until the customer finishes. Null when
+			 * the setup only saves a card. The session read carries the terminal outcome.
+			 */
+			plan: {
+				planKey: string;
+				planVersionId: string;
+				status: PaymentSetupPlanStatus;
+			} | null;
 	  }
 	| {
 			kind: "subscription_cancellation";

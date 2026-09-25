@@ -4,7 +4,9 @@ import {
 	type ActivePaymentSetupSummary,
 	isResolvedPaymentSetupStatus,
 	type PaymentSetupCard,
+	type PaymentSetupPlanStatus,
 	type PaymentSetupSession,
+	type PaymentSetupSessionPlan,
 	type PaymentSetupStatus,
 	paymentSetupConflict,
 	paymentSetupNotFound,
@@ -12,7 +14,7 @@ import {
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import { ensureCustomer } from "./identities";
-import { executeOne } from "./query";
+import { executeOne, jsonb } from "./query";
 import { schedulePaymentSetupReconciliation } from "./store-events";
 import type { QueryExecutor } from "./types";
 import { isUuid, requireNonBlank } from "./validation";
@@ -35,6 +37,14 @@ export interface PaymentSetupRow {
 	email: string | null;
 	success_url: string;
 	cancel_url: string;
+	plan_key: string | null;
+	plan_version_id: string | null;
+	plan_quantities: Record<string, number> | null;
+	plan_status: PaymentSetupPlanStatus | null;
+	plan_failure_code: string | null;
+	plan_failure_message: string | null;
+	external_subscription_id: string | null;
+	plan_resolved_at: Date | string | null;
 	status: PaymentSetupStatus;
 	external_session_id: string | null;
 	session_url: string | null;
@@ -66,6 +76,22 @@ export interface ReservePaymentSetupInput {
 	successUrl: string;
 	cancelUrl: string;
 	expiresAt: Date;
+	/** The plan this setup starts, already resolved to a version. Absent saves a card only. */
+	plan?: {
+		planKey: string;
+		planVersionId: string;
+		quantities: Record<string, number>;
+	} | null;
+}
+
+/** A terminal plan outcome written while the worker still holds the setup. */
+export interface RecordPaymentSetupPlanOutcomeInput {
+	setupId: string;
+	workerId: string;
+	status: Exclude<PaymentSetupPlanStatus, "pending">;
+	externalSubscriptionId: string | null;
+	failureCode: string | null;
+	failureMessage: string | null;
 }
 
 /**
@@ -81,7 +107,9 @@ export type PaymentSetupReservation =
 const columns = drizzleSql`
 	id, project_id, customer_id, billing_account_id, provider, provider_account_id,
 	provider_customer_id, preview_token, provider_idempotency_key, request_hash, currency, email,
-	success_url, cancel_url, status, external_session_id, session_url, external_setup_intent_id,
+	success_url, cancel_url, plan_key, plan_version_id::text AS plan_version_id, plan_quantities,
+	plan_status, plan_failure_code, plan_failure_message, external_subscription_id, plan_resolved_at,
+	status, external_session_id, session_url, external_setup_intent_id,
 	intended_payment_method_id, default_payment_method_id, card_brand, card_last4, card_exp_month,
 	card_exp_year, attention_reason, expires_at, completed_at, claimed_by, claimed_at,
 	created_at, updated_at
@@ -150,12 +178,18 @@ export class PaymentSetupRepository extends RepositoryModule {
 					INSERT INTO payment_setup_sessions (
 						project_id, customer_id, billing_account_id, provider, provider_account_id,
 						provider_customer_id, preview_token, provider_idempotency_key, request_hash,
-						currency, email, success_url, cancel_url, status, expires_at
+						currency, email, success_url, cancel_url, plan_key, plan_version_id,
+						plan_quantities, plan_status, status, expires_at
 					) VALUES (
 						${projectId}, ${customer.id}, ${input.billingAccountId}, 'stripe',
 						${input.providerAccountId}, ${input.providerCustomerId}, ${input.previewToken},
 						${input.providerIdempotencyKey}, ${input.requestHash}, ${input.currency},
-						${input.email}, ${input.successUrl}, ${input.cancelUrl}, 'creating',
+						${input.email}, ${input.successUrl}, ${input.cancelUrl},
+						${input.plan?.planKey ?? null},
+						${input.plan == null ? drizzleSql`NULL` : drizzleSql`${input.plan.planVersionId}::bigint`},
+						${input.plan == null ? drizzleSql`NULL` : jsonb(input.plan.quantities)},
+						${input.plan == null ? null : "pending"},
+						'creating',
 						${input.expiresAt.toISOString()}
 					)
 					RETURNING ${columns}
@@ -325,6 +359,74 @@ export class PaymentSetupRepository extends RepositoryModule {
 		if (updated === null) {
 			const current = await this.requireSetupById(project.projectInstanceId, input.setupId);
 			if (current.status === "completed") return current;
+			throw new PersistenceConflictError(
+				"Payment setup session is no longer held by this worker",
+				"PAYMENT_SETUP_CLAIM_LOST",
+			);
+		}
+		return updated;
+	}
+
+	/**
+	 * Remembers the Stripe subscription this setup created, before the local subscription is
+	 * recorded. A retry adopts that id instead of creating another. Only a pending plan is written.
+	 */
+	async recordPaymentSetupSubscriptionId(
+		project: ProjectInstanceContext,
+		input: { setupId: string; workerId: string; externalSubscriptionId: string },
+	): Promise<PaymentSetupRow> {
+		requireNonBlank(input.workerId, "p_worker_id");
+		requireNonBlank(input.externalSubscriptionId, "p_external_subscription_id");
+		const updated = await executeOne<PaymentSetupRow>(
+			this.database,
+			drizzleSql`
+				UPDATE payment_setup_sessions
+				SET external_subscription_id = ${input.externalSubscriptionId}, updated_at = now()
+				WHERE project_id = ${project.projectInstanceId} AND id = ${input.setupId}
+					AND claimed_by = ${input.workerId}
+					AND plan_status = 'pending'
+					AND (
+						external_subscription_id IS NULL
+						OR external_subscription_id = ${input.externalSubscriptionId}
+					)
+				RETURNING ${columns}
+			`,
+		);
+		if (updated === null) {
+			throw new PersistenceConflictError(
+				"Payment setup session is no longer held by this worker",
+				"PAYMENT_SETUP_CLAIM_LOST",
+			);
+		}
+		return updated;
+	}
+
+	/** Records a terminal plan outcome. Only the worker holding a still-pending plan may write it. */
+	async recordPaymentSetupPlanOutcome(
+		project: ProjectInstanceContext,
+		input: RecordPaymentSetupPlanOutcomeInput,
+	): Promise<PaymentSetupRow> {
+		requireNonBlank(input.workerId, "p_worker_id");
+		const failureCode = boundedText(input.failureCode, 80);
+		const failureMessage = boundedText(input.failureMessage, 500);
+		const updated = await executeOne<PaymentSetupRow>(
+			this.database,
+			drizzleSql`
+				UPDATE payment_setup_sessions
+				SET plan_status = ${input.status},
+					external_subscription_id = COALESCE(${input.externalSubscriptionId}, external_subscription_id),
+					plan_failure_code = ${failureCode},
+					plan_failure_message = ${failureMessage},
+					plan_resolved_at = now(),
+					updated_at = now()
+				WHERE project_id = ${project.projectInstanceId} AND id = ${input.setupId}
+					AND claimed_by = ${input.workerId}
+					AND plan_status = 'pending'
+					AND status IN ('applying_default', 'needs_attention')
+				RETURNING ${columns}
+			`,
+		);
+		if (updated === null) {
 			throw new PersistenceConflictError(
 				"Payment setup session is no longer held by this worker",
 				"PAYMENT_SETUP_CLAIM_LOST",
@@ -504,9 +606,41 @@ export function paymentSetupSession(row: PaymentSetupRow): PaymentSetupSession {
 						expYear: row.card_exp_year,
 					},
 		attention: row.attention_reason,
+		plan: paymentSetupPlan(row),
 		createdAt: new Date(row.created_at).toISOString(),
 		updatedAt: new Date(row.updated_at).toISOString(),
 	};
+}
+
+function paymentSetupPlan(row: PaymentSetupRow): PaymentSetupSessionPlan | null {
+	if (
+		row.plan_status === null ||
+		row.plan_key === null ||
+		row.plan_version_id === null ||
+		row.plan_quantities === null
+	) {
+		return null;
+	}
+	const failure =
+		row.plan_failure_code === null || row.plan_failure_message === null
+			? null
+			: { code: row.plan_failure_code, message: row.plan_failure_message };
+	return {
+		planKey: row.plan_key,
+		planVersionId: row.plan_version_id,
+		quantities: row.plan_quantities,
+		status: row.plan_status,
+		externalSubscriptionId: row.external_subscription_id,
+		failure,
+		resolvedAt: isoOrNull(row.plan_resolved_at),
+	};
+}
+
+function boundedText(value: string | null, max: number): string | null {
+	if (value === null) return null;
+	const trimmed = value.trim();
+	if (trimmed === "") return null;
+	return trimmed.slice(0, max);
 }
 
 function isoOrNull(value: Date | string | null): string | null {

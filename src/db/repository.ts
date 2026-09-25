@@ -76,6 +76,7 @@ import {
 	PaymentSetupRepository,
 	type PaymentSetupReservation,
 	type PaymentSetupRow,
+	type RecordPaymentSetupPlanOutcomeInput,
 	type ReservePaymentSetupInput,
 } from "./repository/payment-setup";
 import { PlanGrantRepository } from "./repository/plan-grants";
@@ -135,6 +136,7 @@ export type { GrantAllocationInput } from "./repository/metering";
 export type {
 	PaymentSetupReservation,
 	PaymentSetupRow,
+	RecordPaymentSetupPlanOutcomeInput,
 	ReservePaymentSetupInput,
 } from "./repository/payment-setup";
 export { ProjectScopedBillingRepository } from "./repository/project-scoped";
@@ -981,6 +983,20 @@ export class BillingRepository {
 		},
 	): Promise<PaymentSetupRow> {
 		return await this.paymentSetups.completePaymentSetup(project, input);
+	}
+
+	async recordPaymentSetupSubscriptionId(
+		project: ProjectInstanceContext,
+		input: { setupId: string; workerId: string; externalSubscriptionId: string },
+	): Promise<PaymentSetupRow> {
+		return await this.paymentSetups.recordPaymentSetupSubscriptionId(project, input);
+	}
+
+	async recordPaymentSetupPlanOutcome(
+		project: ProjectInstanceContext,
+		input: RecordPaymentSetupPlanOutcomeInput,
+	): Promise<PaymentSetupRow> {
+		return await this.paymentSetups.recordPaymentSetupPlanOutcome(project, input);
 	}
 
 	async expirePaymentSetup(

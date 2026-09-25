@@ -208,7 +208,7 @@ export function purchaseActionFor(
 		: "provider_action_required";
 }
 
-/** The operation each commercial preview action needs from the provider that will execute it. */
+/** The primary operation each commercial preview action needs from the provider that executes it. */
 export const commercialActionOperations: Record<CommercialActionIntent["kind"], ProviderOperation> =
 	{
 		checkout_plan: "checkout.plan",
@@ -220,20 +220,40 @@ export const commercialActionOperations: Record<CommercialActionIntent["kind"], 
 	};
 
 /**
+ * Every operation `intent` asks of the provider. A setup that also starts a plan needs the
+ * server-side subscription create as well as the hosted card setup.
+ */
+export function commercialActionOperationsFor(intent: CommercialActionIntent): ProviderOperation[] {
+	if (intent.kind === "setup_payment" && intent.plan !== undefined) {
+		return ["payment_method.setup", "subscription.create"];
+	}
+	return [commercialActionOperations[intent.kind]];
+}
+
+/**
  * The provider a commercial preview reports. A declaration that is not admitted or has not built
  * the action is a wiring mistake, not a request error, so it throws rather than returning null.
+ * A kind string is the plan-less form of that action.
  */
 export function commercialPreviewProvider(
 	declaration: ProviderCapabilityDeclaration,
-	action: CommercialActionIntent["kind"],
+	action: CommercialActionIntent | CommercialActionIntent["kind"],
 ): BillingProvider {
-	const operation = commercialActionOperations[action];
+	const intent: CommercialActionIntent =
+		typeof action === "string" ? ({ kind: action } as CommercialActionIntent) : action;
+	const operations = commercialActionOperationsFor(intent);
 	const provider = declaration.provider;
-	if (!isBillingProvider(provider) || declaration.availability !== "available") {
-		throw new Error(`Provider ${provider} is not admitted for ${operation}`);
+	const [first] = operations;
+	if (first === undefined) {
+		throw new Error(`Provider ${provider} has no commercial operation`);
 	}
-	if (!implementsOperation(declaration, operation)) {
-		throw new Error(`Provider ${provider} does not implement ${operation}`);
+	if (!isBillingProvider(provider) || declaration.availability !== "available") {
+		throw new Error(`Provider ${provider} is not admitted for ${first}`);
+	}
+	for (const operation of operations) {
+		if (!implementsOperation(declaration, operation)) {
+			throw new Error(`Provider ${provider} does not implement ${operation}`);
+		}
 	}
 	return provider;
 }
