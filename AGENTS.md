@@ -58,7 +58,7 @@ Use Bun `>=1.4.0 <1.5.0`. Docker is required for every Postgres-backed lane.
   stored connection secrets with the active key.
 - `bun run mcp` starts the read-only stdio MCP server against `QUOTUM_MCP_BASE_URL` with a
   read-only or sandbox `QUOTUM_MCP_API_KEY`; see [docs/mcp.md](docs/mcp.md).
-- `bun run test:coverage` runs the unit suite against CI's coverage minimum.
+- `bun run test:coverage` runs the unit suite against its local coverage minimum.
 
 ## Coding style
 
@@ -73,8 +73,10 @@ environment variables.
 
 Tests use `bun:test` and mirror the source layout as `*.test.ts` files. Add focused unit tests for
 domain logic, repository contracts, workers, middleware, and environment parsing. CI runs the unit
-suite in random order and enforces minimum line and function coverage, so a test must not depend
-on another test's state or order.
+suite in random order, so a test must not depend on another test's state or order. It gates line
+coverage combined across the unit, integration and merchant lanes, with per-area floors in
+`coverage-floors.json` and 80% of changed lines; see
+[CONTRIBUTING.md](CONTRIBUTING.md#before-you-open-a-pull-request).
 
 Postgres-backed tests under `tests/` are wrapped in `describeLocalPostgres` or `describeE2e` and
 skip under plain `bun run test` unless `RUN_POSTGRES_INTEGRATION_TESTS=1` or

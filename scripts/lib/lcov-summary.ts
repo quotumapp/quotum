@@ -82,3 +82,5 @@ function shortfallMessage(
 ): string {
 	return `${kind} ${formatPercent(coverageRatio(part))} is below the ${formatPercent(minimum)} minimum`;
 }
+
+export { mergeLcov } from "./coverage-map";

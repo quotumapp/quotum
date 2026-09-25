@@ -35,7 +35,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: unit-coverage
+          name: lcov-unit
           path: coverage/lcov.info
           retention-days: 7
 
@@ -70,8 +70,12 @@ jobs:
             contract-reports/
           retention-days: 30
 
-  integration:
-    name: Integration tests (Postgres)
+  integration-shards:
+    name: Integration shard ${{ matrix.shard }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     runs-on: ubuntu-latest
     env:
       NODE_ENV: test
@@ -79,7 +83,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-bun
-      - run: bun run test:integration
+      - run: bun run test:integration --shard=${{ matrix.shard }}/2 --coverage --coverage-reporter=lcov --coverage-dir=coverage/integration-${{ matrix.shard }} tests/integration
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lcov-integration-${{ matrix.shard }}
+          path: coverage/integration-${{ matrix.shard }}/lcov.info
+          if-no-files-found: error
+
+  integration:
+    name: Integration tests (Postgres)
+    needs: integration-shards
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULT: ${{ needs.integration-shards.result }}
+        run: test "$RESULT" = success
 
   e2e:
     name: End-to-end tests
@@ -101,7 +120,33 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-bun
-      - run: bun run test:merchant:integration
+      - run: bun run test:merchant:integration --coverage --coverage-reporter=lcov --coverage-dir=coverage/merchant
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lcov-merchant
+          path: coverage/merchant/lcov.info
+          if-no-files-found: error
+
+  coverage:
+    name: Combined coverage
+    needs: [unit, integration, merchant]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-bun
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: lcov-*
+          path: coverage/lanes
+      - name: Combined coverage floors and ratchet
+        run: bun scripts/check-coverage.ts --combined coverage/lanes/lcov-{unit,integration-1,integration-2,merchant}/lcov.info
+      - name: Changed executable lines
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: bun scripts/check-diff-coverage.ts "$BASE_SHA" coverage/lanes/lcov-{unit,integration-1,integration-2,merchant}/lcov.info
 
   image:
     name: Container image builds

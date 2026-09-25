@@ -33,6 +33,17 @@ bun run test:e2e
 Both runners start their own Docker Postgres, apply migrations, and remove the container when
 they finish.
 
+CI gates combined line coverage. It merges the LCOV reports of the unit lane, both integration
+shards and the merchant lane: for each file it keeps the lines every report containing that file
+lists, with the highest hit count, and counts a tracked runtime module that no report loads as
+uncovered (type-only files and `src/testing/` are excluded). `coverage-floors.json` sets floors
+for the total and for `src/billing/`, `src/db/repository/`, `src/providers/`, `src/platform/` and
+`src/http/`; a floor must stay within two percentage points of actual coverage, so after reviewing
+a change regenerate it with `bun scripts/check-coverage.ts --write <unit-lcov> <integration-1-lcov>
+<integration-2-lcov> <merchant-lcov>`. Pull requests and merge groups also need 80% of their
+changed executable lines covered. `bun run test:coverage` stays a fast unit-only check with its own
+line and function floor.
+
 ## Migrations
 
 - SQL files under `migrations/` are the source of truth and are checksum-verified by the migration

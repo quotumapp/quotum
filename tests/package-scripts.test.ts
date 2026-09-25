@@ -50,6 +50,10 @@ describe("package scripts", () => {
 		expect(runner).toContain('"bun", ["run", "migrate"]');
 		expect(runner).toContain('testTargets.length === 0 ? ["tests/integration"] : testTargets');
 		expect(runner).toContain('"--timeout=20000"');
+		const workflow = readFileSync(join(process.cwd(), ".github/workflows/validate.yml"), "utf8");
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub expression is literal YAML.
+		expect(workflow).toContain("--shard=${{ matrix.shard }}/2");
+		expect(runner).toContain('...(testTargets.length === 0 ? ["tests/integration"] : testTargets)');
 		expect(e2eRunner).toContain("createSanitizedProcessEnv");
 		expect(e2eRunner).toContain("getConnectionUri");
 		expect(e2eRunner).toContain("container.stop");
