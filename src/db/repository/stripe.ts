@@ -845,6 +845,34 @@ export class StripeBillingRepository extends RepositoryModule {
 				return skippedStripeRecordingResult();
 			}
 
+			const existingPurchase = await executeOne<{ original_transaction_id: string | null }>(
+				tx,
+				drizzleSql`
+				SELECT original_transaction_id FROM purchases
+				WHERE project_id = ${projectId} AND provider = 'stripe' AND transaction_id = ${input.transactionId}
+					AND customer_id = ${resolved.id} AND store_product_id = ${storeProduct.id}
+					AND channel = 'web' AND purchase_kind = ${input.purchaseKind}
+				FOR UPDATE
+			`,
+			);
+			const chargeId = existingPurchase?.original_transaction_id ?? input.chargeId;
+			if (
+				existingPurchase &&
+				existingPurchase.original_transaction_id === null &&
+				chargeId !== null
+			) {
+				await executeRows(
+					tx,
+					drizzleSql`
+					UPDATE purchases SET original_transaction_id = ${chargeId}, updated_at = now()
+					WHERE project_id = ${projectId} AND provider = 'stripe' AND transaction_id = ${input.transactionId}
+						AND customer_id = ${resolved.id} AND store_product_id = ${storeProduct.id}
+						AND channel = 'web' AND purchase_kind = ${input.purchaseKind}
+						AND original_transaction_id IS NULL
+				`,
+				);
+			}
+
 			const storeEvent = await recordStoreEventProcessingResult(tx, projectId, {
 				provider: "stripe",
 				channel: "web",
@@ -876,7 +904,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				channel: "web",
 				purchaseKind: input.purchaseKind,
 				transactionId: input.transactionId,
-				originalTransactionId: input.chargeId,
+				originalTransactionId: chargeId,
 				status: "completed",
 				purchasedAt: input.purchasedAt,
 				invalidatedAt: null,

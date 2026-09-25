@@ -20,6 +20,7 @@ export type StripeCheckoutSessionCreateParams = Stripe.Checkout.SessionCreatePar
 };
 
 interface StripeClientLike {
+	paymentIntents: { retrieve(id: string): Promise<Stripe.PaymentIntent> };
 	customers: {
 		create(
 			params: Stripe.CustomerCreateParams,
@@ -229,6 +230,10 @@ export class StripeBillingClient {
 		if (!this.stripe.checkout.sessions.expire)
 			throw new Error("Checkout expiration is unavailable");
 		return this.stripe.checkout.sessions.expire(sessionId);
+	}
+
+	retrievePaymentIntent(id: string) {
+		return this.stripe.paymentIntents.retrieve(id);
 	}
 
 	retrieveCheckoutSession(sessionId: string) {

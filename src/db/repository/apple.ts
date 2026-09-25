@@ -183,6 +183,8 @@ export class AppleBillingRepository extends RepositoryModule {
 					status: input.subscriptionStatus ?? "refunded",
 					startsAt: input.purchasedAt,
 					expiresAt: input.expiresAt,
+					currentPeriodStart: input.purchasedAt,
+					currentPeriodEnd: input.expiresAt,
 					autoRenew: input.autoRenew ?? false,
 					latestTransactionId: input.transactionId,
 					rawState: input.rawPayload,

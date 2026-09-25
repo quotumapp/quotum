@@ -3,7 +3,7 @@ import type { SQL } from "bun";
 import type { MeteringDecision } from "../../src/billing/metering";
 import { materializeSubscriptionAllocations } from "../../src/db/repository/catalog-allocations";
 import { readProjectionBalances } from "../../src/db/repository/entitlements";
-import { addUtcMonths } from "../../src/db/repository/meter-limit-windows";
+import { addUtcMonths, planGrantWindowBounds } from "../../src/db/repository/meter-limit-windows";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
@@ -1056,11 +1056,7 @@ localDescribe("authoritative metering flows", () => {
 		]);
 	});
 
-	// Finding, not a fix: a plan allocation is materialized once per provider period, when the
-	// provider syncs the subscription (catalog-allocations.ts), and expires at the period end. A
-	// monthly allocation on an annual plan is therefore granted once a year, and nothing grants the
-	// following months. This states the monthly expectation and fails until that is decided.
-	it.failing("grants a monthly allocation on an annual plan every month", async () => {
+	it("grants a monthly allocation on an annual plan every month", async () => {
 		const now = new Date();
 		const anchor = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 		const anchorDay = anchor.getUTCDate();
@@ -1119,8 +1115,7 @@ localDescribe("authoritative metering flows", () => {
 			"ai_credits",
 		);
 
-		// Monthly grants would leave this month's 100 credits, expiring at the next monthly reset;
-		// today the one grant for the year expires at the period end instead.
+		// Only the current month is granted, with its own expiry.
 		expect(
 			balance.breakdown.map(({ sourceKind, quantity, expiresAt }) => ({
 				sourceKind,
@@ -1128,6 +1123,205 @@ localDescribe("authoritative metering flows", () => {
 				expiresAt,
 			})),
 		).toEqual([{ sourceKind: "subscription", quantity: "100", expiresAt: monthEnd.toISOString() }]);
+	});
+
+	it("grants only the current missed month and serializes concurrent maintenance", async () => {
+		const seeded = await seedMonthlyAllocation();
+		const runs = await Promise.all([
+			context.repository.runMeteringMaintenance(1),
+			context.repository.runMeteringMaintenance(1),
+		]);
+		expect(runs.reduce((sum, run) => sum + run.grantedSubscriptionAllocations, 0)).toBe(1);
+		const rows =
+			await context.sql`SELECT period_start_at, period_end_at, quantity::text FROM balance_allocations`;
+		expect(rows).toEqual([
+			{
+				period_start_at: seeded.window.start,
+				period_end_at: seeded.window.end,
+				quantity: "100.000000000",
+			},
+		]);
+		expect(
+			(await context.repository.runMeteringMaintenance(1)).grantedSubscriptionAllocations,
+		).toBe(0);
+		const projections =
+			await context.sql`SELECT payload FROM projection_sync_jobs WHERE customer_id = ${seeded.customer_id}`;
+		expect(projections).toHaveLength(1);
+		expect(
+			await readProjectionBalances(
+				context.db as unknown as QueryExecutor,
+				seeded.project_id,
+				seeded.customer_id,
+			),
+		).toContainEqual(expect.objectContaining({ featureKey: "ai_credits", available: "100" }));
+	});
+
+	it("transitions the legacy annual grant without replacing consumed or reserved credits", async () => {
+		const seeded = await seedMonthlyAllocation();
+		await seedAnnualAllocationRow(seeded, seeded.periodStart, seeded.periodEnd, "legacy-year");
+		const subject = { billingAccountId: "monthly_grants", featureKey: "ai_credits" };
+		await context.repository.consumeUsage(integrationProjectContext(), {
+			...subject,
+			quantity: "25",
+			idempotencyKey: "consume-before-transition",
+		});
+		const reservation = await context.repository.reserveUsage(integrationProjectContext(), {
+			...subject,
+			quantity: "10",
+			idempotencyKey: "reserve-before-transition",
+		});
+		const before =
+			await context.sql`SELECT id, source_key, quantity::text, consumed_quantity::text, held_quantity::text FROM balance_allocations`;
+		const result = await context.repository.runMeteringMaintenance(1);
+		expect(result).toMatchObject({
+			grantedSubscriptionAllocations: 0,
+			transitionedSubscriptionAllocations: 1,
+		});
+		expect(
+			await context.sql`SELECT id, source_key, quantity::text, consumed_quantity::text, held_quantity::text FROM balance_allocations`,
+		).toEqual(before);
+		expect((await context.sql`SELECT expires_at FROM balance_allocations`)[0].expires_at).toEqual(
+			seeded.window.end,
+		);
+		expect(
+			(await context.repository.runMeteringMaintenance(1)).transitionedSubscriptionAllocations,
+		).toBe(0);
+		const confirmed = await context.repository.confirmUsageReservation(
+			integrationProjectContext(),
+			{
+				billingAccountId: subject.billingAccountId,
+				reservationId: reservation.reservationId ?? "",
+				quantity: "10",
+				idempotencyKey: "confirm-after-transition",
+			},
+		);
+		expect(confirmed).toMatchObject({
+			status: "confirmed",
+			balance: { consumed: "35", held: "0", available: "65" },
+		});
+	});
+
+	it("replenishes after a prior monthly window and rolls its unused balance once", async () => {
+		const seeded = await seedMonthlyAllocation();
+		const previousStart = addUtcMonths(seeded.periodStart, 1, seeded.periodStart.getUTCDate());
+		await context.sql`UPDATE plan_items SET rollover_enabled = true, rollover_max_quantity = 30, rollover_expiry_mode = 'months', rollover_expiry_months = 1 WHERE id = ${seeded.item_id}`;
+		await seedAnnualAllocationRow(seeded, previousStart, seeded.window.start, "previous-month");
+		await context.sql`UPDATE balance_allocations SET consumed_quantity = 60`;
+		const result = await context.repository.runMeteringMaintenance(50);
+		expect(result).toMatchObject({ grantedSubscriptionAllocations: 1, rolledOverAllocations: 1 });
+		expect(
+			await context.repository.getMeteringBalance(
+				integrationProjectContext(),
+				"monthly_grants",
+				"ai_credits",
+			),
+		).toMatchObject({ available: "130" });
+		expect(await context.repository.runMeteringMaintenance(50)).toMatchObject({
+			grantedSubscriptionAllocations: 0,
+			rolledOverAllocations: 0,
+		});
+	});
+
+	it("does not refill an early-expired monthly allocation before its reset", async () => {
+		const seeded = await seedMonthlyAllocation();
+		await context.sql`UPDATE plan_items SET expires_after_seconds = 1 WHERE id = ${seeded.item_id}`;
+		expect(
+			(await context.repository.runMeteringMaintenance(1)).grantedSubscriptionAllocations,
+		).toBe(1);
+		expect(
+			await context.repository.getMeteringBalance(
+				integrationProjectContext(),
+				"monthly_grants",
+				"ai_credits",
+			),
+		).toMatchObject({ available: "0" });
+		expect(
+			(await context.repository.runMeteringMaintenance(1)).grantedSubscriptionAllocations,
+		).toBe(0);
+		expect(await countRows(context.sql, "balance_allocations")).toBe(1);
+	});
+
+	it.each(["expired", "refunded", "revoked"])(
+		"does not grant monthly credits to a %s subscription",
+		async (status) => {
+			const seeded = await seedMonthlyAllocation();
+			await context.sql`UPDATE subscriptions SET status = ${status} WHERE id = ${seeded.id}`;
+			expect(
+				(await context.repository.runMeteringMaintenance(1)).grantedSubscriptionAllocations,
+			).toBe(0);
+			expect(await countRows(context.sql, "balance_allocations")).toBe(0);
+		},
+	);
+
+	it("continues a period-end cancellation but stops at immediate access expiry", async () => {
+		const seeded = await seedMonthlyAllocation();
+		await context.sql`UPDATE subscriptions SET status = 'cancelled', cancel_at_period_end = true WHERE id = ${seeded.id}`;
+		expect(
+			(await context.repository.runMeteringMaintenance(1)).grantedSubscriptionAllocations,
+		).toBe(1);
+		await context.sql`DELETE FROM balance_allocations`;
+		await context.sql`UPDATE subscriptions SET expires_at = now() - interval '1 second' WHERE id = ${seeded.id}`;
+		expect(
+			(await context.repository.runMeteringMaintenance(1)).grantedSubscriptionAllocations,
+		).toBe(0);
+	});
+
+	it("uses the pinned plan quantity and preserves entity allocation scope", async () => {
+		const seeded = await seedMonthlyAllocation();
+		const [entity] = await context.sql<
+			Array<{ id: string }>
+		>`INSERT INTO entities (project_id, customer_id, external_id, kind)
+			VALUES (${seeded.project_id}, ${seeded.customer_id}, 'monthly-team', 'team') RETURNING id::text`;
+		await context.sql`UPDATE subscriptions SET entity_id = ${entity.id}, scope_mode = 'entity' WHERE id = ${seeded.id}`;
+		await context.sql`UPDATE plan_items SET allocation_scope = 'entity' WHERE id = ${seeded.item_id}`;
+		const [version] = await context.sql<Array<{ id: string; plan_id: string }>>`
+			INSERT INTO plan_versions (project_id, plan_id, catalog_revision_id, version, status, currency, base_amount_minor, billing_interval)
+			SELECT pv.project_id, pv.plan_id, pv.catalog_revision_id, 2, 'published', pv.currency, pv.base_amount_minor, 'year'
+			FROM plan_versions pv JOIN subscriptions s ON s.project_id = pv.project_id AND s.plan_version_id = pv.id
+			WHERE s.id = ${seeded.id} RETURNING id::text, plan_id::text
+		`;
+		await context.sql`UPDATE plans SET active_version_id = ${version.id} WHERE id = ${version.plan_id}`;
+		await context.sql`INSERT INTO plan_items (project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval)
+			SELECT project_id, ${version.id}, feature_id, 'allocation', 999, 'month' FROM plan_items WHERE id = ${seeded.item_id}`;
+		expect(
+			(await context.repository.runMeteringMaintenance(1)).grantedSubscriptionAllocations,
+		).toBe(1);
+		const allocations =
+			await context.sql`SELECT entity_id::text, quantity::text, plan_item_id::text FROM balance_allocations`;
+		expect(allocations).toHaveLength(1);
+		expect(allocations[0]).toMatchObject({
+			entity_id: entity.id,
+			quantity: "100.000000000",
+			plan_item_id: seeded.item_id,
+		});
+	});
+
+	it("does not duplicate the monthly grant when synchronization races maintenance", async () => {
+		const seeded = await seedMonthlyAllocation();
+		const results = await Promise.all([
+			context.repository.runMeteringMaintenance(1),
+			context.db.transaction(async (tx) =>
+				materializeSubscriptionAllocations(tx as unknown as QueryExecutor, {
+					projectId: seeded.project_id,
+					customerId: seeded.customer_id,
+					storeProductId: seeded.store_product_id,
+					subscriptionId: seeded.id,
+					status: "active",
+					periodStartAt: seeded.periodStart,
+					periodEndAt: seeded.periodEnd,
+				}),
+			),
+		]);
+		expect(results[0].grantedSubscriptionAllocations + results[1]).toBe(1);
+		expect(await countRows(context.sql, "balance_allocations")).toBe(1);
+	});
+
+	it("does not speculate past the recorded provider period even during grace", async () => {
+		const seeded = await seedMonthlyAllocation();
+		await context.sql`UPDATE subscriptions SET status = 'grace_period', current_period_end = now() - interval '1 second' WHERE id = ${seeded.id}`;
+		expect(
+			(await context.repository.runMeteringMaintenance(1)).grantedSubscriptionAllocations,
+		).toBe(0);
 	});
 
 	it("rolls unused subscription allocations once with cap, expiry, and provenance", async () => {
@@ -1345,6 +1539,8 @@ localDescribe("authoritative metering flows", () => {
 		const result = await context.repository.runMeteringMaintenance(50);
 		expect(result).toEqual({
 			expiredReservations: 1,
+			grantedSubscriptionAllocations: 0,
+			transitionedSubscriptionAllocations: 0,
 			rolledOverAllocations: 0,
 			closedPeriods: 1,
 			deletedClientClaims: 2,
@@ -1579,6 +1775,48 @@ async function seedAnnualMeterLimitSubscription(
 			AND store_products.product_id = products.id
 			AND store_products.provider = 'stripe'
 		CROSS JOIN annual_version
+	`;
+}
+
+async function seedMonthlyAllocation() {
+	const [clock] = await context.sql<Array<{ now: Date }>>`SELECT now()`;
+	const now = clock.now;
+	const anchor = new Date(now.getTime() - 86400000);
+	const periodStart = addUtcMonths(anchor, -2, anchor.getUTCDate());
+	const periodEnd = addUtcMonths(periodStart, 12, anchor.getUTCDate());
+	await seedAnnualMeterLimitSubscription(context.sql, "monthly_grants", periodStart, periodEnd);
+	const [item] = await context.sql<Array<{ id: string }>>`
+		INSERT INTO plan_items (project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval)
+		SELECT s.project_id, s.plan_version_id, f.id, 'allocation', 100, 'month'
+		FROM subscriptions s JOIN features f ON f.project_id = s.project_id AND f.key = 'ai_credits'
+		RETURNING id::text
+	`;
+	const [subscription] = await context.sql<
+		Array<{ id: string; project_id: string; customer_id: string; store_product_id: string }>
+	>`
+		SELECT id, project_id, customer_id, store_product_id::text FROM subscriptions
+	`;
+	return {
+		...subscription,
+		item_id: item.id,
+		periodStart,
+		periodEnd,
+		window: planGrantWindowBounds(periodStart, periodEnd, "month", now),
+	};
+}
+
+async function seedAnnualAllocationRow(
+	seeded: Awaited<ReturnType<typeof seedMonthlyAllocation>>,
+	start: Date,
+	end: Date,
+	key: string,
+) {
+	await context.sql`
+		INSERT INTO balance_allocations (project_id, customer_id, feature_id, plan_item_id, subscription_id,
+			source_kind, source_key, quantity, period_start_at, period_end_at, expires_at)
+		SELECT ${seeded.project_id}, ${seeded.customer_id}, feature_id, id, ${seeded.id},
+			'subscription', ${key}, 100, ${start.toISOString()}::timestamptz, ${end.toISOString()}::timestamptz, ${end.toISOString()}::timestamptz
+		FROM plan_items WHERE id = ${seeded.item_id}
 	`;
 }
 

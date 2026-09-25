@@ -351,7 +351,7 @@ One process runs the HTTP API and all workers. Each polls on the interval shown:
 | Projection delivery | `BILLING_WORKER_POLL_INTERVAL_MS` |
 | Provider event replay | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
 | Subscription reconciliation (provider reads, subscription and plan grant expiry, plan grant allowances, trial-ending notices) | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
-| Metering maintenance (reservation expiry, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
+| Metering maintenance (reservation expiry, monthly subscription allocations, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Recurring billing | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Automatic top-ups | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Promotion maintenance (expired reservation release, Stripe coupons and hosted promotion codes) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
@@ -363,6 +363,16 @@ per poll from a candidate set bounded by the batch size and delivers five concur
 Usage-driven projections are one job per billing account built at delivery, so the backlog is
 bounded by active accounts. Tune intervals and attempt limits with the `BILLING_*` variables listed
 in [deployment.md](deployment.md#optional-variables).
+
+Monthly allocations on annual subscriptions use the existing metering maintenance cadence and
+allocation ledger; no additional worker, schema migration or environment setting is required.
+The run result logs `grantedSubscriptionAllocations` and `transitionedSubscriptionAllocations`.
+On the first synchronization or maintenance pass after upgrade, an existing year-long allocation
+is adopted into the current monthly window. Its ID, source key, consumption, reservations and
+reversals are retained, its expiry is capped at the next monthly boundary without extending an
+earlier expiry, and no extra current-month credits are issued. The next window receives a fresh
+grant. Missed months are not compensated retroactively. Replace old webhook handlers and workers
+together so the old annual-grant code does not run alongside monthly materialization.
 
 Raw usage is partitioned monthly. Technical retention uses `metering_settings.raw_usage_retention_days`
 (default 400); durable monthly rollups outlive deleted raw rows. This default is not a legal

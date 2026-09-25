@@ -118,6 +118,7 @@ import {
 	validateOccurredAt,
 } from "./metering-persistence";
 import { executeOne, executeRows, jsonb } from "./query";
+import { materializeDueSubscriptionAllocations } from "./subscription-allocation-periods";
 import type { QueryExecutor } from "./types";
 import {
 	materializeUsageInvoicePeriod,
@@ -787,6 +788,15 @@ export class MeteringBillingRepository extends RepositoryModule {
 					`usage:reservation:${reservation.id}:expired`,
 				);
 			}
+			const allocationPeriods = await materializeDueSubscriptionAllocations(tx, limit);
+			for (const period of allocationPeriods) {
+				await enqueueMeteringProjection(
+					tx,
+					period.projectId,
+					period.customerId,
+					"balance:subscription:period",
+				);
+			}
 			const rollovers = await materializeExpiredRollovers(tx, limit);
 			for (const rollover of rollovers) {
 				await enqueueMeteringProjection(
@@ -859,6 +869,14 @@ export class MeteringBillingRepository extends RepositoryModule {
 
 			return {
 				expiredReservations: reservations.length,
+				grantedSubscriptionAllocations: allocationPeriods.reduce(
+					(sum, row) => sum + row.granted,
+					0,
+				),
+				transitionedSubscriptionAllocations: allocationPeriods.reduce(
+					(sum, row) => sum + row.transitioned,
+					0,
+				),
 				rolledOverAllocations: rollovers.length,
 				closedPeriods: closedPeriods.length,
 				deletedClientClaims,

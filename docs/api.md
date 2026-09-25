@@ -303,6 +303,17 @@ token, so retrying a publish that already succeeded returns its stored result wi
 `duplicate: true`. A successful preview also reports `providerCompatibility`; see
 [Provider capabilities and available actions](#provider-capabilities-and-available-actions).
 
+An allocation with `resetInterval: "month"` on an annual plan grants its quantity once per
+monthly window, anchored at the provider period start in UTC. Month-end anchors clamp to the
+shorter month and recover their original day afterwards; the last window stops at the provider
+period end. Its expiry is the earlier of that boundary and `expiresAfterSeconds` after the window
+start. Provider synchronization grants the current window and metering maintenance grants later
+windows on its normal polling cadence. Reads do not create grants. After downtime only the current
+window is granted; elapsed windows are not reconstructed. Existing rollover rules still apply to
+allocations that were actually issued. Grants use the subscription's pinned plan version and
+account/entity scope, and stop when its recorded period or access ends. Period-end cancellation
+continues grants while access remains valid.
+
 The same contract is available as code:
 
 ```sh

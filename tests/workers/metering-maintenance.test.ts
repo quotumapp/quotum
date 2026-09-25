@@ -6,6 +6,8 @@ import { MeteringMaintenanceWorker } from "../../src/workers/metering-maintenanc
 
 const maintenanceResult: MeteringMaintenanceResult = {
 	expiredReservations: 2,
+	grantedSubscriptionAllocations: 0,
+	transitionedSubscriptionAllocations: 0,
 	rolledOverAllocations: 1,
 	closedPeriods: 3,
 	deletedClientClaims: 4,

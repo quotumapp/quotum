@@ -1617,6 +1617,100 @@ localDescribe("Stripe route flows integration", () => {
 		});
 	});
 
+	it("replays a failed charge lookup before fulfilling a Checkout purchase", async () => {
+		const event = stripeEvent(
+			"checkout.session.async_payment_succeeded",
+			stripeCheckoutSessionObject({ payment_intent: "pi_integration" }),
+			"evt_charge_retry",
+		);
+		const fixture = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			stripeEvent: event,
+		});
+		fixture.stripe.failNext("retrievePaymentIntent", new Error("temporary Stripe outage"));
+		const response = await postStripeWebhook(fixture, { id: event.id });
+		expect(response.status).toBe(503);
+		expect((await response.json()).error.code).toBe("BILLING_PROVIDER_UNAVAILABLE");
+		expect(await context.sql`SELECT id FROM purchases`).toHaveLength(0);
+		const saved = await context.sql`SELECT processing_status, raw_payload FROM store_events`;
+		expect(saved).toHaveLength(1);
+		expect(saved[0].processing_status).toBe("skipped");
+		expect(saved[0].raw_payload.payment_intent).toBe("pi_integration");
+		const run = await runStoreEventReplayWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: {
+				apple: null,
+				google: null,
+				stripe: fixture.projectProviderServices.voysee?.stripeBillingService ?? null,
+			},
+		});
+		expect(run).toMatchObject({ processed: 1, failed: 0 });
+		const purchases =
+			await context.sql`SELECT original_transaction_id, transaction_id FROM purchases`;
+		expect(purchases).toHaveLength(1);
+		expect(purchases[0]).toMatchObject({
+			original_transaction_id: "ch_integration",
+			transaction_id: "pi_integration",
+		});
+		expect(
+			(await context.sql`SELECT processing_status FROM store_events`)[0].processing_status,
+		).toBe("processed");
+	});
+
+	it("enriches realistic Checkout purchases and duplicate deliveries without repeating fulfillment", async () => {
+		await publishAiCreditsCatalog(context.repository);
+		const event = stripeEvent(
+			"checkout.session.completed",
+			stripeCheckoutSessionObject({ payment_intent: "pi_integration" }),
+			"evt_charge_lookup",
+		);
+		const fixture = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			stripeEvent: event,
+		});
+		expect((await postStripeWebhook(fixture, { id: event.id })).status).toBe(200);
+		expect(fixture.stripe.calls).toContain("retrievePaymentIntent:pi_integration");
+		const before =
+			await context.sql`SELECT id, original_transaction_id, raw_payload FROM purchases`;
+		expect(before).toHaveLength(1);
+		expect(before[0].original_transaction_id).toBe("ch_integration");
+		expect(before[0].raw_payload.payment_intent).toBe("pi_integration");
+		const search = await testRequest(fixture.app, "/v1/admin/customers/search?q=ch_integration", {
+			headers: fixture.authHeaders("voysee"),
+		});
+		expect(search.status).toBe(200);
+		expect(JSON.stringify(await search.json())).toContain("integration_user");
+		await context.sql`UPDATE purchases SET original_transaction_id = 'ch_known'`;
+		fixture.stripe.setWebhookEvent({ ...event, id: "evt_charge_second_delivery" });
+		expect((await postStripeWebhook(fixture, { id: "evt_charge_second_delivery" })).status).toBe(
+			200,
+		);
+		expect(
+			(await context.sql`SELECT original_transaction_id FROM purchases`)[0].original_transaction_id,
+		).toBe("ch_known");
+		fixture.stripe.setWebhookEvent(event);
+		// A pre-fix processed purchase may receive the same provider event again.
+		await context.sql`UPDATE purchases SET original_transaction_id = NULL, status = 'refunded'`;
+		const allocations =
+			await context.sql`SELECT id, quantity::text, consumed_quantity::text FROM balance_allocations`;
+		const jobs = await context.sql`SELECT id FROM projection_sync_jobs`;
+		expect((await postStripeWebhook(fixture, { id: event.id })).status).toBe(200);
+		expect(
+			await context.sql<
+				Array<{ id: string; original_transaction_id: string; status: string }>
+			>`SELECT id, original_transaction_id, status FROM purchases`,
+		).toEqual([
+			{ id: before[0].id, original_transaction_id: "ch_integration", status: "refunded" },
+		]);
+		expect(
+			await context.sql`SELECT id, quantity::text, consumed_quantity::text FROM balance_allocations`,
+		).toEqual(allocations);
+		expect(await context.sql`SELECT id FROM projection_sync_jobs`).toEqual(jobs);
+	});
+
 	// capability: catalog.product.consumable
 	// capability: checkout.hosted
 	// capability: webhook.ingest

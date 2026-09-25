@@ -215,6 +215,13 @@ a trial of that plan before, through a [Quotum trial](api.md#trials) or a provid
 that recorded trial bounds; otherwise the subscription starts paid and the `checkout_plan` preview
 warns about it. A trial started between preview and execution makes the preview stale.
 
+Paid one-time Checkout completion and asynchronous-success events resolve an unexpanded
+PaymentIntent before recording the purchase, using the connection's PaymentIntent read permission.
+The latest charge ID is stored for admin customer search; the original signed payload stays intact.
+A lookup failure delays fulfillment, records a replayable event and returns a retryable provider
+error. Fully discounted purchases need no charge. Duplicate deliveries may fill a missing charge
+ID without issuing credits again or changing refund state; there is no bulk historical backfill.
+
 Portal sessions come from `POST .../providers/stripe/portal-sessions` and return `{url}`.
 
 For an existing subscription, invoice webhooks record payment history and may update its payment

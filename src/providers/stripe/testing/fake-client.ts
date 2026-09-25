@@ -234,6 +234,11 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		return session;
 	}
 
+	async retrievePaymentIntent(id: string) {
+		this.throwIfFailed("retrievePaymentIntent");
+		return { id, latest_charge: `ch_fake_${digest(id).slice(0, 24)}` };
+	}
+
 	async retrieveCheckoutSession(sessionId: string) {
 		const session = this.requireSession(sessionId);
 		return {
