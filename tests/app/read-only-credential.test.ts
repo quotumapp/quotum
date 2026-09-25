@@ -93,6 +93,7 @@ function testApp(
 		connections: fixtureConnections(env.connectionFixtures),
 		meteringService: recordingService(calls),
 		promotionService: recordingService(calls),
+		trialService: recordingService(calls),
 		projectContextResolver: projectContextResolver({
 			contexts: [projectInstanceContext("voysee")],
 			credentials: {
@@ -226,8 +227,8 @@ describe("read-only project credentials", () => {
 			const outcome = `${response.status} ${body.error?.code}`;
 			expect(pastTheGate, `${route.method} ${route.path} answered ${outcome}`).toContain(outcome);
 		}
-		// The two operations an empty request can complete reach their handlers.
-		expect(calls).toEqual(["release", "getAccountRedemption"]);
+		// The three operations an empty request can complete reach their handlers.
+		expect(calls).toEqual(["release", "getAccountRedemption", "endTrial"]);
 	});
 
 	it("never get raw provider payloads, even from a store-event read they may call", async () => {
