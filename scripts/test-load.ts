@@ -739,6 +739,7 @@ interface CountingReceiver {
 function createCountingReceiver(): CountingReceiver {
 	let delivered = 0;
 	const server = Bun.serve({
+		hostname: "127.0.0.1",
 		port: 0,
 		async fetch(request) {
 			await request.arrayBuffer();

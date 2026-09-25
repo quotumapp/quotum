@@ -288,7 +288,7 @@ export class ConnectionLifecycle {
 			const generated = generateProjectApiCredential(gate.environment, access);
 			const replaced = await tx<
 				{ id: string }[]
-			>`UPDATE platform_project_api_credentials SET revoked_at=${this.deps.now()} WHERE project_instance_id=${instance.id} AND access=${access} AND revoked_at IS NULL RETURNING id`;
+			>`UPDATE platform_project_api_credentials SET revoked_at=clock_timestamp() WHERE project_instance_id=${instance.id} AND access=${access} AND revoked_at IS NULL RETURNING id`;
 			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,access,secret_verifier) VALUES(${generated.credentialId},${instance.id},'billing_api',${generated.access},${generated.secretVerifier})`;
 			await this.audit(
 				tx,
@@ -348,7 +348,7 @@ export class ConnectionLifecycle {
 			// it is neither reported nor audited. The next issue revokes that row whatever its expiry.
 			const revoked = await tx<
 				{ id: string }[]
-			>`UPDATE platform_project_api_credentials SET revoked_at=${this.deps.now()} WHERE project_instance_id=${instance.id} AND access=${access} AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>${this.deps.now()}) RETURNING id`;
+			>`UPDATE platform_project_api_credentials SET revoked_at=clock_timestamp() WHERE project_instance_id=${instance.id} AND access=${access} AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>${this.deps.now()}) RETURNING id`;
 			if (revoked.length > 0)
 				await this.audit(tx, gate, "credential.revoked", instance.id, { access });
 			// Receipted even when nothing was live: a replay of this key never revokes a later key.

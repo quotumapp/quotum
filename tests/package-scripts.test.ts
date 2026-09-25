@@ -49,6 +49,7 @@ describe("package scripts", () => {
 		expect(runner).toContain('"scripts/test-migration-integrity.ts"');
 		expect(runner).toContain('"bun", ["run", "migrate"]');
 		expect(runner).toContain('testTargets.length === 0 ? ["tests/integration"] : testTargets');
+		expect(runner).toContain('"--timeout=20000"');
 		expect(e2eRunner).toContain("createSanitizedProcessEnv");
 		expect(e2eRunner).toContain("getConnectionUri");
 		expect(e2eRunner).toContain("container.stop");

@@ -54,11 +54,12 @@ localDescribe("transaction deadlock retry", () => {
 		// Opposite lock orders on two rows. On the first attempt each transaction waits until both
 		// hold their first row before asking for the other one, so the deadlock happens however long
 		// either connection takes to open. Postgres aborts one loser with 40P01 after
-		// `deadlock_timeout` (1s, far under the pool's 30s statement timeout); the winner commits and
-		// the loser re-runs without waiting.
+		// `deadlock_timeout`, lowered here from its 1 s default and far under the pool's 30 s
+		// statement timeout; the winner commits and the loser re-runs without waiting.
 		const conflictingTransaction = (first: string, second: string, key: "a" | "b") =>
 			probe.run(async (tx) => {
 				attempts[key] += 1;
+				await tx.execute(drizzleSql`SET LOCAL deadlock_timeout = '100ms'`);
 				await tx.execute(
 					drizzleSql`UPDATE customers SET updated_at = now()
 						WHERE project_id = ${projectId} AND billing_account_id = ${first}`,

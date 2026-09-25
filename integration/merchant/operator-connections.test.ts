@@ -250,7 +250,12 @@ describe("operator connection commands", () => {
 			);
 			await Bun.sleep(300);
 			const version = await f.connectionRepository.version(await instanceId("alpha"), draftId);
-			await f.connectionRepository.recordEvent(version, "acct_operator", new Date());
+			// Future-dated like the webhook tests: the draft is dated by the database clock.
+			await f.connectionRepository.recordEvent(
+				version,
+				"acct_operator",
+				new Date(Date.now() + 30_000),
+			);
 			const committed = await waiting;
 			expect(committed.code).toBe(0);
 			expect(committed.json).toMatchObject({ revision: 1, enabled: true });

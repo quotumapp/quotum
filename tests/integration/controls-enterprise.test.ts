@@ -5,6 +5,7 @@ import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
+	databaseNow,
 	describeLocalPostgres,
 	integrationProjectContext,
 	type LocalPostgresContext,
@@ -415,7 +416,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			10,
 			new Date(Date.now() - 300_000),
 		);
-		const retryAt = new Date(Date.now() - 1_000);
+		const retryAt = new Date((await databaseNow(context.sql)).getTime() - 1_000);
 		expect(
 			await context.repository.markAutoTopupFailed(first.projectId, first.jobId, "auto-worker", {
 				kind: "retryable",

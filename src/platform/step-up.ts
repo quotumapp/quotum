@@ -133,9 +133,11 @@ export class MerchantStepUp {
 					404,
 				);
 			const expires = new Date(this.store.now().getTime() + STEP_UP_MS);
+			// Dated by the application clock, like the proof that must follow it: the column default
+			// is the database clock, and a host clock behind it would reject every fresh proof.
 			const [row] = await tx<
 				{ id: string }[]
-			>`INSERT INTO platform_step_up_grants(session_id,organization_id,scope,action,target,return_to,request,expires_at) VALUES(${identity.sessionId},${member.organization_id},${JSON.stringify(input.scope)}::text::jsonb,${input.action},${input.target},${safeReturnTo(input.returnTo)},${JSON.stringify(input.request ?? null)}::text::jsonb,${expires}) RETURNING id`;
+			>`INSERT INTO platform_step_up_grants(session_id,organization_id,scope,action,target,return_to,request,expires_at,created_at) VALUES(${identity.sessionId},${member.organization_id},${JSON.stringify(input.scope)}::text::jsonb,${input.action},${input.target},${safeReturnTo(input.returnTo)},${JSON.stringify(input.request ?? null)}::text::jsonb,${expires},${this.store.now()}) RETURNING id`;
 			if (!row) throw new Error("Challenge insert failed");
 			return {
 				id: row.id,
