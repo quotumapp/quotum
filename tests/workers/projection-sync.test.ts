@@ -314,6 +314,66 @@ describe("ProjectionSyncWorker", () => {
 		]);
 	});
 
+	it("forwards trial context to delivery", async () => {
+		const synced: unknown[] = [];
+		const trial = {
+			event: "ending",
+			source: "subscription",
+			provider: "stripe",
+			channel: "web",
+			externalSubscriptionId: "sub_1",
+			productKey: "premium_monthly",
+			trialStartsAt: "2026-05-31T00:00:00.000Z",
+			trialEndsAt: "2026-06-14T00:00:00.000Z",
+			autoRenew: true,
+		} as const;
+		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
+			workerId: "worker-a",
+			maxAttempts: 10,
+			batchSize: 5,
+			repository: {
+				buildUsageProjection: async (): Promise<never> => {
+					throw new Error("usage projections are not expected here");
+				},
+				claimProjectionSyncJobs: async () => [
+					{
+						...job,
+						idempotency_key: "trial_ending:subscription:sub_row:2026-06-14T00:00:00.000Z",
+						reason: "expiry_reconciliation",
+						payload: { ...job.payload, reason: "expiry_reconciliation", trial },
+					},
+				],
+				markProjectionSyncJobSucceeded: async () => undefined,
+				markProjectionSyncJobFailed: async () => {
+					throw new Error("should not fail");
+				},
+			},
+			delivery: {
+				deliver: async (input) => {
+					synced.push(input);
+				},
+			},
+		});
+
+		await worker.runOnce();
+
+		expect(synced).toEqual([
+			{
+				schemaVersion: 1,
+				projectKey: "voysee",
+				jobId: "job_1",
+				idempotencyKey: "trial_ending:subscription:sub_row:2026-06-14T00:00:00.000Z",
+				billingAccountId: "user_1",
+				generatedAt: job.payload.generatedAt,
+				balances: [],
+				reason: "expiry_reconciliation",
+				entitlements: job.payload.entitlements,
+				trial,
+			},
+		]);
+	});
+
 	it("marks failed jobs with a retry timestamp", async () => {
 		const calls: unknown[] = [];
 		const metrics = createInMemoryBillingMetrics();

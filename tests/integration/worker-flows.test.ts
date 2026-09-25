@@ -517,6 +517,7 @@ localDescribe("Worker flows integration", () => {
 			outcome: "succeeded",
 			expiredSubscriptions: 1,
 			affectedCustomers: 1,
+			trialEndingNotices: 0,
 			providerClaimed: 2,
 			providerProcessed: 2,
 			providerSkipped: 0,
@@ -604,6 +605,134 @@ localDescribe("Worker flows integration", () => {
 		]);
 	});
 
+	// capability: trial.ending_notice
+	it("sends one ending notice for App Store and Play trials within three days of their end", async () => {
+		const day = 86_400_000;
+		const now = Math.floor(Date.now() / 1000) * 1000;
+		const project = integrationProjectContext();
+		const recordAppleTrial = (billingAccountId: string, originalTransactionId: string, end: Date) =>
+			context.repository.recordStoreKitTransactionAndEnqueueProjection(project, {
+				billingAccountId,
+				appAccountToken: null,
+				channel: "ios",
+				externalProductId: "premium_monthly",
+				purchaseKind: "subscription",
+				transactionId: `${originalTransactionId}_1`,
+				originalTransactionId,
+				webOrderLineItemId: `${originalTransactionId}_line`,
+				purchaseStatus: "completed",
+				subscriptionStatus: "active",
+				purchasedAt: new Date(now - 5 * day),
+				expiresAt: end,
+				trialStart: new Date(now - 5 * day),
+				trialEnd: end,
+				autoRenew: true,
+				invalidatedAt: null,
+				invalidationReason: null,
+				rawPayload: { fixture: originalTransactionId },
+				eventType: "SUBSCRIBED",
+				externalEventId: `${originalTransactionId}_event`,
+				projectionReason: "provider_webhook",
+				projectionIdempotencyKey: `${originalTransactionId}:projection`,
+			});
+		const recordGoogleTrial = (end: Date, eventId: string) =>
+			context.repository.recordGooglePurchaseAndEnqueueProjection(project, {
+				billingAccountId: "google_trial_user",
+				obfuscatedAccountId: null,
+				externalProductId: "premium_monthly",
+				externalPriceId: "monthly-base",
+				purchaseKind: "subscription",
+				purchaseToken: "google_trial_token",
+				linkedPurchaseToken: null,
+				orderId: "GPA.TRIAL",
+				purchaseStatus: "completed",
+				subscriptionStatus: "active",
+				purchasedAt: new Date(now - 5 * day),
+				expiresAt: end,
+				trialStart: new Date(now - 5 * day),
+				trialEnd: end,
+				autoRenew: true,
+				acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+				consumptionState: null,
+				quantity: 1,
+				refundableQuantity: null,
+				invalidatedAt: null,
+				invalidationReason: null,
+				rawPayload: { fixture: eventId },
+				eventType: "SUBSCRIPTION_PURCHASED",
+				externalEventId: eventId,
+				projectionReason: "provider_webhook",
+				projectionIdempotencyKey: `${eventId}:projection`,
+			});
+		const appleEnd = new Date(now + 2 * day);
+		const googleEnd = new Date(now + 2 * day + 3_600_000);
+		await recordAppleTrial("apple_trial_user", "apple_trial_due", appleEnd);
+		await recordAppleTrial("apple_later_user", "apple_trial_later", new Date(now + 5 * day));
+		await recordGoogleTrial(googleEnd, "google_trial_event");
+		const noticeJobs = () =>
+			context.sql<{ idempotency_key: string; reason: string; payload: { trial?: unknown } }[]>`
+				SELECT idempotency_key, reason, payload FROM projection_sync_jobs
+				WHERE idempotency_key LIKE 'trial_ending:%'
+				ORDER BY idempotency_key
+			`;
+		const sequences = () =>
+			context.sql<{ billing_account_id: string; projection_sequence: string }[]>`
+				SELECT billing_account_id, projection_sequence::text FROM customers ORDER BY billing_account_id
+			`;
+
+		expect(await context.repository.enqueueTrialEndingNotices(25)).toEqual({
+			noticedTrials: 2,
+			affectedCustomers: 2,
+			projectionJobs: 2,
+		});
+		const jobs = await noticeJobs();
+		expect(
+			jobs.map((job) => [job.idempotency_key.split(":").slice(0, 2).join(":"), job.reason]),
+		).toEqual([
+			["trial_ending:subscription", "expiry_reconciliation"],
+			["trial_ending:subscription", "expiry_reconciliation"],
+		]);
+		expect(jobs.map((job) => job.payload.trial)).toEqual(
+			expect.arrayContaining([
+				{
+					event: "ending",
+					source: "subscription",
+					provider: "apple",
+					channel: "ios",
+					externalSubscriptionId: "apple_trial_due",
+					productKey: "premium_monthly",
+					trialStartsAt: new Date(now - 5 * day).toISOString(),
+					trialEndsAt: appleEnd.toISOString(),
+					autoRenew: true,
+				},
+				{
+					event: "ending",
+					source: "subscription",
+					provider: "google",
+					channel: "android",
+					externalSubscriptionId: "google_trial_token",
+					productKey: "premium_monthly",
+					trialStartsAt: new Date(now - 5 * day).toISOString(),
+					trialEndsAt: googleEnd.toISOString(),
+					autoRenew: true,
+				},
+			]),
+		);
+
+		// A second pass finds nothing and leaves every account's projection sequence alone.
+		const before = await sequences();
+		expect((await context.repository.enqueueTrialEndingNotices(25)).noticedTrials).toBe(0);
+		expect(await sequences()).toEqual(before);
+
+		// Play moving the same trial's end owes a new notice.
+		const movedEnd = new Date(googleEnd.getTime() + 3_600_000);
+		await recordGoogleTrial(movedEnd, "google_trial_moved");
+		expect((await context.repository.enqueueTrialEndingNotices(25)).noticedTrials).toBe(1);
+		expect((await noticeJobs()).map((job) => job.idempotency_key)).toContain(
+			`trial_ending:subscription:${(await context.sql<{ id: string }[]>`SELECT id FROM subscriptions WHERE external_subscription_id = 'google_trial_token'`)[0]?.id}:${movedEnd.toISOString()}`,
+		);
+	});
+
 	it("marks provider subscription reconciliation failures retryable", async () => {
 		const fixture = createIntegrationApp({
 			env: context.env,
@@ -635,6 +764,7 @@ localDescribe("Worker flows integration", () => {
 			outcome: "failed",
 			expiredSubscriptions: 0,
 			affectedCustomers: 0,
+			trialEndingNotices: 0,
 			providerClaimed: 1,
 			providerProcessed: 0,
 			providerSkipped: 0,

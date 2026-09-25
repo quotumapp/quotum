@@ -98,6 +98,19 @@ export function providersImplementing(
 }
 
 /**
+ * Admitted providers that implement `operation` by Quotum composition rather than natively: the
+ * ones whose outcome a Quotum worker produces, such as a trial-ending notice from recorded bounds.
+ */
+export function providersComposing(
+	operation: ProviderOperation,
+	lookup: ProviderCapabilityLookup = providerCapabilityCatalog,
+): BillingProvider[] {
+	return providersImplementing(operation, lookup).filter(
+		(provider) => lookup.get(provider)?.operations[operation].level === "quotum_composed",
+	);
+}
+
+/**
  * A catalog construct whose provider binding must support the operations it requires: an adopted
  * store product, a plan, a price component (the plan's base price when `item` is null, otherwise
  * the priced plan item; the plan's other components decide hybrid pricing) or a top-up.

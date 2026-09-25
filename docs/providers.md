@@ -68,6 +68,7 @@ connections cannot serve. See
 | Webhook ingestion<br>`webhook.ingest` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts), [providers/apple/service](../tests/providers/apple/service.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts), [providers/google/service](../tests/providers/google/service.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-WH-01, Q-WH-02, Q-WH-03 |
 | Stored event replay<br>`event.replay` | Supported · Native<br>Tests: [providers/apple/service](../tests/providers/apple/service.test.ts) | Supported · Native<br>Tests: [providers/google/service](../tests/providers/google/service.test.ts) | Supported · Native<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-WH-03 |
 | Subscription reconciliation<br>`subscription.reconcile` | Supported · Native<br>Tests: [providers/apple/service](../tests/providers/apple/service.test.ts) | Supported · Native<br>Tests: [providers/google/service](../tests/providers/google/service.test.ts), [integration/worker-flows](../tests/integration/worker-flows.test.ts) | Supported · Native<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-RET-02, Q-RATE-01 |
+| Trial ending notice<br>`trial.ending_notice` | Supported · Quotum-composed via App Store free-trial transactions<br>Tests: [integration/worker-flows](../tests/integration/worker-flows.test.ts) | Supported · Quotum-composed via Play free-trial offer phases<br>Tests: [integration/worker-flows](../tests/integration/worker-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Not evaluated |
 | **Subscription changes** | | | | |
 | Subscription change preview<br>`subscription.change.preview` | Unsupported | Unsupported | Conditional · Native<br>The subscription state must be active, grace_period, billing_retry or cancelled.<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Not evaluated<br>Questions: Q-SUB-07 |
 | Immediate subscription change<br>`subscription.change.apply` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Conditional · Native<br>The subscription state must be active, grace_period, billing_retry or cancelled.<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [integration/promotions](../tests/integration/promotions.test.ts), [workers/recurring-billing](../tests/workers/recurring-billing.test.ts) | Planned · Native<br>Questions: Q-SUB-01, Q-SUB-03, Q-RET-01 |
@@ -239,7 +240,9 @@ Refunds and disputes reverse credits proportionally to the cumulative reversed a
 deduplicated by refund id. Configure Stripe to send `refund.created` and `refund.updated`;
 `charge.refunded` is safely ignored. For promotion codes, also send `checkout.session.expired` and
 `checkout.session.async_payment_failed` so reserved uses are released promptly; the promotion
-maintenance worker releases them an hour after the session could have completed otherwise.
+maintenance worker releases them an hour after the session could have completed otherwise. Send
+`customer.subscription.trial_will_end` for [trial-ending facts](#projections); without it, Stripe
+trials get no ending notice.
 
 Regular provider webhooks use `/v1/projects/:projectKey/webhooks/:provider`. Connection setup also
 exposes the version-specific route
@@ -287,7 +290,7 @@ Quotum never writes your database. It delivers signed HTTP `billing_state_v1` pr
 the entitlement and exact-string balance snapshot to the connection's projection URL, retrying
 with backoff. Verify `X-Billing-Signature` and `X-Billing-Timestamp`, and treat the projection as a
 read model: authorization decisions must use the metering API. Order snapshots per billing account
-by `sequence`, and record `purchase` and `reversal` facts idempotently by their key.
+by `sequence`, and record `purchase`, `reversal` and `trial` facts idempotently by their key.
 `idempotencyKey` identifies the job, not a delivery: retries resend it, and every usage-driven
 delivery for an account reuses one key, so discarding a payload whose key was already seen drops
 newer usage snapshots. [`scripts/projection-receiver.ts`](../scripts/projection-receiver.ts) is a
@@ -302,13 +305,28 @@ catalog cannot declare; Quotum records their bounds from the store's purchase da
 [Apple StoreKit](#apple-storekit) and [Google Play Billing](#google-play-billing)). A trial is
 recorded only from a purchase Quotum sees while it runs.
 
+A payload carries at most one fact: `purchase`, `reversal` or `trial`. A `trial` fact with
+`event: "ending"` arrives once per trial, about three days before its end: for Stripe from
+`customer.subscription.trial_will_end` (reason `provider_webhook`), and for Apple and Google, which
+send no such notification, from the subscription reconciliation worker (reason
+`expiry_reconciliation`, key `trial_ending:subscription:<id>:<trialEndsAt>`). A trial recorded when
+it is already that close is announced at the next worker pass, and a trial whose end moves is
+announced again for the new end. The fact names the subscription with `source: "subscription"`,
+`provider`, `channel`, `externalSubscriptionId`, `productKey` and, when the subscription is on a
+plan, `planKey`, and carries `trialStartsAt`, `trialEndsAt` and `autoRenew`, which says whether the
+subscription continues as a paid one unless cancelled. A Stripe trial without a payment method whose
+end behavior cancels or pauses it still reports `autoRenew: true`; Stripe decides at the trial end.
+The schema also admits `event: "ended"` and `source: "plan_grant"` for trials Quotum runs itself.
+Unlike the entitlement metadata, which describes each entitlement's current source, the fact
+describes the one subscription whose trial is ending.
+
 Purchase, provider-webhook and reconciliation projections are delivered per event. Usage-driven
 projections are coalesced: one delivery per billing account covers every consume, reservation and
 confirmation since the previous one, is sent after the project's debounce
 (`metering_settings.projection_usage_debounce_ms`, default one second), and carries the state
 current at delivery, so a receiver sees fewer deliveries than usage calls. Payloads carry a
 per-account `sequence`; a receiver that already applied a higher sequence for the account may
-discard the snapshot but should still record any `purchase` or `reversal` facts by their key. The
+discard the snapshot but should still record any `purchase`, `reversal` or `trial` facts by their key. The
 payload schema keeps `sequence` optional; treat a payload without it as unordered and apply it as
 current. Set
 `usageDelivery` to `off` on the projection connection when your backend takes balances from the

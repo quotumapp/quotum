@@ -2831,6 +2831,102 @@ localDescribe("Stripe route flows integration", () => {
 		});
 	});
 
+	// capability: trial.ending_notice
+	it("attaches one trial-ending fact from trial_will_end while the trial is still running", async () => {
+		const service = createVerifiedEventService();
+		const now = Math.floor(Date.now() / 1000);
+		const trialStart = now - 86_400;
+		const trialEnd = now + 3 * 86_400;
+		const trialing = (overrides: Record<string, unknown> = {}) =>
+			stripeSubscriptionObject({
+				status: "trialing",
+				trial_start: trialStart,
+				trial_end: trialEnd,
+				...overrides,
+			});
+		const deliver = (type: string, object: Record<string, unknown>, created: number, id: string) =>
+			service.handleVerifiedAppEvent(verifiedStripeEvent(type, object, created, id));
+		const trialOf = async (eventId: string, type = "customer.subscription.trial_will_end") =>
+			(
+				await expectProjectionJobByKey(
+					context.sql,
+					`stripe:subscription:sub_1:${type}:${eventId}:projection`,
+				)
+			).payload.trial;
+		const marker = async () =>
+			(
+				await context.sql<{ trial_ending_notified_at: Date | null }[]>`
+					SELECT trial_ending_notified_at FROM subscriptions WHERE external_subscription_id = 'sub_1'
+				`
+			)[0]?.trial_ending_notified_at ?? null;
+
+		await deliver("customer.subscription.created", trialing(), now - 300, "evt_trial_created");
+		await deliver(
+			"customer.subscription.trial_will_end",
+			trialing(),
+			now - 200,
+			"evt_trial_will_end",
+		);
+
+		expect(await trialOf("evt_trial_will_end")).toEqual({
+			event: "ending",
+			source: "subscription",
+			provider: "stripe",
+			channel: "web",
+			externalSubscriptionId: "sub_1",
+			productKey: "premium_monthly",
+			trialStartsAt: new Date(trialStart * 1000).toISOString(),
+			trialEndsAt: new Date(trialEnd * 1000).toISOString(),
+			autoRenew: true,
+		});
+		expect(await marker()).not.toBeNull();
+
+		// A repeated notice for the same trial carries no second fact.
+		await deliver(
+			"customer.subscription.trial_will_end",
+			trialing(),
+			now - 190,
+			"evt_trial_will_end_again",
+		);
+		expect(await trialOf("evt_trial_will_end_again")).toBeUndefined();
+
+		// Moving the trial end re-arms the notice for the new end.
+		const extendedEnd = trialEnd + 86_400;
+		await deliver(
+			"customer.subscription.updated",
+			trialing({ trial_end: extendedEnd }),
+			now - 180,
+			"evt_trial_extended",
+		);
+		expect(await marker()).toBeNull();
+		await deliver(
+			"customer.subscription.trial_will_end",
+			trialing({ trial_end: extendedEnd }),
+			now - 170,
+			"evt_trial_will_end_extended",
+		);
+		expect(await trialOf("evt_trial_will_end_extended")).toMatchObject({
+			trialEndsAt: new Date(extendedEnd * 1000).toISOString(),
+		});
+
+		// Stripe also sends trial_will_end when a trial is ended early; the subscription is paid by
+		// then, so the event refreshes state without a fact, and so does a stale copy of an old notice.
+		await deliver(
+			"customer.subscription.trial_will_end",
+			stripeSubscriptionObject({ status: "active", trial_start: trialStart, trial_end: now - 60 }),
+			now - 60,
+			"evt_trial_ended_early",
+		);
+		expect(await trialOf("evt_trial_ended_early")).toBeUndefined();
+		await deliver(
+			"customer.subscription.trial_will_end",
+			trialing(),
+			now - 250,
+			"evt_trial_will_end_stale",
+		);
+		expect(await trialOf("evt_trial_will_end_stale")).toBeUndefined();
+	});
+
 	// capability: subscription.sync
 	it("does not revive an expired subscription when an old usage invoice is paid", async () => {
 		const service = createVerifiedEventService();

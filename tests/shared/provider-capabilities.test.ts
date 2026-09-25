@@ -136,7 +136,7 @@ describe("provider capability vocabulary", () => {
 		expect(isProviderOperation("checkout")).toBe(false);
 	});
 
-	it("lists exactly the 31 provider operations in contract order", () => {
+	it("lists exactly the 32 provider operations in contract order", () => {
 		expect([...providerOperations]).toEqual([
 			"catalog.product.subscription",
 			"catalog.product.consumable",
@@ -157,6 +157,7 @@ describe("provider capability vocabulary", () => {
 			"webhook.ingest",
 			"event.replay",
 			"subscription.reconcile",
+			"trial.ending_notice",
 			"subscription.change.preview",
 			"subscription.change.apply",
 			"subscription.change.period_end",
@@ -170,7 +171,7 @@ describe("provider capability vocabulary", () => {
 			"promotion.code_entry",
 			"promotion.hosted_code",
 		]);
-		expect(new Set(providerOperations).size).toBe(31);
+		expect(new Set(providerOperations).size).toBe(32);
 	});
 
 	it("defines every operation with a domain, a unique title and a provider-neutral sentence", () => {

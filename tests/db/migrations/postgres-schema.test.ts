@@ -58,8 +58,12 @@ describe("baseline schema files", () => {
 		expect(billingCore).toContain("idx_billing_customers_billing_account_id_trgm");
 		expect(billingCore).toContain("idx_billing_projection_sync_jobs_idempotency");
 		expect(billingCore).toContain("idx_billing_subscriptions_provider_reconciliation_due");
+		expect(billingCore).toContain("idx_billing_subscriptions_trial_ending_due");
 		expect(billingCore).toContain("jsonb_typeof(payload->'balances') = 'array'");
 		expect(billingCore).toContain("NOT (payload ? 'operation')");
+		expect(billingCore).toContain(
+			"NOT (payload ? 'trial' AND (payload ? 'purchase' OR payload ? 'reversal'))",
+		);
 		expect(billingCore).toContain("last_provider_event_created");
 		expect(billingCore).not.toMatch(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION/i);
 		for (const file of files) {

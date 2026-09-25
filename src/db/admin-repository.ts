@@ -501,6 +501,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 						: drizzleSql`(
 							jobs.payload->'purchase'->>'productKey' = ${input.productKey}
 							OR jobs.payload->'reversal'->>'productKey' = ${input.productKey}
+							OR jobs.payload->'trial'->>'productKey' = ${input.productKey}
 						)`,
 					cursorFilter(input.cursor, "jobs"),
 				])}

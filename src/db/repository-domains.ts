@@ -5,6 +5,7 @@ import type {
 	ProjectionSyncJobRow,
 	ProviderSubscriptionReconciliationRow,
 	StoreEventReplayJobRow,
+	TrialEndingNoticeResult,
 } from "./repository";
 
 export interface ProjectionSyncJobRepositorySource {
@@ -135,6 +136,7 @@ export class StoreEventReplayJobRepository implements StoreEventReplayJobReposit
 
 export interface ProviderSubscriptionReconciliationRepositorySource {
 	reconcileExpiredSubscriptions(limit: number): Promise<ExpiredSubscriptionReconciliationResult>;
+	enqueueTrialEndingNotices(limit: number): Promise<TrialEndingNoticeResult>;
 	claimProviderSubscriptionReconciliations(
 		workerId: string,
 		limit: number,
@@ -168,6 +170,10 @@ export class ProviderSubscriptionReconciliationRepository
 		limit: number,
 	): Promise<ExpiredSubscriptionReconciliationResult> {
 		return await this.source.reconcileExpiredSubscriptions(limit);
+	}
+
+	async enqueueTrialEndingNotices(limit: number): Promise<TrialEndingNoticeResult> {
+		return await this.source.enqueueTrialEndingNotices(limit);
 	}
 
 	async claimProviderSubscriptionReconciliations(

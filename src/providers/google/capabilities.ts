@@ -38,6 +38,20 @@ function providerManaged(notes: string, tests: string[] = []): OperationSupport 
 	};
 }
 
+function composed(composedVia: string, tests: string[], notes: string): OperationSupport {
+	return {
+		level: "quotum_composed",
+		composedVia,
+		verification: {
+			status: "verified",
+			verifiedOn,
+			evidence: { tests, scenarios: [], questions: [] },
+		},
+		conditions: [],
+		notes,
+	};
+}
+
 function unsupported(notes: string): OperationSupport {
 	return {
 		level: "unsupported",
@@ -105,6 +119,11 @@ export const googleCapabilities: ProviderCapabilityDeclaration = {
 		"webhook.ingest": verified([googleFlows, googleService]),
 		"event.replay": verified([googleService]),
 		"subscription.reconcile": verified([googleService, workerFlows]),
+		"trial.ending_notice": composed(
+			"Play free-trial offer phases",
+			[workerFlows],
+			"Play sends no trial-ending notification; the subscription reconciliation worker sends the notice three days before the recorded trial end.",
+		),
 		"subscription.change.preview": unsupported(
 			"Plan changes are priced in the Google Play purchase sheet; Quotum has no preview for them and records no preview outcome.",
 		),

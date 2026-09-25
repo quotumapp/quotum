@@ -50,6 +50,7 @@ export const providerOperations = [
 	"webhook.ingest",
 	"event.replay",
 	"subscription.reconcile",
+	"trial.ending_notice",
 	"subscription.change.preview",
 	"subscription.change.apply",
 	"subscription.change.period_end",
@@ -219,6 +220,12 @@ export const providerOperationDefinitions: Record<ProviderOperation, ProviderOpe
 			title: "Subscription reconciliation",
 			description:
 				"Quotum reads a subscription's current state from the provider's API, through the reconciliation worker or an operator run, and corrects local subscription state and entitlements that drifted from it.",
+		},
+		"trial.ending_notice": {
+			domain: "events",
+			title: "Trial ending notice",
+			description:
+				"Quotum delivers one trial-ending fact on the billing state projection shortly before a subscription's trial ends, from the provider's own notice or from the recorded trial bounds.",
 		},
 		"subscription.change.preview": {
 			domain: "subscription_changes",

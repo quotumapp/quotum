@@ -2705,6 +2705,69 @@
                         },
                         "sequence": {
                           "type": "number"
+                        },
+                        "trial": {
+                          "properties": {
+                            "autoRenew": {
+                              "type": "boolean"
+                            },
+                            "channel": {
+                              "enum": [
+                                "ios",
+                                "android",
+                                "web"
+                              ],
+                              "type": "string"
+                            },
+                            "event": {
+                              "enum": [
+                                "ending",
+                                "ended"
+                              ],
+                              "type": "string"
+                            },
+                            "externalSubscriptionId": {
+                              "type": "string"
+                            },
+                            "planGrantId": {
+                              "type": "string"
+                            },
+                            "planKey": {
+                              "type": "string"
+                            },
+                            "productKey": {
+                              "type": "string"
+                            },
+                            "provider": {
+                              "enum": [
+                                "apple",
+                                "google",
+                                "stripe"
+                              ],
+                              "type": "string"
+                            },
+                            "source": {
+                              "enum": [
+                                "subscription",
+                                "plan_grant"
+                              ],
+                              "type": "string"
+                            },
+                            "trialEndsAt": {
+                              "type": "string"
+                            },
+                            "trialStartsAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "event",
+                            "source",
+                            "trialStartsAt",
+                            "trialEndsAt",
+                            "autoRenew"
+                          ],
+                          "type": "object"
                         }
                       },
                       "required": [
@@ -3307,6 +3370,69 @@
                     },
                     "sequence": {
                       "type": "number"
+                    },
+                    "trial": {
+                      "properties": {
+                        "autoRenew": {
+                          "type": "boolean"
+                        },
+                        "channel": {
+                          "enum": [
+                            "ios",
+                            "android",
+                            "web"
+                          ],
+                          "type": "string"
+                        },
+                        "event": {
+                          "enum": [
+                            "ending",
+                            "ended"
+                          ],
+                          "type": "string"
+                        },
+                        "externalSubscriptionId": {
+                          "type": "string"
+                        },
+                        "planGrantId": {
+                          "type": "string"
+                        },
+                        "planKey": {
+                          "type": "string"
+                        },
+                        "productKey": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "enum": [
+                            "apple",
+                            "google",
+                            "stripe"
+                          ],
+                          "type": "string"
+                        },
+                        "source": {
+                          "enum": [
+                            "subscription",
+                            "plan_grant"
+                          ],
+                          "type": "string"
+                        },
+                        "trialEndsAt": {
+                          "type": "string"
+                        },
+                        "trialStartsAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "event",
+                        "source",
+                        "trialStartsAt",
+                        "trialEndsAt",
+                        "autoRenew"
+                      ],
+                      "type": "object"
                     }
                   },
                   "required": [
@@ -4046,6 +4172,69 @@
                         },
                         "sequence": {
                           "type": "number"
+                        },
+                        "trial": {
+                          "properties": {
+                            "autoRenew": {
+                              "type": "boolean"
+                            },
+                            "channel": {
+                              "enum": [
+                                "ios",
+                                "android",
+                                "web"
+                              ],
+                              "type": "string"
+                            },
+                            "event": {
+                              "enum": [
+                                "ending",
+                                "ended"
+                              ],
+                              "type": "string"
+                            },
+                            "externalSubscriptionId": {
+                              "type": "string"
+                            },
+                            "planGrantId": {
+                              "type": "string"
+                            },
+                            "planKey": {
+                              "type": "string"
+                            },
+                            "productKey": {
+                              "type": "string"
+                            },
+                            "provider": {
+                              "enum": [
+                                "apple",
+                                "google",
+                                "stripe"
+                              ],
+                              "type": "string"
+                            },
+                            "source": {
+                              "enum": [
+                                "subscription",
+                                "plan_grant"
+                              ],
+                              "type": "string"
+                            },
+                            "trialEndsAt": {
+                              "type": "string"
+                            },
+                            "trialStartsAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "event",
+                            "source",
+                            "trialStartsAt",
+                            "trialEndsAt",
+                            "autoRenew"
+                          ],
+                          "type": "object"
                         }
                       },
                       "required": [
@@ -5085,6 +5274,69 @@
                     },
                     "sequence": {
                       "type": "number"
+                    },
+                    "trial": {
+                      "properties": {
+                        "autoRenew": {
+                          "type": "boolean"
+                        },
+                        "channel": {
+                          "enum": [
+                            "ios",
+                            "android",
+                            "web"
+                          ],
+                          "type": "string"
+                        },
+                        "event": {
+                          "enum": [
+                            "ending",
+                            "ended"
+                          ],
+                          "type": "string"
+                        },
+                        "externalSubscriptionId": {
+                          "type": "string"
+                        },
+                        "planGrantId": {
+                          "type": "string"
+                        },
+                        "planKey": {
+                          "type": "string"
+                        },
+                        "productKey": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "enum": [
+                            "apple",
+                            "google",
+                            "stripe"
+                          ],
+                          "type": "string"
+                        },
+                        "source": {
+                          "enum": [
+                            "subscription",
+                            "plan_grant"
+                          ],
+                          "type": "string"
+                        },
+                        "trialEndsAt": {
+                          "type": "string"
+                        },
+                        "trialStartsAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "event",
+                        "source",
+                        "trialStartsAt",
+                        "trialEndsAt",
+                        "autoRenew"
+                      ],
+                      "type": "object"
                     }
                   },
                   "required": [
@@ -13187,12 +13439,16 @@
               },
               "providerSkipped": {
                 "type": "number"
+              },
+              "trialEndingNotices": {
+                "type": "number"
               }
             },
             "required": [
               "outcome",
               "expiredSubscriptions",
               "affectedCustomers",
+              "trialEndingNotices",
               "providerClaimed",
               "providerProcessed",
               "providerSkipped",
@@ -16998,6 +17254,9 @@
               "topup.customer_initiated": {
                 "$ref": "#/components/schemas/ProviderOperationSupport"
               },
+              "trial.ending_notice": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
               "webhook.ingest": {
                 "$ref": "#/components/schemas/ProviderOperationSupport"
               }
@@ -17022,6 +17281,7 @@
               "webhook.ingest",
               "event.replay",
               "subscription.reconcile",
+              "trial.ending_notice",
               "subscription.change.preview",
               "subscription.change.apply",
               "subscription.change.period_end",
@@ -17352,6 +17612,7 @@
           "webhook.ingest",
           "event.replay",
           "subscription.reconcile",
+          "trial.ending_notice",
           "subscription.change.preview",
           "subscription.change.apply",
           "subscription.change.period_end",

@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type {
 	ExpiredSubscriptionReconciliationResult,
 	ProviderSubscriptionReconciliationRow,
+	TrialEndingNoticeResult,
 } from "../../src/db/repository";
 import type { BillingLogger } from "../../src/observability/logger";
 import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
@@ -41,11 +42,15 @@ function createRepository({
 		affectedCustomers: 1,
 		projectionJobs: 1,
 	},
+	noticeResult = { noticedTrials: 0, affectedCustomers: 0, projectionJobs: 0 },
+	noticeError,
 	subscriptions = [],
 	succeedError,
 	failError,
 }: {
 	expiredResult?: ExpiredSubscriptionReconciliationResult;
+	noticeResult?: TrialEndingNoticeResult;
+	noticeError?: Error;
 	subscriptions?: ProviderSubscriptionReconciliationRow[];
 	succeedError?: Error;
 	failError?: Error;
@@ -58,6 +63,13 @@ function createRepository({
 			reconcileExpiredSubscriptions(limit: number) {
 				calls.push({ method: "reconcileExpiredSubscriptions", limit });
 				return Promise.resolve(expiredResult);
+			},
+			enqueueTrialEndingNotices(limit: number) {
+				calls.push({ method: "enqueueTrialEndingNotices", limit });
+				if (noticeError !== undefined) {
+					return Promise.reject(noticeError);
+				}
+				return Promise.resolve(noticeResult);
 			},
 			claimProviderSubscriptionReconciliations(workerId: string, limit: number, staleBefore: Date) {
 				calls.push({
@@ -124,7 +136,9 @@ function createRecordingLogger() {
 
 describe("SubscriptionReconciliationWorker", () => {
 	it("reconciles local expirations and claims stale provider subscriptions", async () => {
-		const { calls, repository } = createRepository();
+		const { calls, repository } = createRepository({
+			noticeResult: { noticedTrials: 3, affectedCustomers: 2, projectionJobs: 3 },
+		});
 		const metrics = createInMemoryBillingMetrics();
 		const { logger, infos } = createRecordingLogger();
 		const worker = new SubscriptionReconciliationWorker({
@@ -147,6 +161,7 @@ describe("SubscriptionReconciliationWorker", () => {
 			outcome: "succeeded",
 			expiredSubscriptions: 2,
 			affectedCustomers: 1,
+			trialEndingNotices: 3,
 			providerClaimed: 0,
 			providerProcessed: 0,
 			providerSkipped: 0,
@@ -160,6 +175,7 @@ describe("SubscriptionReconciliationWorker", () => {
 				staleBefore: "2026-05-31T00:05:00.000Z",
 			},
 			{ method: "reconcileExpiredSubscriptions", limit: 10 },
+			{ method: "enqueueTrialEndingNotices", limit: 10 },
 		]);
 		expect(metrics.renderPrometheus()).toContain(
 			'billing_subscription_reconciliation_runs_total{result="succeeded"} 1',
@@ -174,6 +190,7 @@ describe("SubscriptionReconciliationWorker", () => {
 					outcome: "succeeded",
 					expiredSubscriptions: 2,
 					affectedCustomers: 1,
+					trialEndingNotices: 3,
 					providerClaimed: 0,
 					providerProcessed: 0,
 					providerSkipped: 0,
@@ -228,6 +245,7 @@ describe("SubscriptionReconciliationWorker", () => {
 			outcome: "succeeded",
 			expiredSubscriptions: 2,
 			affectedCustomers: 1,
+			trialEndingNotices: 0,
 			providerClaimed: 2,
 			providerProcessed: 1,
 			providerSkipped: 1,
@@ -367,6 +385,7 @@ describe("SubscriptionReconciliationWorker", () => {
 			outcome: "failed",
 			expiredSubscriptions: 2,
 			affectedCustomers: 1,
+			trialEndingNotices: 0,
 			providerClaimed: 2,
 			providerProcessed: 0,
 			providerSkipped: 0,
@@ -560,6 +579,9 @@ describe("SubscriptionReconciliationWorker", () => {
 				reconcileExpiredSubscriptions: async () => {
 					throw new Error("database unavailable");
 				},
+				enqueueTrialEndingNotices: async () => {
+					throw new Error("Unexpected trial notice pass");
+				},
 				claimProviderSubscriptionReconciliations: async () => [],
 				markProviderSubscriptionReconciliationSucceeded: async () => undefined,
 				markProviderSubscriptionReconciliationFailed: async () => undefined,
@@ -576,5 +598,32 @@ describe("SubscriptionReconciliationWorker", () => {
 		expect(errors).toHaveLength(1);
 		expect(errors[0]?.message).toBe("Subscription reconciliation run failed");
 		expect(errors[0]?.context).toEqual({ workerId: "worker-a", result: "failed" });
+	});
+
+	it("records run failures when the trial notice pass throws", async () => {
+		const { calls, repository } = createRepository({
+			noticeError: new Error("notice unavailable"),
+		});
+		const metrics = createInMemoryBillingMetrics();
+		const worker = new SubscriptionReconciliationWorker({
+			projectContextResolver: workerProjectResolver,
+			workerId: "worker-a",
+			maxAttempts: 3,
+			batchSize: 10,
+			staleAfterMs: 5 * 60 * 1000,
+			repository,
+			providers: { apple: null, google: null, stripe: null },
+			metrics,
+		});
+
+		await expect(worker.runOnce()).rejects.toThrow("notice unavailable");
+		expect(calls.map((call) => (call as { method: string }).method)).toEqual([
+			"claimProviderSubscriptionReconciliations",
+			"reconcileExpiredSubscriptions",
+			"enqueueTrialEndingNotices",
+		]);
+		expect(metrics.renderPrometheus()).toContain(
+			'billing_subscription_reconciliation_runs_total{result="failed"} 1',
+		);
 	});
 });

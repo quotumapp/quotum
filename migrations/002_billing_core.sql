@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 	catalog_revision_id BIGINT,
 	trial_start_at TIMESTAMPTZ,
 	trial_end_at TIMESTAMPTZ,
+	-- Set when the current trial's `ending` fact is enqueued; cleared when the trial end moves.
+	trial_ending_notified_at TIMESTAMPTZ,
 	billing_anchor_at TIMESTAMPTZ,
 	provider_schedule_id TEXT,
 	entity_id BIGINT,
@@ -112,6 +114,9 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 	CONSTRAINT subscriptions_trial_bounds_check CHECK (
 		(trial_start_at IS NULL AND trial_end_at IS NULL)
 		OR (trial_start_at IS NOT NULL AND trial_end_at IS NOT NULL AND trial_end_at > trial_start_at)
+	),
+	CONSTRAINT subscriptions_trial_notice_check CHECK (
+		trial_ending_notified_at IS NULL OR trial_end_at IS NOT NULL
 	),
 	CONSTRAINT subscriptions_scope_mode_check CHECK (scope_mode IN ('account', 'entity')),
 	CONSTRAINT subscriptions_scope_entity_check CHECK (
@@ -242,6 +247,7 @@ CREATE TABLE IF NOT EXISTS projection_sync_jobs (
 		AND COALESCE(jsonb_typeof(payload->'balances') = 'array', false)
 		AND NOT (payload ? 'operation')
 		AND NOT (payload ? 'purchase' AND payload ? 'reversal')
+		AND NOT (payload ? 'trial' AND (payload ? 'purchase' OR payload ? 'reversal'))
 		)
 	)
 );
@@ -307,6 +313,12 @@ CREATE INDEX IF NOT EXISTS idx_billing_store_events_stale_processing
 CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_provider_reconciliation_due
 	ON subscriptions (provider_reconciliation_next_attempt_at, provider_reconciled_at, expires_at)
 	WHERE status IN ('active', 'grace_period', 'billing_retry', 'cancelled');
+
+CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_trial_ending_due
+	ON subscriptions (trial_end_at)
+	WHERE trial_ending_notified_at IS NULL
+		AND trial_end_at IS NOT NULL
+		AND status IN ('active', 'grace_period', 'billing_retry', 'cancelled');
 
 CREATE INDEX IF NOT EXISTS idx_billing_store_products_product_id
 	ON store_products (product_id);

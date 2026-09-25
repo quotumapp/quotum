@@ -132,6 +132,22 @@ unrevoked credential; no release creates that state, so revoke the stale rows in
 and dump again. An older image does not recognize `sqrk_` or `pqrk_` tokens and rejects them, so a
 rollback fails closed.
 
+### Trial ending notices
+
+The billing core baseline adds `subscriptions.trial_ending_notified_at` with a check that it is set
+only on a subscription with a trial, the partial index `idx_billing_subscriptions_trial_ending_due`,
+and a projection payload check that keeps a `trial` fact apart from `purchase` and `reversal`. Every
+addition admits existing rows, so the move needs no manual SQL: follow steps 1, 2, 4 and 6 above.
+Restored subscriptions carry no marker, so the first reconciliation pass sends one ending notice for
+each App Store or Play trial then within three days of its end. Stripe trials are announced only by
+`customer.subscription.trial_will_end` events received after the upgrade. Right after the restore,
+
+```sql
+SELECT count(*) FROM subscriptions WHERE trial_ending_notified_at IS NOT NULL;
+```
+
+returns 0.
+
 ### Plan grants
 
 The metering baseline adds the `plan_grants` table, a nullable `balance_allocations.plan_grant_id`
@@ -333,7 +349,7 @@ One process runs the HTTP API and all workers. Each polls on the interval shown:
 | --- | --- |
 | Projection delivery | `BILLING_WORKER_POLL_INTERVAL_MS` |
 | Provider event replay | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
-| Subscription reconciliation | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
+| Subscription reconciliation (provider reads, subscription expiry, App Store and Play trial-ending notices) | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
 | Metering maintenance (reservation expiry, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Recurring billing | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Automatic top-ups | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |

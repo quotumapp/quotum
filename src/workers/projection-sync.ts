@@ -132,6 +132,7 @@ export class ProjectionSyncWorker {
 			reason,
 			purchase,
 			reversal,
+			trial,
 			sequence,
 		} = payload;
 		await this.delivery.deliver({
@@ -146,6 +147,7 @@ export class ProjectionSyncWorker {
 			reason,
 			...(purchase ? { purchase } : {}),
 			...(reversal ? { reversal } : {}),
+			...(trial ? { trial } : {}),
 			...(sequence === undefined ? {} : { sequence }),
 		});
 		return "delivered";
