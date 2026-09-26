@@ -1739,9 +1739,10 @@ CREATE INDEX IF NOT EXISTS idx_billing_commercial_previews_expiry
 CREATE INDEX IF NOT EXISTS idx_billing_commercial_previews_account_created
 	ON commercial_action_previews (project_id, billing_account_id, created_at DESC);
 
--- Hosted payment-method setup. A setup saves a method for later off-session charges; it records no
--- purchase, allocation, entitlement or invoice, and the only provider state it changes is which
--- payment method the customer is charged by default.
+-- Hosted payment-method setup. A setup saves a method for later off-session charges. Without a plan
+-- it records no purchase, allocation, entitlement or invoice, and the only provider state it changes
+-- is which payment method the customer is charged by default. With a plan, completion starts that
+-- plan on the saved card and records the subscription from Stripe's response.
 CREATE TABLE IF NOT EXISTS payment_setup_sessions (
 	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1760,6 +1761,20 @@ CREATE TABLE IF NOT EXISTS payment_setup_sessions (
 	email TEXT CHECK (email IS NULL OR char_length(email) BETWEEN 1 AND 320),
 	success_url TEXT NOT NULL CHECK (char_length(success_url) BETWEEN 1 AND 2000),
 	cancel_url TEXT NOT NULL CHECK (char_length(cancel_url) BETWEEN 1 AND 2000),
+	-- The plan started on the saved card. The four identity columns are all set or all null.
+	-- plan_version_id is plans' bigint identity, stored as the API's decimal string elsewhere.
+	plan_key TEXT CHECK (plan_key IS NULL OR char_length(plan_key) BETWEEN 1 AND 200),
+	plan_version_id BIGINT,
+	plan_quantities JSONB CHECK (plan_quantities IS NULL OR jsonb_typeof(plan_quantities) = 'object'),
+	plan_status TEXT CHECK (
+		plan_status IS NULL OR plan_status IN ('pending', 'started', 'payment_failed', 'plan_changed', 'not_eligible')
+	),
+	plan_failure_code TEXT CHECK (plan_failure_code IS NULL OR char_length(plan_failure_code) BETWEEN 1 AND 80),
+	plan_failure_message TEXT CHECK (plan_failure_message IS NULL OR char_length(plan_failure_message) BETWEEN 1 AND 500),
+	external_subscription_id TEXT CHECK (
+		external_subscription_id IS NULL OR char_length(external_subscription_id) BETWEEN 1 AND 200
+	),
+	plan_resolved_at TIMESTAMPTZ,
 	status TEXT NOT NULL DEFAULT 'creating' CHECK (
 		status IN ('creating', 'awaiting_customer', 'applying_default', 'completed', 'expired', 'needs_attention')
 	),
@@ -1814,6 +1829,47 @@ CREATE TABLE IF NOT EXISTS payment_setup_sessions (
 	CONSTRAINT payment_setup_sessions_card_check CHECK (
 		default_payment_method_id IS NOT NULL
 		OR (card_brand IS NULL AND card_last4 IS NULL AND card_exp_month IS NULL AND card_exp_year IS NULL)
+	),
+	CONSTRAINT payment_setup_sessions_plan_presence_check CHECK (
+		(
+			plan_key IS NULL AND plan_version_id IS NULL AND plan_quantities IS NULL AND plan_status IS NULL
+		)
+		OR (
+			plan_key IS NOT NULL AND plan_version_id IS NOT NULL
+			AND plan_quantities IS NOT NULL AND plan_status IS NOT NULL
+		)
+	),
+	CONSTRAINT payment_setup_sessions_plan_started_check CHECK (
+		plan_status IS DISTINCT FROM 'started' OR external_subscription_id IS NOT NULL
+	),
+	CONSTRAINT payment_setup_sessions_plan_resolved_check CHECK (
+		(
+			plan_status IS NULL
+			AND plan_resolved_at IS NULL AND plan_failure_code IS NULL AND plan_failure_message IS NULL
+		)
+		OR (
+			plan_status = 'pending'
+			AND plan_resolved_at IS NULL AND plan_failure_code IS NULL AND plan_failure_message IS NULL
+		)
+		OR (
+			plan_status = 'started'
+			AND plan_resolved_at IS NOT NULL AND external_subscription_id IS NOT NULL
+			AND plan_failure_code IS NULL AND plan_failure_message IS NULL
+		)
+		OR (
+			plan_status = 'plan_changed'
+			AND plan_resolved_at IS NOT NULL
+			AND plan_failure_code IS NULL AND plan_failure_message IS NULL
+		)
+		OR (
+			plan_status IN ('payment_failed', 'not_eligible')
+			AND plan_resolved_at IS NOT NULL
+			AND plan_failure_code IS NOT NULL AND plan_failure_message IS NOT NULL
+		)
+	),
+	-- A completed setup has finished the plan attempt. Pending keeps the row in applying_default.
+	CONSTRAINT payment_setup_sessions_plan_pending_completion_check CHECK (
+		status IS DISTINCT FROM 'completed' OR plan_status IS DISTINCT FROM 'pending'
 	)
 );
 

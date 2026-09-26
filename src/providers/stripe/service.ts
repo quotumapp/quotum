@@ -76,6 +76,7 @@ import {
 	enqueuePaymentSetupEvent,
 	type NormalizedPaymentSetupEvent,
 	normalizePaymentSetupEvent,
+	PAYMENT_SETUP_METADATA_KEY,
 	type PaymentSetupClientDependency,
 	type PaymentSetupContext,
 	type PaymentSetupCreation,
@@ -85,6 +86,12 @@ import {
 	reconcilePaymentSetup,
 } from "./payment-setup";
 import { type StripePromotionClient, syncPromotionStripeObject } from "./promotions";
+import {
+	assertSetupPlanEligible,
+	type SavedCardPlanContext,
+	setupPlanCurrency,
+	startPlanOnSavedCard,
+} from "./saved-card-plan";
 import type {
 	NormalizedStripeCheckoutPromotion,
 	NormalizedStripeCommand,
@@ -133,6 +140,11 @@ export interface StripeBillingClientDependency extends PaymentSetupClientDepende
 	}>;
 	constructWebhookEvent(rawBody: string, signature: string): unknown | Promise<unknown>;
 	retrieveSubscription(subscriptionId: string): Promise<unknown>;
+	createSubscription(
+		params: Stripe.SubscriptionCreateParams,
+		idempotencyKey: string,
+	): Promise<Record<string, unknown>>;
+	listCustomerSubscriptions(customerId: string): Promise<Array<Record<string, unknown>>>;
 	retrieveDefaultPaymentMethod?(customerId: string): Promise<string | null>;
 	updateSubscription?(
 		subscriptionId: string,
@@ -891,7 +903,7 @@ export class StripeBillingService
 					stateFingerprint,
 					billingAccountId,
 					action: normalized.kind,
-					provider: commercialPreviewProvider(stripeCapabilities, normalized.kind),
+					provider: commercialPreviewProvider(stripeCapabilities, normalized),
 					lineItems: change.lineItems.map((line) => ({
 						...line,
 						subtotalMinor: null,
@@ -969,7 +981,7 @@ export class StripeBillingService
 					stateFingerprint,
 					billingAccountId,
 					action: normalized.kind,
-					provider: commercialPreviewProvider(stripeCapabilities, normalized.kind),
+					provider: commercialPreviewProvider(stripeCapabilities, normalized),
 					...priced,
 					currency: product.currency,
 					cancellation: null,
@@ -1049,7 +1061,7 @@ export class StripeBillingService
 				stateFingerprint,
 				billingAccountId,
 				action: normalized.kind,
-				provider: commercialPreviewProvider(stripeCapabilities, normalized.kind),
+				provider: commercialPreviewProvider(stripeCapabilities, normalized),
 				...priced,
 				currency,
 				cancellation: null,
@@ -1066,10 +1078,10 @@ export class StripeBillingService
 	}
 
 	/**
-	 * Builds the preview for a hosted payment-method setup. A setup binds no catalog item, plan or
-	 * subscription, so there is no customer or catalog state that could drift between the preview
-	 * and its execution: the fingerprint covers the intent alone, and whether an unfinished setup
-	 * is reused is decided by the execution against the live record.
+	 * Builds the preview for a hosted payment-method setup. Without a plan there is no catalog state
+	 * to drift. With a plan, the fingerprint binds the plan version, whether a base plan is already
+	 * active, and a trial this account already used, so a change between preview and execute is
+	 * `COMMERCIAL_PREVIEW_STALE`.
 	 */
 	private async paymentSetupPreviewDraft(
 		billingAccountId: string,
@@ -1077,15 +1089,53 @@ export class StripeBillingService
 		intentHash: string,
 		checkConflict: boolean,
 	): Promise<CommercialPreviewDraft> {
+		const resolved = await this.resolveSetupPlan(billingAccountId, intent);
+		const parameters = this.paymentSetupParameters(
+			billingAccountId,
+			intent,
+			resolved.plan,
+			resolved.quantities,
+		);
 		const facts = await paymentSetupPreviewFacts(
 			this.paymentSetupContext(),
-			this.paymentSetupParameters(billingAccountId, intent),
+			parameters,
 			checkConflict,
 		);
+		const planFingerprint =
+			resolved.plan === null
+				? null
+				: {
+						planKey: resolved.plan.planKey,
+						planVersionId: resolved.plan.planVersionId,
+						quantities: resolved.quantities,
+					};
 		const stateFingerprint = sha256Hex(
-			stableJson({ kind: intent.kind, billingAccountId, currency: intent.currency }),
+			stableJson({
+				kind: intent.kind,
+				billingAccountId,
+				currency: intent.currency,
+				plan: planFingerprint,
+				hasActiveBasePlan: resolved.hasActiveBasePlan,
+				...(resolved.plan !== null && planTrialSkipped(resolved.plan)
+					? { trialSkipped: true }
+					: {}),
+			}),
 		);
+		const lines =
+			resolved.plan === null ? [] : commercialPlanLines(resolved.plan, resolved.quantities);
+		const priced =
+			resolved.plan === null
+				? null
+				: priceCommercialLines({
+						lines,
+						currency: oneCurrency(lines)?.toLowerCase() ?? intent.currency,
+						recurringInterval: lines.find((line) => line.interval !== null)?.interval ?? null,
+						promotion: null,
+						hostedEntry: false,
+					});
 		const active = facts.setup;
+		const trialDays =
+			resolved.plan !== null && planTrialApplies(resolved.plan) ? resolved.plan.trialDays : null;
 		return {
 			billingAccountId,
 			intent,
@@ -1099,16 +1149,16 @@ export class StripeBillingService
 				stateFingerprint,
 				billingAccountId,
 				action: intent.kind,
-				provider: commercialPreviewProvider(stripeCapabilities, intent.kind),
-				lineItems: [],
-				estimatedTotalMinor: 0,
-				subtotalMinor: 0,
-				discountTotalMinor: 0,
+				provider: commercialPreviewProvider(stripeCapabilities, intent),
+				lineItems: priced?.lineItems ?? [],
+				estimatedTotalMinor: priced === null ? 0 : priced.estimatedTotalMinor,
+				subtotalMinor: priced === null ? 0 : priced.subtotalMinor,
+				discountTotalMinor: priced === null ? 0 : priced.discountTotalMinor,
 				currency: intent.currency,
-				amountStatus: "exact",
+				amountStatus: priced?.amountStatus ?? "exact",
 				promotionCodeEntry: "none",
 				promotion: null,
-				nextCycle: null,
+				nextCycle: priced?.nextCycle ?? null,
 				cancellation: null,
 				paymentSetup: {
 					currency: intent.currency,
@@ -1118,15 +1168,45 @@ export class StripeBillingService
 					existingSetupId: active === null ? null : active.id,
 					existingSetupExpiresAt:
 						active === null ? null : new Date(active.expires_at).toISOString(),
+					plan:
+						resolved.plan === null
+							? null
+							: {
+									planKey: resolved.plan.planKey,
+									planVersionId: resolved.plan.planVersionId,
+									trialDays,
+									startsAfterSetup: true,
+								},
 				},
 				effectiveMode: "immediate",
 				effectiveAt: new Date().toISOString(),
 				prorationBehavior: null,
 				changeKind: null,
 				fromPlanVersionId: null,
-				toPlanVersionId: null,
+				toPlanVersionId: resolved.plan?.planVersionId ?? null,
 				targetId: `payment_setup:${billingAccountId}`,
-				warnings: paymentSetupWarnings(facts.reusesExistingSetup),
+				warnings: [
+					...(priced?.warnings ?? []),
+					...paymentSetupWarnings(facts.reusesExistingSetup),
+					...(resolved.plan === null
+						? []
+						: [
+								...(trialDays !== null
+									? [
+											`The plan starts a ${trialDays}-day trial after setup; the saved card is charged when the trial ends.`,
+										]
+									: planTrialSkipped(resolved.plan)
+										? [
+												"This account already had a trial of the plan; the subscription starts without one.",
+											]
+										: []),
+								...(trialDays === null
+									? [
+											"The saved card is charged for this plan when setup completes. A declined payment does not start the plan.",
+										]
+									: []),
+							]),
+				],
 			},
 		};
 	}
@@ -1142,7 +1222,13 @@ export class StripeBillingService
 		intent: Extract<CommercialActionIntent, { kind: "setup_payment" }>;
 	}): Promise<PaymentSetupCreation> {
 		const executionKey = commercialExecutionKey(input.previewToken, input.idempotencyKey);
-		const parameters = this.paymentSetupParameters(input.billingAccountId, input.intent);
+		const resolved = await this.resolveSetupPlan(input.billingAccountId, input.intent);
+		const parameters = this.paymentSetupParameters(
+			input.billingAccountId,
+			input.intent,
+			resolved.plan,
+			resolved.quantities,
+		);
 		const providerCustomerId = await this.getOrCreateCustomer(
 			input.billingAccountId,
 			input.intent.email ?? null,
@@ -1178,9 +1264,48 @@ export class StripeBillingService
 		);
 	}
 
+	/**
+	 * Loads the plan a setup will start, and refuses a currency mismatch or a plan this charge
+	 * cannot start. A setup without a plan resolves nothing.
+	 */
+	private async resolveSetupPlan(
+		billingAccountId: string,
+		intent: Extract<CommercialActionIntent, { kind: "setup_payment" }>,
+	): Promise<{
+		plan: StripeRecurringCheckoutPlan | null;
+		quantities: Record<string, number>;
+		hasActiveBasePlan: boolean | null;
+	}> {
+		if (intent.plan === undefined) {
+			return { plan: null, quantities: {}, hasActiveBasePlan: null };
+		}
+		const plan = await requireRecurringPlanRepository(this.dependencies.repository)(
+			intent.plan.planKey,
+			billingAccountId,
+		);
+		const currency = setupPlanCurrency(plan);
+		if (currency === null || currency !== intent.currency) {
+			throw new BillingError(
+				"Setup currency must match the plan currency",
+				"INVALID_REQUEST",
+				400,
+				{ details: { currency: intent.currency, planCurrency: currency } },
+			);
+		}
+		const quantities = normalizedLicensedQuantities(intent.plan.quantities);
+		recurringCheckoutLines(plan, quantities);
+		const hasActiveBasePlan = await requireActiveBasePlanRepository(this.dependencies.repository)(
+			billingAccountId,
+		);
+		assertSetupPlanEligible(plan, hasActiveBasePlan);
+		return { plan, quantities, hasActiveBasePlan };
+	}
+
 	private paymentSetupParameters(
 		billingAccountId: string,
 		intent: Extract<CommercialActionIntent, { kind: "setup_payment" }>,
+		plan: StripeRecurringCheckoutPlan | null,
+		quantities: Record<string, number>,
 	): PaymentSetupRequestParameters {
 		return {
 			billingAccountId,
@@ -1192,11 +1317,74 @@ export class StripeBillingService
 			cancelUrl: this.returnUrl(intent.cancelUrl, this.dependencies.config.checkoutCancelUrl),
 			providerAccountId: this.providerAccountIdentity(),
 			integrationIdentifier: this.dependencies.config.integrationIdentifier ?? "qfmxzjpa",
+			plan:
+				plan === null
+					? null
+					: { planKey: plan.planKey, planVersionId: plan.planVersionId, quantities },
 		};
 	}
 
 	private paymentSetupContext(): PaymentSetupContext {
-		return { client: this.dependencies.client, repository: this.dependencies.repository };
+		const taxMode = this.dependencies.config.taxMode ?? "disabled";
+		return {
+			client: this.dependencies.client,
+			repository: this.dependencies.repository,
+			taxMode,
+			startPlanOnSavedCard: (setup, workerId) =>
+				startPlanOnSavedCard(
+					{
+						...this.savedCardPlanContext(taxMode),
+						recordSubscription: async (subscription) => {
+							const result = await this.recordProviderSubscription(
+								subscription,
+								`payment_setup_plan:${setup.id}`,
+							);
+							if (result.processingStatus !== "processed") {
+								throw new BillingError(
+									"Stripe subscription was not recorded",
+									"STRIPE_PAYMENT_SETUP_INCOMPLETE",
+									502,
+								);
+							}
+						},
+					},
+					setup,
+					workerId,
+				),
+		};
+	}
+
+	private savedCardPlanContext(taxMode: "disabled" | "test" | "registered"): SavedCardPlanContext {
+		const repository = this.dependencies.repository;
+		const recordSubscriptionId = repository.recordPaymentSetupSubscriptionId?.bind(repository);
+		const recordOutcome = repository.recordPaymentSetupPlanOutcome?.bind(repository);
+		if (recordSubscriptionId === undefined || recordOutcome === undefined) {
+			throw new BillingError(
+				"Payment method setup is not configured",
+				"STRIPE_NOT_CONFIGURED",
+				503,
+			);
+		}
+		return {
+			client: this.dependencies.client,
+			repository: {
+				getStripeRecurringCheckoutPlanByKey: (planKey, billingAccountId) =>
+					requireRecurringPlanRepository(repository)(planKey, billingAccountId),
+				hasActiveBasePlan: (billingAccountId) =>
+					requireActiveBasePlanRepository(repository)(billingAccountId),
+				recordPaymentSetupSubscriptionId: recordSubscriptionId,
+				recordPaymentSetupPlanOutcome: recordOutcome,
+			},
+			subscriptionCreateParams: (plan, quantities, setup) =>
+				paymentSetupSubscriptionParams(plan, quantities, setup, taxMode),
+			recordSubscription: async () => {
+				throw new BillingError(
+					"Payment method setup is not configured",
+					"STRIPE_NOT_CONFIGURED",
+					503,
+				);
+			},
+		};
 	}
 
 	private providerAccountIdentity(): string | null {
@@ -1239,7 +1427,7 @@ export class StripeBillingService
 				stateFingerprint: context.stateFingerprint,
 				billingAccountId,
 				action: cancellation.action === "none" ? "none" : intent.kind,
-				provider: commercialPreviewProvider(stripeCapabilities, intent.kind),
+				provider: commercialPreviewProvider(stripeCapabilities, intent),
 				lineItems: [],
 				estimatedTotalMinor: 0,
 				subtotalMinor: 0,
@@ -1803,21 +1991,32 @@ export class StripeBillingService
 		);
 		const providerSubscription =
 			await this.dependencies.client.retrieveSubscription(stripeSubscriptionId);
+		const result = await this.recordProviderSubscription(
+			requireRecord(providerSubscription, "Stripe subscription"),
+			`provider_reconciliation:${stripeSubscriptionId}`,
+		);
+
+		return { status: result.processingStatus === "processed" ? "processed" : "skipped" };
+	}
+
+	/** Normalizes a Stripe subscription response and records it, the same way reconciliation does. */
+	private async recordProviderSubscription(
+		subscription: Record<string, unknown>,
+		eventId: string,
+	): Promise<StripeRecordingResult> {
 		const command = normalizeStripeSubscription({
-			eventId: `provider_reconciliation:${stripeSubscriptionId}`,
+			eventId,
 			eventType: "provider_reconciliation",
-			subscription: requireRecord(providerSubscription, "Stripe subscription"),
+			subscription,
 			projectionReason: "provider_reconciliation",
 		});
-		const result = await this.dependencies.repository.recordStripeSubscriptionAndEnqueueProjection({
+		return await this.dependencies.repository.recordStripeSubscriptionAndEnqueueProjection({
 			...toStripeSubscriptionRepositoryInput(command, {
 				externalEventId: null,
 				projectionContract: this.projectionContract(),
 			}),
 			...this.providerAccount(),
 		});
-
-		return { status: result.processingStatus === "processed" ? "processed" : "skipped" };
 	}
 
 	/** The internal task that watches one setup until it completes or its expiry is confirmed. */
@@ -2205,6 +2404,40 @@ function checkoutMetadata(
 	};
 }
 
+/**
+ * The subscriptions.create call that starts a plan on the card setup just saved. No subscription
+ * payment method is sent: the customer default was just set to that card. A trial uses the same
+ * end behavior Checkout would.
+ */
+export function paymentSetupSubscriptionParams(
+	plan: StripeRecurringCheckoutPlan,
+	quantities: Record<string, number>,
+	setup: { id: string; billing_account_id: string; provider_customer_id: string },
+	taxMode: "disabled" | "test" | "registered",
+): Stripe.SubscriptionCreateParams {
+	const params: Stripe.SubscriptionCreateParams = {
+		customer: setup.provider_customer_id,
+		items: recurringCheckoutLines(plan, quantities),
+		metadata: {
+			...recurringCheckoutMetadata(setup.billing_account_id, plan),
+			[PAYMENT_SETUP_METADATA_KEY]: setup.id,
+		},
+		payment_behavior: "error_if_incomplete",
+		off_session: true,
+		proration_behavior: "none",
+	};
+	if (taxMode !== "disabled") {
+		params.automatic_tax = { enabled: true };
+	}
+	if (planTrialApplies(plan) && plan.trialDays !== null) {
+		params.trial_period_days = plan.trialDays;
+		params.trial_settings = {
+			end_behavior: { missing_payment_method: plan.trialEndBehavior },
+		};
+	}
+	return params;
+}
+
 function recurringCheckoutMetadata(
 	billingAccountId: string,
 	plan: StripeRecurringCheckoutPlan,
@@ -2459,6 +2692,14 @@ function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialAc
 			email: optionalNonBlankString(intent.email) ?? null,
 			successUrl: optionalNonBlankString(intent.successUrl) ?? null,
 			cancelUrl: optionalNonBlankString(intent.cancelUrl) ?? null,
+			...(intent.plan === undefined
+				? {}
+				: {
+						plan: {
+							planKey: requireNonBlank(intent.plan.planKey, "planKey"),
+							quantities: normalizedLicensedQuantities(intent.plan.quantities),
+						},
+					}),
 		};
 	}
 	const promotionCode =

@@ -43,6 +43,14 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	private readonly sessions = new Map<string, FakeCheckoutSession>();
 	private readonly sessionsByIdempotencyKey = new Map<string, FakeCheckoutSession>();
 	private readonly subscriptions = new Map<string, Record<string, unknown>>();
+	private readonly subscriptionsByIdempotencyKey = new Map<string, Record<string, unknown>>();
+	/** Every subscriptions.create, so a test can assert the saved-card plan start. */
+	readonly subscriptionCreates: Array<{
+		params: Stripe.SubscriptionCreateParams;
+		idempotencyKey: string;
+	}> = [];
+	/** When set, the next create stores the subscription and then throws, as a lost response. */
+	loseNextSubscriptionCreate = false;
 	private readonly invoices = new Map<string, FakeInvoice>();
 	private readonly invoicesByIdempotencyKey = new Map<string, FakeInvoice>();
 	private readonly invoiceLineKeys = new Set<string>();
@@ -271,7 +279,62 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		return subscription;
 	}
 
-	async retrieveDefaultPaymentMethod(_customerId: string): Promise<string | null> {
+	async createSubscription(
+		params: Stripe.SubscriptionCreateParams,
+		idempotencyKey: string,
+	): Promise<Record<string, unknown>> {
+		this.throwIfFailed("createSubscription");
+		const replay = this.subscriptionsByIdempotencyKey.get(idempotencyKey);
+		if (replay !== undefined) return replay;
+		this.subscriptionCreates.push({ params, idempotencyKey });
+		const id = `sub_fake_${digest(idempotencyKey).slice(0, 24)}`;
+		const periodEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
+		const metadata = (params.metadata ?? {}) as Record<string, string>;
+		const subscription: Record<string, unknown> = {
+			id,
+			customer: params.customer,
+			status: (params.trial_period_days ?? 0) > 0 ? "trialing" : "active",
+			created: Math.floor(Date.now() / 1000),
+			current_period_end: periodEnd,
+			cancel_at_period_end: false,
+			metadata,
+			latest_invoice: null,
+			items: {
+				data: (params.items ?? []).map((item, index) => ({
+					id: `si_${id}_${index}`,
+					quantity: item.quantity ?? 1,
+					current_period_end: periodEnd,
+					price: {
+						id: item.price,
+						product:
+							typeof metadata.externalProductId === "string"
+								? metadata.externalProductId
+								: "prod_fake",
+					},
+				})),
+			},
+		};
+		this.subscriptions.set(id, subscription);
+		this.subscriptionsByIdempotencyKey.set(idempotencyKey, subscription);
+		if (this.loseNextSubscriptionCreate) {
+			this.loseNextSubscriptionCreate = false;
+			throw new Error("Fake Stripe subscription create response was lost");
+		}
+		return subscription;
+	}
+
+	async listCustomerSubscriptions(customerId: string): Promise<Array<Record<string, unknown>>> {
+		this.throwIfFailed("listCustomerSubscriptions");
+		return [...this.subscriptions.values()].filter(
+			(subscription) => subscription.customer === customerId,
+		);
+	}
+
+	async retrieveDefaultPaymentMethod(customerId: string): Promise<string | null> {
+		const saved = [...this.defaultPaymentMethodWrites]
+			.reverse()
+			.find((write) => write.customerId === customerId);
+		if (saved !== undefined) return saved.paymentMethodId;
 		return this.options.defaultPaymentMethod === undefined
 			? "pm_fake_default"
 			: this.options.defaultPaymentMethod;

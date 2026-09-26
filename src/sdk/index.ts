@@ -3,10 +3,14 @@ export type {
 	CommercialActionIntent,
 	CommercialActionPreview,
 	CommercialPreviewPaymentSetup,
+	CommercialPreviewPaymentSetupPlan,
 } from "../billing/commercial";
 export type {
 	PaymentSetupCard,
+	PaymentSetupPlanFailure,
+	PaymentSetupPlanStatus,
 	PaymentSetupSession,
+	PaymentSetupSessionPlan,
 	PaymentSetupStatus,
 } from "../billing/payment-setup";
 export type {

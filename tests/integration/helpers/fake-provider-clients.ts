@@ -241,6 +241,10 @@ export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions)
 export function createFakeStripeBillingClient(options: FakeStripeBillingClientOptions = {}) {
 	const calls: string[] = [];
 	const checkoutSessionParams: Stripe.Checkout.SessionCreateParams[] = [];
+	const subscriptionCreateParams: Stripe.SubscriptionCreateParams[] = [];
+	const createdSubscriptions = new Map<string, JsonRecord>();
+	const subscriptionsByIdempotencyKey = new Map<string, JsonRecord>();
+	let loseNextSubscriptionCreate = false;
 	const portalSessionParams: Stripe.BillingPortal.SessionCreateParams[] = [];
 	const expiredSessions = new Set<string>();
 	const invoices = new Map<
@@ -292,6 +296,11 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 	return attachFailNext({
 		calls,
 		checkoutSessionParams,
+		subscriptionCreateParams,
+		/** The next create stores the subscription, then throws, as a response that never arrived. */
+		loseNextSubscriptionCreate() {
+			loseNextSubscriptionCreate = true;
+		},
 		defaultPaymentMethodWrites,
 		invoiceCreateParams,
 		/** The event the next verified webhook delivers; the signature check itself is faked. */
@@ -462,8 +471,51 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			},
 			async retrieveSubscription(subscriptionId: string) {
 				calls.push(`retrieveSubscription:${subscriptionId}`);
-
-				return stripeSubscriptionObject({ id: subscriptionId });
+				return (
+					createdSubscriptions.get(subscriptionId) ??
+					stripeSubscriptionObject({ id: subscriptionId })
+				);
+			},
+			async createSubscription(params: Stripe.SubscriptionCreateParams, idempotencyKey: string) {
+				calls.push(`createSubscription:${idempotencyKey}`);
+				const replay = subscriptionsByIdempotencyKey.get(idempotencyKey);
+				if (replay !== undefined) return replay;
+				subscriptionCreateParams.push(params);
+				const id = `sub_setup_${createdSubscriptions.size + 1}`;
+				const metadata = (params.metadata ?? {}) as Record<string, string>;
+				const subscription = stripeSubscriptionObject({
+					id,
+					customer: params.customer,
+					status: (params.trial_period_days ?? 0) > 0 ? "trialing" : "active",
+					metadata,
+					items: {
+						data: (params.items ?? []).map((item, index) => ({
+							id: `si_${id}_${index}`,
+							quantity: item.quantity ?? 1,
+							current_period_end: farFutureSubscriptionPeriodEnd,
+							price: {
+								id: item.price,
+								product:
+									typeof metadata.externalProductId === "string"
+										? metadata.externalProductId
+										: "prod_stripe_premium",
+							},
+						})),
+					},
+				});
+				createdSubscriptions.set(id, subscription);
+				subscriptionsByIdempotencyKey.set(idempotencyKey, subscription);
+				if (loseNextSubscriptionCreate) {
+					loseNextSubscriptionCreate = false;
+					throw new Error("Fake Stripe subscription create response was lost");
+				}
+				return subscription;
+			},
+			async listCustomerSubscriptions(customerId: string) {
+				calls.push(`listCustomerSubscriptions:${customerId}`);
+				return [...createdSubscriptions.values()].filter(
+					(subscription) => subscription.customer === customerId,
+				);
 			},
 			async retrieveDefaultPaymentMethod(customerId: string) {
 				calls.push(`retrieveDefaultPaymentMethod:${customerId}`);

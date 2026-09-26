@@ -183,6 +183,10 @@ export const paddleCapabilities: ProviderCapabilityDeclaration = {
 			"The Paddle assessment does not cover clearing a scheduled cancellation.",
 			["Q-SUB-01"],
 		),
+		"subscription.create": inP4({
+			notes:
+				"Paddle creates subscriptions from paid transactions or issued invoices and has no direct create-subscription operation.",
+		}),
 		"settlement.collect_finalized_charge": awaitingDecision({
 			level: "quotum_composed",
 			composedVia: "one-time subscription charge",
