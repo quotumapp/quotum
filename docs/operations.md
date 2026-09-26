@@ -574,10 +574,15 @@ Both publishing and ordinary
 The publish job requires successful validation of its exact source commit. Validation checks out
 only this public repository, requires no private siblings or corporate credentials, and has read-only
 repository permissions; registry write access is limited to the publishing job, and release write
-access to the release job that runs after it.
+access to the release job that runs after it. Validation also scans the built amd64 container with
+Trivy. After publication, [image scanning](../.github/workflows/trivy-image.yml) checks the exact
+published digest for both amd64 and arm64; the GitHub Release waits for both scans. A failed scan
+leaves the image and tags in GHCR but prevents release creation. The daily security workflow also
+rescans both architectures of `latest`. See [security scanning](security-scanning.md) for the
+severity policy, local commands and source analysis.
 
-The release job creates the GitHub Release only after the image is pushed, so a published release
-proves the image exists. Its notes are GitHub's generated list of the pull requests merged since
+The release job creates the GitHub Release only after the image is pushed and both image scans
+pass. Its notes are GitHub's generated list of the pull requests merged since
 the previous release tag (the previous stable tag, or the closest lower tag for a prerelease),
 grouped by label through [`.github/release.yml`](../.github/release.yml), with a compare link.
 Details and upgrade notes stay in the pull request descriptions. PRs changing baseline migrations

@@ -1,0 +1,171 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 2 * * *" # Refresh dependency advisories daily.
+    - cron: "11 3 * * 1" # Re-run source analysis with the current CodeQL queries weekly.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.schedule }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  released-image:
+    if: github.event_name == 'schedule' && github.event.schedule == '23 2 * * *'
+    uses: ./.github/workflows/trivy-image.yml
+    with:
+      image: ghcr.io/${{ github.repository }}:latest
+
+  opengrep:
+    name: Opengrep
+    if: github.event.schedule != '23 2 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install pinned Opengrep
+        run: sh ci/security/install-scanner.sh opengrep
+      - name: Test security rules against safe and unsafe examples
+        run: sh ci/security/test-opengrep.sh
+      - name: Scan runtime source
+        run: |
+          mkdir -p security-reports
+          opengrep scan --config ci/security/opengrep.yml --error --strict \
+            --disable-version-check --sarif-output security-reports/opengrep.sarif src
+      - name: Upload Opengrep findings
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && hashFiles('security-reports/opengrep.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          sarif_file: security-reports/opengrep.sarif
+          category: opengrep
+      - name: Retain Opengrep report
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && hashFiles('security-reports/opengrep.sarif') != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-sarif-opengrep
+          path: security-reports/
+          retention-days: 7
+
+  trivy:
+    name: Trivy dependencies and secrets
+    if: github.event.schedule != '11 3 * * 1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install pinned Trivy
+        run: sh ci/security/install-scanner.sh trivy
+      - name: Scan lockfile and repository secrets
+        run: |
+          mkdir -p security-reports
+          trivy fs --config ci/security/trivy.yaml --format sarif \
+            --output security-reports/trivy.sarif .
+      - name: Upload Trivy findings
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && hashFiles('security-reports/trivy.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          sarif_file: security-reports/trivy.sarif
+          category: trivy-filesystem
+      - name: Retain Trivy report
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && hashFiles('security-reports/trivy.sarif') != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-sarif-trivy
+          path: security-reports/
+          retention-days: 7
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    if: github.event.schedule != '23 2 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config: |
+            paths-ignore:
+              - ci/security/fixtures
+              - contracts
+      - name: Analyze
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          category: codeql-${{ matrix.language }}
+          output: security-reports/codeql-${{ matrix.language }}
+          upload: ${{ github.event_name == 'pull_request' && 'always' || 'never' }}
+      - name: Retain CodeQL report
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && hashFiles('security-reports/**/*.sarif') != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-sarif-codeql-${{ matrix.language }}
+          path: security-reports/
+          retention-days: 7
+
+  publish-results:
+    name: Publish security reports
+    needs: [opengrep, trivy, codeql]
+    # PR uploads work with read-only tokens. Other events need a separate writer
+    # that processes reports without executing repository scripts or scanner rules.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: security-sarif-*
+          path: security-reports/
+          merge-multiple: true
+      - name: Publish Opengrep findings
+        if: ${{ !cancelled() && hashFiles('security-reports/opengrep.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          sarif_file: security-reports/opengrep.sarif
+          category: opengrep
+      - name: Publish Trivy findings
+        if: ${{ !cancelled() && hashFiles('security-reports/trivy.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          sarif_file: security-reports/trivy.sarif
+          category: trivy-filesystem
+      - name: Publish CodeQL JavaScript findings
+        if: ${{ !cancelled() && hashFiles('security-reports/codeql-javascript-typescript/*.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          sarif_file: security-reports/codeql-javascript-typescript
+          category: codeql-javascript-typescript
+      - name: Publish CodeQL Actions findings
+        if: ${{ !cancelled() && hashFiles('security-reports/codeql-actions/*.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          sarif_file: security-reports/codeql-actions
+          category: codeql-actions

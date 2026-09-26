@@ -12,7 +12,10 @@ COPY package.json bun.lock /temp/prod/
 WORKDIR /temp/dev
 RUN bun install --frozen-lockfile
 WORKDIR /temp/prod
-RUN bun install --production --frozen-lockfile
+# Elysia's optional TypeScript peer pulls the development compiler into production installs.
+# Bun executes the service directly; no runtime module needs the TypeScript compiler.
+RUN bun install --production --frozen-lockfile \
+    && rm -rf node_modules/typescript node_modules/@typescript node_modules/.bin/tsc
 
 # copy node_modules from temp directory
 # then copy all (non-ignored) project files into the image
@@ -22,6 +25,13 @@ COPY . .
 
 # copy production dependencies and source code into final image
 FROM oven/bun:1.4.2-slim AS release
+# Refresh the vulnerable OS packages inherited from the pinned Bun release.
+# Resolve Debian's current security revisions rather than freezing vulnerable package versions.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade \
+        gzip libpcre2-8-0 libsqlite3-0 perl-base \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /usr/src/app
 
 # Accept build arguments

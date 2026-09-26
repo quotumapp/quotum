@@ -100,9 +100,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  scan-image:
+    needs: [publish]
+    uses: ./.github/workflows/trivy-image.yml
+    with:
+      image: ghcr.io/${{ github.repository }}@${{ needs.publish.outputs.digest }}
+
   release:
     if: github.ref_type == 'tag'
-    needs: [publish]
+    needs: [publish, scan-image]
     permissions:
       contents: write
     name: GitHub Release

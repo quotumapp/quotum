@@ -418,7 +418,7 @@ function verifierMatches(actual: Uint8Array, expected: Uint8Array): boolean {
 }
 
 export async function activateProjectProduction(
-	client: import("bun").SQL,
+	client: SQL,
 	instanceId: string,
 	organizationId: string,
 	catalogRevisionId: string,

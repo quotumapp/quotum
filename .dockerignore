@@ -36,6 +36,8 @@ scripts
 
 # CI/CD
 .github
+ci/security
+security-reports
 
 # Deployment examples
 deploy

@@ -1,0 +1,44 @@
+name: Scan published image
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Public image reference; publishing callers must pass the immutable digest.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Trivy image (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install pinned Trivy
+        run: sh ci/security/install-scanner.sh trivy
+      - name: Scan image packages
+        env:
+          SCAN_IMAGE: ${{ inputs.image }}
+          SCAN_ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p security-reports
+          trivy image --config ci/security/trivy-image.yaml --image-src remote \
+            --platform "linux/$SCAN_ARCH" --format json \
+            --output "security-reports/trivy-image-$SCAN_ARCH.json" "$SCAN_IMAGE"
+      - name: Upload container findings
+        if: ${{ !cancelled() && hashFiles('security-reports/*.json') != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-published-image-${{ matrix.arch }}
+          path: security-reports/*.json
+          retention-days: 30
