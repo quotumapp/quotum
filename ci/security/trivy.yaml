@@ -1,0 +1,22 @@
+# Include build/test dependencies: they execute in CI even when absent from the image.
+scan:
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+  skip-dirs:
+    - node_modules
+    - .git
+    - coverage
+    - local-sandbox
+    - graphify-out
+    - security-reports
+    - ci/security/fixtures
+severity:
+  - HIGH
+  - CRITICAL
+vulnerability:
+  ignore-unfixed: true
+pkg:
+  include-dev-deps: true
+exit-code: 1

@@ -1,0 +1,50 @@
+// Scanner-only examples. Copied to a temporary .ts file; never executed.
+import { Elysia } from "elysia";
+import { sql } from "drizzle-orm";
+
+new Elysia().get("/lookup", ({ query }) => {
+  // ruleid: quotum-dynamic-sql
+  sql.raw(`SELECT * FROM customers WHERE id = '${query.id}'`);
+  // ruleid: quotum-dynamic-sql
+  sql.raw("SELECT * FROM customers WHERE id = " + query.id);
+  // ok: quotum-dynamic-sql
+  sql`SELECT * FROM customers WHERE id = ${query.id}`;
+  // ok: quotum-dynamic-sql
+  sql.raw("CURRENT_TIMESTAMP");
+});
+
+async function bunSql(db, customerId) {
+  // ruleid: quotum-dynamic-sql
+  await db.unsafe(`SELECT * FROM customers WHERE id = '${customerId}'`);
+  // ruleid: quotum-dynamic-sql
+  await db.unsafe("SELECT * FROM customers WHERE id = " + customerId);
+  // ok: quotum-dynamic-sql
+  await db.unsafe("SELECT * FROM customers WHERE id = $1", [customerId]);
+  // ok: quotum-dynamic-sql
+  await db`SELECT * FROM customers WHERE id = ${customerId}`;
+}
+
+// ruleid: quotum-disabled-tls
+const insecure = { tls: { rejectUnauthorized: false } };
+// ruleid: quotum-disabled-tls
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+// ok: quotum-disabled-tls
+const secure = { tls: { rejectUnauthorized: true } };
+
+// ruleid: quotum-dynamic-code
+eval(input);
+// ruleid: quotum-dynamic-code
+new Function("return " + input);
+// ok: quotum-dynamic-code
+JSON.parse(input);
+
+// ruleid: quotum-projection-fetch
+fetch(destination, options);
+// ruleid: quotum-projection-fetch
+globalThis.fetch(destination, options);
+// ruleid: quotum-projection-fetch
+global.fetch(destination, options);
+// ok: quotum-projection-fetch
+postToDestination(destination, body, headers, deps);
+// ok: quotum-projection-fetch
+this.fetch(destination, options);

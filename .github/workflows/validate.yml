@@ -202,6 +202,21 @@ jobs:
           docker run --rm quotum-api:ci quotum help
           docker run --rm quotum-api:ci quotum version
           docker run --rm quotum-api:ci quotum init > /dev/null
+          docker run --rm quotum-api:ci sh -c 'test ! -e node_modules/typescript && test ! -e node_modules/@typescript'
+      - name: Install pinned Trivy
+        run: sh ci/security/install-scanner.sh trivy
+      - name: Scan the built container
+        run: |
+          mkdir -p security-reports
+          trivy image --config ci/security/trivy-image.yaml --image-src docker \
+            --format json --output security-reports/trivy-image.json quotum-api:ci
+      - name: Upload container findings
+        if: ${{ !cancelled() && hashFiles('security-reports/trivy-image.json') != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-ci-image
+          path: security-reports/trivy-image.json
+          retention-days: 30
       - name: Lint the compose smoke test
         run: shellcheck deploy/compose/smoke.sh
       - name: Headless compose stack smoke test

@@ -143,7 +143,9 @@ commit that lands on `main`, and each `main` commit keeps its own run.
 Pull requests run the shared [standalone validation](.github/workflows/validate.yml): static
 checks, unit tests and coverage, OpenAPI checks, Postgres integration tests, end-to-end tests,
 merchant integration tests, and a container build. They also run a bundle size check and an
-advisory dependency audit. Fix failing checks and wait for all required checks to pass on the
+advisory dependency audit. The [security workflow](.github/workflows/security.yml) adds Opengrep,
+Trivy and CodeQL; see [security scanning](docs/security-scanning.md) for local commands, findings
+policy and scanner limitations. Fix failing checks and wait for all required checks to pass on the
 latest revision before merging; a successful branch push alone is not validation. Release
 tagging requires successful CI on the exact `main` commit being tagged, as described in the
 publishing checklist.

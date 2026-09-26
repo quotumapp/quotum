@@ -1,0 +1,51 @@
+# Quotum-authored rules under the repository's Apache-2.0 license.
+# CodeQL supplies the general security query suite; these enforce narrow local policies.
+rules:
+  - id: quotum-dynamic-sql
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Bind SQL values as parameters instead of concatenating or interpolating raw SQL.
+    metadata:
+      category: security
+      cwe: CWE-89
+    pattern-either:
+      - pattern: sql.raw(`...${...}...`)
+      - pattern: sql.raw($LEFT + $RIGHT)
+      - pattern: $DB.unsafe(`...${...}...`, ...)
+      - pattern: $DB.unsafe($LEFT + $RIGHT, ...)
+
+  - id: quotum-disabled-tls
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Keep TLS certificate verification enabled for provider and projection traffic.
+    metadata:
+      category: security
+      cwe: CWE-295
+    pattern-either:
+      - pattern: "{rejectUnauthorized: false, ...}"
+      - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+
+  - id: quotum-dynamic-code
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Runtime code must not evaluate JavaScript strings.
+    metadata:
+      category: security
+      cwe: CWE-95
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+
+  - id: quotum-projection-fetch
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Deliver projections through postToDestination/createProjectionFetch to preserve destination checks.
+    metadata:
+      category: security
+      cwe: CWE-918
+    paths:
+      include: ["**/src/projections/**"]
+    pattern-either:
+      - pattern: fetch(...)
+      - pattern: globalThis.fetch(...)
+      - pattern: global.fetch(...)

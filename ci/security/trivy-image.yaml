@@ -1,0 +1,11 @@
+# Inspect every installed package in the image, including node_modules.
+# Filesystem exclusions belong only to trivy.yaml.
+scan:
+  scanners:
+    - vuln
+severity:
+  - HIGH
+  - CRITICAL
+vulnerability:
+  ignore-unfixed: true
+exit-code: 1
