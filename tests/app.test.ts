@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { generateKeyPairSync } from "node:crypto";
 import type {
 	AdminBillingReader,
 	AdminCatalogProduct,
@@ -17,6 +18,8 @@ import { BillingError, InternalBillingError } from "../src/billing/errors";
 import type { BillingLogger } from "../src/observability/logger";
 import { type BillingMetrics, createInMemoryBillingMetrics } from "../src/observability/metrics";
 import { BillingAdminOperations } from "../src/operations/admin";
+import { AppleStoreKitClient, buildAppleStoreKitConfig } from "../src/providers/apple/client";
+import { AppleStoreKitService } from "../src/providers/apple/service";
 import { createProviderRegistry } from "../src/providers/registry";
 import type { FixtureBillingEnv as BillingEnv } from "../src/testing/connection-fixtures";
 import { fixtureConnections } from "../src/testing/connection-fixtures";
@@ -3220,6 +3223,111 @@ describe("billing app", () => {
 		expect(await response.json()).toEqual({
 			success: false,
 			error: { code: "INVALID_REQUEST", message: "Invalid Apple webhook body" },
+		});
+	});
+
+	it("answers Apple payloads the real verifier rejects with 400 and records nothing", async () => {
+		const writes: string[] = [];
+		const repository = {
+			getOrCreateProviderCustomerToken() {
+				writes.push("token");
+				return Promise.resolve("token");
+			},
+			recordStoreKitTransactionAndEnqueueProjection() {
+				writes.push("record");
+				return Promise.reject(new Error("must not record"));
+			},
+		};
+		const client = new AppleStoreKitClient(
+			buildAppleStoreKitConfig({
+				bundleId: "com.voysee.app",
+				appAppleId: null,
+				issuerId: "issuer",
+				keyId: "KEYID12345",
+				privateKey: generateKeyPairSync("ec", { namedCurve: "prime256v1" })
+					.privateKey.export({ type: "pkcs8", format: "pem" })
+					.toString(),
+				environment: "sandbox",
+				enableOnlineChecks: false,
+				rootCertificatesDir: null,
+			}),
+		);
+		const app = createApp({
+			env,
+			appleStoreKitService: new AppleStoreKitService({
+				bundleId: "com.voysee.app",
+				environment: "sandbox",
+				client,
+				repository,
+			}),
+		});
+		const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+		const payloads = [
+			"not-a-jws",
+			`${encode({ alg: "none" })}.${encode({ notificationType: "DID_RENEW" })}.`,
+		];
+
+		for (const signedPayload of payloads) {
+			const response = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ signedPayload }),
+			});
+
+			expect(response.status).toBe(400);
+			expect(await response.json()).toEqual({
+				success: false,
+				error: {
+					code: "APPLE_SIGNED_DATA_INVALID",
+					message: "Apple signed data failed verification",
+				},
+			});
+		}
+		expect(writes).toEqual([]);
+	});
+
+	it("answers an Apple notification for another environment with 400", async () => {
+		const app = createApp({
+			env,
+			appleStoreKitService: new AppleStoreKitService({
+				bundleId: "com.voysee.app",
+				environment: "sandbox",
+				client: {
+					verifyTransaction: () => Promise.reject(new Error("unused")),
+					getLatestSubscriptionStatus: () => Promise.reject(new Error("unused")),
+					verifyNotification: () =>
+						Promise.resolve({
+							environment: "production" as const,
+							notification: {
+								notificationType: "DID_RENEW",
+								notificationUUID: "notification_1",
+								data: { bundleId: "com.voysee.app", environment: "Production" },
+							},
+							transaction: null,
+							renewalInfo: null,
+						}),
+				},
+				repository: {
+					getOrCreateProviderCustomerToken: () => Promise.reject(new Error("unused")),
+					recordStoreKitTransactionAndEnqueueProjection: () =>
+						Promise.reject(new Error("must not record")),
+				},
+			}),
+		});
+
+		const response = await testRequest(app, "/v1/projects/voysee/webhooks/apple", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ signedPayload: "signed-notification" }),
+		});
+
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({
+			success: false,
+			error: {
+				code: "APPLE_SIGNED_DATA_INVALID",
+				message: "Apple notification belongs to another environment",
+			},
 		});
 	});
 

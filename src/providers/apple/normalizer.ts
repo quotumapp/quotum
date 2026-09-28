@@ -1,5 +1,6 @@
 import type { ProjectionSyncReason, PurchaseKind } from "../../billing/types";
 import type { StoreEventReplayJobRow } from "../../db/repository";
+import { appleSignedDataInvalid } from "./signed-data-errors";
 import type {
 	AppleDecodedNotificationPayload,
 	AppleDecodedRenewalInfoPayload,
@@ -410,14 +411,14 @@ function validateNotificationContext(
 	expectedEnvironment: AppleEnvironmentName,
 ): void {
 	if (notification.data?.bundleId && notification.data.bundleId !== expectedBundleId) {
-		throw new Error("Apple notification bundle mismatch");
+		throw appleSignedDataInvalid("Apple notification belongs to another app");
 	}
 
 	if (
 		notification.data?.environment &&
 		normalizeEnvironment(notification.data.environment) !== expectedEnvironment
 	) {
-		throw new Error("Apple notification environment mismatch");
+		throw appleSignedDataInvalid("Apple notification belongs to another environment");
 	}
 }
 
@@ -427,11 +428,11 @@ function validateTransactionContext(
 	expectedEnvironment: AppleEnvironmentName,
 ): void {
 	if (transaction.bundleId !== expectedBundleId) {
-		throw new Error("Apple transaction bundle mismatch");
+		throw appleSignedDataInvalid("Apple transaction belongs to another app");
 	}
 
 	if (normalizeEnvironment(transaction.environment) !== expectedEnvironment) {
-		throw new Error("Apple transaction environment mismatch");
+		throw appleSignedDataInvalid("Apple transaction belongs to another environment");
 	}
 }
 
@@ -444,7 +445,7 @@ function normalizeEnvironment(value: string | undefined): AppleEnvironmentName {
 		return "production";
 	}
 
-	throw new Error("Apple transaction environment mismatch");
+	throw appleSignedDataInvalid("Apple environment is not supported");
 }
 
 function normalizePurchaseKind(

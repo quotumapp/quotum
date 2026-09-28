@@ -352,7 +352,7 @@ describe("StoreKit normalizer", () => {
 				expectedEnvironment: "sandbox",
 				now,
 			}),
-		).toThrow("Apple transaction bundle mismatch");
+		).toThrow("Apple transaction belongs to another app");
 
 		expect(() =>
 			normalizeVerifiedStoreKitTransaction({
@@ -363,7 +363,7 @@ describe("StoreKit normalizer", () => {
 				expectedEnvironment: "sandbox",
 				now,
 			}),
-		).toThrow("Apple transaction environment mismatch");
+		).toThrow("Apple transaction belongs to another environment");
 	});
 
 	it("normalizes provider reconciliation with a deterministic transaction key", () => {
@@ -558,7 +558,7 @@ describe("StoreKit normalizer", () => {
 				expectedEnvironment: "sandbox",
 				now,
 			}),
-		).toThrow("Apple transaction bundle mismatch");
+		).toThrow("Apple transaction belongs to another app");
 	});
 
 	// capability: catalog.trial

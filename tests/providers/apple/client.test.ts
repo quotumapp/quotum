@@ -27,6 +27,38 @@ const appleEnv = (overrides: Partial<AppleBillingEnv> = {}): AppleBillingEnv => 
 	...overrides,
 });
 
+/** A client whose notification verifier runs `verify`; the API client is never reached. */
+function notificationClient(
+	environment: AppleBillingEnv["environment"],
+	verify: (environment: Environment) => Promise<unknown>,
+): AppleStoreKitClient {
+	return new AppleStoreKitClient(
+		{
+			...buildAppleStoreKitConfig(
+				appleEnv(
+					environment === "production" ? { environment, appAppleId: 1234567890 } : { environment },
+				),
+			),
+			rootCertificates: [Buffer.from("root")],
+		},
+		{
+			createApiClient() {
+				return {
+					getTransactionInfo: () => Promise.reject(new Error("unused")),
+					getAllSubscriptionStatuses: () => Promise.reject(new Error("unused")),
+				};
+			},
+			createVerifier(verifierEnvironment) {
+				return {
+					verifyAndDecodeTransaction: () => Promise.reject(new Error("unused")),
+					verifyAndDecodeRenewalInfo: () => Promise.reject(new Error("unused")),
+					verifyAndDecodeNotification: async () => (await verify(verifierEnvironment)) as never,
+				};
+			},
+		},
+	);
+}
+
 describe("Apple StoreKit client", () => {
 	it("maps configured environments to Apple library environments", () => {
 		expect(toAppleLibraryEnvironment("sandbox")).toBe(Environment.SANDBOX);
@@ -357,9 +389,70 @@ describe("Apple StoreKit client", () => {
 		);
 
 		await expect(client.verifyNotification("signed-notification")).rejects.toMatchObject({
-			status: VerificationStatus.INVALID_CERTIFICATE,
+			code: "APPLE_SIGNED_DATA_INVALID",
+			status: 400,
 		});
 		expect(attempts).toEqual([Environment.PRODUCTION]);
+	});
+
+	it("answers every non-retryable notification verification failure as invalid signed data", async () => {
+		const statuses = [
+			VerificationStatus.VERIFICATION_FAILURE,
+			VerificationStatus.INVALID_APP_IDENTIFIER,
+			VerificationStatus.INVALID_ENVIRONMENT,
+			VerificationStatus.INVALID_CHAIN_LENGTH,
+			VerificationStatus.INVALID_CERTIFICATE,
+			VerificationStatus.FAILURE,
+		];
+		for (const status of statuses) {
+			const client = notificationClient("sandbox", () => {
+				throw new VerificationException(status);
+			});
+
+			await expect(client.verifyNotification("signed-notification")).rejects.toMatchObject({
+				code: "APPLE_SIGNED_DATA_INVALID",
+				status: 400,
+				message: "Apple signed data failed verification",
+			});
+		}
+	});
+
+	it("keeps a retryable notification verification failure retryable", async () => {
+		const client = notificationClient("sandbox", () => {
+			throw new VerificationException(VerificationStatus.RETRYABLE_VERIFICATION_FAILURE);
+		});
+
+		await expect(client.verifyNotification("signed-notification")).rejects.toMatchObject({
+			code: "BILLING_PROVIDER_UNAVAILABLE",
+			status: 503,
+		});
+	});
+
+	it("answers a notification that also fails sandbox verification as invalid signed data", async () => {
+		const attempts: Environment[] = [];
+		const client = notificationClient("production", (environment) => {
+			attempts.push(environment);
+			throw new VerificationException(
+				environment === Environment.PRODUCTION
+					? VerificationStatus.INVALID_ENVIRONMENT
+					: VerificationStatus.VERIFICATION_FAILURE,
+			);
+		});
+
+		await expect(client.verifyNotification("signed-notification")).rejects.toMatchObject({
+			code: "APPLE_SIGNED_DATA_INVALID",
+			status: 400,
+		});
+		expect(attempts).toEqual([Environment.PRODUCTION, Environment.SANDBOX]);
+	});
+
+	it("rethrows a notification failure that is not a verification rejection unchanged", async () => {
+		const failure = new Error("verifier crashed");
+		const client = notificationClient("sandbox", () => {
+			throw failure;
+		});
+
+		await expect(client.verifyNotification("signed-notification")).rejects.toBe(failure);
 	});
 
 	it("gets the latest subscription status transaction and renewal info", async () => {
