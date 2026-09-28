@@ -517,6 +517,76 @@ localDescribe("catalog control plane", () => {
 	// capability: checkout.plan
 	// capability: subscription.change.apply
 	// capability: settlement.collect_finalized_charge
+	it("publishes a quarterly plan against three-month Stripe prices and previews its cycle", async () => {
+		await seedPhaseTwoStripePrices({ unit: "month", count: 3 });
+		// The base price binds the shared monthly fixture product, sold every three months here.
+		await context.sql`
+			UPDATE store_products store SET billing_period = 'month', billing_period_count = 3
+			FROM products product
+			WHERE product.project_id = store.project_id AND product.id = store.product_id
+				AND product.key = 'premium_monthly' AND store.provider = 'stripe'
+		`;
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = operatorHeaders(authHeaders());
+		const catalog = phaseTwoCatalogIntent("quarter");
+		const preview = await testRequest(app, "/v1/admin/catalog/preview", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ expectedRevision: null, catalog }),
+		});
+		expect(preview.status).toBe(200);
+		const publish = await testRequest(app, "/v1/admin/catalog/publish", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				expectedRevision: null,
+				previewToken: (await preview.json()).data.previewToken,
+				catalog,
+			}),
+		});
+		expect(publish.status).toBe(200);
+		const versions = await context.sql<
+			Array<{ billing_interval: string; billing_interval_count: number }>
+		>`
+				SELECT DISTINCT version.billing_interval, version.billing_interval_count
+				FROM plan_versions version
+				JOIN projects project ON project.id = version.project_id
+				WHERE project.key = 'voysee'
+			`;
+		expect(versions).toEqual([{ billing_interval: "quarter", billing_interval_count: 1 }]);
+
+		const publicCatalog = await testRequest(app, "/v1/catalog?provider=stripe&channel=web", {
+			headers: authHeaders("voysee"),
+		});
+		expect((await publicCatalog.json()).data.plans[0].components[0]).toMatchObject({
+			key: "base",
+			interval: "quarter",
+			intervalCount: 1,
+		});
+		const checkoutPreview = await testRequest(
+			app,
+			"/v1/billing-accounts/quarterly-account/commercial-actions/preview",
+			{
+				method: "POST",
+				headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+				body: JSON.stringify({
+					intent: { kind: "checkout_plan", planKey: "pro", quantities: { seats: 5 } },
+				}),
+			},
+		);
+		expect(checkoutPreview.status).toBe(200);
+		expect((await checkoutPreview.json()).data).toMatchObject({
+			lineItems: [
+				{ key: "base", interval: "quarter", intervalCount: 1 },
+				{ key: "seat", interval: "quarter", intervalCount: 1 },
+			],
+			nextCycle: { interval: "quarter", intervalCount: 1, subtotalMinor: 1999 },
+		});
+	});
+
 	it("publishes fixed, licensed-seat, and metered-overage prices as immutable components", async () => {
 		await seedPhaseTwoStripePrices();
 		const { app, authHeaders, stripe } = createIntegrationApp({
@@ -916,7 +986,7 @@ localDescribe("catalog control plane", () => {
 	});
 });
 
-async function seedPhaseTwoStripePrices() {
+async function seedPhaseTwoStripePrices(period = { unit: "month", count: 1 }) {
 	for (const price of [
 		{
 			key: "pro_seat",
@@ -945,10 +1015,10 @@ async function seedPhaseTwoStripePrices() {
 		await context.sql`
 			INSERT INTO store_products (
 				project_id, product_id, provider, channel, external_product_id,
-				external_price_id, billing_period, currency, price_amount, active
+				external_price_id, billing_period, billing_period_count, currency, price_amount, active
 			)
 			SELECT project.id, product.id, 'stripe', 'web', ${price.externalProductId},
-				${price.externalPriceId}, 'month', 'usd', ${price.amount}, true
+				${price.externalPriceId}, ${period.unit}, ${period.count}, 'usd', ${price.amount}, true
 			FROM projects project
 			JOIN products product ON product.project_id = project.id AND product.key = ${price.key}
 			WHERE project.key = 'voysee'
@@ -956,7 +1026,7 @@ async function seedPhaseTwoStripePrices() {
 	}
 }
 
-function phaseTwoCatalogIntent() {
+function phaseTwoCatalogIntent(billingInterval = "month") {
 	const stripePrice = (
 		key: string,
 		productKey: string,
@@ -967,7 +1037,7 @@ function phaseTwoCatalogIntent() {
 		currency: "USD",
 		unitAmountMinor,
 		billingUnits,
-		billingInterval: "month",
+		billingInterval,
 		minimumQuantity: 1,
 		maximumQuantity: key === "seat" ? 500 : null,
 		taxBehavior: "exclusive",
@@ -1010,7 +1080,7 @@ function phaseTwoCatalogIntent() {
 				version: 1,
 				currency: "USD",
 				baseAmountMinor: 999,
-				billingInterval: "month",
+				billingInterval,
 				trialDays: 14,
 				kind: "base",
 				tierRank: 20,
@@ -1047,7 +1117,7 @@ function phaseTwoCatalogIntent() {
 				version: 1,
 				currency: "USD",
 				baseAmountMinor: 300,
-				billingInterval: "month",
+				billingInterval,
 				trialDays: null,
 				kind: "addon",
 				tierRank: 0,

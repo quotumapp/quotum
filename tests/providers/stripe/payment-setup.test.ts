@@ -846,6 +846,7 @@ const proPlan: StripeRecurringCheckoutPlan = {
 			pricingModel: "flat",
 			currency: "usd",
 			billingInterval: "month",
+			billingIntervalCount: 1,
 		},
 		{
 			priceComponentId: "2",
@@ -861,6 +862,7 @@ const proPlan: StripeRecurringCheckoutPlan = {
 			pricingModel: "flat",
 			currency: "usd",
 			billingInterval: "month",
+			billingIntervalCount: 1,
 		},
 	],
 };

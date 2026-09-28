@@ -83,6 +83,13 @@ export const appleCapabilities: ProviderCapabilityDeclaration = {
 	connectionKind: "apple",
 	availability: "available",
 	writeSemantics: { clientIdempotencyKeys: false, uncertainWrite: "reconcile_required" },
+	// Auto-renewable subscriptions last 1 week, 1, 2, 3 or 6 months, or 1 year.
+	billingCadences: [
+		{ unit: "week", minCount: 1, maxCount: 1 },
+		{ unit: "month", minCount: 1, maxCount: 3 },
+		{ unit: "month", minCount: 6, maxCount: 6 },
+		{ unit: "year", minCount: 1, maxCount: 1 },
+	],
 	operations: {
 		"catalog.product.subscription": verified([appleFlows]),
 		"catalog.product.consumable": verified([appleFlows, appleNormalizer]),

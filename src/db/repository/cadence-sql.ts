@@ -22,7 +22,7 @@ function unitCase(unitColumn: string, measure: (unit: CadenceUnit) => number | n
  */
 export function resetSplitsBillingPeriodSql(itemAlias: string, versionAlias: string): SQL {
 	const resetCount = drizzleSql.raw(`${itemAlias}.reset_interval_count`);
-	const billingCount = drizzleSql.raw("1");
+	const billingCount = drizzleSql.raw(`${versionAlias}.billing_interval_count`);
 	const resetMonths = unitCase(`${itemAlias}.reset_interval`, unitMonths);
 	const resetHours = unitCase(`${itemAlias}.reset_interval`, unitHours);
 	const billingMonths = unitCase(`${versionAlias}.billing_interval`, unitMonths);

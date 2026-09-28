@@ -1278,10 +1278,17 @@
                           "properties": {
                             "billingInterval": {
                               "enum": [
+                                "day",
+                                "week",
                                 "month",
+                                "quarter",
+                                "semi_annual",
                                 "year"
                               ],
                               "type": "string"
+                            },
+                            "billingIntervalCount": {
+                              "type": "number"
                             },
                             "billingUnits": {
                               "type": "string"
@@ -1383,6 +1390,7 @@
                             "unitAmountMinor",
                             "billingUnits",
                             "billingInterval",
+                            "billingIntervalCount",
                             "minimumQuantity",
                             "maximumQuantity",
                             "taxBehavior",
@@ -1394,22 +1402,24 @@
                           ]
                         },
                         "billingInterval": {
-                          "anyOf": [
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "enum": [
-                                "month"
-                              ],
-                              "type": "string"
-                            },
-                            {
-                              "enum": [
-                                "year"
-                              ],
-                              "type": "string"
-                            }
+                          "enum": [
+                            "day",
+                            "week",
+                            "month",
+                            "quarter",
+                            "semi_annual",
+                            "year",
+                            null
+                          ],
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "billingIntervalCount": {
+                          "type": [
+                            "null",
+                            "number"
                           ]
                         },
                         "controls": {
@@ -1529,10 +1539,17 @@
                                 "properties": {
                                   "billingInterval": {
                                     "enum": [
+                                      "day",
+                                      "week",
                                       "month",
+                                      "quarter",
+                                      "semi_annual",
                                       "year"
                                     ],
                                     "type": "string"
+                                  },
+                                  "billingIntervalCount": {
+                                    "type": "number"
                                   },
                                   "billingUnits": {
                                     "type": "string"
@@ -1634,6 +1651,7 @@
                                   "unitAmountMinor",
                                   "billingUnits",
                                   "billingInterval",
+                                  "billingIntervalCount",
                                   "minimumQuantity",
                                   "maximumQuantity",
                                   "taxBehavior",
@@ -1843,6 +1861,7 @@
                         "currency",
                         "baseAmountMinor",
                         "billingInterval",
+                        "billingIntervalCount",
                         "trialDays",
                         "items",
                         "providerBindings"
@@ -2051,6 +2070,9 @@
                 "billingPeriod": {
                   "type": "string"
                 },
+                "billingPeriodCount": {
+                  "type": "number"
+                },
                 "channel": {
                   "enum": [
                     "ios",
@@ -2121,6 +2143,7 @@
                 "updatedAt",
                 "externalPriceId",
                 "billingPeriod",
+                "billingPeriodCount",
                 "currency",
                 "priceAmount"
               ],
@@ -9771,10 +9794,17 @@
                           },
                           "interval": {
                             "enum": [
+                              "day",
+                              "week",
                               "month",
+                              "quarter",
+                              "semi_annual",
                               "year"
                             ],
                             "type": "string"
+                          },
+                          "intervalCount": {
+                            "type": "number"
                           },
                           "key": {
                             "type": "string"
@@ -9853,6 +9883,7 @@
                           "tiers",
                           "billingUnits",
                           "interval",
+                          "intervalCount",
                           "minimumQuantity",
                           "maximumQuantity",
                           "taxBehavior"
@@ -13825,22 +13856,24 @@
                       ]
                     },
                     "interval": {
-                      "anyOf": [
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "enum": [
-                            "month"
-                          ],
-                          "type": "string"
-                        },
-                        {
-                          "enum": [
-                            "year"
-                          ],
-                          "type": "string"
-                        }
+                      "enum": [
+                        "day",
+                        "week",
+                        "month",
+                        "quarter",
+                        "semi_annual",
+                        "year",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "intervalCount": {
+                      "type": [
+                        "null",
+                        "number"
                       ]
                     },
                     "key": {
@@ -13883,6 +13916,7 @@
                     "unitAmountMinor",
                     "currency",
                     "interval",
+                    "intervalCount",
                     "pricingModel",
                     "subtotalMinor",
                     "discountMinor",
@@ -13917,10 +13951,17 @@
                   },
                   "interval": {
                     "enum": [
+                      "day",
+                      "week",
                       "month",
+                      "quarter",
+                      "semi_annual",
                       "year"
                     ],
                     "type": "string"
+                  },
+                  "intervalCount": {
+                    "type": "number"
                   },
                   "subtotalMinor": {
                     "type": [
@@ -13937,6 +13978,7 @@
                 },
                 "required": [
                   "interval",
+                  "intervalCount",
                   "currency",
                   "subtotalMinor",
                   "discountMinor",
@@ -17344,6 +17386,36 @@
             ],
             "type": "string"
           },
+          "billingCadences": {
+            "items": {
+              "properties": {
+                "maxCount": {
+                  "type": "number"
+                },
+                "minCount": {
+                  "type": "number"
+                },
+                "unit": {
+                  "enum": [
+                    "day",
+                    "week",
+                    "month",
+                    "quarter",
+                    "semi_annual",
+                    "year"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unit",
+                "minCount",
+                "maxCount"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "changeBillingPolicies": {
             "items": {
               "properties": {
@@ -17586,6 +17658,7 @@
           "connectionKind",
           "availability",
           "writeSemantics",
+          "billingCadences",
           "operations"
         ],
         "type": "object"
@@ -29271,10 +29344,19 @@
                               "properties": {
                                 "billingInterval": {
                                   "enum": [
+                                    "day",
+                                    "week",
                                     "month",
+                                    "quarter",
+                                    "semi_annual",
                                     "year"
                                   ],
                                   "type": "string"
+                                },
+                                "billingIntervalCount": {
+                                  "maximum": 1000,
+                                  "minimum": 1,
+                                  "type": "integer"
                                 },
                                 "billingUnits": {
                                   "maxLength": 80,
@@ -29409,12 +29491,24 @@
                             },
                             "billingInterval": {
                               "enum": [
+                                "day",
+                                "week",
                                 "month",
+                                "quarter",
+                                "semi_annual",
                                 "year",
                                 null
                               ],
                               "type": [
                                 "string",
+                                "null"
+                              ]
+                            },
+                            "billingIntervalCount": {
+                              "maximum": 1000,
+                              "minimum": 1,
+                              "type": [
+                                "integer",
                                 "null"
                               ]
                             },
@@ -29553,10 +29647,19 @@
                                     "properties": {
                                       "billingInterval": {
                                         "enum": [
+                                          "day",
+                                          "week",
                                           "month",
+                                          "quarter",
+                                          "semi_annual",
                                           "year"
                                         ],
                                         "type": "string"
+                                      },
+                                      "billingIntervalCount": {
+                                        "maximum": 1000,
+                                        "minimum": 1,
+                                        "type": "integer"
                                       },
                                       "billingUnits": {
                                         "maxLength": 80,
@@ -30667,10 +30770,19 @@
                               "properties": {
                                 "billingInterval": {
                                   "enum": [
+                                    "day",
+                                    "week",
                                     "month",
+                                    "quarter",
+                                    "semi_annual",
                                     "year"
                                   ],
                                   "type": "string"
+                                },
+                                "billingIntervalCount": {
+                                  "maximum": 1000,
+                                  "minimum": 1,
+                                  "type": "integer"
                                 },
                                 "billingUnits": {
                                   "maxLength": 80,
@@ -30805,12 +30917,24 @@
                             },
                             "billingInterval": {
                               "enum": [
+                                "day",
+                                "week",
                                 "month",
+                                "quarter",
+                                "semi_annual",
                                 "year",
                                 null
                               ],
                               "type": [
                                 "string",
+                                "null"
+                              ]
+                            },
+                            "billingIntervalCount": {
+                              "maximum": 1000,
+                              "minimum": 1,
+                              "type": [
+                                "integer",
                                 "null"
                               ]
                             },
@@ -30949,10 +31073,19 @@
                                     "properties": {
                                       "billingInterval": {
                                         "enum": [
+                                          "day",
+                                          "week",
                                           "month",
+                                          "quarter",
+                                          "semi_annual",
                                           "year"
                                         ],
                                         "type": "string"
+                                      },
+                                      "billingIntervalCount": {
+                                        "maximum": 1000,
+                                        "minimum": 1,
+                                        "type": "integer"
                                       },
                                       "billingUnits": {
                                         "maxLength": 80,
@@ -50629,10 +50762,19 @@
                               "properties": {
                                 "billingInterval": {
                                   "enum": [
+                                    "day",
+                                    "week",
                                     "month",
+                                    "quarter",
+                                    "semi_annual",
                                     "year"
                                   ],
                                   "type": "string"
+                                },
+                                "billingIntervalCount": {
+                                  "maximum": 1000,
+                                  "minimum": 1,
+                                  "type": "integer"
                                 },
                                 "billingUnits": {
                                   "maxLength": 80,
@@ -50767,12 +50909,24 @@
                             },
                             "billingInterval": {
                               "enum": [
+                                "day",
+                                "week",
                                 "month",
+                                "quarter",
+                                "semi_annual",
                                 "year",
                                 null
                               ],
                               "type": [
                                 "string",
+                                "null"
+                              ]
+                            },
+                            "billingIntervalCount": {
+                              "maximum": 1000,
+                              "minimum": 1,
+                              "type": [
+                                "integer",
                                 "null"
                               ]
                             },
@@ -50911,10 +51065,19 @@
                                     "properties": {
                                       "billingInterval": {
                                         "enum": [
+                                          "day",
+                                          "week",
                                           "month",
+                                          "quarter",
+                                          "semi_annual",
                                           "year"
                                         ],
                                         "type": "string"
+                                      },
+                                      "billingIntervalCount": {
+                                        "maximum": 1000,
+                                        "minimum": 1,
+                                        "type": "integer"
                                       },
                                       "billingUnits": {
                                         "maxLength": 80,
@@ -51945,10 +52108,19 @@
                               "properties": {
                                 "billingInterval": {
                                   "enum": [
+                                    "day",
+                                    "week",
                                     "month",
+                                    "quarter",
+                                    "semi_annual",
                                     "year"
                                   ],
                                   "type": "string"
+                                },
+                                "billingIntervalCount": {
+                                  "maximum": 1000,
+                                  "minimum": 1,
+                                  "type": "integer"
                                 },
                                 "billingUnits": {
                                   "maxLength": 80,
@@ -52083,12 +52255,24 @@
                             },
                             "billingInterval": {
                               "enum": [
+                                "day",
+                                "week",
                                 "month",
+                                "quarter",
+                                "semi_annual",
                                 "year",
                                 null
                               ],
                               "type": [
                                 "string",
+                                "null"
+                              ]
+                            },
+                            "billingIntervalCount": {
+                              "maximum": 1000,
+                              "minimum": 1,
+                              "type": [
+                                "integer",
                                 "null"
                               ]
                             },
@@ -52227,10 +52411,19 @@
                                     "properties": {
                                       "billingInterval": {
                                         "enum": [
+                                          "day",
+                                          "week",
                                           "month",
+                                          "quarter",
+                                          "semi_annual",
                                           "year"
                                         ],
                                         "type": "string"
+                                      },
+                                      "billingIntervalCount": {
+                                        "maximum": 1000,
+                                        "minimum": 1,
+                                        "type": "integer"
                                       },
                                       "billingUnits": {
                                         "maxLength": 80,

@@ -24,7 +24,7 @@ describe("parseCatalogImports", () => {
 		).toEqual([
 			{
 				projectInstanceKey: "voysee",
-				catalog: [{ ...subscription, currency: "USD", active: true }],
+				catalog: [{ ...subscription, currency: "USD", intervalCount: 1, active: true }],
 			},
 		]);
 	});

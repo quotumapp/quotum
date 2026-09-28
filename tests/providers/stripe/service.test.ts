@@ -39,6 +39,7 @@ function stripeProduct(
 		externalProductId: "prod_stripe_credits_100",
 		externalPriceId: "price_credits_100",
 		billingPeriod: "one_time",
+		billingPeriodCount: 1,
 		currency: "usd",
 		priceAmount: 499,
 		...overrides,
@@ -98,6 +99,7 @@ function serviceFixture(
 			externalProductId: "prod_stripe_premium",
 			externalPriceId: "price_premium_monthly",
 			billingPeriod: "month",
+			billingPeriodCount: 1,
 			priceAmount: 999,
 		}),
 	};
@@ -633,6 +635,7 @@ describe("StripeBillingService", () => {
 			externalProductId: "prod_stripe_premium",
 			externalPriceId: "price_premium_monthly",
 			billingPeriod: "month",
+			billingPeriodCount: 1,
 			priceAmount: 999,
 		});
 		const { calls, service } = serviceFixture({ products: { premium_monthly: product } });
@@ -696,6 +699,7 @@ describe("StripeBillingService", () => {
 						pricingModel: "flat",
 						currency: "USD",
 						billingInterval: "month",
+						billingIntervalCount: 1,
 					},
 					{
 						priceComponentId: "2",
@@ -711,6 +715,7 @@ describe("StripeBillingService", () => {
 						pricingModel: "flat",
 						currency: "USD",
 						billingInterval: "month",
+						billingIntervalCount: 1,
 					},
 				],
 			},
@@ -762,6 +767,7 @@ describe("StripeBillingService", () => {
 						pricingModel: "flat",
 						currency: "USD",
 						billingInterval: "month",
+						billingIntervalCount: 1,
 					},
 				],
 			},

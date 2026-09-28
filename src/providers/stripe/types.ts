@@ -1,5 +1,6 @@
 import type { StripeCheckoutPromotionFacts } from "../../billing/promotions";
 import type { ProjectionSyncReason, SubscriptionStatus } from "../../billing/types";
+import type { BillingCadenceUnit } from "../../shared/cadence";
 
 export interface StripeCatalog {
 	schemaVersion: 1;
@@ -29,7 +30,8 @@ export interface StripeCatalog {
 				flatAmountMinor: number;
 			}>;
 			billingUnits: string;
-			interval: "month" | "year";
+			interval: BillingCadenceUnit;
+			intervalCount: number;
 			minimumQuantity: number;
 			maximumQuantity: number | null;
 			taxBehavior: "inclusive" | "exclusive" | "unspecified";

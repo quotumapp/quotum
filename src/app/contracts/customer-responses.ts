@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { billingCadenceUnits } from "../../shared/cadence";
 import {
 	BillingAccountAvailableActionsSchema,
 	EntitlementSnapshotSchema,
@@ -57,7 +58,8 @@ export const getV1CatalogResponse200Schema = z.object({
 							}),
 						),
 						billingUnits: z.string(),
-						interval: z.enum(["month", "year"]),
+						interval: z.enum(billingCadenceUnits),
+						intervalCount: z.number(),
 						minimumQuantity: z.number(),
 						maximumQuantity: z.union([z.null(), z.number()]),
 						taxBehavior: z.enum(["inclusive", "exclusive", "unspecified"]),
@@ -110,7 +112,8 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 					quantity: z.number(),
 					unitAmountMinor: z.number(),
 					currency: z.string(),
-					interval: z.union([z.null(), z.literal("month"), z.literal("year")]),
+					interval: z.union([z.null(), z.enum(billingCadenceUnits)]),
+					intervalCount: z.union([z.null(), z.number()]),
 					pricingModel: z.enum(["flat", "graduated", "volume"]),
 					subtotalMinor: z.union([z.null(), z.number()]),
 					discountMinor: z.union([z.null(), z.number()]),
@@ -143,7 +146,8 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 			nextCycle: z.union([
 				z.null(),
 				z.object({
-					interval: z.enum(["month", "year"]),
+					interval: z.enum(billingCadenceUnits),
+					intervalCount: z.number(),
 					currency: z.union([z.null(), z.string()]),
 					subtotalMinor: z.union([z.null(), z.number()]),
 					discountMinor: z.union([z.null(), z.number()]),

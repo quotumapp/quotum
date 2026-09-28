@@ -13,6 +13,7 @@ import type {
 	StoreEventProcessingStatus,
 	SubscriptionStatus,
 } from "../../billing/types";
+import type { BillingCadenceUnit } from "../../shared/cadence";
 
 export interface ProjectionSyncJobRow {
 	id: string;
@@ -190,7 +191,8 @@ export interface StripeWebStoreProductRow {
 	creditAmount: number;
 	externalProductId: string;
 	externalPriceId: string;
-	billingPeriod: string;
+	billingPeriod: "one_time" | BillingCadenceUnit;
+	billingPeriodCount: number;
 	currency: string | null;
 	priceAmount: number | null;
 	productName?: string | null;
@@ -252,7 +254,8 @@ export interface StripeRecurringCheckoutPlan {
 		unitAmountMinor: number;
 		pricingModel: "flat" | "graduated" | "volume";
 		currency: string;
-		billingInterval: "month" | "year";
+		billingInterval: BillingCadenceUnit;
+		billingIntervalCount: number;
 	}>;
 }
 

@@ -17,10 +17,13 @@ import {
 	type ProviderCapabilityLookup,
 	providerCapabilityCatalog,
 } from "../providers/capabilities";
+import { isCadenceUnit, sameCadence } from "../shared/cadence";
 import { toIso } from "../shared/date";
 import {
 	assertPlanCadences,
 	normalizeRolloverExpiry,
+	planBillingCadence,
+	priceBillingCadence,
 	rolloverExpiryCadence,
 } from "./cadence-rules";
 import {
@@ -508,6 +511,11 @@ function normalizeCatalog(
 			currency: basePrice?.currency ?? plan.currency?.trim().toUpperCase() ?? null,
 			baseAmountMinor: basePrice?.unitAmountMinor ?? plan.baseAmountMinor,
 			billingInterval: basePrice?.billingInterval ?? plan.billingInterval,
+			// A count without an interval is kept so that preview can reject it.
+			billingIntervalCount:
+				basePrice?.billingIntervalCount ??
+				plan.billingIntervalCount ??
+				(plan.billingInterval === null ? null : 1),
 			items: plan.items.map((item) => ({
 				...item,
 				featureKey: normalizedKey(item.featureKey, "plan item feature key"),
@@ -597,10 +605,11 @@ function normalizeCatalog(
 			if (item.price !== null && item.itemKind === "access") {
 				throw new InvalidRequestError(`Access item ${item.featureKey} cannot declare a price`);
 			}
+			const planCadence = planBillingCadence(plan);
 			if (
 				item.price !== null &&
-				plan.billingInterval !== null &&
-				item.price.billingInterval !== plan.billingInterval
+				planCadence !== null &&
+				!sameCadence(priceBillingCadence(item.price), planCadence)
 			) {
 				throw new InvalidRequestError(`Plan ${plan.key} price intervals must match`);
 			}
@@ -832,6 +841,7 @@ function normalizePrice(
 		key: normalizedKey(price.key, `${label} key`),
 		currency: requiredText(price.currency, `${label} currency`, 3).toUpperCase(),
 		billingUnits: positiveDecimal(price.billingUnits, `${label} billingUnits`, 9),
+		billingIntervalCount: price.billingIntervalCount ?? 1,
 		pricingModel,
 		tiers,
 		providerBindings,
@@ -1208,7 +1218,7 @@ async function publishPlans(
 			drizzleSql`
 				INSERT INTO plan_versions (
 					project_id, plan_id, catalog_revision_id, version, status,
-					currency, base_amount_minor, billing_interval, trial_days,
+					currency, base_amount_minor, billing_interval, billing_interval_count, trial_days,
 					plan_kind, tier_rank, trial_requires_payment_method, trial_end_behavior,
 					upgrade_proration_behavior, downgrade_proration_behavior,
 					visibility, customer_id
@@ -1216,7 +1226,8 @@ async function publishPlans(
 				VALUES (
 					${projectId}, ${String(stablePlan.id)}::bigint, ${revisionId}::bigint,
 					${plan.version}, 'published', ${plan.currency}, ${plan.baseAmountMinor},
-					${plan.billingInterval}, ${plan.trialDays}, ${plan.kind ?? "base"},
+					${plan.billingInterval}, ${plan.billingIntervalCount ?? 1}, ${plan.trialDays},
+					${plan.kind ?? "base"},
 					${plan.tierRank ?? 0}, ${plan.trialRequiresPaymentMethod ?? true},
 					${plan.trialEndBehavior ?? "cancel"},
 					${plan.upgradeProrationBehavior ?? "always_invoice"},
@@ -1292,8 +1303,8 @@ async function publishPlans(
 					INSERT INTO price_components (
 						project_id, plan_version_id, plan_item_id, key, component_kind,
 						charge_timing, currency, unit_amount_minor, billing_units,
-						billing_interval, minimum_quantity, maximum_quantity, tax_behavior,
-						pricing_model
+						billing_interval, billing_interval_count, minimum_quantity, maximum_quantity,
+						tax_behavior, pricing_model
 					)
 					VALUES (
 						${projectId}, ${versionId}::bigint, ${component.planItemId}::bigint,
@@ -1301,6 +1312,7 @@ async function publishPlans(
 						${component.componentKind === "metered_overage" ? "in_arrears" : "in_advance"},
 						${component.price.currency}, ${component.price.unitAmountMinor},
 						${component.price.billingUnits}::numeric, ${component.price.billingInterval},
+						${component.price.billingIntervalCount ?? 1},
 						${component.price.minimumQuantity}, ${component.price.maximumQuantity},
 						${component.price.taxBehavior}, ${component.price.pricingModel ?? "flat"}
 					)
@@ -1511,10 +1523,11 @@ async function publishProviderPriceBindings(
 					price_amount: number | string | null;
 					currency: string | null;
 					billing_period: string | null;
+					billing_period_count: number;
 				}>(
 					executor,
 					drizzleSql`
-						SELECT sp.id, sp.price_amount, sp.currency, sp.billing_period
+						SELECT sp.id, sp.price_amount, sp.currency, sp.billing_period, sp.billing_period_count
 						FROM store_products sp
 						JOIN products p ON p.project_id = sp.project_id AND p.id = sp.product_id
 						WHERE sp.project_id = ${projectId}
@@ -1532,7 +1545,11 @@ async function publishProviderPriceBindings(
 					((price.pricingModel ?? "flat") === "flat" &&
 						Number(storeProduct.price_amount) !== price.unitAmountMinor) ||
 					storeProduct.currency?.toUpperCase() !== price.currency ||
-					storeProduct.billing_period !== price.billingInterval
+					!isCadenceUnit(storeProduct.billing_period) ||
+					!sameCadence(
+						{ unit: storeProduct.billing_period, count: storeProduct.billing_period_count },
+						priceBillingCadence(price),
+					)
 				) {
 					throw new BillingError(
 						`Price binding ${binding.provider}/${binding.channel}/${binding.productKey} does not match ${plan.key}/${price.key}`,

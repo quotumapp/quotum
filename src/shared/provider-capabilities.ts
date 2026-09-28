@@ -4,6 +4,13 @@
  * single rule that turns declared fields into rendered statuses.
  */
 
+import {
+	type BillingCadenceUnit,
+	billingCadenceUnits,
+	type Cadence,
+	canonicalCadence,
+} from "./cadence";
+
 export const billingProviders = ["apple", "google", "stripe"] as const;
 /**
  * Declared ahead of implementation; never admitted by runtime enums, SQL CHECKs or any request or
@@ -457,6 +464,33 @@ export interface ChangeBillingPolicy {
 	collection: ChangeCollectionTiming;
 }
 
+/**
+ * A run of billing intervals a provider can sell: `unit` times every count from `minCount` to
+ * `maxCount`. A catalog interval matches when it spans the same time, so a quarter matches three
+ * months.
+ */
+export interface BillingCadenceSupport {
+	unit: BillingCadenceUnit;
+	minCount: number;
+	maxCount: number;
+}
+
+/** Whether a declaration sells subscriptions billed every `cadence`. */
+export function declaresBillingCadence(
+	declaration: Pick<ProviderCapabilityDeclaration, "billingCadences">,
+	cadence: Cadence,
+): boolean {
+	const wanted = canonicalCadence(cadence);
+	return declaration.billingCadences.some((support) => {
+		const step = canonicalCadence({ unit: support.unit, count: 1 });
+		if (step.kind !== wanted.kind) return false;
+		const total = wanted.kind === "months" ? wanted.months : wanted.hours;
+		const per = step.kind === "months" ? step.months : step.hours;
+		if (total % per !== 0) return false;
+		return total / per >= support.minCount && total / per <= support.maxCount;
+	});
+}
+
 /** Every (billing, collection) pair; a declaration lists the pairs its provider can express. */
 export const changeBillingPolicies: readonly ChangeBillingPolicy[] = changeBillingModes.flatMap(
 	(billing) => changeCollectionTimings.map((collection) => ({ billing, collection })),
@@ -486,6 +520,8 @@ export interface ProviderCapabilityDeclaration {
 		webhookOrdering?: WebhookOrdering;
 	};
 	changeBillingPolicies?: ChangeBillingPolicy[];
+	/** The subscription billing intervals the provider sells; a catalog plan must use one. */
+	billingCadences: BillingCadenceSupport[];
 	operations: Record<ProviderOperation, OperationSupport>;
 }
 
@@ -947,6 +983,7 @@ export function validateDeclaration(
 
 	validateLimits(input.limits, issue);
 	validateChangeBillingPolicies(input.changeBillingPolicies, issue);
+	validateBillingCadences(input.billingCadences, issue);
 
 	const operations = input.operations;
 	if (!isRecord(operations)) {
@@ -1034,6 +1071,31 @@ function validateChangeBillingPolicies(policies: unknown, issue: IssueSink): voi
 		}
 		const key = `${policy.billing}/${policy.collection}`;
 		if (seen.has(key)) issue(path, `Change billing policy ${key} is listed more than once`);
+		seen.add(key);
+	}
+}
+
+function validateBillingCadences(cadences: unknown, issue: IssueSink): void {
+	if (!Array.isArray(cadences)) {
+		issue("billingCadences", "Billing cadences must be an array");
+		return;
+	}
+	const seen = new Set<string>();
+	for (const [index, cadence] of cadences.entries()) {
+		const path = `billingCadences.${index}`;
+		if (
+			!isRecord(cadence) ||
+			!includes(billingCadenceUnits, cadence.unit) ||
+			!Number.isInteger(cadence.minCount) ||
+			!Number.isInteger(cadence.maxCount) ||
+			(cadence.minCount as number) < 1 ||
+			(cadence.maxCount as number) < (cadence.minCount as number)
+		) {
+			issue(path, "Billing cadence must name a billing unit and a positive count range");
+			continue;
+		}
+		const key = `${cadence.unit}/${cadence.minCount}/${cadence.maxCount}`;
+		if (seen.has(key)) issue(path, `Billing cadence ${key} is listed more than once`);
 		seen.add(key);
 	}
 }

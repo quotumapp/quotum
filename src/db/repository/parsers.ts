@@ -9,6 +9,7 @@ import {
 	parseStoreEventProcessingStatus,
 	subscriptionStatuses,
 } from "../../billing/types";
+import { type BillingCadenceUnit, billingCadenceUnits } from "../../shared/cadence";
 import type {
 	ProjectionSyncJobRow,
 	ProviderSubscriptionReconciliationRow,
@@ -135,10 +136,26 @@ export function parseStripeWebStoreProductRow(row: unknown): StripeWebStoreProdu
 		creditAmount,
 		externalProductId: parseRequiredString(row.externalProductId, errorMessage),
 		externalPriceId: parseRequiredString(row.externalPriceId, errorMessage),
-		billingPeriod: parseRequiredString(row.billingPeriod, errorMessage),
+		billingPeriod: parseBillingPeriod(row.billingPeriod, errorMessage),
+		billingPeriodCount: parseBillingPeriodCount(row.billingPeriodCount, errorMessage),
 		currency: row.currency,
 		priceAmount,
 	};
+}
+
+function parseBillingPeriod(value: unknown, errorMessage: string): "one_time" | BillingCadenceUnit {
+	if (value === "one_time") return value;
+	if (typeof value === "string" && (billingCadenceUnits as readonly string[]).includes(value)) {
+		return value as BillingCadenceUnit;
+	}
+	throw new Error(errorMessage);
+}
+
+function parseBillingPeriodCount(value: unknown, errorMessage: string): number {
+	if (value === undefined || value === null) return 1;
+	const count = Number(value);
+	if (!Number.isInteger(count) || count < 1) throw new Error(errorMessage);
+	return count;
 }
 
 export function parseRequiredString(value: unknown, errorMessage: string): string {

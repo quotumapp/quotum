@@ -19,6 +19,7 @@ import type {
 } from "../../billing/recurring";
 import type { BillingChannel, BillingProvider, SubscriptionStatus } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
+import type { BillingCadenceUnit } from "../../shared/cadence";
 import { RepositoryModule } from "./base";
 import {
 	applyPromotionRedemptionInTx,
@@ -58,7 +59,8 @@ interface ChangePriceRow {
 	maximum_quantity: number | null;
 	unit_amount_minor: string | number;
 	currency: string;
-	billing_interval: "month" | "year";
+	billing_interval: BillingCadenceUnit;
+	billing_interval_count: number;
 	pricing_model: "flat" | "graduated" | "volume";
 }
 
@@ -1416,7 +1418,8 @@ async function changePrices(
 		drizzleSql`
 			SELECT price.key AS price_key, price.component_kind, feature.key AS feature_key,
 				store.external_price_id, price.minimum_quantity, price.maximum_quantity,
-				price.unit_amount_minor, price.currency, price.billing_interval, price.pricing_model
+				price.unit_amount_minor, price.currency, price.billing_interval,
+				price.billing_interval_count, price.pricing_model
 			FROM price_components price
 			JOIN provider_price_bindings binding
 				ON binding.project_id = price.project_id AND binding.price_component_id = price.id
@@ -1468,6 +1471,7 @@ function subscriptionChangePreview(
 			unitAmountMinor: Number(price.unit_amount_minor),
 			currency: price.currency,
 			interval: price.billing_interval,
+			intervalCount: price.billing_interval_count,
 			pricingModel: price.pricing_model,
 		})),
 	};

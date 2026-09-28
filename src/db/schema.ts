@@ -31,7 +31,7 @@ import type {
 	SubscriptionStatus,
 } from "../billing/types";
 import type { ProjectEnvironment, ProjectLifecycleStatus } from "../projects/context";
-import type { CadenceUnit } from "../shared/cadence";
+import type { BillingCadenceUnit, CadenceUnit } from "../shared/cadence";
 
 const metadataColumn = () =>
 	jsonb("metadata").$type<Record<string, unknown>>().notNull().default({});
@@ -161,7 +161,8 @@ export const storeProducts = pgTable(
 		channel: text("channel").$type<BillingChannel>().notNull(),
 		externalProductId: text("external_product_id").notNull(),
 		externalPriceId: text("external_price_id"),
-		billingPeriod: text("billing_period").notNull(),
+		billingPeriod: text("billing_period").$type<"one_time" | BillingCadenceUnit>().notNull(),
+		billingPeriodCount: integer("billing_period_count").notNull().default(1),
 		currency: text("currency"),
 		priceAmount: bigint("price_amount", { mode: "number" }),
 		active: boolean("active").notNull().default(true),
@@ -184,6 +185,14 @@ export const storeProducts = pgTable(
 		index("idx_billing_store_products_product_id").on(table.productId),
 		check("store_products_provider_check", sql`${table.provider} IN ('apple', 'google', 'stripe')`),
 		check("store_products_channel_check", sql`${table.channel} IN ('ios', 'android', 'web')`),
+		check(
+			"store_products_billing_period_check",
+			sql`${table.billingPeriod} IN ('one_time', 'day', 'week', 'month', 'quarter', 'semi_annual', 'year')`,
+		),
+		check(
+			"store_products_billing_period_count_check",
+			sql`${table.billingPeriodCount} BETWEEN 1 AND 1000 AND (${table.billingPeriod} <> 'one_time' OR ${table.billingPeriodCount} = 1)`,
+		),
 	],
 );
 
@@ -1567,7 +1576,8 @@ export const planVersions = pgTable(
 		status: text("status").$type<"draft" | "published" | "archived">().notNull(),
 		currency: text("currency"),
 		baseAmountMinor: bigint("base_amount_minor", { mode: "number" }),
-		billingInterval: text("billing_interval").$type<"month" | "year" | null>(),
+		billingInterval: text("billing_interval").$type<BillingCadenceUnit | null>(),
+		billingIntervalCount: integer("billing_interval_count").notNull().default(1),
 		trialDays: integer("trial_days"),
 		visibility: text("visibility")
 			.$type<"public" | "customer_specific">()
@@ -1608,7 +1618,11 @@ export const planVersions = pgTable(
 		),
 		check(
 			"plan_versions_billing_interval_check",
-			sql`(((billing_interval IS NULL) OR (billing_interval = ANY (ARRAY['month'::text, 'year'::text]))))`,
+			sql`(((billing_interval IS NULL) OR (billing_interval = ANY (ARRAY['day'::text, 'week'::text, 'month'::text, 'quarter'::text, 'semi_annual'::text, 'year'::text]))))`,
+		),
+		check(
+			"plan_versions_billing_interval_count_check",
+			sql`((((billing_interval_count >= 1) AND (billing_interval_count <= 1000)) AND ((billing_interval IS NOT NULL) OR (billing_interval_count = 1))))`,
 		),
 		check(
 			"plan_versions_trial_days_check",
@@ -1798,7 +1812,8 @@ export const priceComponents = pgTable(
 			.notNull()
 			.default("flat"),
 		billingUnits: quantityColumn("billing_units").notNull().default("1"),
-		billingInterval: text("billing_interval").$type<"month" | "year">().notNull(),
+		billingInterval: text("billing_interval").$type<BillingCadenceUnit>().notNull(),
+		billingIntervalCount: integer("billing_interval_count").notNull().default(1),
 		minimumQuantity: integer("minimum_quantity").notNull().default(1),
 		maximumQuantity: integer("maximum_quantity"),
 		taxBehavior: text("tax_behavior")
@@ -1821,7 +1836,11 @@ export const priceComponents = pgTable(
 		check("price_components_billing_units_check", sql`((billing_units > (0)::numeric))`),
 		check(
 			"price_components_billing_interval_check",
-			sql`((billing_interval = ANY (ARRAY['month'::text, 'year'::text])))`,
+			sql`((billing_interval = ANY (ARRAY['day'::text, 'week'::text, 'month'::text, 'quarter'::text, 'semi_annual'::text, 'year'::text])))`,
+		),
+		check(
+			"price_components_billing_interval_count_check",
+			sql`(((billing_interval_count >= 1) AND (billing_interval_count <= 1000)))`,
 		),
 		check("price_components_minimum_quantity_check", sql`((minimum_quantity > 0))`),
 		check(

@@ -195,6 +195,7 @@ interface MeterLimitRow {
 	reset_interval: CadenceUnit;
 	reset_interval_count: number;
 	billing_interval: CadenceUnit | null;
+	billing_interval_count: number;
 	period_start_at: Date | string;
 	period_end_at: Date | string | null;
 }
@@ -220,6 +221,7 @@ export function queryMeterLimitRows(
 				reset_interval,
 				reset_interval_count,
 				billing_interval,
+				billing_interval_count,
 				period_start_at,
 				period_end_at
 			FROM (
@@ -232,6 +234,7 @@ export function queryMeterLimitRows(
 					pi.reset_interval,
 					pi.reset_interval_count,
 					pv.billing_interval,
+					pv.billing_interval_count,
 					COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
 					COALESCE(s.current_period_end, s.expires_at) AS period_end_at,
 					0 AS source_rank,
@@ -262,6 +265,7 @@ export function queryMeterLimitRows(
 					pi.reset_interval,
 					pi.reset_interval_count,
 					pv.billing_interval,
+					pv.billing_interval_count,
 					g.starts_at AS period_start_at,
 					g.ends_at AS period_end_at,
 					1 AS source_rank,
@@ -350,7 +354,7 @@ export async function meterLimitDecision(
 						active.period_end_at,
 						reset,
 						new Date(),
-						optionalStoredCadence(active.billing_interval),
+						optionalStoredCadence(active.billing_interval, active.billing_interval_count),
 					);
 		const overagePrice =
 			active.overage_policy === "allowed"

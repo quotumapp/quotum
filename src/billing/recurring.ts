@@ -1,3 +1,4 @@
+import type { BillingCadenceUnit } from "../shared/cadence";
 import type { StripeProrationBehavior } from "./pricing";
 import type { BillingProvider, SubscriptionStatus } from "./types";
 
@@ -33,7 +34,8 @@ export interface SubscriptionChangePreview {
 		quantity: number;
 		unitAmountMinor: number;
 		currency: string;
-		interval: "month" | "year";
+		interval: BillingCadenceUnit;
+		intervalCount: number;
 		pricingModel: "flat" | "graduated" | "volume";
 	}>;
 }

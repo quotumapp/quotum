@@ -76,6 +76,14 @@ export const paddleCapabilities: ProviderCapabilityDeclaration = {
 	connectionKind: "paddle",
 	availability: "planned",
 	writeSemantics: { clientIdempotencyKeys: false, uncertainWrite: "reconcile_required" },
+	// Billing cycles recur every day, week, month or year times a frequency; Paddle documents no
+	// maximum, so Quotum's three-year cap applies.
+	billingCadences: [
+		{ unit: "day", minCount: 1, maxCount: 1095 },
+		{ unit: "week", minCount: 1, maxCount: 156 },
+		{ unit: "month", minCount: 1, maxCount: 36 },
+		{ unit: "year", minCount: 1, maxCount: 3 },
+	],
 	limits: {
 		requestsPerMinute: 240,
 		webhookRetries: { attempts: 60, windowHours: 72 },

@@ -96,6 +96,7 @@ localDescribe("local Postgres billing integration", () => {
 						amountCents: 1900,
 						credits: 500,
 						interval: "month" as const,
+						intervalCount: 1,
 						entitlementKey: "paid",
 						externalProductId: "prod_thru_creator",
 						externalPriceId: "price_thru_creator",

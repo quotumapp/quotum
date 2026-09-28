@@ -10,6 +10,7 @@ const line = (overrides: Partial<CommercialLineItem> = {}): CommercialLineItem =
 	unitAmountMinor: 2000,
 	currency: "USD",
 	interval: "month",
+	intervalCount: 1,
 	pricingModel: "flat",
 	...overrides,
 });
@@ -30,7 +31,7 @@ describe("commercial preview pricing", () => {
 		const priced = priceCommercialLines({
 			lines: [line(), line({ key: "seats", label: "Seats", quantity: 3, unitAmountMinor: 500 })],
 			currency: "USD",
-			recurringInterval: "month",
+			recurringInterval: { unit: "month", count: 1 },
 			promotion: promotion({
 				type: "amount",
 				amounts: [{ currency: "USD", amountOffMinor: 700 }],
@@ -71,7 +72,7 @@ describe("commercial preview pricing", () => {
 		const tiered = priceCommercialLines({
 			lines: [line(), line({ key: "usage", pricingModel: "graduated" })],
 			currency: "USD",
-			recurringInterval: "month",
+			recurringInterval: { unit: "month", count: 1 },
 			promotion: promotion({
 				type: "percent",
 				percentOffBps: 1000,
@@ -83,7 +84,7 @@ describe("commercial preview pricing", () => {
 		const once = priceCommercialLines({
 			lines: [line()],
 			currency: "USD",
-			recurringInterval: "month",
+			recurringInterval: { unit: "month", count: 1 },
 			promotion: promotion({
 				type: "percent",
 				percentOffBps: 1000,
@@ -93,7 +94,7 @@ describe("commercial preview pricing", () => {
 			hostedEntry: false,
 		});
 		const hosted = priceCommercialLines({
-			lines: [line({ interval: null })],
+			lines: [line({ interval: null, intervalCount: null })],
 			currency: "USD",
 			recurringInterval: null,
 			promotion: null,
@@ -110,6 +111,7 @@ describe("commercial preview pricing", () => {
 		});
 		expect(once.nextCycle).toEqual({
 			interval: "month",
+			intervalCount: 1,
 			currency: "USD",
 			subtotalMinor: 2000,
 			discountMinor: 0,

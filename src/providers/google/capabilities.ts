@@ -83,6 +83,15 @@ export const googleCapabilities: ProviderCapabilityDeclaration = {
 	connectionKind: "google",
 	availability: "available",
 	writeSemantics: { clientIdempotencyKeys: false, uncertainWrite: "reconcile_required" },
+	// Auto-renewing base plans bill weekly, every 4 weeks, every 1, 2, 3, 4, 6 or 8 months, or yearly.
+	billingCadences: [
+		{ unit: "week", minCount: 1, maxCount: 1 },
+		{ unit: "week", minCount: 4, maxCount: 4 },
+		{ unit: "month", minCount: 1, maxCount: 4 },
+		{ unit: "month", minCount: 6, maxCount: 6 },
+		{ unit: "month", minCount: 8, maxCount: 8 },
+		{ unit: "year", minCount: 1, maxCount: 1 },
+	],
 	operations: {
 		"catalog.product.subscription": verified([googleFlows]),
 		"catalog.product.consumable": verified([googleFlows]),
