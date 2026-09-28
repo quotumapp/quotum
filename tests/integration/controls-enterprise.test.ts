@@ -174,16 +174,27 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			{ eventType: "threshold_crossed", thresholdValue: "5.000000000" },
 		]);
 
-		await expect(
-			controls.upsertControl(project, {
-				billingAccountId: "cadence-account",
-				controlKind: "usage_limit",
-				featureKey: "ai_credits",
-				limitValue: "1",
-				interval: "hour",
-				actor: "integration-test",
-			}),
-		).rejects.toThrow("Control cannot use hour yet");
+		// Hourly windows start on the hour.
+		const hourly = await controls.upsertControl(project, {
+			billingAccountId: "cadence-account",
+			controlKind: "usage_limit",
+			featureKey: "ai_credits",
+			limitValue: "1",
+			interval: "hour",
+			actor: "integration-test",
+		});
+		const hour = calendarWindow({ unit: "hour", count: 1 }, await databaseNow(context.sql));
+		expect(hourly).toMatchObject({
+			interval: "hour",
+			intervalCount: 1,
+			windowStartAt: hour.start.toISOString(),
+			windowEndAt: hour.end.toISOString(),
+		});
+		expect(new Date(hourly.windowStartAt ?? "").getUTCMinutes()).toBe(0);
+		expect(await consume("cadence-account", "2", "cadence:4")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
 	});
 
 	it("reserves the safety budget before Stripe and grants the purchased allocation atomically", async () => {

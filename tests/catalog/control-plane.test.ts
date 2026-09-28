@@ -667,9 +667,31 @@ describe("catalog control plane cadences", () => {
 		).toBe("Plan pro item credits reset cannot span more than 3 × year");
 	});
 
-	it("rejects hourly resets until they are published", async () => {
-		expect(await messageOf([plan({ items: [item({ resetInterval: "hour" })] })])).toBe(
-			"Plan pro item credits reset cannot use hour yet",
+	it("accepts hourly meter limits but not hourly allocations or rollover expiry", async () => {
+		expect(
+			await messageOf([plan({ items: [item({ resetInterval: "hour", resetIntervalCount: 5 })] })]),
+		).toBe("normalized");
+		expect(
+			await messageOf([plan({ items: [item({ itemKind: "allocation", resetInterval: "hour" })] })]),
+		).toBe(
+			"Plan pro item credits reset cannot be hourly: allocations are granted by periodic maintenance",
+		);
+		expect(
+			await messageOf([
+				plan({
+					items: [
+						{
+							...resettingItem("allocation", "day"),
+							rollover: {
+								maxQuantity: null,
+								expiry: { mode: "after", interval: "hour", intervalCount: 12 },
+							},
+						},
+					],
+				}),
+			]),
+		).toBe(
+			"Plan pro item credits rollover expiry cannot be hourly: allocations are granted by periodic maintenance",
 		);
 	});
 
@@ -765,8 +787,8 @@ describe("catalog control plane cadences", () => {
 		expect(await withControls([control({}), control({ interval: "week", intervalCount: 2 })])).toBe(
 			"normalized",
 		);
-		expect(await withControls([control({ interval: "hour" })])).toBe(
-			"Plan pro control cannot use hour yet",
+		expect(await withControls([control({ interval: "hour" }), control({ interval: "day" })])).toBe(
+			"normalized",
 		);
 		expect(await withControls([control({ interval: "lifetime", intervalCount: 2 })])).toBe(
 			"Plan pro control with a lifetime interval takes no intervalCount",
