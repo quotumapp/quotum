@@ -1,6 +1,13 @@
 import { BillingError } from "../../billing/errors";
-
-type WindowInterval = "month" | "year";
+import {
+	addCadence,
+	type Cadence,
+	type CadenceUnit,
+	cadenceMilliseconds,
+	cadenceSplits,
+	canonicalCadence,
+	utcMonthIndexDifference,
+} from "../../shared/cadence";
 
 /**
  * The usage window a meter limit counts against right now. Metering writes and every balance read
@@ -8,35 +15,31 @@ type WindowInterval = "month" | "year";
  * read by accident.
  *
  * The provider period is the window while it is current, except when the item resets more often
- * than the plan bills (a monthly allowance on an annual plan): the period is then split into reset
- * sub-windows anchored at the period start, the last one clamped to the period end. Once the period
- * has ended and no renewal has been recorded yet, windows keep rolling forward from the period end
- * by the reset interval.
+ * than the plan bills (a monthly allowance on an annual plan, a weekly one on a monthly plan): the
+ * period is then split into reset sub-windows anchored at the period start, the last one clamped to
+ * the period end. Once the period has ended and no renewal has been recorded yet, windows keep
+ * rolling forward from the period end by the reset cadence.
  */
 export function meterLimitWindowBounds(
 	periodStartAt: Date | string,
 	periodEndAt: Date | string | null,
-	interval: WindowInterval,
+	reset: Cadence,
 	now: Date,
-	billingInterval: WindowInterval | null = null,
+	billing: Cadence | null = null,
 ): { start: Date; end: Date } {
 	const start = new Date(periodStartAt);
-	const end = periodEndAt === null ? addUtcInterval(start, interval) : new Date(periodEndAt);
-	const usesResetSubWindows =
-		periodEndAt !== null &&
-		billingInterval !== null &&
-		intervalMonths(interval) < intervalMonths(billingInterval);
-	if (usesResetSubWindows) {
+	const end = periodEndAt === null ? addCadence(start, reset) : new Date(periodEndAt);
+	if (periodEndAt !== null && cadenceSplits(reset, billing)) {
 		if (now < end) {
-			return resetSubWindowBounds(start, end, interval, now);
+			return resetSubWindowBounds(start, end, reset, now);
 		}
 		// The period is over and no renewal has been recorded: keep rolling in reset-sized windows
 		// from the period end, anchored on its day, so an unaligned end does not stretch the first
 		// window past one reset interval and the renewal's first sub-window lines up with it.
 		assertPeriodBounds(start, end);
-		return rollWindowBounds(end, addUtcInterval(end, interval), interval, now);
+		return rollWindowBounds(end, addCadence(end, reset), reset, now);
 	}
-	return rollWindowBounds(start, end, interval, now);
+	return rollWindowBounds(start, end, reset, now);
 }
 
 /**
@@ -47,63 +50,78 @@ export function meterLimitWindowBounds(
 export function planGrantWindowBounds(
 	startsAt: Date | string,
 	endsAt: Date | string,
-	interval: WindowInterval,
+	reset: Cadence,
 	now: Date,
 ): { start: Date; end: Date } {
-	return resetSubWindowBounds(new Date(startsAt), new Date(endsAt), interval, now);
+	return resetSubWindowBounds(new Date(startsAt), new Date(endsAt), reset, now);
 }
 
 /**
  * The window of [start, end) or, once it has ended, of the reset-sized windows rolling on from its
  * end. A period exactly one interval long keeps its start's anchor day, so a month-end period that
  * was clamped (Jan 31 to Feb 28) rolls on to Mar 31. Any other period rolls on its end's day, as a
- * split period does, so no rolled window is longer or shorter than one reset interval.
+ * split period does, so no rolled window is longer or shorter than one reset interval. Fixed
+ * cadences have no anchor day: every rolled window is exactly one cadence long.
  */
 export function rollWindowBounds(
 	start: Date,
 	end: Date,
-	interval: WindowInterval,
+	reset: Cadence,
 	now: Date,
 ): { start: Date; end: Date } {
 	assertPeriodBounds(start, end);
-	let currentStart = start;
-	let currentEnd = end;
+	if (now < end) return { start, end };
+	const milliseconds = cadenceMilliseconds(reset);
+	if (milliseconds !== null) {
+		const steps = Math.floor((now.getTime() - end.getTime()) / milliseconds);
+		const windowStart = new Date(end.getTime() + steps * milliseconds);
+		return { start: windowStart, end: new Date(windowStart.getTime() + milliseconds) };
+	}
 	const anchorDay =
-		end.getTime() === addUtcInterval(start, interval).getTime()
+		end.getTime() === addCadence(start, reset, 1, start.getUTCDate()).getTime()
 			? start.getUTCDate()
 			: end.getUTCDate();
-	while (currentEnd <= now) {
-		currentStart = currentEnd;
-		currentEnd = addUtcInterval(currentEnd, interval, anchorDay);
-	}
-	return { start: currentStart, end: currentEnd };
+	// Every step lands in its own calendar month, so the month distance finds the window directly;
+	// within the month `now` falls in, the boundary may still be ahead of it.
+	const steps = Math.floor(utcMonthIndexDifference(end, now) / calendarMonths(reset));
+	const boundary = addCadence(end, reset, steps, anchorDay);
+	return boundary > now
+		? { start: addCadence(end, reset, steps - 1, anchorDay), end: boundary }
+		: { start: boundary, end: addCadence(end, reset, steps + 1, anchorDay) };
 }
 
 /**
- * The reset sub-window of [start, end) that contains `now`. Every sub-window is computed from the
- * period start and its anchor day, never from a clamped predecessor, so month-end anchors keep
- * their day.
+ * The reset sub-window of [start, end) that contains `now`, or the first or last one when `now` is
+ * outside the period. Every boundary is computed from the period start and its anchor day, never
+ * from a clamped predecessor, so month-end anchors keep their day.
  */
 function resetSubWindowBounds(
 	start: Date,
 	end: Date,
-	interval: WindowInterval,
+	reset: Cadence,
 	now: Date,
 ): { start: Date; end: Date } {
 	assertPeriodBounds(start, end);
+	const instant = now < start ? start : now >= end ? new Date(end.getTime() - 1) : now;
 	const anchorDay = start.getUTCDate();
-	const months = intervalMonths(interval);
-	let step = 0;
-	let currentStart = start;
-	for (;;) {
-		const nextStart = addUtcMonths(start, months * (step + 1), anchorDay);
-		const currentEnd = nextStart < end ? nextStart : end;
-		if (now < currentEnd || currentEnd >= end) {
-			return { start: currentStart, end: currentEnd };
-		}
-		step += 1;
-		currentStart = nextStart;
+	const milliseconds = cadenceMilliseconds(reset);
+	let steps =
+		milliseconds === null
+			? Math.floor(utcMonthIndexDifference(start, instant) / calendarMonths(reset))
+			: Math.floor((instant.getTime() - start.getTime()) / milliseconds);
+	let windowStart = addCadence(start, reset, steps, anchorDay);
+	if (windowStart > instant) {
+		steps -= 1;
+		windowStart = addCadence(start, reset, steps, anchorDay);
 	}
+	const next = addCadence(start, reset, steps + 1, anchorDay);
+	return { start: windowStart, end: next < end ? next : end };
+}
+
+function calendarMonths(cadence: Cadence): number {
+	const canonical = canonicalCadence(cadence);
+	if (canonical.kind !== "months") throw new Error("Expected a calendar cadence");
+	return canonical.months;
 }
 
 function assertPeriodBounds(start: Date, end: Date): void {
@@ -117,27 +135,17 @@ function assertPeriodBounds(start: Date, end: Date): void {
 	}
 }
 
-export function intervalMonths(interval: WindowInterval): number {
-	return interval === "month" ? 1 : 12;
+/** A stored cadence: the unit column and its count column, which defaults to one. */
+export function storedCadence(unit: CadenceUnit, count: number | string | null = 1): Cadence {
+	return { unit, count: count === null ? 1 : Number(count) };
 }
 
-export function addUtcInterval(
-	value: Date,
-	interval: WindowInterval,
-	anchorDay = value.getUTCDate(),
-): Date {
-	return addUtcMonths(value, intervalMonths(interval), anchorDay);
-}
-
-export function addUtcMonths(value: Date, months: number, anchorDay = value.getUTCDate()): Date {
-	const result = new Date(value);
-	result.setUTCDate(1);
-	result.setUTCMonth(result.getUTCMonth() + months);
-	const lastDay = new Date(
-		Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0),
-	).getUTCDate();
-	result.setUTCDate(Math.min(anchorDay, lastDay));
-	return result;
+/** A stored cadence whose unit column is nullable, such as a free plan's billing interval. */
+export function optionalStoredCadence(
+	unit: CadenceUnit | null,
+	count: number | string | null = 1,
+): Cadence | null {
+	return unit === null ? null : storedCadence(unit, count);
 }
 
 export function startOfUtcMonth(value: Date): Date {

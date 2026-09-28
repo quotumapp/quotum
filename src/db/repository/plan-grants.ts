@@ -20,6 +20,7 @@ import {
 import { trialEndingNoticeLeadMs } from "../../billing/trials";
 import type { BillingProvider, ProjectionTrialPayload } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
+import type { CadenceUnit } from "../../shared/cadence";
 import { RepositoryModule } from "./base";
 import {
 	enqueueProjectionSyncJob,
@@ -27,7 +28,7 @@ import {
 	recomputeCustomerEntitlements,
 } from "./entitlements";
 import { ensureCustomer } from "./identities";
-import { planGrantWindowBounds } from "./meter-limit-windows";
+import { planGrantWindowBounds, storedCadence } from "./meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import { formatUtcTimestamp, requirePositiveLimit } from "./validation";
@@ -605,13 +606,14 @@ async function materializePlanGrantPeriod(
 		id: string | number | bigint;
 		feature_id: string | number | bigint;
 		quantity: string;
-		reset_interval: "month" | "year" | null;
+		reset_interval: CadenceUnit | null;
+		reset_interval_count: number;
 		expires_after_seconds: number | null;
 	}>(
 		executor,
 		drizzleSql`
 			SELECT item.id, item.feature_id, item.quantity::text AS quantity, item.reset_interval,
-				item.expires_after_seconds
+				item.reset_interval_count, item.expires_after_seconds
 			FROM plan_items item
 			WHERE item.project_id = ${projectId}
 				AND item.plan_version_id = ${String(grant.plan_version_id)}::bigint
@@ -628,7 +630,12 @@ async function materializePlanGrantPeriod(
 		const window =
 			item.reset_interval === null
 				? { start: startsAt, end: endsAt }
-				: planGrantWindowBounds(startsAt, endsAt, item.reset_interval, now);
+				: planGrantWindowBounds(
+						startsAt,
+						endsAt,
+						storedCadence(item.reset_interval, item.reset_interval_count),
+						now,
+					);
 		if (item.reset_interval !== null && window.end < endsAt) {
 			nextPeriodAt = nextPeriodAt === null || window.end < nextPeriodAt ? window.end : nextPeriodAt;
 		}

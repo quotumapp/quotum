@@ -39,6 +39,7 @@ import type {
 	UsageOperationResult,
 } from "../../billing/usage-operations";
 import type { ProjectInstanceContext } from "../../projects/context";
+import { addCadence, type CadenceUnit } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
 import type { ControlDenial, UsageAlertRow } from "./controls-runtime";
@@ -56,7 +57,7 @@ import {
 } from "./controls-runtime";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
-import { addUtcInterval, addUtcMonths } from "./meter-limit-windows";
+import { storedCadence } from "./meter-limit-windows";
 import type {
 	AllocationRow,
 	ConfirmationPlan,
@@ -904,9 +905,11 @@ async function materializeExpiredRollovers(
 		reversed_quantity: unknown;
 		consumed_quantity: unknown;
 		rollover_max_quantity: unknown;
-		rollover_expiry_mode: "forever" | "months";
-		rollover_expiry_months: number | null;
-		reset_interval: "month" | "year";
+		rollover_expiry_mode: "forever" | "after";
+		rollover_expiry_interval: CadenceUnit | null;
+		rollover_expiry_interval_count: number;
+		reset_interval: CadenceUnit;
+		reset_interval_count: number;
 		period_end_at: Date | string | null;
 		expires_at: Date | string;
 		policy_revision: number;
@@ -920,7 +923,8 @@ async function materializeExpiredRollovers(
 			allocation.reversed_quantity::text AS reversed_quantity,
 			allocation.consumed_quantity::text AS consumed_quantity,
 			item.rollover_max_quantity::text AS rollover_max_quantity,
-			item.rollover_expiry_mode, item.rollover_expiry_months, item.reset_interval,
+			item.rollover_expiry_mode, item.rollover_expiry_interval,
+			item.rollover_expiry_interval_count, item.reset_interval, item.reset_interval_count,
 			allocation.period_end_at, allocation.expires_at, revision.revision AS policy_revision,
 			feature.credit_scale
 		FROM balance_allocations allocation
@@ -1000,11 +1004,15 @@ async function materializeExpiredRollovers(
 		}
 		if (rolloverUnits > 0n) {
 			const rolloverStart = new Date(origin.period_end_at ?? origin.expires_at);
-			const rolloverEnd = addUtcInterval(rolloverStart, origin.reset_interval);
-			const expiresAt =
-				origin.rollover_expiry_mode === "forever"
+			const rolloverEnd = addCadence(
+				rolloverStart,
+				storedCadence(origin.reset_interval, origin.reset_interval_count),
+			);
+			const expiry =
+				origin.rollover_expiry_mode === "forever" || origin.rollover_expiry_interval === null
 					? null
-					: addUtcMonths(rolloverStart, origin.rollover_expiry_months ?? 1).toISOString();
+					: storedCadence(origin.rollover_expiry_interval, origin.rollover_expiry_interval_count);
+			const expiresAt = expiry === null ? null : addCadence(rolloverStart, expiry).toISOString();
 			const inserted = await executeOne<{ id: string | number | bigint }>(
 				executor,
 				drizzleSql`

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cadenceUnits } from "../../shared/cadence";
 import { billingProviderValues } from "./provider-enum";
 import { CatalogProviderCompatibilitySchema } from "./provider-responses";
 
@@ -82,7 +83,8 @@ export const getV1AdminCatalogResponse200Schema = z.object({
 								featureKey: z.string(),
 								itemKind: z.enum(["access", "allocation", "meter_limit", "licensed_quantity"]),
 								quantity: z.union([z.null(), z.string()]),
-								resetInterval: z.union([z.null(), z.literal("month"), z.literal("year")]),
+								resetInterval: z.union([z.null(), z.enum(cadenceUnits)]),
+								resetIntervalCount: z.union([z.null(), z.number()]),
 								expiresAfterSeconds: z.union([z.null(), z.number()]),
 								overagePolicy: z.enum(["blocked", "allowed"]),
 								allocationScope: z.enum(["account", "entity", "license_pool"]).optional(),
@@ -93,7 +95,11 @@ export const getV1AdminCatalogResponse200Schema = z.object({
 											maxQuantity: z.union([z.null(), z.string()]),
 											expiry: z.union([
 												z.object({ mode: z.literal("forever") }),
-												z.object({ mode: z.literal("months"), months: z.number() }),
+												z.object({
+													mode: z.literal("after"),
+													interval: z.enum(cadenceUnits),
+													intervalCount: z.number(),
+												}),
 											]),
 										}),
 									])

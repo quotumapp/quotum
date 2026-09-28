@@ -1,10 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import {
-	addUtcInterval,
-	addUtcMonths,
 	meterLimitWindowBounds,
 	planGrantWindowBounds,
 } from "../../src/db/repository/meter-limit-windows";
+import { addCadence, addUtcMonths, type Cadence } from "../../src/shared/cadence";
+
+const MONTH: Cadence = { unit: "month", count: 1 };
+const YEAR: Cadence = { unit: "year", count: 1 };
 
 describe("meter-limit window bounds", () => {
 	it("uses the subscription period while it is current", () => {
@@ -12,7 +14,7 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-09-10T00:00:00.000Z",
 				"2026-10-10T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-09-16T12:00:00.000Z"),
 			),
 		).toEqual({
@@ -24,25 +26,25 @@ describe("meter-limit window bounds", () => {
 	it("rolls past periods forward by the reset interval, including an open-ended period", () => {
 		const now = new Date("2026-12-11T00:00:00.000Z");
 		expect(
-			meterLimitWindowBounds("2026-09-10T00:00:00.000Z", "2026-10-10T00:00:00.000Z", "month", now),
+			meterLimitWindowBounds("2026-09-10T00:00:00.000Z", "2026-10-10T00:00:00.000Z", MONTH, now),
 		).toEqual({
 			start: new Date("2026-12-10T00:00:00.000Z"),
 			end: new Date("2027-01-10T00:00:00.000Z"),
 		});
-		expect(meterLimitWindowBounds("2025-12-11T00:00:00.000Z", null, "year", now)).toEqual({
+		expect(meterLimitWindowBounds("2025-12-11T00:00:00.000Z", null, YEAR, now)).toEqual({
 			start: new Date("2026-12-11T00:00:00.000Z"),
 			end: new Date("2027-12-11T00:00:00.000Z"),
 		});
 	});
 
 	it("clamps monthly arithmetic to the target month's final day", () => {
-		expect(addUtcInterval(new Date("2026-01-31T12:34:56.789Z"), "month")).toEqual(
+		expect(addCadence(new Date("2026-01-31T12:34:56.789Z"), MONTH)).toEqual(
 			new Date("2026-02-28T12:34:56.789Z"),
 		);
 		expect(addUtcMonths(new Date("2024-01-31T12:34:56.789Z"), 1)).toEqual(
 			new Date("2024-02-29T12:34:56.789Z"),
 		);
-		expect(addUtcInterval(new Date("2024-02-29T12:34:56.789Z"), "year")).toEqual(
+		expect(addCadence(new Date("2024-02-29T12:34:56.789Z"), YEAR)).toEqual(
 			new Date("2025-02-28T12:34:56.789Z"),
 		);
 	});
@@ -52,7 +54,7 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-31T00:00:00.000Z",
 				"2026-02-28T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-04-01T00:00:00.000Z"),
 			),
 		).toEqual({
@@ -63,7 +65,7 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2024-02-29T00:00:00.000Z",
 				"2025-02-28T00:00:00.000Z",
-				"year",
+				YEAR,
 				new Date("2028-02-28T00:00:00.000Z"),
 			),
 		).toEqual({
@@ -77,9 +79,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-01T00:00:00.000Z",
 				"2027-01-01T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-09-22T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2026-09-01T00:00:00.000Z"),
@@ -90,9 +92,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-01T00:00:00.000Z",
 				"2027-01-01T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-01-15T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2026-01-01T00:00:00.000Z"),
@@ -102,9 +104,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-03-01T00:00:00.000Z",
 				"2027-03-01T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-02-20T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2026-03-01T00:00:00.000Z"),
@@ -119,9 +121,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				periodStart,
 				periodEnd,
-				"month",
+				MONTH,
 				new Date("2026-02-10T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2026-01-31T00:00:00.000Z"),
@@ -132,9 +134,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				periodStart,
 				periodEnd,
-				"month",
+				MONTH,
 				new Date("2026-03-05T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2026-02-28T00:00:00.000Z"),
@@ -144,9 +146,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				periodStart,
 				periodEnd,
-				"month",
+				MONTH,
 				new Date("2027-01-30T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2026-12-31T00:00:00.000Z"),
@@ -159,9 +161,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-15T00:00:00.000Z",
 				"2026-12-01T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-11-20T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2026-11-15T00:00:00.000Z"),
@@ -174,9 +176,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-01T00:00:00.000Z",
 				"2027-01-01T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2027-02-10T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2027-02-01T00:00:00.000Z"),
@@ -189,9 +191,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-15T00:00:00.000Z",
 				"2026-12-01T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-12-10T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2026-12-01T00:00:00.000Z"),
@@ -201,9 +203,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-15T00:00:00.000Z",
 				"2026-12-01T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2027-02-03T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2027-02-01T00:00:00.000Z"),
@@ -217,9 +219,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-31T00:00:00.000Z",
 				"2026-02-28T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-02-10T00:00:00.000Z"),
-				"month",
+				MONTH,
 			),
 		).toEqual({
 			start: new Date("2026-01-31T00:00:00.000Z"),
@@ -229,9 +231,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-02-28T00:00:00.000Z",
 				"2026-03-31T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-03-10T00:00:00.000Z"),
-				"month",
+				MONTH,
 			),
 		).toEqual({
 			start: new Date("2026-02-28T00:00:00.000Z"),
@@ -243,9 +245,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-09-10T00:00:00.000Z",
 				"2026-10-10T00:00:00.000Z",
-				"year",
+				YEAR,
 				new Date("2026-09-16T12:00:00.000Z"),
-				"month",
+				MONTH,
 			),
 		).toEqual({
 			start: new Date("2026-09-10T00:00:00.000Z"),
@@ -256,7 +258,7 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-01T00:00:00.000Z",
 				"2027-01-01T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-09-22T00:00:00.000Z"),
 			),
 		).toEqual({
@@ -267,9 +269,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-01T00:00:00.000Z",
 				null,
-				"month",
+				MONTH,
 				new Date("2026-09-22T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2026-09-01T00:00:00.000Z"),
@@ -282,9 +284,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-01T00:00:00.000Z",
 				"2027-01-01T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date(now),
-				"year",
+				YEAR,
 			);
 		expect(subWindow("2026-01-31T23:59:59.999Z")).toEqual({
 			start: new Date("2026-01-01T00:00:00.000Z"),
@@ -298,9 +300,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-09-10T00:00:00.000Z",
 				"2026-10-10T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-10-10T00:00:00.000Z"),
-				"month",
+				MONTH,
 			),
 		).toEqual({
 			start: new Date("2026-10-10T00:00:00.000Z"),
@@ -314,9 +316,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-01-30T00:00:00.000Z",
 				"2026-03-03T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-03-10T00:00:00.000Z"),
-				"month",
+				MONTH,
 			),
 		).toEqual({
 			start: new Date("2026-03-03T00:00:00.000Z"),
@@ -327,9 +329,9 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2025-03-10T00:00:00.000Z",
 				"2026-02-05T00:00:00.000Z",
-				"year",
+				YEAR,
 				new Date("2026-06-01T00:00:00.000Z"),
-				"year",
+				YEAR,
 			),
 		).toEqual({
 			start: new Date("2026-02-05T00:00:00.000Z"),
@@ -342,14 +344,14 @@ describe("meter-limit window bounds", () => {
 			meterLimitWindowBounds(
 				"2026-10-10T00:00:00.000Z",
 				"2026-10-10T00:00:00.000Z",
-				"month",
+				MONTH,
 				new Date("2026-10-11T00:00:00.000Z"),
 			),
 		).toThrow("Meter-limit subscription has invalid period bounds");
 	});
 
 	it("splits a plan grant into reset windows anchored at its start and clamped to its end", () => {
-		const window = (start: string, end: string, interval: "month" | "year", now: string) =>
+		const window = (start: string, end: string, interval: Cadence, now: string) =>
 			planGrantWindowBounds(start, end, interval, new Date(now));
 
 		// A fourteen-day trial with a monthly allowance is one clamped window.
@@ -357,7 +359,7 @@ describe("meter-limit window bounds", () => {
 			window(
 				"2026-09-10T08:00:00.000Z",
 				"2026-09-24T08:00:00.000Z",
-				"month",
+				MONTH,
 				"2026-09-12T00:00:00.000Z",
 			),
 		).toEqual({
@@ -369,7 +371,7 @@ describe("meter-limit window bounds", () => {
 			window(
 				"2026-01-31T00:00:00.000Z",
 				"2026-04-01T00:00:00.000Z",
-				"month",
+				MONTH,
 				"2026-03-05T00:00:00.000Z",
 			),
 		).toEqual({
@@ -380,7 +382,7 @@ describe("meter-limit window bounds", () => {
 			window(
 				"2026-01-31T00:00:00.000Z",
 				"2026-04-01T00:00:00.000Z",
-				"month",
+				MONTH,
 				"2026-03-31T12:00:00.000Z",
 			),
 		).toEqual({
@@ -392,12 +394,92 @@ describe("meter-limit window bounds", () => {
 			window(
 				"2026-09-10T00:00:00.000Z",
 				"2026-12-10T00:00:00.000Z",
-				"year",
+				YEAR,
 				"2027-01-01T00:00:00.000Z",
 			),
 		).toEqual({
 			start: new Date("2026-09-10T00:00:00.000Z"),
 			end: new Date("2026-12-10T00:00:00.000Z"),
 		});
+	});
+
+	it("tiles a monthly period into weekly windows and clamps the last one", () => {
+		const week: Cadence = { unit: "week", count: 1 };
+		const window = (now: string) =>
+			meterLimitWindowBounds(
+				"2026-09-10T09:30:00.000Z",
+				"2026-10-10T09:30:00.000Z",
+				week,
+				new Date(now),
+				MONTH,
+			);
+		expect(window("2026-09-10T09:30:00.000Z")).toEqual({
+			start: new Date("2026-09-10T09:30:00.000Z"),
+			end: new Date("2026-09-17T09:30:00.000Z"),
+		});
+		expect(window("2026-10-05T00:00:00.000Z")).toEqual({
+			start: new Date("2026-10-01T09:30:00.000Z"),
+			end: new Date("2026-10-08T09:30:00.000Z"),
+		});
+		// Two days are left after four whole weeks; that window still ends with the period.
+		expect(window("2026-10-09T23:59:59.999Z")).toEqual({
+			start: new Date("2026-10-08T09:30:00.000Z"),
+			end: new Date("2026-10-10T09:30:00.000Z"),
+		});
+		// After the period, weekly windows roll on from its end.
+		expect(window("2026-10-20T00:00:00.000Z")).toEqual({
+			start: new Date("2026-10-17T09:30:00.000Z"),
+			end: new Date("2026-10-24T09:30:00.000Z"),
+		});
+	});
+
+	it("keeps the subscription's time of day for daily and multi-hour windows", () => {
+		expect(
+			meterLimitWindowBounds(
+				"2026-09-10T09:30:00.000Z",
+				"2026-10-10T09:30:00.000Z",
+				{ unit: "day", count: 1 },
+				new Date("2026-09-15T08:00:00.000Z"),
+				MONTH,
+			),
+		).toEqual({
+			start: new Date("2026-09-14T09:30:00.000Z"),
+			end: new Date("2026-09-15T09:30:00.000Z"),
+		});
+		expect(
+			planGrantWindowBounds(
+				"2026-09-10T09:30:00.000Z",
+				"2026-09-24T09:30:00.000Z",
+				{ unit: "hour", count: 5 },
+				new Date("2026-09-11T00:00:00.000Z"),
+			),
+		).toEqual({
+			start: new Date("2026-09-10T19:30:00.000Z"),
+			end: new Date("2026-09-11T00:30:00.000Z"),
+		});
+	});
+
+	it("gives a quarter and three months the same windows", () => {
+		const now = new Date("2027-05-01T00:00:00.000Z");
+		const quarter = meterLimitWindowBounds(
+			"2026-11-30T00:00:00.000Z",
+			"2027-11-30T00:00:00.000Z",
+			{ unit: "quarter", count: 1 },
+			now,
+			YEAR,
+		);
+		expect(quarter).toEqual({
+			start: new Date("2027-02-28T00:00:00.000Z"),
+			end: new Date("2027-05-30T00:00:00.000Z"),
+		});
+		expect(
+			meterLimitWindowBounds(
+				"2026-11-30T00:00:00.000Z",
+				"2027-11-30T00:00:00.000Z",
+				{ unit: "month", count: 3 },
+				now,
+				YEAR,
+			),
+		).toEqual(quarter);
 	});
 });

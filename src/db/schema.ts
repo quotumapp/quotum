@@ -31,6 +31,7 @@ import type {
 	SubscriptionStatus,
 } from "../billing/types";
 import type { ProjectEnvironment, ProjectLifecycleStatus } from "../projects/context";
+import type { CadenceUnit } from "../shared/cadence";
 
 const metadataColumn = () =>
 	jsonb("metadata").$type<Record<string, unknown>>().notNull().default({});
@@ -1682,7 +1683,8 @@ export const planItems = pgTable(
 			.$type<"access" | "allocation" | "meter_limit" | "licensed_quantity">()
 			.notNull(),
 		quantity: quantityColumn("quantity"),
-		resetInterval: text("reset_interval").$type<"month" | "year" | null>(),
+		resetInterval: text("reset_interval").$type<CadenceUnit | null>(),
+		resetIntervalCount: integer("reset_interval_count").notNull().default(1),
 		expiresAfterSeconds: bigint("expires_after_seconds", { mode: "number" }),
 		overagePolicy: text("overage_policy")
 			.$type<"blocked" | "allowed">()
@@ -1695,16 +1697,17 @@ export const planItems = pgTable(
 		rolloverEnabled: boolean("rollover_enabled").notNull().default(false),
 		rolloverMaxQuantity: quantityColumn("rollover_max_quantity"),
 		rolloverExpiryMode: text("rollover_expiry_mode")
-			.$type<"none" | "forever" | "months">()
+			.$type<"none" | "forever" | "after">()
 			.notNull()
 			.default("none"),
-		rolloverExpiryMonths: integer("rollover_expiry_months"),
+		rolloverExpiryInterval: text("rollover_expiry_interval").$type<CadenceUnit | null>(),
+		rolloverExpiryIntervalCount: integer("rollover_expiry_interval_count").notNull().default(1),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(table): PgTableExtraConfigValue[] => [
 		check(
 			"plan_items_reset_interval_check",
-			sql`(((reset_interval IS NULL) OR (reset_interval = ANY (ARRAY['month'::text, 'year'::text]))))`,
+			sql`(((reset_interval IS NULL) OR (reset_interval = ANY (ARRAY['hour'::text, 'day'::text, 'week'::text, 'month'::text, 'quarter'::text, 'semi_annual'::text, 'year'::text]))))`,
 		),
 		check(
 			"plan_items_expires_after_seconds_check",
@@ -1727,6 +1730,10 @@ export const planItems = pgTable(
 			sql`(((item_kind <> 'licensed_quantity'::text) OR (reset_interval IS NULL)))`,
 		),
 		check(
+			"plan_items_reset_interval_count_check",
+			sql`((((reset_interval_count >= 1) AND (reset_interval_count <= 1000)) AND ((reset_interval IS NOT NULL) OR (reset_interval_count = 1))))`,
+		),
+		check(
 			"plan_items_overage_check",
 			sql`(((overage_policy = 'blocked'::text) OR (item_kind = 'meter_limit'::text)))`,
 		),
@@ -1740,7 +1747,7 @@ export const planItems = pgTable(
 		),
 		check(
 			"plan_items_rollover_expiry_check",
-			sql`((((rollover_enabled = false) AND (rollover_max_quantity IS NULL) AND (rollover_expiry_mode = 'none'::text) AND (rollover_expiry_months IS NULL)) OR ((rollover_enabled = true) AND (rollover_expiry_mode = ANY (ARRAY['forever'::text, 'months'::text])) AND (((rollover_expiry_mode = 'forever'::text) AND (rollover_expiry_months IS NULL)) OR ((rollover_expiry_mode = 'months'::text) AND ((rollover_expiry_months >= 1) AND (rollover_expiry_months <= 120)))))))`,
+			sql`((((rollover_enabled = false) AND (rollover_max_quantity IS NULL) AND (rollover_expiry_mode = 'none'::text) AND (rollover_expiry_interval IS NULL) AND (rollover_expiry_interval_count = 1)) OR ((rollover_enabled = true) AND (rollover_expiry_mode = ANY (ARRAY['forever'::text, 'after'::text])) AND (((rollover_expiry_mode = 'forever'::text) AND (rollover_expiry_interval IS NULL) AND (rollover_expiry_interval_count = 1)) OR ((rollover_expiry_mode = 'after'::text) AND (rollover_expiry_interval = ANY (ARRAY['hour'::text, 'day'::text, 'week'::text, 'month'::text, 'quarter'::text, 'semi_annual'::text, 'year'::text])) AND ((rollover_expiry_interval_count >= 1) AND (rollover_expiry_interval_count <= 1000)))))))`,
 		),
 		check(
 			"plan_items_rollover_kind_check",
