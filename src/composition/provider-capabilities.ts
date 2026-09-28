@@ -3,6 +3,7 @@ import type { ProviderCapabilityMatrixSchema } from "../app/contracts/provider-r
 import { providerCapabilityDeclarations } from "../providers/capabilities";
 import {
 	assertValidDeclaration,
+	type BillingCadenceSupport,
 	type CapabilityEvidence,
 	type CapabilityStatusLabel,
 	capabilityStatusLabels,
@@ -93,6 +94,13 @@ export function renderProviderCapabilityBlock(contract: ProviderCapabilityContra
 	const kinds = contract.supportLevels.map((level) => escapeMarkdown(level.label)).join("; ");
 	lines.push(
 		"",
+		"Billing intervals a plan can bind to, as `unit × count`; a quarter is three months and a half-year six:",
+		"",
+		...providers.map(
+			(declaration) =>
+				`- **${providerHeading(declaration)}**: ${declaration.billingCadences.map(billingCadenceLabel).join(", ")}`,
+		),
+		"",
 		"Statuses:",
 		"",
 		...contract.labels.map(
@@ -125,6 +133,14 @@ export function replaceProviderCapabilityBlock(markdown: string, block: string):
 		throw new Error("Provider capability end marker precedes its start marker");
 	}
 	return `${markdown.slice(0, start)}${providerCapabilityBlockStart}\n${block}\n${markdown.slice(end)}`;
+}
+
+function billingCadenceLabel(support: BillingCadenceSupport): string {
+	const counts =
+		support.minCount === support.maxCount
+			? String(support.minCount)
+			: `${support.minCount}–${support.maxCount}`;
+	return `${support.unit} × ${counts}`;
 }
 
 function providerHeading(declaration: ProviderCapabilityDeclaration): string {

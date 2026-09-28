@@ -88,6 +88,13 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 	connectionKind: "stripe",
 	availability: "available",
 	writeSemantics: { clientIdempotencyKeys: true, uncertainWrite: "provider_idempotency" },
+	// Prices recur every day, week, month or year times interval_count, up to three years.
+	billingCadences: [
+		{ unit: "day", minCount: 1, maxCount: 1095 },
+		{ unit: "week", minCount: 1, maxCount: 156 },
+		{ unit: "month", minCount: 1, maxCount: 36 },
+		{ unit: "year", minCount: 1, maxCount: 3 },
+	],
 	changeBillingPolicies: [
 		{ billing: "prorated", collection: "immediate" },
 		{ billing: "prorated", collection: "next_renewal" },

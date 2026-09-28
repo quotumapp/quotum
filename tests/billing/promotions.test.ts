@@ -350,10 +350,26 @@ describe("discount math", () => {
 			duration,
 			durationMonths,
 		});
-		expect(discountAppliesNextCycle(percent("forever", null), "year")).toBe(true);
-		expect(discountAppliesNextCycle(percent("once", null), "month")).toBe(false);
-		expect(discountAppliesNextCycle(percent("repeating", 3), "month")).toBe(true);
-		expect(discountAppliesNextCycle(percent("repeating", 1), "month")).toBe(false);
-		expect(discountAppliesNextCycle(percent("repeating", 12), "year")).toBe(false);
+		const month = { unit: "month", count: 1 } as const;
+		const year = { unit: "year", count: 1 } as const;
+		expect(discountAppliesNextCycle(percent("forever", null), year)).toBe(true);
+		expect(discountAppliesNextCycle(percent("once", null), month)).toBe(false);
+		expect(discountAppliesNextCycle(percent("repeating", 3), month)).toBe(true);
+		expect(discountAppliesNextCycle(percent("repeating", 1), month)).toBe(false);
+		expect(discountAppliesNextCycle(percent("repeating", 12), year)).toBe(false);
+		// Other cadences compare by length: a quarter is three months, and weeks must fit in the
+		// shortest months the discount could span.
+		expect(discountAppliesNextCycle(percent("repeating", 4), { unit: "quarter", count: 1 })).toBe(
+			true,
+		);
+		expect(discountAppliesNextCycle(percent("repeating", 3), { unit: "month", count: 3 })).toBe(
+			false,
+		);
+		expect(discountAppliesNextCycle(percent("repeating", 1), { unit: "week", count: 1 })).toBe(
+			true,
+		);
+		expect(discountAppliesNextCycle(percent("repeating", 1), { unit: "day", count: 28 })).toBe(
+			false,
+		);
 	});
 });

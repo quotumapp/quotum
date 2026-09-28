@@ -550,6 +550,7 @@ export async function readProjectionBalances(
 		reset_interval: CadenceUnit;
 		reset_interval_count: number;
 		billing_interval: CadenceUnit | null;
+		billing_interval_count: number;
 		period_start_at: Date | string;
 		period_end_at: Date | string | null;
 		plan_grant: boolean;
@@ -563,6 +564,7 @@ export async function readProjectionBalances(
 				reset_interval,
 				reset_interval_count,
 				billing_interval,
+				billing_interval_count,
 				period_start_at,
 				period_end_at,
 				plan_grant
@@ -573,6 +575,7 @@ export async function readProjectionBalances(
 					pi.reset_interval,
 					pi.reset_interval_count,
 					pv.billing_interval,
+					pv.billing_interval_count,
 					COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
 					COALESCE(s.current_period_end, s.expires_at) AS period_end_at,
 					false AS plan_grant,
@@ -597,6 +600,7 @@ export async function readProjectionBalances(
 					pi.reset_interval,
 					pi.reset_interval_count,
 					pv.billing_interval,
+					pv.billing_interval_count,
 					g.starts_at AS period_start_at,
 					g.ends_at AS period_end_at,
 					true AS plan_grant,
@@ -651,7 +655,10 @@ export async function readProjectionBalances(
 													limit.period_end_at,
 													reset,
 													now,
-													optionalStoredCadence(limit.billing_interval),
+													optionalStoredCadence(
+														limit.billing_interval,
+														limit.billing_interval_count,
+													),
 												);
 									return drizzleSql`(
 										${String(limit.feature_id)}::bigint,

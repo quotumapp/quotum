@@ -5,6 +5,8 @@ import { executeRows } from "../../src/db/repository/query";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import {
 	addCadence,
+	type BillingCadenceUnit,
+	billingCadenceUnits,
 	type Cadence,
 	type CadenceUnit,
 	cadenceSplits,
@@ -19,7 +21,10 @@ import {
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 
 const counts = [1, 2, 3, 12];
-const billingUnits: Array<CadenceUnit | null> = [...cadenceUnits, null];
+const billings: Array<{ unit: BillingCadenceUnit | null; count: number }> = [
+	...billingCadenceUnits.flatMap((unit) => [1, 3].map((count) => ({ unit, count }))),
+	{ unit: null, count: 1 },
+];
 
 localDescribe("cadence SQL", () => {
 	let context: LocalPostgresContext;
@@ -35,28 +40,31 @@ localDescribe("cadence SQL", () => {
 		const rows = await executeRows<{
 			reset_interval: CadenceUnit;
 			reset_interval_count: number;
-			billing_interval: CadenceUnit | null;
+			billing_interval: BillingCadenceUnit | null;
+			billing_interval_count: number;
 			splits: boolean;
 		}>(
 			context.db as unknown as QueryExecutor,
 			drizzleSql`
 				SELECT pi.reset_interval, pi.reset_interval_count, pv.billing_interval,
-					${resetSplitsBillingPeriodSql("pi", "pv")} AS splits
+					pv.billing_interval_count, ${resetSplitsBillingPeriodSql("pi", "pv")} AS splits
 				FROM (VALUES ${drizzleSql.join(
 					resets.map(({ unit, count }) => drizzleSql`(${unit}::text, ${count}::integer)`),
 					drizzleSql`, `,
 				)}) AS pi(reset_interval, reset_interval_count)
 				CROSS JOIN (VALUES ${drizzleSql.join(
-					billingUnits.map((unit) => drizzleSql`(${unit}::text)`),
+					billings.map(({ unit, count }) => drizzleSql`(${unit}::text, ${count}::integer)`),
 					drizzleSql`, `,
-				)}) AS pv(billing_interval)
+				)}) AS pv(billing_interval, billing_interval_count)
 			`,
 		);
-		expect(rows).toHaveLength(resets.length * billingUnits.length);
+		expect(rows).toHaveLength(resets.length * billings.length);
 		for (const row of rows) {
 			const reset: Cadence = { unit: row.reset_interval, count: row.reset_interval_count };
 			const billing: Cadence | null =
-				row.billing_interval === null ? null : { unit: row.billing_interval, count: 1 };
+				row.billing_interval === null
+					? null
+					: { unit: row.billing_interval, count: row.billing_interval_count };
 			expect({ reset, billing, splits: row.splits }).toEqual({
 				reset,
 				billing,

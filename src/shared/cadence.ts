@@ -16,6 +16,18 @@ export const cadenceUnits = [
 
 export type CadenceUnit = (typeof cadenceUnits)[number];
 
+/** Units a billing interval can use: no provider sells an hourly subscription. */
+export const billingCadenceUnits = [
+	"day",
+	"week",
+	"month",
+	"quarter",
+	"semi_annual",
+	"year",
+] as const;
+
+export type BillingCadenceUnit = (typeof billingCadenceUnits)[number];
+
 export interface Cadence {
 	unit: CadenceUnit;
 	count: number;

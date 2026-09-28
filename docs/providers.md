@@ -12,7 +12,10 @@ is an operator prerequisite: the merchant catalog editor does not create `produc
 rows. The development import (`quotum catalog provision`, or `bun run catalog:provision` from a
 checkout) currently creates Stripe/web mappings only and skips instances with a published catalog.
 Apple/iOS and Google/Android mappings require separate operator provisioning; there is no
-native-store provisioning command in the current service.
+native-store provisioning command in the current service. A store product records its billing
+period as `billing_period` (`one_time` or a billing unit) and `billing_period_count`, and a price
+binding adopts it only when that period spans the same time as the price's interval. The import
+takes `interval` and an optional `intervalCount` per subscription entry.
 
 ## Provider capabilities
 
@@ -87,6 +90,13 @@ connections cannot serve. See
 | **Promotions** | | | | |
 | Promotion code applied by Quotum<br>`promotion.code_entry` | Not evaluated | Not evaluated | Supported · Quotum-composed via Stripe coupons applied as Checkout and subscription discounts<br>Tests: [integration/promotions](../tests/integration/promotions.test.ts), [providers/stripe/promotions](../tests/providers/stripe/promotions.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Requires semantic validation (Q-PROMO-01) · Native<br>Questions: Q-PROMO-01 |
 | Hosted promotion code entry<br>`promotion.hosted_code` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/promotions](../tests/integration/promotions.test.ts), [providers/stripe/promotions](../tests/providers/stripe/promotions.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Requires semantic validation (Q-PROMO-01) · Native<br>Questions: Q-PROMO-01, Q-PROMO-02 |
+
+Billing intervals a plan can bind to, as `unit × count`; a quarter is three months and a half-year six:
+
+- **Apple**: week × 1, month × 1–3, month × 6, year × 1
+- **Google**: week × 1, week × 4, month × 1–4, month × 6, month × 8, year × 1
+- **Stripe**: day × 1–1095, week × 1–156, month × 1–36, year × 1–3
+- **Paddle (planned)**: day × 1–1095, week × 1–156, month × 1–36, year × 1–3
 
 Statuses:
 

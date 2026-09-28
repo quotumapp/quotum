@@ -20,6 +20,7 @@ import {
 	conditionLayer,
 	conditionReasonCode,
 	declaredProviders,
+	declaresBillingCadence,
 	describeCondition,
 	evaluateCapability,
 	isBillingChannel,
@@ -86,6 +87,7 @@ function declaration(
 		connectionKind: "stripe",
 		availability: "available",
 		writeSemantics: { clientIdempotencyKeys: true, uncertainWrite: "provider_idempotency" },
+		billingCadences: [{ unit: "month", minCount: 1, maxCount: 12 }],
 		...fields,
 		operations: Object.fromEntries(
 			providerOperations.map((operation) => [operation, operations[operation] ?? notEvaluated]),
@@ -1276,6 +1278,48 @@ describe("validateDeclaration", () => {
 			"operations.checkout.plan.verification.status",
 			"operations.portal.session.verification.status",
 		]);
+	});
+
+	it("requires unique billing cadences with a billing unit and a positive count range", () => {
+		expect(
+			issuePaths(
+				declaration(
+					{},
+					{
+						billingCadences: [
+							{ unit: "month", minCount: 1, maxCount: 3 },
+							{ unit: "month", minCount: 1, maxCount: 3 },
+							{ unit: "hour", minCount: 1, maxCount: 1 } as never,
+							{ unit: "week", minCount: 2, maxCount: 1 },
+							{ unit: "year", minCount: 0, maxCount: 1 },
+						],
+					},
+				),
+			),
+		).toEqual(["billingCadences.1", "billingCadences.2", "billingCadences.3", "billingCadences.4"]);
+		expect(issuePaths(withFields({ billingCadences: undefined }))).toEqual(["billingCadences"]);
+	});
+
+	it("matches a billing cadence by the time it spans", () => {
+		const cadences = (billingCadences: ProviderCapabilityDeclaration["billingCadences"]) => ({
+			billingCadences,
+		});
+		const apple = cadences([
+			{ unit: "week", minCount: 1, maxCount: 1 },
+			{ unit: "month", minCount: 1, maxCount: 3 },
+			{ unit: "month", minCount: 6, maxCount: 6 },
+			{ unit: "year", minCount: 1, maxCount: 1 },
+		]);
+		expect(declaresBillingCadence(apple, { unit: "quarter", count: 1 })).toBe(true);
+		expect(declaresBillingCadence(apple, { unit: "semi_annual", count: 1 })).toBe(true);
+		expect(declaresBillingCadence(apple, { unit: "month", count: 12 })).toBe(true);
+		expect(declaresBillingCadence(apple, { unit: "month", count: 4 })).toBe(false);
+		expect(declaresBillingCadence(apple, { unit: "day", count: 7 })).toBe(true);
+		expect(declaresBillingCadence(apple, { unit: "week", count: 2 })).toBe(false);
+		expect(declaresBillingCadence(apple, { unit: "day", count: 30 })).toBe(false);
+		const stripe = cadences([{ unit: "week", minCount: 1, maxCount: 156 }]);
+		expect(declaresBillingCadence(stripe, { unit: "day", count: 14 })).toBe(true);
+		expect(declaresBillingCadence(stripe, { unit: "day", count: 10 })).toBe(false);
 	});
 
 	it("requires unique, known change billing policies", () => {

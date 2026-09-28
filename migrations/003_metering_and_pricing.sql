@@ -174,7 +174,11 @@ CREATE TABLE IF NOT EXISTS plan_versions (
 	status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'archived')),
 	currency TEXT COLLATE "C",
 	base_amount_minor BIGINT CHECK (base_amount_minor IS NULL OR base_amount_minor >= 0),
-	billing_interval TEXT CHECK (billing_interval IS NULL OR billing_interval IN ('month', 'year')),
+	billing_interval TEXT CHECK (
+		billing_interval IS NULL
+		OR billing_interval IN ('day', 'week', 'month', 'quarter', 'semi_annual', 'year')
+	),
+	billing_interval_count INTEGER NOT NULL DEFAULT 1,
 	trial_days INTEGER CHECK (trial_days IS NULL OR trial_days BETWEEN 0 AND 730),
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	plan_kind TEXT NOT NULL DEFAULT 'base',
@@ -191,6 +195,10 @@ CREATE TABLE IF NOT EXISTS plan_versions (
 		REFERENCES plans(project_id, id),
 	CONSTRAINT plan_versions_project_revision_fk FOREIGN KEY (project_id, catalog_revision_id)
 		REFERENCES catalog_revisions(project_id, id),
+	CONSTRAINT plan_versions_billing_interval_count_check CHECK (
+		billing_interval_count BETWEEN 1 AND 1000
+		AND (billing_interval IS NOT NULL OR billing_interval_count = 1)
+	),
 	CONSTRAINT plan_versions_price_check CHECK (
 		(base_amount_minor IS NULL AND currency IS NULL)
 		OR (base_amount_minor IS NOT NULL AND currency IS NOT NULL)
@@ -876,7 +884,10 @@ CREATE TABLE IF NOT EXISTS price_components (
 	currency TEXT COLLATE "C" NOT NULL CHECK (char_length(currency) = 3),
 	unit_amount_minor BIGINT NOT NULL CHECK (unit_amount_minor >= 0),
 	billing_units NUMERIC(28, 9) NOT NULL DEFAULT 1 CHECK (billing_units > 0),
-	billing_interval TEXT NOT NULL CHECK (billing_interval IN ('month', 'year')),
+	billing_interval TEXT NOT NULL CHECK (
+		billing_interval IN ('day', 'week', 'month', 'quarter', 'semi_annual', 'year')
+	),
+	billing_interval_count INTEGER NOT NULL DEFAULT 1 CHECK (billing_interval_count BETWEEN 1 AND 1000),
 	minimum_quantity INTEGER NOT NULL DEFAULT 1 CHECK (minimum_quantity > 0),
 	maximum_quantity INTEGER CHECK (
 		maximum_quantity IS NULL OR maximum_quantity >= minimum_quantity

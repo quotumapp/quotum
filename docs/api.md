@@ -358,10 +358,17 @@ reset spans at most three years, `resetIntervalCount` is a whole number from 1 t
 overage is invoiced once per closed window; a daily or weekly meter limit is a hard cap. A rollover
 expiry is `{ "mode": "after", "interval": "week", "intervalCount": 2 }` or `{ "mode": "forever" }`
 and spans at most ten years; the earlier `{ "mode": "months", "months": 3 }` is still accepted and
-is returned as `after` with a month interval. Only then do they check each provider binding against
+is returned as `after` with a month interval. A plan bills every `billingInterval` (`day`, `week`,
+`month`, `quarter`, `semi_annual` or `year`) times `billingIntervalCount` (default 1, at most three
+years), and every price on it recurs at the same interval however it is spelled: `quarter` and
+`month` × 3 agree. Only then do they check each provider binding against
 its provider's capability declaration: a plan with a trial, an add-on plan, every explicit price
 component (`basePrice` or an item `price`), and every top-up need the matching `catalog.*`
-operations (a top-up needs `catalog.topup`). All incompatible bindings are reported together as one
+operations (a top-up needs `catalog.topup`). Every plan-level or price binding of a plan with a
+billing interval also needs its provider to sell that interval (the billing intervals listed under
+[Provider capabilities](providers.md#provider-capabilities)): an App Store product cannot renew every
+four months, so a verdict on `catalog.product.subscription` blocked at the `provider` layer with
+reason `BILLING_INTERVAL` names the interval. All incompatible bindings are reported together as one
 `400 PROVIDER_CAPABILITY_UNSUPPORTED` whose `details.providerCompatibility` lists them in catalog
 order; see [Provider capability errors](#provider-capability-errors). The whole submitted intent is
 checked, including the plans it keeps unchanged. The published catalog is never re-validated

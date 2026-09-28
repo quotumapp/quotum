@@ -9,6 +9,7 @@ import {
 import type {
 	CatalogPlanIntent,
 	CatalogPlanItemIntent,
+	CatalogPriceIntent,
 	CatalogRolloverExpiryIntent,
 } from "./types";
 
@@ -20,8 +21,17 @@ export function planItemResetCadence(item: CatalogPlanItemIntent): Cadence | nul
 	return { unit: item.resetInterval, count: item.resetIntervalCount ?? 1 };
 }
 
-export function planBillingCadence(plan: CatalogPlanIntent): Cadence | null {
-	return plan.billingInterval === null ? null : { unit: plan.billingInterval, count: 1 };
+export function planBillingCadence(
+	plan: Pick<CatalogPlanIntent, "billingInterval" | "billingIntervalCount">,
+): Cadence | null {
+	if (plan.billingInterval === null) return null;
+	return { unit: plan.billingInterval, count: plan.billingIntervalCount ?? 1 };
+}
+
+export function priceBillingCadence(
+	price: Pick<CatalogPriceIntent, "billingInterval" | "billingIntervalCount">,
+): Cadence {
+	return { unit: price.billingInterval, count: price.billingIntervalCount ?? 1 };
 }
 
 /** The cadence after which rolled-over quantity expires, or null when it never does. */
@@ -48,6 +58,15 @@ export function normalizeRolloverExpiry(
  */
 export function assertPlanCadences(plan: CatalogPlanIntent): void {
 	const billing = planBillingCadence(plan);
+	if (billing === null) {
+		if (plan.billingIntervalCount !== undefined && plan.billingIntervalCount !== null) {
+			throw new InvalidRequestError(
+				`Plan ${plan.key} billingIntervalCount requires a billingInterval`,
+			);
+		}
+	} else {
+		assertCadence(billing, `Plan ${plan.key} billing interval`);
+	}
 	for (const item of plan.items) {
 		const label = `Plan ${plan.key} item ${item.featureKey}`;
 		const reset = planItemResetCadence(item);

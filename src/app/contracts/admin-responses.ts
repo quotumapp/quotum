@@ -955,6 +955,7 @@ export const getV1AdminCatalogStoreProductsResponse200Schema = z.object({
 			updatedAt: z.string(),
 			externalPriceId: z.union([z.null(), z.string()]),
 			billingPeriod: z.string(),
+			billingPeriodCount: z.number(),
 			currency: z.union([z.null(), z.string()]),
 			priceAmount: z.union([z.null(), z.number()]),
 		}),

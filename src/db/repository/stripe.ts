@@ -3,6 +3,7 @@ import { NotFoundBillingError, PersistenceConflictError } from "../../billing/er
 import type { PurchaseStatus, SubscriptionStatus } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import type { StripeCatalog } from "../../providers/stripe/types";
+import type { BillingCadenceUnit } from "../../shared/cadence";
 import { RepositoryModule } from "./base";
 import {
 	materializeSubscriptionAllocations,
@@ -83,7 +84,8 @@ export class StripeBillingRepository extends RepositoryModule {
 			currency: string;
 			unit_amount_minor: string | number;
 			billing_units: unknown;
-			billing_interval: "month" | "year";
+			billing_interval: BillingCadenceUnit;
+			billing_interval_count: number;
 			minimum_quantity: number;
 			maximum_quantity: number | null;
 			tax_behavior: "inclusive" | "exclusive" | "unspecified";
@@ -100,8 +102,8 @@ export class StripeBillingRepository extends RepositoryModule {
 					price.key AS price_key, price.component_kind, feature.key AS feature_key,
 					feature.unit AS feature_unit, item.quantity AS included_quantity,
 					price.currency, price.unit_amount_minor, price.billing_units,
-					price.billing_interval, price.minimum_quantity, price.maximum_quantity,
-					price.tax_behavior, price.pricing_model
+					price.billing_interval, price.billing_interval_count, price.minimum_quantity,
+					price.maximum_quantity, price.tax_behavior, price.pricing_model
 				FROM plans plan
 				JOIN plan_versions version
 					ON version.project_id = plan.project_id AND version.id = plan.active_version_id
@@ -188,6 +190,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				tiers: tiersByComponent.get(String(row.price_component_id)) ?? [],
 				billingUnits: String(row.billing_units),
 				interval: row.billing_interval,
+				intervalCount: row.billing_interval_count,
 				minimumQuantity: row.minimum_quantity,
 				maximumQuantity: row.maximum_quantity,
 				taxBehavior: row.tax_behavior,
@@ -488,6 +491,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				'externalProductId', sp.external_product_id,
 				'externalPriceId', sp.external_price_id,
 				'billingPeriod', sp.billing_period,
+				'billingPeriodCount', sp.billing_period_count,
 				'currency', sp.currency,
 				'priceAmount', sp.price_amount
 			) AS value,
@@ -597,7 +601,8 @@ export class StripeBillingRepository extends RepositoryModule {
 			maximum_quantity: number | null;
 			unit_amount_minor: number | string;
 			currency: string;
-			billing_interval: "month" | "year";
+			billing_interval: BillingCadenceUnit;
+			billing_interval_count: number;
 			pricing_model: "flat" | "graduated" | "volume";
 		}>(
 			this.database,
@@ -615,6 +620,7 @@ export class StripeBillingRepository extends RepositoryModule {
 					pc.unit_amount_minor,
 					pc.currency,
 					pc.billing_interval,
+					pc.billing_interval_count,
 					pc.pricing_model
 				FROM price_components pc
 				JOIN provider_price_bindings ppb
@@ -662,6 +668,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				pricingModel: row.pricing_model,
 				currency: row.currency.toUpperCase(),
 				billingInterval: row.billing_interval,
+				billingIntervalCount: row.billing_interval_count,
 			})),
 		};
 	}

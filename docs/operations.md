@@ -174,7 +174,20 @@ the check `plan_items_reset_interval_count_check`. It replaces `rollover_expiry_
 way, keeping `lifetime`, and adds `interval_count` (default 1) to both with the checks
 `control_policies_interval_count_check` and `usage_alerts_interval_count_check`; month and year
 control windows keep their calendar bounds, so existing `control_windows` rows stay current.
-Existing reset and control intervals need no change; only rollover rows are rewritten:
+Billing intervals widen the same way without `hour`: `plan_versions` and `price_components` gain
+`billing_interval_count` (default 1, checks `plan_versions_billing_interval_count_check` and
+`price_components_billing_interval_count_check`), and the billing core baseline adds
+`store_products.billing_period_count` (default 1) and constrains `billing_period` to `one_time` or a
+billing unit (`store_products_billing_period_check`, `store_products_billing_period_count_check`).
+Before dumping, confirm that no store product uses another period:
+
+```sql
+SELECT DISTINCT billing_period FROM store_products;
+```
+
+Rewrite any other spelling, such as `monthly`, to `month` in the old database first, or the restore
+fails on the new check. Existing reset, control and billing intervals need no other change; only
+rollover rows are rewritten:
 
 1. Follow steps 1 and 2 of [stored job provider identity](#stored-job-provider-identity).
 2. Let the restore load the old rollover column:

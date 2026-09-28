@@ -38,7 +38,10 @@ CREATE TABLE IF NOT EXISTS store_products (
 	channel TEXT NOT NULL CHECK (channel IN ('ios', 'android', 'web')),
 	external_product_id TEXT NOT NULL,
 	external_price_id TEXT,
-	billing_period TEXT NOT NULL,
+	billing_period TEXT NOT NULL CHECK (
+		billing_period IN ('one_time', 'day', 'week', 'month', 'quarter', 'semi_annual', 'year')
+	),
+	billing_period_count INTEGER NOT NULL DEFAULT 1,
 	currency TEXT,
 	price_amount BIGINT,
 	active BOOLEAN NOT NULL DEFAULT true,
@@ -46,7 +49,11 @@ CREATE TABLE IF NOT EXISTS store_products (
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	CONSTRAINT store_products_project_id_id_unique UNIQUE (project_id, id),
-	CONSTRAINT store_products_project_product_fk FOREIGN KEY (project_id, product_id) REFERENCES products(project_id, id)
+	CONSTRAINT store_products_project_product_fk FOREIGN KEY (project_id, product_id) REFERENCES products(project_id, id),
+	CONSTRAINT store_products_billing_period_count_check CHECK (
+		billing_period_count BETWEEN 1 AND 1000
+		AND (billing_period <> 'one_time' OR billing_period_count = 1)
+	)
 );
 
 CREATE TABLE IF NOT EXISTS provider_customers (

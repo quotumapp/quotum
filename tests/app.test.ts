@@ -329,6 +329,7 @@ function createAdminCatalogStoreProduct(
 		externalProductId: "prod_1",
 		externalPriceId: "price_1",
 		billingPeriod: "month",
+		billingPeriodCount: 1,
 		currency: "usd",
 		priceAmount: 999,
 		active: true,

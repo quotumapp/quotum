@@ -9,18 +9,22 @@ import type {
 	CatalogCompatibilityTarget,
 	CatalogProviderCompatibility,
 } from "../providers/catalog-compatibility-types";
+import { type CadenceUnit, describeCadence } from "../shared/cadence";
 import {
 	type BillingChannel,
 	type BillingProvider,
 	billingProviders,
 	type CapabilityConfigurationFacts,
 	type CapabilityFacts,
+	conditionReasonCode,
+	declaresBillingCadence,
 	evaluateCapability,
 	isBillingProvider,
 	type ProviderCapabilityDeclaration,
 	type ProviderOperation,
 	type RuntimeCapabilityVerdict,
 } from "../shared/provider-capabilities";
+import { planBillingCadence } from "./cadence-rules";
 import type { CatalogIntent, CatalogPlanIntent, CatalogProviderBindingIntent } from "./types";
 
 /** A catalog entry whose provider bindings must implement the operations its construct needs. */
@@ -167,9 +171,12 @@ export function assertCatalogProviderCompatibility(
 	catalog: CatalogIntent,
 	capabilities: ProviderCapabilityLookup,
 ): void {
-	const incompatible = catalogProviderCompatibility(catalog, { capabilities }).filter(
-		({ compatible }) => !compatible,
-	);
+	const incompatible = inCatalogOrder(catalog, [
+		...catalogProviderCompatibility(catalog, { capabilities }).filter(
+			({ compatible }) => !compatible,
+		),
+		...catalogBillingCadenceIncompatibility(catalog, capabilities),
+	]);
 	const [first] = incompatible;
 	if (first === undefined) return;
 	const operations = first.verdicts.map(({ operation }) => operation);
@@ -177,11 +184,135 @@ export function assertCatalogProviderCompatibility(
 	const others = incompatible.length - 1;
 	const more = others === 0 ? "" : ` (and ${others} more)`;
 	const binding = `${targetLabel(first.target)} cannot bind ${first.provider}`;
+	const interval = first.verdicts
+		.flatMap(({ reasons }) => reasons)
+		.find(({ code }) => code === conditionReasonCode.billing_interval)?.observed;
+	const problem =
+		interval === undefined
+			? `${listed(operations)} ${verb} not supported`
+			: `it does not bill every ${describeCadence({
+					unit: interval.billingInterval as CadenceUnit,
+					count: Number(interval.billingIntervalCount),
+				})}`;
 	throw new CapabilityError(
-		`${binding}: ${listed(operations)} ${verb} not supported${more}`,
+		`${binding}: ${problem}${more}`,
 		first.verdicts[0]?.blockingLayer ?? "implementation",
 		{ providerCompatibility: incompatible },
 	);
+}
+
+/**
+ * The bindings whose provider does not sell their plan's billing interval: a plan's own bindings
+ * sell the subscription product, and each price recurs at the plan's interval. The subscription
+ * operation is what fails, at the provider layer, because no configuration can change it.
+ */
+export function catalogBillingCadenceIncompatibility(
+	catalog: CatalogIntent,
+	capabilities: ProviderCapabilityLookup,
+): CatalogProviderCompatibility[] {
+	const operation: ProviderOperation = "catalog.product.subscription";
+	const entries: CatalogProviderCompatibility[] = [];
+	for (const plan of catalog.plans) {
+		const cadence = planBillingCadence(plan);
+		if (cadence === null) continue;
+		const judged: Array<{
+			target: CatalogCompatibilityTarget;
+			bindings: CatalogProviderBindingIntent[];
+		}> = [
+			{ target: { kind: "plan", key: plan.key }, bindings: plan.providerBindings },
+			...[plan.basePrice ?? null, ...plan.items.map((item) => item.price ?? null)]
+				.filter((price) => price !== null)
+				.map((price) => ({
+					target: { kind: "price" as const, key: plan.key, priceKey: price.key },
+					bindings: price.providerBindings,
+				})),
+		];
+		for (const { target, bindings } of judged) {
+			for (const binding of bindings) {
+				const declaration = bindingDeclaration(capabilities, binding);
+				if (declaresBillingCadence(declaration, cadence)) continue;
+				entries.push({
+					target,
+					provider: binding.provider,
+					channel: binding.channel,
+					productKey: binding.productKey,
+					requiredOperations: [operation],
+					compatible: false,
+					verdicts: [
+						{
+							provider: binding.provider,
+							operation,
+							outcome: "blocked",
+							level: declaration.operations[operation].level,
+							blockingLayer: "provider",
+							reasons: [
+								{
+									code: conditionReasonCode.billing_interval,
+									layer: "provider",
+									observed: {
+										billingInterval: cadence.unit,
+										billingIntervalCount: cadence.count,
+									},
+									resolution: { kind: "none" },
+								},
+							],
+						},
+					],
+				});
+			}
+		}
+	}
+	return entries;
+}
+
+/**
+ * Orders incompatible bindings as the catalog lists their entries, merging two reports on one
+ * binding into a single entry.
+ */
+function inCatalogOrder(
+	catalog: CatalogIntent,
+	entries: CatalogProviderCompatibility[],
+): CatalogProviderCompatibility[] {
+	const positions = new Map<string, number>();
+	const position = (target: CatalogCompatibilityTarget) => {
+		const key = `${target.kind}:${target.key}:${target.priceKey ?? ""}`;
+		if (!positions.has(key)) positions.set(key, positions.size);
+		return key;
+	};
+	for (const plan of catalog.plans) {
+		position({ kind: "plan", key: plan.key });
+		if (plan.basePrice !== undefined && plan.basePrice !== null) {
+			position({ kind: "price", key: plan.key, priceKey: plan.basePrice.key });
+		}
+		for (const item of plan.items) {
+			if (item.price !== undefined && item.price !== null) {
+				position({ kind: "price", key: plan.key, priceKey: item.price.key });
+			}
+		}
+	}
+	for (const topup of catalog.topups) position({ kind: "topup", key: topup.key });
+	const merged = new Map<string, CatalogProviderCompatibility & { order: number }>();
+	for (const [index, entry] of entries.entries()) {
+		const key = `${position(entry.target)}|${entry.provider}|${entry.productKey ?? ""}`;
+		const existing = merged.get(key);
+		if (existing === undefined) {
+			merged.set(key, { ...entry, order: index });
+			continue;
+		}
+		existing.compatible = false;
+		existing.requiredOperations = [
+			...new Set([...existing.requiredOperations, ...entry.requiredOperations]),
+		];
+		existing.verdicts = [...existing.verdicts, ...entry.verdicts];
+	}
+	return [...merged.entries()]
+		.sort(([left, a], [right, b]) => {
+			const byTarget =
+				(positions.get(left.split("|")[0] ?? "") ?? 0) -
+				(positions.get(right.split("|")[0] ?? "") ?? 0);
+			return byTarget !== 0 ? byTarget : a.order - b.order;
+		})
+		.map(([, { order: _order, ...entry }]) => entry);
 }
 
 function bindingDeclaration(

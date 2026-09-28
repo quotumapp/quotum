@@ -1,4 +1,5 @@
 import type { ProjectInstanceContext } from "../projects/context";
+import { type Cadence, canonicalCadence, minCalendarSpanHours } from "../shared/cadence";
 import { canonicalDecimal, positiveDecimal, sha256Hex, stableJson } from "./decimal";
 import { BillingError } from "./errors";
 import type { BillingProvider } from "./types";
@@ -880,14 +881,19 @@ export function discountAmountFor(discount: PromotionDiscount, currency: string 
 	return match.amountOffMinor;
 }
 
-/** Whether a recurring discount still applies on the invoice after the first billing interval. */
-export function discountAppliesNextCycle(
-	discount: PromotionDiscount,
-	interval: "month" | "year",
-): boolean {
+/**
+ * Whether a recurring discount still applies on the invoice after the first billing interval: the
+ * second invoice falls strictly inside the discount's months however those months are aligned.
+ */
+export function discountAppliesNextCycle(discount: PromotionDiscount, interval: Cadence): boolean {
 	if (discount.duration === "forever") return true;
 	if (discount.duration === "once") return false;
-	return (discount.durationMonths ?? 0) > (interval === "year" ? 12 : 1);
+	const months = discount.durationMonths ?? 0;
+	if (months < 1) return false;
+	const canonical = canonicalCadence(interval);
+	return canonical.kind === "months"
+		? months > canonical.months
+		: canonical.hours < minCalendarSpanHours(months);
 }
 
 /** Discount facts from a completed Checkout Session, present only when a discount was involved. */

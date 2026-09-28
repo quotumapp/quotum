@@ -295,6 +295,28 @@
   "providers": [
     {
       "availability": "available",
+      "billingCadences": [
+        {
+          "maxCount": 1,
+          "minCount": 1,
+          "unit": "week"
+        },
+        {
+          "maxCount": 3,
+          "minCount": 1,
+          "unit": "month"
+        },
+        {
+          "maxCount": 6,
+          "minCount": 6,
+          "unit": "month"
+        },
+        {
+          "maxCount": 1,
+          "minCount": 1,
+          "unit": "year"
+        }
+      ],
       "channel": "ios",
       "connectionKind": "apple",
       "operations": {
@@ -658,6 +680,38 @@
     },
     {
       "availability": "available",
+      "billingCadences": [
+        {
+          "maxCount": 1,
+          "minCount": 1,
+          "unit": "week"
+        },
+        {
+          "maxCount": 4,
+          "minCount": 4,
+          "unit": "week"
+        },
+        {
+          "maxCount": 4,
+          "minCount": 1,
+          "unit": "month"
+        },
+        {
+          "maxCount": 6,
+          "minCount": 6,
+          "unit": "month"
+        },
+        {
+          "maxCount": 8,
+          "minCount": 8,
+          "unit": "month"
+        },
+        {
+          "maxCount": 1,
+          "minCount": 1,
+          "unit": "year"
+        }
+      ],
       "channel": "android",
       "connectionKind": "google",
       "operations": {
@@ -1021,6 +1075,28 @@
     },
     {
       "availability": "available",
+      "billingCadences": [
+        {
+          "maxCount": 1095,
+          "minCount": 1,
+          "unit": "day"
+        },
+        {
+          "maxCount": 156,
+          "minCount": 1,
+          "unit": "week"
+        },
+        {
+          "maxCount": 36,
+          "minCount": 1,
+          "unit": "month"
+        },
+        {
+          "maxCount": 3,
+          "minCount": 1,
+          "unit": "year"
+        }
+      ],
       "changeBillingPolicies": [
         {
           "billing": "prorated",
@@ -1646,6 +1722,28 @@
     },
     {
       "availability": "planned",
+      "billingCadences": [
+        {
+          "maxCount": 1095,
+          "minCount": 1,
+          "unit": "day"
+        },
+        {
+          "maxCount": 156,
+          "minCount": 1,
+          "unit": "week"
+        },
+        {
+          "maxCount": 36,
+          "minCount": 1,
+          "unit": "month"
+        },
+        {
+          "maxCount": 3,
+          "minCount": 1,
+          "unit": "year"
+        }
+      ],
       "changeBillingPolicies": [
         {
           "billing": "prorated",

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { type BillingCadenceUnit, billingCadenceUnits, maxCadenceCount } from "../shared/cadence";
 
 export interface BillingCatalogDeclaration {
 	key: string;
@@ -8,7 +9,9 @@ export interface BillingCatalogDeclaration {
 	currency: string;
 	amountCents: number;
 	credits: number;
-	interval: "month" | "year" | null;
+	interval: BillingCadenceUnit | null;
+	/** How many `interval` units one billing period spans; defaults to one. */
+	intervalCount: number;
 	entitlementKey: string;
 	externalProductId: string;
 	externalPriceId: string;
@@ -33,7 +36,8 @@ const catalogDeclarationSchema = z
 			.transform((value) => value.toUpperCase()),
 		amountCents: z.number().int().positive().max(1_000_000),
 		credits: z.number().int().positive().max(100_000),
-		interval: z.enum(["month", "year"]).nullable(),
+		interval: z.enum(billingCadenceUnits).nullable(),
+		intervalCount: z.number().int().min(1).max(maxCadenceCount).default(1),
 		entitlementKey: z.string().trim().min(1).max(120).default("paid"),
 		externalProductId: z.string().trim().min(1).max(256),
 		externalPriceId: z.string().trim().min(1).max(256),
@@ -48,7 +52,12 @@ const catalogDeclarationSchema = z
 				message: "subscription catalog items require a plan and billing interval",
 			});
 		}
-		if (!subscription && (declaration.plan !== null || declaration.interval !== null)) {
+		if (
+			!subscription &&
+			(declaration.plan !== null ||
+				declaration.interval !== null ||
+				declaration.intervalCount !== 1)
+		) {
 			context.addIssue({
 				code: "custom",
 				message: "top-up catalog items cannot contain subscription facts",

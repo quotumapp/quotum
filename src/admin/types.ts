@@ -169,6 +169,7 @@ export interface AdminCatalogProduct {
 export interface AdminCatalogStoreProductPrice {
 	externalPriceId: string | null;
 	billingPeriod: string;
+	billingPeriodCount: number;
 	currency: string | null;
 	priceAmount: number | null;
 }

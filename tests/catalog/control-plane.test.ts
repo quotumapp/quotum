@@ -781,4 +781,90 @@ describe("catalog control plane cadences", () => {
 			]),
 		).toBe("Duplicate plan pro control values are not allowed");
 	});
+
+	it("binds a plan only to providers that sell its billing interval", async () => {
+		const quarterly = plan({
+			billingInterval: "quarter",
+			items: [item({ resetInterval: "month" })],
+			providerBindings: [appleBinding, stripeBinding],
+		});
+		expect(await messageOf([quarterly])).toBe("normalized");
+
+		const fourMonthly = plan({
+			billingInterval: "month",
+			billingIntervalCount: 4,
+			items: [item({ resetInterval: "month" })],
+			providerBindings: [appleBinding, stripeBinding],
+		});
+		const error = await previewWith(providerCapabilityCatalog, [fourMonthly]);
+		expect(error).toBeInstanceOf(CapabilityError);
+		expect((error as CapabilityError).message).toBe(
+			"Plan pro cannot bind apple: it does not bill every 4 × month",
+		);
+		expect((error as CapabilityError).code).toBe("PROVIDER_CAPABILITY_UNSUPPORTED");
+		expect((error as CapabilityError).details).toMatchObject({
+			providerCompatibility: [
+				{
+					target: { kind: "plan", key: "pro" },
+					provider: "apple",
+					compatible: false,
+					verdicts: [
+						{
+							operation: "catalog.product.subscription",
+							outcome: "blocked",
+							blockingLayer: "provider",
+							reasons: [
+								{
+									code: "BILLING_INTERVAL",
+									observed: { billingInterval: "month", billingIntervalCount: 4 },
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+	});
+
+	it("checks billing interval shape and price agreement", async () => {
+		expect(
+			await messageOf([plan({ billingInterval: "week", billingIntervalCount: 157, items: [] })]),
+		).toBe("Plan pro billing interval cannot span more than 3 × year");
+		expect(
+			await messageOf([plan({ billingInterval: null, billingIntervalCount: 2, items: [] })]),
+		).toBe("Plan pro billingIntervalCount requires a billingInterval");
+		expect(
+			await messageOf([
+				plan({
+					billingInterval: "quarter",
+					items: [
+						item({
+							resetInterval: "month",
+							overagePolicy: "allowed",
+							price: {
+								...flatPrice([stripeBinding]),
+								key: "credits-overage",
+								billingInterval: "month",
+								billingIntervalCount: 3,
+							},
+						}),
+					],
+				}),
+			]),
+		).toBe("normalized");
+		expect(
+			await messageOf([
+				plan({
+					billingInterval: "quarter",
+					items: [
+						item({
+							resetInterval: "month",
+							overagePolicy: "allowed",
+							price: { ...flatPrice([stripeBinding]), key: "credits-overage" },
+						}),
+					],
+				}),
+			]),
+		).toBe("Plan pro price intervals must match");
+	});
 });

@@ -7,6 +7,7 @@ import type {
 	SubscriptionAvailableActions,
 } from "../../providers/capability-read-types";
 import type { CatalogProviderCompatibility } from "../../providers/catalog-compatibility-types";
+import { billingCadenceUnits } from "../../shared/cadence";
 import {
 	billingChannels,
 	type CapabilityCondition,
@@ -213,6 +214,13 @@ export const ProviderCapabilityDeclarationSchema = z.object({
 			}),
 		)
 		.optional(),
+	billingCadences: z.array(
+		z.object({
+			unit: z.enum(billingCadenceUnits),
+			minCount: z.number(),
+			maxCount: z.number(),
+		}),
+	),
 	operations: z.object(operationSupportShape),
 });
 

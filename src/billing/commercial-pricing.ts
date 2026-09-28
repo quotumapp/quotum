@@ -1,3 +1,4 @@
+import type { BillingCadenceUnit, Cadence } from "../shared/cadence";
 import type {
 	CommercialActionPreview,
 	CommercialLineItem,
@@ -31,7 +32,7 @@ export type PricedCommercialPreview = Pick<
 export function priceCommercialLines(input: {
 	lines: readonly CommercialLineItem[];
 	currency: string | null;
-	recurringInterval: "month" | "year" | null;
+	recurringInterval: Cadence | null;
 	promotion: CommercialPromotion | null;
 	hostedEntry: boolean;
 }): PricedCommercialPreview {
@@ -102,7 +103,7 @@ export function priceCommercialLines(input: {
 }
 
 function nextCycle(input: {
-	interval: "month" | "year";
+	interval: Cadence;
 	currency: string | null;
 	subtotalMinor: number | null;
 	firstCycleDiscountMinor: number | null;
@@ -110,7 +111,8 @@ function nextCycle(input: {
 }): CommercialPreviewNextCycle {
 	if (input.subtotalMinor === null || input.firstCycleDiscountMinor === null) {
 		return {
-			interval: input.interval,
+			interval: input.interval.unit as BillingCadenceUnit,
+			intervalCount: input.interval.count,
 			currency: input.currency,
 			subtotalMinor: null,
 			discountMinor: null,
@@ -122,7 +124,8 @@ function nextCycle(input: {
 		input.promotion !== null && discountAppliesNextCycle(input.promotion.discount, input.interval);
 	const discountMinor = applies ? input.firstCycleDiscountMinor : 0;
 	return {
-		interval: input.interval,
+		interval: input.interval.unit as BillingCadenceUnit,
+		intervalCount: input.interval.count,
 		currency: input.currency,
 		subtotalMinor: input.subtotalMinor,
 		discountMinor,
@@ -150,4 +153,14 @@ function previewPromotion(
 			durationMonths: discount.durationMonths,
 		},
 	};
+}
+
+/** The billing interval of the first recurring line, or null when every line is one-off. */
+export function recurringCadenceOf(
+	lines: ReadonlyArray<Pick<CommercialLineItem, "interval" | "intervalCount">>,
+): Cadence | null {
+	const line = lines.find(({ interval }) => interval !== null);
+	return line === undefined || line.interval === null
+		? null
+		: { unit: line.interval, count: line.intervalCount ?? 1 };
 }

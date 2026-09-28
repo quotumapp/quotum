@@ -1,7 +1,7 @@
 import type { BillingChannel, BillingProvider } from "../billing/types";
 import type { ProjectInstanceContext } from "../projects/context";
 import type { CatalogProviderCompatibility } from "../providers/catalog-compatibility-types";
-import type { CadenceUnit } from "../shared/cadence";
+import type { BillingCadenceUnit, CadenceUnit } from "../shared/cadence";
 
 export interface CatalogFeatureIntent {
 	key: string;
@@ -50,7 +50,9 @@ export interface CatalogPriceIntent {
 	currency: string;
 	unitAmountMinor: number;
 	billingUnits: string;
-	billingInterval: "month" | "year";
+	billingInterval: BillingCadenceUnit;
+	/** How many `billingInterval` units one billing period spans; defaults to one. */
+	billingIntervalCount?: number;
 	minimumQuantity: number;
 	maximumQuantity: number | null;
 	taxBehavior: "inclusive" | "exclusive" | "unspecified";
@@ -81,7 +83,9 @@ export interface CatalogPlanIntent {
 	version: number;
 	currency: string | null;
 	baseAmountMinor: number | null;
-	billingInterval: "month" | "year" | null;
+	billingInterval: BillingCadenceUnit | null;
+	/** How many `billingInterval` units one billing period spans; defaults to one. */
+	billingIntervalCount?: number | null;
 	trialDays: number | null;
 	kind?: "base" | "addon";
 	tierRank?: number;

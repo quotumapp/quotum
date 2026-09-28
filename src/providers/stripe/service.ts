@@ -9,7 +9,7 @@ import type {
 	CommercialPreviewDraft,
 	StoredCommercialActionPreview,
 } from "../../billing/commercial";
-import { priceCommercialLines } from "../../billing/commercial-pricing";
+import { priceCommercialLines, recurringCadenceOf } from "../../billing/commercial-pricing";
 import { sha256Hex, stableJson } from "../../billing/decimal";
 import { BillingError, ProviderUnavailableError } from "../../billing/errors";
 import {
@@ -50,6 +50,7 @@ import type {
 	StripeWebStoreProductRow,
 } from "../../db/repository";
 import { paymentSetupReconcileEventType } from "../../db/repository/store-events";
+import type { BillingCadenceUnit } from "../../shared/cadence";
 import type { AutoTopupWorkerProvider } from "../../workers/auto-topup";
 import type { PromotionStripeProvider } from "../../workers/promotion-maintenance";
 import type { RecurringBillingWorkerProvider } from "../../workers/recurring-billing";
@@ -882,7 +883,7 @@ export class StripeBillingService
 				await repository.ensureSubscriptionDiscountAvailable(normalized.externalSubscriptionId);
 			}
 			const currency = oneCurrency(change.lineItems);
-			const interval = change.lineItems[0]?.interval ?? "month";
+			const interval = recurringCadenceOf(change.lineItems);
 			const renewal = priceCommercialLines({
 				lines: change.lineItems,
 				currency,
@@ -919,9 +920,10 @@ export class StripeBillingService
 					promotionCodeEntry: renewal.promotionCodeEntry,
 					promotion: renewal.promotion,
 					nextCycle:
-						promotion !== null && promotion.discount.duration === "once"
+						interval !== null && promotion !== null && promotion.discount.duration === "once"
 							? {
-									interval,
+									interval: interval.unit as BillingCadenceUnit,
+									intervalCount: interval.count,
 									currency,
 									subtotalMinor: null,
 									discountMinor: null,
@@ -962,11 +964,15 @@ export class StripeBillingService
 						unitAmountMinor: product.priceAmount ?? 0,
 						currency: product.currency ?? "",
 						interval: null,
+						intervalCount: null,
 						pricingModel: "flat",
 					},
 				],
 				currency: product.currency,
-				recurringInterval: recurringIntervalOf(product.billingPeriod),
+				recurringInterval:
+					product.billingPeriod === "one_time"
+						? null
+						: { unit: product.billingPeriod, count: product.billingPeriodCount },
 				promotion,
 				hostedEntry,
 			});
@@ -1035,7 +1041,7 @@ export class StripeBillingService
 		const priced = priceCommercialLines({
 			lines,
 			currency,
-			recurringInterval: lines.find((line) => line.interval !== null)?.interval ?? null,
+			recurringInterval: recurringCadenceOf(lines),
 			promotion,
 			hostedEntry,
 		});
@@ -1130,7 +1136,7 @@ export class StripeBillingService
 				: priceCommercialLines({
 						lines,
 						currency: oneCurrency(lines)?.toLowerCase() ?? intent.currency,
-						recurringInterval: lines.find((line) => line.interval !== null)?.interval ?? null,
+						recurringInterval: recurringCadenceOf(lines),
 						promotion: null,
 						hostedEntry: false,
 					});
@@ -2558,6 +2564,7 @@ function commercialPlanLines(
 			unitAmountMinor: component.unitAmountMinor,
 			currency: component.currency,
 			interval: component.billingInterval,
+			intervalCount: component.billingIntervalCount,
 			pricingModel: component.pricingModel,
 		};
 	});
@@ -2752,10 +2759,6 @@ function promotionFingerprint(base: string, promotion: CommercialPromotion | nul
 	return promotion === null
 		? base
 		: sha256Hex(stableJson({ base, promotion: promotion.fingerprint }));
-}
-
-function recurringIntervalOf(billingPeriod: string): "month" | "year" | null {
-	return billingPeriod === "month" || billingPeriod === "year" ? billingPeriod : null;
 }
 
 /** A reservation outlives its Checkout Session by an hour so the completion webhook still finds it. */

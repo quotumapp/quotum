@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { cadenceUnits } from "../../shared/cadence";
+import { billingCadenceUnits, cadenceUnits } from "../../shared/cadence";
 import { billingProviderValues } from "./provider-enum";
 import { CatalogProviderCompatibilitySchema } from "./provider-responses";
 
@@ -32,7 +32,8 @@ export const getV1AdminCatalogResponse200Schema = z.object({
 						version: z.number(),
 						currency: z.union([z.null(), z.string()]),
 						baseAmountMinor: z.union([z.null(), z.number()]),
-						billingInterval: z.union([z.null(), z.literal("month"), z.literal("year")]),
+						billingInterval: z.union([z.null(), z.enum(billingCadenceUnits)]),
+						billingIntervalCount: z.union([z.null(), z.number()]),
 						trialDays: z.union([z.null(), z.number()]),
 						kind: z.enum(["base", "addon"]).optional(),
 						tierRank: z.number().optional(),
@@ -54,7 +55,8 @@ export const getV1AdminCatalogResponse200Schema = z.object({
 									currency: z.string(),
 									unitAmountMinor: z.number(),
 									billingUnits: z.string(),
-									billingInterval: z.enum(["month", "year"]),
+									billingInterval: z.enum(billingCadenceUnits),
+									billingIntervalCount: z.number(),
 									minimumQuantity: z.number(),
 									maximumQuantity: z.union([z.null(), z.number()]),
 									taxBehavior: z.enum(["inclusive", "exclusive", "unspecified"]),
@@ -112,7 +114,8 @@ export const getV1AdminCatalogResponse200Schema = z.object({
 											currency: z.string(),
 											unitAmountMinor: z.number(),
 											billingUnits: z.string(),
-											billingInterval: z.enum(["month", "year"]),
+											billingInterval: z.enum(billingCadenceUnits),
+											billingIntervalCount: z.number(),
 											minimumQuantity: z.number(),
 											maximumQuantity: z.union([z.null(), z.number()]),
 											taxBehavior: z.enum(["inclusive", "exclusive", "unspecified"]),

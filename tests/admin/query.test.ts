@@ -47,6 +47,7 @@ describe("admin query parsing", () => {
 		const price = {
 			externalPriceId: "price_123",
 			billingPeriod: "monthly",
+			billingPeriodCount: 1,
 			currency: "usd",
 			priceAmount: 999,
 		} satisfies AdminCatalogStoreProductPrice;

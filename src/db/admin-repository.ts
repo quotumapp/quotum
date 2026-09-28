@@ -557,6 +557,7 @@ export class AdminBillingRepository implements AdminBillingReader {
 					sp.external_product_id AS "externalProductId",
 					sp.external_price_id AS "externalPriceId",
 					sp.billing_period AS "billingPeriod",
+					sp.billing_period_count AS "billingPeriodCount",
 					sp.currency,
 					sp.price_amount AS "priceAmount",
 					sp.active,

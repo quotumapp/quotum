@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BillingError } from "../billing/errors";
 import { billingProviders } from "../billing/types";
 import type { CatalogControlPlaneLike } from "../catalog/types";
-import { cadenceUnits, maxCadenceCount } from "../shared/cadence";
+import { billingCadenceUnits, cadenceUnits, maxCadenceCount } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/catalog-responses";
@@ -50,7 +50,8 @@ const priceSchema = z
 		currency: z.string().trim().length(3),
 		unitAmountMinor: z.number().int().nonnegative(),
 		billingUnits: z.string().trim().min(1).max(80),
-		billingInterval: z.enum(["month", "year"]),
+		billingInterval: z.enum(billingCadenceUnits),
+		billingIntervalCount: z.number().int().min(1).max(maxCadenceCount).optional(),
 		minimumQuantity: z.number().int().positive(),
 		maximumQuantity: z.number().int().positive().nullable(),
 		taxBehavior: z.enum(["inclusive", "exclusive", "unspecified"]),
@@ -113,7 +114,8 @@ const planSchema = z
 		version: z.number().int().positive(),
 		currency: z.string().trim().min(3).max(3).nullable(),
 		baseAmountMinor: z.number().int().nonnegative().nullable(),
-		billingInterval: z.enum(["month", "year"]).nullable(),
+		billingInterval: z.enum(billingCadenceUnits).nullable(),
+		billingIntervalCount: z.number().int().min(1).max(maxCadenceCount).nullable().optional(),
 		trialDays: z.number().int().min(0).max(730).nullable(),
 		kind: z.enum(["base", "addon"]).optional(),
 		tierRank: z.number().int().optional(),

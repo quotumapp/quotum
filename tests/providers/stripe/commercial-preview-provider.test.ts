@@ -43,6 +43,7 @@ const product: StripeWebStoreProductRow = {
 	externalProductId: "prod_stripe_credits_100",
 	externalPriceId: "price_credits_100",
 	billingPeriod: "one_time",
+	billingPeriodCount: 1,
 	currency: "usd",
 	priceAmount: 499,
 };
@@ -71,6 +72,7 @@ const plan: StripeRecurringCheckoutPlan = {
 			pricingModel: "flat",
 			currency: "USD",
 			billingInterval: "month",
+			billingIntervalCount: 1,
 		},
 	],
 };
@@ -91,6 +93,7 @@ const change: SubscriptionChangePreview = {
 			unitAmountMinor: 999,
 			currency: "USD",
 			interval: "month",
+			intervalCount: 1,
 			pricingModel: "flat",
 		},
 	],

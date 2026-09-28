@@ -1,3 +1,4 @@
+import type { BillingCadenceUnit } from "../shared/cadence";
 import type { PaymentSetupPlanStatus, PaymentSetupStatus } from "./payment-setup";
 import type { StripeProrationBehavior } from "./pricing";
 import type { CommercialPromotion, PromotionDiscountDuration } from "./promotions";
@@ -70,7 +71,9 @@ export interface CommercialLineItem {
 	quantity: number;
 	unitAmountMinor: number;
 	currency: string;
-	interval: "month" | "year" | null;
+	/** The recurring billing interval, or null for a one-off line. */
+	interval: BillingCadenceUnit | null;
+	intervalCount: number | null;
 	pricingModel: "flat" | "graduated" | "volume";
 	/** Null when Stripe prices the line, such as tiered pricing. */
 	subtotalMinor?: number | null;
@@ -94,7 +97,8 @@ export interface CommercialPreviewPromotion {
 }
 
 export interface CommercialPreviewNextCycle {
-	interval: "month" | "year";
+	interval: BillingCadenceUnit;
+	intervalCount: number;
 	currency: string | null;
 	subtotalMinor: number | null;
 	discountMinor: number | null;
