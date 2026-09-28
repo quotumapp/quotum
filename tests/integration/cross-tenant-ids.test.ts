@@ -38,14 +38,14 @@ localDescribe("Cross-tenant identifiers", () => {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:voysee-shared",
 		});
 		await context.repository.grantAllocation(wiseley, {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:wiseley-shared",
 		});
 		const reserved = await context.repository.reserveUsage(voysee, {
@@ -106,14 +106,14 @@ localDescribe("Cross-tenant identifiers", () => {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:voysee-shared",
 		});
 		await context.repository.grantAllocation(wiseley, {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:wiseley-shared",
 		});
 		const { app, authHeaders } = createIntegrationApp({
@@ -161,14 +161,14 @@ localDescribe("Cross-tenant identifiers", () => {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:voysee-shared",
 		});
 		await context.repository.grantAllocation(wiseley, {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:wiseley-shared",
 		});
 		await context.repository.consumeUsage(voysee, {

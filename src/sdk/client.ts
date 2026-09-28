@@ -6,6 +6,12 @@ import type {
 	AdminStoreEvent,
 } from "../admin/types";
 import type {
+	AdministrativeDebitMutationResult,
+	AdministrativeDebitRecord,
+	OperatorGrantMutationResult,
+	OperatorGrantRecord,
+} from "../billing/balance-adjustments";
+import type {
 	CommercialActionExecutionResult,
 	CommercialActionIntent,
 	CommercialActionPreview,
@@ -124,6 +130,7 @@ export class BillingClient {
 	readonly purchases;
 	readonly promotions;
 	readonly trials;
+	readonly adjustments;
 	readonly providers;
 	readonly admin;
 
@@ -416,6 +423,61 @@ export class BillingClient {
 				this.request<PromotionValidation>(
 					`/v1/billing-accounts/${segment(billingAccountId)}/promotion-codes/validate`,
 					{ method: "POST", body: input },
+				),
+		};
+		// Operator grants and debits change balances, so each call sends the operator key and actor.
+		this.adjustments = {
+			/** Gives a goodwill credit of a consumable feature; it never records a payment. */
+			grant: (
+				billingAccountId: string,
+				input: {
+					featureKey: string;
+					quantity: string;
+					entityId?: string | null;
+					expiresAt?: string | null;
+					reason: string;
+				},
+				idempotencyKey: string,
+			) =>
+				this.request<OperatorGrantMutationResult>(
+					`/v1/admin/operator-grants/${segment(billingAccountId)}`,
+					{ method: "POST", body: input, operator: true, idempotencyKey },
+				),
+			grants: (billingAccountId: string, query: { limit?: number; cursor?: string } = {}) =>
+				this.requestPage<OperatorGrantRecord>(
+					pathWithQuery(`/v1/admin/operator-grants/${segment(billingAccountId)}`, query),
+					{ operator: true },
+				),
+			getGrant: (billingAccountId: string, grantId: string) =>
+				this.request<OperatorGrantRecord>(
+					`/v1/admin/operator-grants/${segment(billingAccountId)}/${segment(grantId)}`,
+					{ operator: true },
+				),
+			/** Takes back only quantity that is unconsumed, unheld and unexpired. */
+			revokeGrant: (
+				billingAccountId: string,
+				grantId: string,
+				reason: string,
+				idempotencyKey: string,
+			) =>
+				this.request<OperatorGrantMutationResult>(
+					`/v1/admin/operator-grants/${segment(billingAccountId)}/${segment(grantId)}/revoke`,
+					{ method: "POST", body: { reason }, operator: true, idempotencyKey },
+				),
+			/** Takes quantity back from named allocations, all or nothing; it is never usage. */
+			debit: (
+				billingAccountId: string,
+				input: { allocations: Array<{ allocationId: string; quantity: string }>; reason: string },
+				idempotencyKey: string,
+			) =>
+				this.request<AdministrativeDebitMutationResult>(
+					`/v1/admin/administrative-debits/${segment(billingAccountId)}`,
+					{ method: "POST", body: input, operator: true, idempotencyKey },
+				),
+			debits: (billingAccountId: string, query: { limit?: number; cursor?: string } = {}) =>
+				this.requestPage<AdministrativeDebitRecord>(
+					pathWithQuery(`/v1/admin/administrative-debits/${segment(billingAccountId)}`, query),
+					{ operator: true },
 				),
 		};
 		this.providers = {

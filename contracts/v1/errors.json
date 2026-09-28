@@ -39,9 +39,27 @@
       ]
     },
     {
+      "code": "ADMINISTRATIVE_DEBIT_EXCEEDS_AVAILABLE",
+      "sources": [
+        "src/billing/balance-adjustments.ts"
+      ]
+    },
+    {
       "code": "ALLOCATION_IDENTITY_CONFLICT",
       "sources": [
         "src/db/repository/metering.ts"
+      ]
+    },
+    {
+      "code": "ALLOCATION_NOT_DEBITABLE",
+      "sources": [
+        "src/billing/balance-adjustments.ts"
+      ]
+    },
+    {
+      "code": "ALLOCATION_NOT_FOUND",
+      "sources": [
+        "src/billing/balance-adjustments.ts"
       ]
     },
     {
@@ -80,6 +98,7 @@
     {
       "code": "BILLING_ACCOUNT_NOT_FOUND",
       "sources": [
+        "src/db/repository/balance-adjustments.ts",
         "src/db/repository/controls-enterprise.ts",
         "src/db/repository/insights.ts",
         "src/db/repository/usage-operations.ts"
@@ -457,6 +476,7 @@
     {
       "code": "IDEMPOTENCY_CONFLICT",
       "sources": [
+        "src/db/repository/balance-adjustments.ts",
         "src/db/repository/commercial-actions.ts",
         "src/db/repository/plan-grants.ts",
         "src/db/repository/promotions.ts",
@@ -700,6 +720,24 @@
       "code": "OPERATION_RESULT_EXPIRED",
       "sources": [
         "src/db/repository/usage-operations.ts"
+      ]
+    },
+    {
+      "code": "OPERATOR_GRANT_ALREADY_REVOKED",
+      "sources": [
+        "src/billing/balance-adjustments.ts"
+      ]
+    },
+    {
+      "code": "OPERATOR_GRANT_FEATURE_INVALID",
+      "sources": [
+        "src/billing/balance-adjustments.ts"
+      ]
+    },
+    {
+      "code": "OPERATOR_GRANT_NOT_FOUND",
+      "sources": [
+        "src/billing/balance-adjustments.ts"
       ]
     },
     {

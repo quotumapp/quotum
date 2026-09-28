@@ -2480,6 +2480,8 @@ export const balanceAllocations = pgTable(
 		promotionRedemptionId: uuid("promotion_redemption_id"),
 		// Composite FK to plan_grants is added after that table in the SQL baseline.
 		planGrantId: uuid("plan_grant_id"),
+		// Composite FK to operator_grants is added after that table in the SQL baseline.
+		operatorGrantId: uuid("operator_grant_id"),
 		...timestampColumns(),
 	},
 	(table): PgTableExtraConfigValue[] => [
@@ -2591,6 +2593,18 @@ export const balanceAllocations = pgTable(
 			"balance_allocations_reward_provenance_check",
 			sql`(${table.sourceKind} = 'reward') = (${table.promotionRedemptionId} IS NOT NULL OR ${table.planGrantId} IS NOT NULL)`,
 		),
+		check(
+			"balance_allocations_operator_provenance_check",
+			sql`(${table.sourceKind} = 'operator') = (${table.operatorGrantId} IS NOT NULL)`,
+		),
+		foreignKey({
+			name: "balance_allocations_project_operator_grant_fk",
+			columns: [table.projectId, table.operatorGrantId],
+			foreignColumns: [operatorGrants.projectId, operatorGrants.id],
+		}),
+		uniqueIndex("idx_billing_balance_allocations_operator_grant")
+			.on(table.projectId, table.operatorGrantId)
+			.where(sql`${table.operatorGrantId} IS NOT NULL`),
 	],
 );
 
@@ -5127,6 +5141,163 @@ export const planGrants = pgTable(
 		check(
 			"plan_grants_status_check",
 			sql`${table.status} IN ('active', 'expired', 'ended', 'superseded')`,
+		),
+	],
+);
+
+export const operatorGrants = pgTable(
+	"operator_grants",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		customerId: uuid("customer_id").notNull(),
+		actor: text("actor").notNull(),
+		reason: text("reason").notNull(),
+		idempotencyKey: text("idempotency_key").notNull(),
+		requestHash: text("request_hash").notNull(),
+		revokedAt: timestamp("revoked_at", { withTimezone: true }),
+		revokedQuantity: quantityColumn("revoked_quantity"),
+		revocationActor: text("revocation_actor"),
+		revocationReason: text("revocation_reason"),
+		revocationIdempotencyKey: text("revocation_idempotency_key"),
+		revocationRequestHash: text("revocation_request_hash"),
+		...timestampColumns(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"operator_grants_actor_check",
+			sql`(((char_length(actor) >= 1) AND (char_length(actor) <= 200)))`,
+		),
+		check(
+			"operator_grants_reason_check",
+			sql`(((char_length(reason) >= 1) AND (char_length(reason) <= 500)))`,
+		),
+		check(
+			"operator_grants_idempotency_key_check",
+			sql`(((char_length(idempotency_key) >= 1) AND (char_length(idempotency_key) <= 255)))`,
+		),
+		check("operator_grants_request_hash_check", sql`((char_length(request_hash) = 64))`),
+		check(
+			"operator_grants_revoked_quantity_check",
+			sql`(((revoked_quantity IS NULL) OR (revoked_quantity >= (0)::numeric)))`,
+		),
+		check(
+			"operator_grants_revocation_actor_check",
+			sql`(((revocation_actor IS NULL) OR ((char_length(revocation_actor) >= 1) AND (char_length(revocation_actor) <= 200))))`,
+		),
+		check(
+			"operator_grants_revocation_reason_check",
+			sql`(((revocation_reason IS NULL) OR ((char_length(revocation_reason) >= 1) AND (char_length(revocation_reason) <= 500))))`,
+		),
+		check(
+			"operator_grants_revocation_idempotency_key_check",
+			sql`(((revocation_idempotency_key IS NULL) OR ((char_length(revocation_idempotency_key) >= 1) AND (char_length(revocation_idempotency_key) <= 255))))`,
+		),
+		check(
+			"operator_grants_revocation_request_hash_check",
+			sql`(((revocation_request_hash IS NULL) OR (char_length(revocation_request_hash) = 64)))`,
+		),
+		check(
+			"operator_grants_revocation_check",
+			sql`((((revoked_at IS NULL) AND (revoked_quantity IS NULL) AND (revocation_actor IS NULL) AND (revocation_reason IS NULL) AND (revocation_idempotency_key IS NULL) AND (revocation_request_hash IS NULL)) OR ((revoked_at IS NOT NULL) AND (revoked_quantity IS NOT NULL) AND (revocation_actor IS NOT NULL) AND (revocation_reason IS NOT NULL) AND (revocation_idempotency_key IS NOT NULL) AND (revocation_request_hash IS NOT NULL))))`,
+		),
+		unique("operator_grants_project_id_id_unique").on(table.projectId, table.id),
+		unique("operator_grants_idempotency_unique").on(
+			table.projectId,
+			table.customerId,
+			table.idempotencyKey,
+		),
+		foreignKey({
+			name: "operator_grants_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		index("idx_billing_operator_grants_customer_created").on(
+			table.projectId,
+			table.customerId,
+			table.createdAt.desc(),
+			table.id.desc(),
+		),
+	],
+);
+
+export const administrativeDebits = pgTable(
+	"administrative_debits",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		customerId: uuid("customer_id").notNull(),
+		actor: text("actor").notNull(),
+		reason: text("reason").notNull(),
+		idempotencyKey: text("idempotency_key").notNull(),
+		requestHash: text("request_hash").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"administrative_debits_actor_check",
+			sql`(((char_length(actor) >= 1) AND (char_length(actor) <= 200)))`,
+		),
+		check(
+			"administrative_debits_reason_check",
+			sql`(((char_length(reason) >= 1) AND (char_length(reason) <= 500)))`,
+		),
+		check(
+			"administrative_debits_idempotency_key_check",
+			sql`(((char_length(idempotency_key) >= 1) AND (char_length(idempotency_key) <= 255)))`,
+		),
+		check("administrative_debits_request_hash_check", sql`((char_length(request_hash) = 64))`),
+		unique("administrative_debits_project_id_id_unique").on(table.projectId, table.id),
+		unique("administrative_debits_idempotency_unique").on(
+			table.projectId,
+			table.customerId,
+			table.idempotencyKey,
+		),
+		foreignKey({
+			name: "administrative_debits_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		index("idx_billing_administrative_debits_customer_created").on(
+			table.projectId,
+			table.customerId,
+			table.createdAt.desc(),
+			table.id.desc(),
+		),
+	],
+);
+
+export const administrativeDebitAllocations = pgTable(
+	"administrative_debit_allocations",
+	{
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		debitId: uuid("debit_id").notNull(),
+		allocationId: bigint("allocation_id", { mode: "number" }).notNull(),
+		quantity: quantityColumn("quantity").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check("administrative_debit_allocations_quantity_check", sql`((quantity > (0)::numeric))`),
+		primaryKey({ columns: [table.projectId, table.debitId, table.allocationId] }),
+		foreignKey({
+			name: "administrative_debit_allocations_project_debit_fk",
+			columns: [table.projectId, table.debitId],
+			foreignColumns: [administrativeDebits.projectId, administrativeDebits.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "administrative_debit_allocations_project_allocation_fk",
+			columns: [table.projectId, table.allocationId],
+			foreignColumns: [balanceAllocations.projectId, balanceAllocations.id],
+		}).onDelete("restrict"),
+		index("idx_billing_administrative_debit_allocations_allocation").on(
+			table.projectId,
+			table.allocationId,
 		),
 	],
 );

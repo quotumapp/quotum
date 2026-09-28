@@ -1,11 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import type { MeteringBalance } from "../../../src/billing/metering";
 import {
+	type AllocationRow,
 	calculateWalletQuantity,
 	type FeatureRow,
 	type MeterLimitDecision,
 	meterLimitReservationSpend,
 	meterLimitSpendDelta,
+	planConfirmation,
 	type RateDecision,
 } from "../../../src/db/repository/metering-persistence";
 import { FakeDatabase } from "../repository-fixture";
@@ -131,5 +133,59 @@ describe("rate-card wallet charges", () => {
 		expect(await calculateWalletQuantity(database as never, rate, "10")).toBe("20");
 		expect(await calculateWalletQuantity(database as never, rate, "10")).toBe("20");
 		expect(database.queries).toHaveLength(0);
+	});
+});
+
+describe("reservation confirmation plan", () => {
+	function allocation(
+		id: string,
+		values: { quantity: string; reversed?: string; consumed?: string; held?: string },
+	): AllocationRow {
+		return {
+			id,
+			quantity: values.quantity,
+			reversed_quantity: values.reversed ?? "0",
+			consumed_quantity: values.consumed ?? "0",
+			held_quantity: values.held ?? "0",
+			source_kind: "topup",
+			source_key: `topup:${id}`,
+			expires_at: null,
+			created_at: "2026-09-01T00:00:00.000Z",
+			reversed_at: null,
+			entity_external_id: null,
+			rollover_origin_allocation_id: null,
+			rollover_policy_revision: null,
+			period_start_at: null,
+			period_end_at: null,
+		};
+	}
+
+	it("settles extra consumption only from quantity a partial refund left", () => {
+		// Allocation 1 holds the reservation's 4; a partial refund reversed 8 of its other 10.
+		const plan = planConfirmation(
+			[
+				allocation("1", { quantity: "20", reversed: "8", consumed: "6", held: "4" }),
+				allocation("2", { quantity: "10" }),
+			],
+			[{ allocation_id: "1", held_quantity: "4", consumed_quantity: "0" }],
+			0,
+			"12",
+		);
+
+		expect(plan.changes).toEqual([
+			{ allocationId: "1", consume: 6n, release: 4n, hasHold: true },
+			{ allocationId: "2", consume: 6n, release: 0n, hasHold: false },
+		]);
+	});
+
+	it("refuses extra consumption that only reversed quantity could cover", () => {
+		expect(() =>
+			planConfirmation(
+				[allocation("1", { quantity: "10", reversed: "6", held: "4" })],
+				[{ allocation_id: "1", held_quantity: "4", consumed_quantity: "0" }],
+				0,
+				"6",
+			),
+		).toThrow(expect.objectContaining({ code: "INSUFFICIENT_BALANCE", status: 409 }));
 	});
 });

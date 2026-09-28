@@ -364,7 +364,7 @@ localDescribe("Provider job identity integration", () => {
 				billingAccountId: account,
 				featureKey: "ai_credits",
 				quantity: "10",
-				sourceKind: "operator",
+				sourceKind: "credit_grant",
 				sourceKey: "fixture:identity-topup",
 			});
 			await linkStripeCustomer(context.sql, account, "cus_identity_topup");

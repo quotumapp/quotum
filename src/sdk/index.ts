@@ -1,4 +1,11 @@
 export type {
+	AdministrativeDebitMutationResult,
+	AdministrativeDebitRecord,
+	OperatorGrantMutationResult,
+	OperatorGrantRecord,
+	OperatorGrantStatus,
+} from "../billing/balance-adjustments";
+export type {
 	CommercialActionExecutionResult,
 	CommercialActionIntent,
 	CommercialActionPreview,

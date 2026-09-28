@@ -1543,7 +1543,7 @@ localDescribe("promotion feature grants", () => {
 			billingAccountId: "reader",
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "reader-base",
 		});
 		const redeem = (billingAccountId: string, key: string, body: unknown) =>
@@ -1617,7 +1617,11 @@ localDescribe("promotion feature grants", () => {
 			ORDER BY id
 		`;
 		expect(allocations).toEqual([
-			{ source_kind: "operator", consumed_quantity: "0.000000000", promotion_redemption_id: null },
+			{
+				source_kind: "credit_grant",
+				consumed_quantity: "0.000000000",
+				promotion_redemption_id: null,
+			},
 			{
 				source_kind: "reward",
 				consumed_quantity: "5.000000000",

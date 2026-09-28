@@ -39,7 +39,7 @@ The current schema is initialized from these ordered baseline files:
 | --- | --- |
 | [001_platform.sql](../migrations/001_platform.sql) | Organizations, projects, instances, credentials and customer connections |
 | [002_billing_core.sql](../migrations/002_billing_core.sql) | Billing accounts, purchases, subscriptions, entitlements and provider/projection jobs |
-| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup, promotions and plan grants |
+| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup, promotions, plan grants, operator grants and administrative debits |
 | [004_merchant.sql](../migrations/004_merchant.sql) | Merchant identity, authentication, sessions, membership, audit and connection OAuth state |
 <!-- migration-inventory:end -->
 
@@ -172,6 +172,58 @@ SELECT count(*) FROM balance_allocations WHERE source_kind = 'reward' AND promot
 
 both return 0. An older image cannot read the new baselines, so a rollback restores the
 pre-upgrade backup and loses grants created since.
+
+### Operator grants
+
+The metering baseline adds the `operator_grants`, `administrative_debits` and
+`administrative_debit_allocations` tables, and a nullable `balance_allocations.operator_grant_id`
+with its foreign key. The check `balance_allocations_operator_provenance_check` requires every
+`operator` allocation to link its grant. Before this version only the test entrypoints, the merchant
+test seed and the load lane wrote `operator` allocations, so count them in the old database before
+dumping:
+
+```sql
+SELECT count(*) FROM balance_allocations WHERE source_kind = 'operator';
+```
+
+With none, follow steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity).
+Otherwise give each such allocation a grant, which the restore cannot do on its own because it
+still enforces checks:
+
+1. Follow steps 1 and 2 there.
+2. Let the restore load unlinked `operator` allocations:
+
+   ```sql
+   ALTER TABLE balance_allocations DROP CONSTRAINT balance_allocations_operator_provenance_check;
+   ```
+
+3. Restore the data as in step 4 there.
+4. Record one grant per allocation, link it and restore the check. Adding the check fails while any
+   `operator` allocation is left unlinked:
+
+   ```sql
+   INSERT INTO operator_grants (
+     project_id, customer_id, actor, reason, idempotency_key, request_hash, created_at, updated_at
+   )
+   SELECT project_id, customer_id, 'upgrade-backfill',
+     'Operator allocation recorded before operator grants', 'backfill:allocation:' || id,
+     encode(sha256(convert_to('backfill:allocation:' || id, 'UTF8')), 'hex'), created_at, created_at
+   FROM balance_allocations WHERE source_kind = 'operator';
+   UPDATE balance_allocations AS allocation SET operator_grant_id = backfill.id
+   FROM operator_grants AS backfill
+   WHERE allocation.source_kind = 'operator'
+     AND backfill.project_id = allocation.project_id
+     AND backfill.customer_id = allocation.customer_id
+     AND backfill.idempotency_key = 'backfill:allocation:' || allocation.id;
+   ALTER TABLE balance_allocations ADD CONSTRAINT balance_allocations_operator_provenance_check
+     CHECK ((source_kind = 'operator') = (operator_grant_id IS NOT NULL));
+   ```
+
+5. Finish with step 6 there.
+
+The backfilled grants keep their allocations' original source keys and can be revoked like any
+other. An older image cannot read the new baselines, so a rollback restores the pre-upgrade backup
+and loses grants and debits made since.
 
 ### Reset cadence
 

@@ -63,7 +63,7 @@ e2eDescribe("E2E MCP server", () => {
 				billingAccountId: "mcp-account",
 				featureKey: "ai_credits",
 				quantity: "10",
-				sourceKind: "operator",
+				sourceKind: "credit_grant",
 				sourceKey: "e2e-mcp",
 			});
 		}

@@ -21,7 +21,7 @@ export async function seedAutoTopupJobs(
 			billingAccountId,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: `fixture:${billingAccountId}`,
 		});
 		await repository.controlsEnterprise.upsertAutoTopupPolicy(project, {

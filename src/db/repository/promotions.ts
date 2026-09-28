@@ -1,6 +1,12 @@
 import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import { decodeAdminCursor, encodeAdminCursor } from "../../admin/query";
-import { databaseDecimal, sha256Hex, stableJson } from "../../billing/decimal";
+import {
+	databaseDecimal,
+	decimalToUnits,
+	sha256Hex,
+	stableJson,
+	unitsToDecimal,
+} from "../../billing/decimal";
 import { PersistenceConflictError } from "../../billing/errors";
 import {
 	type CommercialPromotion,
@@ -968,14 +974,16 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 				id: string | number;
 				feature_key: string;
 				quantity: string;
+				reversed_quantity: string;
 				consumed_quantity: string;
 				held_quantity: string;
 				expired: boolean;
 			}>(
 				tx,
 				drizzleSql`
-					SELECT a.id, f.key AS feature_key, a.quantity::text, a.consumed_quantity::text,
-						a.held_quantity::text, (a.expires_at IS NOT NULL AND a.expires_at <= now()) AS expired
+					SELECT a.id, f.key AS feature_key, a.quantity::text, a.reversed_quantity::text,
+						a.consumed_quantity::text, a.held_quantity::text,
+						(a.expires_at IS NOT NULL AND a.expires_at <= now()) AS expired
 					FROM balance_allocations a
 					JOIN features f ON f.project_id = a.project_id AND f.id = a.feature_id
 					WHERE a.project_id = ${projectId}
@@ -993,18 +1001,24 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 							tx,
 							drizzleSql`
 								UPDATE balance_allocations
-								SET reversed_quantity = GREATEST(quantity - consumed_quantity - held_quantity, 0),
+								SET reversed_quantity = GREATEST(
+										quantity - consumed_quantity - held_quantity, reversed_quantity
+									),
 									reversed_at = now(), updated_at = now()
 								WHERE project_id = ${projectId} AND id = ${String(allocation.id)}::bigint
 								RETURNING reversed_quantity::text
 							`,
 						);
+				// An administrative debit may have reversed part of it already; report only this revocation.
+				const revokedUnits =
+					reversed === null
+						? 0n
+						: decimalToUnits(databaseDecimal(reversed.reversed_quantity, "reversed quantity"), 9) -
+							decimalToUnits(databaseDecimal(allocation.reversed_quantity, "reversed quantity"), 9);
 				reversedAllocations.push({
 					allocationId: String(allocation.id),
 					featureKey: allocation.feature_key,
-					reversedQuantity: promotionQuantity(
-						databaseDecimal(reversed?.reversed_quantity ?? "0", "reversed quantity"),
-					),
+					reversedQuantity: promotionQuantity(unitsToDecimal(revokedUnits, 9)),
 					consumedQuantity: promotionQuantity(
 						databaseDecimal(allocation.consumed_quantity, "consumed quantity"),
 					),

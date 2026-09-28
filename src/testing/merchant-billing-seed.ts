@@ -43,12 +43,15 @@ export async function seedMerchantBilling(
 		]);
 		await publishAiCreditsCatalog(repository, context);
 		await seedPhase3CatalogMigration(database, instance.key);
-		await repository.grantAllocation(context, {
+		await repository.balanceAdjustments.grantOperatorBalance(context, {
 			billingAccountId,
 			featureKey: "ai_credits",
 			quantity: "20",
-			sourceKind: "operator",
-			sourceKey: "merchant:synthetic:grant",
+			entityId: null,
+			expiresAt: null,
+			reason: "Synthetic merchant scenario credit",
+			actor: "merchant-synthetic-seed",
+			idempotencyKey: "merchant:synthetic:grant",
 		});
 		await repository.consumeUsage(context, {
 			billingAccountId,

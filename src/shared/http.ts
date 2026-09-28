@@ -96,6 +96,8 @@ function operatorRequiredPath(path: string): boolean {
 		path.startsWith("/v1/admin/catalog-migrations/") ||
 		path.startsWith("/v1/admin/auto-topups/") ||
 		path.startsWith("/v1/admin/promotion") ||
+		path.startsWith("/v1/admin/operator-grants/") ||
+		path.startsWith("/v1/admin/administrative-debits/") ||
 		operatorRequiredPathPattern.test(path)
 	);
 }

@@ -437,6 +437,7 @@ CREATE TABLE IF NOT EXISTS balance_allocations (
 	rollover_processed_at TIMESTAMPTZ,
 	promotion_redemption_id UUID,
 	plan_grant_id UUID,
+	operator_grant_id UUID,
 	CONSTRAINT balance_allocations_project_id_id_unique UNIQUE (project_id, id),
 	CONSTRAINT balance_allocations_source_unique UNIQUE (project_id, feature_id, source_kind, source_key),
 	CONSTRAINT balance_allocations_project_customer_fk FOREIGN KEY (project_id, customer_id)
@@ -469,6 +470,11 @@ CREATE TABLE IF NOT EXISTS balance_allocations (
 	-- its provenance.
 	CONSTRAINT balance_allocations_reward_provenance_check CHECK (
 		(source_kind = 'reward') = (promotion_redemption_id IS NOT NULL OR plan_grant_id IS NOT NULL)
+	),
+	-- An operator allocation exists only as the effect of an operator grant, which carries its
+	-- actor, reason and idempotency key.
+	CONSTRAINT balance_allocations_operator_provenance_check CHECK (
+		(source_kind = 'operator') = (operator_grant_id IS NOT NULL)
 	)
 );
 
@@ -2435,6 +2441,89 @@ CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_superseding_subscription
 	ON plan_grants (project_id, superseded_by_subscription_id)
 	WHERE superseded_by_subscription_id IS NOT NULL;
 
+-- An operator grant gives an account quantity of a consumable feature as a goodwill credit. It is
+-- audited here and takes effect as one `operator` allocation linked to it; it never records a
+-- payment. Feature, entity, quantity and expiry live on that allocation. A revocation takes back
+-- only quantity that is unconsumed, unheld and unexpired.
+CREATE TABLE IF NOT EXISTS operator_grants (
+	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	customer_id UUID NOT NULL,
+	actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),
+	reason TEXT NOT NULL CHECK (char_length(reason) BETWEEN 1 AND 500),
+	idempotency_key TEXT COLLATE "C" NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
+	request_hash TEXT COLLATE "C" NOT NULL CHECK (char_length(request_hash) = 64),
+	revoked_at TIMESTAMPTZ,
+	revoked_quantity NUMERIC(28, 9) CHECK (revoked_quantity IS NULL OR revoked_quantity >= 0),
+	revocation_actor TEXT CHECK (
+		revocation_actor IS NULL OR char_length(revocation_actor) BETWEEN 1 AND 200
+	),
+	revocation_reason TEXT CHECK (
+		revocation_reason IS NULL OR char_length(revocation_reason) BETWEEN 1 AND 500
+	),
+	revocation_idempotency_key TEXT COLLATE "C" CHECK (
+		revocation_idempotency_key IS NULL OR char_length(revocation_idempotency_key) BETWEEN 1 AND 255
+	),
+	revocation_request_hash TEXT COLLATE "C" CHECK (
+		revocation_request_hash IS NULL OR char_length(revocation_request_hash) = 64
+	),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT operator_grants_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT operator_grants_idempotency_unique UNIQUE (project_id, customer_id, idempotency_key),
+	CONSTRAINT operator_grants_project_customer_fk FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id) ON DELETE CASCADE,
+	CONSTRAINT operator_grants_revocation_check CHECK (
+		(revoked_at IS NULL AND revoked_quantity IS NULL AND revocation_actor IS NULL
+			AND revocation_reason IS NULL AND revocation_idempotency_key IS NULL
+			AND revocation_request_hash IS NULL)
+		OR (revoked_at IS NOT NULL AND revoked_quantity IS NOT NULL AND revocation_actor IS NOT NULL
+			AND revocation_reason IS NOT NULL AND revocation_idempotency_key IS NOT NULL
+			AND revocation_request_hash IS NOT NULL)
+	)
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_operator_grants_customer_created
+	ON operator_grants (project_id, customer_id, created_at DESC, id DESC);
+
+-- An administrative debit takes quantity back from named allocations for a business reason. It is
+-- not usage: it raises each allocation's reversed quantity and never writes a usage event.
+CREATE TABLE IF NOT EXISTS administrative_debits (
+	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	customer_id UUID NOT NULL,
+	actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),
+	reason TEXT NOT NULL CHECK (char_length(reason) BETWEEN 1 AND 500),
+	idempotency_key TEXT COLLATE "C" NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
+	request_hash TEXT COLLATE "C" NOT NULL CHECK (char_length(request_hash) = 64),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT administrative_debits_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT administrative_debits_idempotency_unique
+		UNIQUE (project_id, customer_id, idempotency_key),
+	CONSTRAINT administrative_debits_project_customer_fk FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_administrative_debits_customer_created
+	ON administrative_debits (project_id, customer_id, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS administrative_debit_allocations (
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	debit_id UUID NOT NULL,
+	allocation_id BIGINT NOT NULL,
+	quantity NUMERIC(28, 9) NOT NULL CHECK (quantity > 0),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	PRIMARY KEY (project_id, debit_id, allocation_id),
+	CONSTRAINT administrative_debit_allocations_project_debit_fk FOREIGN KEY (project_id, debit_id)
+		REFERENCES administrative_debits(project_id, id) ON DELETE CASCADE,
+	CONSTRAINT administrative_debit_allocations_project_allocation_fk
+		FOREIGN KEY (project_id, allocation_id)
+		REFERENCES balance_allocations(project_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_administrative_debit_allocations_allocation
+	ON administrative_debit_allocations (project_id, allocation_id);
+
 CREATE INDEX IF NOT EXISTS idx_billing_usage_events_customer_feature_time
 	ON usage_events (project_id, customer_id, meter_feature_id, recorded_at DESC, id DESC);
 
@@ -2460,6 +2549,16 @@ ALTER TABLE balance_allocations
 CREATE INDEX IF NOT EXISTS idx_billing_balance_allocations_plan_grant
 	ON balance_allocations (project_id, plan_grant_id)
 	WHERE plan_grant_id IS NOT NULL;
+
+ALTER TABLE balance_allocations
+	ADD CONSTRAINT balance_allocations_project_operator_grant_fk
+			FOREIGN KEY (project_id, operator_grant_id)
+			REFERENCES operator_grants(project_id, id);
+
+-- One grant, one allocation.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_balance_allocations_operator_grant
+	ON balance_allocations (project_id, operator_grant_id)
+	WHERE operator_grant_id IS NOT NULL;
 
 -- Constraints on tables defined in earlier files that reference this file's tables.
 ALTER TABLE projects

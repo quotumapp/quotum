@@ -919,7 +919,7 @@ async function seedAccounts(repository: BillingRepository, accounts: number): Pr
 			billingAccountId,
 			featureKey: "ai_credits",
 			quantity: "1000000000",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: `load-lane:${billingAccountId}`,
 		});
 	await grant(hotAccount);

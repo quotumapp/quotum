@@ -40,7 +40,7 @@ localDescribe("authoritative metering flows", () => {
 			billingAccountId,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "ceiling",
 		});
 		const { app, authHeaders } = createIntegrationApp({
@@ -117,7 +117,7 @@ localDescribe("authoritative metering flows", () => {
 			billingAccountId,
 			featureKey: "ai_credits",
 			quantity: "1",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "expiry",
 		});
 		await context.repository.controlsEnterprise.upsertControl(project, {
@@ -174,7 +174,7 @@ localDescribe("authoritative metering flows", () => {
 			billingAccountId,
 			featureKey: "ai_credits",
 			quantity: "1",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "ttl",
 		});
 		const input = {
@@ -233,7 +233,7 @@ localDescribe("authoritative metering flows", () => {
 			billingAccountId: "account_1",
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:account_1",
 		});
 		const { app, authHeaders } = createIntegrationApp({
@@ -317,7 +317,7 @@ localDescribe("authoritative metering flows", () => {
 			billingAccountId: "insights_account",
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:insights_account",
 		});
 		const original = await context.repository.consumeUsage(integrationProjectContext(), {
@@ -413,7 +413,7 @@ localDescribe("authoritative metering flows", () => {
 				billingAccountId,
 				featureKey: "ai_credits",
 				quantity: "10",
-				sourceKind: "operator",
+				sourceKind: "credit_grant",
 				sourceKey: `fixture:${billingAccountId}`,
 			});
 		}
@@ -518,7 +518,7 @@ localDescribe("authoritative metering flows", () => {
 			billingAccountId: "account_2",
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:account_2",
 		});
 		const { app, authHeaders } = createIntegrationApp({
@@ -579,7 +579,7 @@ localDescribe("authoritative metering flows", () => {
 			billingAccountId: "worker_account",
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:worker_account",
 		});
 		const input = {
@@ -619,7 +619,7 @@ localDescribe("authoritative metering flows", () => {
 			billingAccountId: "correction_account",
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:correction_account",
 		});
 		const { app, authHeaders } = createIntegrationApp({
@@ -723,7 +723,7 @@ localDescribe("authoritative metering flows", () => {
 			billingAccountId,
 			featureKey: "whole_credits",
 			quantity: "2",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:whole_credits",
 		});
 		const subject = { billingAccountId, featureKey: "small_tokens" };
@@ -1594,7 +1594,7 @@ localDescribe("authoritative metering flows", () => {
 			billingAccountId: "maintenance_account",
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:maintenance_account",
 		});
 		await context.repository.consumeUsage(integrationProjectContext(), {

@@ -50,7 +50,7 @@ localDescribe("Phase 3 release journeys", () => {
 			billingAccountId: account,
 			featureKey: "ai_credits",
 			quantity: "20",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:http-controls",
 		});
 
@@ -137,7 +137,7 @@ localDescribe("Phase 3 release journeys", () => {
 			available: "15",
 			breakdown: [
 				{
-					sourceKind: "operator",
+					sourceKind: "credit_grant",
 					quantity: "20",
 					consumed: "5",
 					available: "15",
@@ -154,7 +154,7 @@ localDescribe("Phase 3 release journeys", () => {
 			billingAccountId: account,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:worker-topup",
 		});
 		await linkStripeCustomer(context.sql, account, "cus_worker_topup");
@@ -225,7 +225,7 @@ localDescribe("Phase 3 release journeys", () => {
 			billingAccountId: actionAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:worker-topup-action",
 		});
 		await linkStripeCustomer(context.sql, actionAccount, "cus_worker_topup_action");

@@ -424,6 +424,70 @@ describe("BillingClient", () => {
 		expect(await calls[2]?.json()).toEqual({ reason: "Fraudulent signup" });
 	});
 
+	it("grants, revokes and debits balances with operator identity on every call", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			operatorKey: "operator-secret",
+			actor: "support@example.com",
+			fetch: async (input, init) => {
+				const request = new Request(input, init);
+				calls.push(request);
+				return request.method === "GET" && !new URL(request.url).pathname.endsWith("/grant-1")
+					? Response.json({ success: true, data: [], pagination: { nextCursor: null } })
+					: Response.json({ success: true, data: {} });
+			},
+		});
+
+		await client.adjustments.grant(
+			"account 1",
+			{ featureKey: "ai_credits", quantity: "25", reason: "Outage goodwill" },
+			"grant-1",
+		);
+		const grants = await client.adjustments.grants("account 1", { limit: 5 });
+		await client.adjustments.getGrant("account 1", "grant-1");
+		await client.adjustments.revokeGrant("account 1", "grant-1", "Granted in error", "revoke-1");
+		await client.adjustments.debit(
+			"account 1",
+			{ allocations: [{ allocationId: "17", quantity: "5" }], reason: "Duplicate credit" },
+			"debit-1",
+		);
+		const debits = await client.adjustments.debits("account 1", { cursor: "next" });
+
+		expect(grants).toEqual({ data: [], nextCursor: null });
+		expect(debits).toEqual({ data: [], nextCursor: null });
+		expect(
+			calls.map(
+				(call) => `${call.method} ${new URL(call.url).pathname}${new URL(call.url).search}`,
+			),
+		).toEqual([
+			"POST /v1/admin/operator-grants/account%201",
+			"GET /v1/admin/operator-grants/account%201?limit=5",
+			"GET /v1/admin/operator-grants/account%201/grant-1",
+			"POST /v1/admin/operator-grants/account%201/grant-1/revoke",
+			"POST /v1/admin/administrative-debits/account%201",
+			"GET /v1/admin/administrative-debits/account%201?cursor=next",
+		]);
+		for (const call of calls) {
+			expect(call.headers.get("x-billing-operator-key")).toBe("operator-secret");
+			expect(call.headers.get("x-billing-actor")).toBe("support@example.com");
+		}
+		expect(calls.map((call) => call.headers.get("idempotency-key"))).toEqual([
+			"grant-1",
+			null,
+			null,
+			"revoke-1",
+			"debit-1",
+			null,
+		]);
+		expect(await calls[3]?.json()).toEqual({ reason: "Granted in error" });
+		expect(await calls[4]?.json()).toEqual({
+			allocations: [{ allocationId: "17", quantity: "5" }],
+			reason: "Duplicate credit",
+		});
+	});
+
 	it("uses the reviewed catalog body for preview and publication", async () => {
 		const calls: Request[] = [];
 		const catalog = { features: [], plans: [], topups: [], rateCards: [] };
