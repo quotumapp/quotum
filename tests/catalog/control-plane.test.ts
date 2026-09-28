@@ -18,6 +18,7 @@ import {
 	providerCapabilityDeclaration,
 } from "../../src/providers/capabilities";
 import type { CatalogProviderCompatibility } from "../../src/providers/catalog-compatibility-types";
+import type { CadenceUnit } from "../../src/shared/cadence";
 import type {
 	DeclaredProvider,
 	OperationSupport,
@@ -466,7 +467,7 @@ describe("catalog control plane preview provider compatibility", () => {
 
 function resettingItem(
 	itemKind: "meter_limit" | "allocation",
-	resetInterval: "month" | "year",
+	resetInterval: CadenceUnit,
 ): CatalogPlanItemIntent {
 	return {
 		featureKey: "credits",
@@ -621,5 +622,131 @@ describe("catalog control plane reset intervals", () => {
 			"Plan pro item credits cannot reset every year on a plan billed every month",
 		);
 		expect(database.writes).toEqual([]);
+	});
+});
+
+describe("catalog control plane cadences", () => {
+	const item = (overrides: Partial<CatalogPlanItemIntent>): CatalogPlanItemIntent => ({
+		...resettingItem("meter_limit", "month"),
+		...overrides,
+	});
+	const messageOf = async (plans: CatalogPlanIntent[]) => {
+		const result = await previewWith(providerCapabilityCatalog, plans);
+		return result === "normalized" ? result : result.message;
+	};
+
+	it("accepts resets shorter than a month that fit the billing interval", async () => {
+		for (const [resetInterval, resetIntervalCount, billingInterval] of [
+			["day", 1, "month"],
+			["day", 28, "month"],
+			["week", 4, "month"],
+			["quarter", 1, "year"],
+			["month", 6, "year"],
+			["week", 2, null],
+		] as const) {
+			expect(
+				await messageOf([
+					plan({ billingInterval, items: [item({ resetInterval, resetIntervalCount })] }),
+				]),
+			).toBe("normalized");
+		}
+	});
+
+	it("rejects a reset that does not fit every billing period", async () => {
+		expect(
+			await messageOf([plan({ items: [item({ resetInterval: "day", resetIntervalCount: 29 })] })]),
+		).toBe("Plan pro item credits cannot reset every 29 × day on a plan billed every month");
+		expect(
+			await messageOf([
+				plan({
+					billingInterval: null,
+					items: [item({ resetInterval: "year", resetIntervalCount: 4 })],
+				}),
+			]),
+		).toBe("Plan pro item credits reset cannot span more than 3 × year");
+	});
+
+	it("rejects hourly resets until they are published", async () => {
+		expect(await messageOf([plan({ items: [item({ resetInterval: "hour" })] })])).toBe(
+			"Plan pro item credits reset cannot use hour yet",
+		);
+	});
+
+	it("rejects counts that are out of range or have no interval", async () => {
+		for (const resetIntervalCount of [0, 1.5, 1001]) {
+			expect(
+				await messageOf([plan({ items: [item({ resetInterval: "day", resetIntervalCount })] })]),
+			).toBe("Plan pro item credits reset count must be a whole number from 1 to 1000");
+		}
+		expect(
+			await messageOf([
+				plan({
+					items: [
+						{ ...item({ itemKind: "allocation" }), resetInterval: null, resetIntervalCount: 2 },
+					],
+				}),
+			]),
+		).toBe("Plan pro item credits resetIntervalCount requires a resetInterval");
+	});
+
+	it("allows postpaid overage only on resets of a month or longer", async () => {
+		const overage = (resetInterval: "week" | "month") =>
+			plan({
+				items: [
+					item({
+						resetInterval,
+						overagePolicy: "allowed",
+						price: { ...flatPrice([stripeBinding]), key: "credits-overage" },
+					}),
+				],
+			});
+		expect(await messageOf([overage("week")])).toBe(
+			"Plan pro item credits can allow postpaid overage only with a reset of a month or longer; overage is invoiced once per window",
+		);
+		expect(await messageOf([overage("month")])).toBe("normalized");
+	});
+
+	it("normalizes counts and the earlier rollover spelling in a stored catalog", async () => {
+		const stored: CatalogIntent = {
+			features: [feature],
+			plans: [
+				plan({
+					items: [
+						{
+							...resettingItem("allocation", "month"),
+							rollover: { maxQuantity: null, expiry: { mode: "months", months: 3 } },
+						},
+					],
+				}),
+			],
+			topups: [],
+			rateCards: [],
+		};
+		const published = await new CatalogControlPlane(new StoredCatalogDatabase(stored)).getPublished(
+			projectInstanceContext(),
+		);
+		expect(published.catalog?.plans[0]?.items[0]).toMatchObject({
+			resetInterval: "month",
+			resetIntervalCount: 1,
+			rollover: {
+				maxQuantity: null,
+				expiry: { mode: "after", interval: "month", intervalCount: 3 },
+			},
+		});
+		expect(
+			await messageOf([
+				plan({
+					items: [
+						{
+							...resettingItem("allocation", "week"),
+							rollover: {
+								maxQuantity: null,
+								expiry: { mode: "after", interval: "year", intervalCount: 11 },
+							},
+						},
+					],
+				}),
+			]),
+		).toBe("Plan pro item credits rollover expiry cannot span more than 10 × year");
 	});
 });

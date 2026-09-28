@@ -107,12 +107,19 @@ again: a partial correction returns its proportional share, rounded to the walle
 by what remains, and correcting the rest of the usage returns the remainder, so corrections
 together return exactly what was charged.
 
-A meter limit counts usage in a window of its item's `resetInterval`. While the provider period is
-current, the window is the period, or a reset sub-window of it when the item resets more often than
-the plan bills (a monthly limit on an annual plan). Once a period has ended without a recorded
-renewal, windows roll on from the period end one reset interval at a time: a period exactly one
-interval long keeps its start's day of the month, so Jan 31 to Feb 28 rolls on to Mar 31, and any
-other period rolls on its end's day. Usage recorded at the exact end of a window counts in the next.
+A meter limit counts usage in a window of its item's reset cadence: `resetInterval`, one of `day`,
+`week`, `month`, `quarter`, `semi_annual` or `year`, times `resetIntervalCount` (default 1), so
+`{ "resetInterval": "hour", "resetIntervalCount": 5 }` would be a five-hour window. `hour` is part
+of the vocabulary but not accepted yet. While the provider period is current, the window is the
+period, or a reset sub-window of it when the item resets more often than the plan bills (a monthly
+limit on an annual plan, a daily or weekly one on a monthly plan). Sub-windows are anchored at the
+period start and keep its time of day; the last one is clamped to the period end, so a weekly limit
+on a 30-day month ends with a two-day window that still carries the whole limit. Once a period has
+ended without a recorded renewal, windows roll on from the period end one reset interval at a time:
+a period exactly one interval long keeps its start's day of the month, so Jan 31 to Feb 28 rolls on
+to Mar 31, and any other period rolls on its end's day. Day, week and hour windows are exact
+multiples of 24 hours, 7 days and 1 hour. Usage recorded at the exact end of a window counts in the
+next.
 
 Spend-control activation and window boundaries use the database clock by default, so API clock
 skew cannot bypass a newly active policy. Spend controls rate committed usage independently of pending reservations: held quantities never
@@ -328,9 +335,15 @@ Retiring a plan removes it from new selection without rewriting pinned subscript
 
 Preview and publish validate the intent's structure first and reject the first structural problem,
 including a binding on the wrong channel, with `400 INVALID_REQUEST`. That includes a meter limit or
-allocation that resets less often than its plan bills, such as `resetInterval: "year"` on a
-`billingInterval: "month"` plan: windows and grants reset with every provider period, so the yearly
-quantity would silently become a monthly one. Only then do they check each provider binding against
+allocation whose reset window cannot fit every billing period, such as `resetInterval: "year"` on a
+`billingInterval: "month"` plan or 29 days on a monthly plan (February is 28): windows and grants
+reset with every provider period, so the yearly quantity would silently become a monthly one. A
+reset spans at most three years, `resetIntervalCount` is a whole number from 1 to 1,000 and needs a
+`resetInterval`, and `overagePolicy: "allowed"` needs a reset of a month or longer, because postpaid
+overage is invoiced once per closed window; a daily or weekly meter limit is a hard cap. A rollover
+expiry is `{ "mode": "after", "interval": "week", "intervalCount": 2 }` or `{ "mode": "forever" }`
+and spans at most ten years; the earlier `{ "mode": "months", "months": 3 }` is still accepted and
+is returned as `after` with a month interval. Only then do they check each provider binding against
 its provider's capability declaration: a plan with a trial, an add-on plan, every explicit price
 component (`basePrice` or an item `price`), and every top-up need the matching `catalog.*`
 operations (a top-up needs `catalog.topup`). All incompatible bindings are reported together as one
@@ -343,10 +356,11 @@ token, so retrying a publish that already succeeded returns its stored result wi
 `duplicate: true`. A successful preview also reports `providerCompatibility`; see
 [Provider capabilities and available actions](#provider-capabilities-and-available-actions).
 
-An allocation with `resetInterval: "month"` on an annual plan grants its quantity once per
-monthly window, anchored at the provider period start in UTC. Month-end anchors clamp to the
-shorter month and recover their original day afterwards; the last window stops at the provider
-period end. Its expiry is the earlier of that boundary and `expiresAfterSeconds` after the window
+An allocation that resets more often than its plan bills, such as `resetInterval: "month"` on an
+annual plan or `"week"` on a monthly one, grants its quantity once per reset window, anchored at the
+provider period start in UTC. Month-end anchors clamp to the shorter month and recover their
+original day afterwards; the last window stops at the provider period end and grants the whole
+quantity. Its expiry is the earlier of that boundary and `expiresAfterSeconds` after the window
 start. Provider synchronization grants the current window and metering maintenance grants later
 windows on its normal polling cadence. Reads do not create grants. After downtime only the current
 window is granted; elapsed windows are not reconstructed. Existing rollover rules still apply to

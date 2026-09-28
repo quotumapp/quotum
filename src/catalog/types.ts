@@ -1,6 +1,7 @@
 import type { BillingChannel, BillingProvider } from "../billing/types";
 import type { ProjectInstanceContext } from "../projects/context";
 import type { CatalogProviderCompatibility } from "../providers/catalog-compatibility-types";
+import type { CadenceUnit } from "../shared/cadence";
 
 export interface CatalogFeatureIntent {
 	key: string;
@@ -16,16 +17,27 @@ export interface CatalogPlanItemIntent {
 	featureKey: string;
 	itemKind: "access" | "allocation" | "meter_limit" | "licensed_quantity";
 	quantity: string | null;
-	resetInterval: "month" | "year" | null;
+	resetInterval: CadenceUnit | null;
+	/** How many `resetInterval` units one window spans; defaults to one. */
+	resetIntervalCount?: number | null;
 	expiresAfterSeconds: number | null;
 	overagePolicy: "blocked" | "allowed";
 	allocationScope?: "account" | "entity" | "license_pool";
 	rollover?: {
 		maxQuantity: string | null;
-		expiry: { mode: "forever" } | { mode: "months"; months: number };
+		expiry: CatalogRolloverExpiryIntent;
 	} | null;
 	price?: CatalogPriceIntent | null;
 }
+
+/**
+ * When rolled-over quantity expires. `months` is the earlier spelling of `after` with a month
+ * interval; it is still accepted and is normalized to `after`.
+ */
+export type CatalogRolloverExpiryIntent =
+	| { mode: "forever" }
+	| { mode: "after"; interval: CadenceUnit; intervalCount: number }
+	| { mode: "months"; months: number };
 
 export interface CatalogProviderBindingIntent {
 	productKey: string;

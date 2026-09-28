@@ -1639,22 +1639,25 @@
                                 ]
                               },
                               "resetInterval": {
-                                "anyOf": [
-                                  {
-                                    "type": "null"
-                                  },
-                                  {
-                                    "enum": [
-                                      "month"
-                                    ],
-                                    "type": "string"
-                                  },
-                                  {
-                                    "enum": [
-                                      "year"
-                                    ],
-                                    "type": "string"
-                                  }
+                                "enum": [
+                                  "hour",
+                                  "day",
+                                  "week",
+                                  "month",
+                                  "quarter",
+                                  "semi_annual",
+                                  "year",
+                                  null
+                                ],
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "resetIntervalCount": {
+                                "type": [
+                                  "null",
+                                  "number"
                                 ]
                               },
                               "rollover": {
@@ -1677,19 +1680,32 @@
                                       },
                                       {
                                         "properties": {
-                                          "mode": {
+                                          "interval": {
                                             "enum": [
-                                              "months"
+                                              "hour",
+                                              "day",
+                                              "week",
+                                              "month",
+                                              "quarter",
+                                              "semi_annual",
+                                              "year"
                                             ],
                                             "type": "string"
                                           },
-                                          "months": {
+                                          "intervalCount": {
                                             "type": "number"
+                                          },
+                                          "mode": {
+                                            "enum": [
+                                              "after"
+                                            ],
+                                            "type": "string"
                                           }
                                         },
                                         "required": [
                                           "mode",
-                                          "months"
+                                          "interval",
+                                          "intervalCount"
                                         ],
                                         "type": "object"
                                       }
@@ -1717,6 +1733,7 @@
                               "itemKind",
                               "quantity",
                               "resetInterval",
+                              "resetIntervalCount",
                               "expiresAfterSeconds",
                               "overagePolicy"
                             ],
@@ -29568,12 +29585,25 @@
                                   },
                                   "resetInterval": {
                                     "enum": [
+                                      "hour",
+                                      "day",
+                                      "week",
                                       "month",
+                                      "quarter",
+                                      "semi_annual",
                                       "year",
                                       null
                                     ],
                                     "type": [
                                       "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "resetIntervalCount": {
+                                    "maximum": 1000,
+                                    "minimum": 1,
+                                    "type": [
+                                      "integer",
                                       "null"
                                     ]
                                   },
@@ -29594,6 +29624,40 @@
                                             },
                                             "required": [
                                               "mode"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "interval": {
+                                                "enum": [
+                                                  "hour",
+                                                  "day",
+                                                  "week",
+                                                  "month",
+                                                  "quarter",
+                                                  "semi_annual",
+                                                  "year"
+                                                ],
+                                                "type": "string"
+                                              },
+                                              "intervalCount": {
+                                                "maximum": 1000,
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              },
+                                              "mode": {
+                                                "enum": [
+                                                  "after"
+                                                ],
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "mode",
+                                              "interval",
+                                              "intervalCount"
                                             ],
                                             "type": "object"
                                           },
@@ -30904,12 +30968,25 @@
                                   },
                                   "resetInterval": {
                                     "enum": [
+                                      "hour",
+                                      "day",
+                                      "week",
                                       "month",
+                                      "quarter",
+                                      "semi_annual",
                                       "year",
                                       null
                                     ],
                                     "type": [
                                       "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "resetIntervalCount": {
+                                    "maximum": 1000,
+                                    "minimum": 1,
+                                    "type": [
+                                      "integer",
                                       "null"
                                     ]
                                   },
@@ -30930,6 +31007,40 @@
                                             },
                                             "required": [
                                               "mode"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "interval": {
+                                                "enum": [
+                                                  "hour",
+                                                  "day",
+                                                  "week",
+                                                  "month",
+                                                  "quarter",
+                                                  "semi_annual",
+                                                  "year"
+                                                ],
+                                                "type": "string"
+                                              },
+                                              "intervalCount": {
+                                                "maximum": 1000,
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              },
+                                              "mode": {
+                                                "enum": [
+                                                  "after"
+                                                ],
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "mode",
+                                              "interval",
+                                              "intervalCount"
                                             ],
                                             "type": "object"
                                           },
@@ -50780,12 +50891,25 @@
                                   },
                                   "resetInterval": {
                                     "enum": [
+                                      "hour",
+                                      "day",
+                                      "week",
                                       "month",
+                                      "quarter",
+                                      "semi_annual",
                                       "year",
                                       null
                                     ],
                                     "type": [
                                       "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "resetIntervalCount": {
+                                    "maximum": 1000,
+                                    "minimum": 1,
+                                    "type": [
+                                      "integer",
                                       "null"
                                     ]
                                   },
@@ -50806,6 +50930,40 @@
                                             },
                                             "required": [
                                               "mode"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "interval": {
+                                                "enum": [
+                                                  "hour",
+                                                  "day",
+                                                  "week",
+                                                  "month",
+                                                  "quarter",
+                                                  "semi_annual",
+                                                  "year"
+                                                ],
+                                                "type": "string"
+                                              },
+                                              "intervalCount": {
+                                                "maximum": 1000,
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              },
+                                              "mode": {
+                                                "enum": [
+                                                  "after"
+                                                ],
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "mode",
+                                              "interval",
+                                              "intervalCount"
                                             ],
                                             "type": "object"
                                           },
@@ -52036,12 +52194,25 @@
                                   },
                                   "resetInterval": {
                                     "enum": [
+                                      "hour",
+                                      "day",
+                                      "week",
                                       "month",
+                                      "quarter",
+                                      "semi_annual",
                                       "year",
                                       null
                                     ],
                                     "type": [
                                       "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "resetIntervalCount": {
+                                    "maximum": 1000,
+                                    "minimum": 1,
+                                    "type": [
+                                      "integer",
                                       "null"
                                     ]
                                   },
@@ -52062,6 +52233,40 @@
                                             },
                                             "required": [
                                               "mode"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "interval": {
+                                                "enum": [
+                                                  "hour",
+                                                  "day",
+                                                  "week",
+                                                  "month",
+                                                  "quarter",
+                                                  "semi_annual",
+                                                  "year"
+                                                ],
+                                                "type": "string"
+                                              },
+                                              "intervalCount": {
+                                                "maximum": 1000,
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              },
+                                              "mode": {
+                                                "enum": [
+                                                  "after"
+                                                ],
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "mode",
+                                              "interval",
+                                              "intervalCount"
                                             ],
                                             "type": "object"
                                           },

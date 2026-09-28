@@ -25,6 +25,7 @@ import {
 } from "../../billing/pricing";
 import type { BillingProvider } from "../../billing/types";
 import { purchaseActionFor } from "../../providers/capabilities";
+import { addUtcMonths, type CadenceUnit } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import type { ControlDenial } from "./controls-runtime";
 import {
@@ -35,10 +36,11 @@ import {
 } from "./controls-runtime";
 import { enqueueUsageProjection } from "./entitlements";
 import {
-	addUtcInterval,
 	meterLimitWindowBounds,
+	optionalStoredCadence,
 	planGrantWindowBounds,
 	startOfUtcMonth,
+	storedCadence,
 } from "./meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -190,8 +192,9 @@ interface MeterLimitRow {
 	plan_grant_id: string | null;
 	quantity: unknown;
 	overage_policy: "blocked" | "allowed";
-	reset_interval: "month" | "year";
-	billing_interval: "month" | "year";
+	reset_interval: CadenceUnit;
+	reset_interval_count: number;
+	billing_interval: CadenceUnit | null;
 	period_start_at: Date | string;
 	period_end_at: Date | string | null;
 }
@@ -215,6 +218,7 @@ export function queryMeterLimitRows(
 				quantity,
 				overage_policy,
 				reset_interval,
+				reset_interval_count,
 				billing_interval,
 				period_start_at,
 				period_end_at
@@ -226,6 +230,7 @@ export function queryMeterLimitRows(
 					pi.quantity,
 					pi.overage_policy,
 					pi.reset_interval,
+					pi.reset_interval_count,
 					pv.billing_interval,
 					COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
 					COALESCE(s.current_period_end, s.expires_at) AS period_end_at,
@@ -255,6 +260,7 @@ export function queryMeterLimitRows(
 					pi.quantity,
 					'blocked'::text AS overage_policy,
 					pi.reset_interval,
+					pi.reset_interval_count,
 					pv.billing_interval,
 					g.starts_at AS period_start_at,
 					g.ends_at AS period_end_at,
@@ -335,20 +341,16 @@ export async function meterLimitDecision(
 	}
 	const active = rows[0];
 	if (active !== undefined) {
+		const reset = storedCadence(active.reset_interval, active.reset_interval_count);
 		const bounds =
 			active.plan_grant_id !== null && active.period_end_at !== null
-				? planGrantWindowBounds(
-						active.period_start_at,
-						active.period_end_at,
-						active.reset_interval,
-						new Date(),
-					)
+				? planGrantWindowBounds(active.period_start_at, active.period_end_at, reset, new Date())
 				: meterLimitWindowBounds(
 						active.period_start_at,
 						active.period_end_at,
-						active.reset_interval,
+						reset,
 						new Date(),
-						active.billing_interval,
+						optionalStoredCadence(active.billing_interval),
 					);
 		const overagePrice =
 			active.overage_policy === "allowed"
@@ -377,7 +379,7 @@ export async function meterLimitDecision(
 		overagePolicy: "blocked",
 		overagePrice: null,
 		windowStartAt: start,
-		windowEndAt: addUtcInterval(start, "month"),
+		windowEndAt: addUtcMonths(start, 1),
 	};
 }
 

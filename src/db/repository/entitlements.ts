@@ -6,7 +6,13 @@ import type {
 	ProjectionPayload,
 	ProjectionSyncReason,
 } from "../../billing/types";
-import { meterLimitWindowBounds, planGrantWindowBounds } from "./meter-limit-windows";
+import type { CadenceUnit } from "../../shared/cadence";
+import {
+	meterLimitWindowBounds,
+	optionalStoredCadence,
+	planGrantWindowBounds,
+	storedCadence,
+} from "./meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import { requireNonBlank, toIsoStringOrNull } from "./validation";
@@ -541,8 +547,9 @@ export async function readProjectionBalances(
 	const limits = await executeRows<{
 		feature_id: string | number | bigint;
 		limit_quantity: unknown;
-		reset_interval: "month" | "year";
-		billing_interval: "month" | "year";
+		reset_interval: CadenceUnit;
+		reset_interval_count: number;
+		billing_interval: CadenceUnit | null;
 		period_start_at: Date | string;
 		period_end_at: Date | string | null;
 		plan_grant: boolean;
@@ -554,6 +561,7 @@ export async function readProjectionBalances(
 				feature_id,
 				limit_quantity,
 				reset_interval,
+				reset_interval_count,
 				billing_interval,
 				period_start_at,
 				period_end_at,
@@ -563,6 +571,7 @@ export async function readProjectionBalances(
 					pi.feature_id,
 					pi.quantity AS limit_quantity,
 					pi.reset_interval,
+					pi.reset_interval_count,
 					pv.billing_interval,
 					COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
 					COALESCE(s.current_period_end, s.expires_at) AS period_end_at,
@@ -586,6 +595,7 @@ export async function readProjectionBalances(
 					pi.feature_id,
 					pi.quantity AS limit_quantity,
 					pi.reset_interval,
+					pi.reset_interval_count,
 					pv.billing_interval,
 					g.starts_at AS period_start_at,
 					g.ends_at AS period_end_at,
@@ -627,20 +637,21 @@ export async function readProjectionBalances(
 						FROM (
 							VALUES ${drizzleSql.join(
 								limits.map((limit) => {
+									const reset = storedCadence(limit.reset_interval, limit.reset_interval_count);
 									const bounds =
 										limit.plan_grant && limit.period_end_at !== null
 											? planGrantWindowBounds(
 													limit.period_start_at,
 													limit.period_end_at,
-													limit.reset_interval,
+													reset,
 													now,
 												)
 											: meterLimitWindowBounds(
 													limit.period_start_at,
 													limit.period_end_at,
-													limit.reset_interval,
+													reset,
 													now,
-													limit.billing_interval,
+													optionalStoredCadence(limit.billing_interval),
 												);
 									return drizzleSql`(
 										${String(limit.feature_id)}::bigint,

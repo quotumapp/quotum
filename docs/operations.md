@@ -164,6 +164,59 @@ SELECT count(*) FROM balance_allocations WHERE source_kind = 'reward' AND promot
 both return 0. An older image cannot read the new baselines, so a rollback restores the
 pre-upgrade backup and loses grants created since.
 
+### Reset cadence
+
+The metering baseline widens `plan_items.reset_interval` to the cadence units (`hour`, `day`,
+`week`, `month`, `quarter`, `semi_annual`, `year`) and adds `reset_interval_count` (default 1) with
+the check `plan_items_reset_interval_count_check`. It replaces `rollover_expiry_months` with
+`rollover_expiry_interval` and `rollover_expiry_interval_count`, and the rollover expiry mode
+`months` with `after`. Existing reset intervals need no change; only rollover rows are rewritten:
+
+1. Follow steps 1 and 2 of [stored job provider identity](#stored-job-provider-identity).
+2. Let the restore load the old rollover column:
+
+   ```sql
+   ALTER TABLE plan_items ADD COLUMN rollover_expiry_months INTEGER,
+     DROP CONSTRAINT plan_items_rollover_expiry_check;
+   ```
+
+3. Restore the data as in step 4 there.
+4. Rewrite month-based expiries and restore the constraint. Adding the constraint fails while any
+   row is left in the old form:
+
+   ```sql
+   UPDATE plan_items SET rollover_expiry_mode = 'after', rollover_expiry_interval = 'month',
+     rollover_expiry_interval_count = rollover_expiry_months
+   WHERE rollover_expiry_mode = 'months';
+   ALTER TABLE plan_items DROP COLUMN rollover_expiry_months,
+     ADD CONSTRAINT plan_items_rollover_expiry_check CHECK (
+       (
+         rollover_enabled = false AND rollover_max_quantity IS NULL
+         AND rollover_expiry_mode = 'none' AND rollover_expiry_interval IS NULL
+         AND rollover_expiry_interval_count = 1
+       )
+       OR (
+         rollover_enabled = true AND rollover_expiry_mode IN ('forever', 'after')
+         AND (
+           (rollover_expiry_mode = 'forever' AND rollover_expiry_interval IS NULL
+             AND rollover_expiry_interval_count = 1)
+           OR (rollover_expiry_mode = 'after'
+             AND rollover_expiry_interval IN
+               ('hour', 'day', 'week', 'month', 'quarter', 'semi_annual', 'year')
+             AND rollover_expiry_interval_count BETWEEN 1 AND 1000)
+         )
+       )
+     );
+   ```
+
+5. Finish with step 6 there.
+
+Published catalogs keep their meaning: a stored `{ "mode": "months" }` expiry reads back as `after`
+with a month interval, and every reset gains `resetIntervalCount: 1`. That changes the normalized
+intent, so a catalog preview taken before the upgrade fails to publish with
+`CATALOG_PREVIEW_MISMATCH` and must be previewed again, and the first `quotum catalog diff` of an
+unchanged catalog reports `changed: true` with an empty impact.
+
 ## Upgrade
 
 1. Read the target version's [GitHub Release](https://github.com/quotumapp/quotum/releases) and
@@ -351,7 +404,7 @@ One process runs the HTTP API and all workers. Each polls on the interval shown:
 | Projection delivery | `BILLING_WORKER_POLL_INTERVAL_MS` |
 | Provider event replay | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
 | Subscription reconciliation (provider reads, subscription and plan grant expiry, plan grant allowances, trial-ending notices) | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
-| Metering maintenance (reservation expiry, monthly subscription allocations, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
+| Metering maintenance (reservation expiry, reset-window subscription allocations, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Recurring billing | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Automatic top-ups | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Promotion maintenance (expired reservation release, Stripe coupons and hosted promotion codes) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
@@ -364,15 +417,18 @@ Usage-driven projections are one job per billing account built at delivery, so t
 bounded by active accounts. Tune intervals and attempt limits with the `BILLING_*` variables listed
 in [deployment.md](deployment.md#optional-variables).
 
-Monthly allocations on annual subscriptions use the existing metering maintenance cadence and
-allocation ledger; no additional worker, schema migration or environment setting is required.
-The run result logs `grantedSubscriptionAllocations` and `transitionedSubscriptionAllocations`.
-On the first synchronization or maintenance pass after upgrade, an existing year-long allocation
-is adopted into the current monthly window. Its ID, source key, consumption, reservations and
-reversals are retained, its expiry is capped at the next monthly boundary without extending an
-earlier expiry, and no extra current-month credits are issued. The next window receives a fresh
-grant. Missed months are not compensated retroactively. Replace old webhook handlers and workers
-together so the old annual-grant code does not run alongside monthly materialization.
+Allocations that reset more often than their plan bills (monthly on an annual plan, weekly on a
+monthly one) use the existing metering maintenance cadence and allocation ledger; no additional
+worker or environment setting is required. The run result logs `grantedSubscriptionAllocations` and
+`transitionedSubscriptionAllocations`. On the first synchronization or maintenance pass after
+upgrade, an existing allocation for the whole provider period is adopted into the current reset
+window. Its ID, source key, consumption, reservations and reversals are retained, its expiry is
+capped at the next reset boundary without extending an earlier expiry, and no extra credits are
+issued for the current window. The next window receives a fresh grant. Missed windows are not
+compensated retroactively. Replace old webhook handlers and workers together so the old
+whole-period grant code does not run alongside per-window materialization. Maintenance grants at
+most one batch per poll, so an allocation that resets daily needs the poll to keep up with every
+subscription within the day.
 
 Raw usage is partitioned monthly. Technical retention uses `metering_settings.raw_usage_retention_days`
 (default 400); durable monthly rollups outlive deleted raw rows. This default is not a legal

@@ -9,7 +9,6 @@ import {
 import { BillingError, InvalidRequestError, PersistenceConflictError } from "../billing/errors";
 import { type BillingProvider, isBillingProvider } from "../billing/types";
 import { RepositoryModule } from "../db/repository/base";
-import { intervalMonths } from "../db/repository/meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "../db/repository/query";
 import type { QueryExecutor, TransactionalQueryExecutor } from "../db/repository/types";
 import type { ProjectInstanceContext } from "../projects/context";
@@ -18,6 +17,11 @@ import {
 	providerCapabilityCatalog,
 } from "../providers/capabilities";
 import { toIso } from "../shared/date";
+import {
+	assertPlanCadences,
+	normalizeRolloverExpiry,
+	rolloverExpiryCadence,
+} from "./cadence-rules";
 import {
 	assertCatalogProviderCompatibility,
 	catalogProviderCompatibility,
@@ -425,27 +429,11 @@ function assertNewCatalogIntent(
 	catalog: CatalogIntent,
 	capabilities: ProviderCapabilityLookup,
 ): void {
-	for (const plan of catalog.plans) assertResetFitsBillingInterval(plan);
+	// Usage windows and plan allocations reset within the provider period, so an item that resets
+	// less often than its plan bills would silently reset every period: a yearly limit on a monthly
+	// plan would become a monthly one.
+	for (const plan of catalog.plans) assertPlanCadences(plan);
 	assertCatalogProviderCompatibility(catalog, capabilities);
-}
-
-/**
- * Usage windows and plan allocations reset within the provider period, so an item that resets less
- * often than its plan bills would silently reset every period: a yearly limit on a monthly plan
- * would become a monthly one.
- */
-function assertResetFitsBillingInterval(plan: CatalogPlanIntent): void {
-	const billingInterval = plan.billingInterval;
-	if (billingInterval === null) return;
-	for (const item of plan.items) {
-		if (item.itemKind !== "meter_limit" && item.itemKind !== "allocation") continue;
-		if (item.resetInterval === null) continue;
-		if (intervalMonths(item.resetInterval) > intervalMonths(billingInterval)) {
-			throw new InvalidRequestError(
-				`Plan ${plan.key} item ${item.featureKey} cannot reset every ${item.resetInterval} on a plan billed every ${billingInterval}`,
-			);
-		}
-	}
 }
 
 /**
@@ -522,6 +510,8 @@ function normalizeCatalog(
 			items: plan.items.map((item) => ({
 				...item,
 				featureKey: normalizedKey(item.featureKey, "plan item feature key"),
+				// A count without an interval is kept so that preview can reject it.
+				resetIntervalCount: item.resetIntervalCount ?? (item.resetInterval === null ? null : 1),
 				quantity:
 					item.quantity === null ? null : positiveDecimal(item.quantity, "plan item quantity"),
 				price:
@@ -537,7 +527,7 @@ function normalizeCatalog(
 									item.rollover.maxQuantity === null
 										? null
 										: positiveDecimal(item.rollover.maxQuantity, "rollover maxQuantity"),
-								expiry: item.rollover.expiry,
+								expiry: normalizeRolloverExpiry(item.rollover.expiry),
 							},
 			})),
 			controls: (plan.controls ?? []).map((control) => normalizeControl(control, featureByKey)),
@@ -621,14 +611,6 @@ function normalizeCatalog(
 					throw new InvalidRequestError(
 						`Rollover for ${item.featureKey} requires a resetting allocation`,
 					);
-				}
-				if (
-					item.rollover.expiry.mode === "months" &&
-					(!Number.isInteger(item.rollover.expiry.months) ||
-						item.rollover.expiry.months < 1 ||
-						item.rollover.expiry.months > 120)
-				) {
-					throw new InvalidRequestError("Rollover expiry months must be between 1 and 120");
 				}
 			}
 			if (item.allocationScope === "license_pool" && item.itemKind !== "licensed_quantity") {
@@ -1249,23 +1231,27 @@ async function publishPlans(
 		versionIds.set(plan.key, versionId);
 		const planItemIds = new Map<string, string>();
 		for (const item of plan.items) {
+			const rolloverExpiry =
+				item.rollover === undefined || item.rollover === null
+					? undefined
+					: rolloverExpiryCadence(item.rollover.expiry);
 			const persistedItem = await executeOne<{ id: string | number | bigint }>(
 				executor,
 				drizzleSql`
 					INSERT INTO plan_items (
 						project_id, plan_version_id, feature_id, item_kind, quantity,
-						reset_interval, expires_after_seconds, overage_policy, allocation_scope,
-						rollover_enabled, rollover_max_quantity, rollover_expiry_mode,
-						rollover_expiry_months
+						reset_interval, reset_interval_count, expires_after_seconds, overage_policy,
+						allocation_scope, rollover_enabled, rollover_max_quantity, rollover_expiry_mode,
+						rollover_expiry_interval, rollover_expiry_interval_count
 					)
 					VALUES (
 						${projectId}, ${versionId}::bigint, ${requireMap(featureIds, item.featureKey)}::bigint,
 						${item.itemKind}, ${item.quantity}::numeric, ${item.resetInterval},
-						${item.expiresAfterSeconds}, ${item.overagePolicy},
+						${item.resetIntervalCount ?? 1}, ${item.expiresAfterSeconds}, ${item.overagePolicy},
 						${item.allocationScope ?? "account"}, ${item.rollover !== null},
 						${item.rollover?.maxQuantity ?? null}::numeric,
-						${item.rollover?.expiry.mode ?? "none"},
-						${item.rollover?.expiry.mode === "months" ? item.rollover.expiry.months : null}
+						${rolloverExpiry === undefined ? "none" : rolloverExpiry === null ? "forever" : "after"},
+						${rolloverExpiry?.unit ?? null}, ${rolloverExpiry?.count ?? 1}
 					)
 					RETURNING id
 				`,

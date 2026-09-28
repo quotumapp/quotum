@@ -2,6 +2,7 @@ import { z } from "zod";
 import { BillingError } from "../billing/errors";
 import { billingProviders } from "../billing/types";
 import type { CatalogControlPlaneLike } from "../catalog/types";
+import { cadenceUnits, maxCadenceCount } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/catalog-responses";
@@ -64,7 +65,8 @@ const planItemSchema = z
 		featureKey: z.string().trim().min(1).max(120),
 		itemKind: z.enum(["access", "allocation", "meter_limit", "licensed_quantity"]),
 		quantity: z.string().trim().min(1).max(80).nullable(),
-		resetInterval: z.enum(["month", "year"]).nullable(),
+		resetInterval: z.enum(cadenceUnits).nullable(),
+		resetIntervalCount: z.number().int().min(1).max(maxCadenceCount).nullable().optional(),
 		expiresAfterSeconds: z.number().int().positive().nullable(),
 		overagePolicy: z.enum(["blocked", "allowed"]),
 		allocationScope: z.enum(["account", "entity", "license_pool"]).optional(),
@@ -73,6 +75,14 @@ const planItemSchema = z
 				maxQuantity: z.string().trim().min(1).max(80).nullable(),
 				expiry: z.discriminatedUnion("mode", [
 					z.object({ mode: z.literal("forever") }).strict(),
+					z
+						.object({
+							mode: z.literal("after"),
+							interval: z.enum(cadenceUnits),
+							intervalCount: z.number().int().min(1).max(maxCadenceCount),
+						})
+						.strict(),
+					// The earlier spelling of `after` with a month interval.
 					z
 						.object({ mode: z.literal("months"), months: z.number().int().min(1).max(120) })
 						.strict(),

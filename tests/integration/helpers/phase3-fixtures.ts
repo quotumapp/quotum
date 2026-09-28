@@ -251,10 +251,10 @@ export async function seedPhase3MeteringCatalog(sql: SQL): Promise<void> {
 			INSERT INTO plan_items (
 				project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval,
 				rollover_enabled, rollover_max_quantity, rollover_expiry_mode,
-				rollover_expiry_months
+				rollover_expiry_interval, rollover_expiry_interval_count
 			)
 			SELECT cap_version.project_id, cap_version.id, wallets.id, 'allocation', 100, 'month',
-				true, 25, 'months', 2
+				true, 25, 'after', 'month', 2
 			FROM cap_version, wallets
 		), rate AS (
 			INSERT INTO rate_card_entries (

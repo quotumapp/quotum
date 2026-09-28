@@ -3,8 +3,9 @@ import type { SQL } from "bun";
 import type { MeteringDecision } from "../../src/billing/metering";
 import { materializeSubscriptionAllocations } from "../../src/db/repository/catalog-allocations";
 import { readProjectionBalances } from "../../src/db/repository/entitlements";
-import { addUtcMonths, planGrantWindowBounds } from "../../src/db/repository/meter-limit-windows";
+import { planGrantWindowBounds } from "../../src/db/repository/meter-limit-windows";
 import type { QueryExecutor } from "../../src/db/repository/types";
+import { addUtcMonths, type Cadence } from "../../src/shared/cadence";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -1204,7 +1205,7 @@ localDescribe("authoritative metering flows", () => {
 	it("replenishes after a prior monthly window and rolls its unused balance once", async () => {
 		const seeded = await seedMonthlyAllocation();
 		const previousStart = addUtcMonths(seeded.periodStart, 1, seeded.periodStart.getUTCDate());
-		await context.sql`UPDATE plan_items SET rollover_enabled = true, rollover_max_quantity = 30, rollover_expiry_mode = 'months', rollover_expiry_months = 1 WHERE id = ${seeded.item_id}`;
+		await context.sql`UPDATE plan_items SET rollover_enabled = true, rollover_max_quantity = 30, rollover_expiry_mode = 'after', rollover_expiry_interval = 'month', rollover_expiry_interval_count = 1 WHERE id = ${seeded.item_id}`;
 		await seedAnnualAllocationRow(seeded, previousStart, seeded.window.start, "previous-month");
 		await context.sql`UPDATE balance_allocations SET consumed_quantity = 60`;
 		const result = await context.repository.runMeteringMaintenance(50);
@@ -1220,6 +1221,107 @@ localDescribe("authoritative metering flows", () => {
 			grantedSubscriptionAllocations: 0,
 			rolledOverAllocations: 0,
 		});
+	});
+
+	it("resets a daily meter limit inside an annual billing period", async () => {
+		const [clock] = await context.sql<Array<{ now: Date }>>`SELECT now()`;
+		const now = new Date(clock.now);
+		const hour = 3_600_000;
+		// Daily windows keep the period start's time of day, an hour before now, so the live clock
+		// cannot reach the next boundary during the test.
+		const periodStart = addUtcMonths(new Date(now.getTime() - hour), -2);
+		const periodEnd = addUtcMonths(periodStart, 12);
+		const windowStart = new Date(now.getTime() - hour);
+		const windowEnd = new Date(windowStart.getTime() + 24 * hour);
+		const previousStart = new Date(windowStart.getTime() - 24 * hour);
+		await seedAnnualMeterLimitSubscription(context.sql, "daily_account", periodStart, periodEnd, {
+			unit: "day",
+			count: 1,
+		});
+		await context.sql`
+			INSERT INTO usage_windows (
+				project_id, customer_id, feature_id, window_start_at, window_end_at, usage
+			)
+			SELECT customer.project_id, customer.id, feature.id,
+				${previousStart.toISOString()}::timestamptz, ${windowStart.toISOString()}::timestamptz, 150
+			FROM customers customer
+			JOIN features feature ON feature.project_id = customer.project_id
+				AND feature.key = 'api_requests'
+			WHERE customer.billing_account_id = 'daily_account'
+		`;
+		const project = integrationProjectContext();
+		const subject = { billingAccountId: "daily_account", featureKey: "api_requests" };
+
+		const consumed = await context.repository.consumeUsage(project, {
+			...subject,
+			quantity: "20",
+			idempotencyKey: "daily:consume",
+		});
+		const windows = await context.sql<Array<{ window_start_at: Date; window_end_at: Date }>>`
+			SELECT window_start_at, window_end_at FROM usage_windows ORDER BY window_start_at
+		`;
+
+		expect(consumed).toMatchObject({
+			allowed: true,
+			balance: { granted: "200", consumed: "20", available: "180" },
+		});
+		expect(
+			windows.map((window) => [
+				new Date(window.window_start_at).toISOString(),
+				new Date(window.window_end_at).toISOString(),
+			]),
+		).toEqual([
+			[previousStart.toISOString(), windowStart.toISOString()],
+			[windowStart.toISOString(), windowEnd.toISOString()],
+		]);
+	});
+
+	it("grants a weekly allocation on an annual plan and rolls it over with a week expiry", async () => {
+		const week: Cadence = { unit: "week", count: 1 };
+		const seeded = await seedMonthlyAllocation(week);
+		const weekMs = 7 * 86_400_000;
+		expect(seeded.window.end.getTime() - seeded.window.start.getTime()).toBe(weekMs);
+		const previousStart = new Date(seeded.window.start.getTime() - weekMs);
+		await context.sql`
+			UPDATE plan_items SET rollover_enabled = true, rollover_expiry_mode = 'after',
+				rollover_expiry_interval = 'week', rollover_expiry_interval_count = 2
+			WHERE id = ${seeded.item_id}
+		`;
+		await seedAnnualAllocationRow(seeded, previousStart, seeded.window.start, "previous-week");
+		await context.sql`UPDATE balance_allocations SET consumed_quantity = 60`;
+
+		const result = await context.repository.runMeteringMaintenance(50);
+		const rows = await context.sql<
+			Array<{ source_kind: string; quantity: string; period_end_at: Date; expires_at: Date }>
+		>`
+			SELECT source_kind, quantity::text AS quantity, period_end_at, expires_at
+			FROM balance_allocations
+			WHERE source_kind IN ('subscription', 'rollover') AND source_key <> 'previous-week'
+			ORDER BY source_kind
+		`;
+
+		expect(result).toMatchObject({ grantedSubscriptionAllocations: 1, rolledOverAllocations: 1 });
+		expect(
+			rows.map((row) => ({
+				sourceKind: row.source_kind,
+				quantity: row.quantity,
+				periodEndAt: new Date(row.period_end_at).toISOString(),
+				expiresAt: new Date(row.expires_at).toISOString(),
+			})),
+		).toEqual([
+			{
+				sourceKind: "rollover",
+				quantity: "40.000000000",
+				periodEndAt: seeded.window.end.toISOString(),
+				expiresAt: new Date(seeded.window.start.getTime() + 2 * weekMs).toISOString(),
+			},
+			{
+				sourceKind: "subscription",
+				quantity: "100.000000000",
+				periodEndAt: seeded.window.end.toISOString(),
+				expiresAt: seeded.window.end.toISOString(),
+			},
+		]);
 	});
 
 	it("does not refill an early-expired monthly allocation before its reset", async () => {
@@ -1609,10 +1711,10 @@ async function seedMeteringCatalog(sql: SQL): Promise<void> {
 			INSERT INTO plan_items (
 				project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval,
 				rollover_enabled, rollover_max_quantity, rollover_expiry_mode,
-				rollover_expiry_months
+				rollover_expiry_interval, rollover_expiry_interval_count
 			)
 			SELECT cap_version.project_id, cap_version.id, wallets.id, 'allocation', 100, 'month',
-				true, 25, 'months', 2
+				true, 25, 'after', 'month', 2
 			FROM cap_version, wallets
 		), rate AS (
 			INSERT INTO rate_card_entries (
@@ -1726,6 +1828,7 @@ async function seedAnnualMeterLimitSubscription(
 	billingAccountId: string,
 	periodStart: Date,
 	periodEnd: Date,
+	limitReset: Cadence = { unit: "month", count: 1 },
 ): Promise<void> {
 	await sql`
 		WITH revision AS (
@@ -1746,9 +1849,11 @@ async function seedAnnualMeterLimitSubscription(
 			RETURNING id, project_id, catalog_revision_id
 		), annual_item AS (
 			INSERT INTO plan_items (
-				project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval
+				project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval,
+				reset_interval_count
 			)
-			SELECT annual_version.project_id, annual_version.id, feature.id, 'meter_limit', 200, 'month'
+			SELECT annual_version.project_id, annual_version.id, feature.id, 'meter_limit', 200,
+				${limitReset.unit}, ${limitReset.count}
 			FROM annual_version
 			JOIN features feature ON feature.project_id = annual_version.project_id
 				AND feature.key = 'api_requests'
@@ -1778,7 +1883,7 @@ async function seedAnnualMeterLimitSubscription(
 	`;
 }
 
-async function seedMonthlyAllocation() {
+async function seedMonthlyAllocation(reset: Cadence = { unit: "month", count: 1 }) {
 	const [clock] = await context.sql<Array<{ now: Date }>>`SELECT now()`;
 	const now = clock.now;
 	const anchor = new Date(now.getTime() - 86400000);
@@ -1786,8 +1891,11 @@ async function seedMonthlyAllocation() {
 	const periodEnd = addUtcMonths(periodStart, 12, anchor.getUTCDate());
 	await seedAnnualMeterLimitSubscription(context.sql, "monthly_grants", periodStart, periodEnd);
 	const [item] = await context.sql<Array<{ id: string }>>`
-		INSERT INTO plan_items (project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval)
-		SELECT s.project_id, s.plan_version_id, f.id, 'allocation', 100, 'month'
+		INSERT INTO plan_items (
+			project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval,
+			reset_interval_count
+		)
+		SELECT s.project_id, s.plan_version_id, f.id, 'allocation', 100, ${reset.unit}, ${reset.count}
 		FROM subscriptions s JOIN features f ON f.project_id = s.project_id AND f.key = 'ai_credits'
 		RETURNING id::text
 	`;
@@ -1801,7 +1909,7 @@ async function seedMonthlyAllocation() {
 		item_id: item.id,
 		periodStart,
 		periodEnd,
-		window: planGrantWindowBounds(periodStart, periodEnd, "month", now),
+		window: planGrantWindowBounds(periodStart, periodEnd, reset, now),
 	};
 }
 

@@ -1,8 +1,9 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type { SubscriptionStatus } from "../../billing/types";
+import { resetSplitsBillingPeriodSql } from "./cadence-sql";
 import { supersedeBasePlanGrants } from "./plan-grants";
 import { executeOne, executeRows, jsonb } from "./query";
-import { materializeMonthlySubscriptionAllocations } from "./subscription-allocation-periods";
+import { materializeSubscriptionResetAllocations } from "./subscription-allocation-periods";
 import type { QueryExecutor } from "./types";
 
 const allocationFundingStatuses = new Set<SubscriptionStatus>([
@@ -277,20 +278,21 @@ export async function materializeSubscriptionAllocations(
 				AND subscription.id = ${input.subscriptionId}
 				AND pi.plan_version_id = ${version.planVersionId}::bigint
 				AND pi.item_kind = 'allocation'
-				AND (pi.reset_interval IS DISTINCT FROM 'month' OR NOT EXISTS (
+				-- Items that reset more often than the plan bills get one grant per reset window below.
+				AND NOT EXISTS (
 					SELECT 1 FROM plan_versions pv WHERE pv.project_id = pi.project_id
-						AND pv.id = pi.plan_version_id AND pv.billing_interval = 'year'
-				))
+						AND pv.id = pi.plan_version_id AND ${resetSplitsBillingPeriodSql("pi", "pv")}
+				)
 			ON CONFLICT (project_id, feature_id, source_kind, source_key) DO NOTHING
 			RETURNING id
 		`,
 	);
-	const monthly = await materializeMonthlySubscriptionAllocations(
+	const resetWindows = await materializeSubscriptionResetAllocations(
 		executor,
 		input.projectId,
 		input.subscriptionId,
 	);
-	return inserted.length + monthly.granted;
+	return inserted.length + resetWindows.granted;
 }
 
 export async function syncSubscriptionPriceItems(

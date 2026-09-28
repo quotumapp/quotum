@@ -223,7 +223,11 @@ CREATE TABLE IF NOT EXISTS plan_items (
 	feature_id BIGINT NOT NULL REFERENCES features(id) ON DELETE RESTRICT,
 	item_kind TEXT NOT NULL,
 	quantity NUMERIC(28, 9),
-	reset_interval TEXT CHECK (reset_interval IS NULL OR reset_interval IN ('month', 'year')),
+	reset_interval TEXT CHECK (
+		reset_interval IS NULL
+		OR reset_interval IN ('hour', 'day', 'week', 'month', 'quarter', 'semi_annual', 'year')
+	),
+	reset_interval_count INTEGER NOT NULL DEFAULT 1,
 	expires_after_seconds BIGINT CHECK (expires_after_seconds IS NULL OR expires_after_seconds > 0),
 	overage_policy TEXT NOT NULL DEFAULT 'blocked' CHECK (overage_policy IN ('blocked', 'allowed')),
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -231,7 +235,8 @@ CREATE TABLE IF NOT EXISTS plan_items (
 	rollover_enabled BOOLEAN NOT NULL DEFAULT false,
 	rollover_max_quantity NUMERIC(28, 9),
 	rollover_expiry_mode TEXT NOT NULL DEFAULT 'none',
-	rollover_expiry_months INTEGER,
+	rollover_expiry_interval TEXT,
+	rollover_expiry_interval_count INTEGER NOT NULL DEFAULT 1,
 	CONSTRAINT plan_items_project_id_id_unique UNIQUE (project_id, id),
 	CONSTRAINT plan_items_project_version_feature_unique UNIQUE (project_id, plan_version_id, feature_id),
 	CONSTRAINT plan_items_project_version_fk FOREIGN KEY (project_id, plan_version_id)
@@ -252,6 +257,10 @@ CREATE TABLE IF NOT EXISTS plan_items (
 	CONSTRAINT plan_items_licensed_reset_check CHECK (
 		item_kind <> 'licensed_quantity' OR reset_interval IS NULL
 	),
+	CONSTRAINT plan_items_reset_interval_count_check CHECK (
+		reset_interval_count BETWEEN 1 AND 1000
+		AND (reset_interval IS NOT NULL OR reset_interval_count = 1)
+	),
 	CONSTRAINT plan_items_overage_check CHECK (
 		overage_policy = 'blocked' OR item_kind = 'meter_limit'
 	),
@@ -266,14 +275,23 @@ CREATE TABLE IF NOT EXISTS plan_items (
 			rollover_enabled = false
 			AND rollover_max_quantity IS NULL
 			AND rollover_expiry_mode = 'none'
-			AND rollover_expiry_months IS NULL
+			AND rollover_expiry_interval IS NULL
+			AND rollover_expiry_interval_count = 1
 		)
 		OR (
 			rollover_enabled = true
-			AND rollover_expiry_mode IN ('forever', 'months')
+			AND rollover_expiry_mode IN ('forever', 'after')
 			AND (
-				(rollover_expiry_mode = 'forever' AND rollover_expiry_months IS NULL)
-				OR (rollover_expiry_mode = 'months' AND rollover_expiry_months BETWEEN 1 AND 120)
+				(
+					rollover_expiry_mode = 'forever'
+					AND rollover_expiry_interval IS NULL
+					AND rollover_expiry_interval_count = 1
+				)
+				OR (
+					rollover_expiry_mode = 'after'
+					AND rollover_expiry_interval IN ('hour', 'day', 'week', 'month', 'quarter', 'semi_annual', 'year')
+					AND rollover_expiry_interval_count BETWEEN 1 AND 1000
+				)
 			)
 		)
 	),
