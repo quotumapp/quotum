@@ -74,7 +74,16 @@ again and invoice customers a second time. Move a populated deployment as follow
    workers, and keep it stopped until the new version serves traffic. Anything the old version
    accepts after the dump is lost; while the service is down, providers retry undelivered webhooks.
    Then take a [backup](#backup) with `pg_dump --format=custom`.
-2. Create an empty database and run `quotum migrate` from the target image.
+2. Create an empty database and run `quotum migrate` from the target image. The merchant baseline
+   seeds the built-in remote MCP OAuth clients `quotum-claude-code` and `quotum-cursor`. A
+   dump taken from v0.13.1 or later already contains them, and the restore would stop on their
+   duplicate `client_id`, so delete the seeded copies first; the restore brings them back with
+   any clients registered since. Skip this for a dump from an earlier version, which has none.
+
+   ```sql
+   DELETE FROM platform_auth_oauth_clients;
+   ```
+
 3. Let the restore load rows that have no provider:
 
    ```sql
