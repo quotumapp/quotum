@@ -1,5 +1,11 @@
-import { describe, expect, it } from "bun:test";
-import { isBillingError } from "../../../src/billing/errors";
+import { describe, expect, it, spyOn } from "bun:test";
+import type Stripe from "stripe";
+import type {
+	CommercialActionExecutionResult,
+	CommercialPreviewDraft,
+} from "../../../src/billing/commercial";
+import { BillingError, isBillingError } from "../../../src/billing/errors";
+import type { StripeRecurringCheckoutPlan } from "../../../src/db/repository";
 import {
 	applyPaymentSetupEvent,
 	createPaymentSetup,
@@ -17,6 +23,15 @@ import {
 	reconcilePaymentSetup,
 	STRIPE_IDEMPOTENCY_RETENTION_MS,
 } from "../../../src/providers/stripe/payment-setup";
+import {
+	paymentSetupPlanIdempotencyKey,
+	startPlanOnSavedCard,
+} from "../../../src/providers/stripe/saved-card-plan";
+import {
+	paymentSetupSubscriptionParams,
+	StripeBillingService,
+	type StripeBillingServiceDependencies,
+} from "../../../src/providers/stripe/service";
 import {
 	FakePaymentSetupClient,
 	type FakePaymentSetupClientOptions,
@@ -36,6 +51,7 @@ const parameters: PaymentSetupRequestParameters = {
 	cancelUrl: "https://app.example.com/billing",
 	providerAccountId: "acct_stripe_1",
 	integrationIdentifier: "qfmxzjpa",
+	plan: null,
 };
 
 function context(
@@ -187,6 +203,21 @@ describe("hosted payment setup reuse and conflicts", () => {
 		expect(paymentSetupRequestHash({ ...parameters, currency: "eur" })).not.toBe(
 			paymentSetupRequestHash(parameters),
 		);
+	});
+
+	it("reuses a card-only setup reserved before plan support", async () => {
+		const ctx = context();
+		const first = await create(ctx);
+		// Frozen hash from the previous release, whose serialized request had no plan field.
+		const legacyHash = "1a28458dcf6b5d17391e00704b5512536fa0ec8e3d004df7ee9a0bf9ad6dc350";
+		ctx.store.only().request_hash = legacyHash;
+
+		expect((await paymentSetupPreviewFacts(ctx, parameters)).reusesExistingSetup).toBe(true);
+		const reused = await create(ctx, { previewToken: otherPreviewToken });
+		expect(reused).toMatchObject({ setupId: first.setupId, url: first.url, reused: true });
+		expect(ctx.client.createdSessions).toHaveLength(1);
+		expect(ctx.store.rows.size).toBe(1);
+		expect(paymentSetupRequestHash(parameters)).toBe(legacyHash);
 	});
 
 	it("needs a new preview once the setup completed", async () => {
@@ -789,4 +820,724 @@ describe("hosted setup review regressions", () => {
 			expect(ctx.client.createdSessions).toHaveLength(1);
 		});
 	}
+});
+
+const proPlan: StripeRecurringCheckoutPlan = {
+	planVersionId: "42",
+	planKey: "pro",
+	name: "Pro",
+	kind: "base",
+	trialDays: 14,
+	trialRequiresPaymentMethod: true,
+	trialEndBehavior: "cancel",
+	trialUsed: false,
+	components: [
+		{
+			priceComponentId: "1",
+			priceKey: "base",
+			componentKind: "base",
+			featureKey: null,
+			externalProductId: "prod_pro",
+			externalPriceId: "price_pro",
+			defaultQuantity: 1,
+			minimumQuantity: 1,
+			maximumQuantity: 1,
+			unitAmountMinor: 999,
+			pricingModel: "flat",
+			currency: "usd",
+			billingInterval: "month",
+		},
+		{
+			priceComponentId: "2",
+			priceKey: "seats",
+			componentKind: "licensed",
+			featureKey: "seats",
+			externalProductId: "prod_seats",
+			externalPriceId: "price_seats",
+			defaultQuantity: 1,
+			minimumQuantity: 1,
+			maximumQuantity: 100,
+			unitAmountMinor: 200,
+			pricingModel: "flat",
+			currency: "usd",
+			billingInterval: "month",
+		},
+	],
+};
+
+const planRequest: PaymentSetupRequestParameters = {
+	...parameters,
+	plan: { planKey: "pro", planVersionId: "42", quantities: { seats: 5 } },
+};
+
+describe("setup that starts a plan", () => {
+	// capability: subscription.create
+	function subscriptionClient() {
+		const subscriptions = new Map<string, Record<string, unknown>>();
+		const byKey = new Map<string, Record<string, unknown>>();
+		const creates: Array<{ params: Stripe.SubscriptionCreateParams; idempotencyKey: string }> = [];
+		let failure: unknown;
+		let loseNext = false;
+		return {
+			creates,
+			failNext(error: unknown) {
+				failure = error;
+			},
+			loseNextResponse() {
+				loseNext = true;
+			},
+			async createSubscription(params: Stripe.SubscriptionCreateParams, idempotencyKey: string) {
+				const replay = byKey.get(idempotencyKey);
+				if (replay !== undefined) return replay;
+				if (failure !== undefined) {
+					const error = failure;
+					failure = undefined;
+					throw error;
+				}
+				creates.push({ params, idempotencyKey });
+				const subscription = {
+					id: `sub_${creates.length}`,
+					customer: params.customer,
+					status: "active",
+					metadata: params.metadata ?? {},
+				};
+				subscriptions.set(subscription.id, subscription);
+				byKey.set(idempotencyKey, subscription);
+				if (loseNext) {
+					loseNext = false;
+					throw new Error("response lost");
+				}
+				return subscription;
+			},
+			async listCustomerSubscriptions(customerId: string) {
+				return [...subscriptions.values()].filter(
+					(subscription) => subscription.customer === customerId,
+				);
+			},
+			async retrieveSubscription(subscriptionId: string) {
+				const subscription = subscriptions.get(subscriptionId);
+				if (subscription === undefined) throw new Error(`Unknown subscription ${subscriptionId}`);
+				return subscription;
+			},
+		};
+	}
+
+	function planSetup(
+		options: { plan?: StripeRecurringCheckoutPlan; hasActiveBasePlan?: boolean } = {},
+	) {
+		const ctx = context({ sessionStatus: "complete" });
+		const subscriptions = subscriptionClient();
+		const recorded: Record<string, unknown>[] = [];
+		let resolved = options.plan ?? proPlan;
+		let lookupFailure: unknown;
+		ctx.startPlanOnSavedCard = (setup, workerId) =>
+			startPlanOnSavedCard(
+				{
+					client: subscriptions,
+					repository: {
+						getStripeRecurringCheckoutPlanByKey: async () => {
+							if (lookupFailure !== undefined) throw lookupFailure;
+							return resolved;
+						},
+						hasActiveBasePlan: async () => options.hasActiveBasePlan ?? false,
+						recordPaymentSetupSubscriptionId: (input) =>
+							ctx.store.recordPaymentSetupSubscriptionId(input),
+						recordPaymentSetupPlanOutcome: (input) =>
+							ctx.store.recordPaymentSetupPlanOutcome(input),
+					},
+					subscriptionCreateParams: (plan, quantities, setup) =>
+						paymentSetupSubscriptionParams(plan, quantities, setup, "disabled"),
+					recordSubscription: async (subscription) => {
+						recorded.push(subscription);
+					},
+				},
+				setup,
+				workerId,
+			);
+		return {
+			ctx,
+			subscriptions,
+			recorded,
+			resolveAs(plan: StripeRecurringCheckoutPlan) {
+				resolved = plan;
+			},
+			failPlanLookup(error: unknown) {
+				lookupFailure = error;
+			},
+		};
+	}
+
+	it("includes the plan version and quantities in the request hash", () => {
+		expect(paymentSetupRequestHash(planRequest)).not.toBe(paymentSetupRequestHash(parameters));
+		expect(paymentSetupRequestHash(planRequest)).not.toBe(
+			paymentSetupRequestHash({
+				...planRequest,
+				plan: { planKey: "pro", planVersionId: "43", quantities: { seats: 5 } },
+			}),
+		);
+	});
+
+	it("keeps the plan on the normalized intent, prices it, and goes stale when the version changes", async () => {
+		const drafts: CommercialPreviewDraft[] = [];
+		let version = "42";
+		let trialUsed = false;
+		const service = new StripeBillingService({
+			config: {
+				checkoutSuccessUrl: "https://app.example.com/billing/success",
+				checkoutCancelUrl: "https://app.example.com/billing",
+				portalReturnUrl: "https://app.example.com/account/billing",
+			},
+			client: {} as StripeBillingServiceDependencies["client"],
+			repository: {
+				getStripeRecurringCheckoutPlanByKey: async () => ({
+					...proPlan,
+					planVersionId: version,
+					trialUsed,
+				}),
+				hasActiveBasePlan: async () => false,
+				createCommercialActionPreview: async (draft: CommercialPreviewDraft) => {
+					drafts.push(draft);
+					return {
+						...draft.preview,
+						previewToken: previewToken,
+						expiresAt: "2026-09-22T10:15:00.000Z",
+					};
+				},
+				getCommercialActionPreview: async () => {
+					throw new Error("unread");
+				},
+				beginCommercialActionExecution: async () => {
+					throw new Error("unexecuted");
+				},
+				completeCommercialActionExecution: async () => {
+					throw new Error("unexecuted");
+				},
+			} as unknown as StripeBillingServiceDependencies["repository"],
+		});
+		const intent = {
+			kind: "setup_payment" as const,
+			currency: "usd",
+			plan: { planKey: "pro", quantities: { seats: 5 } },
+		};
+		const preview = await service.previewCommercialAction({ billingAccountId: "acct_1", intent });
+		expect(drafts[0]?.intent).toMatchObject({
+			kind: "setup_payment",
+			plan: { planKey: "pro", quantities: { seats: 5 } },
+		});
+		expect(preview).toMatchObject({
+			estimatedTotalMinor: 1999,
+			toPlanVersionId: "42",
+			paymentSetup: {
+				plan: { planKey: "pro", planVersionId: "42", trialDays: 14, startsAfterSetup: true },
+			},
+		});
+		expect(preview.lineItems).toHaveLength(2);
+		const firstFingerprint = preview.stateFingerprint;
+		version = "43";
+		const changed = await service.previewCommercialAction({ billingAccountId: "acct_1", intent });
+		expect(changed.stateFingerprint).not.toBe(firstFingerprint);
+		trialUsed = true;
+		const skipped = await service.previewCommercialAction({ billingAccountId: "acct_1", intent });
+		expect(skipped.stateFingerprint).not.toBe(changed.stateFingerprint);
+		expect(skipped.paymentSetup?.plan).toMatchObject({ trialDays: null });
+		expect(skipped.warnings).toContain(
+			"This account already had a trial of the plan; the subscription starts without one.",
+		);
+		await expect(
+			service.previewCommercialAction({
+				billingAccountId: "acct_1",
+				intent: {
+					kind: "setup_payment",
+					currency: "eur",
+					plan: { planKey: "pro", quantities: {} },
+				},
+			}),
+		).rejects.toMatchObject({
+			code: "INVALID_REQUEST",
+			status: 400,
+			details: { currency: "eur", planCurrency: "usd" },
+		});
+	});
+
+	it.each(["usd", "eur"])(
+		"rejects a plan published in %s after the execution fingerprint was checked",
+		async (currency) => {
+			const ctx = context({}, { now: new Date() });
+			const drafts: CommercialPreviewDraft[] = [];
+			let plan = proPlan;
+			const readPreview = () => {
+				const draft = drafts[0];
+				if (draft === undefined) throw new Error("Expected a stored preview");
+				return {
+					intent: draft.intent,
+					preview: {
+						...draft.preview,
+						previewToken,
+						expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+					},
+					status: "previewed" as const,
+					executionIdempotencyKey: null,
+					executionResult: null,
+				};
+			};
+			const repository = Object.assign(ctx.store, {
+				getStripeRecurringCheckoutPlanByKey: async () => plan,
+				hasActiveBasePlan: async () => false,
+				getStripeProviderCustomer: async () => "cus_1",
+				createCommercialActionPreview: async (draft: CommercialPreviewDraft) => {
+					drafts.push(draft);
+					return readPreview().preview;
+				},
+				getCommercialActionPreview: async () => readPreview(),
+				beginCommercialActionExecution: async (input: { stateFingerprint: string }) => {
+					expect(input.stateFingerprint).toBe(readPreview().preview.stateFingerprint);
+					// Publication occurs after the preview's fingerprint is accepted.
+					plan = {
+						...proPlan,
+						planVersionId: "43",
+						components: proPlan.components.map((component) => ({
+							...component,
+							currency,
+							externalPriceId: `${component.externalPriceId}_new`,
+							unitAmountMinor: component.unitAmountMinor * 2,
+						})),
+					};
+					return { ...readPreview(), status: "executing" as const };
+				},
+				completeCommercialActionExecution: async (input: {
+					result: CommercialActionExecutionResult;
+				}) => input.result,
+			});
+			const service = new StripeBillingService({
+				config: {
+					checkoutSuccessUrl: parameters.successUrl,
+					checkoutCancelUrl: parameters.cancelUrl,
+					portalReturnUrl: parameters.cancelUrl,
+				},
+				client: ctx.client as unknown as StripeBillingServiceDependencies["client"],
+				repository: repository as unknown as StripeBillingServiceDependencies["repository"],
+			});
+			const preview = await service.previewCommercialAction({
+				billingAccountId: "acct_1",
+				intent: {
+					kind: "setup_payment",
+					currency: "usd",
+					plan: { planKey: "pro", quantities: { seats: 5 } },
+				},
+			});
+			expect(preview.toPlanVersionId).toBe("42");
+			await expect(
+				service.executeCommercialAction({
+					billingAccountId: "acct_1",
+					previewToken,
+					idempotencyKey: "setup-plan-execution",
+				}),
+			).rejects.toMatchObject({ code: "COMMERCIAL_PREVIEW_STALE", status: 409 });
+			expect(ctx.client.createdSessions).toHaveLength(0);
+			expect(ctx.store.rows.size).toBe(0);
+		},
+	);
+
+	it("creates the subscription with the saved card, trial and setup idempotency key", async () => {
+		const { ctx, subscriptions, recorded } = planSetup();
+		const creation = await create(ctx, { parameters: planRequest });
+		expect(
+			await reconcilePaymentSetup(ctx, {
+				setupId: creation.setupId,
+				workerId: "worker-a",
+				attempts: 0,
+			}),
+		).toEqual({ status: "processed" });
+		const setup = ctx.store.only();
+		expect(setup.status).toBe("completed");
+		expect(setup.plan_status).toBe("started");
+		expect(subscriptions.creates[0]?.idempotencyKey).toBe(paymentSetupPlanIdempotencyKey(setup.id));
+		expect(subscriptions.creates[0]?.params).toMatchObject({
+			customer: "cus_1",
+			payment_behavior: "error_if_incomplete",
+			off_session: true,
+			proration_behavior: "none",
+			trial_period_days: 14,
+			items: [
+				{ price: "price_pro", quantity: 1 },
+				{ price: "price_seats", quantity: 5 },
+			],
+			metadata: { quotumPaymentSetupId: setup.id, planKey: "pro", planVersionId: "42" },
+		});
+		expect(recorded).toHaveLength(1);
+		expect(setup.external_subscription_id).toBe("sub_1");
+		expect(
+			paymentSetupSubscriptionParams(
+				{ ...proPlan, trialUsed: true },
+				{ seats: 5 },
+				{ id: setup.id, billing_account_id: "acct_1", provider_customer_id: "cus_1" },
+				"disabled",
+			).trial_period_days,
+		).toBeUndefined();
+	});
+
+	it("records plan_changed when the active version moved", async () => {
+		const { ctx, subscriptions, resolveAs } = planSetup();
+		const creation = await create(ctx, { parameters: planRequest });
+		resolveAs({ ...proPlan, planVersionId: "99" });
+		await reconcilePaymentSetup(ctx, {
+			setupId: creation.setupId,
+			workerId: "worker-a",
+			attempts: 0,
+		});
+		expect(ctx.store.only()).toMatchObject({
+			status: "completed",
+			plan_status: "plan_changed",
+			external_subscription_id: null,
+		});
+		expect(subscriptions.creates).toHaveLength(0);
+	});
+
+	it("records not_eligible for an add-on without a base plan and for a second base plan", async () => {
+		const addon = planSetup({ plan: { ...proPlan, kind: "addon" } });
+		const addonCreation = await create(addon.ctx, { parameters: planRequest });
+		await reconcilePaymentSetup(addon.ctx, {
+			setupId: addonCreation.setupId,
+			workerId: "worker-a",
+			attempts: 0,
+		});
+		expect(addon.ctx.store.only()).toMatchObject({
+			status: "completed",
+			plan_status: "not_eligible",
+			plan_failure_code: "ADDON_REQUIRES_BASE_PLAN",
+		});
+
+		const secondBase = planSetup({ hasActiveBasePlan: true });
+		const secondCreation = await create(secondBase.ctx, {
+			parameters: planRequest,
+			previewToken: otherPreviewToken,
+		});
+		await reconcilePaymentSetup(secondBase.ctx, {
+			setupId: secondCreation.setupId,
+			workerId: "worker-a",
+			attempts: 0,
+		});
+		expect(secondBase.ctx.store.only()).toMatchObject({
+			plan_status: "not_eligible",
+			plan_failure_code: "BASE_PLAN_ALREADY_ACTIVE",
+		});
+	});
+
+	it.each(["card_declined", "authentication_required"] as const)(
+		"completes the setup and releases the slot on a 402 %s",
+		async (code) => {
+			const { ctx, subscriptions } = planSetup();
+			const creation = await create(ctx, { parameters: planRequest });
+			subscriptions.failNext(Object.assign(new Error("card failed"), { statusCode: 402, code }));
+			expect(
+				await reconcilePaymentSetup(ctx, {
+					setupId: creation.setupId,
+					workerId: "worker-a",
+					attempts: 0,
+				}),
+			).toEqual({ status: "processed" });
+			expect(ctx.store.only()).toMatchObject({
+				status: "completed",
+				plan_status: "payment_failed",
+				plan_failure_code: code,
+			});
+			expect(await ctx.store.findActivePaymentSetup(planRequest)).toBeNull();
+			expect(subscriptions.creates).toHaveLength(0);
+		},
+	);
+
+	it("adopts the subscription a lost create response already made", async () => {
+		const { ctx, subscriptions, recorded } = planSetup();
+		const creation = await create(ctx, { parameters: planRequest });
+		subscriptions.loseNextResponse();
+		expect(
+			(
+				await reconcilePaymentSetup(ctx, {
+					setupId: creation.setupId,
+					workerId: "worker-a",
+					attempts: 0,
+				})
+			).status,
+		).toBe("retryable");
+		expect(ctx.store.only().status).toBe("applying_default");
+		expect(
+			await reconcilePaymentSetup(ctx, {
+				setupId: creation.setupId,
+				workerId: "worker-a",
+				attempts: 1,
+			}),
+		).toEqual({ status: "processed" });
+		expect(subscriptions.creates).toHaveLength(1);
+		expect(recorded).toHaveLength(1);
+		expect(ctx.store.only()).toMatchObject({ status: "completed", plan_status: "started" });
+	});
+
+	it.each(["active_base", "version", "currency"] as const)(
+		"recovers a lost create response after %s changes",
+		async (change) => {
+			const options = { hasActiveBasePlan: false };
+			const { ctx, subscriptions, recorded, resolveAs } = planSetup(options);
+			const creation = await create(ctx, { parameters: planRequest });
+			const input = { setupId: creation.setupId, workerId: "worker-a", attempts: 0 };
+			subscriptions.loseNextResponse();
+			expect(await reconcilePaymentSetup(ctx, input)).toEqual({
+				status: "retryable",
+				reason: "response lost",
+			});
+			if (change === "active_base") options.hasActiveBasePlan = true;
+			if (change === "version") resolveAs({ ...proPlan, planVersionId: "99" });
+			if (change === "currency")
+				resolveAs({
+					...proPlan,
+					components: proPlan.components.map((component) => ({ ...component, currency: "eur" })),
+				});
+			expect(await reconcilePaymentSetup(ctx, { ...input, attempts: 1 })).toEqual({
+				status: "processed",
+			});
+			expect(subscriptions.creates).toHaveLength(1);
+			expect(recorded).toHaveLength(1);
+			expect(ctx.store.only()).toMatchObject({
+				status: "completed",
+				plan_status: "started",
+				external_subscription_id: "sub_1",
+			});
+		},
+	);
+
+	it.each(["subscription_id", "outcome"] as const)(
+		"retries a post-create INVALID_REQUEST while recording %s",
+		async (stage) => {
+			const options = { hasActiveBasePlan: false };
+			const { ctx, subscriptions, recorded, resolveAs } = planSetup(options);
+			const creation = await create(ctx, { parameters: planRequest });
+			const input = { setupId: creation.setupId, workerId: "worker-a", attempts: 0 };
+			const method =
+				stage === "subscription_id"
+					? "recordPaymentSetupSubscriptionId"
+					: "recordPaymentSetupPlanOutcome";
+			const failure = spyOn(ctx.store, method).mockImplementationOnce(async () => {
+				throw new BillingError("local persistence failed", "INVALID_REQUEST", 400);
+			});
+			try {
+				expect(await reconcilePaymentSetup(ctx, input)).toEqual({
+					status: "retryable",
+					reason: "local persistence failed",
+				});
+				expect(ctx.store.only()).toMatchObject({
+					status: "applying_default",
+					plan_status: "pending",
+				});
+				expect(subscriptions.creates).toHaveLength(1);
+				// A webhook or the first attempt has now stored the subscription locally.
+				options.hasActiveBasePlan = true;
+				resolveAs({ ...proPlan, planVersionId: "99" });
+				expect(await reconcilePaymentSetup(ctx, { ...input, attempts: 1 })).toEqual({
+					status: "processed",
+				});
+				expect(ctx.store.only()).toMatchObject({
+					status: "completed",
+					plan_status: "started",
+					external_subscription_id: "sub_1",
+				});
+				expect(subscriptions.creates).toHaveLength(1);
+				expect(recorded.length).toBe(stage === "outcome" ? 2 : 1);
+			} finally {
+				failure.mockRestore();
+			}
+		},
+	);
+
+	it("retries subscription recording errors on both creation and recovery", async () => {
+		const { ctx, subscriptions, recorded } = planSetup();
+		const creation = await create(ctx, { parameters: planRequest });
+		const input = { setupId: creation.setupId, workerId: "worker-a", attempts: 0 };
+		const failure = spyOn(recorded, "push").mockImplementation(() => {
+			throw new BillingError("subscription normalization failed", "INVALID_REQUEST", 400);
+		});
+		try {
+			for (const attempts of [0, 1]) {
+				expect(await reconcilePaymentSetup(ctx, { ...input, attempts })).toEqual({
+					status: "retryable",
+					reason: "subscription normalization failed",
+				});
+				expect(ctx.store.only()).toMatchObject({
+					status: "applying_default",
+					plan_status: "pending",
+					external_subscription_id: "sub_1",
+				});
+			}
+		} finally {
+			failure.mockRestore();
+		}
+		expect(await reconcilePaymentSetup(ctx, { ...input, attempts: 2 })).toEqual({
+			status: "processed",
+		});
+		expect(ctx.store.only()).toMatchObject({ status: "completed", plan_status: "started" });
+		expect(subscriptions.creates).toHaveLength(1);
+		expect(recorded).toHaveLength(1);
+	});
+
+	it("records not_eligible when the plan left the catalog and retries an unavailable catalog", async () => {
+		const { ctx, subscriptions, failPlanLookup } = planSetup();
+		const creation = await create(ctx, { parameters: planRequest });
+		const input = { setupId: creation.setupId, workerId: "worker-a", attempts: 0 };
+		failPlanLookup(new Error("catalog unavailable"));
+		expect(await reconcilePaymentSetup(ctx, input)).toEqual({
+			status: "retryable",
+			reason: "catalog unavailable",
+		});
+		expect(ctx.store.only()).toMatchObject({ status: "applying_default", plan_status: "pending" });
+
+		failPlanLookup(new BillingError("Plan not found", "BILLING_PLAN_NOT_FOUND", 404));
+		expect(await reconcilePaymentSetup(ctx, { ...input, attempts: 1 })).toEqual({
+			status: "processed",
+		});
+		expect(ctx.store.only()).toMatchObject({
+			status: "completed",
+			plan_status: "not_eligible",
+			plan_failure_code: "BILLING_PLAN_NOT_FOUND",
+			plan_failure_message: "Plan not found",
+		});
+		expect(subscriptions.creates).toHaveLength(0);
+	});
+
+	it("records not_eligible when the plan currency no longer matches the setup", async () => {
+		const { ctx, subscriptions, resolveAs } = planSetup();
+		const creation = await create(ctx, { parameters: planRequest });
+		resolveAs({
+			...proPlan,
+			components: proPlan.components.map((component) => ({ ...component, currency: "eur" })),
+		});
+		expect(
+			await reconcilePaymentSetup(ctx, {
+				setupId: creation.setupId,
+				workerId: "worker-a",
+				attempts: 0,
+			}),
+		).toEqual({ status: "processed" });
+		expect(ctx.store.only()).toMatchObject({
+			status: "completed",
+			plan_status: "not_eligible",
+			plan_failure_code: "INVALID_REQUEST",
+		});
+		expect(subscriptions.creates).toHaveLength(0);
+	});
+
+	it("records payment_failed when the recovered subscription is no longer active", async () => {
+		const { ctx, subscriptions, recorded } = planSetup();
+		const creation = await create(ctx, { parameters: planRequest });
+		const input = { setupId: creation.setupId, workerId: "worker-a", attempts: 0 };
+		subscriptions.loseNextResponse();
+		expect((await reconcilePaymentSetup(ctx, input)).status).toBe("retryable");
+		const lost = await subscriptions.retrieveSubscription("sub_1");
+		lost.status = "incomplete_expired";
+
+		expect(await reconcilePaymentSetup(ctx, { ...input, attempts: 1 })).toEqual({
+			status: "processed",
+		});
+		expect(ctx.store.only()).toMatchObject({
+			status: "completed",
+			plan_status: "payment_failed",
+			plan_failure_code: "subscription_incomplete",
+			external_subscription_id: "sub_1",
+		});
+		expect(recorded).toHaveLength(0);
+	});
+
+	it("retries instead of guessing when two subscriptions carry the setup id", async () => {
+		const { ctx, subscriptions } = planSetup();
+		const creation = await create(ctx, { parameters: planRequest });
+		const input = { setupId: creation.setupId, workerId: "worker-a", attempts: 0 };
+		subscriptions.loseNextResponse();
+		expect((await reconcilePaymentSetup(ctx, input)).status).toBe("retryable");
+		const [lost] = subscriptions.creates;
+		if (lost === undefined) throw new Error("Expected the lost create");
+		await subscriptions.createSubscription(lost.params, "another-key");
+
+		expect(await reconcilePaymentSetup(ctx, { ...input, attempts: 1 })).toEqual({
+			status: "retryable",
+			reason: "More than one Stripe subscription is tagged with this payment setup",
+		});
+		expect(ctx.store.only()).toMatchObject({ status: "applying_default", plan_status: "pending" });
+	});
+
+	it("retries a subscription Stripe returned without an id or could not read", async () => {
+		const { ctx, subscriptions, recorded } = planSetup();
+		const creation = await create(ctx, { parameters: planRequest });
+		const input = { setupId: creation.setupId, workerId: "worker-a", attempts: 0 };
+		const idless = spyOn(subscriptions, "createSubscription").mockResolvedValueOnce({
+			status: "active",
+		});
+		try {
+			expect(await reconcilePaymentSetup(ctx, input)).toEqual({
+				status: "retryable",
+				reason: "Stripe subscription did not include an id",
+			});
+		} finally {
+			idless.mockRestore();
+		}
+		const outcome = spyOn(ctx.store, "recordPaymentSetupPlanOutcome").mockImplementationOnce(
+			async () => {
+				throw new Error("outcome write failed");
+			},
+		);
+		try {
+			expect((await reconcilePaymentSetup(ctx, { ...input, attempts: 1 })).status).toBe(
+				"retryable",
+			);
+		} finally {
+			outcome.mockRestore();
+		}
+		expect(ctx.store.only().external_subscription_id).toBe("sub_1");
+
+		const retrieve = spyOn(subscriptions, "retrieveSubscription").mockResolvedValueOnce(
+			null as unknown as Record<string, unknown>,
+		);
+		try {
+			expect(await reconcilePaymentSetup(ctx, { ...input, attempts: 2 })).toEqual({
+				status: "retryable",
+				reason: "Stripe subscription could not be read",
+			});
+		} finally {
+			retrieve.mockRestore();
+		}
+		expect(await reconcilePaymentSetup(ctx, { ...input, attempts: 3 })).toEqual({
+			status: "processed",
+		});
+		expect(ctx.store.only()).toMatchObject({ status: "completed", plan_status: "started" });
+		expect(recorded).toHaveLength(2);
+	});
+
+	it("retries a setup whose stored plan reservation is incomplete", async () => {
+		const { ctx, subscriptions } = planSetup();
+		const creation = await create(ctx, { parameters: planRequest });
+		ctx.store.only().plan_version_id = null;
+		expect(
+			await reconcilePaymentSetup(ctx, {
+				setupId: creation.setupId,
+				workerId: "worker-a",
+				attempts: 0,
+			}),
+		).toEqual({
+			status: "retryable",
+			reason: "Payment setup is missing the plan it was reserved to start",
+		});
+		expect(subscriptions.creates).toHaveLength(0);
+	});
+
+	it("leaves a setup without a plan unchanged", async () => {
+		const ctx = context({ sessionStatus: "complete" });
+		ctx.startPlanOnSavedCard = () => {
+			throw new Error("a card-only setup must not start a plan");
+		};
+		const creation = await create(ctx);
+		expect(
+			await reconcilePaymentSetup(ctx, {
+				setupId: creation.setupId,
+				workerId: "worker-a",
+				attempts: 0,
+			}),
+		).toEqual({ status: "processed" });
+		expect(ctx.store.only()).toMatchObject({ status: "completed", plan_status: null });
+	});
 });

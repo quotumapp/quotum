@@ -75,6 +75,14 @@ export class FakePaymentSetupStore implements PaymentSetupRepositoryDependency {
 			email: input.email,
 			success_url: input.successUrl,
 			cancel_url: input.cancelUrl,
+			plan_key: input.plan?.planKey ?? null,
+			plan_version_id: input.plan?.planVersionId ?? null,
+			plan_quantities: input.plan?.quantities ?? null,
+			plan_status: input.plan == null ? null : "pending",
+			plan_failure_code: null,
+			plan_failure_message: null,
+			external_subscription_id: null,
+			plan_resolved_at: null,
 			status: "creating",
 			external_session_id: null,
 			session_url: null,
@@ -163,6 +171,9 @@ export class FakePaymentSetupStore implements PaymentSetupRepositoryDependency {
 		} | null;
 	}): Promise<PaymentSetupRow> {
 		const row = this.requireHeld(input.setupId, input.workerId);
+		if (row.plan_status === "pending") {
+			throw new Error("A completed setup cannot still have a pending plan");
+		}
 		row.status = "completed";
 		row.default_payment_method_id = input.paymentMethodId;
 		row.card_brand = input.card?.brand ?? null;
@@ -173,6 +184,41 @@ export class FakePaymentSetupStore implements PaymentSetupRepositoryDependency {
 		row.completed_at = this.now.toISOString();
 		row.claimed_by = null;
 		row.claimed_at = null;
+		return row;
+	}
+
+	async recordPaymentSetupSubscriptionId(input: {
+		setupId: string;
+		workerId: string;
+		externalSubscriptionId: string;
+	}): Promise<PaymentSetupRow> {
+		const row = this.requireHeld(input.setupId, input.workerId);
+		if (row.plan_status !== "pending") throw new Error("Payment setup plan is not pending");
+		if (
+			row.external_subscription_id !== null &&
+			row.external_subscription_id !== input.externalSubscriptionId
+		) {
+			throw new Error("Payment setup subscription id changed");
+		}
+		row.external_subscription_id = input.externalSubscriptionId;
+		return row;
+	}
+
+	async recordPaymentSetupPlanOutcome(input: {
+		setupId: string;
+		workerId: string;
+		status: "started" | "payment_failed" | "plan_changed" | "not_eligible";
+		externalSubscriptionId: string | null;
+		failureCode: string | null;
+		failureMessage: string | null;
+	}): Promise<PaymentSetupRow> {
+		const row = this.requireHeld(input.setupId, input.workerId);
+		if (row.plan_status !== "pending") throw new Error("Payment setup plan is not pending");
+		row.plan_status = input.status;
+		row.external_subscription_id = input.externalSubscriptionId ?? row.external_subscription_id;
+		row.plan_failure_code = input.failureCode;
+		row.plan_failure_message = input.failureMessage;
+		row.plan_resolved_at = this.now.toISOString();
 		return row;
 	}
 

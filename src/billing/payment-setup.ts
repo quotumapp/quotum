@@ -1,7 +1,7 @@
 /**
- * Hosted payment-method setup: saving a payment method for later off-session charges. A setup is
- * not a purchase. It creates no purchase, allocation, entitlement or invoice, and the only billing
- * state it changes is which payment method the provider charges by default.
+ * Hosted payment-method setup: saving a payment method for later off-session charges. Without a
+ * plan, a setup is not a purchase and the only billing state it changes is the provider default
+ * payment method. With a plan, completion starts that plan on the saved card.
  */
 
 import { BillingError } from "./errors";
@@ -12,9 +12,9 @@ export const paymentSetupStatuses = [
 	"creating",
 	/** The link exists and the customer has not finished with it. */
 	"awaiting_customer",
-	/** The customer finished; the provider default-method write is still owed. */
+	/** The customer finished; the default-method write, and any plan start, is still owed. */
 	"applying_default",
-	/** The default-method write is confirmed. */
+	/** The default-method write is confirmed and any plan outcome is terminal. */
 	"completed",
 	/** The link expired without a completed setup, confirmed against the provider. */
 	"expired",
@@ -22,6 +22,35 @@ export const paymentSetupStatuses = [
 	"needs_attention",
 ] as const;
 export type PaymentSetupStatus = (typeof paymentSetupStatuses)[number];
+
+/**
+ * What happened to a plan attached to a setup. `pending` holds the setup in `applying_default`
+ * until the outcome is terminal; a completed setup is never left pending.
+ */
+export const paymentSetupPlanStatuses = [
+	"pending",
+	"started",
+	"payment_failed",
+	"plan_changed",
+	"not_eligible",
+] as const;
+export type PaymentSetupPlanStatus = (typeof paymentSetupPlanStatuses)[number];
+
+export interface PaymentSetupPlanFailure {
+	code: string;
+	message: string;
+}
+
+/** The plan a setup session reports. Absent when setup only saved a card. */
+export interface PaymentSetupSessionPlan {
+	planKey: string;
+	planVersionId: string;
+	quantities: Record<string, number>;
+	status: PaymentSetupPlanStatus;
+	externalSubscriptionId: string | null;
+	failure: PaymentSetupPlanFailure | null;
+	resolvedAt: string | null;
+}
 
 /**
  * The states that release a billing account's single active setup slot. Everything else, including
@@ -61,6 +90,8 @@ export interface PaymentSetupSession {
 	card: PaymentSetupCard | null;
 	/** Why the setup needs attention, in operator-facing words; null otherwise. */
 	attention: string | null;
+	/** The plan this setup starts after the card is saved, or null when it only saves a card. */
+	plan: PaymentSetupSessionPlan | null;
 	createdAt: string;
 	updatedAt: string;
 }

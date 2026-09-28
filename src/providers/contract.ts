@@ -234,6 +234,7 @@ export const providerOperationMethods: Record<ProviderOperation, readonly Provid
 		"subscription.change.period_end": ["changes.apply"],
 		"subscription.cancel": ["commercial.execute"],
 		"subscription.uncancel": ["commercial.execute"],
+		"subscription.create": ["commercial.execute"],
 		"settlement.collect_finalized_charge": ["settlement.collectFinalizedCharge"],
 		"adjustment.issue": ["settlement.collectFinalizedCharge"],
 		"refund.sync": ["webhooks.ingest"],

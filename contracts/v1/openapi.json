@@ -8481,6 +8481,75 @@
                   "string"
                 ]
               },
+              "plan": {
+                "properties": {
+                  "externalSubscriptionId": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "failure": {
+                    "properties": {
+                      "code": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "code",
+                      "message"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "planKey": {
+                    "type": "string"
+                  },
+                  "planVersionId": {
+                    "type": "string"
+                  },
+                  "quantities": {
+                    "additionalProperties": {
+                      "type": "number"
+                    },
+                    "type": "object"
+                  },
+                  "resolvedAt": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "started",
+                      "payment_failed",
+                      "plan_changed",
+                      "not_eligible"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "planKey",
+                  "planVersionId",
+                  "quantities",
+                  "status",
+                  "externalSubscriptionId",
+                  "failure",
+                  "resolvedAt"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "provider": {
                 "enum": [
                   "stripe"
@@ -8529,6 +8598,7 @@
               "completedAt",
               "card",
               "attention",
+              "plan",
               "createdAt",
               "updatedAt"
             ],
@@ -13834,6 +13904,38 @@
                       "string"
                     ]
                   },
+                  "plan": {
+                    "properties": {
+                      "planKey": {
+                        "type": "string"
+                      },
+                      "planVersionId": {
+                        "type": "string"
+                      },
+                      "startsAfterSetup": {
+                        "enum": [
+                          true
+                        ],
+                        "type": "boolean"
+                      },
+                      "trialDays": {
+                        "type": [
+                          "null",
+                          "number"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "planKey",
+                      "planVersionId",
+                      "trialDays",
+                      "startsAfterSetup"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
                   "preservesSubscriptionPaymentMethods": {
                     "enum": [
                       true
@@ -13850,7 +13952,8 @@
                   "preservesSubscriptionPaymentMethods",
                   "reusesExistingSetup",
                   "existingSetupId",
-                  "existingSetupExpiresAt"
+                  "existingSetupExpiresAt",
+                  "plan"
                 ],
                 "type": [
                   "object",
@@ -14179,6 +14282,35 @@
                     ],
                     "type": "string"
                   },
+                  "plan": {
+                    "properties": {
+                      "planKey": {
+                        "type": "string"
+                      },
+                      "planVersionId": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "pending",
+                          "started",
+                          "payment_failed",
+                          "plan_changed",
+                          "not_eligible"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "planKey",
+                      "planVersionId",
+                      "status"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
                   "reused": {
                     "type": "boolean"
                   },
@@ -14216,7 +14348,8 @@
                   "sessionId",
                   "url",
                   "expiresAt",
-                  "reused"
+                  "reused",
+                  "plan"
                 ],
                 "type": "object"
               },
@@ -14426,6 +14559,35 @@
                     ],
                     "type": "string"
                   },
+                  "plan": {
+                    "properties": {
+                      "planKey": {
+                        "type": "string"
+                      },
+                      "planVersionId": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "pending",
+                          "started",
+                          "payment_failed",
+                          "plan_changed",
+                          "not_eligible"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "planKey",
+                      "planVersionId",
+                      "status"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
                   "reused": {
                     "type": "boolean"
                   },
@@ -14463,7 +14625,8 @@
                   "sessionId",
                   "url",
                   "expiresAt",
-                  "reused"
+                  "reused",
+                  "plan"
                 ],
                 "type": "object"
               },
@@ -17250,6 +17413,9 @@
               "subscription.change.preview": {
                 "$ref": "#/components/schemas/ProviderOperationSupport"
               },
+              "subscription.create": {
+                "$ref": "#/components/schemas/ProviderOperationSupport"
+              },
               "subscription.reconcile": {
                 "$ref": "#/components/schemas/ProviderOperationSupport"
               },
@@ -17295,6 +17461,7 @@
               "subscription.change.period_end",
               "subscription.cancel",
               "subscription.uncancel",
+              "subscription.create",
               "settlement.collect_finalized_charge",
               "adjustment.issue",
               "refund.sync",
@@ -17626,6 +17793,7 @@
           "subscription.change.period_end",
           "subscription.cancel",
           "subscription.uncancel",
+          "subscription.create",
           "settlement.collect_finalized_charge",
           "adjustment.issue",
           "refund.sync",
@@ -25622,6 +25790,27 @@
                               "setup_payment"
                             ],
                             "type": "string"
+                          },
+                          "plan": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "planKey": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "quantities": {
+                                "additionalProperties": {
+                                  "exclusiveMinimum": 0,
+                                  "type": "integer"
+                                },
+                                "default": {},
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "planKey"
+                            ],
+                            "type": "object"
                           },
                           "successUrl": {
                             "format": "uri",
@@ -60668,6 +60857,27 @@
                               "setup_payment"
                             ],
                             "type": "string"
+                          },
+                          "plan": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "planKey": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "quantities": {
+                                "additionalProperties": {
+                                  "exclusiveMinimum": 0,
+                                  "type": "integer"
+                                },
+                                "default": {},
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "planKey"
+                            ],
+                            "type": "object"
                           },
                           "successUrl": {
                             "format": "uri",

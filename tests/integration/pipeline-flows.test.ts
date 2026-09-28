@@ -422,6 +422,12 @@ function replayOnlyStripeClient() {
 		async retrieveSubscription() {
 			throw new Error("Unexpected Stripe subscription retrieval");
 		},
+		async createSubscription() {
+			throw new Error("Unexpected Stripe subscription creation");
+		},
+		async listCustomerSubscriptions() {
+			throw new Error("Unexpected Stripe subscription list");
+		},
 	};
 }
 

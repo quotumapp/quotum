@@ -19,6 +19,25 @@ let context: LocalPostgresContext;
 
 const hour = 60 * 60 * 1000;
 
+/** A constraint failure's message, without walking the driver's circular error object. */
+async function expectConstraint(
+	query: Promise<unknown>,
+	constraint: string | RegExp,
+): Promise<void> {
+	try {
+		await query;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (typeof constraint === "string") {
+			expect(message).toContain(constraint);
+		} else {
+			expect(message).toMatch(constraint);
+		}
+		return;
+	}
+	throw new Error(`Expected ${String(constraint)}`);
+}
+
 function reservation(overrides: Partial<ReservePaymentSetupInput> = {}): ReservePaymentSetupInput {
 	return {
 		billingAccountId: "setup_account",
@@ -32,6 +51,7 @@ function reservation(overrides: Partial<ReservePaymentSetupInput> = {}): Reserve
 		successUrl: "https://app.integration.test/billing",
 		cancelUrl: "https://app.integration.test/billing",
 		expiresAt: new Date(Date.now() + 24 * hour),
+		plan: null,
 		...overrides,
 	};
 }
@@ -502,6 +522,104 @@ localDescribe("Payment setup persistence", () => {
 			>`SELECT customer_id FROM store_events WHERE id = ${queued.storeEventId}`;
 			expect(event?.customer_id).toBe(id === "local" ? local.setup.customer_id : null);
 		}
+	});
+
+	it("stores a plan, records its outcome under the claim, and rejects a partial plan", async () => {
+		const created = await context.repository.reservePaymentSetup(
+			voysee,
+			reservation({
+				plan: { planKey: "pro", planVersionId: "42", quantities: { seats: 5 } },
+			}),
+		);
+		expect(created.setup).toMatchObject({
+			plan_key: "pro",
+			plan_version_id: "42",
+			plan_status: "pending",
+			plan_quantities: { seats: 5 },
+		});
+		await context.repository.recordPaymentSetupLink(voysee, {
+			setupId: created.setup.id,
+			externalSessionId: "cs_plan_1",
+			sessionUrl: "https://checkout.stripe.test/setup/cs_plan_1",
+			externalSetupIntentId: null,
+			expiresAt: new Date(Date.now() + 24 * hour),
+		});
+		await context.repository.claimPaymentSetup(voysee, {
+			setupId: created.setup.id,
+			workerId: "worker-a",
+		});
+		await context.repository.recordPaymentSetupIntent(voysee, {
+			setupId: created.setup.id,
+			workerId: "worker-a",
+			externalSetupIntentId: "seti_plan_1",
+			paymentMethodId: "pm_plan_1",
+			externalSessionId: "cs_plan_1",
+		});
+		await context.repository.recordPaymentSetupSubscriptionId(voysee, {
+			setupId: created.setup.id,
+			workerId: "worker-a",
+			externalSubscriptionId: "sub_plan_1",
+		});
+		const started = await context.repository.recordPaymentSetupPlanOutcome(voysee, {
+			setupId: created.setup.id,
+			workerId: "worker-a",
+			status: "started",
+			externalSubscriptionId: "sub_plan_1",
+			failureCode: null,
+			failureMessage: null,
+		});
+		expect(started.plan_status).toBe("started");
+		expect(started.plan_resolved_at).not.toBeNull();
+		const completed = await context.repository.completePaymentSetup(voysee, {
+			setupId: created.setup.id,
+			workerId: "worker-a",
+			paymentMethodId: "pm_plan_1",
+			card: null,
+		});
+		expect(completed.status).toBe("completed");
+		const session = await context.repository.getPaymentSetupSession(
+			voysee,
+			"setup_account",
+			created.setup.id,
+		);
+		expect(session.plan).toMatchObject({
+			planKey: "pro",
+			planVersionId: "42",
+			status: "started",
+			externalSubscriptionId: "sub_plan_1",
+			failure: null,
+		});
+
+		const partial = await context.repository.reservePaymentSetup(
+			wiseley,
+			reservation({ previewToken: "33333333-3333-4333-8333-333333333333" }),
+		);
+		await expectConstraint(
+			context.sql`
+				UPDATE payment_setup_sessions SET plan_key = 'pro' WHERE id = ${partial.setup.id}::uuid
+			`,
+			"payment_setup_sessions_plan_presence_check",
+		);
+		await expectConstraint(
+			context.sql`
+				UPDATE payment_setup_sessions
+				SET plan_key = 'pro', plan_version_id = 7, plan_quantities = '{"seats":1}'::jsonb,
+					plan_status = 'started', plan_resolved_at = now()
+				WHERE id = ${partial.setup.id}::uuid
+			`,
+			/payment_setup_sessions_plan_(started|resolved)_check/,
+		);
+		await expectConstraint(
+			context.sql`
+				UPDATE payment_setup_sessions
+				SET status = 'completed', default_payment_method_id = 'pm_x', completed_at = now(),
+					external_session_id = 'cs_partial',
+					plan_key = 'pro', plan_version_id = 7, plan_quantities = '{}'::jsonb,
+					plan_status = 'pending'
+				WHERE id = ${partial.setup.id}::uuid
+			`,
+			"payment_setup_sessions_plan_pending_completion_check",
+		);
 	});
 
 	it("mirrors every SQL setup constraint and descending account-history index", async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import Stripe from "stripe";
 import { buildStripeConfig, StripeBillingClient } from "../../../src/providers/stripe/client";
+import type { DeepPartial } from "../../helpers/deep-partial";
 
 const stripeEnv = {
 	secretKey: "sk_test_123",
@@ -80,6 +81,7 @@ function stripeFixture(options: { asyncWebhook?: boolean } = {}) {
 		client: new StripeBillingClient(buildStripeConfig(stripeEnv), stripe),
 		event,
 		requestOptions,
+		stripe,
 	};
 }
 
@@ -246,6 +248,96 @@ describe("StripeBillingClient", () => {
 			},
 		]);
 	});
+
+	it("lists every customer subscription page, including canceled subscriptions", async () => {
+		const { stripe } = stripeFixture();
+		const calls: Stripe.SubscriptionListParams[] = [];
+		const recent = Array.from(
+			{ length: 100 },
+			(_, index) =>
+				({
+					id: `sub_recent_${index}`,
+					customer: "cus_123",
+					status: "canceled",
+				}) satisfies DeepPartial<Stripe.Subscription>,
+		);
+		const original = {
+			id: "sub_original",
+			customer: "cus_123",
+			status: "active",
+			metadata: { quotumPaymentSetupId: "setup_1" },
+		} satisfies DeepPartial<Stripe.Subscription>;
+		const client = new StripeBillingClient(buildStripeConfig(stripeEnv), {
+			...stripe,
+			subscriptions: {
+				...stripe.subscriptions,
+				async list(params) {
+					calls.push(params);
+					const firstPage = params.starting_after === undefined;
+					return {
+						object: "list",
+						url: "/v1/subscriptions",
+						data: (firstPage ? recent : [original]) as Stripe.Subscription[],
+						has_more: firstPage,
+					};
+				},
+			},
+		});
+
+		const subscriptions = await client.listCustomerSubscriptions("cus_123");
+		expect(subscriptions).toHaveLength(101);
+		expect(subscriptions.at(-1)).toEqual(original);
+		expect(calls).toEqual([
+			{ customer: "cus_123", status: "all", limit: 100 },
+			{ customer: "cus_123", status: "all", limit: 100, starting_after: "sub_recent_99" },
+		]);
+	});
+
+	it("fails recovery when a later subscription page cannot be read", async () => {
+		const { stripe } = stripeFixture();
+		const client = new StripeBillingClient(buildStripeConfig(stripeEnv), {
+			...stripe,
+			subscriptions: {
+				...stripe.subscriptions,
+				async list(params) {
+					if (params.starting_after !== undefined) throw new Error("Stripe listing unavailable");
+					return {
+						object: "list",
+						url: "/v1/subscriptions",
+						data: [{ id: "sub_recent" }] as Stripe.Subscription[],
+						has_more: true,
+					};
+				},
+			},
+		});
+		await expect(client.listCustomerSubscriptions("cus_123")).rejects.toThrow(
+			"Stripe listing unavailable",
+		);
+	});
+
+	it.each(["empty", "repeated"])(
+		"rejects a %s subscription pagination cursor",
+		async (pageKind) => {
+			const { stripe } = stripeFixture();
+			const client = new StripeBillingClient(buildStripeConfig(stripeEnv), {
+				...stripe,
+				subscriptions: {
+					...stripe.subscriptions,
+					async list() {
+						return {
+							object: "list",
+							url: "/v1/subscriptions",
+							data: (pageKind === "empty" ? [] : [{ id: "sub_recent" }]) as Stripe.Subscription[],
+							has_more: true,
+						};
+					},
+				},
+			});
+			await expect(client.listCustomerSubscriptions("cus_123")).rejects.toThrow(
+				"Stripe subscription pagination did not advance",
+			);
+		},
+	);
 
 	it("constructs webhook events with the configured webhook secret", async () => {
 		const { calls, client, event } = stripeFixture();
