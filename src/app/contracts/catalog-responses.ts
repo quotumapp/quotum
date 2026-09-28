@@ -145,7 +145,8 @@ export const getV1AdminCatalogResponse200Schema = z.object({
 									featureKey: z.union([z.null(), z.string()]),
 									currency: z.union([z.null(), z.string()]),
 									limitValue: z.string(),
-									interval: z.enum(["month", "year", "lifetime"]),
+									interval: z.enum([...cadenceUnits, "lifetime"]),
+									intervalCount: z.union([z.null(), z.number()]),
 								}),
 							)
 							.optional(),

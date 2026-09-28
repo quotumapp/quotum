@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cadenceUnits } from "../../shared/cadence";
 import { billingProviderValues } from "./provider-enum";
 
 /** Authored HTTP wire schemas. Update these with the handlers; OpenAPI is generated from them. */
@@ -35,7 +36,10 @@ export const putV1BillingAccountsByBillingAccountIdControlsResponse200Schema = z
 		featureKey: z.union([z.null(), z.string()]),
 		currency: z.union([z.null(), z.string()]),
 		limitValue: z.string(),
-		interval: z.enum(["month", "year", "lifetime"]),
+		interval: z.enum([...cadenceUnits, "lifetime"]),
+		intervalCount: z.union([z.null(), z.number()]),
+		windowStartAt: z.union([z.null(), z.string()]),
+		windowEndAt: z.union([z.null(), z.string()]),
 		source: z.enum(["account", "entity", "plan_default", "contract"]),
 		revision: z.number(),
 		policyId: z.string(),
@@ -53,7 +57,10 @@ export const getV1BillingAccountsByBillingAccountIdControlsResponse200Schema = z
 			featureKey: z.union([z.null(), z.string()]),
 			currency: z.union([z.null(), z.string()]),
 			limitValue: z.string(),
-			interval: z.enum(["month", "year", "lifetime"]),
+			interval: z.enum([...cadenceUnits, "lifetime"]),
+			intervalCount: z.union([z.null(), z.number()]),
+			windowStartAt: z.union([z.null(), z.string()]),
+			windowEndAt: z.union([z.null(), z.string()]),
 			source: z.enum(["account", "entity", "plan_default", "contract"]),
 			revision: z.number(),
 			policyId: z.string(),
@@ -72,7 +79,8 @@ export const postV1BillingAccountsByBillingAccountIdUsageAlertsResponse201Schema
 		featureKey: z.string(),
 		thresholdType: z.enum(["absolute", "percentage"]),
 		thresholdValue: z.string(),
-		interval: z.enum(["month", "year", "lifetime"]),
+		interval: z.enum([...cadenceUnits, "lifetime"]),
+		intervalCount: z.union([z.null(), z.number()]),
 		active: z.boolean(),
 		currentValue: z.string(),
 		crossed: z.boolean(),
@@ -89,7 +97,8 @@ export const getV1BillingAccountsByBillingAccountIdUsageAlertsResponse200Schema 
 			featureKey: z.string(),
 			thresholdType: z.enum(["absolute", "percentage"]),
 			thresholdValue: z.string(),
-			interval: z.enum(["month", "year", "lifetime"]),
+			interval: z.enum([...cadenceUnits, "lifetime"]),
+			intervalCount: z.union([z.null(), z.number()]),
 			active: z.boolean(),
 			currentValue: z.string(),
 			crossed: z.boolean(),

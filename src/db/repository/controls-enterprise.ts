@@ -1,4 +1,5 @@
 import { sql as drizzleSql } from "drizzle-orm";
+import { controlCadence } from "../../billing/cadence";
 import type {
 	AutoTopupPolicyInput,
 	AutoTopupPolicyRecord,
@@ -33,6 +34,7 @@ import {
 	PersistenceConflictError,
 } from "../../billing/errors";
 import type { ProjectInstanceContext } from "../../projects/context";
+import { type Cadence, cadenceKey, calendarWindow } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
 import { ensureCustomer } from "./identities";
@@ -47,6 +49,7 @@ interface EffectiveControlRow {
 	currency: string | null;
 	limit_value: unknown;
 	interval: ControlInterval;
+	interval_count: number;
 	revision: number;
 	contract_replaces_defaults: boolean | null;
 }
@@ -104,13 +107,14 @@ export class ControlsEnterpriseRepository
 				drizzleSql`
 					INSERT INTO control_policies (
 						project_id, source_type, customer_id, entity_id, control_kind,
-						feature_id, currency, limit_value, interval, revision, created_by
+						feature_id, currency, limit_value, interval, interval_count, revision, created_by
 					)
 					VALUES (
 						${projectId}, ${entity === null ? "account" : "entity"}, ${customer.id},
 						${entity?.id ?? null}::bigint, ${normalized.controlKind},
 						${normalized.featureId}::bigint, ${normalized.currency},
-						${normalized.limitValue}::numeric, ${normalized.interval}, ${revision},
+						${normalized.limitValue}::numeric, ${normalized.interval},
+						${normalized.intervalCount ?? 1}, ${revision},
 						${requiredText(input.actor, "actor", 200)}
 					)
 					RETURNING id
@@ -224,6 +228,7 @@ export class ControlsEnterpriseRepository
 			const customer = await requireCustomer(tx, projectId, input.billingAccountId);
 			const entity = await resolveEntity(tx, projectId, customer.id, input.entityId ?? null);
 			const feature = await requireFeature(tx, projectId, input.featureKey);
+			const cadence = controlCadence(input.interval, input.intervalCount, "Usage alert");
 			const threshold = canonicalDecimal(input.thresholdValue, "thresholdValue", 9);
 			if (decimalToUnits(threshold, 9) <= 0n)
 				throw new InvalidRequestError("thresholdValue must be positive");
@@ -238,9 +243,16 @@ export class ControlsEnterpriseRepository
 						customerId: customer.id,
 						entityId: entity?.id ?? null,
 					})
-				).find((item) => item.controlKind === "usage_limit" && item.featureKey === feature.key);
+				).find(
+					(item) =>
+						item.controlKind === "usage_limit" &&
+						item.featureKey === feature.key &&
+						sameControlWindow(item, input.interval, cadence),
+				);
 				if (control === undefined) {
-					throw new InvalidRequestError("Percentage alerts require an effective usage limit");
+					throw new InvalidRequestError(
+						"Percentage alerts require an effective usage limit with the same interval",
+					);
 				}
 				evaluatedThreshold = unitsToDecimal(
 					(decimalToUnits(control.limitValue, 9) * decimalToUnits(threshold, 9)) /
@@ -253,19 +265,20 @@ export class ControlsEnterpriseRepository
 				drizzleSql`
 					INSERT INTO usage_alerts (
 						project_id, customer_id, entity_id, feature_id, threshold_type,
-						threshold_value, interval, created_by, metadata
+						threshold_value, interval, interval_count, created_by, metadata
 					)
 					VALUES (
 						${projectId}, ${customer.id}, ${entity?.id ?? null}::bigint,
 						${feature.id}::bigint, ${input.thresholdType}, ${threshold}::numeric,
-						${input.interval}, ${requiredText(input.actor, "actor", 200)},
-						${jsonb(input.metadata ?? {})}
+						${input.interval}, ${cadence?.count ?? 1},
+						${requiredText(input.actor, "actor", 200)}, ${jsonb(input.metadata ?? {})}
 					)
-					RETURNING id, entity_id, threshold_type, threshold_value, interval, active, created_at
+					RETURNING id, entity_id, threshold_type, threshold_value, interval, interval_count,
+						active, created_at
 				`,
 			);
 			if (row === null) throw new Error("Usage alert could not be persisted");
-			const bounds = controlWindowBounds(input.interval, new Date());
+			const bounds = controlWindowBounds(input.interval, cadence?.count ?? null, new Date());
 			await executeOne(
 				tx,
 				drizzleSql`
@@ -300,7 +313,8 @@ export class ControlsEnterpriseRepository
 			this.database,
 			drizzleSql`
 				SELECT alert.id, alert.entity_id, alert.threshold_type, alert.threshold_value,
-					alert.interval, alert.active, alert.created_at, feature.key AS feature_key,
+					alert.interval, alert.interval_count, alert.active, alert.created_at,
+					feature.key AS feature_key,
 					entity.external_id AS entity_external_id,
 					COALESCE(state.current_value, 0)::text AS current_value,
 					COALESCE(state.crossed, false) AS crossed
@@ -712,11 +726,13 @@ export class ControlsEnterpriseRepository
 					drizzleSql`
 					INSERT INTO control_policies (
 						project_id, source_type, contract_id, control_kind, feature_id, currency,
-						limit_value, interval, revision, effective_at, expires_at, created_by
+						limit_value, interval, interval_count, revision, effective_at, expires_at,
+						created_by
 					) VALUES (
 						${context.projectId}, 'contract', ${String(row.id)}::bigint, ${normalized.controlKind},
 						${normalized.featureId}::bigint, ${normalized.currency}, ${normalized.limitValue}::numeric,
-						${normalized.interval}, ${context.intent.version}, ${context.intent.effectiveAt},
+						${normalized.interval}, ${normalized.intervalCount ?? 1}, ${context.intent.version},
+						${context.intent.effectiveAt},
 						${context.intent.expiresAt}, ${context.intent.actor}
 					) RETURNING id
 				`,
@@ -1138,7 +1154,8 @@ export async function resolveEffectiveControls(
 			ORDER BY effective_at DESC, version DESC, id DESC LIMIT 1
 		)
 		SELECT DISTINCT policy.id, policy.source_type, policy.control_kind, feature.key AS feature_key,
-			policy.currency, policy.limit_value::text AS limit_value, policy.interval, policy.revision,
+			policy.currency, policy.limit_value::text AS limit_value, policy.interval,
+			policy.interval_count, policy.revision,
 			(SELECT replaces_commercial_defaults FROM active_contract) AS contract_replaces_defaults
 		FROM control_policies policy
 		LEFT JOIN features feature ON feature.project_id = policy.project_id AND feature.id = policy.feature_id
@@ -1171,8 +1188,15 @@ export async function resolveEffectiveControls(
 			)
 	`,
 	);
+	// Controls with the same window compete, whichever way the cadence is spelled: a quarter and
+	// three months are one window.
 	const controlIdentity = (row: EffectiveControlRow) =>
-		[row.control_kind, row.feature_key ?? "", row.currency ?? "", row.interval].join(":");
+		[
+			row.control_kind,
+			row.feature_key ?? "",
+			row.currency ?? "",
+			controlWindowKey(row.interval, row.interval_count),
+		].join(":");
 	const replacedPlanDefaults = new Set(
 		rows[0]?.contract_replaces_defaults === true
 			? rows.filter((row) => row.source_type === "contract").map((row) => controlIdentity(row))
@@ -1191,7 +1215,7 @@ export async function resolveEffectiveControls(
 	const winnerRows = [...winners.values()];
 	const windows = await Promise.all(
 		winnerRows.map((row) => {
-			const bounds = controlWindowBounds(row.interval, now);
+			const bounds = controlWindowBounds(row.interval, row.interval_count, now);
 			return executeOne<{ consumed_value: unknown; held_value: unknown }>(
 				executor,
 				drizzleSql`
@@ -1205,6 +1229,7 @@ export async function resolveEffectiveControls(
 	);
 	for (const [index, row] of winnerRows.entries()) {
 		const window = windows[index] ?? null;
+		const bounds = controlWindowBounds(row.interval, row.interval_count, now);
 		const limit = canonicalDecimal(String(row.limit_value), "control limit", 9);
 		const consumed = canonicalDecimal(String(window?.consumed_value ?? "0"), "control consumed", 9);
 		const held = canonicalDecimal(String(window?.held_value ?? "0"), "control held", 9);
@@ -1216,6 +1241,9 @@ export async function resolveEffectiveControls(
 			currency: row.currency,
 			limitValue: limit,
 			interval: row.interval,
+			intervalCount: row.interval === "lifetime" ? null : row.interval_count,
+			windowStartAt: bounds.end === null ? null : bounds.start.toISOString(),
+			windowEndAt: bounds.end?.toISOString() ?? null,
 			source: row.source_type,
 			revision: row.revision,
 			policyId: String(row.id),
@@ -1224,26 +1252,47 @@ export async function resolveEffectiveControls(
 			remainingValue: unitsToDecimal(remaining > 0n ? remaining : 0n, 9),
 		});
 	}
-	return result.sort((left, right) =>
-		[left.controlKind, left.featureKey ?? "", left.currency ?? ""]
-			.join(":")
-			.localeCompare([right.controlKind, right.featureKey ?? "", right.currency ?? ""].join(":")),
-	);
+	const sortKey = (control: EffectiveControl) =>
+		[
+			control.controlKind,
+			control.featureKey ?? "",
+			control.currency ?? "",
+			controlWindowKey(control.interval, control.intervalCount),
+		].join(":");
+	return result.sort((left, right) => sortKey(left).localeCompare(sortKey(right)));
 }
 
+/**
+ * The UTC calendar window of a control or usage alert that contains `now`; a lifetime window starts
+ * at the epoch and never ends. Windows follow the calendar, not a subscription, so every control of
+ * an account resets at the same boundary whatever its source.
+ */
 export function controlWindowBounds(
 	interval: ControlInterval,
+	intervalCount: number | null,
 	now: Date,
 ): { start: Date; end: Date | null } {
 	if (interval === "lifetime") return { start: new Date(0), end: null };
-	const start =
-		interval === "month"
-			? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
-			: new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-	const end = new Date(start);
-	if (interval === "month") end.setUTCMonth(end.getUTCMonth() + 1);
-	else end.setUTCFullYear(end.getUTCFullYear() + 1);
-	return { start, end };
+	return calendarWindow({ unit: interval, count: intervalCount ?? 1 }, now);
+}
+
+/** Groups controls by the window they count in: lifetime, or the cadence's canonical form. */
+export function controlWindowKey(interval: ControlInterval, intervalCount: number | null): string {
+	return interval === "lifetime"
+		? "lifetime"
+		: cadenceKey({ unit: interval, count: intervalCount ?? 1 });
+}
+
+/** Whether a control counts in the window of an alert's interval. */
+export function sameControlWindow(
+	control: Pick<EffectiveControl, "interval" | "intervalCount">,
+	interval: ControlInterval,
+	cadence: Cadence | null,
+): boolean {
+	return (
+		controlWindowKey(control.interval, control.intervalCount) ===
+		controlWindowKey(interval, cadence?.count ?? null)
+	);
 }
 
 function compareControlRows(left: EffectiveControlRow, right: EffectiveControlRow): number {
@@ -1259,9 +1308,11 @@ async function normalizeControlInput(
 	projectId: string,
 	input: Pick<
 		ControlPolicyInput,
-		"controlKind" | "featureKey" | "currency" | "limitValue" | "interval"
+		"controlKind" | "featureKey" | "currency" | "limitValue" | "interval" | "intervalCount"
 	>,
 ) {
+	const cadence = controlCadence(input.interval, input.intervalCount, "Control");
+	const intervalCount = cadence?.count ?? null;
 	const limitValue = canonicalDecimal(input.limitValue, "limitValue", 9);
 	if (input.controlKind === "spend_limit") {
 		const currency = input.currency?.trim().toUpperCase() ?? null;
@@ -1282,6 +1333,7 @@ async function normalizeControlInput(
 			currency,
 			limitValue,
 			interval: input.interval,
+			intervalCount,
 		};
 	}
 	if (input.currency != null || input.featureKey == null)
@@ -1294,6 +1346,7 @@ async function normalizeControlInput(
 		currency: null,
 		limitValue: canonicalDecimal(input.limitValue, "limitValue", feature.credit_scale),
 		interval: input.interval,
+		intervalCount,
 	};
 }
 
@@ -1311,6 +1364,7 @@ interface AlertDbRow {
 	threshold_type: "absolute" | "percentage";
 	threshold_value: unknown;
 	interval: ControlInterval;
+	interval_count: number;
 	active: boolean;
 	created_at: Date | string;
 }
@@ -1443,6 +1497,7 @@ function alertRecord(
 		thresholdType: row.threshold_type,
 		thresholdValue: String(row.threshold_value),
 		interval: row.interval,
+		intervalCount: row.interval === "lifetime" ? null : row.interval_count,
 		active: row.active,
 		currentValue,
 		crossed,
@@ -1538,6 +1593,9 @@ async function contractContext(
 	if (plan === null)
 		throw new NotFoundBillingError("Contract plan was not found", "BILLING_PLAN_NOT_FOUND");
 	const controls = input.controls ?? [];
+	for (const control of controls) {
+		controlCadence(control.interval, control.intervalCount, "Contract control");
+	}
 	const intent = {
 		billingAccountId: requiredText(input.billingAccountId, "billingAccountId", 200),
 		contractKey: requiredText(input.contractKey, "contractKey", 120),

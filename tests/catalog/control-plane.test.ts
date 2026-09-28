@@ -3,6 +3,7 @@ import { postV1AdminCatalogPreviewResponse200Schema } from "../../src/app/contra
 import { CapabilityError, InvalidRequestError } from "../../src/billing/errors";
 import { CatalogControlPlane } from "../../src/catalog/control-plane";
 import type {
+	CatalogControlIntent,
 	CatalogFeatureIntent,
 	CatalogIntent,
 	CatalogPlanIntent,
@@ -748,5 +749,36 @@ describe("catalog control plane cadences", () => {
 				}),
 			]),
 		).toBe("Plan pro item credits rollover expiry cannot span more than 10 × year");
+	});
+
+	it("checks plan control cadences and treats equal windows as duplicates", async () => {
+		const control = (overrides: Partial<CatalogControlIntent>): CatalogControlIntent => ({
+			controlKind: "usage_limit",
+			featureKey: "credits",
+			currency: null,
+			limitValue: "100",
+			interval: "day",
+			...overrides,
+		});
+		const withControls = (controls: CatalogControlIntent[]) =>
+			messageOf([plan({ items: [item({})], controls })]);
+		expect(await withControls([control({}), control({ interval: "week", intervalCount: 2 })])).toBe(
+			"normalized",
+		);
+		expect(await withControls([control({ interval: "hour" })])).toBe(
+			"Plan pro control cannot use hour yet",
+		);
+		expect(await withControls([control({ interval: "lifetime", intervalCount: 2 })])).toBe(
+			"Plan pro control with a lifetime interval takes no intervalCount",
+		);
+		expect(await withControls([control({ interval: "year", intervalCount: 4 })])).toBe(
+			"Plan pro control cannot span more than 3 × year",
+		);
+		expect(
+			await withControls([
+				control({ interval: "quarter" }),
+				control({ interval: "month", intervalCount: 3, limitValue: "50" }),
+			]),
+		).toBe("Duplicate plan pro control values are not allowed");
 	});
 });

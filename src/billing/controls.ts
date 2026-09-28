@@ -1,8 +1,10 @@
 import type { ProjectInstanceContext } from "../projects/context";
+import type { CadenceUnit } from "../shared/cadence";
 import type { BillingProvider } from "./types";
 
 export type ControlKind = "spend_limit" | "usage_limit";
-export type ControlInterval = "month" | "year" | "lifetime";
+/** A control or alert window: a calendar-aligned cadence unit, or `lifetime` for no reset. */
+export type ControlInterval = CadenceUnit | "lifetime";
 export type ControlSource = "plan_default" | "contract" | "account" | "entity";
 
 export interface ControlPolicyInput {
@@ -13,6 +15,8 @@ export interface ControlPolicyInput {
 	currency?: string | null;
 	limitValue: string;
 	interval: ControlInterval;
+	/** How many `interval` units one window spans; defaults to one, and lifetime takes none. */
+	intervalCount?: number | null;
 	actor: string;
 }
 
@@ -22,6 +26,10 @@ export interface EffectiveControl {
 	currency: string | null;
 	limitValue: string;
 	interval: ControlInterval;
+	intervalCount: number | null;
+	/** The current window's bounds; both null for a lifetime control. */
+	windowStartAt: string | null;
+	windowEndAt: string | null;
 	source: ControlSource;
 	revision: number;
 	policyId: string;
@@ -46,6 +54,7 @@ export interface UsageAlertInput {
 	thresholdType: "absolute" | "percentage";
 	thresholdValue: string;
 	interval: ControlInterval;
+	intervalCount?: number | null;
 	actor: string;
 	metadata?: Record<string, unknown>;
 }
@@ -57,6 +66,7 @@ export interface UsageAlertRecord {
 	thresholdType: "absolute" | "percentage";
 	thresholdValue: string;
 	interval: ControlInterval;
+	intervalCount: number | null;
 	active: boolean;
 	currentValue: string;
 	crossed: boolean;

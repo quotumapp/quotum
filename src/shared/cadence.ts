@@ -38,6 +38,7 @@ const fixedUnitHours: Partial<Record<CadenceUnit, number>> = {
 };
 
 const hourMs = 3_600_000;
+const hoursPerWeek = 168;
 
 export function isCadenceUnit(value: unknown): value is CadenceUnit {
 	return typeof value === "string" && (cadenceUnits as readonly string[]).includes(value);
@@ -179,4 +180,30 @@ export function cadenceSplits(reset: Cadence, billing: Cadence | null): boolean 
 /** A cadence as the API spells it, for messages: `month` or `3 × month`. */
 export function describeCadence(cadence: Cadence): string {
 	return cadence.count === 1 ? cadence.unit : `${cadence.count} × ${cadence.unit}`;
+}
+
+/** The first Monday after the Unix epoch; weekly calendar windows start on Mondays. */
+const firstMondayMs = Date.UTC(1970, 0, 5);
+
+/**
+ * The calendar window in UTC that contains `now`. Calendar units start on the first of a month:
+ * quarters in January, April, July and October, halves in January and July. Fixed units start on
+ * the hour, at midnight or, when a whole number of weeks long, on Monday. A count above one groups
+ * consecutive windows counted from the Unix epoch, so windows never depend on when a policy was
+ * created.
+ */
+export function calendarWindow(cadence: Cadence, now: Date): { start: Date; end: Date } {
+	const canonical = canonicalCadence(cadence);
+	if (canonical.kind === "months") {
+		const monthIndex = (now.getUTCFullYear() - 1970) * 12 + now.getUTCMonth();
+		const first = Math.floor(monthIndex / canonical.months) * canonical.months;
+		return {
+			start: new Date(Date.UTC(1970, first, 1)),
+			end: new Date(Date.UTC(1970, first + canonical.months, 1)),
+		};
+	}
+	const span = canonical.hours * hourMs;
+	const origin = canonical.hours % hoursPerWeek === 0 ? firstMondayMs : 0;
+	const start = origin + Math.floor((now.getTime() - origin) / span) * span;
+	return { start: new Date(start), end: new Date(start + span) };
 }

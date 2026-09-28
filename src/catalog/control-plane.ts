@@ -9,6 +9,7 @@ import {
 import { BillingError, InvalidRequestError, PersistenceConflictError } from "../billing/errors";
 import { type BillingProvider, isBillingProvider } from "../billing/types";
 import { RepositoryModule } from "../db/repository/base";
+import { controlWindowKey } from "../db/repository/controls-enterprise";
 import { executeOne, executeRows, jsonb } from "../db/repository/query";
 import type { QueryExecutor, TransactionalQueryExecutor } from "../db/repository/types";
 import type { ProjectInstanceContext } from "../projects/context";
@@ -874,6 +875,8 @@ function normalizeControl(
 	featureByKey: Map<string, CatalogFeatureIntent>,
 ): CatalogControlIntent {
 	const limitValue = canonicalDecimal(control.limitValue, "control limitValue", 9);
+	// A count on a lifetime control is kept so that preview can reject it.
+	const intervalCount = control.intervalCount ?? (control.interval === "lifetime" ? null : 1);
 	if (control.controlKind === "spend_limit") {
 		if (control.featureKey !== null || control.currency === null) {
 			throw new InvalidRequestError("Spend limits require currency and cannot select a feature");
@@ -886,6 +889,7 @@ function normalizeControl(
 		}
 		return {
 			...control,
+			intervalCount,
 			featureKey: null,
 			currency: control.currency.trim().toUpperCase(),
 			limitValue,
@@ -901,18 +905,20 @@ function normalizeControl(
 	}
 	return {
 		...control,
+		intervalCount,
 		featureKey,
 		currency: null,
 		limitValue: canonicalDecimal(control.limitValue, "control limitValue", feature.creditScale),
 	};
 }
 
+/** Two controls with the same window are duplicates, whichever way the cadence is spelled. */
 function controlIdentity(control: CatalogControlIntent): string {
 	return [
 		control.controlKind,
 		control.featureKey ?? "",
 		control.currency ?? "",
-		control.interval,
+		controlWindowKey(control.interval, control.intervalCount ?? null),
 	].join(":");
 }
 
@@ -1328,13 +1334,13 @@ async function publishPlans(
 				drizzleSql`
 					INSERT INTO control_policies (
 						project_id, source_type, plan_version_id, control_kind, feature_id,
-						currency, limit_value, interval, revision, created_by
+						currency, limit_value, interval, interval_count, revision, created_by
 					)
 					VALUES (
 						${projectId}, 'plan_default', ${versionId}::bigint, ${control.controlKind},
 						${control.featureKey === null ? null : requireMap(featureIds, control.featureKey)}::bigint,
 						${control.currency}, ${control.limitValue}::numeric, ${control.interval},
-						${plan.version}, 'catalog'
+						${control.intervalCount ?? 1}, ${plan.version}, 'catalog'
 					)
 					RETURNING id
 				`,
