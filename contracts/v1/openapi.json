@@ -1436,11 +1436,22 @@
                               },
                               "interval": {
                                 "enum": [
+                                  "hour",
+                                  "day",
+                                  "week",
                                   "month",
+                                  "quarter",
+                                  "semi_annual",
                                   "year",
                                   "lifetime"
                                 ],
                                 "type": "string"
+                              },
+                              "intervalCount": {
+                                "type": [
+                                  "null",
+                                  "number"
+                                ]
                               },
                               "limitValue": {
                                 "type": "string"
@@ -1451,7 +1462,8 @@
                               "featureKey",
                               "currency",
                               "limitValue",
-                              "interval"
+                              "interval",
+                              "intervalCount"
                             ],
                             "type": "object"
                           },
@@ -8165,11 +8177,22 @@
                 },
                 "interval": {
                   "enum": [
+                    "hour",
+                    "day",
+                    "week",
                     "month",
+                    "quarter",
+                    "semi_annual",
                     "year",
                     "lifetime"
                   ],
                   "type": "string"
+                },
+                "intervalCount": {
+                  "type": [
+                    "null",
+                    "number"
+                  ]
                 },
                 "limitValue": {
                   "type": "string"
@@ -8191,6 +8214,18 @@
                     "contract"
                   ],
                   "type": "string"
+                },
+                "windowEndAt": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "windowStartAt": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 }
               },
               "required": [
@@ -8199,6 +8234,9 @@
                 "currency",
                 "limitValue",
                 "interval",
+                "intervalCount",
+                "windowStartAt",
+                "windowEndAt",
                 "source",
                 "revision",
                 "policyId",
@@ -9233,11 +9271,22 @@
                 },
                 "interval": {
                   "enum": [
+                    "hour",
+                    "day",
+                    "week",
                     "month",
+                    "quarter",
+                    "semi_annual",
                     "year",
                     "lifetime"
                   ],
                   "type": "string"
+                },
+                "intervalCount": {
+                  "type": [
+                    "null",
+                    "number"
+                  ]
                 },
                 "thresholdType": {
                   "enum": [
@@ -9257,6 +9306,7 @@
                 "thresholdType",
                 "thresholdValue",
                 "interval",
+                "intervalCount",
                 "active",
                 "currentValue",
                 "crossed",
@@ -15338,11 +15388,22 @@
               },
               "interval": {
                 "enum": [
+                  "hour",
+                  "day",
+                  "week",
                   "month",
+                  "quarter",
+                  "semi_annual",
                   "year",
                   "lifetime"
                 ],
                 "type": "string"
+              },
+              "intervalCount": {
+                "type": [
+                  "null",
+                  "number"
+                ]
               },
               "thresholdType": {
                 "enum": [
@@ -15362,6 +15423,7 @@
               "thresholdType",
               "thresholdValue",
               "interval",
+              "intervalCount",
               "active",
               "currentValue",
               "crossed",
@@ -18039,11 +18101,22 @@
               },
               "interval": {
                 "enum": [
+                  "hour",
+                  "day",
+                  "week",
                   "month",
+                  "quarter",
+                  "semi_annual",
                   "year",
                   "lifetime"
                 ],
                 "type": "string"
+              },
+              "intervalCount": {
+                "type": [
+                  "null",
+                  "number"
+                ]
               },
               "limitValue": {
                 "type": "string"
@@ -18065,6 +18138,18 @@
                   "contract"
                 ],
                 "type": "string"
+              },
+              "windowEndAt": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "windowStartAt": {
+                "type": [
+                  "null",
+                  "string"
+                ]
               }
             },
             "required": [
@@ -18073,6 +18158,9 @@
               "currency",
               "limitValue",
               "interval",
+              "intervalCount",
+              "windowStartAt",
+              "windowEndAt",
               "source",
               "revision",
               "policyId",
@@ -26339,11 +26427,24 @@
                   },
                   "interval": {
                     "enum": [
+                      "hour",
+                      "day",
+                      "week",
                       "month",
+                      "quarter",
+                      "semi_annual",
                       "year",
                       "lifetime"
                     ],
                     "type": "string"
+                  },
+                  "intervalCount": {
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   },
                   "limitValue": {
                     "maxLength": 80,
@@ -29346,11 +29447,24 @@
                                   },
                                   "interval": {
                                     "enum": [
+                                      "hour",
+                                      "day",
+                                      "week",
                                       "month",
+                                      "quarter",
+                                      "semi_annual",
                                       "year",
                                       "lifetime"
                                     ],
                                     "type": "string"
+                                  },
+                                  "intervalCount": {
+                                    "maximum": 1000,
+                                    "minimum": 1,
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
                                   },
                                   "limitValue": {
                                     "maxLength": 80,
@@ -30729,11 +30843,24 @@
                                   },
                                   "interval": {
                                     "enum": [
+                                      "hour",
+                                      "day",
+                                      "week",
                                       "month",
+                                      "quarter",
+                                      "semi_annual",
                                       "year",
                                       "lifetime"
                                     ],
                                     "type": "string"
+                                  },
+                                  "intervalCount": {
+                                    "maximum": 1000,
+                                    "minimum": 1,
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
                                   },
                                   "limitValue": {
                                     "maxLength": 80,
@@ -31871,11 +31998,24 @@
                         },
                         "interval": {
                           "enum": [
+                            "hour",
+                            "day",
+                            "week",
                             "month",
+                            "quarter",
+                            "semi_annual",
                             "year",
                             "lifetime"
                           ],
                           "type": "string"
+                        },
+                        "intervalCount": {
+                          "maximum": 1000,
+                          "minimum": 1,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
                         },
                         "limitValue": {
                           "maxLength": 80,
@@ -32199,11 +32339,24 @@
                         },
                         "interval": {
                           "enum": [
+                            "hour",
+                            "day",
+                            "week",
                             "month",
+                            "quarter",
+                            "semi_annual",
                             "year",
                             "lifetime"
                           ],
                           "type": "string"
+                        },
+                        "intervalCount": {
+                          "maximum": 1000,
+                          "minimum": 1,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
                         },
                         "limitValue": {
                           "maxLength": 80,
@@ -50652,11 +50805,24 @@
                                   },
                                   "interval": {
                                     "enum": [
+                                      "hour",
+                                      "day",
+                                      "week",
                                       "month",
+                                      "quarter",
+                                      "semi_annual",
                                       "year",
                                       "lifetime"
                                     ],
                                     "type": "string"
+                                  },
+                                  "intervalCount": {
+                                    "maximum": 1000,
+                                    "minimum": 1,
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
                                   },
                                   "limitValue": {
                                     "maxLength": 80,
@@ -51955,11 +52121,24 @@
                                   },
                                   "interval": {
                                     "enum": [
+                                      "hour",
+                                      "day",
+                                      "week",
                                       "month",
+                                      "quarter",
+                                      "semi_annual",
                                       "year",
                                       "lifetime"
                                     ],
                                     "type": "string"
+                                  },
+                                  "intervalCount": {
+                                    "maximum": 1000,
+                                    "minimum": 1,
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
                                   },
                                   "limitValue": {
                                     "maxLength": 80,
@@ -53380,11 +53559,24 @@
                         },
                         "interval": {
                           "enum": [
+                            "hour",
+                            "day",
+                            "week",
                             "month",
+                            "quarter",
+                            "semi_annual",
                             "year",
                             "lifetime"
                           ],
                           "type": "string"
+                        },
+                        "intervalCount": {
+                          "maximum": 1000,
+                          "minimum": 1,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
                         },
                         "limitValue": {
                           "maxLength": 80,
@@ -53661,11 +53853,24 @@
                         },
                         "interval": {
                           "enum": [
+                            "hour",
+                            "day",
+                            "week",
                             "month",
+                            "quarter",
+                            "semi_annual",
                             "year",
                             "lifetime"
                           ],
                           "type": "string"
+                        },
+                        "intervalCount": {
+                          "maximum": 1000,
+                          "minimum": 1,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
                         },
                         "limitValue": {
                           "maxLength": 80,
@@ -61511,11 +61716,24 @@
                   },
                   "interval": {
                     "enum": [
+                      "hour",
+                      "day",
+                      "week",
                       "month",
+                      "quarter",
+                      "semi_annual",
                       "year",
                       "lifetime"
                     ],
                     "type": "string"
+                  },
+                  "intervalCount": {
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   },
                   "limitValue": {
                     "maxLength": 80,
@@ -67416,11 +67634,24 @@
                   },
                   "interval": {
                     "enum": [
+                      "hour",
+                      "day",
+                      "week",
                       "month",
+                      "quarter",
+                      "semi_annual",
                       "year",
                       "lifetime"
                     ],
                     "type": "string"
+                  },
+                  "intervalCount": {
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   },
                   "metadata": {
                     "additionalProperties": {},

@@ -70,7 +70,9 @@ export interface CatalogControlIntent {
 	featureKey: string | null;
 	currency: string | null;
 	limitValue: string;
-	interval: "month" | "year" | "lifetime";
+	interval: CadenceUnit | "lifetime";
+	/** How many `interval` units one window spans; defaults to one, and lifetime takes none. */
+	intervalCount?: number | null;
 }
 
 export interface CatalogPlanIntent {

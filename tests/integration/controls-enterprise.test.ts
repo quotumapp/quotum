@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
 import { StripeBillingService } from "../../src/providers/stripe/service";
+import { calendarWindow } from "../../src/shared/cadence";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
@@ -89,6 +90,100 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			crossed: true,
 			crossing_sequence: 2,
 		});
+	});
+
+	it("counts usage limits and alerts in calendar windows of any cadence", async () => {
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "cadence-account",
+			featureKey: "ai_credits",
+			quantity: "100",
+			sourceKind: "operator",
+			sourceKey: "fixture:cadence-account",
+		});
+		const controls = context.repository.controlsEnterprise;
+		const daily = await controls.upsertControl(project, {
+			billingAccountId: "cadence-account",
+			controlKind: "usage_limit",
+			featureKey: "ai_credits",
+			limitValue: "5",
+			interval: "day",
+			actor: "integration-test",
+		});
+		const now = await databaseNow(context.sql);
+		const day = calendarWindow({ unit: "day", count: 1 }, now);
+		expect(daily).toMatchObject({
+			interval: "day",
+			intervalCount: 1,
+			windowStartAt: day.start.toISOString(),
+			windowEndAt: day.end.toISOString(),
+		});
+
+		expect(await consume("cadence-account", "3", "cadence:1")).toMatchObject({ allowed: true });
+		expect(await consume("cadence-account", "3", "cadence:2")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+		const [window] = await context.sql<Array<{ window_start_at: Date; window_end_at: Date }>>`
+			SELECT window_start_at, window_end_at FROM control_windows
+		`;
+		expect(window).toEqual({ window_start_at: day.start, window_end_at: day.end });
+
+		// The account's one usage limit for the feature moves to a two-week window.
+		const fortnight = await controls.upsertControl(project, {
+			billingAccountId: "cadence-account",
+			controlKind: "usage_limit",
+			featureKey: "ai_credits",
+			limitValue: "10",
+			interval: "week",
+			intervalCount: 2,
+			actor: "integration-test",
+		});
+		const weeks = calendarWindow({ unit: "week", count: 2 }, await databaseNow(context.sql));
+		expect(fortnight).toMatchObject({
+			interval: "week",
+			intervalCount: 2,
+			consumedValue: "0",
+			windowStartAt: weeks.start.toISOString(),
+			windowEndAt: weeks.end.toISOString(),
+		});
+		expect(new Date(fortnight.windowStartAt ?? "").getUTCDay()).toBe(1);
+
+		// A percentage alert follows the usage limit counted in the same window.
+		await expect(
+			controls.createUsageAlert(project, {
+				billingAccountId: "cadence-account",
+				featureKey: "ai_credits",
+				thresholdType: "percentage",
+				thresholdValue: "50",
+				interval: "day",
+				actor: "integration-test",
+			}),
+		).rejects.toThrow("Percentage alerts require an effective usage limit with the same interval");
+		const alert = await controls.createUsageAlert(project, {
+			billingAccountId: "cadence-account",
+			featureKey: "ai_credits",
+			thresholdType: "percentage",
+			thresholdValue: "50",
+			interval: "day",
+			intervalCount: 14,
+			actor: "integration-test",
+		});
+		expect(alert).toMatchObject({ interval: "day", intervalCount: 14 });
+		await consume("cadence-account", "6", "cadence:3");
+		expect(await controls.listUsageAlertEvents(project, "cadence-account", 10)).toMatchObject([
+			{ eventType: "threshold_crossed", thresholdValue: "5.000000000" },
+		]);
+
+		await expect(
+			controls.upsertControl(project, {
+				billingAccountId: "cadence-account",
+				controlKind: "usage_limit",
+				featureKey: "ai_credits",
+				limitValue: "1",
+				interval: "hour",
+				actor: "integration-test",
+			}),
+		).rejects.toThrow("Control cannot use hour yet");
 	});
 
 	it("reserves the safety budget before Stripe and grants the purchased allocation atomically", async () => {
@@ -714,6 +809,68 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 				"integration-test",
 			),
 		).toMatchObject({ status: "terminated" });
+	});
+
+	it("lets a contract replace a plan default counted in the same window, however it is spelled", async () => {
+		await seedCatalogMigration(context.sql);
+		await context.sql`
+			INSERT INTO control_policies (
+				project_id, source_type, plan_version_id, control_kind, feature_id,
+				limit_value, interval, revision, created_by
+			)
+			SELECT version.project_id, 'plan_default', version.id, 'usage_limit', feature.id, 100,
+				'quarter', 1, 'integration-test'
+			FROM plan_versions version
+			JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+			JOIN features feature ON feature.project_id = version.project_id AND feature.key = 'ai_credits'
+			WHERE plan.key = 'migration-plan' AND version.version = 1
+		`;
+		const controls = context.repository.controlsEnterprise;
+		expect(await controls.listEffectiveControls(project, "migration-stripe")).toMatchObject([
+			{ interval: "quarter", intervalCount: 1, limitValue: "100", source: "plan_default" },
+		]);
+		const intent = {
+			billingAccountId: "migration-stripe",
+			contractKey: "quarterly-2026",
+			version: 1,
+			planKey: "migration-plan",
+			effectiveAt: new Date(Date.now() - 60_000),
+			replacesCommercialDefaults: true,
+			controls: [
+				{
+					controlKind: "usage_limit" as const,
+					featureKey: "ai_credits",
+					currency: null,
+					limitValue: "150",
+					interval: "month" as const,
+					intervalCount: 3,
+				},
+			],
+			actor: "integration-test",
+		};
+		const preview = await controls.previewEnterpriseContract(project, intent);
+		await controls.publishEnterpriseContract(project, {
+			...intent,
+			previewToken: preview.previewToken,
+		});
+		const quarter = calendarWindow({ unit: "quarter", count: 1 }, await databaseNow(context.sql));
+		expect(await controls.listEffectiveControls(project, "migration-stripe")).toMatchObject([
+			{
+				interval: "month",
+				intervalCount: 3,
+				limitValue: "150",
+				source: "contract",
+				windowStartAt: quarter.start.toISOString(),
+				windowEndAt: quarter.end.toISOString(),
+			},
+		]);
+		await expect(
+			controls.previewEnterpriseContract(project, {
+				...intent,
+				version: 2,
+				controls: [{ ...intent.controls[0], interval: "lifetime" as const }],
+			}),
+		).rejects.toThrow("Contract control with a lifetime interval takes no intervalCount");
 	});
 
 	it("enforces purchased license-pool quantity for entity assignments", async () => {

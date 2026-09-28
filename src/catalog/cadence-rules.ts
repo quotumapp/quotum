@@ -1,23 +1,16 @@
+import { assertCadence, controlCadence } from "../billing/cadence";
 import { InvalidRequestError } from "../billing/errors";
 import {
 	type Cadence,
-	type CadenceUnit,
 	cadenceFitsWithin,
 	describeCadence,
 	isCalendarUnit,
-	maxCadenceCount,
 } from "../shared/cadence";
 import type {
 	CatalogPlanIntent,
 	CatalogPlanItemIntent,
 	CatalogRolloverExpiryIntent,
 } from "./types";
-
-/** Units the API does not accept yet; `hour` waits for its hot-path measurement. */
-const unpublishedResetUnits: ReadonlySet<CadenceUnit> = new Set(["hour"]);
-
-/** The longest reset or window span: three years, the longest billing interval providers sell. */
-const maxResetSpan: Cadence = { unit: "year", count: 3 };
 
 /** Rolled-over quantity can outlive its window by at most ten years (formerly 120 months). */
 const maxRolloverExpirySpan: Cadence = { unit: "year", count: 10 };
@@ -63,7 +56,7 @@ export function assertPlanCadences(plan: CatalogPlanIntent): void {
 				throw new InvalidRequestError(`${label} resetIntervalCount requires a resetInterval`);
 			}
 		} else {
-			assertCadence(reset, `${label} reset`, maxResetSpan);
+			assertCadence(reset, `${label} reset`);
 			if (
 				billing !== null &&
 				(item.itemKind === "meter_limit" || item.itemKind === "allocation") &&
@@ -85,18 +78,7 @@ export function assertPlanCadences(plan: CatalogPlanIntent): void {
 				: rolloverExpiryCadence(item.rollover.expiry);
 		if (expiry !== null) assertCadence(expiry, `${label} rollover expiry`, maxRolloverExpirySpan);
 	}
-}
-
-function assertCadence(cadence: Cadence, label: string, maxSpan: Cadence): void {
-	if (unpublishedResetUnits.has(cadence.unit)) {
-		throw new InvalidRequestError(`${label} cannot use ${cadence.unit} yet`);
-	}
-	if (!Number.isInteger(cadence.count) || cadence.count < 1 || cadence.count > maxCadenceCount) {
-		throw new InvalidRequestError(
-			`${label} count must be a whole number from 1 to ${maxCadenceCount}`,
-		);
-	}
-	if (!cadenceFitsWithin(cadence, maxSpan)) {
-		throw new InvalidRequestError(`${label} cannot span more than ${describeCadence(maxSpan)}`);
+	for (const control of plan.controls ?? []) {
+		controlCadence(control.interval, control.intervalCount, `Plan ${plan.key} control`);
 	}
 }

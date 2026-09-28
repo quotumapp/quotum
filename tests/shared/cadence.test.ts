@@ -6,6 +6,7 @@ import {
 	cadenceKey,
 	cadenceSplits,
 	cadenceUnits,
+	calendarWindow,
 	canonicalCadence,
 	describeCadence,
 	isCadenceUnit,
@@ -106,5 +107,61 @@ describe("cadence vocabulary", () => {
 	it("describes a cadence as the API spells it", () => {
 		expect(describeCadence(cadence("month"))).toBe("month");
 		expect(describeCadence(cadence("semi_annual", 2))).toBe("2 × semi_annual");
+	});
+
+	it("aligns calendar windows to the UTC calendar", () => {
+		const now = new Date("2026-09-17T13:45:10.000Z"); // a Thursday
+		const window = (unit: Cadence["unit"], count = 1) => {
+			const { start, end } = calendarWindow(cadence(unit, count), now);
+			return [start.toISOString(), end.toISOString()];
+		};
+		expect(window("hour")).toEqual(["2026-09-17T13:00:00.000Z", "2026-09-17T14:00:00.000Z"]);
+		// Multi-hour windows count from the epoch, so five-hour windows drift across midnight.
+		expect(window("hour", 5)).toEqual(["2026-09-17T13:00:00.000Z", "2026-09-17T18:00:00.000Z"]);
+		expect(window("day")).toEqual(["2026-09-17T00:00:00.000Z", "2026-09-18T00:00:00.000Z"]);
+		expect(window("week")).toEqual(["2026-09-14T00:00:00.000Z", "2026-09-21T00:00:00.000Z"]);
+		expect(window("day", 7)).toEqual(window("week"));
+		expect(window("hour", 24)).toEqual(window("day"));
+		expect(window("month")).toEqual(["2026-09-01T00:00:00.000Z", "2026-10-01T00:00:00.000Z"]);
+		expect(window("quarter")).toEqual(["2026-07-01T00:00:00.000Z", "2026-10-01T00:00:00.000Z"]);
+		expect(window("month", 3)).toEqual(window("quarter"));
+		expect(window("semi_annual")).toEqual(["2026-07-01T00:00:00.000Z", "2027-01-01T00:00:00.000Z"]);
+		expect(window("year")).toEqual(["2026-01-01T00:00:00.000Z", "2027-01-01T00:00:00.000Z"]);
+		expect(window("year", 2)).toEqual(["2026-01-01T00:00:00.000Z", "2028-01-01T00:00:00.000Z"]);
+	});
+
+	it("keeps month and year windows where calendar controls always had them", () => {
+		for (const iso of [
+			"2024-02-29T23:59:59.999Z",
+			"2026-01-01T00:00:00.000Z",
+			"2026-12-31T23:59:59.999Z",
+			"2031-07-15T08:00:00.000Z",
+		]) {
+			const now = new Date(iso);
+			expect(calendarWindow(cadence("month"), now)).toEqual({
+				start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+				end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)),
+			});
+			expect(calendarWindow(cadence("year"), now)).toEqual({
+				start: new Date(Date.UTC(now.getUTCFullYear(), 0, 1)),
+				end: new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1)),
+			});
+		}
+	});
+
+	it("contains now and tiles into the next calendar window", () => {
+		const cadences = cadenceUnits.flatMap((unit) =>
+			[1, 2, 3, 7].map((count) => cadence(unit, count)),
+		);
+		for (let offset = 0; offset < 200; offset += 1) {
+			const now = new Date(Date.UTC(2026, 0, 1) + offset * 7_919_000_017);
+			for (const each of cadences) {
+				const { start, end } = calendarWindow(each, now);
+				expect(start.getTime()).toBeLessThanOrEqual(now.getTime());
+				expect(end.getTime()).toBeGreaterThan(now.getTime());
+				expect(calendarWindow(each, end).start).toEqual(end);
+				expect(calendarWindow(each, new Date(end.getTime() - 1))).toEqual({ start, end });
+			}
+		}
 	});
 });

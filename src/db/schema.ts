@@ -3390,7 +3390,8 @@ export const controlPolicies = pgTable(
 		}),
 		currency: text("currency"),
 		limitValue: numeric("limit_value", { precision: 38, scale: 9 }).notNull(),
-		interval: text("interval").$type<"month" | "year" | "lifetime">().notNull(),
+		interval: text("interval").$type<CadenceUnit | "lifetime">().notNull(),
+		intervalCount: integer("interval_count").notNull().default(1),
 		revision: integer("revision").notNull(),
 		effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull().defaultNow(),
 		expiresAt: timestamp("expires_at", { withTimezone: true }),
@@ -3411,7 +3412,11 @@ export const controlPolicies = pgTable(
 		check("control_policies_limit_value_check", sql`((limit_value >= (0)::numeric))`),
 		check(
 			"control_policies_interval_check",
-			sql`(("interval" = ANY (ARRAY['month'::text, 'year'::text, 'lifetime'::text])))`,
+			sql`(("interval" = ANY (ARRAY['hour'::text, 'day'::text, 'week'::text, 'month'::text, 'quarter'::text, 'semi_annual'::text, 'year'::text, 'lifetime'::text])))`,
+		),
+		check(
+			"control_policies_interval_count_check",
+			sql`((((interval_count >= 1) AND (interval_count <= 1000)) AND (("interval" <> 'lifetime'::text) OR (interval_count = 1))))`,
 		),
 		check("control_policies_revision_check", sql`((revision > 0))`),
 		check(
@@ -3634,7 +3639,8 @@ export const usageAlerts = pgTable(
 			.references(() => features.id, { onDelete: "restrict" }),
 		thresholdType: text("threshold_type").$type<"absolute" | "percentage">().notNull(),
 		thresholdValue: numeric("threshold_value", { precision: 38, scale: 9 }).notNull(),
-		interval: text("interval").$type<"month" | "year" | "lifetime">().notNull(),
+		interval: text("interval").$type<CadenceUnit | "lifetime">().notNull(),
+		intervalCount: integer("interval_count").notNull().default(1),
 		active: boolean("active").notNull().default(true),
 		createdBy: text("created_by").notNull(),
 		metadata: metadataColumn(),
@@ -3648,7 +3654,11 @@ export const usageAlerts = pgTable(
 		check("usage_alerts_threshold_value_check", sql`((threshold_value > (0)::numeric))`),
 		check(
 			"usage_alerts_interval_check",
-			sql`(("interval" = ANY (ARRAY['month'::text, 'year'::text, 'lifetime'::text])))`,
+			sql`(("interval" = ANY (ARRAY['hour'::text, 'day'::text, 'week'::text, 'month'::text, 'quarter'::text, 'semi_annual'::text, 'year'::text, 'lifetime'::text])))`,
+		),
+		check(
+			"usage_alerts_interval_count_check",
+			sql`((((interval_count >= 1) AND (interval_count <= 1000)) AND (("interval" <> 'lifetime'::text) OR (interval_count = 1))))`,
 		),
 		check(
 			"usage_alerts_created_by_check",

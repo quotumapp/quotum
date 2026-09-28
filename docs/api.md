@@ -121,6 +121,21 @@ to Mar 31, and any other period rolls on its end's day. Day, week and hour windo
 multiples of 24 hours, 7 days and 1 hour. Usage recorded at the exact end of a window counts in the
 next.
 
+Spend and usage limits (`PUT /controls`, plan `controls`, contract `controls`) and usage alerts
+count in UTC calendar windows: `interval` is one of `day`, `week`, `month`, `quarter`,
+`semi_annual`, `year` or `lifetime`, times an optional `intervalCount` (default 1; none for
+`lifetime`). A day starts at 00:00 UTC, a week on Monday, a quarter in January, April, July or
+October and a half in January or July; a window of several units is counted from the Unix epoch, so
+`{ "interval": "week", "intervalCount": 2 }` covers fixed Monday-to-Monday fortnights for every
+account. `hour` is part of the vocabulary but not accepted yet. Windows follow the calendar, not the
+subscription, and span at most three years. Controls counted in the same window compete however
+their cadence is spelled: a contract `month` × 3 replaces a plan `quarter`. An account or entity
+holds one limit per kind, feature and currency, so a new one replaces the previous one whatever its
+window; stacked windows, such as a daily and a monthly limit, belong on the plan. `GET /controls`
+reports each limit's `windowStartAt` and `windowEndAt` (both `null` for `lifetime`). A percentage
+alert follows the usage limit counted in its own window, and a hold stays in the window it was
+taken in: confirming after the window rolls charges the earlier window.
+
 Spend-control activation and window boundaries use the database clock by default, so API clock
 skew cannot bypass a newly active policy. Spend controls rate committed usage independently of pending reservations: held quantities never
 unlock volume discounts on consumed usage. A monetary reservation hold is a fixed budget quote,

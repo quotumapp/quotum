@@ -1275,7 +1275,10 @@ CREATE TABLE IF NOT EXISTS control_policies (
 	feature_id BIGINT REFERENCES features(id) ON DELETE RESTRICT,
 	currency TEXT COLLATE "C",
 	limit_value NUMERIC(38, 9) NOT NULL CHECK (limit_value >= 0),
-	interval TEXT NOT NULL CHECK (interval IN ('month', 'year', 'lifetime')),
+	interval TEXT NOT NULL CHECK (
+		interval IN ('hour', 'day', 'week', 'month', 'quarter', 'semi_annual', 'year', 'lifetime')
+	),
+	interval_count INTEGER NOT NULL DEFAULT 1,
 	revision INTEGER NOT NULL CHECK (revision > 0),
 	effective_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	expires_at TIMESTAMPTZ,
@@ -1296,6 +1299,10 @@ CREATE TABLE IF NOT EXISTS control_policies (
 	CONSTRAINT control_policies_project_feature_fk FOREIGN KEY (project_id, feature_id)
 		REFERENCES features(project_id, id) ON DELETE RESTRICT,
 	CONSTRAINT control_policies_bounds_check CHECK (expires_at IS NULL OR expires_at > effective_at),
+	CONSTRAINT control_policies_interval_count_check CHECK (
+		interval_count BETWEEN 1 AND 1000
+		AND (interval <> 'lifetime' OR interval_count = 1)
+	),
 	CONSTRAINT control_policies_value_shape_check CHECK (
 		(control_kind = 'spend_limit' AND currency IS NOT NULL AND feature_id IS NULL
 			AND trunc(limit_value) = limit_value)
@@ -1402,7 +1409,10 @@ CREATE TABLE IF NOT EXISTS usage_alerts (
 	feature_id BIGINT NOT NULL REFERENCES features(id) ON DELETE RESTRICT,
 	threshold_type TEXT NOT NULL CHECK (threshold_type IN ('absolute', 'percentage')),
 	threshold_value NUMERIC(38, 9) NOT NULL CHECK (threshold_value > 0),
-	interval TEXT NOT NULL CHECK (interval IN ('month', 'year', 'lifetime')),
+	interval TEXT NOT NULL CHECK (
+		interval IN ('hour', 'day', 'week', 'month', 'quarter', 'semi_annual', 'year', 'lifetime')
+	),
+	interval_count INTEGER NOT NULL DEFAULT 1,
 	active BOOLEAN NOT NULL DEFAULT true,
 	created_by TEXT NOT NULL CHECK (char_length(created_by) BETWEEN 1 AND 200),
 	metadata JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(metadata) = 'object'),
@@ -1417,6 +1427,10 @@ CREATE TABLE IF NOT EXISTS usage_alerts (
 		REFERENCES features(project_id, id) ON DELETE RESTRICT,
 	CONSTRAINT usage_alerts_percentage_check CHECK (
 		threshold_type <> 'percentage' OR threshold_value <= 100
+	),
+	CONSTRAINT usage_alerts_interval_count_check CHECK (
+		interval_count BETWEEN 1 AND 1000
+		AND (interval <> 'lifetime' OR interval_count = 1)
 	)
 );
 

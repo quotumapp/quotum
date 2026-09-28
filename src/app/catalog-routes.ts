@@ -101,7 +101,8 @@ const controlSchema = z
 		featureKey: z.string().trim().min(1).max(120).nullable(),
 		currency: z.string().trim().length(3).nullable(),
 		limitValue: z.string().trim().min(1).max(80),
-		interval: z.enum(["month", "year", "lifetime"]),
+		interval: z.enum([...cadenceUnits, "lifetime"]),
+		intervalCount: z.number().int().min(1).max(maxCadenceCount).nullable().optional(),
 	})
 	.strict();
 

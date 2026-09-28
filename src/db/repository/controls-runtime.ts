@@ -1,5 +1,5 @@
 import { sql as drizzleSql } from "drizzle-orm";
-import type { EffectiveControl } from "../../billing/controls";
+import type { ControlInterval, EffectiveControl } from "../../billing/controls";
 import {
 	canonicalDecimal,
 	canonicalSignedDecimal,
@@ -13,6 +13,7 @@ import {
 	controlWindowBounds,
 	readControlClock,
 	resolveEffectiveControls,
+	sameControlWindow,
 } from "./controls-enterprise";
 import { executeOne, executeRows } from "./query";
 import type { QueryExecutor } from "./types";
@@ -117,7 +118,7 @@ async function evaluateControls(
 				: canonicalSignedDecimal(input.spendMinorDelta ?? "0", "spend control delta", 9);
 		const deltaUnits = signedDecimalToUnits(delta, 9);
 		if (deltaUnits <= 0n && mode !== "consume") continue;
-		const bounds = controlWindowBounds(control.interval, now);
+		const bounds = controlWindowBounds(control.interval, control.intervalCount, now);
 		let window: {
 			id: string | number | bigint;
 			consumed_value: unknown;
@@ -292,7 +293,7 @@ export async function confirmControlHolds(
 	const existingPolicyIds = new Set(existingHolds.map((hold) => String(hold.control_policy_id)));
 	for (const control of activeControls) {
 		if (existingPolicyIds.has(control.policyId)) continue;
-		const bounds = controlWindowBounds(control.interval, now);
+		const bounds = controlWindowBounds(control.interval, control.intervalCount, now);
 		await executeRows(
 			executor,
 			drizzleSql`
@@ -589,7 +590,8 @@ export async function correctControlConsumption(
 export interface UsageAlertRow {
 	id: string | number | bigint;
 	entity_id: string | number | bigint | null;
-	interval: "month" | "year" | "lifetime";
+	interval: ControlInterval;
+	interval_count: number;
 	threshold_type: "absolute" | "percentage";
 	threshold_value: unknown;
 	feature_key: string;
@@ -603,7 +605,7 @@ export function queryUsageAlerts(
 	return executeRows<UsageAlertRow>(
 		executor,
 		drizzleSql`
-		SELECT alert.id, alert.entity_id, alert.interval, alert.threshold_type,
+		SELECT alert.id, alert.entity_id, alert.interval, alert.interval_count, alert.threshold_type,
 			alert.threshold_value::text AS threshold_value, feature.key AS feature_key
 		FROM usage_alerts alert
 		JOIN features feature ON feature.project_id = alert.project_id AND feature.id = alert.feature_id
@@ -632,7 +634,7 @@ export async function recordUsageAlertDelta(
 	const now = input.now ?? new Date();
 	const alerts = input.alerts ?? (await queryUsageAlerts(executor, input));
 	for (const alert of alerts) {
-		const bounds = controlWindowBounds(alert.interval, now);
+		const bounds = controlWindowBounds(alert.interval, alert.interval_count, now);
 		let threshold = canonicalDecimal(String(alert.threshold_value), "alert threshold", 9);
 		if (alert.threshold_type === "percentage") {
 			const controls = await resolveEffectiveControls(executor, {
@@ -643,7 +645,15 @@ export async function recordUsageAlertDelta(
 			});
 			const limit = controls.find(
 				(control) =>
-					control.controlKind === "usage_limit" && control.featureKey === alert.feature_key,
+					control.controlKind === "usage_limit" &&
+					control.featureKey === alert.feature_key &&
+					sameControlWindow(
+						control,
+						alert.interval,
+						alert.interval === "lifetime"
+							? null
+							: { unit: alert.interval, count: alert.interval_count },
+					),
 			);
 			if (limit === undefined) continue;
 			threshold = unitsToDecimal(

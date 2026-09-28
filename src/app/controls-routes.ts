@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ControlsEnterpriseRepositoryLike } from "../billing/controls";
 import { billingProviders } from "../billing/types";
+import { cadenceUnits, maxCadenceCount } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/controls-responses";
@@ -38,7 +39,8 @@ export const controlBody = z
 		featureKey: z.string().trim().min(1).max(120).nullable().optional(),
 		currency: z.string().trim().length(3).nullable().optional(),
 		limitValue: z.string().trim().min(1).max(80),
-		interval: z.enum(["month", "year", "lifetime"]),
+		interval: z.enum([...cadenceUnits, "lifetime"]),
+		intervalCount: z.number().int().min(1).max(maxCadenceCount).nullable().optional(),
 	})
 	.strict();
 
@@ -48,7 +50,8 @@ const alertBody = z
 		featureKey: z.string().trim().min(1).max(120),
 		thresholdType: z.enum(["absolute", "percentage"]),
 		thresholdValue: z.string().trim().min(1).max(80),
-		interval: z.enum(["month", "year", "lifetime"]),
+		interval: z.enum([...cadenceUnits, "lifetime"]),
+		intervalCount: z.number().int().min(1).max(maxCadenceCount).nullable().optional(),
 		metadata: z.record(z.string(), z.unknown()).optional(),
 	})
 	.strict();

@@ -170,7 +170,11 @@ The metering baseline widens `plan_items.reset_interval` to the cadence units (`
 `week`, `month`, `quarter`, `semi_annual`, `year`) and adds `reset_interval_count` (default 1) with
 the check `plan_items_reset_interval_count_check`. It replaces `rollover_expiry_months` with
 `rollover_expiry_interval` and `rollover_expiry_interval_count`, and the rollover expiry mode
-`months` with `after`. Existing reset intervals need no change; only rollover rows are rewritten:
+`months` with `after`. It widens `control_policies.interval` and `usage_alerts.interval` the same
+way, keeping `lifetime`, and adds `interval_count` (default 1) to both with the checks
+`control_policies_interval_count_check` and `usage_alerts_interval_count_check`; month and year
+control windows keep their calendar bounds, so existing `control_windows` rows stay current.
+Existing reset and control intervals need no change; only rollover rows are rewritten:
 
 1. Follow steps 1 and 2 of [stored job provider identity](#stored-job-provider-identity).
 2. Let the restore load the old rollover column:
