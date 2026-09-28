@@ -65,7 +65,7 @@ export function assertPlanCadences(plan: CatalogPlanIntent): void {
 			);
 		}
 	} else {
-		assertCadence(billing, `Plan ${plan.key} billing interval`);
+		assertCadence(billing, `Plan ${plan.key} billing interval`, "billing");
 	}
 	for (const item of plan.items) {
 		const label = `Plan ${plan.key} item ${item.featureKey}`;
@@ -75,7 +75,7 @@ export function assertPlanCadences(plan: CatalogPlanIntent): void {
 				throw new InvalidRequestError(`${label} resetIntervalCount requires a resetInterval`);
 			}
 		} else {
-			assertCadence(reset, `${label} reset`);
+			assertCadence(reset, `${label} reset`, item.itemKind === "allocation" ? "grant" : "window");
 			if (
 				billing !== null &&
 				(item.itemKind === "meter_limit" || item.itemKind === "allocation") &&
@@ -95,7 +95,9 @@ export function assertPlanCadences(plan: CatalogPlanIntent): void {
 			item.rollover === undefined || item.rollover === null
 				? null
 				: rolloverExpiryCadence(item.rollover.expiry);
-		if (expiry !== null) assertCadence(expiry, `${label} rollover expiry`, maxRolloverExpirySpan);
+		if (expiry !== null) {
+			assertCadence(expiry, `${label} rollover expiry`, "grant", maxRolloverExpirySpan);
+		}
 	}
 	for (const control of plan.controls ?? []) {
 		controlCadence(control.interval, control.intervalCount, `Plan ${plan.key} control`);

@@ -107,34 +107,37 @@ again: a partial correction returns its proportional share, rounded to the walle
 by what remains, and correcting the rest of the usage returns the remainder, so corrections
 together return exactly what was charged.
 
-A meter limit counts usage in a window of its item's reset cadence: `resetInterval`, one of `day`,
-`week`, `month`, `quarter`, `semi_annual` or `year`, times `resetIntervalCount` (default 1), so
-`{ "resetInterval": "hour", "resetIntervalCount": 5 }` would be a five-hour window. `hour` is part
-of the vocabulary but not accepted yet. While the provider period is current, the window is the
-period, or a reset sub-window of it when the item resets more often than the plan bills (a monthly
-limit on an annual plan, a daily or weekly one on a monthly plan). Sub-windows are anchored at the
-period start and keep its time of day; the last one is clamped to the period end, so a weekly limit
-on a 30-day month ends with a two-day window that still carries the whole limit. Once a period has
-ended without a recorded renewal, windows roll on from the period end one reset interval at a time:
-a period exactly one interval long keeps its start's day of the month, so Jan 31 to Feb 28 rolls on
-to Mar 31, and any other period rolls on its end's day. Day, week and hour windows are exact
-multiples of 24 hours, 7 days and 1 hour. Usage recorded at the exact end of a window counts in the
-next.
+A meter limit counts usage in a window of its item's reset cadence: `resetInterval`, one of `hour`,
+`day`, `week`, `month`, `quarter`, `semi_annual` or `year`, times `resetIntervalCount` (default 1),
+so `{ "resetInterval": "hour", "resetIntervalCount": 5 }` is a five-hour window. An allocation
+cannot reset hourly and a rollover cannot expire in hours: metering maintenance grants allocations
+on its polling cadence and never grants a missed window afterwards. While the provider period is
+current, the window is the period, or a reset sub-window of it when the item resets more often than
+the plan bills (a monthly limit on an annual plan, a daily or weekly one on a monthly plan).
+Sub-windows are anchored at the period start and keep its time of day; the last one is clamped to
+the period end, so a weekly limit on a 30-day month ends with a two-day window that still carries
+the whole limit. Once a period has ended without a recorded renewal, windows roll on from the period
+end one reset interval at a time: a period exactly one interval long keeps its start's day of the
+month, so Jan 31 to Feb 28 rolls on to Mar 31, and any other period rolls on its end's day. Day,
+week and hour windows are exact multiples of 24 hours, 7 days and 1 hour. Usage recorded at the
+exact end of a window counts in the next.
 
 Spend and usage limits (`PUT /controls`, plan `controls`, contract `controls`) and usage alerts
 count in UTC calendar windows: `interval` is one of `day`, `week`, `month`, `quarter`,
-`semi_annual`, `year` or `lifetime`, times an optional `intervalCount` (default 1; none for
-`lifetime`). A day starts at 00:00 UTC, a week on Monday, a quarter in January, April, July or
-October and a half in January or July; a window of several units is counted from the Unix epoch, so
-`{ "interval": "week", "intervalCount": 2 }` covers fixed Monday-to-Monday fortnights for every
-account. `hour` is part of the vocabulary but not accepted yet. Windows follow the calendar, not the
-subscription, and span at most three years. Controls counted in the same window compete however
-their cadence is spelled: a contract `month` × 3 replaces a plan `quarter`. An account or entity
-holds one limit per kind, feature and currency, so a new one replaces the previous one whatever its
-window; stacked windows, such as a daily and a monthly limit, belong on the plan. `GET /controls`
-reports each limit's `windowStartAt` and `windowEndAt` (both `null` for `lifetime`). A percentage
-alert follows the usage limit counted in its own window, and a hold stays in the window it was
-taken in: confirming after the window rolls charges the earlier window.
+`semi_annual`, `year`, `hour` or `lifetime`, times an optional `intervalCount` (default 1; none for
+`lifetime`). An hour starts on the hour, a day at 00:00 UTC, a week on Monday, a quarter in January,
+April, July or October and a half in January or July; a window of several units is counted from the
+Unix epoch, so `{ "interval": "week", "intervalCount": 2 }` covers fixed Monday-to-Monday fortnights
+for every account and five-hour windows do not restart at midnight. Every window an account uses is
+kept as a row of about 450 bytes with its indexes, so an hourly limit adds up to 24 rows a day for
+each account that uses it. Windows follow the calendar, not the subscription, and span at most three
+years. Controls counted in the same window compete however their cadence is spelled: a contract
+`month` × 3 replaces a plan `quarter`. An account or entity holds one limit per kind, feature and
+currency, so a new one replaces the previous one whatever its window; stacked windows, such as a
+daily and a monthly limit, belong on the plan. `GET /controls` reports each limit's `windowStartAt`
+and `windowEndAt` (both `null` for `lifetime`). A percentage alert follows the usage limit counted
+in its own window, and a hold stays in the window it was taken in: confirming after the window rolls
+charges the earlier window.
 
 Spend-control activation and window boundaries use the database clock by default, so API clock
 skew cannot bypass a newly active policy. Spend controls rate committed usage independently of pending reservations: held quantities never

@@ -228,6 +228,11 @@ rollover rows are rewritten:
 
 5. Finish with step 6 there.
 
+Meter limits, spend and usage limits and usage alerts can now reset hourly. Every window an account
+uses is a `usage_windows` or `control_windows` row of about 450 bytes with its indexes, and closed
+windows are kept, so an hourly limit adds up to 24 rows a day for each account that uses it; plan
+storage for that before offering hourly limits widely.
+
 Published catalogs keep their meaning: a stored `{ "mode": "months" }` expiry reads back as `after`
 with a month interval, and every reset gains `resetIntervalCount: 1`. That changes the normalized
 intent, so a catalog preview taken before the upgrade fails to publish with
@@ -540,9 +545,27 @@ container, overriding an environment URI; when combined with `--postgres-uri`, t
 The lane publishes a metered catalog and grants balances to one hot account and, by default,
 1,000 spread accounts. Scenarios are `hot` (one account, one feature), `spread` (round-robin),
 `reserve` (reserve then confirm), `check`, and `workers-off` (hot and spread with worker polling
-intervals extended to one hour). The last scenario keeps polling idle during short runs; it does
+intervals extended to one hour). `users` and `windows` run only when listed. The last scenario keeps polling idle during short runs; it does
 not permanently disable workers. Keep `workers-off` last in a custom scenario list because later
 scenarios do not restore the normal polling intervals.
+
+### Short control windows
+
+Use `windows` to measure what a short reset costs. It gives every spread account a usage limit that
+resets every `--window-cadence` (default `hour`), written straight to the database, then sends each
+account one consume while its window does not exist yet and one more once it does. The first pass
+is what every active account pays once per window; the report adds the window rows created and their
+size on disk with indexes. Projections are drained before each pass, up to `--drain-seconds`.
+
+```sh
+bun run test:load --docker --scenarios spread,windows --window-cadence hour \
+  --accounts 3000 --concurrency 32 --drain-seconds 180 --out /tmp/quotum-windows.json
+```
+
+On a laptop container (2026-09-28, diagnostic only) both passes ran about 1,300 consumes per second
+at 31 statements each; opening a window added about 0.8 ms of database time to that one request and
+a heavier p99, and each window row took about 450 bytes. Hourly and monthly limits run the same
+statements.
 
 ### One merchant with many active users
 

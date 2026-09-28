@@ -8,22 +8,33 @@ import {
 } from "../shared/cadence";
 import { InvalidRequestError } from "./errors";
 
-/** Units the API does not accept yet; `hour` waits for its hot-path measurement. */
-const unpublishedCadenceUnits: ReadonlySet<CadenceUnit> = new Set(["hour"]);
-
 /** The longest reset or control window: three years, the longest billing interval sold. */
 export const maxWindowSpan: Cadence = { unit: "year", count: 3 };
 
 /**
- * Rejects a cadence the API does not accept: an unknown or unpublished unit, a count that is not a
- * whole number from 1 to 1000, or a span longer than `maxSpan`.
+ * What a cadence paces. A `window` is counted as requests arrive, so any unit works. A `grant` is
+ * issued by the metering maintenance worker on its polling cadence, and a missed window is never
+ * granted afterwards, so it cannot be hourly. `billing` intervals exclude `hour` by type.
  */
-export function assertCadence(cadence: Cadence, label: string, maxSpan = maxWindowSpan): void {
+export type CadenceUse = "window" | "grant" | "billing";
+
+/**
+ * Rejects a cadence the API does not accept: an unknown unit, an hour where it cannot be honored,
+ * a count that is not a whole number from 1 to 1000, or a span longer than `maxSpan`.
+ */
+export function assertCadence(
+	cadence: Cadence,
+	label: string,
+	use: CadenceUse,
+	maxSpan = maxWindowSpan,
+): void {
 	if (!isCadenceUnit(cadence.unit)) {
 		throw new InvalidRequestError(`${label} has an unknown interval`);
 	}
-	if (unpublishedCadenceUnits.has(cadence.unit)) {
-		throw new InvalidRequestError(`${label} cannot use ${cadence.unit} yet`);
+	if (cadence.unit === "hour" && use !== "window") {
+		throw new InvalidRequestError(
+			`${label} cannot be hourly: allocations are granted by periodic maintenance`,
+		);
 	}
 	if (!Number.isInteger(cadence.count) || cadence.count < 1 || cadence.count > maxCadenceCount) {
 		throw new InvalidRequestError(
@@ -51,6 +62,6 @@ export function controlCadence(
 		return null;
 	}
 	const cadence = { unit: interval, count: intervalCount ?? 1 };
-	assertCadence(cadence, label);
+	assertCadence(cadence, label, "window");
 	return cadence;
 }

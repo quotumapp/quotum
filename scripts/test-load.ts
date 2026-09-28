@@ -5,6 +5,7 @@ import { SQL } from "bun";
 import { createBillingDatabaseConnection } from "../src/db/client";
 import { BillingRepository } from "../src/db/repository";
 import { createCliBillingLogger } from "../src/observability/logger";
+import { type CadenceUnit, cadenceUnits, isCadenceUnit } from "../src/shared/cadence";
 import { writeStdout } from "../src/shared/cli-output";
 import { e2eServiceEnv } from "../tests/e2e/helpers/e2e-env";
 import {
@@ -34,7 +35,7 @@ const logger = createCliBillingLogger();
  * with POSTGRES_URI against a sized instance for figures worth quoting.
  */
 
-type ScenarioKind = "hot" | "spread" | "reserve" | "check" | "workers-off" | "users";
+type ScenarioKind = "hot" | "spread" | "reserve" | "check" | "workers-off" | "users" | "windows";
 
 interface Options {
 	durationMs: number;
@@ -53,6 +54,7 @@ interface Options {
 	maxInFlight: number;
 	requestTimeoutMs: number;
 	drainMs: number;
+	windowCadence: CadenceUnit;
 }
 
 interface DbSnapshot {
@@ -110,6 +112,8 @@ interface RunResult {
 		projectionDrainMs: number;
 		accounting: { committed: number; missingAccepted: number; invalidEvents: number };
 	};
+	/** Control windows the run created, and what one row costs on disk with its indexes. */
+	windows?: { cadence: CadenceUnit; rowsCreated: number; bytesPerRow: number | null };
 }
 
 const defaultConcurrency = [1, 8, 32, 64] as const;
@@ -220,6 +224,10 @@ async function main(options: Options): Promise<void> {
 			return;
 		}
 		for (const scenario of options.scenarios) {
+			if (scenario === "windows") {
+				results.push(...(await runWindowScenario(context)));
+				continue;
+			}
 			if (scenario === "users") {
 				for (const users of options.users) {
 					results.push(await runUserScenario(context, users));
@@ -333,13 +341,39 @@ async function runScenario(
 
 	process.stdout.write(`\n${scenario} (${operation}) concurrency=${concurrency} ... `);
 	await drive(concurrency, options.warmupMs, request);
+	return await measureRun(
+		context,
+		{
+			scenario,
+			operation,
+			concurrency,
+			unitsPerCall,
+			serverOperation: shape === "reserve" ? "confirm" : operation,
+		},
+		() => drive(concurrency, options.durationMs, request),
+	);
+}
+
+/** Runs one measured pass and reports client, server and database figures for it. */
+async function measureRun(
+	context: ScenarioContext,
+	run: {
+		scenario: ScenarioKind;
+		operation: string;
+		concurrency: number;
+		unitsPerCall: number;
+		serverOperation: string;
+	},
+	execute: () => Promise<Sample[]>,
+): Promise<RunResult> {
+	const { client } = context;
 	const receiverBefore = context.receiver.count();
 	const metricsBefore = await client.metrics();
 	const dbBefore = await snapshotDb(context.sql, context.statementStats);
 	const lockSampler = startLockSampler(context.sampler);
 	const cpuSampler = startCpuSampler(context.servicePid, context.containerId);
 	const startedAt = performance.now();
-	const samples = await drive(concurrency, options.durationMs, request);
+	const samples = await execute();
 	const elapsedMs = performance.now() - startedAt;
 	const lockWaits = await lockSampler.stop();
 	const cpu = await cpuSampler.stop();
@@ -357,15 +391,14 @@ async function runScenario(
 		if (sample.denied) denied += 1;
 		ledgerCalls += sample.ledgerCalls;
 	}
-	const serverOperation = shape === "reserve" ? "confirm" : operation;
 	const result: RunResult = {
-		scenario,
-		operation,
-		concurrency,
+		scenario: run.scenario,
+		operation: run.operation,
+		concurrency: run.concurrency,
 		durationMs: Math.round(elapsedMs),
 		requests: samples.length,
 		ledgerCalls,
-		unitsPerCall,
+		unitsPerCall: run.unitsPerCall,
 		rps: round(samples.length / (elapsedMs / 1000)),
 		ledgerCallsPerSecond: round(ledgerCalls / (elapsedMs / 1000)),
 		clientMs: {
@@ -374,7 +407,7 @@ async function runScenario(
 			p99: round(percentile(latencies, 0.99)),
 			max: round(latencies[latencies.length - 1] ?? 0),
 		},
-		serverMs: histogramDelta(metricsBefore, metricsAfter, serverOperation),
+		serverMs: histogramDelta(metricsBefore, metricsAfter, run.serverOperation),
 		statuses,
 		denied,
 		db: {
@@ -402,6 +435,137 @@ async function runScenario(
 		`${result.rps} rps, p50 ${result.clientMs.p50} ms, p99 ${result.clientMs.p99} ms, statuses ${JSON.stringify(statuses)}\n`,
 	);
 	return result;
+}
+
+/**
+ * The cost of a short control window. Every account gets a usage limit that resets every
+ * `--window-cadence`, written straight to the database so units the API does not accept yet can be
+ * measured. The first pass sends each account its first consume in the current window, so every
+ * request creates that account's window row, as every active account does once per window; the
+ * second pass repeats the same accounts, whose windows now exist. A shorter cadence changes how
+ * often the first kind happens, not what either costs.
+ */
+async function runWindowScenario(context: ScenarioContext): Promise<RunResult[]> {
+	const { options } = context;
+	const projectId = integrationProjectContext().projectInstanceId;
+	const cadence = options.windowCadence;
+	await context.sql`
+		UPDATE control_policies SET active = false
+		WHERE project_id = ${projectId} AND source_type = 'account' AND created_by = 'load-lane'
+	`;
+	await context.sql`
+		INSERT INTO control_policies (
+			project_id, source_type, customer_id, control_kind, feature_id, limit_value, interval,
+			interval_count, revision, created_by
+		)
+		SELECT customer.project_id, 'account', customer.id, 'usage_limit', feature.id,
+			1000000000000, ${cadence}, 1, 1, 'load-lane'
+		FROM customers customer
+		JOIN features feature
+			ON feature.project_id = customer.project_id AND feature.key = 'model_tokens'
+		WHERE customer.project_id = ${projectId}
+			AND customer.billing_account_id LIKE 'load-%'
+			AND customer.billing_account_id <> ${hotAccount}
+	`;
+	const concurrency = Math.max(...options.concurrency);
+	const results: RunResult[] = [];
+	for (const pass of ["first in window", "window exists"] as const) {
+		// Start each pass with no projection delivery in flight, so both passes compete with the same
+		// background work.
+		await drainProjections(context.sql, Number.POSITIVE_INFINITY, options.drainMs);
+		const windowsBefore = await controlWindowCount(context.sql, projectId);
+		process.stdout.write(
+			`\nwindows (${cadence}, ${pass}) accounts=${options.accounts} concurrency=${concurrency} ... `,
+		);
+		const result = await measureRun(
+			context,
+			{
+				scenario: "windows",
+				operation: `consume (${pass})`,
+				concurrency,
+				unitsPerCall: 1,
+				serverOperation: "consume",
+			},
+			() =>
+				driveEach(concurrency, options.accounts, (index) =>
+					context.client.consume(`load-${index}`),
+				),
+		);
+		// Usage projections queue one job per account; let them deliver before the next pass.
+		result.db.projectionBacklogAfter = await drainProjections(
+			context.sql,
+			result.db.projectionBacklogAfter,
+			options.drainMs,
+		);
+		const windowsAfter = await controlWindowCount(context.sql, projectId);
+		result.windows = {
+			cadence,
+			rowsCreated: windowsAfter - windowsBefore,
+			bytesPerRow: await controlWindowBytesPerRow(context.sql),
+		};
+		writeStdout(
+			`- ${result.windows.rowsCreated} window rows created; ${result.windows.bytesPerRow ?? "n/a"} bytes per row with indexes`,
+		);
+		results.push(result);
+	}
+	return results;
+}
+
+/** Waits up to `drainMs` for queued projections to deliver and returns what is left. */
+async function drainProjections(sql: SQL, backlog: number, drainMs: number): Promise<number> {
+	const startedAt = performance.now();
+	let remaining = backlog;
+	while (remaining > 0 && performance.now() - startedAt < drainMs) {
+		await Bun.sleep(250);
+		const [row] = await sql<Array<{ backlog: number }>>`
+			SELECT count(*)::int AS backlog FROM projection_sync_jobs
+			WHERE status IN ('pending', 'processing', 'retrying')
+		`;
+		remaining = row?.backlog ?? remaining;
+	}
+	return remaining;
+}
+
+/** Sends exactly one request per index, `concurrency` at a time. */
+async function driveEach(
+	concurrency: number,
+	total: number,
+	request: (index: number) => Promise<RequestOutcome>,
+): Promise<Sample[]> {
+	const samples: Sample[] = [];
+	let next = 0;
+	const workers = Array.from({ length: Math.min(concurrency, total) }, async () => {
+		while (next < total) {
+			const index = next;
+			next += 1;
+			const startedAt = performance.now();
+			let outcome: RequestOutcome;
+			try {
+				outcome = await request(index);
+			} catch {
+				outcome = { status: 0, denied: false, ledgerCalls: 0 };
+			}
+			samples.push({ ...outcome, ms: performance.now() - startedAt });
+		}
+	});
+	await Promise.all(workers);
+	return samples;
+}
+
+async function controlWindowCount(sql: SQL, projectId: string): Promise<number> {
+	const [row] = await sql<Array<{ count: number }>>`
+		SELECT count(*)::int AS count FROM control_windows WHERE project_id = ${projectId}
+	`;
+	return row?.count ?? 0;
+}
+
+async function controlWindowBytesPerRow(sql: SQL): Promise<number | null> {
+	const [row] = await sql<Array<{ bytes: string | number; rows: string | number }>>`
+		SELECT pg_total_relation_size('control_windows') AS bytes,
+			(SELECT count(*) FROM control_windows) AS rows
+	`;
+	const rows = Number(row?.rows ?? 0);
+	return rows === 0 ? null : round(Number(row?.bytes ?? 0) / rows);
 }
 
 async function runUserScenario(context: ScenarioContext, users: number): Promise<RunResult> {
@@ -445,15 +609,7 @@ async function runUserScenario(context: ScenarioContext, users: number): Promise
 		}
 	}
 	const drainStartedAt = performance.now();
-	let backlog = dbAfter.projectionBacklog;
-	while (backlog > 0 && performance.now() - drainStartedAt < options.drainMs) {
-		await Bun.sleep(250);
-		const [row] = await context.sql<Array<{ backlog: number }>>`
-			SELECT count(*)::int AS backlog FROM projection_sync_jobs
-			WHERE status IN ('pending', 'processing', 'retrying')
-		`;
-		backlog = row?.backlog ?? backlog;
-	}
+	const backlog = await drainProjections(context.sql, dbAfter.projectionBacklog, options.drainMs);
 	const projectionDrainMs = performance.now() - drainStartedAt;
 	const accounting = await verifyUserAccounting(context.sql, prefix, users, acceptedKeys);
 	const result: RunResult = {
@@ -1029,6 +1185,7 @@ function parseOptions(argv: readonly string[]): Options {
 		maxInFlight: 2000,
 		requestTimeoutMs: 5000,
 		drainMs: 10000,
+		windowCadence: "hour",
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const flag = argv[index];
@@ -1058,11 +1215,20 @@ function parseOptions(argv: readonly string[]): Options {
 				options.scenarios = requireValue()
 					.split(",")
 					.map((item) => item.trim())
-					.filter((item): item is ScenarioKind => [...defaultScenarios, "users"].includes(item));
+					.filter((item): item is ScenarioKind =>
+						[...defaultScenarios, "users", "windows"].includes(item),
+					);
 				break;
 			case "--out":
 				options.out = requireValue();
 				break;
+			case "--window-cadence": {
+				const cadence = requireValue();
+				if (!isCadenceUnit(cadence))
+					throw new Error(`--window-cadence must be one of ${cadenceUnits.join(", ")}`);
+				options.windowCadence = cadence;
+				break;
+			}
 			case "--postgres-uri":
 				options.postgresUri = requireValue();
 				break;
@@ -1105,7 +1271,7 @@ function parseOptions(argv: readonly string[]): Options {
 			}
 			case "--help":
 				writeStdout(
-					"bun run test:load [--duration s] [--warmup s] [--concurrency 1,8,32,64] [--accounts n] [--scenarios hot,spread,reserve,check,workers-off,users] [--users 100,1000,2000,5000,10000] [--max-in-flight 2000] [--request-timeout-ms 5000] [--drain-seconds 10] [--min-rps n] [--max-p99-ms n] [--out file.json] [--docker | --postgres-uri uri] [--pg-config setting=value ...] [--profile [consume|check|reserve]] [--recreate-schema]",
+					"bun run test:load [--duration s] [--warmup s] [--concurrency 1,8,32,64] [--accounts n] [--scenarios hot,spread,reserve,check,workers-off,users,windows] [--window-cadence hour] [--users 100,1000,2000,5000,10000] [--max-in-flight 2000] [--request-timeout-ms 5000] [--drain-seconds 10] [--min-rps n] [--max-p99-ms n] [--out file.json] [--docker | --postgres-uri uri] [--pg-config setting=value ...] [--profile [consume|check|reserve]] [--recreate-schema]",
 				);
 				process.exit(0);
 				break;
