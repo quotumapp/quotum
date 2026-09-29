@@ -2034,7 +2034,13 @@ async function confirmWithinTransaction(
 	}
 
 	const rate = await rateFromReservation(tx, reservation);
-	const walletQuantity = await calculateWalletQuantity(tx, rate, quantity);
+	// A confirmation is a write: it opens the current allowance windows before locking allocations,
+	// as consume and reserve do, so what it spends beyond its hold and the balance it reports and
+	// hands to auto top-up count the window's allowance.
+	const [walletQuantity] = await Promise.all([
+		calculateWalletQuantity(tx, rate, quantity),
+		openPlanGrantWindows(tx, projectId, customer.id, featureId(rate.wallet)),
+	]);
 	const scale = rate.wallet.credit_scale;
 	// Allocation rows are locked first, then the reservation's holds; the config reads follow.
 	const [rows, reservationRows, alerts, topupPolicy] = await Promise.all([
