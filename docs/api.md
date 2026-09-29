@@ -170,6 +170,10 @@ update:
 
 - The outgoing version's live plan allowances end at that moment and are not rolled over.
 - The incoming version's allowance for the current period, or reset window, is granted in full.
+- A version grants that allowance at most once per period or window. A subscription that returns
+  to a version it held earlier in the same period or window gets that allowance back as it was
+  left, with its use kept, not a fresh one. A carry taken from it ends, and its quantity returns
+  to the resumed allowance instead of counting twice; what the carry spent is taken from it.
 - Allowances that already ended at a period boundary roll over under the old item's policy as
   before, so a period-end change keeps its rollover.
 - Top-ups, promotion rewards, operator grants, plan grants and rolled-over quantity are not

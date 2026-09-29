@@ -338,6 +338,12 @@ export async function materializeSubscriptionAllocations(
 		input.subscriptionId,
 	);
 	if (outgoingPlanVersionId !== null) {
+		// A return to a version held earlier in this period resumes what that version granted.
+		await resumeReturningAllowances(executor, {
+			projectId: input.projectId,
+			subscriptionId: input.subscriptionId,
+			incomingPlanVersionId: version.planVersionId,
+		});
 		// Carry needs the incoming allowances granted and the outgoing ones still live.
 		if (version.carryOver !== null && version.changeId !== null) {
 			await carryOverAllowances(executor, {
@@ -361,6 +367,84 @@ export async function materializeSubscriptionAllocations(
 		);
 	}
 	return inserted.length + resetWindows.granted;
+}
+
+/**
+ * A version grants its allowance at most once per period or reset window. When the subscription
+ * returns to a version whose allowance a switch ended earlier in the same period or window, that
+ * allowance is reopened as it was left: its use stays, its natural expiry is restored, and it rolls
+ * over again. The period's source key already exists, so the grant above adds nothing for it.
+ *
+ * A carry taken from a reopened allowance ends, and its quantity returns to the origin instead of
+ * counting twice: whatever the carry spent, holds or had debited is taken from the origin.
+ */
+async function resumeReturningAllowances(
+	executor: QueryExecutor,
+	input: { projectId: string; subscriptionId: string; incomingPlanVersionId: string },
+): Promise<void> {
+	const reopened = await executeRows<{ id: string | number | bigint }>(
+		executor,
+		drizzleSql`
+			WITH ended AS (
+				SELECT allocation.id,
+					CASE
+						WHEN item.expires_after_seconds IS NOT NULL
+							THEN LEAST(
+								allocation.period_end_at,
+								allocation.period_start_at + item.expires_after_seconds * interval '1 second'
+							)
+						WHEN item.reset_interval IS NOT NULL THEN allocation.period_end_at
+						ELSE NULL
+					END AS natural_expires_at
+				FROM balance_allocations allocation
+				JOIN plan_items item
+					ON item.project_id = allocation.project_id AND item.id = allocation.plan_item_id
+				WHERE allocation.project_id = ${input.projectId}
+					AND allocation.subscription_id = ${input.subscriptionId}
+					AND allocation.source_kind = 'subscription'
+					AND allocation.reversed_at IS NULL
+					AND item.plan_version_id = ${input.incomingPlanVersionId}::bigint
+					AND allocation.expires_at <= now()
+					AND allocation.rollover_processed_at IS NOT NULL
+					AND allocation.period_start_at <= now()
+					AND (allocation.period_end_at IS NULL OR allocation.period_end_at > now())
+			)
+			UPDATE balance_allocations allocation
+			SET expires_at = ended.natural_expires_at, rollover_processed_at = NULL, updated_at = now()
+			FROM ended
+			WHERE allocation.project_id = ${input.projectId} AND allocation.id = ended.id
+				AND (ended.natural_expires_at IS NULL OR ended.natural_expires_at > now())
+			RETURNING allocation.id
+		`,
+	);
+	if (reopened.length === 0) return;
+	const origins = drizzleSql.join(
+		reopened.map((row) => drizzleSql`${String(row.id)}::bigint`),
+		drizzleSql`, `,
+	);
+	await executeRows(
+		executor,
+		drizzleSql`
+			WITH carries AS (
+				UPDATE balance_allocations carry
+				SET expires_at = now(),
+					rollover_processed_at = COALESCE(carry.rollover_processed_at, now()),
+					updated_at = now()
+				WHERE carry.project_id = ${input.projectId}
+					AND carry.source_kind = 'carry_over'
+					AND carry.reversed_at IS NULL
+					AND (carry.expires_at IS NULL OR carry.expires_at > now())
+					AND carry.carry_over_origin_allocation_id IN (${origins})
+				RETURNING carry.carry_over_origin_allocation_id AS origin_id,
+					carry.consumed_quantity + carry.held_quantity + carry.reversed_quantity AS taken
+			)
+			UPDATE balance_allocations origin
+			SET reversed_quantity = LEAST(origin.quantity, origin.reversed_quantity + carries.taken),
+				updated_at = now()
+			FROM carries
+			WHERE origin.project_id = ${input.projectId} AND origin.id = carries.origin_id
+		`,
+	);
 }
 
 /**

@@ -90,6 +90,82 @@ describeLocalPostgres(describe, describe.skip)("Catalog migration synchronizatio
 		expect(await allowanceRows()).toHaveLength(2);
 	});
 
+	it("resumes a version's allowance, as it was left, when the subscription returns to it in the same period", async () => {
+		await addAllowance(1, "100", true);
+		await addAllowance(2, "300", false);
+		await sync(1);
+		const balance = async () =>
+			(await context.repository.getMeteringBalance(project, "migration-stripe", "ai_credits"))
+				.available;
+		const spend = async (quantity: string, key: string) => {
+			await context.repository.consumeUsage(project, {
+				billingAccountId: "migration-stripe",
+				featureKey: "model_tokens",
+				quantity,
+				idempotencyKey: key,
+			});
+		};
+		await spend("30", "spend-on-1");
+
+		await stageMigration(1, 2);
+		await sync(2);
+		expect(await balance()).toBe("300");
+		await spend("50", "spend-on-2");
+
+		await stageMigration(2, 1);
+		await sync(1);
+		// Version 1's allowance comes back with its earlier use; version 2's ends. No fresh grant.
+		expect(await allowanceRows()).toEqual([
+			{
+				version: 1,
+				quantity: "100.000000000",
+				consumed: "30.000000000",
+				ended: false,
+				rolls: true,
+			},
+			{
+				version: 2,
+				quantity: "300.000000000",
+				consumed: "50.000000000",
+				ended: true,
+				rolls: false,
+			},
+		]);
+		expect(await balance()).toBe("70");
+		await sync(1);
+		expect(await allowanceRows()).toHaveLength(2);
+		expect(await balance()).toBe("70");
+
+		await stageMigration(1, 2);
+		await sync(2);
+		expect(await balance()).toBe("250");
+		expect(await allowanceRows()).toHaveLength(2);
+	});
+
+	it("resumes the current reset window's allowance when the subscription returns within it", async () => {
+		await addAllowance(1, "40", false, "week");
+		await addAllowance(2, "90", false, "week");
+		await sync(1);
+		await context.repository.consumeUsage(project, {
+			billingAccountId: "migration-stripe",
+			featureKey: "model_tokens",
+			quantity: "15",
+			idempotencyKey: "weekly-spend-on-1",
+		});
+		await stageMigration(1, 2);
+		await sync(2);
+		await stageMigration(2, 1);
+		await sync(1);
+		expect(await allowanceRows()).toEqual([
+			{ version: 1, quantity: "40.000000000", consumed: "15.000000000", ended: false, rolls: true },
+			{ version: 2, quantity: "90.000000000", consumed: "0.000000000", ended: true, rolls: false },
+		]);
+		expect(
+			(await context.repository.getMeteringBalance(project, "migration-stripe", "ai_credits"))
+				.available,
+		).toBe("25");
+	});
+
 	it("keeps a 1 → 2 → 1 migration settled through ordinary item updates", async () => {
 		const original = await itemRows();
 		await context.repository.controlsEnterprise.createEntity(project, {
@@ -204,15 +280,20 @@ describeLocalPostgres(describe, describe.skip)("Catalog migration synchronizatio
 	});
 });
 
-/** An `ai_credits` allowance on one version of the migration plan, resetting monthly. */
-async function addAllowance(version: number, quantity: string, rollover: boolean): Promise<void> {
+/** An `ai_credits` allowance on one version of the migration plan, resetting monthly by default. */
+async function addAllowance(
+	version: number,
+	quantity: string,
+	rollover: boolean,
+	reset: "month" | "week" = "month",
+): Promise<void> {
 	await context.sql`
 		INSERT INTO plan_items (
 			project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval,
 			rollover_enabled, rollover_max_quantity, rollover_expiry_mode, rollover_expiry_interval,
 			rollover_expiry_interval_count
 		)
-		SELECT version.project_id, version.id, feature.id, 'allocation', ${quantity}::numeric, 'month',
+		SELECT version.project_id, version.id, feature.id, 'allocation', ${quantity}::numeric, ${reset},
 			${rollover}, NULL, ${rollover ? "forever" : "none"}, NULL, 1
 		FROM plan_versions version
 		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
