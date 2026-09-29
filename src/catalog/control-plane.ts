@@ -589,6 +589,22 @@ function normalizeCatalog(
 			if (item.itemKind === "access" && item.quantity !== null) {
 				throw new InvalidRequestError(`Access item ${item.featureKey} cannot have a quantity`);
 			}
+			// Quantities are held at the feature's credit scale; a finer one would publish and then
+			// fail every balance read and write for the accounts that hold the plan.
+			if (item.quantity !== null) {
+				positiveDecimal(
+					item.quantity,
+					`Plan ${plan.key} item ${item.featureKey} quantity`,
+					feature.creditScale,
+				);
+			}
+			if (item.rollover?.maxQuantity != null) {
+				positiveDecimal(
+					item.rollover.maxQuantity,
+					`Plan ${plan.key} item ${item.featureKey} rollover maxQuantity`,
+					feature.creditScale,
+				);
+			}
 			if (item.itemKind !== "access" && item.quantity === null) {
 				throw new InvalidRequestError(`Metered item ${item.featureKey} requires a quantity`);
 			}
