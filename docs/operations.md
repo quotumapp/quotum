@@ -306,6 +306,45 @@ The same release ends a subscription's outgoing plan allowances when it moves to
 version. Earlier versions kept them spendable alongside the new version's grant, so after the
 upgrade a plan change leaves only the new allowance.
 
+The upgrade does not end allowances that a plan change before it left live: they stay spendable
+until their own expiry, and one from an item with no reset and no expiry never ends. After the
+restore, list them:
+
+```sql
+SELECT allocation.project_id, allocation.customer_id, allocation.id, allocation.quantity,
+  allocation.consumed_quantity, allocation.expires_at
+FROM balance_allocations allocation
+JOIN plan_items item
+  ON item.project_id = allocation.project_id AND item.id = allocation.plan_item_id
+JOIN subscriptions subscription
+  ON subscription.project_id = allocation.project_id
+  AND subscription.id = allocation.subscription_id
+WHERE allocation.source_kind = 'subscription'
+  AND allocation.reversed_at IS NULL
+  AND (allocation.expires_at IS NULL OR allocation.expires_at > now())
+  AND item.plan_version_id <> subscription.plan_version_id;
+```
+
+Keeping them honours what customers were already given. To end them the way a plan change now
+does, without rollover, run the following before starting the new version. A reservation held on
+one still confirms, and projection receivers see the lower balance with the account's next
+projection.
+
+```sql
+UPDATE balance_allocations AS allocation
+SET expires_at = now(),
+  rollover_processed_at = COALESCE(allocation.rollover_processed_at, now()),
+  updated_at = now()
+FROM plan_items AS item, subscriptions AS subscription
+WHERE item.project_id = allocation.project_id AND item.id = allocation.plan_item_id
+  AND subscription.project_id = allocation.project_id
+  AND subscription.id = allocation.subscription_id
+  AND allocation.source_kind = 'subscription'
+  AND allocation.reversed_at IS NULL
+  AND (allocation.expires_at IS NULL OR allocation.expires_at > now())
+  AND item.plan_version_id <> subscription.plan_version_id;
+```
+
 ### Reset cadence
 
 The metering baseline widens `plan_items.reset_interval` to the cadence units (`hour`, `day`,
