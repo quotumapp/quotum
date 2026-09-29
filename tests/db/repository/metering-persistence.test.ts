@@ -171,12 +171,40 @@ describe("reservation confirmation plan", () => {
 			[{ allocation_id: "1", held_quantity: "4", consumed_quantity: "0" }],
 			0,
 			"12",
+			new Date(),
 		);
 
 		expect(plan.changes).toEqual([
 			{ allocationId: "1", consume: 6n, release: 4n, hasHold: true },
 			{ allocationId: "2", consume: 6n, release: 0n, hasHold: false },
 		]);
+	});
+
+	it("spends beyond a hold only from allocations live on the clock it is given", () => {
+		const now = new Date("2026-09-30T12:00:00.000Z");
+		const expiring = {
+			...allocation("2", { quantity: "10" }),
+			expires_at: new Date("2026-09-30T12:00:30.000Z"),
+		};
+		// The allocation is live at `now`, however far the process clock has moved.
+		expect(
+			planConfirmation(
+				[allocation("1", { quantity: "4", held: "4" }), expiring],
+				[{ allocation_id: "1", held_quantity: "4", consumed_quantity: "0" }],
+				0,
+				"6",
+				now,
+			).changes.find((change) => change.allocationId === "2"),
+		).toMatchObject({ consume: 2n });
+		expect(() =>
+			planConfirmation(
+				[allocation("1", { quantity: "4", held: "4" }), expiring],
+				[{ allocation_id: "1", held_quantity: "4", consumed_quantity: "0" }],
+				0,
+				"6",
+				new Date("2026-09-30T12:01:00.000Z"),
+			),
+		).toThrow(expect.objectContaining({ code: "INSUFFICIENT_BALANCE" }));
 	});
 
 	it("refuses extra consumption that only reversed quantity could cover", () => {
@@ -186,6 +214,7 @@ describe("reservation confirmation plan", () => {
 				[{ allocation_id: "1", held_quantity: "4", consumed_quantity: "0" }],
 				0,
 				"6",
+				new Date(),
 			),
 		).toThrow(expect.objectContaining({ code: "INSUFFICIENT_BALANCE", status: 409 }));
 	});
