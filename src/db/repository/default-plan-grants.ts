@@ -1,6 +1,7 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { activeBaseGrantSql, fundingBaseSubscriptionSql } from "./base-plan-sources";
-import { clampPlanGrantAllocations, materializePlanGrantPeriod } from "./plan-grant-periods";
+import { defaultPlanTargetSql, previousDefaultGrantSql } from "./default-plan-sql";
+import { clampPlanGrantAllocations, resumeDefaultPlanAllowances } from "./plan-grant-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -20,6 +21,8 @@ export type DefaultPlanChange = "started" | "moved" | "superseded" | "ended";
 export interface DefaultPlanOutcome {
 	change: DefaultPlanChange;
 	grantId: string;
+	/** The catalog revision whose default plan the account now follows, or null without one. */
+	revision: number | null;
 }
 
 interface DefaultPlanStateRow {
@@ -32,6 +35,7 @@ interface DefaultPlanStateRow {
 	grant_entitlement_keys: string[] | null;
 	funding_subscription_id: string | null;
 	base_grant_id: string | null;
+	previous_grant_id: string | null;
 }
 
 /** The target of the project's published catalog, or null when it marks no usable default. */
@@ -66,35 +70,15 @@ export function sameDefaultPlanTarget(
 	);
 }
 
-/** The published default plan's target row, for joining into other reads. */
-export function defaultPlanTargetSql(projectId: string) {
-	return drizzleSql`
-		SELECT
-			marker.plan_id::text AS plan_id,
-			plan.active_version_id::text AS plan_version_id,
-			marker.entitlement_keys,
-			revision.revision
-		FROM projects project
-		JOIN catalog_revisions revision
-			ON revision.project_id = project.id AND revision.id = project.published_catalog_revision_id
-		JOIN catalog_default_plans marker
-			ON marker.project_id = revision.project_id AND marker.catalog_revision_id = revision.id
-		JOIN plans plan
-			ON plan.project_id = marker.project_id AND plan.id = marker.plan_id AND plan.active
-		JOIN plan_versions version
-			ON version.project_id = plan.project_id
-			AND version.id = plan.active_version_id
-			AND version.status = 'published'
-			AND version.plan_kind = 'base'
-		WHERE project.id = ${projectId}
-	`;
-}
-
 /**
  * Brings one account's default-plan grant in line with the catalog, under the caller's lock on the
  * customer: starts it for an account without a base plan, supersedes it when a paid base plan or a
  * trial takes over, moves it to the plan's current version or keys, and ends it when the catalog
  * drops the marker. It reads the account's state in one statement and writes only on a change.
+ *
+ * A grant that replaces an earlier default-plan grant starts where that one started and takes over
+ * the allowances it left in the windows still running, so an account that falls back within a
+ * window resumes what was left of it, and its meter limits keep counting the same window.
  */
 export async function reconcileDefaultPlanGrant(
 	executor: QueryExecutor,
@@ -114,7 +98,8 @@ export async function reconcileDefaultPlanGrant(
 				held.entitlement_keys AS grant_entitlement_keys,
 				${fundingBaseSubscriptionSql(projectId, drizzleSql`${customerId}::uuid`)}
 					AS funding_subscription_id,
-				${activeBaseGrantSql(projectId, drizzleSql`${customerId}::uuid`)} AS base_grant_id
+				${activeBaseGrantSql(projectId, drizzleSql`${customerId}::uuid`)} AS base_grant_id,
+				previous.id AS previous_grant_id
 			FROM (SELECT 1) anchor
 			LEFT JOIN (${defaultPlanTargetSql(projectId)}) target ON true
 			LEFT JOIN plan_grants held
@@ -122,6 +107,9 @@ export async function reconcileDefaultPlanGrant(
 				AND held.customer_id = ${customerId}::uuid
 				AND held.origin = 'default'
 				AND held.status = 'active'
+			LEFT JOIN LATERAL (
+				${previousDefaultGrantSql(projectId, drizzleSql`${customerId}::uuid`)}
+			) previous ON true
 		`,
 	);
 	if (state === null) return null;
@@ -137,6 +125,7 @@ export async function reconcileDefaultPlanGrant(
 					revision: state.target_revision,
 				};
 	const heldBase = state.funding_subscription_id !== null || state.base_grant_id !== null;
+	const revision = target?.revision ?? null;
 	if (state.grant_id !== null) {
 		const grantId = state.grant_id;
 		if (heldBase) {
@@ -144,20 +133,21 @@ export async function reconcileDefaultPlanGrant(
 				subscriptionId: state.funding_subscription_id,
 				planGrantId: state.funding_subscription_id === null ? state.base_grant_id : null,
 			});
-			return { change: "superseded", grantId };
+			return { change: "superseded", grantId, revision };
 		}
 		if (target === null) {
 			await endGrant(executor, projectId, grantId);
-			return { change: "ended", grantId };
+			return { change: "ended", grantId, revision };
 		}
 		const versionChanged = state.grant_plan_version_id !== target.planVersionId;
 		const keysChanged =
 			JSON.stringify(state.grant_entitlement_keys ?? []) !== JSON.stringify(target.entitlementKeys);
 		if (!versionChanged && !keysChanged) return null;
 		await moveGrant(executor, projectId, grantId, target, versionChanged);
-		return { change: "moved", grantId };
+		return { change: "moved", grantId, revision };
 	}
 	if (heldBase || target === null) return null;
+	const previousGrantId = state.previous_grant_id;
 	const started = await executeOne<{ id: string }>(
 		executor,
 		drizzleSql`
@@ -165,22 +155,37 @@ export async function reconcileDefaultPlanGrant(
 				project_id, customer_id, plan_id, plan_version_id, plan_kind, origin, status, starts_at,
 				entitlement_keys, actor, metadata
 			)
-			VALUES (
+			SELECT
 				${projectId}, ${customerId}::uuid, ${target.planId}::bigint, ${target.planVersionId}::bigint,
-				'base', 'default', 'active', now(),
+				'base', 'default', 'active',
+				COALESCE(
+					(SELECT starts_at FROM plan_grants WHERE project_id = ${projectId} AND id = ${previousGrantId}::uuid),
+					now()
+				),
 				ARRAY(SELECT jsonb_array_elements_text(${jsonb(target.entitlementKeys)})),
-				${defaultPlanActor}, ${jsonb({ catalogRevision: target.revision })}
-			)
+				${defaultPlanActor},
+				${jsonb({
+					catalogRevision: target.revision,
+					...(previousGrantId === null ? {} : { resumesPlanGrantId: previousGrantId }),
+				})}
 			-- An elapsed trial the worker has not recorded yet still holds the account's one active
-			-- base grant; the default plan starts when the worker records it.
+			-- base grant; the default plan starts when that trial is recorded as expired.
 			ON CONFLICT (project_id, customer_id) WHERE status = 'active' AND plan_kind = 'base'
 			DO NOTHING
 			RETURNING id
 		`,
 	);
 	if (started === null) return null;
-	await materializePlanGrantPeriod(executor, projectId, started.id);
-	return { change: "started", grantId: started.id };
+	if (previousGrantId !== null) {
+		await resumeDefaultPlanAllowances(
+			executor,
+			projectId,
+			previousGrantId,
+			started.id,
+			target.planVersionId,
+		);
+	}
+	return { change: "started", grantId: started.id, revision };
 }
 
 /** Supersedes the account's default-plan grant with a trial whose row is inserted afterwards. */
@@ -220,7 +225,6 @@ async function supersedeGrant(
 			UPDATE plan_grants
 			SET status = 'superseded',
 				ended_at = now(),
-				next_period_at = NULL,
 				superseded_by_subscription_id = ${by.subscriptionId}::uuid,
 				superseded_by_plan_grant_id = ${by.planGrantId}::uuid,
 				updated_at = now()
@@ -242,7 +246,6 @@ async function endGrant(
 			UPDATE plan_grants
 			SET status = 'ended',
 				ended_at = now(),
-				next_period_at = NULL,
 				end_actor = ${defaultPlanActor},
 				end_reason = 'default_plan_removed',
 				updated_at = now()
@@ -256,9 +259,8 @@ async function endGrant(
 /**
  * Moves the grant to the plan's current version or keys in place, keeping its id and start, so its
  * windows keep their anchor. A live allowance whose feature keeps the same reset in the new
- * version stays for the rest of its window; the others end, and features the version adds are
- * granted for the current window. New quantities apply from the next reset, so republishing the
- * plan never refills what the window already gave.
+ * version stays for the rest of its window; the others end. New quantities apply from the next
+ * window a write creates, so republishing the plan never refills what the window already gave.
  */
 async function moveGrant(
 	executor: QueryExecutor,
@@ -317,32 +319,4 @@ async function moveGrant(
 				)
 		`,
 	);
-	await materializePlanGrantPeriod(executor, projectId, grantId);
-}
-
-/**
- * What an account Quotum has not recorded yet would hold of a feature on the default plan: the sum
- * of the published version's account-wide allocation items, or null without a default plan.
- * A read never creates the account, so this answers `check` and balance reads without writing.
- */
-export async function readDefaultPlanAllowance(
-	executor: QueryExecutor,
-	projectId: string,
-	featureId: string,
-): Promise<string | null> {
-	const row = await executeOne<{ quantity: string | null }>(
-		executor,
-		drizzleSql`
-			SELECT sum(item.quantity)::text AS quantity
-			FROM (${defaultPlanTargetSql(projectId)}) target
-			LEFT JOIN plan_items item
-				ON item.project_id = ${projectId}
-				AND item.plan_version_id = target.plan_version_id::bigint
-				AND item.feature_id = ${featureId}::bigint
-				AND item.item_kind = 'allocation'
-				AND item.allocation_scope = 'account'
-			GROUP BY target.plan_id
-		`,
-	);
-	return row === null ? null : (row.quantity ?? "0");
 }

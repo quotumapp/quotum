@@ -223,12 +223,12 @@ async function seedTrialGrant(
 	const [grant] = await context.sql<{ id: string }[]>`
 		INSERT INTO plan_grants (
 			project_id, customer_id, plan_id, plan_version_id, plan_kind, origin, status,
-			duration_unit, duration_count, starts_at, ends_at, entitlement_keys, next_period_at,
+			duration_unit, duration_count, starts_at, ends_at, entitlement_keys,
 			actor, idempotency_key, request_hash
 		)
 		SELECT p.project_id, ${customer.id}::uuid, p.id, pv.id, pv.plan_kind, 'trial', 'active',
 			'day', ${input.daysLong}, ${startsAt.toISOString()}::timestamptz,
-			${endsAt.toISOString()}::timestamptz, ARRAY['premium'], NULL,
+			${endsAt.toISOString()}::timestamptz, ARRAY['premium'],
 			'plan-grant-access', ${`seed:${billingAccountId}`}, repeat('0', 64)
 		FROM plans p
 		JOIN plan_versions pv ON pv.project_id = p.project_id AND pv.id = p.active_version_id

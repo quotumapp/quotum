@@ -1,5 +1,10 @@
 import { sql as drizzleSql } from "drizzle-orm";
-import { databaseDecimal } from "../../billing/decimal";
+import {
+	databaseDecimal,
+	decimalToUnits,
+	signedDecimalToUnits,
+	unitsToDecimal,
+} from "../../billing/decimal";
 import type {
 	EntitlementSnapshot,
 	ProjectionJobPayload,
@@ -8,12 +13,14 @@ import type {
 } from "../../billing/types";
 import type { CadenceUnit } from "../../shared/cadence";
 import { reconcileDefaultPlanGrant } from "./default-plan-grants";
+import { defaultPlanPendingSql, defaultPlanTargetSql } from "./default-plan-sql";
 import {
 	meterLimitWindowBounds,
 	optionalStoredCadence,
 	planGrantWindowBounds,
 	storedCadence,
 } from "./meter-limit-windows";
+import { type PendingAllowance, readPendingAllowances } from "./plan-grant-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import { requireNonBlank, toIsoStringOrNull } from "./validation";
@@ -33,29 +40,60 @@ export async function getEntitlementSnapshot(
 		LIMIT 1
 	`,
 	);
-	if (customer === null) {
-		return { billingAccountId, generatedAt: new Date().toISOString(), entitlements: [] };
-	}
-	return await readEntitlementSnapshotByCustomer(
-		executor,
-		projectId,
-		customer.id,
-		billingAccountId,
-	);
-}
-
-/** Snapshot for an already-resolved customer; issues exactly one statement. */
-export async function readEntitlementSnapshotByCustomer(
-	executor: QueryExecutor,
-	projectId: string,
-	customerId: string,
-	billingAccountId: string,
-): Promise<EntitlementSnapshot> {
+	const [stored, pending] = await Promise.all([
+		customer === null ? Promise.resolve([]) : readEntitlementRows(executor, projectId, customer.id),
+		readPendingDefaultEntitlements(executor, projectId, customer?.id ?? null),
+	]);
 	return {
 		billingAccountId,
 		generatedAt: new Date().toISOString(),
-		entitlements: await readEntitlementRows(executor, projectId, customerId),
+		entitlements: withPendingEntitlements(stored, pending),
 	};
+}
+
+/**
+ * The entitlements of the default plan an account would start on its next write, which a read
+ * reports as held: the marker's keys, active and without an end. A null account is one Quotum has
+ * not recorded yet.
+ */
+async function readPendingDefaultEntitlements(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string | null,
+): Promise<EntitlementSnapshot["entitlements"]> {
+	const customer = drizzleSql`${customerId}::uuid`;
+	const rows = await executeRows<{ key: string; plan_key: string }>(
+		executor,
+		drizzleSql`
+			SELECT DISTINCT entitlement.key, plan.key AS plan_key
+			FROM (${defaultPlanTargetSql(projectId)}) target
+			JOIN plans plan ON plan.project_id = ${projectId} AND plan.id = target.plan_id::bigint
+			CROSS JOIN LATERAL unnest(target.entitlement_keys) AS entitlement(key)
+			WHERE ${defaultPlanPendingSql(projectId, customer)}
+			ORDER BY entitlement.key
+		`,
+	);
+	return rows.map((row) => ({
+		key: row.key,
+		active: true,
+		expiresAt: null,
+		metadata: { source: "plan_grant", origin: "default", status: "active", planKey: row.plan_key },
+	}));
+}
+
+/** A pending default-plan entitlement stands in for a stored one only where that is inactive. */
+function withPendingEntitlements(
+	stored: EntitlementSnapshot["entitlements"],
+	pending: EntitlementSnapshot["entitlements"],
+): EntitlementSnapshot["entitlements"] {
+	if (pending.length === 0) return stored;
+	const byKey = new Map(stored.map((entry) => [entry.key, entry]));
+	for (const entry of pending) {
+		if (byKey.get(entry.key)?.active !== true) byKey.set(entry.key, entry);
+	}
+	return [...byKey.values()].sort((left, right) =>
+		left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
+	);
 }
 
 /** The customer's entitlement entries as they stand; one statement. */
@@ -526,19 +564,17 @@ export async function readProjectionBalances(
 	projectId: string,
 	customerId: string,
 ): Promise<ProjectionPayload["balances"]> {
-	const allocations = await executeRows<ProjectionBalanceRow>(
-		executor,
-		drizzleSql`
+	const [allocationRows, pending] = await Promise.all([
+		executeRows<ProjectionBalanceRow>(
+			executor,
+			drizzleSql`
 			SELECT
 				f.key AS feature_key,
 				f.unit,
 				f.credit_scale,
-				GREATEST(
-					SUM(
-						a.quantity - a.reversed_quantity - a.consumed_quantity - a.held_quantity
-					),
-					0::numeric
-				) AS available,
+				SUM(
+					a.quantity - a.reversed_quantity - a.consumed_quantity - a.held_quantity
+				)::text AS available,
 				SUM(a.held_quantity) AS held,
 				MIN(COALESCE(a.expires_at, a.period_end_at)) AS period_ends_at
 			FROM balance_allocations a
@@ -552,7 +588,10 @@ export async function readProjectionBalances(
 				AND (a.expires_at IS NULL OR a.expires_at > now())
 			GROUP BY f.id, f.key, f.unit, f.credit_scale
 		`,
-	);
+		),
+		readPendingAllowances(executor, projectId, customerId, null),
+	]);
+	const allocations = withPendingProjectionBalances(allocationRows, pending);
 	const limits = await executeRows<{
 		feature_id: string | number | bigint;
 		limit_quantity: unknown;
@@ -710,4 +749,59 @@ interface ProjectionBalanceRow {
 	available: unknown;
 	held: unknown;
 	period_ends_at: unknown;
+}
+
+/**
+ * Adds the allowances no write has created yet to the per-feature allocation totals, which the SQL
+ * leaves unclamped so the sum is exact, then clamps each feature's available quantity at zero.
+ */
+function withPendingProjectionBalances(
+	rows: readonly ProjectionBalanceRow[],
+	pending: readonly PendingAllowance[],
+): ProjectionBalanceRow[] {
+	const byFeature = new Map<
+		string,
+		{ unit: string; scale: number; available: bigint; held: bigint; endsAt: Date | null }
+	>();
+	for (const row of rows) {
+		const scale = Number(row.credit_scale);
+		byFeature.set(row.feature_key, {
+			unit: row.unit,
+			scale,
+			available: signedDecimalToUnits(String(row.available), scale),
+			held: decimalToUnits(databaseDecimal(row.held, "projection held", scale), scale),
+			endsAt: row.period_ends_at === null ? null : new Date(row.period_ends_at as string | Date),
+		});
+	}
+	for (const allowance of pending) {
+		const units = (value: string) => decimalToUnits(value, allowance.scale);
+		const current = byFeature.get(allowance.featureKey) ?? {
+			unit: allowance.unit,
+			scale: allowance.scale,
+			available: 0n,
+			held: 0n,
+			endsAt: null,
+		};
+		current.available +=
+			units(allowance.quantity) -
+			units(allowance.reversed) -
+			units(allowance.consumed) -
+			units(allowance.held);
+		current.held += units(allowance.held);
+		if (
+			allowance.expiresAt !== null &&
+			(current.endsAt === null || allowance.expiresAt < current.endsAt)
+		) {
+			current.endsAt = allowance.expiresAt;
+		}
+		byFeature.set(allowance.featureKey, current);
+	}
+	return [...byFeature].map(([featureKey, total]) => ({
+		feature_key: featureKey,
+		unit: total.unit,
+		credit_scale: total.scale,
+		available: unitsToDecimal(total.available > 0n ? total.available : 0n, total.scale),
+		held: unitsToDecimal(total.held, total.scale),
+		period_ends_at: total.endsAt,
+	}));
 }

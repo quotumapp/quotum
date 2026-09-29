@@ -1,7 +1,7 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError } from "../../billing/errors";
 import type { BillingChannel, BillingProvider } from "../../billing/types";
-import { reconcileDefaultPlanGrant } from "./default-plan-grants";
+import { type DefaultPlanOutcome, reconcileDefaultPlanGrant } from "./default-plan-grants";
 import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
 import { executeOne } from "./query";
 import type { CustomerIdentityRow, QueryExecutor, StoreProductIdentityRow } from "./types";
@@ -32,17 +32,23 @@ export async function ensureCustomer(
 	if (row === null) {
 		throw new Error(`customer ${billingAccountId} could not be created`);
 	}
-	if (row.created) await startDefaultPlan(executor, projectId, row);
+	if (row.created) await applyDefaultPlan(executor, projectId, row);
 	return { id: row.id, billing_account_id: row.billing_account_id };
 }
 
-async function startDefaultPlan(
+/**
+ * Brings the account's default-plan grant in line with the catalog, under the caller's lock on the
+ * customer, and gives a change a stored projection. The key names the grant and the change, and a
+ * move also the revision it follows, so the worker pass and a write that both find the same change
+ * deliver it once.
+ */
+export async function applyDefaultPlan(
 	executor: QueryExecutor,
 	projectId: string,
 	customer: CustomerIdentityRow,
-): Promise<void> {
+): Promise<DefaultPlanOutcome | null> {
 	const outcome = await reconcileDefaultPlanGrant(executor, projectId, customer.id);
-	if (outcome?.change !== "started") return;
+	if (outcome === null) return null;
 	const snapshot = await recomputeCustomerEntitlements(
 		executor,
 		projectId,
@@ -51,7 +57,10 @@ async function startDefaultPlan(
 	// A stored job, so a receiver that turned usage deliveries off still learns about it.
 	await enqueueProjectionSyncJob(executor, {
 		customerId: customer.id,
-		idempotencyKey: `plan_grant:${outcome.grantId}:started`,
+		idempotencyKey:
+			outcome.change === "moved"
+				? `plan_grant:${outcome.grantId}:moved:${outcome.revision}`
+				: `plan_grant:${outcome.grantId}:${outcome.change}`,
 		reason: "usage_changed",
 		payload: {
 			billingAccountId: customer.billing_account_id,
@@ -59,6 +68,7 @@ async function startDefaultPlan(
 			entitlements: snapshot,
 		},
 	});
+	return outcome;
 }
 
 /**

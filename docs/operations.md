@@ -236,23 +236,58 @@ marks a default plan, and the `default_plan_reconciliations` job table. It widen
 - a new `superseded_by_plan_grant_id` column references the trial that replaced a default-plan
   grant, with a deferred foreign key and its index;
 - `plan_grants_bounds_check` and `plan_grants_state_check` allow a grant without an end;
-- `idx_billing_plan_grants_due` covers only grants with an end.
+- `idx_billing_plan_grants_due` covers only grants with an end;
+- `next_period_at` and its index `idx_billing_plan_grants_next_period` are dropped, because a
+  write now records a window's allowance and no worker tracks the next one.
 
-Existing trial rows satisfy every new check and no earlier revision has a marker, so the move needs
-no manual SQL: follow steps 1, 2, 4 and 6 of
-[stored job provider identity](#stored-job-provider-identity). Afterwards
+`default_plan_reconciliations` records the accounts a pass left behind in `customers_skipped`,
+`last_skipped_customer_id` and `last_skip_error`, and `idx_billing_balance_allocations_plan_grant`
+adds `feature_id` and `period_start_at` for the lookup a write makes before it spends.
+
+Existing trial rows satisfy every new check and no earlier revision has a marker. Follow steps 1, 2,
+4 and 6 of [stored job provider identity](#stored-job-provider-identity), but give the restore the
+column that a dump from v0.15.0 or later still carries. Before step 4 run:
+
+```sql
+ALTER TABLE plan_grants ADD COLUMN next_period_at TIMESTAMPTZ;
+```
+
+After the restore, drop it again:
+
+```sql
+ALTER TABLE plan_grants DROP COLUMN next_period_at;
+```
+
+Allowances the old worker created for current windows stay in use. Afterwards
 `SELECT count(*) FROM catalog_default_plans;` and
 `SELECT count(*) FROM plan_grants WHERE origin = 'default';` both return 0 until a catalog marks a
 default plan. Stored catalog intents without the marker keep their intent hash, so a preview taken
 before the upgrade still publishes.
 
-Every account without a paid base plan holds a default-plan grant. That means one grant row, one
-entitlement row per key, and allowance rows for each reset window the account reaches. A publish
-that changes the default plan queues one pass over the project's customers. The subscription
+Every account without a paid base plan holds a default-plan grant: one grant row and one
+entitlement row per key. Allowance rows exist only for the windows the account wrote in, so an
+idle free account costs no rows and sends no projection when its allowance resets. A publish that
+changes the default plan queues one pass over the project's customers. The subscription
 reconciliation worker runs it after grant expiry: it scans 1,000 customers per slice, changes up to
-its batch size of them, and spends at most ten slices and ten allowance batches per poll. Each
-changed account gets a stored projection job. Plan the delivery backlog for large free tiers: a
-first default plan enqueues one job per covered account.
+its batch size of them, and spends at most ten slices per poll. Reads and writes do not wait for
+it (see [Default plan](api.md#default-plan)); it keeps grants, entitlement rows and projections
+current for accounts that neither read nor write. Each changed account gets a stored projection
+job. Plan the delivery backlog for large free tiers: a first default plan enqueues one job per
+covered account.
+
+The pass changes each account under its own savepoint. An account whose change fails is rolled
+back and left behind: the pass counts it in `customers_skipped`, keeps the last one in
+`last_skipped_customer_id` and `last_skip_error`, and the worker run reports `defaultPlanSkipped`
+with a `partial` outcome. The account's next write applies the change instead. A slice that fails
+as a whole is counted in `defaultPlanFailedSlices` and retried with backoff (`attempts`,
+`last_error`), while the run moves on to other projects' passes. To find both:
+
+```sql
+SELECT project_id, status, customers_checked, grants_changed, customers_skipped,
+  last_skipped_customer_id, last_skip_error, attempts, last_error
+FROM default_plan_reconciliations
+WHERE customers_skipped > 0 OR attempts > 0;
+```
 
 ### Reset cadence
 
@@ -515,7 +550,7 @@ One process runs the HTTP API and all workers. Each polls on the interval shown:
 | --- | --- |
 | Projection delivery | `BILLING_WORKER_POLL_INTERVAL_MS` |
 | Provider event replay | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
-| Subscription reconciliation (provider reads, subscription and plan grant expiry, plan grant allowances, default-plan passes, trial-ending notices) | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
+| Subscription reconciliation (provider reads, subscription and plan grant expiry, default-plan passes, trial-ending notices) | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
 | Metering maintenance (reservation expiry, reset-window subscription allocations, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Recurring billing | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Automatic top-ups | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |

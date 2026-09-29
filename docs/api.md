@@ -891,9 +891,10 @@ During the trial:
 - Entitlements come from the keys of the version's published provider bindings, copied when the
   trial starts, with `metadata.source: "plan_grant"`, the `planKey`, the `planGrantId` and the
   trial bounds. A paid source for the same key always wins.
-- Allocation items become reward allocations for the reset window the trial is in; the
-  subscription reconciliation worker adds the next window's when it begins. No allowance outlives
-  the trial.
+- Allocation items give an allowance in each reset window, anchored at the trial start and clamped
+  to its end. The account's first write in a window records that window's allowance as a reward
+  allocation; until then balance reads and checks count it in full. A reset needs no worker and
+  sends no projection, and no allowance outlives the trial.
 - Meter limits apply with overage blocked, in windows anchored at the trial start and clamped to
   its end, and plan-default controls apply. Rate cards, add-on purchases and license pools still
   need a paid subscription.
@@ -929,13 +930,18 @@ with no end:
 - Its entitlements carry the keys declared on the marker, with
   `metadata: { source: "plan_grant", origin: "default", planKey, planGrantId }` and a null
   `expiresAt`.
-- Its allowances reset in windows anchored at the moment the account started holding it. Its meter
-  limits apply with overage blocked, and its plan-default controls apply.
+- Its allowances reset in windows anchored at the moment the account first held it, and are
+  recorded as a trial's are: by the account's first write in each window. An account that never
+  spends costs no allowance rows. Its meter limits apply with overage blocked, and its plan-default
+  controls apply.
 - A paid base plan from any provider, a funding subscription recorded before plan versions, or a
   trial supersedes it, and its allowances stop at that moment.
 - When the account's last base plan ends (expiry, cancellation at period end, refund, revocation or
-  the end of a trial), it falls back to the default plan with a fresh allowance anchored at that
-  moment. The projection that records the ending also carries the default plan's keys.
+  the end of a trial), it falls back to the default plan. The new grant keeps the anchor of the
+  account's previous default-plan grant and takes over what that grant left in the windows still
+  running, so falling back within a window resumes it instead of refilling it, and its meter limits
+  keep counting the same window. The projection that records the ending also carries the default
+  plan's keys.
 
 A publish that changes the default plan changes the accounts that hold it, in the background.
 - **The plan is republished with a new version:** each grant moves in place. Its meter limits
@@ -943,20 +949,34 @@ A publish that changes the default plan changes the accounts that hold it, in th
   and the new quantities apply from the next reset; a feature the new version adds is granted now,
   and one it drops ends now.
 - **The declared keys change:** the entitlements follow them.
-- **The marker is removed:** the grants end.
+- **The marker is removed:** the grants end. Marking it again resumes the windows still running,
+  as a fallback does.
 - **A default plan is marked for the first time:** existing accounts without a base plan start
   holding it.
 
 Each changed account gets a stored `usage_changed` projection. `impact.defaultPlanAccounts`
-reports how many accounts the pass covers.
+reports how many accounts the pass covers. An account whose change fails is left behind and
+recorded on the pass (see [operations](operations.md#default-plan)), and the pass moves on.
 
-A read never creates an account, so `check` and `GET .../balances/:featureKey` answer an account
-Quotum has not recorded yet as if it held the default plan from now, and write nothing:
-- its balance is the default version's account allowance of the feature;
-- its meter limit applies in a window starting now, with no usage.
+Reads never write, so they answer an account that would start the default plan on its next write
+as if it already held it. That is an account Quotum has not recorded yet, and a recorded one the
+pass has not reached or whose last base plan ended moments ago, such as a trial the worker has not
+recorded as expired yet. For such an account:
+- `check` and `GET .../balances/:featureKey` report the default version's allowance of the feature
+  in the current window, or what the previous default-plan grant left of it, and its meter limit
+  in the window it would count;
+- `GET .../entitlements` reports the marker's keys, active, with
+  `metadata: { source: "plan_grant", origin: "default", status: "active", planKey }` and no
+  `planGrantId`;
+- the billing summary of a recorded account counts the same allowance.
 
-The account's first write creates it and the same allowance, so a product that checks before it
-consumes admits a new free user. Entitlement reads for such an account stay empty until then.
+Its next write first records what the read assumed: it starts the default plan, records an elapsed
+trial, or applies a changed default plan, so the write sees what the read reported. A product that
+checks before it consumes therefore admits a new free user at once.
+
+A balance counts an allowance no write has recorded in `granted` and `available`, but its
+`breakdown` lists only recorded allocations. Such an allowance has no `allocationId` until the
+account's next write in its window, so an administrative debit cannot target it before then.
 
 ## Operator grants and administrative debits
 

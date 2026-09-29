@@ -13611,7 +13611,13 @@
               "affectedCustomers": {
                 "type": "number"
               },
+              "defaultPlanFailedSlices": {
+                "type": "number"
+              },
               "defaultPlanGrants": {
+                "type": "number"
+              },
+              "defaultPlanSkipped": {
                 "type": "number"
               },
               "expiredPlanGrants": {
@@ -13627,9 +13633,6 @@
                   "partial"
                 ],
                 "type": "string"
-              },
-              "planGrantPeriods": {
-                "type": "number"
               },
               "providerClaimed": {
                 "type": "number"
@@ -13652,8 +13655,9 @@
               "expiredSubscriptions",
               "affectedCustomers",
               "expiredPlanGrants",
-              "planGrantPeriods",
               "defaultPlanGrants",
+              "defaultPlanSkipped",
+              "defaultPlanFailedSlices",
               "trialEndingNotices",
               "providerClaimed",
               "providerProcessed",
