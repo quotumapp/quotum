@@ -244,7 +244,11 @@ describe("AppleStoreKitService", () => {
 
 		await expect(
 			service.verifyPurchase({ billingAccountId: "user_1", transactionId: "200000000000001" }),
-		).rejects.toThrow("Apple transaction environment mismatch");
+		).rejects.toMatchObject({
+			code: "APPLE_SIGNED_DATA_INVALID",
+			status: 400,
+			message: "Apple transaction belongs to another environment",
+		});
 		expect(
 			calls.some(
 				(call) =>
@@ -330,7 +334,11 @@ describe("AppleStoreKitService", () => {
 
 		await expect(
 			service.handleNotification({ signedPayload: "signed-notification" }),
-		).rejects.toThrow("Apple notification environment mismatch");
+		).rejects.toMatchObject({
+			code: "APPLE_SIGNED_DATA_INVALID",
+			status: 400,
+			message: "Apple notification belongs to another environment",
+		});
 		expect(
 			calls.some(
 				(call) =>
@@ -574,8 +582,11 @@ describe("AppleStoreKitService", () => {
 			},
 		});
 
-		await expect(service.reconcileSubscription(reconciliationSubscription())).rejects.toThrow(
-			"Apple transaction environment mismatch",
+		await expect(service.reconcileSubscription(reconciliationSubscription())).rejects.toMatchObject(
+			{
+				code: "APPLE_SIGNED_DATA_INVALID",
+				status: 400,
+			},
 		);
 		expect(
 			calls.some(

@@ -142,6 +142,10 @@ Configure App Store Server Notifications V2 to
 `https://<billing-host>/v1/projects/<projectKey>/webhooks/apple`. Notification types that do not
 change entitlements (`TEST`, `REFUND_DECLINED`, `CONSUMPTION_REQUEST`, renewal-extension summaries,
 external purchase token events, Advanced Commerce metadata) are acknowledged without durable writes.
+Quotum verifies each `signedPayload` against Apple's root certificates. A payload that fails
+verification, or that belongs to another app or environment, answers `400 APPLE_SIGNED_DATA_INVALID`
+and records nothing; a transient failure of Apple's online certificate checks answers
+`503 BILLING_PROVIDER_UNAVAILABLE`. Apple retries any answer other than 200.
 
 A transaction whose `offerDiscountType` is `FREE_TRIAL`, under any offer type (introductory,
 promotional, offer code or win-back), records its purchase date and transaction expiry as the

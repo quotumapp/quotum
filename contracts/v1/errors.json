@@ -51,6 +51,12 @@
       ]
     },
     {
+      "code": "APPLE_SIGNED_DATA_INVALID",
+      "sources": [
+        "src/providers/apple/signed-data-errors.ts"
+      ]
+    },
+    {
       "code": "AUTHENTICATION_INCOMPLETE",
       "sources": [
         "src/platform/app.ts",

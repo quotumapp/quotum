@@ -14,6 +14,7 @@ import {
 	VerificationStatus,
 } from "@apple/app-store-server-library";
 import type { AppleBillingEnv } from "../../env";
+import { signedDataVerificationError } from "./signed-data-errors";
 import type {
 	AppleDecodedNotificationPayload,
 	AppleDecodedRenewalInfoPayload,
@@ -176,15 +177,20 @@ export class AppleStoreKitClient {
 		}
 	}
 
+	/** A notification arrives unauthenticated, so a payload the verifier rejects answers 400. */
 	async verifyNotification(signedPayload: string): Promise<VerifiedStoreKitNotification> {
 		try {
 			return await this.verifyNotificationWithRuntime(this.primaryRuntime, signedPayload);
 		} catch (error) {
 			if (this.sandboxRuntime && isSandboxFallbackError(error)) {
-				return this.verifyNotificationWithRuntime(this.sandboxRuntime, signedPayload);
+				return await this.verifyNotificationWithRuntime(this.sandboxRuntime, signedPayload).catch(
+					(sandboxError: unknown) => {
+						throw signedDataVerificationError(sandboxError);
+					},
+				);
 			}
 
-			throw error;
+			throw signedDataVerificationError(error);
 		}
 	}
 
