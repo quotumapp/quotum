@@ -148,6 +148,36 @@ describe("BillingClient", () => {
 		}
 	});
 
+	it("turns a response that is not JSON into a typed error with its status", async () => {
+		for (const [body, status, contentType] of [
+			["Bad Gateway", 502, "text/plain"],
+			["", 502, "text/plain"],
+			["<html>upstream unavailable</html>", 503, "text/html"],
+			["ok", 200, "text/plain"],
+		] as const) {
+			const client = new BillingClient({
+				baseUrl: "https://billing.example.com",
+				apiKey: "project-secret",
+				fetch: async () => new Response(body, { status, headers: { "content-type": contentType } }),
+			});
+			for (const request of [
+				() => client.catalog.status(),
+				() => client.usage.events("account_1"),
+			]) {
+				const error = await request().then(
+					() => null,
+					(failure: unknown) => failure,
+				);
+				expect(error).toBeInstanceOf(BillingApiError);
+				expect(error).toMatchObject({
+					code: "HTTP_ERROR",
+					status,
+					message: `Billing request failed with ${status}`,
+				});
+			}
+		}
+	});
+
 	it("omits details when the envelope has none or they are not an object", async () => {
 		for (const error of [
 			{ code: "NOT_FOUND", message: "missing" },

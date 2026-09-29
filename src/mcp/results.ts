@@ -78,7 +78,8 @@ export interface ToolErrorBody {
 
 /** The whitelisted view of a failure; also used for one section of a multi-read tool. */
 export function describeError(error: unknown, log: DiagnosticLog): ToolErrorBody {
-	if (error instanceof BillingApiError) {
+	// HTTP_ERROR carries no API envelope: a proxy's text or HTML page, or an empty body.
+	if (error instanceof BillingApiError && error.code !== "HTTP_ERROR") {
 		return {
 			code: error.code,
 			status: error.status,

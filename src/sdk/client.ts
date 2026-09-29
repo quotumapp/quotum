@@ -522,9 +522,9 @@ export class BillingClient {
 			headers: this.headers({ ...options, hasBody: options.body !== undefined }),
 			body: options.body === undefined ? undefined : JSON.stringify(options.body),
 		});
-		const payload = (await response.json()) as ApiEnvelope<T>;
-		if (!response.ok || payload.success === false) {
-			const error = payload.success === false ? payload.error : null;
+		const payload = await readEnvelope<ApiEnvelope<T>>(response);
+		if (!response.ok || payload === null || payload.success === false) {
+			const error = payload?.success === false ? payload.error : null;
 			throw new BillingApiError(
 				error?.message ?? `Billing request failed with ${response.status}`,
 				error?.code ?? "HTTP_ERROR",
@@ -543,9 +543,9 @@ export class BillingClient {
 		const response = await this.requestFetch(`${this.baseUrl}${path}`, {
 			headers: this.headers(options),
 		});
-		const payload = (await response.json()) as PagedEnvelope<T> | ApiFailure;
-		if (!response.ok || payload.success === false) {
-			const error = payload.success === false ? payload.error : null;
+		const payload = await readEnvelope<PagedEnvelope<T> | ApiFailure>(response);
+		if (!response.ok || payload === null || payload.success === false) {
+			const error = payload?.success === false ? payload.error : null;
 			throw new BillingApiError(
 				error?.message ?? `Billing request failed with ${response.status}`,
 				error?.code ?? "HTTP_ERROR",
@@ -657,4 +657,18 @@ function meteringBody(input: MeteringSubjectInput & { metadata?: Record<string, 
 			: { occurredAt: input.occurredAt === null ? null : input.occurredAt.toISOString() }),
 		...(input.metadata === undefined ? {} : { metadata: input.metadata }),
 	};
+}
+
+/**
+ * The response's JSON envelope, or null when the body is empty or not JSON, such as a proxy's
+ * text or HTML 502, so the caller still gets a typed error with the HTTP status.
+ */
+async function readEnvelope<T>(response: Response): Promise<T | null> {
+	const text = await response.text();
+	if (text.trim() === "") return null;
+	try {
+		return JSON.parse(text) as T;
+	} catch {
+		return null;
+	}
 }

@@ -472,7 +472,9 @@ selected admin calls and keeps credentials server-side. Its admin reads (`admin.
 `admin.searchCustomers`, `admin.storeEvents`, `admin.storeEvent`, `admin.projectionJobs`,
 `admin.statsSummary`) and `accounts.controls` use project authentication only and never send the
 operator key; `admin.storeEvent` never requests the raw provider payload. On a 429,
-`BillingApiError.rateLimitResetAt` carries the `ratelimit-reset` timestamp. The read-only
+`BillingApiError.rateLimitResetAt` carries the `ratelimit-reset` timestamp. A response whose body
+is empty or not JSON, such as a proxy's text or HTML 502, raises `BillingApiError` with code
+`HTTP_ERROR` and the HTTP status, so callers can retry on 5xx. The read-only
 [MCP server](mcp.md) for coding agents is built on these reads.
 
 An applied catalog migration settles once when the subscription is synchronized. Later updates,
