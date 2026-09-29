@@ -322,6 +322,76 @@ localDescribe("default plan", () => {
 		expect(await balance("mover")).toMatchObject({ available: "50" });
 	});
 
+	it("answers an unknown account from the default plan without recording it", async () => {
+		const check = (quantity: string) =>
+			context.repository.checkUsage(project, {
+				billingAccountId: "stranger",
+				featureKey: "model_tokens",
+				quantity,
+			});
+		const counts = async () =>
+			(
+				await context.sql<Array<{ customers: number; grants: number }>>`
+					SELECT
+						(SELECT count(*)::integer FROM customers WHERE billing_account_id = 'stranger') AS customers,
+						(SELECT count(*)::integer FROM plan_grants) AS grants
+				`
+			)[0];
+
+		await publish(catalog(null));
+		expect(await check("2000")).toMatchObject({ allowed: false, balance: { available: "0" } });
+		await publish(catalog(freePlan(1, "100")));
+
+		expect(await check("2000")).toMatchObject({
+			allowed: true,
+			walletQuantity: "10",
+			balance: { granted: "100", available: "100" },
+		});
+		expect(await check("40000")).toMatchObject({ allowed: false, reason: "insufficient_balance" });
+		expect(await balance("stranger")).toMatchObject({
+			granted: "100",
+			consumed: "0",
+			available: "100",
+		});
+		expect(await counts()).toEqual({ customers: 0, grants: 0 });
+
+		await consume("stranger", 10, "first-write");
+		expect(await balance("stranger")).toMatchObject({ granted: "100", available: "90" });
+	});
+
+	it("applies the default plan's meter limit to an unknown account in a window starting now", async () => {
+		const limited = freePlan(1, "100");
+		limited.items.push({
+			featureKey: "model_tokens",
+			itemKind: "meter_limit",
+			quantity: "1000",
+			resetInterval: "day",
+			expiresAfterSeconds: null,
+			overagePolicy: "blocked",
+		});
+		await publish({ ...catalog(limited), rateCards: [] });
+
+		const within = await context.repository.checkUsage(project, {
+			billingAccountId: "stranger",
+			featureKey: "model_tokens",
+			quantity: "600",
+		});
+		const beyond = await context.repository.checkUsage(project, {
+			billingAccountId: "stranger",
+			featureKey: "model_tokens",
+			quantity: "1200",
+		});
+
+		expect(within).toMatchObject({
+			allowed: true,
+			balance: { granted: "1000", available: "1000" },
+		});
+		expect(beyond).toMatchObject({ allowed: false, reason: "insufficient_balance" });
+		expect(
+			await context.sql`SELECT id FROM customers WHERE billing_account_id = 'stranger'`,
+		).toHaveLength(0);
+	});
+
 	it("gives two concurrent first requests one default grant", async () => {
 		await publish(catalog(freePlan(1, "100")));
 

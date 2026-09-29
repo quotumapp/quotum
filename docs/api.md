@@ -948,8 +948,15 @@ A publish that changes the default plan changes the accounts that hold it, in th
   holding it.
 
 Each changed account gets a stored `usage_changed` projection. `impact.defaultPlanAccounts`
-reports how many accounts the pass covers. A read never creates an account, so an account Quotum
-has not seen yet holds nothing until its first write.
+reports how many accounts the pass covers.
+
+A read never creates an account, so `check` and `GET .../balances/:featureKey` answer an account
+Quotum has not recorded yet as if it held the default plan from now, and write nothing:
+- its balance is the default version's account allowance of the feature;
+- its meter limit applies in a window starting now, with no usage.
+
+The account's first write creates it and the same allowance, so a product that checks before it
+consumes admits a new free user. Entitlement reads for such an account stay empty until then.
 
 ## Operator grants and administrative debits
 
