@@ -199,6 +199,28 @@ describe("Google OAuth using signed local provider tokens", () => {
 		expect(await f.sql`SELECT id FROM platform_auth_sessions`).toHaveLength(0);
 		expect((await browser.request("/api/platform/session/exchange", {})).status).toBe(401);
 	});
+	it("refuses a foreign or malformed sign-in destination as a bad request", async () => {
+		for (const callbackURL of [
+			`${testConfig.origin}/elsewhere`,
+			"https://attacker.example/auth/callback",
+			"http://[",
+			"https://%zz",
+			"//[::1",
+		]) {
+			const browser = new MerchantBrowser(f);
+			await browser.json("/api/platform/config");
+			const response = await browser.request("/api/auth/sign-in/social", {
+				provider: "google",
+				callbackURL,
+			});
+			expect(response.status).toBe(400);
+			expect(await response.json()).toMatchObject({
+				success: false,
+				error: { code: "RETURN_URL_REJECTED" },
+			});
+		}
+	});
+
 	it("returns cancellation without creating a session", async () => {
 		const browser = new MerchantBrowser(f);
 		const { result } = await oauth(browser, true, true);
