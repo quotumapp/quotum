@@ -198,6 +198,7 @@ export function createIntegrationApp({
 			meteringService: new MeteringService(repository),
 			controlsEnterpriseService: repository.controlsEnterprise,
 			promotionService: repository.promotions,
+			balanceAdjustmentService: repository.balanceAdjustments,
 			billingInsightsService: {
 				listUsageEvents: (...args) => repository.listUsageEvents(...args),
 				listProjectUsageEvents: (...args) => repository.listProjectUsageEvents(...args),

@@ -36,7 +36,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			billingAccountId: "alert-account",
 			featureKey: "ai_credits",
 			quantity: "20",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:alert-account",
 		});
 		await context.repository.controlsEnterprise.createUsageAlert(project, {
@@ -97,7 +97,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			billingAccountId: "cadence-account",
 			featureKey: "ai_credits",
 			quantity: "100",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:cadence-account",
 		});
 		const controls = context.repository.controlsEnterprise;
@@ -203,7 +203,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			billingAccountId: "topup-account",
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:topup-account",
 		});
 		await context.repository.controlsEnterprise.upsertAutoTopupPolicy(project, {
@@ -324,7 +324,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			billingAccountId: "topup-account",
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:topup-account",
 		});
 		await context.repository.controlsEnterprise.upsertAutoTopupPolicy(project, {
@@ -430,7 +430,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			billingAccountId: "topup-account",
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:topup-account",
 		});
 		await context.repository.controlsEnterprise.upsertAutoTopupPolicy(project, {
@@ -502,7 +502,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			billingAccountId: "failure-account",
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "fixture:failure-account",
 		});
 		await context.repository.controlsEnterprise.upsertAutoTopupPolicy(project, {

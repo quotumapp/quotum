@@ -36,8 +36,8 @@ e2eDescribe("E2E Phase 3 release journeys", () => {
 	it("enforces controls and operator contracts and assigns licenses over the real HTTP process", async () => {
 		await seedPhase3ControlCatalog(sql);
 		await seedPhase3CatalogMigration(sql);
-		await seedBalanceAllocation("phase3-http", "ai_credits", "20");
 		service = await startBillingService(runtimeEnv());
+		await grantOperatorCredit("phase3-http", "20");
 
 		expect(
 			(await putJson("/v1/billing-accounts/phase3-http/controls", {}, usageLimitBody("6"))).status,
@@ -192,10 +192,10 @@ e2eDescribe("E2E Phase 3 release journeys", () => {
 		await seedPhase3ControlCatalog(sql);
 		await seedPhase3CatalogMigration(sql);
 		await linkStripeCustomer(sql, "phase3-topup", "cus_phase3_topup");
-		await seedBalanceAllocation("phase3-topup", "ai_credits", "10");
 		service = await startBillingService(fakeStripeRuntimeEnv(), {
 			entrypoint: "src/testing/test-stripe-entrypoint.ts",
 		});
+		await grantOperatorCredit("phase3-topup", "10");
 
 		expect(
 			(
@@ -292,28 +292,21 @@ function fakeStripeRuntimeEnv(): NodeJS.ProcessEnv {
 	};
 }
 
-async function seedBalanceAllocation(
-	billingAccountId: string,
-	featureKey: string,
-	quantity: string,
-): Promise<void> {
-	await sql`
-		INSERT INTO customers (project_id, billing_account_id)
-		SELECT id, ${billingAccountId} FROM projects WHERE key = 'voysee'
-		ON CONFLICT (project_id, billing_account_id) DO NOTHING
-	`;
-	await sql`
-		INSERT INTO balance_allocations (
-			project_id, customer_id, feature_id, source_kind, source_key, quantity
-		)
-		SELECT project.id, customer.id, feature.id, 'operator', ${`e2e:${billingAccountId}`},
-			${quantity}::numeric
-		FROM projects project
-		JOIN customers customer ON customer.project_id = project.id
-			AND customer.billing_account_id = ${billingAccountId}
-		JOIN features feature ON feature.project_id = project.id AND feature.key = ${featureKey}
-		WHERE project.key = 'voysee'
-	`;
+/** Gives the account its starting credits through the operator grant route. */
+async function grantOperatorCredit(billingAccountId: string, quantity: string): Promise<void> {
+	const response = await postJson(
+		`/v1/admin/operator-grants/${billingAccountId}`,
+		{ ...operatorHeaders(), "idempotency-key": `phase3-e2e:grant:${billingAccountId}` },
+		{ featureKey: "ai_credits", quantity, reason: "E2E starting balance" },
+	);
+	expect(response.status).toBe(201);
+	expect((await response.json()).data.grant).toMatchObject({
+		billingAccountId,
+		featureKey: "ai_credits",
+		quantity,
+		status: "active",
+		actor,
+	});
 }
 
 async function consume(billingAccountId: string, quantity: string, idempotencyKey: string) {

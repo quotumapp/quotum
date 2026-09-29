@@ -117,6 +117,9 @@ describe("baseline schema files", () => {
 			"promotion_redemptions",
 			"promotion_audit_events",
 			"plan_grants",
+			"operator_grants",
+			"administrative_debits",
+			"administrative_debit_allocations",
 		]) {
 			expect(metering).toContain(`CREATE TABLE IF NOT EXISTS ${table} (`);
 		}
@@ -134,6 +137,9 @@ describe("baseline schema files", () => {
 		expect(metering).toContain("idx_billing_plan_grants_trial_once");
 		expect(metering).toContain("ADD CONSTRAINT entitlements_project_plan_grant_fk");
 		expect(metering).toContain("ADD CONSTRAINT balance_allocations_project_plan_grant_fk");
+		expect(metering).toContain("ADD CONSTRAINT balance_allocations_project_operator_grant_fk");
+		expect(metering).toContain("balance_allocations_operator_provenance_check");
+		expect(metering).toContain("idx_billing_balance_allocations_operator_grant");
 		expect(metering).toContain("ADD CONSTRAINT projects_published_catalog_revision_fk");
 		expect(metering).toContain("ADD CONSTRAINT plans_active_version_fk");
 	});

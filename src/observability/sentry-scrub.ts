@@ -35,6 +35,7 @@ const KEEP_SEGMENT_PATTERN = /^(?:[a-z]+(?:-[a-z]+)*|v\d+)$/;
 
 /** Path segments followed by one identifier, e.g. `billing-accounts/:billingAccountId`. */
 const COLLECTIONS = new Set([
+	"administrative-debits",
 	"balances",
 	"billing-accounts",
 	"by-billing-account",
@@ -62,7 +63,7 @@ const COLLECTIONS = new Set([
 ]);
 
 /** Path segments followed by two identifiers, e.g. `contracts/:billingAccountId/:contractId`. */
-const PAIR_COLLECTIONS = new Set(["auto-topups", "contracts"]);
+const PAIR_COLLECTIONS = new Set(["auto-topups", "contracts", "operator-grants"]);
 
 /** Static route segments, including enum values, that sit where a collection takes an id. */
 const STATIC_AFTER_COLLECTION = new Set([

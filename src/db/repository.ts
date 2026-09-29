@@ -66,6 +66,7 @@ import type { StripeCatalog } from "../providers/stripe/types";
 import { db as defaultDb } from "./client";
 import { AppleBillingRepository } from "./repository/apple";
 import { AutoTopupJobRepository } from "./repository/auto-topup-jobs";
+import { BalanceAdjustmentRepository } from "./repository/balance-adjustments";
 import { CommercialActionRepository } from "./repository/commercial-actions";
 import { ControlsEnterpriseRepository } from "./repository/controls-enterprise";
 import { CoreBillingRepository } from "./repository/core";
@@ -192,6 +193,7 @@ export class BillingRepository {
 	readonly controlsEnterprise: ControlsEnterpriseRepository;
 	readonly promotions: PromotionRepository;
 	readonly planGrants: PlanGrantRepository;
+	readonly balanceAdjustments: BalanceAdjustmentRepository;
 	readonly promotionProviders: PromotionProviderObjectRepository;
 
 	private readonly database: TransactionalQueryExecutor;
@@ -217,6 +219,7 @@ export class BillingRepository {
 		this.controlsEnterprise = new ControlsEnterpriseRepository(database);
 		this.promotions = new PromotionRepository(database);
 		this.planGrants = new PlanGrantRepository(database);
+		this.balanceAdjustments = new BalanceAdjustmentRepository(database);
 		this.promotionProviders = new PromotionProviderObjectRepository(database);
 	}
 

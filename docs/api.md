@@ -901,6 +901,53 @@ checkout: Stripe Checkout leaves out a plan's trial for an account that has had 
 credential. Grants carry no channel restriction; follow the store rules for the apps you unlock
 them in.
 
+## Operator grants and administrative debits
+
+Support credit and clawback are audited operator operations. They are not usage corrections or
+promotions, which would misstate what happened:
+
+```http
+POST /v1/admin/operator-grants/:billingAccountId
+GET  /v1/admin/operator-grants/:billingAccountId
+GET  /v1/admin/operator-grants/:billingAccountId/:grantId
+POST /v1/admin/operator-grants/:billingAccountId/:grantId/revoke
+POST /v1/admin/administrative-debits/:billingAccountId
+GET  /v1/admin/administrative-debits/:billingAccountId
+```
+
+Every route needs the operator key, including the reads, so a read-only credential is refused.
+Mutations also need `X-Billing-Actor` and an `Idempotency-Key`, and each takes a `reason` (1-500
+characters). A replayed key returns `200` with `duplicate: true`; reusing it for other terms returns
+`IDEMPOTENCY_CONFLICT`. Keys are scoped to the billing account.
+
+- **Grant.** `POST .../operator-grants/:billingAccountId` takes `featureKey`, a decimal `quantity`,
+  an optional `entityId` and an optional future `expiresAt`. It gives the account one allocation
+  with `sourceKind: "operator"`, spent in the usual order, and never records a payment. The feature
+  must be a consumable meter (`OPERATOR_GRANT_FEATURE_INVALID`), and the quantity must fit its
+  credit scale. It creates the customer when needed and returns `201` with the grant. A grant
+  carries its allocation's consumed, held, reversed and available quantity, and its `status` is
+  `active`, `expired` or `revoked`. A feature that the account's plan caps with a meter limit is
+  metered against that limit's window, so a grant of it has no effect while the limit applies.
+- **Revoke.** `POST .../:grantId/revoke` takes back what the grant still gives: quantity that is
+  unconsumed, unheld and unexpired. Consumed usage stays consumed, and an open reservation still
+  confirms from its hold. `revocation.revokedQuantity` reports what this revocation took, which
+  leaves out anything an earlier debit already took; an expired grant reports `0`. A second
+  revocation with another key returns `OPERATOR_GRANT_ALREADY_REVOKED`.
+- **Debit.** `POST .../administrative-debits/:billingAccountId` takes `allocations`, 1-20 of
+  `{allocationId, quantity}` (ids from a balance breakdown), all applied or none. A debit raises
+  each allocation's reversed quantity and writes no usage event, so the balance breakdown shows
+  it as `reversed` and never as `consumed`. An allocation must belong to the account
+  (`ALLOCATION_NOT_FOUND`) and be live. A purchase or top-up allocation is refused
+  (`ALLOCATION_NOT_DEBITABLE`, `reason: "provider_purchase"`), because purchased credit is taken
+  back by refunding it through the provider. A quantity above an allocation's available quantity
+  returns `ADMINISTRATIVE_DEBIT_EXCEEDS_AVAILABLE`, and the error `details` carry the
+  `allocationId` and its `available` quantity. A debit needs an existing account
+  (`BILLING_ACCOUNT_NOT_FOUND`).
+
+Each change enqueues the coalesced `usage_changed` projection, as promotion grants do. A revoked
+promotion reward reports only the quantity its revocation took, net of an earlier debit.
+Balances cannot be set to a value, and usage counters or reset times cannot be edited.
+
 ## Admin operations
 
 Every admin route requires project authentication. The routes listed under Operator routes also
@@ -936,6 +983,9 @@ Operator routes:
 - `POST /v1/admin/auto-topups/:billingAccountId/:policyId/reset`.
 - Promotion management under `/v1/admin/promotions` and
   `POST /v1/admin/promotion-redemptions/:redemptionId/revoke`; see [Promotions](#promotions).
+- Operator grants under `/v1/admin/operator-grants` and administrative debits under
+  `/v1/admin/administrative-debits`; see
+  [Operator grants and administrative debits](#operator-grants-and-administrative-debits).
 - `POST /v1/admin/store-events/:eventId/replay`.
 - `POST /v1/admin/reconciliation/subscriptions/run`.
 - `POST /v1/admin/projection-jobs/:jobId/retry`.

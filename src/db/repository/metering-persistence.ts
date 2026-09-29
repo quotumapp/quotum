@@ -2126,6 +2126,10 @@ export function planConfirmation(
 			const free =
 				decimalToUnits(databaseDecimal(row.quantity, "allocation quantity", scale), scale) -
 				decimalToUnits(
+					databaseDecimal(row.reversed_quantity, "allocation reversed", scale),
+					scale,
+				) -
+				decimalToUnits(
 					databaseDecimal(row.consumed_quantity, "allocation consumed", scale),
 					scale,
 				) -

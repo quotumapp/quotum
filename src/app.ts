@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import type { AdminBillingReader } from "./admin/types";
 import { registerAdminRoutes } from "./app/admin-routes";
+import { registerBalanceAdjustmentRoutes } from "./app/balance-adjustment-routes";
 import { registerCapabilityRoutes } from "./app/capability-routes";
 import { registerCatalogRoutes } from "./app/catalog-routes";
 import { registerControlsRoutes } from "./app/controls-routes";
@@ -100,6 +101,7 @@ export function createApp({
 	controlsEnterpriseService,
 	promotionService,
 	trialService,
+	balanceAdjustmentService,
 	catalogControlPlane,
 	billingInsightsService,
 	appleStoreKitService,
@@ -483,6 +485,12 @@ export function createApp({
 		registerPostAuthGuard,
 	});
 	registerTrialRoutes({ app, service: trialService ?? getRepository().planGrants });
+	registerBalanceAdjustmentRoutes({
+		app,
+		operatorApiKey: env.operatorApiKey,
+		service: balanceAdjustmentService ?? getRepository().balanceAdjustments,
+		registerPostAuthGuard,
+	});
 
 	return app;
 

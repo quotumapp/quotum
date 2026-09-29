@@ -162,8 +162,11 @@ export interface GrantAllocationInput {
 	entityId?: string | null;
 	featureKey: string;
 	quantity: string;
-	/** Rewards are written only by promotion redemptions, which carry their provenance. */
-	sourceKind: "subscription" | "purchase" | "credit_grant" | "topup" | "operator";
+	/**
+	 * Rewards and operator allocations are written only by promotion redemptions, plan grants and
+	 * operator grants, which carry their provenance.
+	 */
+	sourceKind: "subscription" | "purchase" | "credit_grant" | "topup";
 	sourceKey: string;
 	expiresAt?: Date | null;
 	periodStartAt?: Date | null;

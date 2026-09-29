@@ -34,7 +34,7 @@ localDescribe("usage projection coalescing", () => {
 			billingAccountId,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "coalesced",
 		});
 		for (const key of ["one", "two"]) {
@@ -99,7 +99,7 @@ localDescribe("usage projection coalescing", () => {
 			billingAccountId,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "debounced",
 		});
 		await context.repository.consumeUsage(project, {
@@ -132,7 +132,7 @@ localDescribe("usage projection coalescing", () => {
 			billingAccountId,
 			featureKey: "ai_credits",
 			quantity: "10",
-			sourceKind: "operator",
+			sourceKind: "credit_grant",
 			sourceKey: "silent",
 		});
 		await context.repository.consumeUsage(project, {

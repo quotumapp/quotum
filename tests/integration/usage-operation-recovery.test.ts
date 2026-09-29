@@ -412,7 +412,7 @@ localDescribe("usage operation recovery", () => {
 	it("rolls back a result exceeding the durable domain-outcome bound", async () => {
 		await context.sql`
    INSERT INTO balance_allocations (project_id, customer_id, feature_id, source_kind, source_key, quantity)
-   SELECT project_id, customer_id, feature_id, 'operator', 'bound:' || ordinal, 10
+   SELECT project_id, customer_id, feature_id, 'credit_grant', 'bound:' || ordinal, 10
    FROM balance_allocations CROSS JOIN generate_series(1, 400) AS ordinal
   `;
 		await expect(context.repository.consumeUsage(project, input)).rejects.toMatchObject({
@@ -473,7 +473,7 @@ localDescribe("usage operation recovery", () => {
 				billingAccountId: input.billingAccountId,
 				featureKey: "ai_credits",
 				quantity: "20",
-				sourceKind: "operator",
+				sourceKind: "credit_grant",
 				sourceKey: input.billingAccountId,
 			});
 			expect((await testRequest(app, path, { headers: authHeaders(key) })).status).toBe(404);
@@ -527,7 +527,7 @@ async function grant(billingAccountId: string, quantity = "10", sourceKey = bill
 		billingAccountId,
 		featureKey: "ai_credits",
 		quantity,
-		sourceKind: "operator",
+		sourceKind: "credit_grant",
 		sourceKey,
 	});
 }

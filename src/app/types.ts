@@ -1,4 +1,5 @@
 import type { AdminBillingReader } from "../admin/types";
+import type { BalanceAdjustmentServiceLike } from "../billing/balance-adjustments";
 import type {
 	CommercialActionExecutionResult,
 	CommercialActionIntent,
@@ -211,6 +212,7 @@ export interface AppDependencies {
 	controlsEnterpriseService?: ControlsEnterpriseRepositoryLike;
 	promotionService?: PromotionServiceLike;
 	trialService?: TrialServiceLike;
+	balanceAdjustmentService?: BalanceAdjustmentServiceLike;
 	catalogControlPlane?: CatalogControlPlaneLike;
 	billingInsightsService?: BillingInsightsServiceLike;
 	appleStoreKitService?: AppleStoreKitServiceLike | null;
