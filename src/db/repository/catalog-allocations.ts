@@ -27,6 +27,8 @@ async function resolveSubscriptionPlanVersion(
 	catalogRevisionId: string;
 	changed: boolean;
 	changeId: string | null;
+	/** The version the subscription held before this sync; null when it had none. */
+	previousPlanVersionId: string | null;
 } | null> {
 	const row = await executeOne<{
 		current_version_id: string | number | bigint | null;
@@ -105,8 +107,11 @@ async function resolveSubscriptionPlanVersion(
 				};
 	// 1. A subscription without a version adopts what the purchased product is bound to.
 	if (current === null) {
-		return binding === null ? null : { ...binding, changed: true, changeId };
+		return binding === null
+			? null
+			: { ...binding, changed: true, changeId, previousPlanVersionId: null };
 	}
+	const previousPlanVersionId = current.planVersionId;
 	// 2. Only the latest applied change can move the pinned version. Filtering by its source
 	// before selecting the latest would replay an old upgrade after a later downgrade returns
 	// to that source, including when a newer quantity-only change supersedes the upgrade.
@@ -116,6 +121,7 @@ async function resolveSubscriptionPlanVersion(
 			catalogRevisionId: String(row.change_revision_id),
 			changed: true,
 			changeId,
+			previousPlanVersionId,
 		};
 	}
 	// 3. A product of another plan is a provider-side switch, so its bound version applies.
@@ -124,10 +130,15 @@ async function resolveSubscriptionPlanVersion(
 		row.binding_plan_id !== null &&
 		String(row.binding_plan_id) !== String(row.current_plan_id)
 	) {
-		return { ...binding, changed: binding.planVersionId !== current.planVersionId, changeId };
+		return {
+			...binding,
+			changed: binding.planVersionId !== current.planVersionId,
+			changeId,
+			previousPlanVersionId,
+		};
 	}
 	// 4. Otherwise the subscription stays grandfathered on its pinned version.
-	return { ...current, changed: false, changeId };
+	return { ...current, changed: false, changeId, previousPlanVersionId };
 }
 
 export async function materializeSubscriptionAllocations(
@@ -174,6 +185,17 @@ export async function materializeSubscriptionAllocations(
 				RETURNING id
 			`,
 		);
+		if (
+			version.previousPlanVersionId !== null &&
+			version.previousPlanVersionId !== version.planVersionId
+		) {
+			await endOutgoingPlanAllowances(
+				executor,
+				input.projectId,
+				input.subscriptionId,
+				version.previousPlanVersionId,
+			);
+		}
 	}
 
 	if (!allocationFundingStatuses.has(input.status)) {
@@ -293,6 +315,39 @@ export async function materializeSubscriptionAllocations(
 		input.subscriptionId,
 	);
 	return inserted.length + resetWindows.granted;
+}
+
+/**
+ * Quantity the outgoing plan version granted ends with it, and the incoming version grants afresh
+ * (DEC-08). Its live allowances end now and are never rolled over: rolling them over would carry
+ * them into the new plan. Allowances that already ended at a period boundary are left to the
+ * rollover worker as before, and top-ups, rewards, grants and rollovers are not plan-granted.
+ * Open reservations still settle from their holds on the ended rows.
+ */
+async function endOutgoingPlanAllowances(
+	executor: QueryExecutor,
+	projectId: string,
+	subscriptionId: string,
+	outgoingPlanVersionId: string,
+): Promise<void> {
+	await executeRows(
+		executor,
+		drizzleSql`
+			UPDATE balance_allocations allocation
+			SET expires_at = now(),
+				rollover_processed_at = COALESCE(allocation.rollover_processed_at, now()),
+				updated_at = now()
+			FROM plan_items item
+			WHERE allocation.project_id = ${projectId}
+				AND allocation.subscription_id = ${subscriptionId}
+				AND allocation.source_kind = 'subscription'
+				AND allocation.reversed_at IS NULL
+				AND (allocation.expires_at IS NULL OR allocation.expires_at > now())
+				AND item.project_id = allocation.project_id
+				AND item.id = allocation.plan_item_id
+				AND item.plan_version_id = ${outgoingPlanVersionId}::bigint
+		`,
+	);
 }
 
 export async function syncSubscriptionPriceItems(
