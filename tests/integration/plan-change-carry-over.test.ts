@@ -107,6 +107,39 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		expect(await carriedUsage()).toHaveLength(1);
 	});
 
+	it("hands an unspent carry back to its origin when the subscription returns, without counting it twice", async () => {
+		await carryIntoVersionTwo();
+		expect(await available()).toBe("370");
+
+		await migrateBackToVersionOne();
+		const rows = await allowances();
+		const origin = rows.find((row) => row.source_kind === "subscription" && row.version === 1);
+		expect(origin).toMatchObject({ consumed: "30.000000000", ended: false, rolls: true });
+		expect(rows.find((row) => row.source_kind === "carry_over")).toMatchObject({ ended: true });
+		expect(rows.find((row) => row.version === 2)).toMatchObject({ ended: true });
+		expect(await available()).toBe("70");
+
+		// Switching away again does not bring the ended carry back.
+		await migrate(1, 2);
+		expect(await available()).toBe("300");
+	});
+
+	it("takes what a carry spent from its origin when the subscription returns", async () => {
+		await carryIntoVersionTwo();
+		await spend(370, "spend-everything-on-2");
+		expect(await available()).toBe("0");
+
+		await migrateBackToVersionOne();
+		const [origin] = await context.sql<Array<{ reversed: string }>>`
+			SELECT reversed_quantity::text AS reversed FROM balance_allocations allocation
+			JOIN plan_items item ON item.id = allocation.plan_item_id
+			JOIN plan_versions version ON version.id = item.plan_version_id
+			WHERE allocation.source_kind = 'subscription' AND version.version = 1
+		`;
+		expect(origin?.reversed).toBe("70.000000000");
+		expect(await available()).toBe("0");
+	});
+
 	it("caps carried usage at the new allowance and forgives the rest", async () => {
 		await addAllowance(1, "100");
 		await addAllowance(2, "20");
@@ -195,6 +228,63 @@ async function previewChange(fixture: ReturnType<typeof createIntegrationApp>, i
 		"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
 		{ method: "POST", headers: jsonHeaders(fixture), body: JSON.stringify({ intent }) },
 	);
+}
+
+/** Version 1 with 30 of 100 spent, then an immediate change to version 2 carrying the other 70. */
+async function carryIntoVersionTwo(): Promise<void> {
+	await addAllowance(1, "100");
+	await addAllowance(2, "300");
+	await sync(1);
+	await spend(30, "spend-before-carry");
+	const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+	const preview = await previewChange(fixture, {
+		...changeIntent("immediate"),
+		carryOver: { balances: ["ai_credits"] },
+	});
+	const previewToken = (await preview.json()).data.previewToken;
+	const executed = await testRequest(
+		fixture.app,
+		"/v1/billing-accounts/migration-stripe/commercial-actions",
+		{
+			method: "POST",
+			headers: { ...jsonHeaders(fixture), "idempotency-key": "carry-then-return" },
+			body: JSON.stringify({ previewToken }),
+		},
+	);
+	expect(executed.status).toBe(202);
+	await applyClaimedChange();
+	await sync(2);
+}
+
+/** A catalog migration of the subscription between versions, applied and synced. */
+async function migrate(fromVersion: number, toVersion: number): Promise<void> {
+	const input = {
+		fromPlanKey: "migration-plan",
+		fromVersion,
+		toPlanKey: "migration-plan",
+		toVersion,
+		effectiveMode: "immediate" as const,
+		actor: "integration-test",
+	};
+	const preview = await context.repository.controlsEnterprise.previewCatalogMigration(
+		project,
+		input,
+	);
+	await context.repository.controlsEnterprise.publishCatalogMigration(project, {
+		...input,
+		previewToken: preview.previewToken,
+	});
+	await applyClaimedChange();
+	await sync(toVersion);
+}
+
+async function migrateBackToVersionOne(): Promise<void> {
+	await migrate(2, 1);
+}
+
+async function available(): Promise<string> {
+	return (await context.repository.getMeteringBalance(project, "migration-stripe", "ai_credits"))
+		.available;
 }
 
 /** An `ai_credits` allowance on one version of the migration plan, for the whole monthly period. */
