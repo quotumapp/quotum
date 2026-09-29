@@ -890,3 +890,148 @@ describe("catalog control plane cadences", () => {
 		).toBe("Plan pro price intervals must match");
 	});
 });
+
+describe("catalog control plane default plan", () => {
+	const freePlan: CatalogPlanIntent = {
+		key: "free",
+		name: "Free",
+		version: 1,
+		currency: null,
+		baseAmountMinor: null,
+		billingInterval: null,
+		trialDays: null,
+		items: [
+			{
+				featureKey: "credits",
+				itemKind: "allocation",
+				quantity: "100",
+				resetInterval: "month",
+				expiresAfterSeconds: null,
+				overagePolicy: "blocked",
+			},
+		],
+		providerBindings: [],
+	};
+
+	async function previewDefault(
+		plan: CatalogPlanIntent,
+		planKey = plan.key,
+	): Promise<InvalidRequestError | CapabilityError | "normalized"> {
+		const controlPlane = new CatalogControlPlane(sentinelDatabase);
+		try {
+			await controlPlane.preview({} as never, {
+				expectedRevision: null,
+				actor: "test",
+				catalog: {
+					features: [feature],
+					plans: [plan],
+					topups: [],
+					rateCards: [],
+					defaultPlan: { planKey },
+				},
+			});
+		} catch (error) {
+			if (error === passedNormalization) return "normalized";
+			if (error instanceof InvalidRequestError || error instanceof CapabilityError) return error;
+			throw error;
+		}
+		throw new Error("Catalog preview resolved without reaching its transaction");
+	}
+
+	async function refusal(plan: CatalogPlanIntent, planKey?: string): Promise<string> {
+		const error = await previewDefault(plan, planKey);
+		if (!(error instanceof InvalidRequestError)) throw new Error("expected a refusal");
+		expect(error.code).toBe("INVALID_REQUEST");
+		return error.message;
+	}
+
+	it("accepts a public, unpriced base plan whose allocations reset", async () => {
+		expect(await previewDefault(freePlan)).toBe("normalized");
+		expect(
+			await previewDefault({
+				...freePlan,
+				items: [
+					{
+						featureKey: "credits",
+						itemKind: "meter_limit",
+						quantity: "50",
+						resetInterval: "day",
+						expiresAfterSeconds: null,
+						overagePolicy: "blocked",
+					},
+				],
+			}),
+		).toBe("normalized");
+	});
+
+	it("refuses a plan a grant cannot hold without a provider", async () => {
+		const item = freePlan.items[0] as CatalogPlanItemIntent;
+		expect(await refusal(freePlan, "missing")).toBe(
+			"Default plan missing must be an active plan of this catalog",
+		);
+		expect(await refusal({ ...freePlan, kind: "addon" })).toBe(
+			"Default plan free must be a base plan",
+		);
+		expect(
+			await refusal({
+				...freePlan,
+				visibility: "customer_specific",
+				customerBillingAccountId: "acct_1",
+			}),
+		).toBe("Default plan free must be public");
+		expect(await refusal({ ...freePlan, currency: "USD", baseAmountMinor: 0 })).toBe(
+			"Default plan free must have no price or provider binding",
+		);
+		expect(
+			await refusal({
+				...freePlan,
+				providerBindings: [{ productKey: "free", provider: "stripe", channel: "web" }],
+			}),
+		).toBe("Default plan free must have no price or provider binding");
+		expect(await refusal({ ...freePlan, trialDays: 7 })).toBe(
+			"Default plan free cannot declare a trial",
+		);
+		expect(await refusal({ ...freePlan, items: [{ ...item, allocationScope: "entity" }] })).toBe(
+			"Default plan free item credits must be allocated to the account",
+		);
+		expect(
+			await refusal({
+				...freePlan,
+				items: [{ ...item, rollover: { maxQuantity: null, expiry: { mode: "forever" } } }],
+			}),
+		).toBe("Default plan free item credits cannot roll over");
+		expect(await refusal({ ...freePlan, items: [{ ...item, resetInterval: null }] })).toBe(
+			"Default plan free allocation credits must reset",
+		);
+	});
+
+	it("keeps a catalog without the marker unchanged and canonicalizes the marker's keys", async () => {
+		const unmarked: CatalogIntent = {
+			features: [feature],
+			plans: [freePlan],
+			topups: [],
+			rateCards: [],
+		};
+		const read = async (stored: CatalogIntent) =>
+			(
+				await new CatalogControlPlane(new StoredCatalogDatabase(stored)).getPublished(
+					projectInstanceContext(),
+				)
+			).catalog;
+
+		expect(await read(unmarked)).not.toHaveProperty("defaultPlan");
+		expect(await read({ ...unmarked, defaultPlan: null })).not.toHaveProperty("defaultPlan");
+		expect(
+			(
+				await read({
+					...unmarked,
+					defaultPlan: { planKey: " free ", entitlementKeys: [" b", "a", "a"] },
+				})
+			)?.defaultPlan,
+		).toEqual({ planKey: "free", entitlementKeys: ["a", "b"] });
+		expect((await read({ ...unmarked, defaultPlan: { planKey: "free" } }))?.defaultPlan).toEqual({
+			planKey: "free",
+			entitlementKeys: [],
+		});
+	});
+});

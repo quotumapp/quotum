@@ -172,6 +172,14 @@ const catalogSchema = z
 		retiredFeatureKeys: z.array(z.string().trim().min(1).max(120)).max(100).optional(),
 		retiredPlanKeys: z.array(z.string().trim().min(1).max(120)).max(100).optional(),
 		retiredTopupKeys: z.array(z.string().trim().min(1).max(120)).max(100).optional(),
+		defaultPlan: z
+			.object({
+				planKey: z.string().trim().min(1).max(120),
+				entitlementKeys: z.array(z.string().trim().min(1).max(120)).max(100).optional(),
+			})
+			.strict()
+			.nullable()
+			.optional(),
 	})
 	.strict();
 

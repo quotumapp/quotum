@@ -120,6 +120,15 @@ export interface CatalogTopupIntent {
 	providerBindings: CatalogProviderBindingIntent[];
 }
 
+/**
+ * The plan an account holds while it has no paid base plan: a public, unpriced base plan of this
+ * catalog. Its entitlement keys are declared here, since an unpriced plan has no provider product.
+ */
+export interface CatalogDefaultPlanIntent {
+	planKey: string;
+	entitlementKeys?: string[];
+}
+
 export interface CatalogIntent {
 	features: CatalogFeatureIntent[];
 	plans: CatalogPlanIntent[];
@@ -128,6 +137,8 @@ export interface CatalogIntent {
 	retiredFeatureKeys?: string[];
 	retiredPlanKeys?: string[];
 	retiredTopupKeys?: string[];
+	/** Absent or null when the catalog marks no default plan. */
+	defaultPlan?: CatalogDefaultPlanIntent | null;
 }
 
 export interface CatalogPreviewInput {
@@ -151,6 +162,8 @@ export interface CatalogImpact {
 	topupsRetired: number;
 	providerBindingsValidated: number;
 	existingSubscriptionsGrandfathered: number;
+	/** Accounts without a paid base plan or an active base plan grant, which hold the default. */
+	defaultPlanAccounts: number;
 }
 
 export interface CatalogPreview {

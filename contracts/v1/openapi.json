@@ -1204,6 +1204,24 @@
             "properties": {
               "catalog": {
                 "properties": {
+                  "defaultPlan": {
+                    "properties": {
+                      "entitlementKeys": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "planKey": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "planKey",
+                      "entitlementKeys"
+                    ],
+                    "type": "object"
+                  },
                   "features": {
                     "items": {
                       "properties": {
@@ -11142,6 +11160,9 @@
               },
               "impact": {
                 "properties": {
+                  "defaultPlanAccounts": {
+                    "type": "number"
+                  },
                   "existingSubscriptionsGrandfathered": {
                     "type": "number"
                   },
@@ -11183,7 +11204,8 @@
                   "topupOptionsCreated",
                   "topupsRetired",
                   "providerBindingsValidated",
-                  "existingSubscriptionsGrandfathered"
+                  "existingSubscriptionsGrandfathered",
+                  "defaultPlanAccounts"
                 ],
                 "type": "object"
               },
@@ -11236,6 +11258,9 @@
               },
               "impact": {
                 "properties": {
+                  "defaultPlanAccounts": {
+                    "type": "number"
+                  },
                   "existingSubscriptionsGrandfathered": {
                     "type": "number"
                   },
@@ -11277,7 +11302,8 @@
                   "topupOptionsCreated",
                   "topupsRetired",
                   "providerBindingsValidated",
-                  "existingSubscriptionsGrandfathered"
+                  "existingSubscriptionsGrandfathered",
+                  "defaultPlanAccounts"
                 ],
                 "type": "object"
               },
@@ -29261,6 +29287,32 @@
                   "catalog": {
                     "additionalProperties": false,
                     "properties": {
+                      "defaultPlan": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "entitlementKeys": {
+                            "items": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 100,
+                            "type": "array"
+                          },
+                          "planKey": {
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "planKey"
+                        ],
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
                       "features": {
                         "items": {
                           "additionalProperties": false,
@@ -30687,6 +30739,32 @@
                   "catalog": {
                     "additionalProperties": false,
                     "properties": {
+                      "defaultPlan": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "entitlementKeys": {
+                            "items": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 100,
+                            "type": "array"
+                          },
+                          "planKey": {
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "planKey"
+                        ],
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
                       "features": {
                         "items": {
                           "additionalProperties": false,
@@ -51379,6 +51457,32 @@
                   "catalog": {
                     "additionalProperties": false,
                     "properties": {
+                      "defaultPlan": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "entitlementKeys": {
+                            "items": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 100,
+                            "type": "array"
+                          },
+                          "planKey": {
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "planKey"
+                        ],
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
                       "features": {
                         "items": {
                           "additionalProperties": false,
@@ -52725,6 +52829,32 @@
                   "catalog": {
                     "additionalProperties": false,
                     "properties": {
+                      "defaultPlan": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "entitlementKeys": {
+                            "items": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 100,
+                            "type": "array"
+                          },
+                          "planKey": {
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "planKey"
+                        ],
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
                       "features": {
                         "items": {
                           "additionalProperties": false,

@@ -393,6 +393,19 @@ allocations that were actually issued. Grants use the subscription's pinned plan
 account/entity scope, and stop when its recorded period or access ends. Period-end cancellation
 continues grants while access remains valid.
 
+A catalog may mark one plan as its default with
+`"defaultPlan": { "planKey": "free", "entitlementKeys": ["free_tier"] }`. An account that has no
+paid base plan holds the default plan's published version with no provider involved, the way it
+holds a trial. The marked plan must be an active, public base plan with no price, `basePrice`,
+billing interval or provider binding and no trial days. It cannot hold licensed quantities,
+entity-scoped allocations or rollover, and each of its allocations must reset. A violation returns
+`400 INVALID_REQUEST`. An unpriced plan has no provider product, so its entitlement keys are
+declared on the marker (at most 100). Changing or removing the marker creates no plan version.
+Preview and publish report `impact.defaultPlanAccounts`: the accounts the default plan covers,
+meaning those without a funding subscription to a base plan (or to no plan version, as recorded
+before plans existed) and without an active base plan grant such as a trial. A revision published
+before this field existed reports `0`.
+
 The same contract is available as code:
 
 ```sh

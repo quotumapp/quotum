@@ -5302,6 +5302,40 @@ export const administrativeDebitAllocations = pgTable(
 	],
 );
 
+export const catalogDefaultPlans = pgTable(
+	"catalog_default_plans",
+	{
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		catalogRevisionId: bigint("catalog_revision_id", { mode: "number" }).notNull(),
+		planId: bigint("plan_id", { mode: "number" }).notNull(),
+		entitlementKeys: text("entitlement_keys").array().notNull().default(sql`ARRAY[]::text[]`),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		primaryKey({
+			name: "catalog_default_plans_pkey",
+			columns: [table.projectId, table.catalogRevisionId],
+		}),
+		foreignKey({
+			name: "catalog_default_plans_project_revision_fk",
+			columns: [table.projectId, table.catalogRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "catalog_default_plans_project_plan_fk",
+			columns: [table.projectId, table.planId],
+			foreignColumns: [plans.projectId, plans.id],
+		}),
+		check(
+			"catalog_default_plans_entitlement_keys_check",
+			sql`(((cardinality(entitlement_keys) <= 100) AND (array_position(entitlement_keys, NULL::text) IS NULL)))`,
+		),
+		index("idx_billing_catalog_default_plans_plan").on(table.projectId, table.planId),
+	],
+);
+
 export type ProjectRow = typeof projects.$inferSelect;
 export type CustomerRow = typeof customers.$inferSelect;
 export type ProductRow = typeof products.$inferSelect;

@@ -138,6 +138,135 @@ localDescribe("catalog control plane", () => {
 		});
 	});
 
+	it("publishes an unpriced default plan and counts the accounts without a base plan", async () => {
+		const errors: unknown[] = [];
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			logger: recordingErrorLogger(errors),
+		});
+		const headers = operatorHeaders(authHeaders());
+		const freePlan = {
+			key: "free",
+			name: "Free",
+			version: 1,
+			currency: null,
+			baseAmountMinor: null,
+			billingInterval: null,
+			trialDays: null,
+			items: [
+				{
+					featureKey: "ai_credits",
+					itemKind: "allocation",
+					quantity: "50",
+					resetInterval: "month",
+					expiresAfterSeconds: null,
+					overagePolicy: "blocked",
+				},
+			],
+			providerBindings: [],
+		};
+		const base = catalogIntent(1, "0.005");
+		const marked = {
+			...base,
+			plans: [...base.plans, freePlan],
+			defaultPlan: { planKey: "free", entitlementKeys: ["free_tier", " free_tier "] },
+		};
+		const publish = async (catalog: unknown, expectedRevision: number | null) => {
+			const preview = await testRequest(app, "/v1/admin/catalog/preview", {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ expectedRevision, catalog }),
+			});
+			const previewData = (await preview.json()).data;
+			const published = await testRequest(app, "/v1/admin/catalog/publish", {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ expectedRevision, previewToken: previewData.previewToken, catalog }),
+			});
+			if (published.status !== 200) throw errors[0] ?? new Error(await published.clone().text());
+			return {
+				preview: previewData,
+				published: (await published.json()).data,
+				replay: async () =>
+					(
+						await (
+							await testRequest(app, "/v1/admin/catalog/publish", {
+								method: "POST",
+								headers,
+								body: JSON.stringify({
+									expectedRevision,
+									previewToken: previewData.previewToken,
+									catalog,
+								}),
+							})
+						).json()
+					).data,
+			};
+		};
+		await seedCustomer("free_user");
+		await seedSubscription("lapsed_user", "expired", null);
+		await seedSubscription("legacy_user", "active", null);
+
+		const first = await publish(marked, null);
+
+		expect(first.preview.impact.defaultPlanAccounts).toBe(2);
+		expect(first.published.impact.defaultPlanAccounts).toBe(2);
+		expect((await first.replay()).impact.defaultPlanAccounts).toBe(2);
+		const [row] = await context.sql<Array<{ plan_key: string; entitlement_keys: string[] }>>`
+			SELECT plan.key AS plan_key, marker.entitlement_keys
+			FROM catalog_default_plans marker
+			JOIN plans plan ON plan.project_id = marker.project_id AND plan.id = marker.plan_id
+			WHERE marker.catalog_revision_id = ${first.published.revisionId}::bigint
+		`;
+		expect(row).toEqual({ plan_key: "free", entitlement_keys: ["free_tier"] });
+		const [version] = await context.sql<
+			Array<{ currency: string | null; base_amount_minor: string | null }>
+		>`
+			SELECT version.currency, version.base_amount_minor::text
+			FROM plan_versions version JOIN plans plan ON plan.active_version_id = version.id
+			WHERE plan.key = 'free'
+		`;
+		expect(version).toEqual({ currency: null, base_amount_minor: null });
+		const current = await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() });
+		expect((await current.json()).data.catalog.defaultPlan).toEqual({
+			planKey: "free",
+			entitlementKeys: ["free_tier"],
+		});
+
+		await seedSubscription("paid_user", "active", "premium");
+		await context.repository.planGrants.startTrial(integrationProjectContext(), {
+			billingAccountId: "trial_user",
+			planKey: "premium",
+			durationDays: 7,
+			metadata: {},
+			idempotencyKey: "trial-1",
+			actor: null,
+		});
+		const unchanged = await publish(marked, 1);
+		expect(unchanged.published.impact).toMatchObject({
+			planVersionsCreated: 0,
+			defaultPlanAccounts: 2,
+		});
+
+		const { defaultPlan: _removed, ...unmarked } = marked;
+		const removed = await publish(unmarked, 2);
+		expect(removed.published.impact.defaultPlanAccounts).toBe(0);
+		expect(
+			await context.sql`
+				SELECT 1 FROM catalog_default_plans
+				WHERE catalog_revision_id = ${removed.published.revisionId}::bigint
+			`,
+		).toHaveLength(0);
+		const after = await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() });
+		expect((await after.json()).data.catalog).not.toHaveProperty("defaultPlan");
+		const [audit] = await context.sql<Array<{ default_plan: unknown }>>`
+			SELECT details->'defaultPlan' AS default_plan FROM catalog_audit_log
+			WHERE catalog_revision_id = ${first.published.revisionId}::bigint
+		`;
+		expect(audit?.default_plan).toEqual({ planKey: "free", entitlementKeys: ["free_tier"] });
+	});
+
 	it("rejects stale previews and intent changes without moving active pointers", async () => {
 		const errors: unknown[] = [];
 		const { app, authHeaders } = createIntegrationApp({
@@ -1242,6 +1371,46 @@ async function publishCatalog(
 	if (response.status !== 200) throw errors[0] ?? new Error(await response.clone().text());
 	expect(response.status).toBe(200);
 	return (await response.json()).data;
+}
+
+async function seedCustomer(billingAccountId: string): Promise<void> {
+	await context.sql`
+		INSERT INTO customers (project_id, billing_account_id)
+		SELECT id, ${billingAccountId} FROM projects WHERE key = 'voysee'
+	`;
+}
+
+/** A Stripe subscription to the published plan, or with no plan version as recorded before them. */
+async function seedSubscription(
+	billingAccountId: string,
+	status: string,
+	planKey: string | null,
+): Promise<void> {
+	await seedCustomer(billingAccountId);
+	await context.sql`
+		INSERT INTO subscriptions (
+			project_id, customer_id, product_id, store_product_id, provider, channel,
+			external_subscription_id, external_product_id, external_price_id, status,
+			starts_at, expires_at, current_period_start, current_period_end,
+			plan_version_id, catalog_revision_id
+		)
+		SELECT
+			customer.project_id, customer.id, product.id, store_product.id, 'stripe', 'web',
+			${`subscription:${billingAccountId}`}, 'prod_stripe_premium', 'price_premium_monthly',
+			${status}, now() - INTERVAL '1 day', now() + INTERVAL '1 month',
+			now() - INTERVAL '1 day', now() + INTERVAL '1 month',
+			version.id, version.catalog_revision_id
+		FROM customers customer
+		JOIN products product
+			ON product.project_id = customer.project_id AND product.key = 'premium_monthly'
+		JOIN store_products store_product
+			ON store_product.project_id = product.project_id
+			AND store_product.product_id = product.id
+			AND store_product.provider = 'stripe'
+		LEFT JOIN plans plan ON plan.project_id = customer.project_id AND plan.key = ${planKey}
+		LEFT JOIN plan_versions version ON version.id = plan.active_version_id
+		WHERE customer.billing_account_id = ${billingAccountId}
+	`;
 }
 
 function recordingErrorLogger(errors: unknown[]) {

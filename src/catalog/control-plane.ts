@@ -9,6 +9,7 @@ import {
 import { BillingError, InvalidRequestError, PersistenceConflictError } from "../billing/errors";
 import { type BillingProvider, isBillingProvider } from "../billing/types";
 import { RepositoryModule } from "../db/repository/base";
+import { heldBasePlanSql } from "../db/repository/base-plan-sources";
 import { controlWindowKey } from "../db/repository/controls-enterprise";
 import { executeOne, executeRows, jsonb } from "../db/repository/query";
 import type { QueryExecutor, TransactionalQueryExecutor } from "../db/repository/types";
@@ -26,6 +27,7 @@ import {
 	priceBillingCadence,
 	rolloverExpiryCadence,
 } from "./cadence-rules";
+import { assertDefaultPlan } from "./default-plan-rules";
 import {
 	assertCatalogProviderCompatibility,
 	catalogProviderCompatibility,
@@ -33,6 +35,7 @@ import {
 import type {
 	CatalogControlIntent,
 	CatalogControlPlaneLike,
+	CatalogDefaultPlanIntent,
 	CatalogFeatureIntent,
 	CatalogImpact,
 	CatalogIntent,
@@ -283,6 +286,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				featureIds,
 			);
 			await publishRateCards(tx, projectState.id, String(revision.id), catalog, featureIds);
+			await publishDefaultPlan(tx, projectState.id, String(revision.id), catalog);
 			await publishProviderBindings(
 				tx,
 				projectState.id,
@@ -377,7 +381,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 						'catalog_published',
 						${requireActor(input.actor)},
 						${intentHash},
-						${jsonb({ impact, previewToken: token })}
+						${jsonb({ impact, previewToken: token, defaultPlan: catalog.defaultPlan ?? null })}
 					)
 					RETURNING id
 				`,
@@ -437,6 +441,7 @@ function assertNewCatalogIntent(
 	// less often than its plan bills would silently reset every period: a yearly limit on a monthly
 	// plan would become a monthly one.
 	for (const plan of catalog.plans) assertPlanCadences(plan);
+	assertDefaultPlan(catalog);
 	assertCatalogProviderCompatibility(catalog, capabilities);
 }
 
@@ -743,6 +748,7 @@ function normalizeCatalog(
 			);
 		}
 	}
+	const defaultPlan = normalizeDefaultPlan(catalog.defaultPlan);
 	return {
 		features,
 		plans,
@@ -751,7 +757,26 @@ function normalizeCatalog(
 		retiredFeatureKeys,
 		retiredPlanKeys,
 		retiredTopupKeys,
+		// Left out when unset, so a catalog that marks no default keeps its intent hash.
+		...(defaultPlan === null ? {} : { defaultPlan }),
 	};
+}
+
+function normalizeDefaultPlan(
+	marker: CatalogDefaultPlanIntent | null | undefined,
+): Required<CatalogDefaultPlanIntent> | null {
+	if (marker === undefined || marker === null) return null;
+	const entitlementKeys = [
+		...new Set(
+			(marker.entitlementKeys ?? []).map((key) =>
+				requiredText(key, "default plan entitlement key", 120),
+			),
+		),
+	].sort();
+	if (entitlementKeys.length > 100) {
+		throw new InvalidRequestError("A default plan declares at most 100 entitlement keys");
+	}
+	return { planKey: normalizedKey(marker.planKey, "default plan key"), entitlementKeys };
 }
 
 function normalizedRetirementKeys(keys: string[] | undefined, field: string): string[] {
@@ -997,6 +1022,18 @@ async function calculateImpact(
 				AND plan_version_id IS NOT NULL
 		`,
 	);
+	const defaultPlanAccounts =
+		catalog.defaultPlan === undefined || catalog.defaultPlan === null
+			? null
+			: await executeOne<{ count: number | string }>(
+					executor,
+					drizzleSql`
+						SELECT count(*)::text AS count
+						FROM customers c
+						WHERE c.project_id = ${projectId}
+							AND NOT ${heldBasePlanSql(projectId, drizzleSql`c.id`)}
+					`,
+				);
 	return {
 		featuresCreated: catalog.features.filter(({ key }) => !existingFeatures.has(key)).length,
 		featuresReused: catalog.features.filter(({ key }) => existingFeatures.has(key)).length,
@@ -1012,6 +1049,7 @@ async function calculateImpact(
 			catalog.topups.reduce((total, topup) => total + topup.providerBindings.length, 0),
 		),
 		existingSubscriptionsGrandfathered: Number(grandfathered?.count ?? 0),
+		defaultPlanAccounts: Number(defaultPlanAccounts?.count ?? 0),
 	};
 }
 
@@ -1369,6 +1407,32 @@ async function publishPlans(
 		);
 	}
 	return { versionIds, priceComponentIds };
+}
+
+/** Records the revision's default plan; the plan row exists once its plans are published. */
+async function publishDefaultPlan(
+	executor: QueryExecutor,
+	projectId: string,
+	revisionId: string,
+	catalog: CatalogIntent,
+): Promise<void> {
+	const marker = catalog.defaultPlan;
+	if (marker === undefined || marker === null) return;
+	const recorded = await executeOne<{ plan_id: string | number | bigint }>(
+		executor,
+		drizzleSql`
+			INSERT INTO catalog_default_plans (project_id, catalog_revision_id, plan_id, entitlement_keys)
+			SELECT
+				${projectId},
+				${revisionId}::bigint,
+				plan.id,
+				ARRAY(SELECT jsonb_array_elements_text(${jsonb(marker.entitlementKeys ?? [])}))
+			FROM plans plan
+			WHERE plan.project_id = ${projectId} AND plan.key = ${marker.planKey}
+			RETURNING plan_id
+		`,
+	);
+	if (recorded === null) throw new Error(`Default plan ${marker.planKey} was not published`);
 }
 
 async function publishRateCards(
@@ -1763,7 +1827,8 @@ async function readPublishedResult(
 		intentHash: row.intent_hash,
 		publishedAt: toIso(row.published_at),
 		duplicate,
-		impact: row.metadata.impact ?? {
+		// A revision published before a field existed replays it as zero.
+		impact: {
 			featuresCreated: 0,
 			featuresReused: 0,
 			featuresRetired: 0,
@@ -1774,6 +1839,8 @@ async function readPublishedResult(
 			topupsRetired: 0,
 			providerBindingsValidated: 0,
 			existingSubscriptionsGrandfathered: 0,
+			defaultPlanAccounts: 0,
+			...row.metadata.impact,
 		},
 	};
 }
