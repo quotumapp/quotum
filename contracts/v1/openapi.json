@@ -13611,6 +13611,9 @@
               "affectedCustomers": {
                 "type": "number"
               },
+              "defaultPlanGrants": {
+                "type": "number"
+              },
               "expiredPlanGrants": {
                 "type": "number"
               },
@@ -13650,6 +13653,7 @@
               "affectedCustomers",
               "expiredPlanGrants",
               "planGrantPeriods",
+              "defaultPlanGrants",
               "trialEndingNotices",
               "providerClaimed",
               "providerProcessed",

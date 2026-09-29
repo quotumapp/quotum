@@ -404,7 +404,8 @@ declared on the marker (at most 100). Changing or removing the marker creates no
 Preview and publish report `impact.defaultPlanAccounts`: the accounts the default plan covers,
 meaning those without a funding subscription to a base plan (or to no plan version, as recorded
 before plans existed) and without an active base plan grant such as a trial. A revision published
-before this field existed reports `0`.
+before this field existed reports `0`. How accounts hold it is described under
+[Default plan](#default-plan).
 
 The same contract is available as code:
 
@@ -875,8 +876,9 @@ billing account. Without `durationDays` the plan's `trialDays` applies, and a pl
 returns `TRIAL_DURATION_REQUIRED`. It creates the customer when needed and returns `201` with the
 trial, or `200` with `duplicate: true` when the key is replayed; reusing the key with other terms
 returns `IDEMPOTENCY_CONFLICT`. Only the plan's active, published, public version of a base plan
-without licensed quantities or entity-scoped allocations can be trialed
-(`TRIAL_PLAN_NOT_ELIGIBLE`); an unknown plan returns `BILLING_PLAN_NOT_FOUND`. An account is
+without licensed quantities or entity-scoped allocations, other than the catalog's default plan,
+can be trialed (`TRIAL_PLAN_NOT_ELIGIBLE`); an unknown plan returns `BILLING_PLAN_NOT_FOUND`. A
+trial supersedes the account's default plan, which returns when the trial ends. An account is
 refused a trial while it has another active base trial (`TRIAL_ALREADY_ACTIVE`) or a funding paid
 base subscription (`TRIAL_BASE_PLAN_ACTIVE`), and gets one trial per plan: a plan it trialed
 through Quotum, or through a provider subscription that recorded trial bounds, returns
@@ -913,6 +915,41 @@ reaches the receiver even when usage deliveries are off. The one-trial-per-plan 
 checkout: Stripe Checkout leaves out a plan's trial for an account that has had one. Trial reads work with a read-only
 credential. Grants carry no channel restriction; follow the store rules for the apps you unlock
 them in.
+
+## Default plan
+
+When the published catalog marks a default plan (see
+[Catalog publication](#catalog-publication)), every account without a paid base plan holds it, with
+no provider, payment method or invoice. Like a trial, it is a plan grant (`origin: "default"`), but
+with no end:
+
+- A new account starts on it when Quotum first records the account, whether through a consume, a
+  reservation, a checkout, a trial start or a provider event. The account gets a stored
+  `usage_changed` projection keyed `plan_grant:<id>:started`.
+- Its entitlements carry the keys declared on the marker, with
+  `metadata: { source: "plan_grant", origin: "default", planKey, planGrantId }` and a null
+  `expiresAt`.
+- Its allowances reset in windows anchored at the moment the account started holding it. Its meter
+  limits apply with overage blocked, and its plan-default controls apply.
+- A paid base plan from any provider, a funding subscription recorded before plan versions, or a
+  trial supersedes it, and its allowances stop at that moment.
+- When the account's last base plan ends (expiry, cancellation at period end, refund, revocation or
+  the end of a trial), it falls back to the default plan with a fresh allowance anchored at that
+  moment. The projection that records the ending also carries the default plan's keys.
+
+A publish that changes the default plan changes the accounts that hold it, in the background.
+- **The plan is republished with a new version:** each grant moves in place. Its meter limits
+  switch to the new version immediately. Allowances already issued for the current window stay,
+  and the new quantities apply from the next reset; a feature the new version adds is granted now,
+  and one it drops ends now.
+- **The declared keys change:** the entitlements follow them.
+- **The marker is removed:** the grants end.
+- **A default plan is marked for the first time:** existing accounts without a base plan start
+  holding it.
+
+Each changed account gets a stored `usage_changed` projection. `impact.defaultPlanAccounts`
+reports how many accounts the pass covers. A read never creates an account, so an account Quotum
+has not seen yet holds nothing until its first write.
 
 ## Operator grants and administrative debits
 

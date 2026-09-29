@@ -979,6 +979,7 @@ export const postV1AdminReconciliationSubscriptionsRunResponse200Schema = z.obje
 		affectedCustomers: z.number(),
 		expiredPlanGrants: z.number(),
 		planGrantPeriods: z.number(),
+		defaultPlanGrants: z.number(),
 		trialEndingNotices: z.number(),
 		providerClaimed: z.number(),
 		providerProcessed: z.number(),

@@ -62,7 +62,8 @@ describe("BillingRepository core", () => {
 
 		await repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1");
 
-		const queries = database.queries.join("\n");
+		// The default-plan read that precedes it counts null-expiry subscriptions as funding.
+		const queries = database.queries.find((query) => query.includes("WITH active_sources")) ?? "";
 		expect(queries).toContain(
 			"s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')",
 		);

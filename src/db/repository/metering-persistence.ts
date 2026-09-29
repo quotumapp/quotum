@@ -281,7 +281,7 @@ export function queryMeterLimitRows(
 				WHERE g.project_id = ${projectId}
 					AND g.customer_id = ${customerId}
 					AND g.status = 'active'
-					AND g.ends_at > now()
+					AND (g.ends_at IS NULL OR g.ends_at > now())
 					AND pi.feature_id = ${featureId(feature)}
 					AND pi.item_kind = 'meter_limit'
 			) sources
@@ -347,7 +347,7 @@ export async function meterLimitDecision(
 	if (active !== undefined) {
 		const reset = storedCadence(active.reset_interval, active.reset_interval_count);
 		const bounds =
-			active.plan_grant_id !== null && active.period_end_at !== null
+			active.plan_grant_id !== null
 				? planGrantWindowBounds(active.period_start_at, active.period_end_at, reset, new Date())
 				: meterLimitWindowBounds(
 						active.period_start_at,

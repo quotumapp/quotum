@@ -22,15 +22,17 @@ import type { BillingProvider, ProjectionTrialPayload } from "../../billing/type
 import type { ProjectInstanceContext } from "../../projects/context";
 import type { CadenceUnit } from "../../shared/cadence";
 import { RepositoryModule } from "./base";
+import { heldBasePlanSql } from "./base-plan-sources";
+import { reconcileDefaultPlanGrant, supersedeDefaultPlanGrant } from "./default-plan-grants";
 import {
 	enqueueProjectionSyncJob,
 	enqueueUsageProjection,
 	recomputeCustomerEntitlements,
 } from "./entitlements";
 import { ensureCustomer } from "./identities";
-import { planGrantWindowBounds, storedCadence } from "./meter-limit-windows";
+import { clampPlanGrantAllocations, materializePlanGrantPeriod } from "./plan-grant-periods";
 import { executeOne, executeRows, jsonb } from "./query";
-import type { QueryExecutor } from "./types";
+import type { PlanGrantReconciliationResult, QueryExecutor } from "./types";
 import { formatUtcTimestamp, requirePositiveLimit } from "./validation";
 
 interface PlanGrantRow {
@@ -40,11 +42,12 @@ interface PlanGrantRow {
 	billing_account_id: string;
 	plan_key: string;
 	plan_version: number | string;
-	origin: "trial";
+	origin: "trial" | "default";
 	status: PlanGrantStatus;
-	duration_count: number;
+	/** Null only on a default-plan grant, which has no end. */
+	duration_count: number | null;
 	starts_at: Date | string;
-	ends_at: Date | string;
+	ends_at: Date | string | null;
 	ended_at: Date | string | null;
 	entitlement_keys: string[];
 	superseded_provider: BillingProvider | null;
@@ -54,7 +57,7 @@ interface PlanGrantRow {
 	metadata: Record<string, unknown>;
 	created_at: Date | string;
 	cursor_created_at: string;
-	request_hash: string;
+	request_hash: string | null;
 	end_idempotency_key: string | null;
 	end_request_hash: string | null;
 	elapsed: boolean;
@@ -66,10 +69,22 @@ interface TrialPlanRow {
 	plan_kind: "base" | "addon";
 	trial_days: number | null;
 	unsupported_items: boolean;
+	default_plan: boolean;
 }
 
 /** Statuses of a subscription that still funds its plan. */
 const fundingStatuses = drizzleSql`('active', 'grace_period', 'billing_retry', 'cancelled')`;
+
+interface DefaultPlanJob {
+	id: string | number;
+	project_id: string;
+}
+
+/** Transactions one worker pass spends on allowance windows, and on default-plan slices. */
+const maxWorkerBatches = 10;
+
+/** Customers a default-plan slice scans for accounts whose grant must change. */
+const defaultPlanScanSize = 1000;
 
 export class PlanGrantRepository extends RepositoryModule implements TrialServiceLike {
 	async startTrial(
@@ -116,16 +131,20 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 			if (durationDays === null) {
 				throw trialError("TRIAL_DURATION_REQUIRED", { planKey: input.planKey });
 			}
+			// The trial takes the account's one active base grant from the default plan, which returns
+			// when the trial ends. The foreign key to the trial is checked at commit.
+			const trialId = crypto.randomUUID();
+			await supersedeDefaultPlanGrant(tx, projectId, customer.id, trialId);
 			const inserted = await executeOne<{ id: string }>(
 				tx,
 				drizzleSql`
 					INSERT INTO plan_grants (
-						project_id, customer_id, plan_id, plan_version_id, plan_kind, origin, status,
+						id, project_id, customer_id, plan_id, plan_version_id, plan_kind, origin, status,
 						duration_unit, duration_count, starts_at, ends_at, entitlement_keys, actor, metadata,
 						idempotency_key, request_hash
 					)
 					SELECT
-						${projectId}, ${customer.id}, ${String(plan.plan_id)}::bigint,
+						${trialId}::uuid, ${projectId}, ${customer.id}, ${String(plan.plan_id)}::bigint,
 						${String(plan.plan_version_id)}::bigint, ${plan.plan_kind}, 'trial', 'active', 'day',
 						${durationDays}, now(), now() + ${durationDays} * interval '24 hours',
 						COALESCE(
@@ -318,16 +337,56 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 		};
 	}
 
-	/** Worker pass: expires elapsed grants, then materializes allowances for reset windows begun. */
-	async reconcilePlanGrants(
-		limit: number,
-	): Promise<{ expiredPlanGrants: number; planGrantPeriods: number }> {
+	/**
+	 * Worker pass: expires elapsed grants, which lets their accounts fall back to the default plan;
+	 * materializes allowances for reset windows begun; then applies a changed default plan to the
+	 * accounts of projects that published one. Allowance and default-plan work loops over several
+	 * transactions, because every free account holds a grant.
+	 */
+	async reconcilePlanGrants(limit: number): Promise<PlanGrantReconciliationResult> {
 		const cappedLimit = requirePositiveLimit(limit);
 		const expired = await this.transaction((tx) =>
 			expirePlanGrantsWhere(tx, drizzleSql`true`, cappedLimit),
 		);
-		const periods = await this.transaction((tx) => materializeDuePlanGrantPeriods(tx, cappedLimit));
-		return { expiredPlanGrants: expired, planGrantPeriods: periods };
+		let periods = 0;
+		for (let batch = 0; batch < maxWorkerBatches; batch += 1) {
+			const materialized = await this.transaction((tx) =>
+				materializeDuePlanGrantPeriods(tx, cappedLimit),
+			);
+			periods += materialized;
+			if (materialized < cappedLimit) break;
+		}
+		let defaultPlanGrants = 0;
+		for (let batch = 0; batch < maxWorkerBatches; batch += 1) {
+			const changed = await this.reconcileDefaultPlanBatch(cappedLimit);
+			if (changed === null) break;
+			defaultPlanGrants += changed;
+		}
+		return { expiredPlanGrants: expired, planGrantPeriods: periods, defaultPlanGrants };
+	}
+
+	/**
+	 * Advances the oldest due default-plan pass by one slice of customers, or returns null when none
+	 * is due. A failed slice rolls back, and the pass is retried with backoff from where it stood.
+	 */
+	private async reconcileDefaultPlanBatch(limit: number): Promise<number | null> {
+		const due = await executeOne<DefaultPlanJob>(
+			this.database,
+			drizzleSql`
+				SELECT id, project_id
+				FROM default_plan_reconciliations
+				WHERE status = 'pending' AND next_attempt_at <= now()
+				ORDER BY next_attempt_at, id
+				LIMIT 1
+			`,
+		);
+		if (due === null) return null;
+		try {
+			return await this.transaction((tx) => reconcileDefaultPlanSlice(tx, due, limit));
+		} catch (error) {
+			await this.transaction((tx) => recordDefaultPlanFailure(tx, due, error));
+			throw error;
+		}
 	}
 
 	/** Worker pass: one `ending` fact per trial grant within the notice lead of its end. */
@@ -442,7 +501,7 @@ export async function supersedeBasePlanGrants(
 					AND g.customer_id = ${input.customerId}
 					AND g.status = 'active'
 					AND g.plan_kind = 'base'
-					AND g.ends_at > now()
+					AND (g.ends_at IS NULL OR g.ends_at > now())
 					AND EXISTS (
 						SELECT 1 FROM plan_versions version
 						WHERE version.project_id = ${input.projectId}
@@ -512,7 +571,16 @@ async function resolveTrialPlan(
 							item.item_kind = 'licensed_quantity'
 							OR (item.item_kind = 'allocation' AND item.allocation_scope <> 'account')
 						)
-				) AS unsupported_items
+				) AS unsupported_items,
+				-- Every account without a base plan already holds the default plan.
+				EXISTS (
+					SELECT 1
+					FROM projects project
+					JOIN catalog_default_plans marker
+						ON marker.project_id = project.id
+						AND marker.catalog_revision_id = project.published_catalog_revision_id
+					WHERE project.id = p.project_id AND marker.plan_id = p.id
+				) AS default_plan
 			FROM plans p
 			JOIN plan_versions version
 				ON version.project_id = p.project_id AND version.id = p.active_version_id
@@ -533,7 +601,9 @@ async function resolveTrialPlan(
 }
 
 function trialPlanIneligibility(plan: TrialPlanRow): TrialIneligibility | null {
-	return plan.plan_kind !== "base" || plan.unsupported_items ? "TRIAL_PLAN_NOT_ELIGIBLE" : null;
+	return plan.plan_kind !== "base" || plan.unsupported_items || plan.default_plan
+		? "TRIAL_PLAN_NOT_ELIGIBLE"
+		: null;
 }
 
 async function customerTrialIneligibility(
@@ -575,133 +645,6 @@ async function customerTrialIneligibility(
 	if (row?.paid_base === true) return "TRIAL_BASE_PLAN_ACTIVE";
 	if (row?.trial_used === true) return "TRIAL_ALREADY_USED";
 	return null;
-}
-
-/**
- * Creates the allowances of the reset window the grant is in now, then records when the next one
- * begins. Items without a reset get one allowance for the whole grant. Every allowance expires by
- * the grant end, and elapsed windows are never created afterwards.
- */
-async function materializePlanGrantPeriod(
-	executor: QueryExecutor,
-	projectId: string,
-	grantId: string,
-): Promise<void> {
-	const grant = await executeOne<{
-		customer_id: string;
-		plan_version_id: string | number | bigint;
-		starts_at: Date | string;
-		ends_at: Date | string;
-		db_now: Date | string;
-	}>(
-		executor,
-		drizzleSql`
-			SELECT g.customer_id, g.plan_version_id, g.starts_at, g.ends_at, now() AS db_now
-			FROM plan_grants g
-			WHERE g.project_id = ${projectId} AND g.id = ${grantId}::uuid AND g.status = 'active'
-		`,
-	);
-	if (grant === null) return;
-	const items = await executeRows<{
-		id: string | number | bigint;
-		feature_id: string | number | bigint;
-		quantity: string;
-		reset_interval: CadenceUnit | null;
-		reset_interval_count: number;
-		expires_after_seconds: number | null;
-	}>(
-		executor,
-		drizzleSql`
-			SELECT item.id, item.feature_id, item.quantity::text AS quantity, item.reset_interval,
-				item.reset_interval_count, item.expires_after_seconds
-			FROM plan_items item
-			WHERE item.project_id = ${projectId}
-				AND item.plan_version_id = ${String(grant.plan_version_id)}::bigint
-				AND item.item_kind = 'allocation'
-				AND item.allocation_scope = 'account'
-			ORDER BY item.id
-		`,
-	);
-	const now = new Date(grant.db_now);
-	const startsAt = new Date(grant.starts_at);
-	const endsAt = new Date(grant.ends_at);
-	let nextPeriodAt: Date | null = null;
-	const allocations = items.map((item) => {
-		const window =
-			item.reset_interval === null
-				? { start: startsAt, end: endsAt }
-				: planGrantWindowBounds(
-						startsAt,
-						endsAt,
-						storedCadence(item.reset_interval, item.reset_interval_count),
-						now,
-					);
-		if (item.reset_interval !== null && window.end < endsAt) {
-			nextPeriodAt = nextPeriodAt === null || window.end < nextPeriodAt ? window.end : nextPeriodAt;
-		}
-		const expiresAt =
-			item.expires_after_seconds === null
-				? window.end
-				: new Date(
-						Math.min(
-							window.end.getTime(),
-							window.start.getTime() + item.expires_after_seconds * 1000,
-						),
-					);
-		const window_key = item.reset_interval === null ? "once" : window.start.toISOString();
-		return drizzleSql`(
-			${projectId}::uuid,
-			${grant.customer_id}::uuid,
-			${String(item.feature_id)}::bigint,
-			${String(item.id)}::bigint,
-			${grantId}::uuid,
-			'reward',
-			${`plan_grant:${grantId}:${String(item.id)}:${window_key}`},
-			${item.quantity}::numeric,
-			${window.start.toISOString()}::timestamptz,
-			${window.end.toISOString()}::timestamptz,
-			${expiresAt.toISOString()}::timestamptz
-		)`;
-	});
-	if (allocations.length > 0) {
-		await executeRows(
-			executor,
-			drizzleSql`
-				INSERT INTO balance_allocations (
-					project_id, customer_id, feature_id, plan_item_id, plan_grant_id, source_kind,
-					source_key, quantity, period_start_at, period_end_at, expires_at
-				)
-				VALUES ${drizzleSql.join(allocations, drizzleSql`, `)}
-				ON CONFLICT (project_id, feature_id, source_kind, source_key) DO NOTHING
-			`,
-		);
-	}
-	const next: Date | null = nextPeriodAt;
-	await executeRows(
-		executor,
-		drizzleSql`
-			UPDATE plan_grants
-			SET next_period_at = ${next === null ? null : (next as Date).toISOString()}::timestamptz,
-				updated_at = now()
-			WHERE project_id = ${projectId} AND id = ${grantId}::uuid AND status = 'active'
-		`,
-	);
-}
-
-async function clampPlanGrantAllocations(
-	executor: QueryExecutor,
-	projectId: string,
-	grantId: string,
-): Promise<void> {
-	await executeRows(
-		executor,
-		drizzleSql`
-			UPDATE balance_allocations SET expires_at = now(), updated_at = now()
-			WHERE project_id = ${projectId}
-				AND plan_grant_id = ${grantId}::uuid
-				AND (expires_at IS NULL OR expires_at > now())
-		`,
-	);
 }
 
 /**
@@ -780,7 +723,7 @@ async function materializeDuePlanGrantPeriods(
 		WITH candidates AS MATERIALIZED (
 			SELECT g.id, g.customer_id
 			FROM plan_grants g
-			WHERE g.status = 'active' AND g.next_period_at <= now() AND g.ends_at > now()
+			WHERE g.status = 'active' AND g.next_period_at <= now() AND (g.ends_at IS NULL OR g.ends_at > now())
 			ORDER BY g.next_period_at ASC, g.id ASC
 			LIMIT ${limit}
 		),
@@ -796,7 +739,7 @@ async function materializeDuePlanGrantPeriods(
 		FROM plan_grants g
 		JOIN candidates candidate ON candidate.id = g.id
 		JOIN locked_customers locked_customer ON locked_customer.id = g.customer_id
-		WHERE g.status = 'active' AND g.next_period_at <= now() AND g.ends_at > now()
+		WHERE g.status = 'active' AND g.next_period_at <= now() AND (g.ends_at IS NULL OR g.ends_at > now())
 		ORDER BY g.next_period_at ASC, g.id ASC
 		FOR UPDATE OF g SKIP LOCKED
 	`,
@@ -809,6 +752,168 @@ async function materializeDuePlanGrantPeriods(
 		});
 	}
 	return rows.length;
+}
+
+/**
+ * One slice of a default-plan pass: the next customers by id whose default-plan grant must start,
+ * move, end or give way, each under its own lock, with a stored projection per change.
+ */
+async function reconcileDefaultPlanSlice(
+	executor: QueryExecutor,
+	due: DefaultPlanJob,
+	limit: number,
+): Promise<number> {
+	// Another worker holding the pass, or a publish that superseded it, leaves nothing to do here.
+	const job = await executeOne<DefaultPlanJob & { after_customer_id: string | null }>(
+		executor,
+		drizzleSql`
+			SELECT id, project_id, after_customer_id
+			FROM default_plan_reconciliations
+			WHERE project_id = ${due.project_id}
+				AND id = ${String(due.id)}::bigint
+				AND status = 'pending'
+			FOR UPDATE SKIP LOCKED
+		`,
+	);
+	if (job === null) return 0;
+	const projectId = job.project_id;
+	const scanned = await executeRows<{ id: string }>(
+		executor,
+		drizzleSql`
+			SELECT c.id
+			FROM customers c
+			WHERE c.project_id = ${projectId}
+				AND (${job.after_customer_id}::uuid IS NULL OR c.id > ${job.after_customer_id}::uuid)
+			ORDER BY c.id
+			LIMIT ${defaultPlanScanSize}
+		`,
+	);
+	const candidates =
+		scanned.length === 0
+			? []
+			: await executeRows<{ id: string; billing_account_id: string }>(
+					executor,
+					drizzleSql`
+						SELECT c.id, c.billing_account_id
+						FROM customers c
+						LEFT JOIN plan_grants held
+							ON held.project_id = c.project_id
+							AND held.customer_id = c.id
+							AND held.origin = 'default'
+							AND held.status = 'active'
+						LEFT JOIN (
+							SELECT marker.plan_id, plan.active_version_id AS plan_version_id,
+								marker.entitlement_keys
+							FROM projects project
+							JOIN catalog_default_plans marker
+								ON marker.project_id = project.id
+								AND marker.catalog_revision_id = project.published_catalog_revision_id
+							JOIN plans plan
+								ON plan.project_id = marker.project_id AND plan.id = marker.plan_id AND plan.active
+							JOIN plan_versions version
+								ON version.project_id = plan.project_id
+								AND version.id = plan.active_version_id
+								AND version.status = 'published'
+								AND version.plan_kind = 'base'
+							WHERE project.id = ${projectId}
+						) target ON true
+						WHERE c.project_id = ${projectId}
+							AND c.id IN (
+								SELECT jsonb_array_elements_text(${jsonb(scanned.map((row) => row.id))})::uuid
+							)
+							AND (
+								(held.id IS NULL AND target.plan_id IS NOT NULL
+									AND NOT ${heldBasePlanSql(projectId, drizzleSql`c.id`)})
+								OR (held.id IS NOT NULL AND (
+									target.plan_id IS NULL
+									OR held.plan_version_id <> target.plan_version_id
+									OR held.entitlement_keys <> target.entitlement_keys
+									OR ${heldBasePlanSql(projectId, drizzleSql`c.id`)}
+								))
+							)
+						ORDER BY c.id
+						LIMIT ${limit + 1}
+					`,
+				);
+	const handled = candidates.slice(0, limit);
+	let changed = 0;
+	for (const customer of handled) {
+		await executeOne(
+			executor,
+			drizzleSql`
+				SELECT id FROM customers WHERE project_id = ${projectId} AND id = ${customer.id} FOR UPDATE
+			`,
+		);
+		const outcome = await reconcileDefaultPlanGrant(executor, projectId, customer.id);
+		if (outcome === null) continue;
+		changed += 1;
+		const snapshot = await recomputeCustomerEntitlements(
+			executor,
+			projectId,
+			customer.billing_account_id,
+		);
+		await enqueueProjectionSyncJob(executor, {
+			customerId: customer.id,
+			idempotencyKey:
+				outcome.change === "moved"
+					? `plan_grant:${outcome.grantId}:moved:${String(job.id)}`
+					: `plan_grant:${outcome.grantId}:${outcome.change}`,
+			reason: "usage_changed",
+			payload: {
+				billingAccountId: customer.billing_account_id,
+				reason: "usage_changed",
+				entitlements: snapshot,
+			},
+		});
+	}
+	// More candidates than one slice takes: resume after the last one handled, not the scan end.
+	const cursor =
+		candidates.length > limit ? (handled.at(-1)?.id ?? null) : (scanned.at(-1)?.id ?? null);
+	const completed = candidates.length <= limit && scanned.length < defaultPlanScanSize;
+	await executeOne(
+		executor,
+		drizzleSql`
+			UPDATE default_plan_reconciliations
+			SET after_customer_id = COALESCE(${cursor}::uuid, after_customer_id),
+				customers_checked = customers_checked + ${
+					candidates.length > limit
+						? scanned.filter((row) => row.id <= (cursor ?? "")).length
+						: scanned.length
+				},
+				grants_changed = grants_changed + ${changed},
+				status = CASE WHEN ${completed} THEN 'completed' ELSE status END,
+				completed_at = CASE WHEN ${completed} THEN now() ELSE NULL END,
+				attempts = 0,
+				last_error = NULL,
+				next_attempt_at = now(),
+				updated_at = now()
+			WHERE project_id = ${projectId} AND id = ${String(job.id)}::bigint
+			RETURNING id
+		`,
+	);
+	return changed;
+}
+
+/** Backs off a default-plan pass after one of its slices failed. */
+async function recordDefaultPlanFailure(
+	executor: QueryExecutor,
+	job: DefaultPlanJob,
+	error: unknown,
+): Promise<void> {
+	await executeOne(
+		executor,
+		drizzleSql`
+			UPDATE default_plan_reconciliations
+			SET attempts = attempts + 1,
+				last_error = ${error instanceof Error ? error.message.slice(0, 500) : "failed"},
+				next_attempt_at = now() + LEAST(power(2, attempts) * interval '30 seconds', interval '1 hour'),
+				updated_at = now()
+			WHERE project_id = ${job.project_id}
+				AND id = ${String(job.id)}::bigint
+				AND status = 'pending'
+			RETURNING id
+		`,
+	);
 }
 
 function planGrantSelect(projectId: string, condition: DrizzleSQL): DrizzleSQL {
@@ -891,6 +996,10 @@ async function requireTrialRecord(
 }
 
 function toTrialRecord(row: PlanGrantRow): TrialRecord {
+	// Every read that reaches here filters on the trial origin; a default-plan grant has no term.
+	if (row.origin !== "trial" || row.ends_at === null || row.duration_count === null) {
+		throw new Error(`plan grant ${row.id} is not a trial`);
+	}
 	return {
 		id: row.id,
 		billingAccountId: row.billing_account_id,

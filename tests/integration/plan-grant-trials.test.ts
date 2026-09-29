@@ -345,6 +345,7 @@ localDescribe("Plan grant trials integration", () => {
 		expect(await context.repository.reconcilePlanGrants(25)).toEqual({
 			expiredPlanGrants: 0,
 			planGrantPeriods: 1,
+			defaultPlanGrants: 0,
 		});
 		const windows = await context.sql<{ period_end_at: Date }[]>`
 			SELECT period_end_at FROM balance_allocations
@@ -354,6 +355,7 @@ localDescribe("Plan grant trials integration", () => {
 		expect(await context.repository.reconcilePlanGrants(25)).toEqual({
 			expiredPlanGrants: 0,
 			planGrantPeriods: 0,
+			defaultPlanGrants: 0,
 		});
 
 		// Within three days of the end, one ending notice.
@@ -389,6 +391,7 @@ localDescribe("Plan grant trials integration", () => {
 		expect(await context.repository.reconcilePlanGrants(25)).toEqual({
 			expiredPlanGrants: 1,
 			planGrantPeriods: 0,
+			defaultPlanGrants: 0,
 		});
 		const [expired] = await context.sql<{ status: string; ends_at: Date }[]>`
 			SELECT status, ends_at FROM plan_grants WHERE id = ${trial.id}::uuid

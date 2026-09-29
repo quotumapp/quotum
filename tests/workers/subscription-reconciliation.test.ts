@@ -66,7 +66,7 @@ function createRepository({
 			},
 			reconcilePlanGrants(limit: number) {
 				calls.push({ method: "reconcilePlanGrants", limit });
-				return Promise.resolve({ expiredPlanGrants: 0, planGrantPeriods: 0 });
+				return Promise.resolve({ expiredPlanGrants: 0, planGrantPeriods: 0, defaultPlanGrants: 0 });
 			},
 			enqueueTrialEndingNotices(limit: number) {
 				calls.push({ method: "enqueueTrialEndingNotices", limit });
@@ -167,6 +167,7 @@ describe("SubscriptionReconciliationWorker", () => {
 			affectedCustomers: 1,
 			expiredPlanGrants: 0,
 			planGrantPeriods: 0,
+			defaultPlanGrants: 0,
 			trialEndingNotices: 3,
 			providerClaimed: 0,
 			providerProcessed: 0,
@@ -199,6 +200,7 @@ describe("SubscriptionReconciliationWorker", () => {
 					affectedCustomers: 1,
 					expiredPlanGrants: 0,
 					planGrantPeriods: 0,
+					defaultPlanGrants: 0,
 					trialEndingNotices: 3,
 					providerClaimed: 0,
 					providerProcessed: 0,
@@ -256,6 +258,7 @@ describe("SubscriptionReconciliationWorker", () => {
 			affectedCustomers: 1,
 			expiredPlanGrants: 0,
 			planGrantPeriods: 0,
+			defaultPlanGrants: 0,
 			trialEndingNotices: 0,
 			providerClaimed: 2,
 			providerProcessed: 1,
@@ -398,6 +401,7 @@ describe("SubscriptionReconciliationWorker", () => {
 			affectedCustomers: 1,
 			expiredPlanGrants: 0,
 			planGrantPeriods: 0,
+			defaultPlanGrants: 0,
 			trialEndingNotices: 0,
 			providerClaimed: 2,
 			providerProcessed: 0,

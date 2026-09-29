@@ -42,18 +42,26 @@ export function meterLimitWindowBounds(
 	return rollWindowBounds(start, end, reset, now);
 }
 
+/** The latest instant a Date holds; a grant without an end is windowed as if it ended there. */
+const openEnd = new Date(8_640_000_000_000_000);
+
 /**
  * The reset window of a plan grant that contains `now`. A grant's windows are anchored at its start
  * and the last one is clamped to its end, so no allowance or limit window outlives the grant; past
- * the end the last window is returned.
+ * the end the last window is returned. A default-plan grant has no end, so its windows roll on.
  */
 export function planGrantWindowBounds(
 	startsAt: Date | string,
-	endsAt: Date | string,
+	endsAt: Date | string | null,
 	reset: Cadence,
 	now: Date,
 ): { start: Date; end: Date } {
-	return resetSubWindowBounds(new Date(startsAt), new Date(endsAt), reset, now);
+	return resetSubWindowBounds(
+		new Date(startsAt),
+		endsAt === null ? openEnd : new Date(endsAt),
+		reset,
+		now,
+	);
 }
 
 /**

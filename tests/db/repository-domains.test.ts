@@ -104,7 +104,7 @@ describe("repository domain adapters", () => {
 			},
 		});
 		const notices = { noticedTrials: 1, affectedCustomers: 1, projectionJobs: 1 };
-		const grants = { expiredPlanGrants: 1, planGrantPeriods: 0 };
+		const grants = { expiredPlanGrants: 1, planGrantPeriods: 0, defaultPlanGrants: 0 };
 		const reconciliation = new ProviderSubscriptionReconciliationRepository({
 			reconcileExpiredSubscriptions(limit) {
 				calls.push({ method: "reconcileExpiredSubscriptions", limit });
