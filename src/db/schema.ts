@@ -2061,6 +2061,10 @@ export const subscriptionChanges = pgTable(
 			.$type<Record<string, number>>()
 			.notNull()
 			.default({}),
+		carryOver: jsonb("carry_over")
+			.$type<{ balances?: string[]; usages?: string[] }>()
+			.notNull()
+			.default({}),
 		changeKind: text("change_kind").$type<"upgrade" | "downgrade" | "quantity">().notNull(),
 		effectiveMode: text("effective_mode").$type<"immediate" | "period_end">().notNull(),
 		effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull(),
@@ -2086,6 +2090,10 @@ export const subscriptionChanges = pgTable(
 		check(
 			"subscription_changes_requested_quantities_check",
 			sql`((jsonb_typeof(requested_quantities) = 'object'::text))`,
+		),
+		check(
+			"subscription_changes_carry_over_check",
+			sql`((jsonb_typeof(carry_over) = 'object'::text))`,
 		),
 		check(
 			"subscription_changes_change_kind_check",
@@ -2482,12 +2490,13 @@ export const balanceAllocations = pgTable(
 		planGrantId: uuid("plan_grant_id"),
 		// Composite FK to operator_grants is added after that table in the SQL baseline.
 		operatorGrantId: uuid("operator_grant_id"),
+		carryOverOriginAllocationId: bigint("carry_over_origin_allocation_id", { mode: "number" }),
 		...timestampColumns(),
 	},
 	(table): PgTableExtraConfigValue[] => [
 		check(
 			"balance_allocations_source_kind_check",
-			sql`((source_kind = ANY (ARRAY['subscription'::text, 'purchase'::text, 'credit_grant'::text, 'topup'::text, 'reward'::text, 'operator'::text, 'rollover'::text])))`,
+			sql`((source_kind = ANY (ARRAY['subscription'::text, 'purchase'::text, 'credit_grant'::text, 'topup'::text, 'reward'::text, 'operator'::text, 'rollover'::text, 'carry_over'::text])))`,
 		),
 		check("balance_allocations_quantity_check", sql`((quantity > (0)::numeric))`),
 		check(
@@ -2605,6 +2614,18 @@ export const balanceAllocations = pgTable(
 		uniqueIndex("idx_billing_balance_allocations_operator_grant")
 			.on(table.projectId, table.operatorGrantId)
 			.where(sql`${table.operatorGrantId} IS NOT NULL`),
+		foreignKey({
+			name: "balance_allocations_carry_over_origin_fk",
+			columns: [table.projectId, table.carryOverOriginAllocationId],
+			foreignColumns: [table.projectId, table.id],
+		}).onDelete("restrict"),
+		check(
+			"balance_allocations_carry_over_shape_check",
+			sql`(${table.sourceKind} = 'carry_over') = (${table.carryOverOriginAllocationId} IS NOT NULL)`,
+		),
+		uniqueIndex("idx_billing_balance_allocations_carry_over_origin")
+			.on(table.projectId, table.carryOverOriginAllocationId)
+			.where(sql`${table.carryOverOriginAllocationId} IS NOT NULL`),
 	],
 );
 
@@ -5152,6 +5173,45 @@ export const planGrants = pgTable(
 			"plan_grants_status_check",
 			sql`${table.status} IN ('active', 'expired', 'ended', 'superseded')`,
 		),
+	],
+);
+
+export const carriedUsages = pgTable(
+	"carried_usages",
+	{
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		subscriptionChangeId: uuid("subscription_change_id").notNull(),
+		fromAllocationId: bigint("from_allocation_id", { mode: "number" }).notNull(),
+		toAllocationId: bigint("to_allocation_id", { mode: "number" }).notNull(),
+		requestedQuantity: quantityColumn("requested_quantity").notNull(),
+		appliedQuantity: quantityColumn("applied_quantity").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check("carried_usages_requested_quantity_check", sql`((requested_quantity > (0)::numeric))`),
+		check("carried_usages_applied_quantity_check", sql`((applied_quantity >= (0)::numeric))`),
+		check("carried_usages_applied_check", sql`((applied_quantity <= requested_quantity))`),
+		primaryKey({
+			columns: [table.projectId, table.subscriptionChangeId, table.fromAllocationId],
+		}),
+		foreignKey({
+			name: "carried_usages_project_change_fk",
+			columns: [table.projectId, table.subscriptionChangeId],
+			foreignColumns: [subscriptionChanges.projectId, subscriptionChanges.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "carried_usages_project_from_allocation_fk",
+			columns: [table.projectId, table.fromAllocationId],
+			foreignColumns: [balanceAllocations.projectId, balanceAllocations.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "carried_usages_project_to_allocation_fk",
+			columns: [table.projectId, table.toAllocationId],
+			foreignColumns: [balanceAllocations.projectId, balanceAllocations.id],
+		}).onDelete("restrict"),
+		index("idx_billing_carried_usages_to_allocation").on(table.projectId, table.toAllocationId),
 	],
 );
 

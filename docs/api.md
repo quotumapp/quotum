@@ -176,6 +176,31 @@ update:
   plan-granted and are untouched.
 - An open reservation still settles from its hold on the ended allowance.
 
+An immediate `subscription_change` intent can carry some of that over, per consumable feature:
+
+```json
+{ "intent": { "kind": "subscription_change", "externalSubscriptionId": "sub_123",
+  "targetPlanKey": "pro", "effectiveMode": "immediate",
+  "carryOver": { "balances": ["ai_credits"], "usages": ["ai_credits"] } } }
+```
+
+- **`balances`:** the unused quantity of each live outgoing allowance of the feature becomes a
+  one-off `carry_over` allocation. It expires at the end of the new plan's first reset window for
+  that feature, or at the end of the billing period when the new item does not reset or the new
+  plan lacks the feature. It is never rolled over, and the balance breakdown names its origin in
+  `carryOverOriginAllocationId`.
+- **`usages`:** the feature's usage in the current period is written as consumed quantity on the new
+  allowance, so an upgrade does not reset consumption. It is capped at what the new allowance holds;
+  usage beyond it is forgiven, not charged.
+- The preview reports `carryOver.features[]`, with each feature's current unused balance and usage
+  and whether it carries. Those figures are indicative: the switch carries what the allowances hold
+  when Quotum records the provider's update.
+- The choice enters the intent hash. Naming a feature the current plan does not allocate returns
+  `400 INVALID_REQUEST`, and a change that takes effect at period end, whether requested or
+  resolved, returns `400 CARRY_OVER_REQUIRES_IMMEDIATE_CHANGE`, because the reset does that work.
+- Only the previewed commercial action carries over. `POST .../subscriptions/:subscriptionId/changes`
+  refuses the field.
+
 ### Cancelling and uncancelling a subscription
 
 `cancel` names `externalSubscriptionId` and an `effectiveMode`; `uncancel` names the subscription

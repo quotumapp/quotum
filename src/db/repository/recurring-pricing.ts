@@ -1,5 +1,6 @@
 import { sql as drizzleSql } from "drizzle-orm";
-import { sha256Hex, stableJson } from "../../billing/decimal";
+import type { CommercialCarryOver, CommercialPreviewCarryOver } from "../../billing/commercial";
+import { databaseDecimal, sha256Hex, stableJson } from "../../billing/decimal";
 import {
 	InvalidRequestError,
 	NotFoundBillingError,
@@ -169,6 +170,103 @@ export class RecurringPricingRepository extends RepositoryModule {
 		);
 	}
 
+	/**
+	 * The live figures an immediate change would carry per named feature. Each must be a consumable
+	 * meter the outgoing version allocates; the switch carries what its allowances hold then.
+	 */
+	async previewSubscriptionCarryOver(
+		project: ProjectInstanceContext,
+		input: {
+			billingAccountId: string;
+			externalSubscriptionId: string;
+			fromPlanVersionId: string;
+			carryOver: Required<CommercialCarryOver>;
+		},
+	): Promise<CommercialPreviewCarryOver> {
+		const projectId = project.projectInstanceId;
+		const keys = [...new Set([...input.carryOver.balances, ...input.carryOver.usages])].sort();
+		const rows = await executeRows<{
+			key: string;
+			allocated: boolean;
+			unused: string;
+			used: string;
+		}>(
+			this.database,
+			drizzleSql`
+				WITH subscription AS (
+					SELECT s.id
+					FROM subscriptions s
+					JOIN customers c ON c.project_id = s.project_id AND c.id = s.customer_id
+					WHERE s.project_id = ${projectId}
+						AND c.billing_account_id = ${input.billingAccountId}
+						AND s.provider = 'stripe'
+						AND s.external_subscription_id = ${input.externalSubscriptionId}
+				),
+				outgoing AS (
+					SELECT a.feature_id,
+						a.quantity - a.reversed_quantity - a.consumed_quantity - a.held_quantity AS unused,
+						CASE
+							WHEN (a.period_start_at IS NULL OR a.period_start_at <= now())
+								AND (a.period_end_at IS NULL OR a.period_end_at > now())
+								THEN a.consumed_quantity
+							ELSE 0
+						END AS used
+					FROM balance_allocations a
+					JOIN subscription ON subscription.id = a.subscription_id
+					JOIN plan_items item
+						ON item.project_id = a.project_id
+						AND item.id = a.plan_item_id
+						AND item.plan_version_id = ${input.fromPlanVersionId}::bigint
+					WHERE a.project_id = ${projectId}
+						AND a.source_kind = 'subscription'
+						AND a.reversed_at IS NULL
+						AND (a.expires_at IS NULL OR a.expires_at > now())
+				)
+				SELECT
+					f.key,
+					EXISTS (
+						SELECT 1 FROM plan_items item
+						WHERE item.project_id = f.project_id
+							AND item.plan_version_id = ${input.fromPlanVersionId}::bigint
+							AND item.feature_id = f.id
+							AND item.item_kind = 'allocation'
+					) AS allocated,
+					COALESCE((SELECT sum(unused) FROM outgoing WHERE outgoing.feature_id = f.id), 0)::text
+						AS unused,
+					COALESCE((SELECT sum(used) FROM outgoing WHERE outgoing.feature_id = f.id), 0)::text
+						AS used
+				FROM features f
+				WHERE f.project_id = ${projectId}
+					AND f.key IN (SELECT jsonb_array_elements_text(${jsonb(keys)}))
+					AND f.active
+					AND f.kind = 'metered'
+					AND f.meter_kind = 'consumable'
+			`,
+		);
+		const byKey = new Map(rows.map((row) => [row.key, row]));
+		return {
+			features: keys.map((featureKey) => {
+				const row = byKey.get(featureKey);
+				if (row === undefined || !row.allocated) {
+					throw new InvalidRequestError(
+						`Feature ${featureKey} has no allowance in the current plan to carry over`,
+					);
+				}
+				return {
+					featureKey,
+					balance: {
+						carried: input.carryOver.balances.includes(featureKey),
+						quantity: databaseDecimal(row.unused, "carried balance"),
+					},
+					usage: {
+						carried: input.carryOver.usages.includes(featureKey),
+						quantity: databaseDecimal(row.used, "carried usage"),
+					},
+				};
+			}),
+		};
+	}
+
 	async prepareSubscriptionChange(
 		project: ProjectInstanceContext,
 		input: SubscriptionChangeInput,
@@ -198,6 +296,7 @@ export class RecurringPricingRepository extends RepositoryModule {
 					...(input.promotion === undefined
 						? {}
 						: { promotionCodeId: input.promotion.promotionCodeId }),
+					...(input.carryOver === undefined ? {} : { carryOver: input.carryOver }),
 				}),
 			);
 			const reservePromotion = async (changeId: string) => {
@@ -261,16 +360,18 @@ export class RecurringPricingRepository extends RepositoryModule {
 				drizzleSql`
 					INSERT INTO subscription_changes (
 						project_id, customer_id, subscription_id, provider, provider_account_id,
-						from_plan_version_id, to_plan_version_id, requested_quantities, change_kind,
-						effective_mode, effective_at, proration_behavior, idempotency_key, request_hash
+						from_plan_version_id, to_plan_version_id, requested_quantities, carry_over,
+						change_kind, effective_mode, effective_at, proration_behavior, idempotency_key,
+						request_hash
 					)
 					VALUES (
 						${projectId}, ${context.customer_id}, ${context.subscription_id},
 						${context.provider}, ${context.provider_account_id},
 						${String(context.from_plan_version_id)}::bigint,
 						${String(context.to_plan_version_id)}::bigint, ${jsonb(quantities)},
-						${changeKind}, ${effectiveMode}, ${effectiveAt.toISOString()},
-						${prorationBehavior}, ${input.idempotencyKey}, ${requestHash}
+						${jsonb(input.carryOver ?? {})}, ${changeKind}, ${effectiveMode},
+						${effectiveAt.toISOString()}, ${prorationBehavior}, ${input.idempotencyKey},
+						${requestHash}
 					)
 					ON CONFLICT (project_id, customer_id, idempotency_key) DO NOTHING
 				`,

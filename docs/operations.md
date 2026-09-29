@@ -39,7 +39,7 @@ The current schema is initialized from these ordered baseline files:
 | --- | --- |
 | [001_platform.sql](../migrations/001_platform.sql) | Organizations, projects, instances, credentials and customer connections |
 | [002_billing_core.sql](../migrations/002_billing_core.sql) | Billing accounts, purchases, subscriptions, entitlements and provider/projection jobs |
-| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup, promotions, plan grants, operator grants, administrative debits and default plans |
+| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup, promotions, plan grants, operator grants, administrative debits, default plans and plan-change carry-over |
 | [004_merchant.sql](../migrations/004_merchant.sql) | Merchant identity, authentication, sessions, membership, audit and connection OAuth state |
 <!-- migration-inventory:end -->
 
@@ -288,6 +288,23 @@ SELECT project_id, status, customers_checked, grants_changed, customers_skipped,
 FROM default_plan_reconciliations
 WHERE customers_skipped > 0 OR attempts > 0;
 ```
+
+### Plan-change carry-over
+
+The metering baseline adds `carry_over` to the `balance_allocations.source_kind` check, and adds the
+following:
+- a nullable `carry_over_origin_allocation_id`, with its foreign key, the unique index
+  `idx_billing_balance_allocations_carry_over_origin` and the check
+  `balance_allocations_carry_over_shape_check`;
+- `subscription_changes.carry_over`, a JSONB column defaulting to `{}`;
+- the `carried_usages` table.
+
+Existing rows satisfy every check, so follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity).
+
+The same release ends a subscription's outgoing plan allowances when it moves to another plan
+version. Earlier versions kept them spendable alongside the new version's grant, so after the
+upgrade a plan change leaves only the new allowance.
 
 ### Reset cadence
 

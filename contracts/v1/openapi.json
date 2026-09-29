@@ -7844,6 +7844,12 @@
                     "available": {
                       "type": "string"
                     },
+                    "carryOverOriginAllocationId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
                     "consumed": {
                       "type": "string"
                     },
@@ -7908,6 +7914,7 @@
                     "sourceKind",
                     "sourceKey",
                     "rolloverOriginAllocationId",
+                    "carryOverOriginAllocationId",
                     "rolloverPolicyRevision",
                     "quantity",
                     "reversed",
@@ -13797,6 +13804,63 @@
                   "null"
                 ]
               },
+              "carryOver": {
+                "properties": {
+                  "features": {
+                    "items": {
+                      "properties": {
+                        "balance": {
+                          "properties": {
+                            "carried": {
+                              "type": "boolean"
+                            },
+                            "quantity": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "carried",
+                            "quantity"
+                          ],
+                          "type": "object"
+                        },
+                        "featureKey": {
+                          "type": "string"
+                        },
+                        "usage": {
+                          "properties": {
+                            "carried": {
+                              "type": "boolean"
+                            },
+                            "quantity": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "carried",
+                            "quantity"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "featureKey",
+                        "balance",
+                        "usage"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "features"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "changeKind": {
                 "anyOf": [
                   {
@@ -14275,6 +14339,7 @@
               "nextCycle",
               "cancellation",
               "paymentSetup",
+              "carryOver",
               "effectiveMode",
               "effectiveAt",
               "prorationBehavior",
@@ -15541,6 +15606,12 @@
                         "available": {
                           "type": "string"
                         },
+                        "carryOverOriginAllocationId": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
                         "consumed": {
                           "type": "string"
                         },
@@ -15605,6 +15676,7 @@
                         "sourceKind",
                         "sourceKey",
                         "rolloverOriginAllocationId",
+                        "carryOverOriginAllocationId",
                         "rolloverPolicyRevision",
                         "quantity",
                         "reversed",
@@ -15871,6 +15943,12 @@
                         "available": {
                           "type": "string"
                         },
+                        "carryOverOriginAllocationId": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
                         "consumed": {
                           "type": "string"
                         },
@@ -15935,6 +16013,7 @@
                         "sourceKind",
                         "sourceKey",
                         "rolloverOriginAllocationId",
+                        "carryOverOriginAllocationId",
                         "rolloverPolicyRevision",
                         "quantity",
                         "reversed",
@@ -16246,6 +16325,12 @@
                         "available": {
                           "type": "string"
                         },
+                        "carryOverOriginAllocationId": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
                         "consumed": {
                           "type": "string"
                         },
@@ -16310,6 +16395,7 @@
                         "sourceKind",
                         "sourceKey",
                         "rolloverOriginAllocationId",
+                        "carryOverOriginAllocationId",
                         "rolloverPolicyRevision",
                         "quantity",
                         "reversed",
@@ -16454,6 +16540,12 @@
                         "available": {
                           "type": "string"
                         },
+                        "carryOverOriginAllocationId": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
                         "consumed": {
                           "type": "string"
                         },
@@ -16518,6 +16610,7 @@
                         "sourceKind",
                         "sourceKey",
                         "rolloverOriginAllocationId",
+                        "carryOverOriginAllocationId",
                         "rolloverPolicyRevision",
                         "quantity",
                         "reversed",
@@ -16729,6 +16822,12 @@
                         "available": {
                           "type": "string"
                         },
+                        "carryOverOriginAllocationId": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
                         "consumed": {
                           "type": "string"
                         },
@@ -16793,6 +16892,7 @@
                         "sourceKind",
                         "sourceKey",
                         "rolloverOriginAllocationId",
+                        "carryOverOriginAllocationId",
                         "rolloverPolicyRevision",
                         "quantity",
                         "reversed",
@@ -17004,6 +17104,12 @@
                         "available": {
                           "type": "string"
                         },
+                        "carryOverOriginAllocationId": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
                         "consumed": {
                           "type": "string"
                         },
@@ -17068,6 +17174,7 @@
                         "sourceKind",
                         "sourceKey",
                         "rolloverOriginAllocationId",
+                        "carryOverOriginAllocationId",
                         "rolloverPolicyRevision",
                         "quantity",
                         "reversed",
@@ -25874,6 +25981,30 @@
                       {
                         "additionalProperties": false,
                         "properties": {
+                          "carryOver": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "balances": {
+                                "items": {
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 50,
+                                "type": "array"
+                              },
+                              "usages": {
+                                "items": {
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 50,
+                                "type": "array"
+                              }
+                            },
+                            "type": "object"
+                          },
                           "effectiveMode": {
                             "enum": [
                               "immediate",
@@ -63654,6 +63785,30 @@
                       {
                         "additionalProperties": false,
                         "properties": {
+                          "carryOver": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "balances": {
+                                "items": {
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 50,
+                                "type": "array"
+                              },
+                              "usages": {
+                                "items": {
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 50,
+                                "type": "array"
+                              }
+                            },
+                            "type": "object"
+                          },
                           "effectiveMode": {
                             "enum": [
                               "immediate",

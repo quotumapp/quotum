@@ -5,7 +5,9 @@ import type {
 	CommercialActionExecutionResult,
 	CommercialActionIntent,
 	CommercialActionPreview,
+	CommercialCarryOver,
 	CommercialPreviewCancellation,
+	CommercialPreviewCarryOver,
 	CommercialPreviewDraft,
 	StoredCommercialActionPreview,
 } from "../../billing/commercial";
@@ -205,6 +207,12 @@ interface StripeBillingRepositoryDependency extends PaymentSetupRepositoryDepend
 		billingAccountId: string;
 		externalSubscriptionId: string;
 	}): Promise<SubscriptionCancellationContext>;
+	previewSubscriptionCarryOver?(input: {
+		billingAccountId: string;
+		externalSubscriptionId: string;
+		fromPlanVersionId: string;
+		carryOver: Required<CommercialCarryOver>;
+	}): Promise<CommercialPreviewCarryOver>;
 	createCommercialActionPreview?(draft: CommercialPreviewDraft): Promise<CommercialActionPreview>;
 	resolveCommercialPromotion?(input: {
 		billingAccountId: string;
@@ -764,6 +772,9 @@ export class StripeBillingService
 				quantities: current.intent.quantities,
 				effectiveMode: current.intent.effectiveMode,
 				prorationBehavior: current.intent.prorationBehavior,
+				...(current.intent.carryOver === undefined
+					? {}
+					: { carryOver: canonicalCarryOver(current.intent.carryOver) }),
 				idempotencyKey: executionKey,
 				expectedStateFingerprint: current.providerStateFingerprint ?? current.stateFingerprint,
 				...(promotion === null
@@ -837,6 +848,39 @@ export class StripeBillingService
 		});
 	}
 
+	/**
+	 * What an immediate change would carry, named per feature. A period-end change never carries:
+	 * the reset does that work, so naming features on one is refused.
+	 */
+	private async carryOverPreview(
+		billingAccountId: string,
+		intent: Extract<CommercialActionIntent, { kind: "subscription_change" }>,
+		change: SubscriptionChangePreview,
+	): Promise<CommercialPreviewCarryOver | null> {
+		if (intent.carryOver === undefined) return null;
+		if (change.effectiveMode !== "immediate") {
+			throw new BillingError(
+				"Allowances carry over only on an immediate plan change",
+				"CARRY_OVER_REQUIRES_IMMEDIATE_CHANGE",
+				400,
+			);
+		}
+		const repository = this.dependencies.repository;
+		if (repository.previewSubscriptionCarryOver === undefined) {
+			throw new BillingError(
+				"Commercial previews are not configured",
+				"STRIPE_NOT_CONFIGURED",
+				503,
+			);
+		}
+		return await repository.previewSubscriptionCarryOver({
+			billingAccountId,
+			externalSubscriptionId: intent.externalSubscriptionId,
+			fromPlanVersionId: change.fromPlanVersionId,
+			carryOver: canonicalCarryOver(intent.carryOver),
+		});
+	}
+
 	private async commercialPreviewDraft(
 		billingAccountId: string,
 		intent: CommercialActionIntent,
@@ -892,6 +936,7 @@ export class StripeBillingService
 				hostedEntry: false,
 			});
 			const stateFingerprint = promotionFingerprint(change.stateFingerprint, promotion);
+			const carryOver = await this.carryOverPreview(billingAccountId, normalized, change);
 			return {
 				billingAccountId,
 				intent: normalized,
@@ -933,6 +978,7 @@ export class StripeBillingService
 							: renewal.nextCycle,
 					cancellation: null,
 					paymentSetup: null,
+					carryOver,
 					effectiveMode: change.effectiveMode,
 					effectiveAt: change.effectiveAt,
 					prorationBehavior: change.prorationBehavior,
@@ -992,6 +1038,7 @@ export class StripeBillingService
 					...priced,
 					currency: product.currency,
 					cancellation: null,
+					carryOver: null,
 					paymentSetup: null,
 					effectiveMode: null,
 					effectiveAt: null,
@@ -1072,6 +1119,7 @@ export class StripeBillingService
 				...priced,
 				currency,
 				cancellation: null,
+				carryOver: null,
 				paymentSetup: null,
 				effectiveMode: "immediate",
 				effectiveAt: new Date().toISOString(),
@@ -1167,6 +1215,7 @@ export class StripeBillingService
 				promotion: null,
 				nextCycle: priced?.nextCycle ?? null,
 				cancellation: null,
+				carryOver: null,
 				paymentSetup: {
 					currency: intent.currency,
 					appliesTo: "account_default",
@@ -1460,6 +1509,7 @@ export class StripeBillingService
 				promotion: null,
 				nextCycle: null,
 				cancellation,
+				carryOver: null,
 				paymentSetup: null,
 				effectiveMode: intent.kind === "cancel" ? intent.effectiveMode : null,
 				effectiveAt: cancellation.accessEndsAt,
@@ -2670,6 +2720,24 @@ const liveStripeSubscriptionStatuses: ReadonlySet<SubscriptionStatus> = new Set(
 	"billing_retry",
 ]);
 
+/** Trimmed, de-duplicated and sorted keys, so equal choices hash equally. */
+function canonicalCarryOver(carryOver: CommercialCarryOver): Required<CommercialCarryOver> {
+	const keys = (values: string[] | undefined) =>
+		[...new Set((values ?? []).map((key) => key.trim()).filter((key) => key !== ""))].sort();
+	return { balances: keys(carryOver.balances), usages: keys(carryOver.usages) };
+}
+
+/** The intent's carry-over choice, or nothing when it names no feature. */
+function carryOverField(carryOver: CommercialCarryOver | undefined): {
+	carryOver?: Required<CommercialCarryOver>;
+} {
+	if (carryOver === undefined) return {};
+	const canonical = canonicalCarryOver(carryOver);
+	return canonical.balances.length === 0 && canonical.usages.length === 0
+		? {}
+		: { carryOver: canonical };
+}
+
 function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialActionIntent {
 	if (intent.kind === "cancel") {
 		return {
@@ -2706,6 +2774,8 @@ function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialAc
 			...(intent.promotionCode === undefined || intent.promotionCode === null
 				? {}
 				: { promotionCode: normalizePromotionCode(intent.promotionCode) }),
+			// Left out when empty, so an intent that carries nothing keeps its earlier hash.
+			...carryOverField(intent.carryOver),
 		};
 	}
 	if (intent.kind === "setup_payment") {

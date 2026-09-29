@@ -182,6 +182,12 @@
       ]
     },
     {
+      "code": "CARRY_OVER_REQUIRES_IMMEDIATE_CHANGE",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
       "code": "CATALOG_PREVIEW_EXPIRED",
       "sources": [
         "src/catalog/control-plane.ts"

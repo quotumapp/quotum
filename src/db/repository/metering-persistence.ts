@@ -121,6 +121,7 @@ export interface AllocationRow {
 	reversed_at: Date | string | null;
 	entity_external_id: string | null;
 	rollover_origin_allocation_id: string | number | bigint | null;
+	carry_over_origin_allocation_id: string | number | bigint | null;
 	rollover_policy_revision: number | null;
 	period_start_at: Date | string | null;
 	period_end_at: Date | string | null;
@@ -1534,7 +1535,8 @@ async function readAllocationRows(
                 allocation.source_kind,
 				allocation.source_key, allocation.expires_at, allocation.created_at,
 				allocation.reversed_at, entity.external_id AS entity_external_id,
-				allocation.rollover_origin_allocation_id, allocation.rollover_policy_revision,
+				allocation.rollover_origin_allocation_id, allocation.carry_over_origin_allocation_id,
+				allocation.rollover_policy_revision,
 				allocation.period_start_at, allocation.period_end_at
 			FROM balance_allocations allocation
 			LEFT JOIN entities entity
@@ -1586,6 +1588,7 @@ export async function lockAllocations(
 					allocation.reversed_at,
 					entity.external_id AS entity_external_id,
 					allocation.rollover_origin_allocation_id,
+					allocation.carry_over_origin_allocation_id,
 					allocation.rollover_policy_revision,
 					allocation.period_start_at,
 					allocation.period_end_at
@@ -1627,6 +1630,7 @@ export async function lockAllAllocationRows(
 					allocation.reversed_at,
 					entity.external_id AS entity_external_id,
 					allocation.rollover_origin_allocation_id,
+					allocation.carry_over_origin_allocation_id,
 					allocation.rollover_policy_revision,
 					allocation.period_start_at,
 					allocation.period_end_at
@@ -1693,6 +1697,10 @@ export function balanceFromRows(feature: FeatureRow, rows: AllocationRow[]): Met
 					row.rollover_origin_allocation_id === null
 						? null
 						: String(row.rollover_origin_allocation_id),
+				carryOverOriginAllocationId:
+					row.carry_over_origin_allocation_id === null
+						? null
+						: String(row.carry_over_origin_allocation_id),
 				rolloverPolicyRevision: row.rollover_policy_revision,
 				quantity: unitsToDecimal(quantity, scale),
 				reversed: unitsToDecimal(reversed, scale),

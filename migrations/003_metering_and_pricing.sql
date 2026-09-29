@@ -417,7 +417,10 @@ CREATE TABLE IF NOT EXISTS balance_allocations (
 	purchase_id UUID REFERENCES purchases(id) ON DELETE SET NULL,
 	credit_grant_id UUID REFERENCES credit_grants(id) ON DELETE SET NULL,
 	source_kind TEXT NOT NULL CHECK (
-		source_kind IN ('subscription', 'purchase', 'credit_grant', 'topup', 'reward', 'operator', 'rollover')
+		source_kind IN (
+			'subscription', 'purchase', 'credit_grant', 'topup', 'reward', 'operator', 'rollover',
+			'carry_over'
+		)
 	),
 	source_key TEXT COLLATE "C" NOT NULL,
 	quantity NUMERIC(28, 9) NOT NULL CHECK (quantity > 0),
@@ -438,6 +441,8 @@ CREATE TABLE IF NOT EXISTS balance_allocations (
 	promotion_redemption_id UUID,
 	plan_grant_id UUID,
 	operator_grant_id UUID,
+	-- The outgoing plan allowance an immediate plan change carried this quantity from.
+	carry_over_origin_allocation_id BIGINT,
 	CONSTRAINT balance_allocations_project_id_id_unique UNIQUE (project_id, id),
 	CONSTRAINT balance_allocations_source_unique UNIQUE (project_id, feature_id, source_kind, source_key),
 	CONSTRAINT balance_allocations_project_customer_fk FOREIGN KEY (project_id, customer_id)
@@ -475,6 +480,12 @@ CREATE TABLE IF NOT EXISTS balance_allocations (
 	-- actor, reason and idempotency key.
 	CONSTRAINT balance_allocations_operator_provenance_check CHECK (
 		(source_kind = 'operator') = (operator_grant_id IS NOT NULL)
+	),
+	CONSTRAINT balance_allocations_carry_over_origin_fk
+		FOREIGN KEY (project_id, carry_over_origin_allocation_id)
+		REFERENCES balance_allocations(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT balance_allocations_carry_over_shape_check CHECK (
+		(source_kind = 'carry_over') = (carry_over_origin_allocation_id IS NOT NULL)
 	)
 );
 
@@ -1010,6 +1021,9 @@ CREATE TABLE IF NOT EXISTS subscription_changes (
 	requested_quantities JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (
 		jsonb_typeof(requested_quantities) = 'object'
 	),
+	-- Feature keys whose unused allowance (`balances`) or period usage (`usages`) an immediate
+	-- change carries into the new plan version; empty for every other change.
+	carry_over JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(carry_over) = 'object'),
 	change_kind TEXT NOT NULL CHECK (change_kind IN ('upgrade', 'downgrade', 'quantity')),
 	effective_mode TEXT NOT NULL CHECK (effective_mode IN ('immediate', 'period_end')),
 	effective_at TIMESTAMPTZ NOT NULL,
@@ -2634,6 +2648,34 @@ ALTER TABLE balance_allocations
 	ADD CONSTRAINT balance_allocations_project_operator_grant_fk
 			FOREIGN KEY (project_id, operator_grant_id)
 			REFERENCES operator_grants(project_id, id);
+
+-- An allowance is carried into a new plan at most once.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_balance_allocations_carry_over_origin
+	ON balance_allocations (project_id, carry_over_origin_allocation_id)
+	WHERE carry_over_origin_allocation_id IS NOT NULL;
+
+-- Usage an immediate plan change carried into the new plan: it is written as consumed quantity on
+-- the incoming allowance, capped at what that allowance holds; the rest is forgiven, not charged.
+CREATE TABLE IF NOT EXISTS carried_usages (
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	subscription_change_id UUID NOT NULL,
+	from_allocation_id BIGINT NOT NULL,
+	to_allocation_id BIGINT NOT NULL,
+	requested_quantity NUMERIC(28, 9) NOT NULL CHECK (requested_quantity > 0),
+	applied_quantity NUMERIC(28, 9) NOT NULL CHECK (applied_quantity >= 0),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	PRIMARY KEY (project_id, subscription_change_id, from_allocation_id),
+	CONSTRAINT carried_usages_project_change_fk FOREIGN KEY (project_id, subscription_change_id)
+		REFERENCES subscription_changes(project_id, id) ON DELETE CASCADE,
+	CONSTRAINT carried_usages_project_from_allocation_fk FOREIGN KEY (project_id, from_allocation_id)
+		REFERENCES balance_allocations(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT carried_usages_project_to_allocation_fk FOREIGN KEY (project_id, to_allocation_id)
+		REFERENCES balance_allocations(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT carried_usages_applied_check CHECK (applied_quantity <= requested_quantity)
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_carried_usages_to_allocation
+	ON carried_usages (project_id, to_allocation_id);
 
 -- One grant, one allocation.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_balance_allocations_operator_grant

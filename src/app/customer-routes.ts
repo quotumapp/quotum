@@ -131,6 +131,13 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 				.regex(/^[A-Za-z0-9-]{3,64}$/)
 				.nullable()
 				.optional(),
+			carryOver: z
+				.object({
+					balances: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
+					usages: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
+				})
+				.strict()
+				.optional(),
 		})
 		.strict(),
 	z
