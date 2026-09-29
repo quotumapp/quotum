@@ -28,7 +28,7 @@ async function runCatalogCli(argv: readonly string[]): Promise<void> {
 		if (file === undefined) throw new Error(`${command} requires a catalog TypeScript file`);
 		const source = await loadCatalog(file);
 		const current = await client.catalog.status();
-		const expectedRevision = source.expectedRevision ?? current.revision;
+		const expectedRevision = expectedRevisionFor(source.expectedRevision, current.revision);
 		const preview = await client.catalog.preview({
 			expectedRevision,
 			catalog: source.catalog,
@@ -59,6 +59,17 @@ async function runCatalogCli(argv: readonly string[]): Promise<void> {
 	} else {
 		throw new Error(`Unknown catalog command: ${command}`);
 	}
+}
+
+/**
+ * The revision a push expects. `null` is a real expectation ("nothing is published yet"); only an
+ * absent export follows the current revision.
+ */
+export function expectedRevisionFor(
+	declared: number | null | undefined,
+	current: number | null,
+): number | null {
+	return declared === undefined ? current : declared;
 }
 
 async function loadCatalog(

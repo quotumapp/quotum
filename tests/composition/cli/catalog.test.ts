@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createSanitizedProcessEnv } from "../../../scripts/lib/sanitized-env";
+import { expectedRevisionFor } from "../../../src/composition/cli/catalog";
 
 interface RecordedCall {
 	method: string;
@@ -96,6 +97,45 @@ export const catalog = { features: [], plans: [], topups: [], rateCards: [] };
 			previewToken: "preview-token",
 			catalog: { features: [], plans: [], topups: [], rateCards: [] },
 		});
+	});
+
+	it("expects the declared revision, null included, and the current one only when none is declared", () => {
+		expect(expectedRevisionFor(null, 3)).toBeNull();
+		expect(expectedRevisionFor(7, 3)).toBe(7);
+		expect(expectedRevisionFor(undefined, 3)).toBe(3);
+		expect(expectedRevisionFor(undefined, null)).toBeNull();
+	});
+
+	it("keeps an explicit null expectedRevision and follows the current one only when absent", async () => {
+		const fixture = catalogServer();
+		const directory = await mkdtemp(join(tmpdir(), "billing-catalog-test-"));
+		temporaryDirectories.push(directory);
+		const firstPublication = join(directory, "first.ts");
+		await writeFile(
+			firstPublication,
+			`export const expectedRevision = null;
+export const catalog = { features: [], plans: [], topups: [], rateCards: [] };
+`,
+			"utf8",
+		);
+		const unpinned = join(directory, "unpinned.ts");
+		await writeFile(
+			unpinned,
+			"export const catalog = { features: [], plans: [], topups: [], rateCards: [] };\n",
+			"utf8",
+		);
+
+		// `null` means "publish only while nothing is published", so it must reach the API as null.
+		await runCli(["push", firstPublication], fixture.baseUrl);
+		expect(
+			fixture.calls.map(
+				(call) => (call.body as { expectedRevision?: unknown } | null)?.expectedRevision,
+			),
+		).toEqual([undefined, null, null]);
+
+		fixture.calls.length = 0;
+		await runCli(["diff", unpinned], fixture.baseUrl);
+		expect(fixture.calls[1]?.body).toMatchObject({ expectedRevision: 3 });
 	});
 
 	it("stops at a preview revision conflict without publishing or leaking credentials", async () => {
