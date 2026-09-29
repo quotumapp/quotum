@@ -399,8 +399,10 @@ Preview and publish validate the intent's structure first and reject the first s
 including a binding on the wrong channel, with `400 INVALID_REQUEST`. That includes a meter limit or
 allocation whose reset window cannot fit every billing period, such as `resetInterval: "year"` on a
 `billingInterval: "month"` plan or 29 days on a monthly plan (February is 28): windows and grants
-reset with every provider period, so the yearly quantity would silently become a monthly one. A
-reset spans at most three years, `resetIntervalCount` is a whole number from 1 to 1,000 and needs a
+reset with every provider period, so the yearly quantity would silently become a monthly one. It
+also includes a plan item quantity or rollover `maxQuantity` with more decimal places than its
+feature's `creditScale`, which a top-up's quantity may not have either. A reset spans at most three
+years, `resetIntervalCount` is a whole number from 1 to 1,000 and needs a
 `resetInterval`, and `overagePolicy: "allowed"` needs a reset of a month or longer, because postpaid
 overage is invoiced once per closed window; a daily or weekly meter limit is a hard cap. A rollover
 expiry is `{ "mode": "after", "interval": "week", "intervalCount": 2 }` or `{ "mode": "forever" }`

@@ -548,6 +548,38 @@ class StoredCatalogDatabase {
 }
 
 describe("catalog control plane reset intervals", () => {
+	it("rejects an item quantity or rollover cap finer than its feature's credit scale", async () => {
+		// `credits` has creditScale 0: a 0.5 allowance would publish and then fail every read.
+		for (const itemKind of ["meter_limit", "allocation"] as const) {
+			const error = await previewWith(providerCapabilityCatalog, [
+				plan({ items: [{ ...resettingItem(itemKind, "month"), quantity: "0.5" }] }),
+			]);
+			expect(error).toBeInstanceOf(InvalidRequestError);
+			expect((error as InvalidRequestError).message).toBe(
+				"Plan pro item credits quantity supports at most 0 decimal places",
+			);
+		}
+		const rollover = await previewWith(providerCapabilityCatalog, [
+			plan({
+				items: [
+					{
+						...resettingItem("allocation", "month"),
+						rollover: { maxQuantity: "1.5", expiry: { mode: "forever" } },
+					},
+				],
+			}),
+		]);
+		expect(rollover).toBeInstanceOf(InvalidRequestError);
+		expect((rollover as InvalidRequestError).message).toBe(
+			"Plan pro item credits rollover maxQuantity supports at most 0 decimal places",
+		);
+		expect(
+			await previewWith(providerCapabilityCatalog, [
+				plan({ items: [{ ...resettingItem("allocation", "month"), quantity: "12000.000" }] }),
+			]),
+		).toBe("normalized");
+	});
+
 	it("rejects an item that resets less often than its plan bills", async () => {
 		// Windows and grants reset with every provider period, so a yearly 12,000 on a monthly plan
 		// would silently become 12,000 a month.
