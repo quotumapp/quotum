@@ -228,11 +228,31 @@ and loses grants and debits made since.
 ### Default plan
 
 The metering baseline adds the `catalog_default_plans` table, one row per published revision that
-marks a default plan. No earlier revision has one, so the move needs no manual SQL: follow steps 1,
-2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity). Afterwards
-`SELECT count(*) FROM catalog_default_plans;` returns 0 until a catalog marks a default plan. Stored
-catalog intents without the marker keep their intent hash, so a preview taken before the upgrade
-still publishes.
+marks a default plan, and the `default_plan_reconciliations` job table. It widens `plan_grants`:
+- `origin` accepts `default`;
+- `ends_at`, `duration_unit`, `duration_count`, `idempotency_key` and `request_hash` become nullable,
+  with the new check `plan_grants_term_check` requiring them to be null exactly on a default-plan
+  grant;
+- a new `superseded_by_plan_grant_id` column references the trial that replaced a default-plan
+  grant, with a deferred foreign key and its index;
+- `plan_grants_bounds_check` and `plan_grants_state_check` allow a grant without an end;
+- `idx_billing_plan_grants_due` covers only grants with an end.
+
+Existing trial rows satisfy every new check and no earlier revision has a marker, so the move needs
+no manual SQL: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). Afterwards
+`SELECT count(*) FROM catalog_default_plans;` and
+`SELECT count(*) FROM plan_grants WHERE origin = 'default';` both return 0 until a catalog marks a
+default plan. Stored catalog intents without the marker keep their intent hash, so a preview taken
+before the upgrade still publishes.
+
+Every account without a paid base plan holds a default-plan grant. That means one grant row, one
+entitlement row per key, and allowance rows for each reset window the account reaches. A publish
+that changes the default plan queues one pass over the project's customers. The subscription
+reconciliation worker runs it after grant expiry: it scans 1,000 customers per slice, changes up to
+its batch size of them, and spends at most ten slices and ten allowance batches per poll. Each
+changed account gets a stored projection job. Plan the delivery backlog for large free tiers: a
+first default plan enqueues one job per covered account.
 
 ### Reset cadence
 
@@ -495,7 +515,7 @@ One process runs the HTTP API and all workers. Each polls on the interval shown:
 | --- | --- |
 | Projection delivery | `BILLING_WORKER_POLL_INTERVAL_MS` |
 | Provider event replay | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
-| Subscription reconciliation (provider reads, subscription and plan grant expiry, plan grant allowances, trial-ending notices) | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
+| Subscription reconciliation (provider reads, subscription and plan grant expiry, plan grant allowances, default-plan passes, trial-ending notices) | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
 | Metering maintenance (reservation expiry, reset-window subscription allocations, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Recurring billing | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Automatic top-ups | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |

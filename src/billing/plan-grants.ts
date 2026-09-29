@@ -99,7 +99,7 @@ const trialErrorDefinitions = [
 		code: "TRIAL_PLAN_NOT_ELIGIBLE",
 		status: 409,
 		message:
-			"Only a public base plan without licensed quantities or entity allocations can be trialed",
+			"Only a public base plan without licensed quantities or entity allocations, other than the default plan, can be trialed",
 	},
 	{
 		code: "TRIAL_DURATION_REQUIRED",

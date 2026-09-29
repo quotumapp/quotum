@@ -26,6 +26,7 @@ interface SeededStoreProduct {
 }
 
 export const publicBillingTableResetOrder = [
+	"default_plan_reconciliations",
 	"promotion_audit_events",
 	"promotion_redemptions",
 	"promotion_provider_objects",
@@ -188,6 +189,7 @@ export async function resetPublicBillingTables(sql: SQL): Promise<void> {
 	await sql`UPDATE projects SET published_catalog_revision_id = NULL`;
 	await sql`
 		TRUNCATE TABLE
+			default_plan_reconciliations,
 			promotion_audit_events,
 			promotion_redemptions,
 			promotion_provider_objects,

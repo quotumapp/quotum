@@ -87,6 +87,7 @@ export interface SubscriptionReconciliationRunResult {
 	affectedCustomers: number;
 	expiredPlanGrants: number;
 	planGrantPeriods: number;
+	defaultPlanGrants: number;
 	trialEndingNotices: number;
 	providerClaimed: number;
 	providerProcessed: number;
@@ -153,6 +154,7 @@ export class SubscriptionReconciliationWorker {
 				affectedCustomers: 0,
 				expiredPlanGrants: 0,
 				planGrantPeriods: 0,
+				defaultPlanGrants: 0,
 				trialEndingNotices: 0,
 				providerClaimed: subscriptions.length,
 				providerProcessed: 0,
@@ -185,6 +187,7 @@ export class SubscriptionReconciliationWorker {
 			const grants = await this.repository.reconcilePlanGrants(this.batchSize);
 			result.expiredPlanGrants = grants.expiredPlanGrants;
 			result.planGrantPeriods = grants.planGrantPeriods;
+			result.defaultPlanGrants = grants.defaultPlanGrants;
 			const notices = await this.repository.enqueueTrialEndingNotices(this.batchSize);
 			result.trialEndingNotices = notices.noticedTrials;
 			result.outcome = reconciliationOutcome(result);

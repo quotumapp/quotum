@@ -5007,23 +5007,24 @@ export const planGrants = pgTable(
 		planId: bigint("plan_id", { mode: "number" }).notNull(),
 		planVersionId: bigint("plan_version_id", { mode: "number" }).notNull(),
 		planKind: text("plan_kind").$type<"base" | "addon">().notNull(),
-		origin: text("origin").$type<"trial">().notNull(),
+		origin: text("origin").$type<"trial" | "default">().notNull(),
 		status: text("status").$type<"active" | "expired" | "ended" | "superseded">().notNull(),
-		durationUnit: text("duration_unit").$type<"day" | "month">().notNull(),
-		durationCount: integer("duration_count").notNull(),
+		durationUnit: text("duration_unit").$type<"day" | "month">(),
+		durationCount: integer("duration_count"),
 		startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
-		endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+		endsAt: timestamp("ends_at", { withTimezone: true }),
 		endedAt: timestamp("ended_at", { withTimezone: true }),
 		entitlementKeys: text("entitlement_keys").array().notNull().default(sql`ARRAY[]::text[]`),
 		nextPeriodAt: timestamp("next_period_at", { withTimezone: true }),
 		endingNotifiedAt: timestamp("ending_notified_at", { withTimezone: true }),
 		supersededBySubscriptionId: uuid("superseded_by_subscription_id"),
+		supersededByPlanGrantId: uuid("superseded_by_plan_grant_id"),
 		actor: text("actor").notNull(),
 		endActor: text("end_actor"),
 		endReason: text("end_reason"),
 		metadata: metadataColumn(),
-		idempotencyKey: text("idempotency_key").notNull(),
-		requestHash: text("request_hash").notNull(),
+		idempotencyKey: text("idempotency_key"),
+		requestHash: text("request_hash"),
 		endIdempotencyKey: text("end_idempotency_key"),
 		endRequestHash: text("end_request_hash"),
 		...timestampColumns(),
@@ -5067,8 +5068,12 @@ export const planGrants = pgTable(
 			sql`(((end_request_hash IS NULL) OR (char_length(end_request_hash) = 64)))`,
 		),
 		check(
+			"plan_grants_term_check",
+			sql`((((origin = 'default'::text) AND (plan_kind = 'base'::text) AND (ends_at IS NULL) AND (duration_unit IS NULL) AND (duration_count IS NULL) AND (idempotency_key IS NULL) AND (request_hash IS NULL)) OR ((origin <> 'default'::text) AND (ends_at IS NOT NULL) AND (duration_unit IS NOT NULL) AND (duration_count IS NOT NULL) AND (idempotency_key IS NOT NULL) AND (request_hash IS NOT NULL))))`,
+		),
+		check(
 			"plan_grants_bounds_check",
-			sql`(((starts_at < ends_at) AND ((ended_at IS NULL) OR ((ended_at >= starts_at) AND (ended_at <= ends_at)))))`,
+			sql`((((ends_at IS NULL) OR (starts_at < ends_at)) AND ((ended_at IS NULL) OR ((ended_at >= starts_at) AND ((ends_at IS NULL) OR (ended_at <= ends_at))))))`,
 		),
 		check(
 			"plan_grants_entitlement_keys_check",
@@ -5084,7 +5089,7 @@ export const planGrants = pgTable(
 		),
 		check(
 			"plan_grants_state_check",
-			sql`((((status = 'active'::text) AND (ended_at IS NULL) AND (superseded_by_subscription_id IS NULL) AND (end_idempotency_key IS NULL)) OR ((status = 'expired'::text) AND (ended_at = ends_at) AND (superseded_by_subscription_id IS NULL) AND (next_period_at IS NULL)) OR ((status = 'ended'::text) AND (ended_at < ends_at) AND (end_idempotency_key IS NOT NULL) AND (superseded_by_subscription_id IS NULL) AND (next_period_at IS NULL)) OR ((status = 'superseded'::text) AND (ended_at IS NOT NULL) AND (superseded_by_subscription_id IS NOT NULL) AND (next_period_at IS NULL))))`,
+			sql`((((status = 'active'::text) AND (ended_at IS NULL) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL) AND (end_idempotency_key IS NULL)) OR ((status = 'expired'::text) AND (ends_at IS NOT NULL) AND (ended_at = ends_at) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL) AND (next_period_at IS NULL)) OR ((status = 'ended'::text) AND (ended_at IS NOT NULL) AND ((ends_at IS NULL) OR (ended_at < ends_at)) AND ((end_idempotency_key IS NOT NULL) OR (origin = 'default'::text)) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL) AND (next_period_at IS NULL)) OR ((status = 'superseded'::text) AND (ended_at IS NOT NULL) AND (next_period_at IS NULL) AND (num_nonnulls(superseded_by_subscription_id, superseded_by_plan_grant_id) = 1))))`,
 		),
 		unique("plan_grants_project_id_id_unique").on(table.projectId, table.id),
 		unique("plan_grants_idempotency_unique").on(
@@ -5112,6 +5117,12 @@ export const planGrants = pgTable(
 			columns: [table.projectId, table.supersededBySubscriptionId],
 			foreignColumns: [subscriptions.projectId, subscriptions.id],
 		}),
+		// DEFERRABLE INITIALLY DEFERRED in the SQL baseline; Drizzle cannot declare deferral.
+		foreignKey({
+			name: "plan_grants_project_superseding_grant_fk",
+			columns: [table.projectId, table.supersededByPlanGrantId],
+			foreignColumns: [table.projectId, table.id],
+		}),
 		uniqueIndex("idx_billing_plan_grants_one_active_base")
 			.on(table.projectId, table.customerId)
 			.where(sql`${table.status} = 'active' AND ${table.planKind} = 'base'`),
@@ -5123,7 +5134,7 @@ export const planGrants = pgTable(
 			.where(sql`${table.status} = 'active'`),
 		index("idx_billing_plan_grants_due")
 			.on(table.endsAt, table.id)
-			.where(sql`${table.status} = 'active'`),
+			.where(sql`${table.status} = 'active' AND ${table.endsAt} IS NOT NULL`),
 		index("idx_billing_plan_grants_next_period")
 			.on(table.nextPeriodAt, table.id)
 			.where(sql`${table.status} = 'active' AND ${table.nextPeriodAt} IS NOT NULL`),
@@ -5136,8 +5147,11 @@ export const planGrants = pgTable(
 		index("idx_billing_plan_grants_superseding_subscription")
 			.on(table.projectId, table.supersededBySubscriptionId)
 			.where(sql`${table.supersededBySubscriptionId} IS NOT NULL`),
+		index("idx_billing_plan_grants_superseding_grant")
+			.on(table.projectId, table.supersededByPlanGrantId)
+			.where(sql`${table.supersededByPlanGrantId} IS NOT NULL`),
 		check("plan_grants_plan_kind_check", sql`${table.planKind} IN ('base', 'addon')`),
-		check("plan_grants_origin_check", sql`${table.origin} IN ('trial')`),
+		check("plan_grants_origin_check", sql`${table.origin} IN ('trial', 'default')`),
 		check(
 			"plan_grants_status_check",
 			sql`${table.status} IN ('active', 'expired', 'ended', 'superseded')`,
@@ -5333,6 +5347,53 @@ export const catalogDefaultPlans = pgTable(
 			sql`(((cardinality(entitlement_keys) <= 100) AND (array_position(entitlement_keys, NULL::text) IS NULL)))`,
 		),
 		index("idx_billing_catalog_default_plans_plan").on(table.projectId, table.planId),
+	],
+);
+
+export const defaultPlanReconciliations = pgTable(
+	"default_plan_reconciliations",
+	{
+		id: meteringId(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		catalogRevisionId: bigint("catalog_revision_id", { mode: "number" }).notNull(),
+		status: text("status")
+			.$type<"pending" | "completed" | "superseded">()
+			.notNull()
+			.default("pending"),
+		afterCustomerId: uuid("after_customer_id"),
+		customersChecked: integer("customers_checked").notNull().default(0),
+		grantsChanged: integer("grants_changed").notNull().default(0),
+		attempts: integer("attempts").notNull().default(0),
+		nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+		lastError: text("last_error"),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+		...timestampColumns(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"default_plan_reconciliations_status_check",
+			sql`((status = ANY (ARRAY['pending'::text, 'completed'::text, 'superseded'::text])))`,
+		),
+		check("default_plan_reconciliations_customers_checked_check", sql`((customers_checked >= 0))`),
+		check("default_plan_reconciliations_grants_changed_check", sql`((grants_changed >= 0))`),
+		check("default_plan_reconciliations_attempts_check", sql`((attempts >= 0))`),
+		check(
+			"default_plan_reconciliations_completion_check",
+			sql`(((status = 'completed'::text) = (completed_at IS NOT NULL)))`,
+		),
+		foreignKey({
+			name: "default_plan_reconciliations_project_revision_fk",
+			columns: [table.projectId, table.catalogRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}).onDelete("restrict"),
+		uniqueIndex("idx_billing_default_plan_reconciliations_open")
+			.on(table.projectId)
+			.where(sql`${table.status} = 'pending'`),
+		index("idx_billing_default_plan_reconciliations_due")
+			.on(table.nextAttemptAt, table.id)
+			.where(sql`${table.status} = 'pending'`),
 	],
 );
 

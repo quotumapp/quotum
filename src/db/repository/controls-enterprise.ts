@@ -1179,7 +1179,7 @@ export async function resolveEffectiveControls(
 						AND plan_grant.plan_version_id = policy.plan_version_id
 						AND plan_grant.status = 'active'
 						AND plan_grant.starts_at <= ${now.toISOString()}
-						AND plan_grant.ends_at > ${now.toISOString()}
+						AND (plan_grant.ends_at IS NULL OR plan_grant.ends_at > ${now.toISOString()})
 				)))
 				OR (policy.source_type = 'contract' AND policy.contract_id = (SELECT id FROM active_contract))
 				OR (policy.source_type = 'account' AND policy.customer_id = ${input.customerId})

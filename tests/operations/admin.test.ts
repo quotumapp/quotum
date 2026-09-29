@@ -113,6 +113,7 @@ describe("BillingAdminOperations", () => {
 			affectedCustomers: 1,
 			expiredPlanGrants: 0,
 			planGrantPeriods: 0,
+			defaultPlanGrants: 0,
 			trialEndingNotices: 0,
 			providerClaimed: 3,
 			providerProcessed: 2,

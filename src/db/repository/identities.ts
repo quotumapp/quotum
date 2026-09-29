@@ -1,10 +1,16 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError } from "../../billing/errors";
 import type { BillingChannel, BillingProvider } from "../../billing/types";
+import { reconcileDefaultPlanGrant } from "./default-plan-grants";
+import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
 import { executeOne } from "./query";
 import type { CustomerIdentityRow, QueryExecutor, StoreProductIdentityRow } from "./types";
 import { requireNonBlank, requireStripeCustomerId } from "./validation";
 
+/**
+ * The customer for a billing account, created when missing. The upsert locks the row for the rest of
+ * the transaction. A new account starts on the catalog's default plan, if it marks one.
+ */
 export async function ensureCustomer(
 	executor: QueryExecutor,
 	projectId: string,
@@ -12,7 +18,7 @@ export async function ensureCustomer(
 	email: string | null = null,
 ): Promise<CustomerIdentityRow> {
 	requireNonBlank(billingAccountId, "p_billing_account_id");
-	const row = await executeOne<CustomerIdentityRow>(
+	const row = await executeOne<CustomerIdentityRow & { created: boolean }>(
 		executor,
 		drizzleSql`
 		INSERT INTO customers (project_id, billing_account_id, email)
@@ -20,13 +26,39 @@ export async function ensureCustomer(
 		ON CONFLICT (project_id, billing_account_id) DO UPDATE SET
 			email = COALESCE(${email}, customers.email),
 			updated_at = now()
-		RETURNING id, billing_account_id
+		RETURNING id, billing_account_id, (xmax = 0) AS created
 	`,
 	);
 	if (row === null) {
 		throw new Error(`customer ${billingAccountId} could not be created`);
 	}
-	return row;
+	if (row.created) await startDefaultPlan(executor, projectId, row);
+	return { id: row.id, billing_account_id: row.billing_account_id };
+}
+
+async function startDefaultPlan(
+	executor: QueryExecutor,
+	projectId: string,
+	customer: CustomerIdentityRow,
+): Promise<void> {
+	const outcome = await reconcileDefaultPlanGrant(executor, projectId, customer.id);
+	if (outcome?.change !== "started") return;
+	const snapshot = await recomputeCustomerEntitlements(
+		executor,
+		projectId,
+		customer.billing_account_id,
+	);
+	// A stored job, so a receiver that turned usage deliveries off still learns about it.
+	await enqueueProjectionSyncJob(executor, {
+		customerId: customer.id,
+		idempotencyKey: `plan_grant:${outcome.grantId}:started`,
+		reason: "usage_changed",
+		payload: {
+			billingAccountId: customer.billing_account_id,
+			reason: "usage_changed",
+			entitlements: snapshot,
+		},
+	});
 }
 
 /**

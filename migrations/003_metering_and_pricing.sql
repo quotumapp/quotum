@@ -2339,9 +2339,10 @@ CREATE TABLE IF NOT EXISTS promotion_audit_events (
 CREATE INDEX IF NOT EXISTS idx_billing_promotion_audit_events_promotion_created
 	ON promotion_audit_events (project_id, promotion_id, created_at DESC);
 
--- A plan grant holds a published plan version for a fixed time without a payment provider. It is
--- its own access source, never a subscription; a trial is its first origin. Its allowances are
--- `reward` allocations linked to it, and none outlives it.
+-- A plan grant holds a published plan version without a payment provider. It is its own access
+-- source, never a subscription. A trial holds its plan for a fixed time; the default plan is held
+-- with no end by an account without a paid base plan, and follows the catalog's marker. Its
+-- allowances are `reward` allocations linked to it, and none outlives it.
 CREATE TABLE IF NOT EXISTS plan_grants (
 	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
@@ -2350,27 +2351,30 @@ CREATE TABLE IF NOT EXISTS plan_grants (
 	plan_version_id BIGINT NOT NULL,
 	-- The pinned version's kind, kept here so the one-active-base-grant index can use it.
 	plan_kind TEXT NOT NULL CHECK (plan_kind IN ('base', 'addon')),
-	origin TEXT NOT NULL CHECK (origin IN ('trial')),
+	origin TEXT NOT NULL CHECK (origin IN ('trial', 'default')),
 	status TEXT NOT NULL CHECK (status IN ('active', 'expired', 'ended', 'superseded')),
-	duration_unit TEXT NOT NULL CHECK (duration_unit IN ('day', 'month')),
-	duration_count INTEGER NOT NULL CHECK (duration_count BETWEEN 1 AND 730),
+	duration_unit TEXT CHECK (duration_unit IN ('day', 'month')),
+	duration_count INTEGER CHECK (duration_count BETWEEN 1 AND 730),
 	starts_at TIMESTAMPTZ NOT NULL,
-	ends_at TIMESTAMPTZ NOT NULL,
+	ends_at TIMESTAMPTZ,
 	ended_at TIMESTAMPTZ,
-	-- Copied at start from the version's published bindings, so a later publish cannot move them.
+	-- A trial copies them at start from the version's published bindings, so a later publish cannot
+	-- move them; the default plan takes them from the catalog's marker and follows it.
 	entitlement_keys TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
 	-- Start of the next reset window whose allowances are not materialized yet.
 	next_period_at TIMESTAMPTZ,
 	ending_notified_at TIMESTAMPTZ,
 	superseded_by_subscription_id UUID,
+	-- A trial that replaced the default plan.
+	superseded_by_plan_grant_id UUID,
 	actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),
 	end_actor TEXT CHECK (end_actor IS NULL OR char_length(end_actor) BETWEEN 1 AND 200),
 	end_reason TEXT CHECK (end_reason IS NULL OR char_length(end_reason) BETWEEN 1 AND 500),
 	metadata JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (
 		jsonb_typeof(metadata) = 'object' AND octet_length(metadata::text) <= 4096
 	),
-	idempotency_key TEXT COLLATE "C" NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
-	request_hash TEXT COLLATE "C" NOT NULL CHECK (char_length(request_hash) = 64),
+	idempotency_key TEXT COLLATE "C" CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
+	request_hash TEXT COLLATE "C" CHECK (char_length(request_hash) = 64),
 	end_idempotency_key TEXT COLLATE "C" CHECK (
 		end_idempotency_key IS NULL OR char_length(end_idempotency_key) BETWEEN 1 AND 255
 	),
@@ -2390,8 +2394,21 @@ CREATE TABLE IF NOT EXISTS plan_grants (
 	CONSTRAINT plan_grants_project_superseding_subscription_fk
 		FOREIGN KEY (project_id, superseded_by_subscription_id)
 		REFERENCES subscriptions(project_id, id),
+	-- Deferred: a trial supersedes the default plan before the trial row exists, because only one
+	-- base grant may be active at a time.
+	CONSTRAINT plan_grants_project_superseding_grant_fk
+		FOREIGN KEY (project_id, superseded_by_plan_grant_id)
+		REFERENCES plan_grants(project_id, id) DEFERRABLE INITIALLY DEFERRED,
+	-- A default-plan grant has no end, duration or caller key; every other grant has all of them.
+	CONSTRAINT plan_grants_term_check CHECK (
+		(origin = 'default' AND plan_kind = 'base' AND ends_at IS NULL AND duration_unit IS NULL
+			AND duration_count IS NULL AND idempotency_key IS NULL AND request_hash IS NULL)
+		OR (origin <> 'default' AND ends_at IS NOT NULL AND duration_unit IS NOT NULL
+			AND duration_count IS NOT NULL AND idempotency_key IS NOT NULL AND request_hash IS NOT NULL)
+	),
 	CONSTRAINT plan_grants_bounds_check CHECK (
-		starts_at < ends_at AND (ended_at IS NULL OR (ended_at >= starts_at AND ended_at <= ends_at))
+		(ends_at IS NULL OR starts_at < ends_at)
+		AND (ended_at IS NULL OR (ended_at >= starts_at AND (ends_at IS NULL OR ended_at <= ends_at)))
 	),
 	CONSTRAINT plan_grants_entitlement_keys_check CHECK (
 		cardinality(entitlement_keys) <= 100 AND array_position(entitlement_keys, NULL) IS NULL
@@ -2400,15 +2417,19 @@ CREATE TABLE IF NOT EXISTS plan_grants (
 	CONSTRAINT plan_grants_end_key_check CHECK (
 		(end_idempotency_key IS NULL) = (end_request_hash IS NULL)
 	),
+	-- A default-plan grant ends without a caller key when the catalog removes the marker.
 	CONSTRAINT plan_grants_state_check CHECK (
 		(status = 'active' AND ended_at IS NULL AND superseded_by_subscription_id IS NULL
-			AND end_idempotency_key IS NULL)
-		OR (status = 'expired' AND ended_at = ends_at AND superseded_by_subscription_id IS NULL
+			AND superseded_by_plan_grant_id IS NULL AND end_idempotency_key IS NULL)
+		OR (status = 'expired' AND ends_at IS NOT NULL AND ended_at = ends_at
+			AND superseded_by_subscription_id IS NULL AND superseded_by_plan_grant_id IS NULL
 			AND next_period_at IS NULL)
-		OR (status = 'ended' AND ended_at < ends_at AND end_idempotency_key IS NOT NULL
-			AND superseded_by_subscription_id IS NULL AND next_period_at IS NULL)
-		OR (status = 'superseded' AND ended_at IS NOT NULL
-			AND superseded_by_subscription_id IS NOT NULL AND next_period_at IS NULL)
+		OR (status = 'ended' AND ended_at IS NOT NULL AND (ends_at IS NULL OR ended_at < ends_at)
+			AND (end_idempotency_key IS NOT NULL OR origin = 'default')
+			AND superseded_by_subscription_id IS NULL AND superseded_by_plan_grant_id IS NULL
+			AND next_period_at IS NULL)
+		OR (status = 'superseded' AND ended_at IS NOT NULL AND next_period_at IS NULL
+			AND num_nonnulls(superseded_by_subscription_id, superseded_by_plan_grant_id) = 1)
 	)
 );
 
@@ -2428,7 +2449,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_customer_active
 
 CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_due
 	ON plan_grants (ends_at, id)
-	WHERE status = 'active';
+	WHERE status = 'active' AND ends_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_next_period
 	ON plan_grants (next_period_at, id)
@@ -2440,6 +2461,10 @@ CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_customer_created
 CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_superseding_subscription
 	ON plan_grants (project_id, superseded_by_subscription_id)
 	WHERE superseded_by_subscription_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_superseding_grant
+	ON plan_grants (project_id, superseded_by_plan_grant_id)
+	WHERE superseded_by_plan_grant_id IS NOT NULL;
 
 -- An operator grant gives an account quantity of a consumable feature as a goodwill credit. It is
 -- audited here and takes effect as one `operator` allocation linked to it; it never records a
@@ -2545,6 +2570,39 @@ CREATE TABLE IF NOT EXISTS catalog_default_plans (
 
 CREATE INDEX IF NOT EXISTS idx_billing_catalog_default_plans_plan
 	ON catalog_default_plans (project_id, plan_id);
+
+-- A publish that changes the default plan leaves one pending pass over the project's customers,
+-- which starts, moves or ends their default-plan grants in batches. A later change supersedes it;
+-- the pass always reads the current target, so correctness never depends on its revision.
+CREATE TABLE IF NOT EXISTS default_plan_reconciliations (
+	id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	catalog_revision_id BIGINT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'superseded')),
+	after_customer_id UUID,
+	customers_checked INTEGER NOT NULL DEFAULT 0 CHECK (customers_checked >= 0),
+	grants_changed INTEGER NOT NULL DEFAULT 0 CHECK (grants_changed >= 0),
+	attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+	next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	last_error TEXT,
+	completed_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT default_plan_reconciliations_project_revision_fk
+		FOREIGN KEY (project_id, catalog_revision_id)
+		REFERENCES catalog_revisions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT default_plan_reconciliations_completion_check CHECK (
+		(status = 'completed') = (completed_at IS NOT NULL)
+	)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_default_plan_reconciliations_open
+	ON default_plan_reconciliations (project_id)
+	WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_billing_default_plan_reconciliations_due
+	ON default_plan_reconciliations (next_attempt_at, id)
+	WHERE status = 'pending';
 
 CREATE INDEX IF NOT EXISTS idx_billing_usage_events_customer_feature_time
 	ON usage_events (project_id, customer_id, meter_feature_id, recorded_at DESC, id DESC);

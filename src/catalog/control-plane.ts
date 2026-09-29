@@ -11,6 +11,11 @@ import { type BillingProvider, isBillingProvider } from "../billing/types";
 import { RepositoryModule } from "../db/repository/base";
 import { heldBasePlanSql } from "../db/repository/base-plan-sources";
 import { controlWindowKey } from "../db/repository/controls-enterprise";
+import {
+	type DefaultPlanTarget,
+	readDefaultPlanTarget,
+	sameDefaultPlanTarget,
+} from "../db/repository/default-plan-grants";
 import { executeOne, executeRows, jsonb } from "../db/repository/query";
 import type { QueryExecutor, TransactionalQueryExecutor } from "../db/repository/types";
 import type { ProjectInstanceContext } from "../projects/context";
@@ -247,6 +252,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 
 			await validateCatalogLifecycle(tx, projectState.id, catalog, this.capabilities);
 			const impact = await calculateImpact(tx, projectState.id, catalog, this.capabilities);
+			const previousDefault = await readDefaultPlanTarget(tx, projectState.id);
 			const currentCatalog = await readCurrentCatalogIntent(tx, projectState.id, this.capabilities);
 			const changedCatalog = {
 				...catalog,
@@ -351,6 +357,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 					RETURNING id
 				`,
 			);
+			await scheduleDefaultPlanPass(tx, projectState.id, String(revision.id), previousDefault);
 			await executeOne(
 				tx,
 				drizzleSql`
@@ -1407,6 +1414,37 @@ async function publishPlans(
 		);
 	}
 	return { versionIds, priceComponentIds };
+}
+
+/**
+ * Queues one pass over the project's customers when the publish changed the default plan: its plan,
+ * version or keys, or whether there is one. Accounts are moved in batches by the worker, never in
+ * the publish transaction; a later change supersedes a pass still pending.
+ */
+async function scheduleDefaultPlanPass(
+	executor: QueryExecutor,
+	projectId: string,
+	revisionId: string,
+	previous: DefaultPlanTarget | null,
+): Promise<void> {
+	const next = await readDefaultPlanTarget(executor, projectId);
+	if (sameDefaultPlanTarget(previous, next)) return;
+	await executeRows(
+		executor,
+		drizzleSql`
+			UPDATE default_plan_reconciliations
+			SET status = 'superseded', updated_at = now()
+			WHERE project_id = ${projectId} AND status = 'pending'
+		`,
+	);
+	await executeOne(
+		executor,
+		drizzleSql`
+			INSERT INTO default_plan_reconciliations (project_id, catalog_revision_id)
+			VALUES (${projectId}, ${revisionId}::bigint)
+			RETURNING id
+		`,
+	);
 }
 
 /** Records the revision's default plan; the plan row exists once its plans are published. */

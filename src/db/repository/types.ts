@@ -84,6 +84,8 @@ export interface ExpiredSubscriptionReconciliationResult {
 export interface PlanGrantReconciliationResult {
 	expiredPlanGrants: number;
 	planGrantPeriods: number;
+	/** Default-plan grants started, moved, ended or superseded by publish-triggered passes. */
+	defaultPlanGrants: number;
 }
 
 export interface TrialEndingNoticeResult {

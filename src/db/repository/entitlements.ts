@@ -7,6 +7,7 @@ import type {
 	ProjectionSyncReason,
 } from "../../billing/types";
 import type { CadenceUnit } from "../../shared/cadence";
+import { reconcileDefaultPlanGrant } from "./default-plan-grants";
 import {
 	meterLimitWindowBounds,
 	optionalStoredCadence,
@@ -76,9 +77,14 @@ export async function readEntitlementRows(
 			e.active AND (
 				e.source_purchase_id IS NOT NULL
 				OR (
-					(e.source_subscription_id IS NOT NULL OR e.source_plan_grant_id IS NOT NULL)
+					e.source_subscription_id IS NOT NULL
 					AND e.expires_at IS NOT NULL
 					AND e.expires_at > now()
+				)
+				-- A default-plan grant has no end; a trial's ends when its expiry passes.
+				OR (
+					e.source_plan_grant_id IS NOT NULL
+					AND (e.expires_at IS NULL OR e.expires_at > now())
 				)
 			) AS active,
 			e.expires_at,
@@ -206,6 +212,9 @@ export async function recomputeCustomerEntitlements(
 	if (customer === null) {
 		return { billingAccountId, generatedAt: new Date().toISOString(), entitlements: [] };
 	}
+	// Every place a base plan starts or ends recomputes here, so the default plan follows it:
+	// an account that loses its last base plan falls back to it without a caller action.
+	await reconcileDefaultPlanGrant(executor, projectId, customer.id);
 
 	await executeRows(
 		executor,
@@ -309,7 +318,7 @@ export async function recomputeCustomerEntitlements(
 			WHERE g.customer_id = ${customer.id}
 				AND g.project_id = ${projectId}
 				AND g.status = 'active'
-				AND g.ends_at > now()
+				AND (g.ends_at IS NULL OR g.ends_at > now())
 		),
 		ranked_sources AS (
 			SELECT
@@ -614,7 +623,7 @@ export async function readProjectionBalances(
 				WHERE g.project_id = ${projectId}
 					AND g.customer_id = ${customerId}
 					AND g.status = 'active'
-					AND g.ends_at > now()
+					AND (g.ends_at IS NULL OR g.ends_at > now())
 					AND pi.item_kind = 'meter_limit'
 			) sources
 			ORDER BY feature_id, plan_grant, sort_at, sort_id
@@ -642,24 +651,15 @@ export async function readProjectionBalances(
 							VALUES ${drizzleSql.join(
 								limits.map((limit) => {
 									const reset = storedCadence(limit.reset_interval, limit.reset_interval_count);
-									const bounds =
-										limit.plan_grant && limit.period_end_at !== null
-											? planGrantWindowBounds(
-													limit.period_start_at,
-													limit.period_end_at,
-													reset,
-													now,
-												)
-											: meterLimitWindowBounds(
-													limit.period_start_at,
-													limit.period_end_at,
-													reset,
-													now,
-													optionalStoredCadence(
-														limit.billing_interval,
-														limit.billing_interval_count,
-													),
-												);
+									const bounds = limit.plan_grant
+										? planGrantWindowBounds(limit.period_start_at, limit.period_end_at, reset, now)
+										: meterLimitWindowBounds(
+												limit.period_start_at,
+												limit.period_end_at,
+												reset,
+												now,
+												optionalStoredCadence(limit.billing_interval, limit.billing_interval_count),
+											);
 									return drizzleSql`(
 										${String(limit.feature_id)}::bigint,
 										${String(limit.limit_quantity)}::numeric,
