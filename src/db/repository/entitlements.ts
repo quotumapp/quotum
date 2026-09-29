@@ -244,7 +244,7 @@ export async function recomputeCustomerEntitlements(
 		FROM customers c
 		WHERE c.project_id = ${projectId}
 			AND c.billing_account_id = ${billingAccountId}
-		FOR UPDATE
+		FOR NO KEY UPDATE
 	`,
 	);
 	if (customer === null) {

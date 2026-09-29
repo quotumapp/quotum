@@ -172,7 +172,7 @@ export async function materializeDueSubscriptionAllocations(
 			SELECT c.project_id, c.id FROM customers c
 			JOIN (SELECT DISTINCT project_id, customer_id FROM candidates) candidate
 				ON candidate.project_id = c.project_id AND candidate.customer_id = c.id
-			ORDER BY c.id FOR UPDATE OF c
+			ORDER BY c.id FOR NO KEY UPDATE OF c
 		)
 		SELECT s.project_id, s.id, s.customer_id FROM subscriptions s
 		JOIN candidates candidate ON candidate.project_id = s.project_id AND candidate.id = s.id

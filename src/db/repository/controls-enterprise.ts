@@ -73,7 +73,7 @@ export class ControlsEnterpriseRepository
 			const normalized = await normalizeControlInput(tx, projectId, input);
 			await executeOne(
 				tx,
-				drizzleSql`SELECT id FROM customers WHERE id = ${customer.id} FOR UPDATE`,
+				drizzleSql`SELECT id FROM customers WHERE id = ${customer.id} FOR NO KEY UPDATE`,
 			);
 			const revisionRow = await executeOne<{ revision: number }>(
 				tx,
@@ -709,7 +709,7 @@ export class ControlsEnterpriseRepository
 				drizzleSql`
 					SELECT id FROM customers
 					WHERE project_id = ${context.projectId} AND id = ${context.customerId}
-					FOR UPDATE
+					FOR NO KEY UPDATE
 				`,
 			);
 			await executeOne(
@@ -1392,7 +1392,7 @@ async function refreshLicensePools(
 		drizzleSql`
 			SELECT id FROM customers
 			WHERE project_id = ${projectId} AND id = ${customerId}
-			FOR UPDATE
+			FOR NO KEY UPDATE
 		`,
 	);
 	await executeRows(

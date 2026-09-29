@@ -658,4 +658,49 @@ localDescribe("default plan", () => {
 		expect(await grants("racer")).toHaveLength(1);
 		expect(await balance("racer")).toMatchObject({ available: "98" });
 	});
+
+	it("recomputes an account's plan while a write holds a foreign-key lock on its customer", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		await consume("busy", 1, "busy-start");
+		let finishWrite = () => {};
+		const writeHeld = new Promise<void>((resolve) => {
+			finishWrite = resolve;
+		});
+		let lockTaken = () => {};
+		const locked = new Promise<void>((resolve) => {
+			lockTaken = resolve;
+		});
+		// The key-share lock every insert referencing the customer takes through its foreign key.
+		const write = context.sql.begin(async (tx) => {
+			await tx`SELECT id FROM customers WHERE billing_account_id = 'busy' FOR KEY SHARE`;
+			lockTaken();
+			await writeHeld;
+		});
+		await locked;
+		try {
+			const outcome = await Promise.race([
+				context.repository.recomputeCustomerEntitlements(project, "busy").then(() => "done"),
+				Bun.sleep(3000).then(() => "blocked"),
+			]);
+			expect(outcome).toBe("done");
+		} finally {
+			finishWrite();
+			await write;
+		}
+	});
+
+	it("catches an account up to a new version while parallel writes spend, without deadlocking", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		await consume("catcher", 1, "catch-up-start");
+		// The pass has not reached the account, so each write below catches it up first.
+		await publish(catalog(freePlan(2, "100")));
+
+		const results = await Promise.all(
+			Array.from({ length: 8 }, (_, index) => consume("catcher", 1, `catch-up-${index}`)),
+		);
+
+		expect(results.every((result) => result.allowed)).toBe(true);
+		expect(await grants("catcher")).toMatchObject([{ status: "active", plan_version: 2 }]);
+		expect(await balance("catcher")).toMatchObject({ consumed: "9", available: "91" });
+	});
 });
