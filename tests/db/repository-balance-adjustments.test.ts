@@ -188,6 +188,7 @@ describe("operator grants", () => {
 						revocation_request_hash: null,
 					},
 				],
+				[],
 				[{ id: "17", reversed_quantity: "5.000000000", expired: false }],
 				[{ reversed_quantity: "15.000000000" }],
 				[{ id: "grant-id" }],
@@ -215,11 +216,13 @@ describe("operator grants", () => {
 		});
 
 		database.assertConsumed();
-		const [lockCustomer, lockGrant, lockAllocation, reverse, record] = database.queries;
+		const [lockCustomer, lockGrant, keyHolder, lockAllocation, reverse, record] = database.queries;
 		expect(lockCustomer).toMatch(
 			/FROM customers\s+WHERE project_id = \$1 AND billing_account_id = \$2\s+FOR NO KEY UPDATE/,
 		);
 		expect(lockGrant).toMatch(/FROM operator_grants[\s\S]*FOR UPDATE/);
+		// The key is scoped to the account: another grant already revoked with it conflicts.
+		expect(keyHolder).toMatch(/revocation_idempotency_key = \$3\s+AND id <> \$4::uuid/);
 		expect(lockAllocation).toMatch(
 			/WHERE project_id = \$1 AND operator_grant_id = \$2\s+FOR UPDATE/,
 		);
@@ -228,7 +231,7 @@ describe("operator grants", () => {
 		);
 		expect(reverse).toContain("reversed_at = COALESCE(reversed_at, now())");
 		expect(record).toContain("UPDATE operator_grants");
-		expect(database.boundParameter("revoked_quantity", 4)).toBe("10");
+		expect(database.boundParameter("revoked_quantity", 5)).toBe("10");
 		expect(result.grant).toMatchObject({
 			status: "revoked",
 			availableQuantity: "0",
@@ -248,6 +251,7 @@ describe("operator grants", () => {
 						revocation_request_hash: null,
 					},
 				],
+				[],
 				[{ id: "17", reversed_quantity: "0.000000000", expired: true }],
 				[{ id: "grant-id" }],
 				[{ id: 1 }],
@@ -268,7 +272,7 @@ describe("operator grants", () => {
 		expect(database.queries.some((query) => query.includes("UPDATE balance_allocations"))).toBe(
 			false,
 		);
-		expect(database.boundParameter("revoked_quantity", 3)).toBe("0");
+		expect(database.boundParameter("revoked_quantity", 4)).toBe("0");
 	});
 
 	it("answers a repeated revocation by key: replay, conflict, or already revoked", async () => {
@@ -287,20 +291,24 @@ describe("operator grants", () => {
 		};
 
 		await expect(
-			repository(new FakeDatabase([[customer], [revoked]], { strict: true })).revokeOperatorGrant(
-				project,
-				input,
-			),
+			repository(
+				new FakeDatabase([[customer], [revoked], []], { strict: true }),
+			).revokeOperatorGrant(project, input),
 		).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
 		await expect(
-			repository(new FakeDatabase([[customer], [revoked]], { strict: true })).revokeOperatorGrant(
-				project,
-				{ ...input, idempotencyKey: "revoke-2" },
-			),
+			repository(
+				new FakeDatabase([[customer], [revoked], []], { strict: true }),
+			).revokeOperatorGrant(project, { ...input, idempotencyKey: "revoke-2" }),
 		).rejects.toMatchObject({ code: "OPERATOR_GRANT_ALREADY_REVOKED", status: 409 });
 		await expect(
 			repository(new FakeDatabase([[]], { strict: true })).revokeOperatorGrant(project, input),
 		).rejects.toMatchObject({ code: "OPERATOR_GRANT_NOT_FOUND", status: 404 });
+		const unrevoked = { ...revoked, revoked_at: null, revocation_idempotency_key: null };
+		await expect(
+			repository(
+				new FakeDatabase([[customer], [unrevoked], [{ id: "other-grant" }]], { strict: true }),
+			).revokeOperatorGrant(project, input),
+		).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT", status: 409 });
 	});
 });
 

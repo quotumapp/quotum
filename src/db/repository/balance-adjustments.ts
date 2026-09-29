@@ -211,6 +211,25 @@ export class BalanceAdjustmentRepository
 				`,
 			);
 			if (grant === null) throw balanceAdjustmentError("OPERATOR_GRANT_NOT_FOUND");
+			// Revocation keys are scoped to the billing account, like grant keys: a key another grant
+			// of this account already used conflicts instead of revoking a second grant.
+			const keyHolder = await executeOne<{ id: string }>(
+				tx,
+				drizzleSql`
+					SELECT id FROM operator_grants
+					WHERE project_id = ${projectId}
+						AND customer_id = ${customer.id}
+						AND revocation_idempotency_key = ${input.idempotencyKey}
+						AND id <> ${grant.id}::uuid
+					LIMIT 1
+				`,
+			);
+			if (keyHolder !== null) {
+				throw new PersistenceConflictError(
+					"Idempotency key was reused with a different revocation",
+					"IDEMPOTENCY_CONFLICT",
+				);
+			}
 			if (grant.revoked_at !== null) {
 				if (grant.revocation_idempotency_key !== input.idempotencyKey) {
 					throw balanceAdjustmentError("OPERATOR_GRANT_ALREADY_REVOKED");
