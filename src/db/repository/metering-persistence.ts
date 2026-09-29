@@ -2639,6 +2639,21 @@ export async function releaseReservationHolds(
 	reservation: ReservationRow,
 	status: "released" | "expired",
 ): Promise<void> {
+	// Lock order matches consume, reserve and confirm: allocation rows first, in spend order, then
+	// the customer's controls lock. Taking the controls lock first deadlocks against them.
+	await executeRows(
+		executor,
+		drizzleSql`
+			SELECT allocation.id
+			FROM balance_allocations allocation
+			JOIN reservation_allocations held
+				ON held.project_id = allocation.project_id AND held.allocation_id = allocation.id
+			WHERE allocation.project_id = ${reservation.project_id}
+				AND held.reservation_id = ${reservation.id}
+			ORDER BY allocation.expires_at ASC NULLS LAST, allocation.created_at ASC, allocation.id ASC
+			FOR UPDATE OF allocation
+		`,
+	);
 	await releaseControlHolds(executor, reservation.project_id, reservation.id);
 	const reservationRows = await lockReservationAllocations(
 		executor,

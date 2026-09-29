@@ -1660,6 +1660,91 @@ localDescribe("authoritative metering flows", () => {
 		`;
 		expect(state).toEqual({ reservation_status: "expired", rollup_status: "closed" });
 	});
+
+	it("releases reservations while other requests spend from the same allocations, without deadlocking", async () => {
+		const project = integrationProjectContext();
+		const billingAccountId = "release-race";
+		// Two allocations whose id order differs from their spend order.
+		await context.repository.grantAllocation(project, {
+			billingAccountId,
+			featureKey: "ai_credits",
+			quantity: "1000",
+			sourceKind: "credit_grant",
+			sourceKey: "release-race-late",
+		});
+		await context.repository.grantAllocation(project, {
+			billingAccountId,
+			featureKey: "ai_credits",
+			quantity: "1000",
+			sourceKind: "credit_grant",
+			sourceKey: "release-race-early",
+			expiresAt: new Date(Date.now() + 86_400_000),
+		});
+		const holds = await Promise.all(
+			Array.from({ length: 10 }, (_, index) =>
+				context.repository.reserveUsage(project, {
+					billingAccountId,
+					featureKey: "model_tokens",
+					quantity: "100",
+					idempotencyKey: `release-race-hold-${index}`,
+					expiresInSeconds: 600,
+				}),
+			),
+		);
+
+		const results = await Promise.allSettled([
+			...holds.map((hold, index) =>
+				context.repository.releaseUsageReservation(project, {
+					billingAccountId,
+					reservationId: hold.reservationId ?? "",
+					idempotencyKey: `release-race-release-${index}`,
+				}),
+			),
+			...Array.from({ length: 10 }, (_, index) =>
+				context.repository.consumeUsage(project, {
+					billingAccountId,
+					featureKey: "model_tokens",
+					quantity: "100",
+					idempotencyKey: `release-race-spend-${index}`,
+				}),
+			),
+		]);
+
+		expect(results.filter((result) => result.status === "rejected")).toEqual([]);
+
+		// Reservations settled while others are made, confirmed and released at once.
+		const loops = await Promise.allSettled(
+			Array.from({ length: 30 }, async (_, index) => {
+				const hold = await context.repository.reserveUsage(project, {
+					billingAccountId,
+					featureKey: "model_tokens",
+					quantity: "100",
+					idempotencyKey: `release-race-loop-hold-${index}`,
+					expiresInSeconds: 600,
+				});
+				const reservationId = hold.reservationId ?? "";
+				return index % 2 === 0
+					? await context.repository.confirmUsageReservation(project, {
+							billingAccountId,
+							reservationId,
+							quantity: "100",
+							idempotencyKey: `release-race-loop-confirm-${index}`,
+						})
+					: await context.repository.releaseUsageReservation(project, {
+							billingAccountId,
+							reservationId,
+							idempotencyKey: `release-race-loop-release-${index}`,
+						});
+			}),
+		);
+		expect(loops.filter((result) => result.status === "rejected")).toEqual([]);
+		const balance = await context.repository.getMeteringBalance(
+			project,
+			billingAccountId,
+			"ai_credits",
+		);
+		expect(balance.held).toBe("0");
+	});
 });
 
 async function seedMeteringCatalog(sql: SQL): Promise<void> {
