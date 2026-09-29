@@ -291,6 +291,39 @@ localDescribe("default plan", () => {
 		expect(await balance("trial_user")).toMatchObject({ available: "99" });
 	});
 
+	it("opens the current window on a confirmation, so its balance counts what the account holds", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		await consume("confirmer", 1, "confirm-start");
+		const hold = await context.repository.reserveUsage(project, {
+			billingAccountId: "confirmer",
+			featureKey: "model_tokens",
+			quantity: "200",
+			idempotencyKey: "confirm-hold",
+			expiresInSeconds: 300,
+		});
+		if (hold.reservationId === null) throw new Error("Expected a reservation");
+		// The trial's allowance window has not been opened by any write yet.
+		await context.repository.planGrants.startTrial(project, {
+			billingAccountId: "confirmer",
+			planKey: "premium",
+			durationDays: 7,
+			metadata: {},
+			idempotencyKey: "confirm-trial",
+			actor: null,
+		});
+
+		const confirmed = await context.repository.confirmUsageReservation(project, {
+			billingAccountId: "confirmer",
+			reservationId: hold.reservationId,
+			quantity: "200",
+			idempotencyKey: "confirm-after-trial",
+		});
+
+		const read = await balance("confirmer");
+		expect(Number(read.available)).toBeGreaterThan(0);
+		expect(confirmed.balance?.available).toBe(read.available);
+	});
+
 	it("backfills existing accounts in slices and leaves paying accounts alone", async () => {
 		await publish(catalog(null));
 		await context.sql`
