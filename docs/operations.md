@@ -39,7 +39,7 @@ The current schema is initialized from these ordered baseline files:
 | --- | --- |
 | [001_platform.sql](../migrations/001_platform.sql) | Organizations, projects, instances, credentials and customer connections |
 | [002_billing_core.sql](../migrations/002_billing_core.sql) | Billing accounts, purchases, subscriptions, entitlements and provider/projection jobs |
-| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup, promotions, plan grants, operator grants and administrative debits |
+| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup, promotions, plan grants, operator grants, administrative debits and default plans |
 | [004_merchant.sql](../migrations/004_merchant.sql) | Merchant identity, authentication, sessions, membership, audit and connection OAuth state |
 <!-- migration-inventory:end -->
 
@@ -224,6 +224,15 @@ still enforces checks:
 The backfilled grants keep their allocations' original source keys and can be revoked like any
 other. An older image cannot read the new baselines, so a rollback restores the pre-upgrade backup
 and loses grants and debits made since.
+
+### Default plan
+
+The metering baseline adds the `catalog_default_plans` table, one row per published revision that
+marks a default plan. No earlier revision has one, so the move needs no manual SQL: follow steps 1,
+2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity). Afterwards
+`SELECT count(*) FROM catalog_default_plans;` returns 0 until a catalog marks a default plan. Stored
+catalog intents without the marker keep their intent hash, so a preview taken before the upgrade
+still publishes.
 
 ### Reset cadence
 

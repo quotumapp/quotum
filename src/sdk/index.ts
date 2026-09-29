@@ -44,7 +44,11 @@ export type {
 	UsageOperationLookupResult,
 	UsageOperationReceipt,
 } from "../billing/usage-operations";
-export type { CatalogIntent, CatalogPreview } from "../catalog/types";
+export type {
+	CatalogDefaultPlanIntent,
+	CatalogIntent,
+	CatalogPreview,
+} from "../catalog/types";
 export type {
 	BillingAccountAvailableActions,
 	ProviderConnectionSummary,

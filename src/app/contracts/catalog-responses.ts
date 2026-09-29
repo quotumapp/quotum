@@ -196,6 +196,9 @@ export const getV1AdminCatalogResponse200Schema = z.object({
 				retiredFeatureKeys: z.array(z.string()).optional(),
 				retiredPlanKeys: z.array(z.string()).optional(),
 				retiredTopupKeys: z.array(z.string()).optional(),
+				defaultPlan: z
+					.object({ planKey: z.string(), entitlementKeys: z.array(z.string()) })
+					.optional(),
 			}),
 		]),
 	}),
@@ -220,6 +223,7 @@ export const postV1AdminCatalogPreviewResponse200Schema = z.object({
 			topupsRetired: z.number(),
 			providerBindingsValidated: z.number(),
 			existingSubscriptionsGrandfathered: z.number(),
+			defaultPlanAccounts: z.number(),
 		}),
 		providerCompatibility: z.array(CatalogProviderCompatibilitySchema),
 	}),
@@ -244,6 +248,7 @@ export const postV1AdminCatalogPublishResponse200Schema = z.object({
 			topupsRetired: z.number(),
 			providerBindingsValidated: z.number(),
 			existingSubscriptionsGrandfathered: z.number(),
+			defaultPlanAccounts: z.number(),
 		}),
 	}),
 });

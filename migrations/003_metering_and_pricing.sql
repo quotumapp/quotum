@@ -2524,6 +2524,28 @@ CREATE TABLE IF NOT EXISTS administrative_debit_allocations (
 CREATE INDEX IF NOT EXISTS idx_billing_administrative_debit_allocations_allocation
 	ON administrative_debit_allocations (project_id, allocation_id);
 
+-- The plan a published revision marks as the default, at most one per revision. An account without
+-- a paid base plan holds it with no provider, like a plan grant. Its entitlement keys are declared
+-- with the marker, because an unpriced plan has no provider product to take them from.
+CREATE TABLE IF NOT EXISTS catalog_default_plans (
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	catalog_revision_id BIGINT NOT NULL,
+	plan_id BIGINT NOT NULL,
+	entitlement_keys TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT catalog_default_plans_pkey PRIMARY KEY (project_id, catalog_revision_id),
+	CONSTRAINT catalog_default_plans_project_revision_fk FOREIGN KEY (project_id, catalog_revision_id)
+		REFERENCES catalog_revisions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT catalog_default_plans_project_plan_fk FOREIGN KEY (project_id, plan_id)
+		REFERENCES plans(project_id, id),
+	CONSTRAINT catalog_default_plans_entitlement_keys_check CHECK (
+		cardinality(entitlement_keys) <= 100 AND array_position(entitlement_keys, NULL) IS NULL
+	)
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_catalog_default_plans_plan
+	ON catalog_default_plans (project_id, plan_id);
+
 CREATE INDEX IF NOT EXISTS idx_billing_usage_events_customer_feature_time
 	ON usage_events (project_id, customer_id, meter_feature_id, recorded_at DESC, id DESC);
 
