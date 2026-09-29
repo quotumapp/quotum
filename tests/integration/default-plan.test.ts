@@ -161,7 +161,7 @@ async function seedCustomers(accounts: string[]): Promise<void> {
 	await context.sql`
 		INSERT INTO customers (project_id, billing_account_id)
 		SELECT id, account FROM projects, unnest(string_to_array(${accounts.join(",")}, ',')) AS account
-		WHERE key = 'voysee'
+		WHERE key = 'acme'
 	`;
 }
 
@@ -296,7 +296,7 @@ localDescribe("default plan", () => {
 		await context.sql`
 			INSERT INTO customers (project_id, billing_account_id)
 			SELECT id, account FROM projects, unnest(ARRAY['a_user', 'b_user', 'c_user']) AS account
-			WHERE key = 'voysee'
+			WHERE key = 'acme'
 		`;
 		await context.repository.grantAllocation(project, {
 			billingAccountId: "paid_user",

@@ -153,14 +153,14 @@ localDescribe("Provider capability reads integration", () => {
 		await seedAccountSubscriptions();
 		await context.sql`
 			INSERT INTO customers (project_id, billing_account_id)
-			SELECT id, ${account} FROM projects WHERE key = 'wiseley'
+			SELECT id, ${account} FROM projects WHERE key = 'globex'
 		`;
 		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
 
 		const response = await testRequest(
 			fixture.app,
 			`/v1/billing-accounts/${account}/available-actions`,
-			{ headers: fixture.authHeaders("wiseley") },
+			{ headers: fixture.authHeaders("globex") },
 		);
 
 		expect(response.status).toBe(200);
@@ -288,7 +288,7 @@ async function seedAccountSubscriptions(): Promise<{
 			variant.cancel_at_period_end, source.plan_version_id, source.catalog_revision_id,
 			now() - variant.age
 		FROM subscriptions source
-		JOIN projects project ON project.id = source.project_id AND project.key = 'voysee'
+		JOIN projects project ON project.id = source.project_id AND project.key = 'acme'
 		CROSS JOIN (VALUES
 			('sub_actions_grace', 'grace_period', now() + interval '10 days', false, interval '20 minutes'),
 			('sub_actions_retry', 'billing_retry', now() + interval '10 days', true, interval '40 minutes'),
@@ -311,7 +311,7 @@ async function seedAccountSubscriptions(): Promise<{
 			'upgrade', 'period_end', subscription.current_period_end, 'none', variant.status,
 			variant.applied_at, concat('actions:', variant.status), repeat('c', 64)
 		FROM subscriptions subscription
-		JOIN projects project ON project.id = subscription.project_id AND project.key = 'voysee'
+		JOIN projects project ON project.id = subscription.project_id AND project.key = 'acme'
 		JOIN plans plan ON plan.project_id = project.id AND plan.key = 'migration-plan'
 		JOIN plan_versions from_version
 			ON from_version.project_id = plan.project_id AND from_version.plan_id = plan.id

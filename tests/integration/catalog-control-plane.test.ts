@@ -126,7 +126,7 @@ localDescribe("catalog control plane", () => {
 				(SELECT count(*)::integer FROM catalog_audit_log cal WHERE cal.project_id = p.id) AS audits
 			FROM projects p
 			JOIN catalog_revisions cr ON cr.id = p.published_catalog_revision_id
-			WHERE p.key = 'voysee'
+			WHERE p.key = 'acme'
 		`;
 		expect(state).toEqual({
 			revision: 1,
@@ -384,7 +384,7 @@ localDescribe("catalog control plane", () => {
 				(SELECT count(*)::integer FROM catalog_revisions revision
 					WHERE revision.project_id = p.id) AS revisions
 			FROM projects p
-			WHERE p.key = 'voysee'
+			WHERE p.key = 'acme'
 		`;
 		expect(state).toEqual({ drafts: 0, revisions: 0 });
 
@@ -405,7 +405,7 @@ localDescribe("catalog control plane", () => {
 		await publishCatalog(app, headers, null, firstPreview.previewToken, firstIntent, errors);
 		await context.sql`
 			INSERT INTO customers (project_id, billing_account_id)
-			SELECT id, 'retirement-account' FROM projects WHERE key = 'voysee'
+			SELECT id, 'retirement-account' FROM projects WHERE key = 'acme'
 		`;
 		await context.sql`
 			INSERT INTO subscriptions (
@@ -426,7 +426,7 @@ localDescribe("catalog control plane", () => {
 				AND store.provider = 'stripe'
 			JOIN plans plan ON plan.project_id = project.id AND plan.key = 'premium'
 			JOIN plan_versions version ON version.id = plan.active_version_id
-			WHERE project.key = 'voysee' AND customer.billing_account_id = 'retirement-account'
+			WHERE project.key = 'acme' AND customer.billing_account_id = 'retirement-account'
 		`;
 
 		const omittedPlan = { ...firstIntent, plans: [] };
@@ -466,7 +466,7 @@ localDescribe("catalog control plane", () => {
 			JOIN subscriptions subscription
 				ON subscription.project_id = plan.project_id
 				AND subscription.external_subscription_id = 'sub_retired_plan'
-			WHERE project.key = 'voysee' AND plan.key = 'premium'
+			WHERE project.key = 'acme' AND plan.key = 'premium'
 		`;
 		expect(state.active).toBe(false);
 		expect(state.subscription_plan_version_id).toBe(state.active_version_id);
@@ -478,7 +478,7 @@ localDescribe("catalog control plane", () => {
 			retiredPlanKeys: ["premium"],
 		});
 		const publicCatalog = await testRequest(app, "/v1/catalog?provider=stripe&channel=web", {
-			headers: authHeaders("voysee"),
+			headers: authHeaders("acme"),
 		});
 		expect(publicCatalog.status).toBe(200);
 		expect((await publicCatalog.json()).data.plans).toEqual([]);
@@ -599,7 +599,7 @@ localDescribe("catalog control plane", () => {
 		await context.sql`
 			INSERT INTO products (project_id, key, entitlement_key, credit_amount, name, type, active)
 			SELECT id, 'pro_monthly', 'pro', 0, 'Pro Monthly', 'subscription', true
-			FROM projects WHERE key = 'voysee'
+			FROM projects WHERE key = 'acme'
 		`;
 		await context.sql`
 			INSERT INTO store_products (
@@ -610,7 +610,7 @@ localDescribe("catalog control plane", () => {
 				'month', 'usd', 1999, true
 			FROM projects project
 			JOIN products product ON product.project_id = project.id AND product.key = 'pro_monthly'
-			WHERE project.key = 'voysee'
+			WHERE project.key = 'acme'
 		`;
 		const thirdIntent = {
 			...secondIntent,
@@ -685,12 +685,12 @@ localDescribe("catalog control plane", () => {
 				SELECT DISTINCT version.billing_interval, version.billing_interval_count
 				FROM plan_versions version
 				JOIN projects project ON project.id = version.project_id
-				WHERE project.key = 'voysee'
+				WHERE project.key = 'acme'
 			`;
 		expect(versions).toEqual([{ billing_interval: "quarter", billing_interval_count: 1 }]);
 
 		const publicCatalog = await testRequest(app, "/v1/catalog?provider=stripe&channel=web", {
-			headers: authHeaders("voysee"),
+			headers: authHeaders("acme"),
 		});
 		expect((await publicCatalog.json()).data.plans[0].components[0]).toMatchObject({
 			key: "base",
@@ -702,7 +702,7 @@ localDescribe("catalog control plane", () => {
 			"/v1/billing-accounts/quarterly-account/commercial-actions/preview",
 			{
 				method: "POST",
-				headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+				headers: { ...authHeaders("acme"), "content-type": "application/json" },
 				body: JSON.stringify({
 					intent: { kind: "checkout_plan", planKey: "pro", quantities: { seats: 5 } },
 				}),
@@ -758,7 +758,7 @@ localDescribe("catalog control plane", () => {
 				pc.unit_amount_minor::integer, pc.billing_units::text
 			FROM price_components pc
 			JOIN projects project ON project.id = pc.project_id
-			WHERE project.key = 'voysee'
+			WHERE project.key = 'acme'
 			ORDER BY pc.id
 		`;
 		expect(components).toEqual([
@@ -792,7 +792,7 @@ localDescribe("catalog control plane", () => {
 			},
 		]);
 		const publicCatalog = await testRequest(app, "/v1/catalog?provider=stripe&channel=web", {
-			headers: authHeaders("voysee"),
+			headers: authHeaders("acme"),
 		});
 		expect(publicCatalog.status).toBe(200);
 		expect((await publicCatalog.json()).data).toMatchObject({
@@ -834,7 +834,7 @@ localDescribe("catalog control plane", () => {
 			"/v1/billing-accounts/phase2-account/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
-				headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+				headers: { ...authHeaders("acme"), "content-type": "application/json" },
 				body: JSON.stringify({ planKey: "pro", quantities: { seats: 5 } }),
 			},
 		);
@@ -857,7 +857,7 @@ localDescribe("catalog control plane", () => {
 		// subscription, checks out without one.
 		await context.sql`
 			INSERT INTO customers (project_id, billing_account_id)
-			SELECT id, 'phase2-trialed-account' FROM projects WHERE key = 'voysee'
+			SELECT id, 'phase2-trialed-account' FROM projects WHERE key = 'acme'
 		`;
 		await context.sql`
 			INSERT INTO subscriptions (
@@ -879,14 +879,14 @@ localDescribe("catalog control plane", () => {
 				AND store.provider = 'stripe'
 			JOIN plans plan ON plan.project_id = project.id AND plan.key = 'pro'
 			JOIN plan_versions version ON version.id = plan.active_version_id
-			WHERE project.key = 'voysee' AND customer.billing_account_id = 'phase2-trialed-account'
+			WHERE project.key = 'acme' AND customer.billing_account_id = 'phase2-trialed-account'
 		`;
 		const trialedCheckout = await testRequest(
 			app,
 			"/v1/billing-accounts/phase2-trialed-account/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
-				headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+				headers: { ...authHeaders("acme"), "content-type": "application/json" },
 				body: JSON.stringify({ planKey: "pro", quantities: { seats: 5 } }),
 			},
 		);
@@ -899,14 +899,14 @@ localDescribe("catalog control plane", () => {
 
 		await context.sql`
 			INSERT INTO customers (project_id, billing_account_id)
-			SELECT id, 'phase2-metered-account' FROM projects WHERE key = 'voysee'
+			SELECT id, 'phase2-metered-account' FROM projects WHERE key = 'acme'
 		`;
 		await context.sql`
 			INSERT INTO provider_customers (project_id, customer_id, provider, external_customer_id)
 			SELECT project.id, customer.id, 'stripe', 'cus_phase2_metered'
 			FROM projects project
 			JOIN customers customer ON customer.project_id = project.id
-			WHERE project.key = 'voysee' AND customer.billing_account_id = 'phase2-metered-account'
+			WHERE project.key = 'acme' AND customer.billing_account_id = 'phase2-metered-account'
 		`;
 		await context.sql`
 			INSERT INTO subscriptions (
@@ -928,14 +928,14 @@ localDescribe("catalog control plane", () => {
 				AND store.provider = 'stripe'
 			JOIN plans plan ON plan.project_id = project.id AND plan.key = 'pro'
 			JOIN plan_versions version ON version.id = plan.active_version_id
-			WHERE project.key = 'voysee' AND customer.billing_account_id = 'phase2-metered-account'
+			WHERE project.key = 'acme' AND customer.billing_account_id = 'phase2-metered-account'
 		`;
 		const addonCheckout = await testRequest(
 			app,
 			"/v1/billing-accounts/phase2-metered-account/providers/stripe/checkout-sessions",
 			{
 				method: "POST",
-				headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+				headers: { ...authHeaders("acme"), "content-type": "application/json" },
 				body: JSON.stringify({ planKey: "priority-support", quantities: {} }),
 			},
 		);
@@ -960,7 +960,7 @@ localDescribe("catalog control plane", () => {
 				ON subscription.project_id = project.id AND subscription.external_subscription_id = 'sub_phase2_metered'
 			JOIN price_components price
 				ON price.project_id = subscription.project_id AND price.plan_version_id = subscription.plan_version_id
-			WHERE project.key = 'voysee' AND price.component_kind IN ('base', 'licensed')
+			WHERE project.key = 'acme' AND price.component_kind IN ('base', 'licensed')
 		`;
 		const changeResponse = await testRequest(
 			app,
@@ -968,7 +968,7 @@ localDescribe("catalog control plane", () => {
 			{
 				method: "POST",
 				headers: {
-					...authHeaders("voysee"),
+					...authHeaders("acme"),
 					"content-type": "application/json",
 					"idempotency-key": "phase2-seat-change",
 				},
@@ -1016,7 +1016,7 @@ localDescribe("catalog control plane", () => {
 			SET window_start_at = now() - interval '30 days', window_end_at = now() - interval '1 second'
 			FROM customers customer, projects project
 			WHERE uw.project_id = project.id AND uw.customer_id = customer.id
-				AND customer.project_id = project.id AND project.key = 'voysee'
+				AND customer.project_id = project.id AND project.key = 'acme'
 				AND customer.billing_account_id = 'phase2-metered-account'
 		`;
 		await context.sql`
@@ -1059,7 +1059,7 @@ localDescribe("catalog control plane", () => {
 		});
 		await expect(
 			context.repository.markUsageInvoiceSucceeded(
-				integrationProjectContext("wiseley").projectInstanceId,
+				integrationProjectContext("globex").projectInstanceId,
 				claimedPeriod.jobKind,
 				claimedPeriod.jobId,
 				"in_wrong_project",
@@ -1141,7 +1141,7 @@ async function seedPhaseTwoStripePrices(period = { unit: "month", count: 1 }) {
 		await context.sql`
 			INSERT INTO products (project_id, key, entitlement_key, credit_amount, name, type, active)
 			SELECT id, ${price.key}, ${price.key}, 0, ${price.key}, 'subscription', true
-			FROM projects WHERE key = 'voysee'
+			FROM projects WHERE key = 'acme'
 		`;
 		await context.sql`
 			INSERT INTO store_products (
@@ -1152,7 +1152,7 @@ async function seedPhaseTwoStripePrices(period = { unit: "month", count: 1 }) {
 				${price.externalPriceId}, ${period.unit}, ${period.count}, 'usd', ${price.amount}, true
 			FROM projects project
 			JOIN products product ON product.project_id = project.id AND product.key = ${price.key}
-			WHERE project.key = 'voysee'
+			WHERE project.key = 'acme'
 		`;
 	}
 }
@@ -1378,7 +1378,7 @@ async function publishCatalog(
 async function seedCustomer(billingAccountId: string): Promise<void> {
 	await context.sql`
 		INSERT INTO customers (project_id, billing_account_id)
-		SELECT id, ${billingAccountId} FROM projects WHERE key = 'voysee'
+		SELECT id, ${billingAccountId} FROM projects WHERE key = 'acme'
 	`;
 }
 

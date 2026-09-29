@@ -74,7 +74,7 @@ export const aiCreditsCatalog: CatalogIntent = {
 
 export async function publishAiCreditsCatalog(
 	repository: BillingRepository,
-	projectKey: string | ProjectInstanceContext = "voysee",
+	projectKey: string | ProjectInstanceContext = "acme",
 ): Promise<void> {
 	const project =
 		typeof projectKey === "string" ? integrationProjectContext(projectKey) : projectKey;

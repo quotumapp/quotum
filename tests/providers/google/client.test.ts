@@ -15,7 +15,7 @@ const serviceAccount = {
 };
 
 const googleEnv = (overrides: Partial<GooglePlayBillingEnv> = {}): GooglePlayBillingEnv => ({
-	packageName: "com.voysee.app",
+	packageName: "com.acme.app",
 	serviceAccountJson: JSON.stringify(serviceAccount),
 	serviceAccountKeyFile: null,
 	obfuscatedAccountIdSecret: "account-link-secret",
@@ -31,7 +31,7 @@ describe("Google Play developer client", () => {
 	it("builds config from service account JSON", () => {
 		const config = buildGooglePlayConfig(googleEnv());
 
-		expect(config.packageName).toBe("com.voysee.app");
+		expect(config.packageName).toBe("com.acme.app");
 		expect(config.serviceAccountCredentials).toEqual(serviceAccount);
 		expect(config.enablePublisherMutations).toBe(true);
 	});
@@ -81,7 +81,7 @@ describe("Google Play developer client", () => {
 		expect(calls).toEqual([
 			{
 				method: "subscriptionsv2.get",
-				args: { packageName: "com.voysee.app", token: "purchase_token_1" },
+				args: { packageName: "com.acme.app", token: "purchase_token_1" },
 			},
 		]);
 	});
@@ -107,7 +107,7 @@ describe("Google Play developer client", () => {
 
 		expect(calls).toEqual([
 			{
-				packageName: "com.voysee.app",
+				packageName: "com.acme.app",
 				subscriptionId: "premium_monthly",
 				token: "purchase_token_1",
 				requestBody: { developerPayload: "gpa_account_1" },
@@ -147,12 +147,12 @@ describe("Google Play developer client", () => {
 		expect(calls).toEqual([
 			{
 				method: "productsv2.getproductpurchasev2",
-				args: { packageName: "com.voysee.app", token: "purchase_token_1" },
+				args: { packageName: "com.acme.app", token: "purchase_token_1" },
 			},
 			{
 				method: "products.acknowledge",
 				args: {
-					packageName: "com.voysee.app",
+					packageName: "com.acme.app",
 					productId: "credits_10",
 					token: "purchase_token_1",
 					requestBody: {},
@@ -161,7 +161,7 @@ describe("Google Play developer client", () => {
 			{
 				method: "products.consume",
 				args: {
-					packageName: "com.voysee.app",
+					packageName: "com.acme.app",
 					productId: "credits_10",
 					token: "purchase_token_1",
 				},

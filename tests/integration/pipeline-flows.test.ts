@@ -37,8 +37,8 @@ localDescribe("Pipeline flows integration", () => {
 	});
 
 	it("delivers an Apple verification projection through a real receiver", async () => {
-		const receiver = createLocalProjectionReceiver({ secret: "voysee-projection-secret" });
-		const env = withProjectionUrls(context.env, { voysee: receiver.url });
+		const receiver = createLocalProjectionReceiver({ secret: "acme-projection-secret" });
+		const env = withProjectionUrls(context.env, { acme: receiver.url });
 
 		try {
 			const fixture = createIntegrationApp({ env, repository: context.repository });
@@ -58,7 +58,7 @@ localDescribe("Pipeline flows integration", () => {
 			expect(receiver.requests).toHaveLength(1);
 			expect(receiver.requests[0]).toMatchObject({ bearerOk: true, signatureOk: true });
 			expect(receiver.requests[0].body).toMatchObject({
-				projectKey: "voysee",
+				projectKey: "acme",
 				billingAccountId: "integration_user",
 				reason: "purchase_verified",
 				entitlements: {
@@ -81,7 +81,7 @@ localDescribe("Pipeline flows integration", () => {
 			const entitlements = await testRequest(
 				fixture.app,
 				"/v1/billing-accounts/integration_user/entitlements",
-				{ headers: fixture.authHeaders("voysee") },
+				{ headers: fixture.authHeaders("acme") },
 			);
 			expect(entitlements.status).toBe(200);
 			expectActivePremiumSnapshot((await entitlements.json()).data, "integration_user", {
@@ -94,8 +94,8 @@ localDescribe("Pipeline flows integration", () => {
 	});
 
 	it("delivers Stripe checkout and refund projections with distinct idempotency keys", async () => {
-		const receiver = createLocalProjectionReceiver({ secret: "voysee-projection-secret" });
-		const env = withProjectionUrls(context.env, { voysee: receiver.url });
+		const receiver = createLocalProjectionReceiver({ secret: "acme-projection-secret" });
+		const env = withProjectionUrls(context.env, { acme: receiver.url });
 
 		try {
 			const checkout = createIntegrationApp({
@@ -152,8 +152,8 @@ localDescribe("Pipeline flows integration", () => {
 	});
 
 	it("replays a skipped Stripe refund event and delivers its projection", async () => {
-		const receiver = createLocalProjectionReceiver({ secret: "voysee-projection-secret" });
-		const env = withProjectionUrls(context.env, { voysee: receiver.url });
+		const receiver = createLocalProjectionReceiver({ secret: "acme-projection-secret" });
+		const env = withProjectionUrls(context.env, { acme: receiver.url });
 
 		try {
 			const skippedRefund = createIntegrationApp({
@@ -213,11 +213,11 @@ localDescribe("Pipeline flows integration", () => {
 	});
 
 	it("routes projections to each project receiver with project-specific signatures", async () => {
-		const voyseeReceiver = createLocalProjectionReceiver({ secret: "voysee-projection-secret" });
-		const wiseleyReceiver = createLocalProjectionReceiver({ secret: "wiseley-projection-secret" });
+		const acmeReceiver = createLocalProjectionReceiver({ secret: "acme-projection-secret" });
+		const globexReceiver = createLocalProjectionReceiver({ secret: "globex-projection-secret" });
 		const env = withProjectionUrls(context.env, {
-			voysee: voyseeReceiver.url,
-			wiseley: wiseleyReceiver.url,
+			acme: acmeReceiver.url,
+			globex: globexReceiver.url,
 		});
 
 		try {
@@ -225,48 +225,43 @@ localDescribe("Pipeline flows integration", () => {
 				env,
 				repository: context.repository,
 			});
-			await createGoogleConsumable(fixture, "voysee", "integration_user", "voysee_purchase_token");
-			await createGoogleConsumable(
-				fixture,
-				"wiseley",
-				"integration_user",
-				"wiseley_purchase_token",
-			);
+			await createGoogleConsumable(fixture, "acme", "integration_user", "acme_purchase_token");
+			await createGoogleConsumable(fixture, "globex", "integration_user", "globex_purchase_token");
 
 			const result = await runProjectionWorkerOnce({ env, repository: context.repository });
-			await voyseeReceiver.waitForRequests(1, 1000);
-			await wiseleyReceiver.waitForRequests(1, 1000);
+			await acmeReceiver.waitForRequests(1, 1000);
+			await globexReceiver.waitForRequests(1, 1000);
 
 			expect(result).toEqual({ claimed: 2, succeeded: 2, failed: 0 });
-			expect(voyseeReceiver.requests).toHaveLength(1);
-			expect(wiseleyReceiver.requests).toHaveLength(1);
-			expect(voyseeReceiver.requests[0]).toMatchObject({
+			expect(acmeReceiver.requests).toHaveLength(1);
+			expect(globexReceiver.requests).toHaveLength(1);
+			expect(acmeReceiver.requests[0]).toMatchObject({
 				bearerOk: true,
 				signatureOk: true,
 			});
-			expect(wiseleyReceiver.requests[0]).toMatchObject({
+			expect(globexReceiver.requests[0]).toMatchObject({
 				bearerOk: true,
 				signatureOk: true,
 			});
-			expect(voyseeReceiver.requests[0].body.projectKey).toBe("voysee");
-			expect(voyseeReceiver.requests[0].body.billingAccountId).toBe("integration_user");
-			expect(wiseleyReceiver.requests[0].body.projectKey).toBe("wiseley");
-			expect(wiseleyReceiver.requests[0].body.billingAccountId).toBe("integration_user");
+			expect(acmeReceiver.requests[0].body.projectKey).toBe("acme");
+			expect(acmeReceiver.requests[0].body.billingAccountId).toBe("integration_user");
+			expect(globexReceiver.requests[0].body.projectKey).toBe("globex");
+			expect(globexReceiver.requests[0].body.billingAccountId).toBe("integration_user");
 		} finally {
-			voyseeReceiver.stop();
-			wiseleyReceiver.stop();
+			acmeReceiver.stop();
+			globexReceiver.stop();
 		}
 	});
 });
 
 function withProjectionUrls(
 	env: LocalPostgresContext["env"],
-	urls: Partial<Record<"voysee" | "wiseley", string>>,
+	urls: Partial<Record<"acme" | "globex", string>>,
 ): LocalPostgresContext["env"] {
 	return {
 		...env,
 		connectionFixtures: env.connectionFixtures.map((project) => {
-			const projectionUrl = urls[project.projectInstanceKey as "voysee" | "wiseley"];
+			const projectionUrl = urls[project.projectInstanceKey as "acme" | "globex"];
 			return projectionUrl === undefined ? project : { ...project, projectionUrl };
 		}),
 	};
@@ -278,7 +273,7 @@ async function createAppleAccountToken(
 	const response = await testRequest(
 		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
-		{ headers: fixture.authHeaders("voysee") },
+		{ headers: fixture.authHeaders("acme") },
 	);
 	const body = await response.json();
 	expect(response.status).toBe(200);
@@ -291,7 +286,7 @@ async function verifyAppleSubscription(
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...fixture.authHeaders("voysee"),
+			...fixture.authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -305,7 +300,7 @@ async function verifyAppleSubscription(
 async function postStripeWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	body: Record<string, unknown>,
-	projectKey = "voysee",
+	projectKey = "acme",
 ): Promise<Response> {
 	return await testRequest(fixture.app, `/v1/projects/${projectKey}/webhooks/stripe`, {
 		method: "POST",
@@ -323,7 +318,7 @@ async function postStripeWebhook(
 
 async function createGoogleConsumable(
 	fixture: ReturnType<typeof createIntegrationApp>,
-	projectKey: "voysee" | "wiseley",
+	projectKey: "acme" | "globex",
 	billingAccountId: string,
 	purchaseToken: string,
 ): Promise<void> {
@@ -355,7 +350,7 @@ async function createGoogleConsumable(
 
 function operatorHeaders(fixture: ReturnType<typeof createIntegrationApp>): HeadersInit {
 	return {
-		...fixture.authHeaders("voysee"),
+		...fixture.authHeaders("acme"),
 		"x-billing-operator-key": context.env.operatorApiKey ?? "",
 	};
 }

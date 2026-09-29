@@ -210,7 +210,7 @@ describe("createSentryBillingLogger", () => {
 
 		logger.error("Projection sync failed", error, {
 			worker: "projection_sync",
-			projectKey: "voysee",
+			projectKey: "acme",
 			authorizationHeader: "Bearer secret",
 		});
 
@@ -220,7 +220,7 @@ describe("createSentryBillingLogger", () => {
 				error,
 				context: {
 					worker: "projection_sync",
-					projectKey: "voysee",
+					projectKey: "acme",
 					authorizationHeader: "Bearer secret",
 				},
 			},
@@ -233,7 +233,7 @@ describe("createSentryBillingLogger", () => {
 					"billing.category": "worker",
 					"error.message": "database unavailable",
 					"error.name": "Error",
-					projectKey: "voysee",
+					projectKey: "acme",
 					worker: "projection_sync",
 				},
 			},
@@ -245,7 +245,7 @@ describe("createSentryBillingLogger", () => {
 					"billing.category": "worker",
 					"error.message": "database unavailable",
 					"error.name": "Error",
-					projectKey: "voysee",
+					projectKey: "acme",
 					worker: "projection_sync",
 				},
 				level: "error",
@@ -260,12 +260,12 @@ describe("createSentryBillingLogger", () => {
 						"billing.category": "worker",
 						"error.message": "database unavailable",
 						"error.name": "Error",
-						projectKey: "voysee",
+						projectKey: "acme",
 						worker: "projection_sync",
 					},
 				},
 				tags: {
-					project_key: "voysee",
+					project_key: "acme",
 					worker: "projection_sync",
 				},
 			},
@@ -331,7 +331,7 @@ describe("createSentryBillingLogger", () => {
 
 		logger.warn("Google webhook retry delayed", {
 			provider: "google",
-			projectKey: "voysee",
+			projectKey: "acme",
 			billingAccountId: "user_sensitive",
 			customer_id: "customer_sensitive",
 			transactionId: "transaction_sensitive",
@@ -357,7 +357,7 @@ describe("createSentryBillingLogger", () => {
 					nested: {
 						message: "retry with Bearer [Filtered]",
 					},
-					projectKey: "voysee",
+					projectKey: "acme",
 					provider: "google",
 				},
 			},
@@ -383,7 +383,7 @@ describe("createSentryRequestScope", () => {
 			.use(requestScope.plugin)
 			.post("/v1/projects/:projectKey/webhooks/apple", () => ({ ok: true }));
 
-		const response = await dispatch(requestScope, app, "/v1/projects/voysee/webhooks/apple", {
+		const response = await dispatch(requestScope, app, "/v1/projects/acme/webhooks/apple", {
 			method: "POST",
 			headers: {
 				authorization: "Bearer secret",
@@ -398,7 +398,7 @@ describe("createSentryRequestScope", () => {
 				contexts: {
 					"billing.request": {
 						method: "POST",
-						projectKey: "voysee",
+						projectKey: "acme",
 						provider: "apple",
 						route: "/v1/projects/:projectKey/webhooks/apple",
 						service: "billing",
@@ -407,7 +407,7 @@ describe("createSentryRequestScope", () => {
 				},
 				tags: {
 					method: "POST",
-					project_key: "voysee",
+					project_key: "acme",
 					provider: "apple",
 					route: "/v1/projects/:projectKey/webhooks/apple",
 					service: "billing",

@@ -20,7 +20,7 @@ describe("BillingRepository core", () => {
 		const repository = new BillingRepository(database as never);
 
 		await expect(
-			repository.getEntitlementSnapshot(projectInstanceContext("wiseley"), "user-1"),
+			repository.getEntitlementSnapshot(projectInstanceContext("globex"), "user-1"),
 		).resolves.toEqual({
 			billingAccountId: "user-1",
 			generatedAt: expect.any(String),
@@ -42,7 +42,7 @@ describe("BillingRepository core", () => {
 		expect(queries).not.toContain("FROM billing.entitlements");
 		expect(queries).toContain("e.project_id = $1");
 		expect(database.boundParameter("e.project_id")).toBe(
-			projectInstanceContext("wiseley").projectInstanceId,
+			projectInstanceContext("globex").projectInstanceId,
 		);
 	});
 
@@ -50,7 +50,7 @@ describe("BillingRepository core", () => {
 		const database = new FakeDatabase([[{ id: "customer-id" }], []]);
 		const repository = new BillingRepository(database as never);
 
-		await repository.getEntitlementSnapshot(projectInstanceContext("wiseley"), "user-1");
+		await repository.getEntitlementSnapshot(projectInstanceContext("globex"), "user-1");
 
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("e.source_purchase_id IS NOT NULL");
@@ -63,7 +63,7 @@ describe("BillingRepository core", () => {
 		const database = new FakeDatabase([[{ id: "customer-id" }], [], [{ id: "customer-id" }], []]);
 		const repository = new BillingRepository(database as never);
 
-		await repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1");
+		await repository.recomputeCustomerEntitlements(projectInstanceContext("globex"), "user-1");
 
 		// The default-plan read that precedes it counts null-expiry subscriptions as funding.
 		const queries = database.queries.find((query) => query.includes("WITH active_sources")) ?? "";
@@ -84,7 +84,7 @@ describe("BillingRepository core", () => {
 		const repository = new BillingRepository(database as never);
 
 		const token = await repository.getOrCreateProviderCustomerToken(
-			projectInstanceContext("wiseley"),
+			projectInstanceContext("globex"),
 			"user-1",
 			"apple",
 		);
@@ -94,7 +94,7 @@ describe("BillingRepository core", () => {
 		expect(queries).not.toContain("FROM projects");
 		expect(queries).toContain("pc.project_id = $1");
 		expect(database.boundParameter("pc.project_id")).toBe(
-			projectInstanceContext("wiseley").projectInstanceId,
+			projectInstanceContext("globex").projectInstanceId,
 		);
 	});
 
@@ -118,7 +118,7 @@ describe("BillingRepository core", () => {
 			};
 			const repository = new BillingRepository(database as never);
 
-			await repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1");
+			await repository.recomputeCustomerEntitlements(projectInstanceContext("globex"), "user-1");
 
 			expect(attempts).toBe(3);
 		}
@@ -134,7 +134,7 @@ describe("BillingRepository core", () => {
 		const repository = new BillingRepository(database as never);
 
 		await expect(
-			repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1"),
+			repository.recomputeCustomerEntitlements(projectInstanceContext("globex"), "user-1"),
 		).rejects.toMatchObject({ cause: { errno: "40P01" } });
 		expect(attempts).toBe(3);
 	});
@@ -150,7 +150,7 @@ describe("BillingRepository core", () => {
 			const repository = new BillingRepository(database as never);
 
 			await expect(
-				repository.recomputeCustomerEntitlements(projectInstanceContext("wiseley"), "user-1"),
+				repository.recomputeCustomerEntitlements(projectInstanceContext("globex"), "user-1"),
 			).rejects.toMatchObject({ cause: { errno: code } });
 			expect(attempts).toBe(1);
 		}

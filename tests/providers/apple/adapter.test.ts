@@ -66,8 +66,8 @@ describe("Apple adapter wrapper", () => {
 		expect(adapter.provider).toBe("apple");
 		expect(adapter.declaration).toBe(appleCapabilities);
 		expect(adapter.accountIdentity).toBeNull();
-		expect(wrapAppleService(recordingService().service, "com.voysee.app").accountIdentity).toBe(
-			"com.voysee.app",
+		expect(wrapAppleService(recordingService().service, "com.acme.app").accountIdentity).toBe(
+			"com.acme.app",
 		);
 	});
 

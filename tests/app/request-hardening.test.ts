@@ -17,9 +17,9 @@ const env: BillingEnv = {
 	trustGatewayProjectHeader: false,
 	connectionFixtures: [
 		{
-			projectInstanceKey: "voysee",
-			projectionUrl: "https://voysee.example.com",
-			projectionSecret: "voysee-projection-secret",
+			projectInstanceKey: "acme",
+			projectionUrl: "https://acme.example.com",
+			projectionSecret: "acme-projection-secret",
 		},
 	],
 	runtimeEnvironment: "development",
@@ -63,8 +63,8 @@ function createApp(
 	const { rateLimit, ...rest } = dependencies;
 	let credentialLookups = 0;
 	const resolver = projectContextResolver({
-		contexts: [projectInstanceContext("voysee")],
-		credentials: { secret: "voysee" },
+		contexts: [projectInstanceContext("acme")],
+		credentials: { secret: "acme" },
 	});
 	const app = createBillingApp({
 		env: { ...env, rateLimit: { ...env.rateLimit, ...rateLimit } },

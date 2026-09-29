@@ -1447,7 +1447,7 @@ localDescribe("authoritative metering flows", () => {
 			JOIN plan_items item ON item.project_id = project.id
 				AND item.plan_version_id = subscription.plan_version_id
 				AND item.feature_id = feature.id AND item.item_kind = 'allocation'
-			WHERE project.key = 'voysee'
+			WHERE project.key = 'acme'
 			RETURNING id::text
 		`;
 		expect(origin?.id).toEqual(expect.any(String));
@@ -1627,7 +1627,7 @@ localDescribe("authoritative metering flows", () => {
 			)
 			SELECT id, 'maintenance:delivery', 'maintenance:request',
 				now() - INTERVAL '2 days', now() - INTERVAL '1 day'
-			FROM projects WHERE key = 'voysee'
+			FROM projects WHERE key = 'acme'
 		`;
 		await context.sql`
 			UPDATE usage_event_rollups
@@ -1665,7 +1665,7 @@ localDescribe("authoritative metering flows", () => {
 async function seedMeteringCatalog(sql: SQL): Promise<void> {
 	await sql`
 		WITH project AS (
-			SELECT id FROM projects WHERE key = 'voysee'
+			SELECT id FROM projects WHERE key = 'acme'
 		), revision AS (
 			INSERT INTO catalog_revisions (project_id, revision, status, intent_hash, created_by, published_at)
 			SELECT id, 1, 'published', repeat('a', 64), 'integration-test', now()
@@ -1749,7 +1749,7 @@ async function seedWholeCreditRate(sql: SQL): Promise<void> {
 		WITH revision AS (
 			SELECT catalog_revisions.id, catalog_revisions.project_id
 			FROM catalog_revisions
-			JOIN projects ON projects.id = catalog_revisions.project_id AND projects.key = 'voysee'
+			JOIN projects ON projects.id = catalog_revisions.project_id AND projects.key = 'acme'
 			WHERE catalog_revisions.revision = 1
 		), wallets AS (
 			INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
@@ -1782,7 +1782,7 @@ async function seedMeterLimitSubscription(
 	await sql`
 		WITH customer AS (
 			INSERT INTO customers (project_id, billing_account_id)
-			SELECT id, ${billingAccountId} FROM projects WHERE key = 'voysee'
+			SELECT id, ${billingAccountId} FROM projects WHERE key = 'acme'
 			RETURNING id, project_id
 		), entity AS (
 			INSERT INTO entities (project_id, customer_id, external_id, kind)
@@ -1833,7 +1833,7 @@ async function seedAnnualMeterLimitSubscription(
 	await sql`
 		WITH revision AS (
 			SELECT id, published_catalog_revision_id AS revision_id
-			FROM projects WHERE key = 'voysee'
+			FROM projects WHERE key = 'acme'
 		), annual_plan AS (
 			INSERT INTO plans (project_id, key, name)
 			SELECT id, 'api_annual', 'API Annual' FROM revision

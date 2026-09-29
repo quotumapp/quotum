@@ -200,7 +200,7 @@ describe("composeRuntimeApp request scopes", () => {
 			const from = (client: string) =>
 				app.fetch(
 					new Request(
-						`http://localhost/v1/projects/voysee/connections/${crypto.randomUUID()}/webhooks/paddle`,
+						`http://localhost/v1/projects/acme/connections/${crypto.randomUUID()}/webhooks/paddle`,
 						{ method: "POST", headers: { "x-forwarded-for": client }, body: "{}" },
 					),
 					{ requestIP: () => ({ address: "10.0.0.2" }) },

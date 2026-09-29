@@ -31,14 +31,14 @@ describe("local Postgres integration helper", () => {
 		expect(env.connectionFixtures).toEqual(
 			expect.arrayContaining([
 				{
-					projectInstanceKey: "voysee",
-					projectionUrl: "https://voysee.projection.integration.test",
-					projectionSecret: "voysee-projection-secret",
+					projectInstanceKey: "acme",
+					projectionUrl: "https://acme.projection.integration.test",
+					projectionSecret: "acme-projection-secret",
 				},
 				{
-					projectInstanceKey: "wiseley",
-					projectionUrl: "https://wiseley.projection.integration.test",
-					projectionSecret: "wiseley-projection-secret",
+					projectInstanceKey: "globex",
+					projectionUrl: "https://globex.projection.integration.test",
+					projectionSecret: "globex-projection-secret",
 				},
 			]),
 		);
@@ -58,7 +58,7 @@ describe("local Postgres integration helper", () => {
 				},
 				connectionFixtures: [
 					{
-						projectInstanceKey: "voysee",
+						projectInstanceKey: "acme",
 						projectionUrl: "http://localhost:1234",
 						projectionSecret: "override-secret",
 					},
@@ -70,7 +70,7 @@ describe("local Postgres integration helper", () => {
 		expect(env.rateLimit.trustProxyHeaders).toBe(true);
 		expect(env.connectionFixtures).toEqual([
 			{
-				projectInstanceKey: "voysee",
+				projectInstanceKey: "acme",
 				projectionUrl: "http://localhost:1234",
 				projectionSecret: "override-secret",
 			},

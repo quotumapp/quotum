@@ -342,7 +342,7 @@ describe("Google Play normalizer", () => {
 				messageId: "message_1",
 				notification: {
 					version: "1.0",
-					packageName: "com.voysee.app",
+					packageName: "com.acme.app",
 					eventTimeMillis: "1780185600000",
 					testNotification: { version: "1.0" },
 				},

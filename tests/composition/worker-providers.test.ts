@@ -16,15 +16,15 @@ import { createProviderRegistry } from "../../src/providers/registry";
 import { FakeStripeBillingClient } from "../../src/providers/stripe/testing/fake-client";
 import { projectInstanceContext } from "../helpers/project-context";
 
-const project = projectInstanceContext("voysee");
-const otherProject = projectInstanceContext("wiseley");
+const project = projectInstanceContext("acme");
+const otherProject = projectInstanceContext("globex");
 
 const stripeConfig: StripeBillingEnv = {
 	secretKey: "sk_test_worker_providers",
 	webhookSecret: "whsec_worker_providers",
-	checkoutSuccessUrl: "https://voysee.example.com/success?session_id={CHECKOUT_SESSION_ID}",
-	checkoutCancelUrl: "https://voysee.example.com/cancel",
-	portalReturnUrl: "https://voysee.example.com/account",
+	checkoutSuccessUrl: "https://acme.example.com/success?session_id={CHECKOUT_SESSION_ID}",
+	checkoutCancelUrl: "https://acme.example.com/cancel",
+	portalReturnUrl: "https://acme.example.com/account",
 };
 
 function recordingConnections(configured: { stripe?: StripeBillingEnv } = {}) {
@@ -132,11 +132,11 @@ describe("worker provider selectors", () => {
 		expect(typeof topup.topups?.chargeAutomatic).toBe("function");
 		expect(typeof promotions?.promotions?.syncObject).toBe("function");
 		expect(resolved).toEqual([
-			{ project: "voysee", kind: "stripe", purpose: "recovery" },
-			{ project: "voysee", kind: "stripe", purpose: "recovery" },
-			{ project: "voysee", kind: "stripe", purpose: "recovery" },
+			{ project: "acme", kind: "stripe", purpose: "recovery" },
+			{ project: "acme", kind: "stripe", purpose: "recovery" },
+			{ project: "acme", kind: "stripe", purpose: "recovery" },
 		]);
-		expect(clientsFor).toEqual(["voysee", "voysee", "voysee"]);
+		expect(clientsFor).toEqual(["acme", "acme", "acme"]);
 	});
 
 	it("keeps the not-configured texts and defers promotions without a connection", async () => {
@@ -148,13 +148,13 @@ describe("worker provider selectors", () => {
 		);
 
 		expect(await rejection(selectors.recurringBilling(project, "stripe"))).toEqual(
-			new Error("Stripe is not configured for voysee"),
+			new Error("Stripe is not configured for acme"),
 		);
 		expect(await rejection(selectors.autoTopup(otherProject, "stripe"))).toEqual(
-			new Error("Stripe is not configured for wiseley"),
+			new Error("Stripe is not configured for globex"),
 		);
 		expect(await rejection(selectors.recurringBilling(project, "apple"))).toEqual(
-			new Error("Apple StoreKit is not configured for voysee"),
+			new Error("Apple StoreKit is not configured for acme"),
 		);
 		expect(await selectors.promotionMaintenance(project, "stripe")).toBeNull();
 	});
@@ -178,7 +178,7 @@ describe("worker provider selectors", () => {
 			createProviderRegistry({
 				connections,
 				getRepository: unusedRepository,
-				overrides: { voysee: { googlePlayBillingService: googleService } },
+				overrides: { acme: { googlePlayBillingService: googleService } },
 			}),
 		);
 
@@ -211,8 +211,8 @@ describe("worker provider selectors", () => {
 			stripe: null,
 		});
 		expect(resolved).toEqual([
-			{ project: "wiseley", kind: "google", purpose: "recovery" },
-			{ project: "wiseley", kind: "google", purpose: "recovery" },
+			{ project: "globex", kind: "google", purpose: "recovery" },
+			{ project: "globex", kind: "google", purpose: "recovery" },
 		]);
 	});
 
@@ -228,7 +228,7 @@ describe("worker provider selectors", () => {
 			createProviderRegistry({
 				connections,
 				getRepository: unusedRepository,
-				overrides: { voysee: { stripeBillingService: stripeService } },
+				overrides: { acme: { stripeBillingService: stripeService } },
 			}),
 		);
 

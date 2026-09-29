@@ -27,14 +27,14 @@ export async function seedOverageSubscriber(
 	await sql`
 		INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
 		SELECT id, ${feature}, ${feature}, 'metered', 'consumable', 'call', 1
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = 'acme'
 	`;
 	await sql`
 		WITH target AS (
 			SELECT project.id AS project_id, revision.id AS revision_id
 			FROM projects project
 			JOIN catalog_revisions revision ON revision.project_id = project.id AND revision.revision = 1
-			WHERE project.key = 'voysee'
+			WHERE project.key = 'acme'
 		), plan AS (
 			INSERT INTO plans (project_id, key, name)
 			SELECT project_id, ${planKey}, ${planKey} FROM target
@@ -92,7 +92,7 @@ export async function seedOverageSubscriber(
 	await sql`
 		INSERT INTO products (project_id, key, entitlement_key, credit_amount, name, type, active)
 		SELECT id, ${productKey}, ${productKey}, 0, ${productKey}, 'subscription', true
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = 'acme'
 	`;
 	await sql`
 		INSERT INTO store_products (
@@ -103,7 +103,7 @@ export async function seedOverageSubscriber(
 			'month', 'USD', 0, true
 		FROM projects project
 		JOIN products product ON product.project_id = project.id AND product.key = ${productKey}
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 	if (provider === "apple") {
 		await sql`
@@ -115,7 +115,7 @@ export async function seedOverageSubscriber(
 				'month', 'USD', 0, true
 			FROM projects project
 			JOIN products product ON product.project_id = project.id AND product.key = ${productKey}
-			WHERE project.key = 'voysee'
+			WHERE project.key = 'acme'
 		`;
 	}
 	await sql`
@@ -135,7 +135,7 @@ export async function seedOverageSubscriber(
 		// No Stripe customer: the period materializes and is claimed, and only its load fails.
 		await sql`
 			INSERT INTO customers (project_id, billing_account_id)
-			SELECT id, ${account} FROM projects WHERE key = 'voysee'
+			SELECT id, ${account} FROM projects WHERE key = 'acme'
 			ON CONFLICT (project_id, billing_account_id) DO NOTHING
 		`;
 	} else {
@@ -161,7 +161,7 @@ export async function seedOverageSubscriber(
 		JOIN plans plan ON plan.project_id = project.id AND plan.key = ${planKey}
 		JOIN plan_versions version
 			ON version.project_id = plan.project_id AND version.id = plan.active_version_id
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 }
 

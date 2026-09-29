@@ -26,7 +26,7 @@ e2eDescribe("E2E pipeline", () => {
 
 		sql = new SQL(postgresUri, { max: 2, idleTimeout: 1, maxLifetime: 0 });
 		await resetAndSeedIntegrationData(sql);
-		receiver = createLocalProjectionReceiver({ secret: "voysee-e2e-projection-secret" });
+		receiver = createLocalProjectionReceiver({ secret: "acme-e2e-projection-secret" });
 		service = await startBillingService(
 			e2eServiceEnv({
 				postgresUri,
@@ -66,7 +66,7 @@ e2eDescribe("E2E pipeline", () => {
 			signatureOk: true,
 		});
 		expect(projectionReceiver.requests[0].body).toMatchObject({
-			projectKey: "voysee",
+			projectKey: "acme",
 			idempotencyKey: "stripe:payment:pi_e2e_checkout:projection",
 			purchase: expect.objectContaining({
 				productKey: "echo_credits_10",
@@ -226,7 +226,7 @@ function authHeaders(): HeadersInit {
 
 async function postSignedStripeWebhook(event: Record<string, unknown>): Promise<Response> {
 	const payload = JSON.stringify(event);
-	return await requireService().request("/v1/projects/voysee/webhooks/stripe", {
+	return await requireService().request("/v1/projects/acme/webhooks/stripe", {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",

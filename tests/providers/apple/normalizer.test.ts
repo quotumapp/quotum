@@ -15,7 +15,7 @@ const now = new Date("2026-05-31T00:00:00.000Z");
 const subscriptionTransaction = (
 	overrides: Partial<AppleDecodedTransactionPayload> = {},
 ): AppleDecodedTransactionPayload => ({
-	bundleId: "com.voysee.app",
+	bundleId: "com.acme.app",
 	environment: "Sandbox",
 	productId: "premium_monthly",
 	type: "AUTO_RENEWABLE_SUBSCRIPTION",
@@ -35,7 +35,7 @@ const notification = (
 	notificationType,
 	notificationUUID: "notification_1",
 	data: {
-		bundleId: "com.voysee.app",
+		bundleId: "com.acme.app",
 		environment: "Sandbox",
 	},
 	...overrides,
@@ -54,7 +54,7 @@ describe("StoreKit normalizer", () => {
 			billingAccountId: "user_1",
 			transaction: subscriptionTransaction(),
 			renewalInfo: renewalInfo(),
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -86,7 +86,7 @@ describe("StoreKit normalizer", () => {
 			renewalInfo: renewalInfo({
 				appAccountToken: "11111111-1111-1111-1111-111111111111",
 			}),
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -102,7 +102,7 @@ describe("StoreKit normalizer", () => {
 				gracePeriodExpiresDate: Date.parse("2026-06-05T00:00:00.000Z"),
 				isInBillingRetryPeriod: true,
 			}),
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -117,7 +117,7 @@ describe("StoreKit normalizer", () => {
 			notification: notification("DID_FAIL_TO_RENEW"),
 			transaction: subscriptionTransaction(),
 			renewalInfo: renewalInfo({ isInBillingRetryPeriod: true }),
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -130,7 +130,7 @@ describe("StoreKit normalizer", () => {
 			notification: notification("DID_FAIL_TO_RENEW", { subtype: "GRACE_PERIOD" }),
 			transaction: subscriptionTransaction(),
 			renewalInfo: renewalInfo({ isInBillingRetryPeriod: true }),
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -143,7 +143,7 @@ describe("StoreKit normalizer", () => {
 			notification: notification("DID_FAIL_TO_RENEW"),
 			transaction: subscriptionTransaction(),
 			renewalInfo: renewalInfo(),
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -159,7 +159,7 @@ describe("StoreKit normalizer", () => {
 					expiresDate: Date.parse("2026-05-30T00:00:00.000Z"),
 				}),
 				renewalInfo: renewalInfo({ autoRenewStatus: 0 }),
-				expectedBundleId: "com.voysee.app",
+				expectedBundleId: "com.acme.app",
 				expectedEnvironment: "sandbox",
 				now,
 			});
@@ -176,7 +176,7 @@ describe("StoreKit normalizer", () => {
 				revocationDate: Date.parse("2026-06-01T00:00:00.000Z"),
 			}),
 			renewalInfo: renewalInfo(),
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -186,7 +186,7 @@ describe("StoreKit normalizer", () => {
 				revocationDate: Date.parse("2026-06-01T00:00:00.000Z"),
 			}),
 			renewalInfo: renewalInfo(),
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -207,7 +207,7 @@ describe("StoreKit normalizer", () => {
 				revocationDate: Date.parse("2026-06-01T00:00:00.000Z"),
 			}),
 			renewalInfo: renewalInfo(),
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -225,7 +225,7 @@ describe("StoreKit normalizer", () => {
 				revocationDate: Date.parse("2026-06-01T00:00:00.000Z"),
 			}),
 			renewalInfo: renewalInfo(),
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -248,7 +248,7 @@ describe("StoreKit normalizer", () => {
 				expiresDate: undefined,
 			}),
 			renewalInfo: null,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -267,7 +267,7 @@ describe("StoreKit normalizer", () => {
 			notification: notification("TEST"),
 			transaction: null,
 			renewalInfo: null,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -309,7 +309,7 @@ describe("StoreKit normalizer", () => {
 				}),
 				transaction: testCase.transaction,
 				renewalInfo: null,
-				expectedBundleId: "com.voysee.app",
+				expectedBundleId: "com.acme.app",
 				expectedEnvironment: "sandbox",
 				now,
 			});
@@ -324,7 +324,7 @@ describe("StoreKit normalizer", () => {
 				notification: notification("UNKNOWN_TYPE"),
 				transaction: subscriptionTransaction(),
 				renewalInfo: renewalInfo(),
-				expectedBundleId: "com.voysee.app",
+				expectedBundleId: "com.acme.app",
 				expectedEnvironment: "sandbox",
 				now,
 			}),
@@ -335,7 +335,7 @@ describe("StoreKit normalizer", () => {
 				notification: notification("DID_RENEW", { subtype: "UPGRADE" }),
 				transaction: subscriptionTransaction(),
 				renewalInfo: renewalInfo(),
-				expectedBundleId: "com.voysee.app",
+				expectedBundleId: "com.acme.app",
 				expectedEnvironment: "sandbox",
 				now,
 			}),
@@ -348,7 +348,7 @@ describe("StoreKit normalizer", () => {
 				billingAccountId: "user_1",
 				transaction: subscriptionTransaction({ bundleId: "com.other.app" }),
 				renewalInfo: renewalInfo(),
-				expectedBundleId: "com.voysee.app",
+				expectedBundleId: "com.acme.app",
 				expectedEnvironment: "sandbox",
 				now,
 			}),
@@ -359,7 +359,7 @@ describe("StoreKit normalizer", () => {
 				billingAccountId: "user_1",
 				transaction: subscriptionTransaction({ environment: "Production" }),
 				renewalInfo: renewalInfo(),
-				expectedBundleId: "com.voysee.app",
+				expectedBundleId: "com.acme.app",
 				expectedEnvironment: "sandbox",
 				now,
 			}),
@@ -372,7 +372,7 @@ describe("StoreKit normalizer", () => {
 			transaction: subscriptionTransaction(),
 			renewalInfo: renewalInfo(),
 			storeKitStatus: 1,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -400,7 +400,7 @@ describe("StoreKit normalizer", () => {
 				}),
 				renewalInfo: renewalInfo(),
 				storeKitStatus,
-				expectedBundleId: "com.voysee.app",
+				expectedBundleId: "com.acme.app",
 				expectedEnvironment: "sandbox",
 				now,
 			});
@@ -421,7 +421,7 @@ describe("StoreKit normalizer", () => {
 			}),
 			renewalInfo: renewalInfo({ gracePeriodExpiresDate }),
 			storeKitStatus: 4,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -432,7 +432,7 @@ describe("StoreKit normalizer", () => {
 			}),
 			renewalInfo: renewalInfo({ gracePeriodExpiresDate }),
 			storeKitStatus: 4,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now: new Date("2026-06-01T00:00:00.000Z"),
 		});
@@ -454,7 +454,7 @@ describe("StoreKit normalizer", () => {
 			}),
 			renewalInfo: renewalInfo(),
 			storeKitStatus: 5,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -476,7 +476,7 @@ describe("StoreKit normalizer", () => {
 			}),
 			renewalInfo: renewalInfo(),
 			storeKitStatus: 5,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now: new Date("2026-05-31T00:00:00.000Z"),
 		});
@@ -487,7 +487,7 @@ describe("StoreKit normalizer", () => {
 			}),
 			renewalInfo: renewalInfo(),
 			storeKitStatus: 5,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now: new Date("2026-06-01T00:00:00.000Z"),
 		});
@@ -505,7 +505,7 @@ describe("StoreKit normalizer", () => {
 			transaction: subscriptionTransaction(),
 			renewalInfo: renewalInfo({ autoRenewStatus: 1 }),
 			storeKitStatus: 1,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -514,7 +514,7 @@ describe("StoreKit normalizer", () => {
 			transaction: subscriptionTransaction(),
 			renewalInfo: renewalInfo({ autoRenewStatus: 1, isInBillingRetryPeriod: true }),
 			storeKitStatus: 3,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -523,7 +523,7 @@ describe("StoreKit normalizer", () => {
 			transaction: subscriptionTransaction(),
 			renewalInfo: renewalInfo({ autoRenewStatus: 0 }),
 			storeKitStatus: 1,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -534,7 +534,7 @@ describe("StoreKit normalizer", () => {
 			}),
 			renewalInfo: renewalInfo({ autoRenewStatus: 1 }),
 			storeKitStatus: 5,
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -554,7 +554,7 @@ describe("StoreKit normalizer", () => {
 				transaction: subscriptionTransaction({ bundleId: "com.other.app" }),
 				renewalInfo: renewalInfo(),
 				storeKitStatus: 1,
-				expectedBundleId: "com.voysee.app",
+				expectedBundleId: "com.acme.app",
 				expectedEnvironment: "sandbox",
 				now,
 			}),
@@ -568,7 +568,7 @@ describe("StoreKit normalizer", () => {
 				billingAccountId: "user_1",
 				transaction: subscriptionTransaction({ offerType, offerDiscountType: "FREE_TRIAL" }),
 				renewalInfo: renewalInfo(),
-				expectedBundleId: "com.voysee.app",
+				expectedBundleId: "com.acme.app",
 				expectedEnvironment: "sandbox",
 				now,
 			});
@@ -593,7 +593,7 @@ describe("StoreKit normalizer", () => {
 				gracePeriodExpiresDate: Date.parse("2026-07-05T00:00:00.000Z"),
 				isInBillingRetryPeriod: true,
 			}),
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			now,
 		});
@@ -622,7 +622,7 @@ describe("StoreKit normalizer", () => {
 				billingAccountId: "user_1",
 				transaction,
 				renewalInfo: renewalInfo(),
-				expectedBundleId: "com.voysee.app",
+				expectedBundleId: "com.acme.app",
 				expectedEnvironment: "sandbox",
 				now,
 			});

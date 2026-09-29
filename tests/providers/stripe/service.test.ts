@@ -14,9 +14,9 @@ import type { StripeCatalog } from "../../../src/providers/stripe/types";
 import type { DeepPartial } from "../../helpers/deep-partial";
 
 const config = {
-	checkoutSuccessUrl: "https://app.voysee.com/billing/success?session_id={CHECKOUT_SESSION_ID}",
-	checkoutCancelUrl: "https://app.voysee.com/billing",
-	portalReturnUrl: "https://app.voysee.com/account/billing",
+	checkoutSuccessUrl: "https://app.acme.com/billing/success?session_id={CHECKOUT_SESSION_ID}",
+	checkoutCancelUrl: "https://app.acme.com/billing",
+	portalReturnUrl: "https://app.acme.com/account/billing",
 };
 
 const checkoutUrl = "https://checkout.stripe.com/c/pay/cs_123";
@@ -456,7 +456,7 @@ function storeEvent(overrides: Partial<StoreEventReplayJobRow> = {}): StoreEvent
 	return {
 		id: "event_1",
 		project_id: "project_1",
-		project_key: "voysee",
+		project_key: "acme",
 		provider: "stripe",
 		channel: "web",
 		external_event_id: "evt_123",
@@ -485,7 +485,7 @@ function reconciliationSubscription(
 	return {
 		id: "subscription_1",
 		project_id: "project_1",
-		project_key: "voysee",
+		project_key: "acme",
 		provider: "stripe",
 		channel: "web",
 		external_subscription_id: "sub_123",
@@ -507,7 +507,7 @@ function endedSubscriptionUsageJob(overrides: Partial<UsageInvoiceJob> = {}): Us
 		periodId: "period-1",
 		adjustmentId: null,
 		projectInstanceId: "00000000-0000-4000-8000-000000000003",
-		projectKey: "voysee",
+		projectKey: "acme",
 		provider: "stripe",
 		providerAccountId: null,
 		billingAccountId: "user_1",
@@ -532,7 +532,7 @@ function autoTopupJob(): AutoTopupJob {
 	return {
 		jobId: "topup-job-1",
 		projectId: "project-1",
-		projectKey: "voysee",
+		projectKey: "acme",
 		provider: "stripe",
 		providerAccountId: null,
 		policyId: "7",
@@ -791,7 +791,7 @@ describe("StripeBillingService", () => {
 				periodId: "period-1",
 				adjustmentId: null,
 				projectInstanceId: "00000000-0000-4000-8000-000000000003",
-				projectKey: "voysee",
+				projectKey: "acme",
 				provider: "stripe",
 				providerAccountId: null,
 				billingAccountId: "user_1",
@@ -838,7 +838,7 @@ describe("StripeBillingService", () => {
 				periodId: "period-1",
 				adjustmentId: "42",
 				projectInstanceId: "00000000-0000-4000-8000-000000000003",
-				projectKey: "voysee",
+				projectKey: "acme",
 				provider: "stripe",
 				providerAccountId: null,
 				billingAccountId: "user_1",
@@ -953,7 +953,7 @@ describe("StripeBillingService", () => {
 				periodId: "period-1",
 				adjustmentId: "43",
 				projectInstanceId: "00000000-0000-4000-8000-000000000003",
-				projectKey: "voysee",
+				projectKey: "acme",
 				provider: "stripe",
 				providerAccountId: null,
 				billingAccountId: "user_1",

@@ -73,12 +73,12 @@ localDescribe("Stripe invoice snapshots", () => {
 		await resetAndSeedIntegrationData(context.sql);
 		service = new StripeBillingService({
 			config: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				checkoutSuccessUrl: "https://example.com/success?session_id={CHECKOUT_SESSION_ID}",
 				checkoutCancelUrl: "https://example.com/cancel",
 				portalReturnUrl: "https://example.com/billing",
 			},
-			repository: context.repository.forProject(integrationProjectContext("voysee")),
+			repository: context.repository.forProject(integrationProjectContext("acme")),
 			client: createFakeStripeBillingClient().client,
 		});
 	});

@@ -111,7 +111,7 @@ e2eDescribe("E2E HTTP surface", () => {
 		});
 		expect(unknown.status).toBe(404);
 
-		const invalidSignature = await service.request("/v1/projects/voysee/webhooks/stripe", {
+		const invalidSignature = await service.request("/v1/projects/acme/webhooks/stripe", {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",

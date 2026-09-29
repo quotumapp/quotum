@@ -60,11 +60,11 @@ import {
 	createFakeGooglePlayClient,
 } from "../integration/helpers/fake-provider-clients";
 
-const project = projectInstanceContext("voysee");
-const otherProject = projectInstanceContext("wiseley");
+const project = projectInstanceContext("acme");
+const otherProject = projectInstanceContext("globex");
 
 const appleConfig: AppleBillingEnv = {
-	bundleId: "com.voysee.app",
+	bundleId: "com.acme.app",
 	appAppleId: null,
 	issuerId: "issuer",
 	keyId: "key",
@@ -75,7 +75,7 @@ const appleConfig: AppleBillingEnv = {
 };
 
 const googleConfig: GooglePlayBillingEnv = {
-	packageName: "com.voysee.app",
+	packageName: "com.acme.app",
 	serviceAccountJson: JSON.stringify({
 		type: "service_account",
 		client_email: "play-publisher@example.iam.gserviceaccount.com",
@@ -91,12 +91,12 @@ const googleConfig: GooglePlayBillingEnv = {
 };
 
 const stripeConfig: StripeBillingEnv = {
-	connectedAccountId: "acct_voysee",
+	connectedAccountId: "acct_acme",
 	secretKey: "sk_test_registry",
 	webhookSecret: "whsec_registry",
-	checkoutSuccessUrl: "https://voysee.example.com/success?session_id={CHECKOUT_SESSION_ID}",
-	checkoutCancelUrl: "https://voysee.example.com/cancel",
-	portalReturnUrl: "https://voysee.example.com/account",
+	checkoutSuccessUrl: "https://acme.example.com/success?session_id={CHECKOUT_SESSION_ID}",
+	checkoutCancelUrl: "https://acme.example.com/cancel",
+	portalReturnUrl: "https://acme.example.com/account",
 };
 
 const configs = { apple: appleConfig, google: googleConfig, stripe: stripeConfig };
@@ -391,14 +391,14 @@ describe("provider registry", () => {
 
 		expect(
 			await identities({
-				apple: { ...appleConfig, accountIdentity: "com.voysee.app" },
-				google: { ...googleConfig, accountIdentity: "com.voysee.android" },
+				apple: { ...appleConfig, accountIdentity: "com.acme.app" },
+				google: { ...googleConfig, accountIdentity: "com.acme.android" },
 				stripe: { ...stripeConfig, accountIdentity: "acct_identity" },
 			}),
-		).toEqual(["com.voysee.app", "com.voysee.android", "acct_identity"]);
+		).toEqual(["com.acme.app", "com.acme.android", "acct_identity"]);
 		expect(
 			await identities({ ...configs, stripe: { ...stripeConfig, accountIdentity: null } }),
-		).toEqual([null, null, "acct_voysee"]);
+		).toEqual([null, null, "acct_acme"]);
 		expect(
 			await identities({
 				...configs,
@@ -425,11 +425,11 @@ describe("provider registry", () => {
 			StripeBillingService,
 		);
 		expect(resolved).toEqual([
-			{ project: "voysee", kind: "apple", purpose: "new" },
-			{ project: "voysee", kind: "google", purpose: "recovery" },
-			{ project: "voysee", kind: "stripe", purpose: "recovery" },
+			{ project: "acme", kind: "apple", purpose: "new" },
+			{ project: "acme", kind: "google", purpose: "recovery" },
+			{ project: "acme", kind: "stripe", purpose: "recovery" },
 		]);
-		expect(scopedFor).toEqual(["voysee", "voysee", "voysee"]);
+		expect(scopedFor).toEqual(["acme", "acme", "acme"]);
 	});
 
 	it("returns null without touching the repository when a project has no connection", async () => {
@@ -471,7 +471,7 @@ describe("provider registry", () => {
 
 	it("rejects require for an operation the adapter cannot serve and returns it otherwise", async () => {
 		const registry = realRegistry({
-			overrides: { voysee: { stripeBillingService: stripeFake, appleStoreKitService: appleFake } },
+			overrides: { acme: { stripeBillingService: stripeFake, appleStoreKitService: appleFake } },
 		});
 
 		const through = { through: "implementation" } as const;
@@ -542,7 +542,7 @@ describe("provider registry", () => {
 		expect(scopedFor).toEqual([]);
 
 		expect((await registry.require(project, "apple", "purchase.verify")).provider).toBe("apple");
-		expect(resolved).toEqual([{ project: "voysee", kind: "apple", purpose: "new" }]);
+		expect(resolved).toEqual([{ project: "acme", kind: "apple", purpose: "new" }]);
 	});
 
 	it("reports a planned implementation from the registered declaration", async () => {
@@ -594,7 +594,7 @@ describe("provider registry", () => {
 			getRepository: fakeRepository().getRepository,
 			clientFactories: fakeClientFactories(),
 			overrides: {
-				voysee: { stripeBillingService: stripeFake, googlePlayBillingService: null },
+				acme: { stripeBillingService: stripeFake, googlePlayBillingService: null },
 			},
 		});
 
@@ -603,7 +603,7 @@ describe("provider registry", () => {
 		expect(await registry.adapter(project, "google")).toBeNull();
 		expect(resolved).toEqual([]);
 		expect(await registry.service(project, "apple")).toBeInstanceOf(AppleStoreKitService);
-		expect(resolved).toEqual([{ project: "voysee", kind: "apple", purpose: "new" }]);
+		expect(resolved).toEqual([{ project: "acme", kind: "apple", purpose: "new" }]);
 
 		const adapter = await registry.adapter(project, "stripe");
 		const session = await adapter?.checkout?.createHosted({
@@ -620,7 +620,7 @@ describe("provider registry", () => {
 		const registry = createProviderRegistry({
 			connections,
 			getRepository: fakeRepository().getRepository,
-			overrides: { wiseley: { stripeBillingService: stripeFake } },
+			overrides: { globex: { stripeBillingService: stripeFake } },
 			legacyServices: {
 				appleStoreKitService: appleFake,
 				googlePlayBillingService: null,
@@ -638,7 +638,7 @@ describe("provider registry", () => {
 	it("skips the declaration check for overrides that lack groups", async () => {
 		const registry = realRegistry({
 			overrides: {
-				voysee: {
+				acme: {
 					appleStoreKitService: appleFake,
 					googlePlayBillingService: googleFake,
 					stripeBillingService: stripeFake,
@@ -673,8 +673,8 @@ describe("provider registry", () => {
 		expect(calls).toHaveLength(1);
 		expect(calls[0]?.secretKey).toBe("sk_test_registry");
 		expect(calls[0]?.apiVersion).toBeString();
-		expect(calls[0]?.projectKey).toBe("voysee");
-		expect(adapter?.accountIdentity).toBe("acct_voysee");
+		expect(calls[0]?.projectKey).toBe("acme");
+		expect(adapter?.accountIdentity).toBe("acct_acme");
 	});
 
 	it("builds real clients when no factory is given", async () => {
@@ -772,7 +772,7 @@ describe("provider registry", () => {
 
 		const adapter = (await registry.adapter(project, "stripe")) as ProviderAdapter<"stripe">;
 		expect(adapter.provider).toBe("stripe");
-		expect(resolved).toEqual([{ project: "voysee", kind: "stripe", purpose: "new" }]);
+		expect(resolved).toEqual([{ project: "acme", kind: "stripe", purpose: "new" }]);
 	});
 
 	it("keeps the request-path resolver a facade over the registry", async () => {
@@ -781,7 +781,7 @@ describe("provider registry", () => {
 			createProviderRegistry({
 				connections,
 				getRepository: fakeRepository().getRepository,
-				overrides: { wiseley: { stripeBillingService: stripeFake } },
+				overrides: { globex: { stripeBillingService: stripeFake } },
 			}),
 		);
 
@@ -795,16 +795,16 @@ describe("provider registry", () => {
 		);
 		expect(await resolver.appleStoreKitService(otherProject)).toBeNull();
 		expect(resolved).toEqual([
-			{ project: "voysee", kind: "apple", purpose: "new" },
-			{ project: "voysee", kind: "google", purpose: "recovery" },
-			{ project: "voysee", kind: "stripe", purpose: "recovery" },
-			{ project: "wiseley", kind: "apple", purpose: "new" },
+			{ project: "acme", kind: "apple", purpose: "new" },
+			{ project: "acme", kind: "google", purpose: "recovery" },
+			{ project: "acme", kind: "stripe", purpose: "recovery" },
+			{ project: "globex", kind: "apple", purpose: "new" },
 		]);
 	});
 
 	it("types lookups by provider", async () => {
 		const registry: ProviderRegistry = realRegistry({
-			overrides: { voysee: { appleStoreKitService: appleFake } },
+			overrides: { acme: { appleStoreKitService: appleFake } },
 		});
 		const apple = await registry.require(project, "apple", "purchase.verify");
 
@@ -817,7 +817,7 @@ const validatedDescription: RuntimeConnectionDescription = {
 	active: true,
 	validated: true,
 	validatedAt: "2026-09-18T10:00:00.000Z",
-	accountIdentity: "acct_voysee",
+	accountIdentity: "acct_acme",
 	settings: { authMethod: "api_key" },
 };
 
@@ -893,7 +893,7 @@ describe("provider registry describe", () => {
 		const { connections, described } = describingConnections({ google: validatedDescription });
 		const { registry, scopedFor, built } = describingRegistry(connections, {
 			overrides: {
-				voysee: { stripeBillingService: stripeFake, appleStoreKitService: null },
+				acme: { stripeBillingService: stripeFake, appleStoreKitService: null },
 			},
 			legacyServices: { stripeBillingService: null, appleStoreKitService: appleFake },
 		});
@@ -902,9 +902,9 @@ describe("provider registry describe", () => {
 		expect(await registry.describe(project, "apple")).toEqual(absentConnection);
 		expect(described).toEqual([]);
 		expect(await registry.describe(project, "google")).toMatchObject({
-			connection: { configured: true, accountIdentity: "acct_voysee" },
+			connection: { configured: true, accountIdentity: "acct_acme" },
 		});
-		expect(described).toEqual([{ project: "voysee", kind: "google" }]);
+		expect(described).toEqual([{ project: "acme", kind: "google" }]);
 		expect(scopedFor).toEqual([]);
 		expect(built).toEqual([]);
 	});
@@ -916,7 +916,7 @@ describe("provider registry describe", () => {
 			stripe: validatedDescription,
 		});
 		const { registry } = describingRegistry(connections, {
-			overrides: { wiseley: { stripeBillingService: null } },
+			overrides: { globex: { stripeBillingService: null } },
 			legacyServices: { stripeBillingService: stripeFake, googlePlayBillingService: null },
 		});
 
@@ -925,7 +925,7 @@ describe("provider registry describe", () => {
 		expect(await registry.describe(otherProject, "stripe")).toEqual(absentConnection);
 		expect(described).toEqual([]);
 		expect((await registry.describe(project, "apple")).connection?.configured).toBe(true);
-		expect(described).toEqual([{ project: "voysee", kind: "apple" }]);
+		expect(described).toEqual([{ project: "acme", kind: "apple" }]);
 	});
 
 	it("leaves the state unknown when the resolver cannot describe connections", async () => {
@@ -948,7 +948,7 @@ describe("provider registry describe", () => {
 
 	it("reads persisted rows by connection kind: missing, disabled, unvalidated and validated", async () => {
 		const { connections, described } = describingConnections({
-			apple: { ...validatedDescription, enabled: false, accountIdentity: "com.voysee.app" },
+			apple: { ...validatedDescription, enabled: false, accountIdentity: "com.acme.app" },
 			google: {
 				...validatedDescription,
 				validated: false,
@@ -966,7 +966,7 @@ describe("provider registry describe", () => {
 				enabled: false,
 				validated: true,
 				validatedAt: "2026-09-18T10:00:00.000Z",
-				accountIdentity: "com.voysee.app",
+				accountIdentity: "com.acme.app",
 			},
 			configuration: {
 				connectionEnabled: false,
@@ -990,7 +990,7 @@ describe("provider registry describe", () => {
 				enabled: true,
 				validated: true,
 				validatedAt: "2026-09-18T10:00:00.000Z",
-				accountIdentity: "acct_voysee",
+				accountIdentity: "acct_acme",
 			},
 			configuration: {
 				connectionEnabled: true,
@@ -1012,9 +1012,9 @@ describe("provider registry describe", () => {
 			).registry.describe(project, "stripe"),
 		).toEqual(absentConnection);
 		expect(described).toEqual([
-			{ project: "voysee", kind: "apple" },
-			{ project: "voysee", kind: "google" },
-			{ project: "voysee", kind: "stripe" },
+			{ project: "acme", kind: "apple" },
+			{ project: "acme", kind: "google" },
+			{ project: "acme", kind: "stripe" },
 		]);
 		expect(scopedFor).toEqual([]);
 		expect(built).toEqual([]);
@@ -1024,16 +1024,16 @@ describe("provider registry describe", () => {
 		const { connectedAccountId: _, ...apiKeyStripe } = stripeConfig;
 		const connections = fixtureConnections([
 			{
-				projectInstanceKey: "voysee",
-				projectionUrl: "https://voysee.example.com/billing/projection",
+				projectInstanceKey: "acme",
+				projectionUrl: "https://acme.example.com/billing/projection",
 				projectionSecret: "projection-secret",
-				apple: { ...appleConfig, accountIdentity: "com.voysee.app" },
+				apple: { ...appleConfig, accountIdentity: "com.acme.app" },
 				googlePlay: null,
 				stripe: stripeConfig,
 			},
 			{
-				projectInstanceKey: "wiseley",
-				projectionUrl: "https://wiseley.example.com/billing/projection",
+				projectInstanceKey: "globex",
+				projectionUrl: "https://globex.example.com/billing/projection",
 				projectionSecret: "projection-secret",
 				stripe: apiKeyStripe,
 			},
@@ -1050,9 +1050,9 @@ describe("provider registry describe", () => {
 			configuration: { connectionEnabled: true, connectionValidated: true, accountFlags: {} },
 		});
 
-		expect(await registry.describe(project, "apple")).toEqual(fixture("com.voysee.app"));
+		expect(await registry.describe(project, "apple")).toEqual(fixture("com.acme.app"));
 		expect(await registry.describe(project, "google")).toEqual(absentConnection);
-		expect(await registry.describe(project, "stripe")).toEqual(fixture("acct_voysee"));
+		expect(await registry.describe(project, "stripe")).toEqual(fixture("acct_acme"));
 		expect(await registry.describe(otherProject, "stripe")).toEqual(fixture(null));
 		expect(await registry.describe(otherProject, "apple")).toEqual(absentConnection);
 		expect(await registry.describe(projectInstanceContext("unknown"), "stripe")).toEqual(

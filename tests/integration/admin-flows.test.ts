@@ -51,7 +51,7 @@ localDescribe("Admin flows integration", () => {
 				adminApp,
 				"/v1/admin/customers/by-billing-account/integration_user",
 				{
-					headers: authHeaders("voysee"),
+					headers: authHeaders("acme"),
 				},
 			);
 
@@ -60,7 +60,7 @@ localDescribe("Admin flows integration", () => {
 			expect(body.success).toBe(true);
 			expect(body.data.customer).toMatchObject({
 				id: customer.id,
-				projectKey: "voysee",
+				projectKey: "acme",
 				billingAccountId: "integration_user",
 			});
 			expect(body.data.entitlementSnapshot.entitlements).toEqual([
@@ -107,7 +107,7 @@ localDescribe("Admin flows integration", () => {
 			]);
 
 			const byId = await testRequest(adminApp, `/v1/admin/customers/${customer.id}`, {
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			});
 			expect(byId.status).toBe(200);
 			expect((await byId.json()).data.customer.billingAccountId).toBe("integration_user");
@@ -157,7 +157,7 @@ localDescribe("Admin flows integration", () => {
 			const tooLong = await testRequest(
 				adminApp,
 				`/v1/admin/customers/search?q=${encodeURIComponent("a".repeat(129))}`,
-				{ headers: authHeaders("voysee") },
+				{ headers: authHeaders("acme") },
 			);
 			expect(tooLong.status).toBe(400);
 
@@ -428,7 +428,7 @@ localDescribe("Admin flows integration", () => {
 
 		await withAdminReadApp(async (adminApp) => {
 			const hidden = await testRequest(adminApp, `/v1/admin/store-events/${eventId}`, {
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			});
 			expect(hidden.status).toBe(200);
 			const hiddenBody = await hidden.json();
@@ -438,7 +438,7 @@ localDescribe("Admin flows integration", () => {
 			const included = await testRequest(
 				adminApp,
 				`/v1/admin/store-events/${eventId}?includeRawPayload=true`,
-				{ headers: authHeaders("voysee") },
+				{ headers: authHeaders("acme") },
 			);
 			expect(included.status).toBe(200);
 			const includedBody = await included.json();
@@ -454,7 +454,7 @@ localDescribe("Admin flows integration", () => {
 		}, logs.logger);
 		expect(logs.infos).toContainEqual({
 			message: "Billing admin raw store event payload read",
-			context: { projectKey: "voysee", eventId },
+			context: { projectKey: "acme", eventId },
 		});
 	});
 
@@ -466,36 +466,32 @@ localDescribe("Admin flows integration", () => {
 		await withIsoDateSqlParameters(() => verifyGoogleSubscription(fixture));
 
 		await withAdminReadApp(async (adminApp) => {
-			const voyseeSearch = await getAdminList(
+			const acmeSearch = await getAdminList(
 				adminApp,
 				"/v1/admin/customers/search?q=integration_user",
-				"voysee",
+				"acme",
 			);
-			expect(voyseeSearch.data).toHaveLength(1);
+			expect(acmeSearch.data).toHaveLength(1);
 
-			const wiseleySearch = await getAdminList(
+			const globexSearch = await getAdminList(
 				adminApp,
 				"/v1/admin/customers/search?q=integration_user",
-				"wiseley",
+				"globex",
 			);
-			expect(wiseleySearch.data).toEqual([]);
+			expect(globexSearch.data).toEqual([]);
 
-			const wiseleyPurchases = await getAdminList(adminApp, "/v1/admin/purchases", "wiseley");
-			const wiseleySubscriptions = await getAdminList(
-				adminApp,
-				"/v1/admin/subscriptions",
-				"wiseley",
-			);
-			const wiseleyStoreEvents = await getAdminList(adminApp, "/v1/admin/store-events", "wiseley");
-			const wiseleyProjectionJobs = await getAdminList(
+			const globexPurchases = await getAdminList(adminApp, "/v1/admin/purchases", "globex");
+			const globexSubscriptions = await getAdminList(adminApp, "/v1/admin/subscriptions", "globex");
+			const globexStoreEvents = await getAdminList(adminApp, "/v1/admin/store-events", "globex");
+			const globexProjectionJobs = await getAdminList(
 				adminApp,
 				"/v1/admin/projection-jobs",
-				"wiseley",
+				"globex",
 			);
-			expect(wiseleyPurchases.data).toEqual([]);
-			expect(wiseleySubscriptions.data).toEqual([]);
-			expect(wiseleyStoreEvents.data).toEqual([]);
-			expect(wiseleyProjectionJobs.data).toEqual([]);
+			expect(globexPurchases.data).toEqual([]);
+			expect(globexSubscriptions.data).toEqual([]);
+			expect(globexStoreEvents.data).toEqual([]);
+			expect(globexProjectionJobs.data).toEqual([]);
 		});
 	});
 
@@ -507,7 +503,7 @@ localDescribe("Admin flows integration", () => {
 				`/v1/admin/customers/${missingId}`,
 				`/v1/admin/store-events/${missingId}`,
 			]) {
-				const response = await testRequest(adminApp, path, { headers: authHeaders("voysee") });
+				const response = await testRequest(adminApp, path, { headers: authHeaders("acme") });
 
 				expect(response.status).toBe(404);
 				expect(await response.json()).toMatchObject({
@@ -526,7 +522,7 @@ localDescribe("Admin flows integration", () => {
 		const invalid = await testRequest(fixture.app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
-				...fixture.authHeaders("voysee"),
+				...fixture.authHeaders("acme"),
 				"content-type": "application/json",
 			},
 			body: JSON.stringify({
@@ -550,7 +546,7 @@ localDescribe("Admin flows integration", () => {
 
 		const metrics = await testRequest(fixture.app, "/v1/admin/metrics", {
 			headers: {
-				...fixture.authHeaders("voysee"),
+				...fixture.authHeaders("acme"),
 				"x-billing-operator-key": "billing-integration-operator-key",
 			},
 		});
@@ -590,7 +586,7 @@ localDescribe("Admin flows integration", () => {
 
 		const replay = await testRequest(operationApp, `/v1/admin/store-events/${eventId}/replay`, {
 			method: "POST",
-			headers: operatorHeaders("voysee"),
+			headers: operatorHeaders("acme"),
 		});
 		expect(replay.status).toBe(200);
 		expect(await replay.json()).toEqual({
@@ -603,7 +599,7 @@ localDescribe("Admin flows integration", () => {
 			"/v1/admin/reconciliation/subscriptions/run",
 			{
 				method: "POST",
-				headers: operatorHeaders("voysee"),
+				headers: operatorHeaders("acme"),
 			},
 		);
 		expect(reconciliation.status).toBe(200);
@@ -624,57 +620,57 @@ localDescribe("Admin flows integration", () => {
 				providerFailed: 0,
 			},
 		});
-		expect(calls).toEqual([`replay:voysee:${eventId}`, "reconcile"]);
+		expect(calls).toEqual([`replay:acme:${eventId}`, "reconcile"]);
 	});
 
 	it("requires operator auth and keeps admin replay scoped to the authenticated project", async () => {
-		const wiseleyEventId = await seedAdminReplayEvent(context.sql, {
-			projectKey: "wiseley",
+		const globexEventId = await seedAdminReplayEvent(context.sql, {
+			projectKey: "globex",
 			provider: "stripe",
 			channel: "web",
 			eventType: "checkout.session.completed",
-			externalEventId: "stripe:admin-replay:wiseley",
+			externalEventId: "stripe:admin-replay:globex",
 		});
 		const calls: string[] = [];
 		const operationApp = createRealReplayOperationApp(calls);
 
 		const missingOperator = await testRequest(
 			operationApp,
-			`/v1/admin/store-events/${wiseleyEventId}/replay`,
+			`/v1/admin/store-events/${globexEventId}/replay`,
 			{
 				method: "POST",
-				headers: authHeaders("wiseley"),
+				headers: authHeaders("globex"),
 			},
 		);
 		expect(missingOperator.status).toBe(401);
 
 		const crossProjectReplay = await testRequest(
 			operationApp,
-			`/v1/admin/store-events/${wiseleyEventId}/replay`,
+			`/v1/admin/store-events/${globexEventId}/replay`,
 			{
 				method: "POST",
-				headers: operatorHeaders("voysee"),
+				headers: operatorHeaders("acme"),
 			},
 		);
 		expect(crossProjectReplay.status).not.toBe(200);
 		expect(calls).toEqual([]);
-		await expectAdminReplayEventStatus(context.sql, wiseleyEventId, "skipped");
+		await expectAdminReplayEventStatus(context.sql, globexEventId, "skipped");
 
 		const sameProjectReplay = await testRequest(
 			operationApp,
-			`/v1/admin/store-events/${wiseleyEventId}/replay`,
+			`/v1/admin/store-events/${globexEventId}/replay`,
 			{
 				method: "POST",
-				headers: operatorHeaders("wiseley"),
+				headers: operatorHeaders("globex"),
 			},
 		);
 		expect(sameProjectReplay.status).toBe(200);
 		expect(await sameProjectReplay.json()).toEqual({
 			success: true,
-			data: { eventId: wiseleyEventId, status: "processed" },
+			data: { eventId: globexEventId, status: "processed" },
 		});
-		expect(calls).toEqual(["wiseley:stripe:checkout.session.completed"]);
-		await expectAdminReplayEventStatus(context.sql, wiseleyEventId, "processed");
+		expect(calls).toEqual(["globex:stripe:checkout.session.completed"]);
+		await expectAdminReplayEventStatus(context.sql, globexEventId, "processed");
 	});
 });
 
@@ -685,7 +681,7 @@ async function verifyGoogleSubscription(
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...fixture.authHeaders("voysee"),
+			...fixture.authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -703,7 +699,7 @@ async function verifyGoogleConsumable(
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...fixture.authHeaders("voysee"),
+			...fixture.authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -723,7 +719,7 @@ async function createAppleAccountToken(
 		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
 		{
-			headers: fixture.authHeaders("voysee"),
+			headers: fixture.authHeaders("acme"),
 		},
 	);
 	const body = await response.json();
@@ -737,7 +733,7 @@ async function verifyAppleSubscription(
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...fixture.authHeaders("voysee"),
+			...fixture.authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -780,11 +776,11 @@ function createOperationApp(adminOperations: BillingAdminOperations): ReturnType
 	});
 }
 
-function authHeaders(projectKey: "voysee" | "wiseley" = "voysee"): HeadersInit {
+function authHeaders(projectKey: "acme" | "globex" = "acme"): HeadersInit {
 	return { authorization: `Bearer ${integrationProjectCredential(projectKey)}` };
 }
 
-function operatorHeaders(projectKey: "voysee" | "wiseley" = "voysee"): HeadersInit {
+function operatorHeaders(projectKey: "acme" | "globex" = "acme"): HeadersInit {
 	return {
 		...authHeaders(projectKey),
 		"x-billing-operator-key": context.env.operatorApiKey ?? "",
@@ -820,7 +816,7 @@ function adminReplayProvidersForProject(
 		apple: null,
 		google: null,
 		stripe:
-			projectKey === "wiseley"
+			projectKey === "globex"
 				? {
 						async replayStoreEvent(event) {
 							calls.push(`${event.project_key}:${event.provider}:${event.event_type}`);
@@ -834,7 +830,7 @@ function adminReplayProvidersForProject(
 async function seedAdminReplayEvent(
 	sql: SQL,
 	input: {
-		projectKey: "voysee" | "wiseley";
+		projectKey: "acme" | "globex";
 		provider: "google" | "stripe";
 		channel: "android" | "web";
 		eventType: string;
@@ -917,7 +913,7 @@ async function customerSearchIdentifiers(sql: SQL): Promise<{
 		JOIN entitlements ON entitlements.customer_id = customers.id
 			AND entitlements.project_id = customers.project_id
 		JOIN projects ON projects.id = customers.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND customers.billing_account_id = 'integration_user'
 		LIMIT 1
 	`;
@@ -966,7 +962,7 @@ async function expectSearchResult(
 		app,
 		`/v1/admin/customers/search?q=${encodeURIComponent(query)}`,
 		{
-			headers: authHeaders("voysee"),
+			headers: authHeaders("acme"),
 		},
 	);
 	expect(response.status).toBe(200);
@@ -977,7 +973,7 @@ async function expectSearchResult(
 			matchType: expected.matchType,
 			matchedValue: expected.matchedValue,
 			customer: expect.objectContaining({
-				projectKey: "voysee",
+				projectKey: "acme",
 				billingAccountId: "integration_user",
 			}),
 		}),
@@ -987,7 +983,7 @@ async function expectSearchResult(
 async function getAdminList(
 	app: ReturnType<typeof createApp>,
 	path: string,
-	projectKey: "voysee" | "wiseley" = "voysee",
+	projectKey: "acme" | "globex" = "acme",
 ): Promise<{ data: Array<Record<string, unknown>>; pagination: { nextCursor: string | null } }> {
 	const response = await testRequest(app, path, {
 		headers: path.includes("/catalog/") ? operatorHeaders(projectKey) : authHeaders(projectKey),
@@ -1022,7 +1018,7 @@ async function latestStoreEventId(sql: SQL): Promise<string> {
 		SELECT store_events.id
 		FROM store_events
 		JOIN projects ON projects.id = store_events.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 		ORDER BY store_events.created_at DESC, store_events.id DESC
 		LIMIT 1
 	`;
@@ -1042,7 +1038,7 @@ async function staggerGoogleSubscriptionFlowCreatedAt(sql: SQL): Promise<void> {
 			END
 		FROM projects
 		WHERE projects.id = purchases.project_id
-			AND projects.key = 'voysee'
+			AND projects.key = 'acme'
 			AND purchases.transaction_id IN ('purchase_token_1', 'purchase_token_2')
 		RETURNING purchases.transaction_id
 	`;
@@ -1054,7 +1050,7 @@ async function staggerGoogleSubscriptionFlowCreatedAt(sql: SQL): Promise<void> {
 			END
 		FROM projects
 		WHERE projects.id = subscriptions.project_id
-			AND projects.key = 'voysee'
+			AND projects.key = 'acme'
 			AND subscriptions.external_subscription_id IN ('purchase_token_1', 'purchase_token_2')
 		RETURNING subscriptions.external_subscription_id
 	`;
@@ -1066,7 +1062,7 @@ async function staggerGoogleSubscriptionFlowCreatedAt(sql: SQL): Promise<void> {
 			END
 		FROM projects
 		WHERE projects.id = store_events.project_id
-			AND projects.key = 'voysee'
+			AND projects.key = 'acme'
 			AND store_events.transaction_id IN ('purchase_token_1', 'purchase_token_2')
 		RETURNING store_events.transaction_id
 	`;
@@ -1079,7 +1075,7 @@ async function staggerGoogleSubscriptionFlowCreatedAt(sql: SQL): Promise<void> {
 			END
 		FROM projects
 		WHERE projects.id = projection_sync_jobs.project_id
-			AND projects.key = 'voysee'
+			AND projects.key = 'acme'
 			AND projection_sync_jobs.idempotency_key IN (
 				'google:purchase_token_1:purchase_verified',
 				'google:purchase_token_2:purchase_verified'
@@ -1114,7 +1110,7 @@ async function staggerCatalogProductCreatedAt(sql: SQL): Promise<void> {
 			END
 		FROM projects
 		WHERE projects.id = products.project_id
-			AND projects.key = 'voysee'
+			AND projects.key = 'acme'
 			AND products.key IN ('echo_credits_10', 'premium_monthly')
 		RETURNING products.key
 	`;
@@ -1159,7 +1155,7 @@ async function seedRecentInactiveSubscriptions(sql: SQL, customerId: string): Pr
 			AND store_products.provider = 'google'
 			AND store_products.external_price_id = 'monthly-base'
 		CROSS JOIN generate_series(1, 6) AS series(value)
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 		RETURNING external_subscription_id
 	`;
 	expect(rows).toHaveLength(6);

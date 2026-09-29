@@ -36,7 +36,7 @@ localDescribe("billing auth and tenancy integration", () => {
 
 		const missing = await testRequest(app, "/v1/billing-accounts/integration_user/entitlements");
 		const allowed = await testRequest(app, "/v1/billing-accounts/integration_user/entitlements", {
-			headers: authHeaders("voysee"),
+			headers: authHeaders("acme"),
 		});
 
 		expect(missing.status).toBe(401);
@@ -53,7 +53,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const credential = integrationProjectCredential("voysee");
+		const credential = integrationProjectCredential("acme");
 		const parsed = parseProjectApiCredential(credential);
 		if (parsed === null) throw new Error("Expected an environment-prefixed integration credential");
 		const [stored] = await context.sql<Array<{ id: string }>>`
@@ -65,7 +65,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			app,
 			"/v1/billing-accounts/revoked_user/entitlements",
 			{
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 		expect(beforeRevocation.status).toBe(200);
@@ -80,7 +80,7 @@ localDescribe("billing auth and tenancy integration", () => {
 				app,
 				"/v1/billing-accounts/revoked_user/entitlements",
 				{
-					headers: authHeaders("voysee"),
+					headers: authHeaders("acme"),
 				},
 			);
 			expect(afterRevocation.status).toBe(401);
@@ -103,10 +103,10 @@ localDescribe("billing auth and tenancy integration", () => {
 			repository: context.repository,
 		});
 
-		const response = await testRequest(app, "/v1/purchases/verify?project_id=wiseley", {
+		const response = await testRequest(app, "/v1/purchases/verify?project_id=globex", {
 			method: "POST",
 			headers: {
-				...authHeaders("voysee"),
+				...authHeaders("acme"),
 				"content-type": "application/json",
 			},
 			body: JSON.stringify({
@@ -172,15 +172,15 @@ localDescribe("billing auth and tenancy integration", () => {
 				await context.sql`
 					UPDATE projects
 					SET lifecycle_status = ${lifecycleStatus}
-					WHERE key = 'wiseley'
+					WHERE key = 'globex'
 				`;
 				const privateResponse = await testRequest(
 					app,
 					"/v1/billing-accounts/integration_user/entitlements",
-					{ headers: { authorization: `Bearer ${integrationProjectCredential("wiseley")}` } },
+					{ headers: { authorization: `Bearer ${integrationProjectCredential("globex")}` } },
 				);
 				const callsBeforeWebhook = apple.calls.length;
-				const webhookResponse = await testRequest(app, "/v1/projects/wiseley/webhooks/apple", {
+				const webhookResponse = await testRequest(app, "/v1/projects/globex/webhooks/apple", {
 					method: "POST",
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({ signedPayload: `signed-notification-${lifecycleStatus}` }),
@@ -192,7 +192,7 @@ localDescribe("billing auth and tenancy integration", () => {
 				else expect(apple.calls.length).toBeGreaterThan(callsBeforeWebhook);
 			}
 		} finally {
-			await context.sql`UPDATE projects SET lifecycle_status = 'active' WHERE key = 'wiseley'`;
+			await context.sql`UPDATE projects SET lifecycle_status = 'active' WHERE key = 'globex'`;
 		}
 	});
 
@@ -205,7 +205,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			app,
 			"/v1/billing-accounts/same_user/providers/apple/account-token",
 			{
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 
@@ -217,7 +217,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			testRequest(app, "/v1/purchases/verify", {
 				method: "POST",
 				headers: {
-					...authHeaders("voysee"),
+					...authHeaders("acme"),
 					"content-type": "application/json",
 				},
 				body: JSON.stringify({
@@ -228,21 +228,21 @@ localDescribe("billing auth and tenancy integration", () => {
 			}),
 		);
 
-		const voysee = await testRequest(app, "/v1/billing-accounts/same_user/entitlements", {
-			headers: authHeaders("voysee"),
+		const acme = await testRequest(app, "/v1/billing-accounts/same_user/entitlements", {
+			headers: authHeaders("acme"),
 		});
-		const wiseley = await testRequest(app, "/v1/billing-accounts/same_user/entitlements", {
-			headers: authHeaders("wiseley"),
+		const globex = await testRequest(app, "/v1/billing-accounts/same_user/entitlements", {
+			headers: authHeaders("globex"),
 		});
 
 		expect(purchase.status).toBe(200);
 		expectActivePremiumSnapshot((await purchase.json()).data, "same_user");
 		expect(apple.calls).toEqual(["verifyTransaction:200000000000001"]);
-		expect(voysee.status).toBe(200);
-		expect(wiseley.status).toBe(200);
-		expectActivePremiumSnapshot((await voysee.json()).data, "same_user");
-		expectEmptySnapshot((await wiseley.json()).data, "same_user");
-		await expectEntitlementProjectCounts({ voysee: 1, wiseley: 0 });
+		expect(acme.status).toBe(200);
+		expect(globex.status).toBe(200);
+		expectActivePremiumSnapshot((await acme.json()).data, "same_user");
+		expectEmptySnapshot((await globex.json()).data, "same_user");
+		await expectEntitlementProjectCounts({ acme: 1, globex: 0 });
 	});
 
 	it("accepts trusted gateway project headers and rejects missing gateway context", async () => {
@@ -258,7 +258,7 @@ localDescribe("billing auth and tenancy integration", () => {
 
 		const missing = await testRequest(app, "/v1/billing-accounts/gateway_user/entitlements");
 		const allowed = await testRequest(app, "/v1/billing-accounts/gateway_user/entitlements", {
-			headers: { "x-billing-project-key": "voysee" },
+			headers: { "x-billing-project-key": "acme" },
 		});
 
 		expect(missing.status).toBe(401);
@@ -299,13 +299,13 @@ localDescribe("billing auth and tenancy integration", () => {
 			repository: context.repository,
 		});
 		const ignored = await testRequest(app, "/v1/billing-accounts/gateway_user/entitlements", {
-			headers: { "x-billing-project-key": "voysee" },
+			headers: { "x-billing-project-key": "acme" },
 		});
 		expect(ignored.status).toBe(401);
 		const mismatched = await testRequest(app, "/v1/billing-accounts/gateway_user/entitlements", {
 			headers: {
-				...authHeaders("voysee"),
-				"x-billing-project-key": "wiseley",
+				...authHeaders("acme"),
+				"x-billing-project-key": "globex",
 			},
 		});
 		expect(mismatched.status).toBe(200);
@@ -320,7 +320,7 @@ localDescribe("billing auth and tenancy integration", () => {
 
 		const webhook = await testRequest(app, "/v1/webhooks/apple", {
 			method: "POST",
-			headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+			headers: { ...authHeaders("acme"), "content-type": "application/json" },
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
 		});
 
@@ -367,20 +367,20 @@ async function withIsoDateSqlParameters<T>(callback: () => T | Promise<T>): Prom
 }
 
 async function expectEntitlementProjectCounts(expected: {
-	voysee: number;
-	wiseley: number;
+	acme: number;
+	globex: number;
 }): Promise<void> {
 	const rows = await context.sql<{ key: string; count: string }[]>`
 		SELECT projects.key, count(entitlements.id)::text AS count
 		FROM projects
 		LEFT JOIN entitlements ON entitlements.project_id = projects.id
-		WHERE projects.key IN ('voysee', 'wiseley')
+		WHERE projects.key IN ('acme', 'globex')
 		GROUP BY projects.key
 		ORDER BY projects.key
 	`;
 
 	expect(rows).toEqual([
-		{ key: "voysee", count: String(expected.voysee) },
-		{ key: "wiseley", count: String(expected.wiseley) },
+		{ key: "acme", count: String(expected.acme) },
+		{ key: "globex", count: String(expected.globex) },
 	]);
 }

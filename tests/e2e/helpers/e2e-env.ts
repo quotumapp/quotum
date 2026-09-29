@@ -1,18 +1,18 @@
 import { createHmac } from "node:crypto";
 import { createSanitizedProcessEnv } from "../../../scripts/lib/sanitized-env";
 
-export const e2eApiKey = testCredential("voysee") ?? "voysee-unit-test-placeholder";
+export const e2eApiKey = testCredential("acme") ?? "acme-unit-test-placeholder";
 /** The sandbox instance of the same logical project; its credential starts with `sqpk_`. */
 export const e2eSandboxApiKey =
-	testCredential("voysee-sandbox") ?? "voysee-sandbox-unit-test-placeholder";
+	testCredential("acme-sandbox") ?? "acme-sandbox-unit-test-placeholder";
 /** The read-only key of the production instance; it starts with `pqrk_`. */
 export const e2eReadOnlyApiKey =
-	testCredential("voysee", "BILLING_TEST_PROJECT_READ_ONLY_CREDENTIALS_JSON") ??
-	"voysee-read-only-unit-test-placeholder";
-export const e2eOperatorKey = "voysee-e2e-operator-key";
-export const e2eProjectionSecret = "voysee-e2e-projection-secret";
-export const e2eStripeWebhookSecret = "whsec_voysee_e2e";
-export const e2eMerchantAuthSecret = "voysee-e2e-merchant-auth-secret-at-least-32";
+	testCredential("acme", "BILLING_TEST_PROJECT_READ_ONLY_CREDENTIALS_JSON") ??
+	"acme-read-only-unit-test-placeholder";
+export const e2eOperatorKey = "acme-e2e-operator-key";
+export const e2eProjectionSecret = "acme-e2e-projection-secret";
+export const e2eStripeWebhookSecret = "whsec_acme_e2e";
+export const e2eMerchantAuthSecret = "acme-e2e-merchant-auth-secret-at-least-32";
 
 export function e2eProjectRuntimeJson(receiverUrl = "http://127.0.0.1:9"): string {
 	return JSON.stringify(
@@ -33,7 +33,7 @@ export function e2eProjectRuntimeJson(receiverUrl = "http://127.0.0.1:9"): strin
 
 function testProjectInstanceKeys(): string[] {
 	const serialized = process.env.BILLING_TEST_PROJECT_CONTEXTS_JSON;
-	if (serialized === undefined) return ["voysee", "wiseley"];
+	if (serialized === undefined) return ["acme", "globex"];
 
 	const value = JSON.parse(serialized) as unknown;
 	if (!Array.isArray(value)) {

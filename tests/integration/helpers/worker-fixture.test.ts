@@ -11,9 +11,9 @@ describe("worker fixture helpers", () => {
 			{
 				connectionFixtures: [
 					{
-						projectInstanceKey: "voysee",
+						projectInstanceKey: "acme",
 						projectionUrl: "https://projection.test",
-						projectionSecret: "voysee-projection-secret",
+						projectionSecret: "acme-projection-secret",
 					},
 				],
 			},
@@ -107,7 +107,7 @@ function projectionJob(): ProjectionSyncJobRow {
 	return {
 		id: "job-1",
 		project_id: integrationProjectContext().projectInstanceId,
-		project_key: "voysee",
+		project_key: "acme",
 		customer_id: "customer-1",
 		idempotency_key: "idem-1",
 		reason: "purchase_verified",
@@ -138,7 +138,7 @@ function storeEvent(): StoreEventReplayJobRow {
 	return {
 		id: "event-1",
 		project_id: integrationProjectContext().projectInstanceId,
-		project_key: "voysee",
+		project_key: "acme",
 		provider: "stripe",
 		channel: "web",
 		external_event_id: "evt_1",

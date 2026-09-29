@@ -79,7 +79,7 @@ export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOp
 		...appleAccountTokenPayload(renewalAppAccountToken),
 	});
 	const transaction = (): AppleDecodedTransactionPayload => ({
-		bundleId: "com.voysee.app",
+		bundleId: "com.acme.app",
 		environment: "Sandbox",
 		expiresDate: appleDateMillis(options.expiresDate ?? farFutureSubscriptionExpiry),
 		originalTransactionId: options.originalTransactionId,
@@ -92,7 +92,7 @@ export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOp
 	});
 	const notification = (): AppleDecodedNotificationPayload => ({
 		data: {
-			bundleId: "com.voysee.app",
+			bundleId: "com.acme.app",
 			environment: "Sandbox",
 			status: 1,
 		},

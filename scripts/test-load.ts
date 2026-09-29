@@ -167,11 +167,11 @@ async function main(options: Options): Promise<void> {
 		POSTGRES_URI: postgresUri,
 	};
 	run("bun", ["run", "migrate"], { env: baseEnv });
-	const platform = await bootstrapTestPlatform(postgresUri, ["voysee", "wiseley"]);
+	const platform = await bootstrapTestPlatform(postgresUri, ["acme", "globex"]);
 	process.env.BILLING_TEST_PROJECT_CONTEXTS_JSON = JSON.stringify(platform.contexts);
 	process.env.BILLING_TEST_PROJECT_CREDENTIALS_JSON = JSON.stringify(platform.credentials);
-	const apiKey = platform.credentials.voysee;
-	if (apiKey === undefined) throw new Error("Load lane did not receive the voysee credential");
+	const apiKey = platform.credentials.acme;
+	if (apiKey === undefined) throw new Error("Load lane did not receive the acme credential");
 
 	const connection = createBillingDatabaseConnection({ postgresUri });
 	const sampler = new SQL(postgresUri, { max: 1 });

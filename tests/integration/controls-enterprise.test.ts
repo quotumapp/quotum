@@ -453,7 +453,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		});
 		const stripeService = new StripeBillingService({
 			config: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				checkoutSuccessUrl: "https://app.integration.test/billing/success",
 				checkoutCancelUrl: "https://app.integration.test/billing",
 				portalReturnUrl: "https://app.integration.test/account/billing",
@@ -640,7 +640,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 
 		await expect(
 			context.repository.markSubscriptionChangeApplied(
-				integrationProjectContext("wiseley").projectInstanceId,
+				integrationProjectContext("globex").projectInstanceId,
 				claimed.changeId,
 				"sub_migrate_stripe",
 				"migration-worker",
@@ -686,7 +686,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			FROM plans plan, customers customer, projects project
 			WHERE version.project_id = project.id AND version.plan_id = plan.id
 				AND customer.project_id = project.id
-				AND project.key = 'voysee' AND plan.key = 'migration-plan'
+				AND project.key = 'acme' AND plan.key = 'migration-plan'
 				AND version.version = 2 AND customer.billing_account_id = 'migration-stripe'
 		`;
 		await context.sql`
@@ -1076,14 +1076,14 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 	async function prepareAutoTopupAccount(billingAccountId: string): Promise<void> {
 		await context.sql`
 			INSERT INTO customers (project_id, billing_account_id)
-			SELECT id, ${billingAccountId} FROM projects WHERE key = 'voysee'
+			SELECT id, ${billingAccountId} FROM projects WHERE key = 'acme'
 		`;
 		await context.sql`
 			INSERT INTO provider_customers (project_id, customer_id, provider, external_customer_id)
 			SELECT project.id, customer.id, 'stripe', 'cus_auto_topup'
 			FROM projects project
 			JOIN customers customer ON customer.project_id = project.id
-			WHERE project.key = 'voysee' AND customer.billing_account_id = ${billingAccountId}
+			WHERE project.key = 'acme' AND customer.billing_account_id = ${billingAccountId}
 		`;
 	}
 });
@@ -1092,22 +1092,22 @@ async function seedControlCatalog(sql: SQL): Promise<void> {
 	await sql`
 		INSERT INTO catalog_revisions (project_id, revision, status, intent_hash, created_by, published_at)
 		SELECT id, 1, 'published', repeat('a', 64), 'integration-test', now()
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = 'acme'
 	`;
 	await sql`
 		UPDATE projects SET published_catalog_revision_id = revision.id
 		FROM catalog_revisions revision
-		WHERE projects.id = revision.project_id AND projects.key = 'voysee'
+		WHERE projects.id = revision.project_id AND projects.key = 'acme'
 	`;
 	await sql`
 		INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
 		SELECT id, 'ai_credits', 'AI credits', 'metered', 'consumable', 'credit', 0
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = 'acme'
 	`;
 	await sql`
 		INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
 		SELECT id, 'model_tokens', 'Model tokens', 'metered', 'consumable', 'token', 0
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = 'acme'
 	`;
 	await sql`
 		INSERT INTO rate_card_entries (
@@ -1118,7 +1118,7 @@ async function seedControlCatalog(sql: SQL): Promise<void> {
 		JOIN catalog_revisions revision ON revision.project_id = project.id AND revision.revision = 1
 		JOIN features meter ON meter.project_id = project.id AND meter.key = 'model_tokens'
 		JOIN features wallet ON wallet.project_id = project.id AND wallet.key = 'ai_credits'
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 	await sql`
 		INSERT INTO topup_options (project_id, catalog_revision_id, key, feature_id, quantity)
@@ -1126,7 +1126,7 @@ async function seedControlCatalog(sql: SQL): Promise<void> {
 		FROM projects project
 		JOIN catalog_revisions revision ON revision.project_id = project.id AND revision.revision = 1
 		JOIN features feature ON feature.project_id = project.id AND feature.key = 'ai_credits'
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 	await sql`
 		INSERT INTO provider_topup_bindings (
@@ -1137,7 +1137,7 @@ async function seedControlCatalog(sql: SQL): Promise<void> {
 		JOIN topup_options option ON option.project_id = project.id AND option.key = 'credits_10'
 		JOIN store_products store ON store.project_id = project.id
 			AND store.provider = 'stripe' AND store.external_price_id = 'price_credits_10'
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 }
 
@@ -1157,14 +1157,14 @@ async function seedCatalogMigration(sql: SQL): Promise<void> {
 	await sql`
 		INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
 		SELECT id, 'licensed_seats', 'Licensed seats', 'metered', 'non_consumable', 'seat', 0
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = 'acme'
 	`;
 	await sql`
 		WITH target AS (
 			SELECT project.id AS project_id, revision.id AS revision_id
 			FROM projects project
 			JOIN catalog_revisions revision ON revision.project_id = project.id
-			WHERE project.key = 'voysee' AND revision.revision = 1
+			WHERE project.key = 'acme' AND revision.revision = 1
 		), plan AS (
 			INSERT INTO plans (project_id, key, name)
 			SELECT project_id, 'migration-plan', 'Migration plan' FROM target
@@ -1228,7 +1228,7 @@ async function seedCatalogMigration(sql: SQL): Promise<void> {
 		JOIN products product ON product.project_id = project.id AND product.key = 'premium_monthly'
 		CROSS JOIN (VALUES (1), (2)) AS version(number)
 		CROSS JOIN (VALUES ('base', 1000), ('seats', 100)) AS component(kind, amount)
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 	await sql`
 		INSERT INTO provider_price_bindings (
@@ -1247,7 +1247,7 @@ async function seedCatalogMigration(sql: SQL): Promise<void> {
 		SELECT project.id, account.id
 		FROM projects project
 		CROSS JOIN (VALUES ('migration-stripe'), ('migration-apple')) AS account(id)
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 	await sql`
 		INSERT INTO subscriptions (
@@ -1287,7 +1287,7 @@ async function seedCatalogMigration(sql: SQL): Promise<void> {
 		) AS account(provider, channel, external_subscription_id, billing_account_id)
 		JOIN customers customer ON customer.project_id = project.id
 			AND customer.billing_account_id = account.billing_account_id
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 	await sql`
 		INSERT INTO subscription_items (

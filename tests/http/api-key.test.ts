@@ -69,7 +69,7 @@ describe("api key authentication", () => {
 		const app = createApp({
 			env,
 			entitlementService: entitlementServiceRecording(projects),
-			projectContextResolver: projectContextResolver({ credentials: { secret: "voysee" } }),
+			projectContextResolver: projectContextResolver({ credentials: { secret: "acme" } }),
 		});
 
 		const response = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
@@ -80,17 +80,17 @@ describe("api key authentication", () => {
 		expect(await response.json()).toEqual({
 			success: true,
 			data: {
-				billingAccountId: "voysee:user_1",
+				billingAccountId: "acme:user_1",
 				generatedAt: "2026-05-31T00:00:00.000Z",
 				entitlements: [],
 			},
 		});
-		expect(projects).toEqual(["voysee"]);
+		expect(projects).toEqual(["acme"]);
 	});
 
 	it("rejects missing or wrong bearer tokens", async () => {
 		const projects: string[] = [];
-		const resolver = projectContextResolver({ credentials: { secret: "voysee" } });
+		const resolver = projectContextResolver({ credentials: { secret: "acme" } });
 		const resolveCredential = resolver.resolveCredential.bind(resolver);
 		let calls = 0;
 		resolver.resolveCredential = async (token) => {
@@ -142,50 +142,50 @@ describe("api key authentication", () => {
 				})
 			).status,
 		).toBe(200);
-		expect(projects).toEqual(["voysee", "voysee"]);
+		expect(projects).toEqual(["acme", "acme"]);
 	});
 
 	it("resolves project-scoped bearer tokens onto request context", async () => {
 		const projects: string[] = [];
-		const contexts = [projectInstanceContext(), projectInstanceContext("wiseley")];
+		const contexts = [projectInstanceContext(), projectInstanceContext("globex")];
 		const app = createApp({
 			env,
 			entitlementService: entitlementServiceRecording(projects),
 			projectContextResolver: projectContextResolver({
 				contexts,
 				credentials: {
-					"voysee-service-key-123456": "voysee",
-					"wiseley-service-key-123456": "wiseley",
+					"acme-service-key-123456": "acme",
+					"globex-service-key-123456": "globex",
 				},
 			}),
 		});
 
-		const voysee = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
-			headers: { authorization: "Bearer voysee-service-key-123456" },
+		const acme = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
+			headers: { authorization: "Bearer acme-service-key-123456" },
 		});
-		const wiseley = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
-			headers: { authorization: "Bearer wiseley-service-key-123456" },
+		const globex = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
+			headers: { authorization: "Bearer globex-service-key-123456" },
 		});
 
-		expect(voysee.status).toBe(200);
-		expect(await voysee.json()).toEqual({
+		expect(acme.status).toBe(200);
+		expect(await acme.json()).toEqual({
 			success: true,
 			data: {
-				billingAccountId: "voysee:user_1",
+				billingAccountId: "acme:user_1",
 				generatedAt: "2026-05-31T00:00:00.000Z",
 				entitlements: [],
 			},
 		});
-		expect(wiseley.status).toBe(200);
-		expect(await wiseley.json()).toEqual({
+		expect(globex.status).toBe(200);
+		expect(await globex.json()).toEqual({
 			success: true,
 			data: {
-				billingAccountId: "wiseley:user_1",
+				billingAccountId: "globex:user_1",
 				generatedAt: "2026-05-31T00:00:00.000Z",
 				entitlements: [],
 			},
 		});
-		expect(projects).toEqual(["voysee", "wiseley"]);
+		expect(projects).toEqual(["acme", "globex"]);
 	});
 
 	it("fails closed when project persistence is unavailable", async () => {
@@ -210,8 +210,8 @@ describe("api key authentication", () => {
 
 	it("rejects suspended and internal project instances", async () => {
 		for (const context of [
-			projectInstanceContext("voysee", { lifecycleStatus: "suspended" }),
-			projectInstanceContext("voysee", { environment: "internal", internalProject: true }),
+			projectInstanceContext("acme", { lifecycleStatus: "suspended" }),
+			projectInstanceContext("acme", { environment: "internal", internalProject: true }),
 		]) {
 			const app = createApp({
 				env,
@@ -242,7 +242,7 @@ describe("api key authentication", () => {
 			rows.push(credentialRow(generated.secretVerifier, { environment, ...instance }));
 			return generated.token;
 		};
-		const sandbox = issue("sandbox", { project_instance_key: "voysee-sandbox" });
+		const sandbox = issue("sandbox", { project_instance_key: "acme-sandbox" });
 		const production = issue("production");
 		const mismatched = generateProjectApiCredential("sandbox", "full").token;
 		rows.push(credentialRow(hashProjectApiCredential(mismatched), { environment: "production" }));
@@ -277,7 +277,7 @@ describe("api key authentication", () => {
 
 		expect((await request(sandbox)).status).toBe(200);
 		expect((await request(production)).status).toBe(200);
-		expect(projects).toEqual(["voysee-sandbox", "voysee"]);
+		expect(projects).toEqual(["acme-sandbox", "acme"]);
 
 		const secret = sandbox.slice("sqpk_".length);
 		const altered = `${sandbox.slice(0, -1)}${sandbox.endsWith("A") ? "B" : "A"}`;
@@ -308,7 +308,7 @@ describe("api key authentication", () => {
 			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
 		});
 		expect(lookups).toHaveLength(11);
-		expect(projects).toEqual(["voysee-sandbox", "voysee"]);
+		expect(projects).toEqual(["acme-sandbox", "acme"]);
 	});
 });
 

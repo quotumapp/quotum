@@ -22,7 +22,7 @@ import {
 } from "./helpers/platform-fixture";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
-const manifest = createTestPlatformManifest(["voysee", "wiseley"]);
+const manifest = createTestPlatformManifest(["acme", "globex"]);
 let context: LocalPostgresContext;
 
 localDescribe("platform project identity persistence", () => {
@@ -61,7 +61,7 @@ localDescribe("platform project identity persistence", () => {
 			service.apply(manifest, [
 				{
 					credentialId: unexpected.credentialId,
-					projectInstanceKey: "voysee",
+					projectInstanceKey: "acme",
 					environment: unexpected.environment,
 					access: unexpected.access,
 					secretVerifier: unexpected.secretVerifier,
@@ -225,12 +225,12 @@ localDescribe("platform project identity persistence", () => {
 
 	it("resolves the same database-authoritative context by credential, key, and id", async () => {
 		const resolver = new PostgresProjectInstanceContextResolver(context.sql);
-		const expected = integrationProjectContext("voysee");
-		const sandbox = integrationProjectContext("voysee-sandbox");
-		const otherOrganization = integrationProjectContext("wiseley");
-		const otherSandbox = integrationProjectContext("wiseley-sandbox");
+		const expected = integrationProjectContext("acme");
+		const sandbox = integrationProjectContext("acme-sandbox");
+		const otherOrganization = integrationProjectContext("globex");
+		const otherSandbox = integrationProjectContext("globex-sandbox");
 		expect(expected.logicalProjectId).toBe(sandbox.logicalProjectId);
-		expect(expected.logicalProjectKey).toBe("voysee");
+		expect(expected.logicalProjectKey).toBe("acme");
 		expect(expected.environment).toBe("production");
 		expect(sandbox.environment).toBe("sandbox");
 		expect(expected.projectInstanceId).not.toBe(sandbox.projectInstanceId);
@@ -239,9 +239,9 @@ localDescribe("platform project identity persistence", () => {
 		expect(otherOrganization.environment).toBe("production");
 		expect(otherSandbox.environment).toBe("sandbox");
 		expect(otherOrganization.projectInstanceId).not.toBe(otherSandbox.projectInstanceId);
-		await expect(
-			resolver.resolveCredential(integrationProjectCredential("voysee")),
-		).resolves.toEqual({ kind: "resolved", context: expected, access: "full" });
+		await expect(resolver.resolveCredential(integrationProjectCredential("acme"))).resolves.toEqual(
+			{ kind: "resolved", context: expected, access: "full" },
+		);
 		await expect(resolver.resolveInstanceKey(expected.projectInstanceKey)).resolves.toEqual({
 			kind: "resolved",
 			context: expected,
@@ -251,7 +251,7 @@ localDescribe("platform project identity persistence", () => {
 			context: expected,
 		});
 
-		const credential = integrationProjectCredential("voysee");
+		const credential = integrationProjectCredential("acme");
 		const modified = `${credential.slice(0, -1)}${credential.endsWith("A") ? "B" : "A"}`;
 		await expect(resolver.resolveCredential(modified)).resolves.toEqual({ kind: "not_found" });
 	});
@@ -275,8 +275,8 @@ localDescribe("platform project identity persistence", () => {
 	});
 
 	it("stores only a whole-token verifier under the internal credential UUID", async () => {
-		const token = integrationProjectCredential("voysee");
-		const sandboxToken = integrationProjectCredential("voysee-sandbox");
+		const token = integrationProjectCredential("acme");
+		const sandboxToken = integrationProjectCredential("acme-sandbox");
 		expect(token).toMatch(/^pqpk_[A-Za-z0-9_-]{43}$/u);
 		expect(sandboxToken).toMatch(/^sqpk_[A-Za-z0-9_-]{43}$/u);
 		const parsed = parseProjectApiCredential(token);
@@ -300,7 +300,7 @@ localDescribe("platform project identity persistence", () => {
 		expect(rows).toHaveLength(1);
 		expect(row.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u);
 		expect(token).not.toContain(row.id);
-		expect(row.project_instance_id).toBe(integrationProjectContext("voysee").projectInstanceId);
+		expect(row.project_instance_id).toBe(integrationProjectContext("acme").projectInstanceId);
 		expect(row.verifier_hex).toBe(Buffer.from(parsed.secretVerifier).toString("hex"));
 		expect(row.verifier_hex).toBe(createHash("sha256").update(token, "utf8").digest("hex"));
 		expect(row.verifier_hex).not.toContain(token.slice("pqpk_".length));
@@ -342,10 +342,10 @@ localDescribe("platform project identity persistence", () => {
 	});
 
 	it("enforces verifier uniqueness across credentials", async () => {
-		const token = integrationProjectCredential("voysee");
+		const token = integrationProjectCredential("acme");
 		const parsed = parseProjectApiCredential(token);
 		if (parsed === null) throw new Error("Expected an environment-prefixed integration credential");
-		const otherInstance = integrationProjectContext("wiseley").projectInstanceId;
+		const otherInstance = integrationProjectContext("globex").projectInstanceId;
 
 		let captured: unknown = null;
 		try {
@@ -367,8 +367,8 @@ localDescribe("platform project identity persistence", () => {
 
 	it("rejects a credential whose prefix does not match the stored instance environment", async () => {
 		const resolver = new PostgresProjectInstanceContextResolver(context.sql);
-		const production = integrationProjectContext("voysee");
-		const sandbox = integrationProjectContext("voysee-sandbox");
+		const production = integrationProjectContext("acme");
+		const sandbox = integrationProjectContext("acme-sandbox");
 		const internal = integrationProjectContext("billing-internal");
 		const cases = [
 			{
@@ -417,9 +417,9 @@ localDescribe("platform project identity persistence", () => {
 	});
 	it("stores the access level, keeps it authoritative, and allows one live key of each kind", async () => {
 		const resolver = new PostgresProjectInstanceContextResolver(context.sql);
-		const production = integrationProjectContext("voysee");
+		const production = integrationProjectContext("acme");
 		// The lane bootstrap issued this instance's one live read-only key.
-		const readOnlyToken = integrationProjectReadOnlyCredential("voysee");
+		const readOnlyToken = integrationProjectReadOnlyCredential("acme");
 		const mislabelled = generateProjectApiCredential("production", "read_only");
 		const second = generateProjectApiCredential("production", "read_only");
 		const insert = (token: typeof second, access: string, revoked: boolean) => context.sql`
@@ -448,7 +448,7 @@ localDescribe("platform project identity persistence", () => {
 			});
 			// The full key of the same instance is untouched by the read-only one.
 			await expect(
-				resolver.resolveCredential(integrationProjectCredential("voysee")),
+				resolver.resolveCredential(integrationProjectCredential("acme")),
 			).resolves.toMatchObject({ kind: "resolved", access: "full" });
 
 			// A read-only token stored as full must not authenticate as either kind.

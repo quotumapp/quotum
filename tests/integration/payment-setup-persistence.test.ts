@@ -13,8 +13,8 @@ import {
 } from "./helpers/local-postgres";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
-const voysee = integrationProjectContext("voysee");
-const wiseley = integrationProjectContext("wiseley");
+const acme = integrationProjectContext("acme");
+const globex = integrationProjectContext("globex");
 let context: LocalPostgresContext;
 
 const hour = 60 * 60 * 1000;
@@ -44,7 +44,7 @@ function reservation(overrides: Partial<ReservePaymentSetupInput> = {}): Reserve
 		previewToken: "11111111-1111-4111-8111-111111111111",
 		providerAccountId: "acct_stripe_1",
 		providerCustomerId: "cus_setup",
-		providerIdempotencyKey: "billing:payment-setup:voysee:abc",
+		providerIdempotencyKey: "billing:payment-setup:acme:abc",
 		requestHash: "a".repeat(64),
 		currency: "usd",
 		email: null,
@@ -74,11 +74,11 @@ localDescribe("Payment setup persistence", () => {
 	});
 
 	it("moves one setup through creating, applying and completed", async () => {
-		const created = await context.repository.reservePaymentSetup(voysee, reservation());
+		const created = await context.repository.reservePaymentSetup(acme, reservation());
 		expect(created.kind).toBe("created");
 		expect(created.setup.status).toBe("creating");
 
-		const linked = await context.repository.recordPaymentSetupLink(voysee, {
+		const linked = await context.repository.recordPaymentSetupLink(acme, {
 			setupId: created.setup.id,
 			externalSessionId: "cs_setup_1",
 			sessionUrl: "https://checkout.stripe.test/setup/cs_setup_1",
@@ -87,20 +87,20 @@ localDescribe("Payment setup persistence", () => {
 		});
 		expect(linked.status).toBe("awaiting_customer");
 
-		const claimed = await context.repository.claimPaymentSetup(voysee, {
+		const claimed = await context.repository.claimPaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 		});
 		expect(claimed?.claimed_by).toBe("worker-a");
 		// A second worker cannot take a fresh claim.
 		expect(
-			await context.repository.claimPaymentSetup(voysee, {
+			await context.repository.claimPaymentSetup(acme, {
 				setupId: created.setup.id,
 				workerId: "worker-b",
 			}),
 		).toBeNull();
 
-		const applying = await context.repository.recordPaymentSetupIntent(voysee, {
+		const applying = await context.repository.recordPaymentSetupIntent(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 			externalSetupIntentId: "seti_1",
@@ -111,7 +111,7 @@ localDescribe("Payment setup persistence", () => {
 		expect(applying.intended_payment_method_id).toBe("pm_1");
 		expect(applying.default_payment_method_id).toBeNull();
 
-		const completed = await context.repository.completePaymentSetup(voysee, {
+		const completed = await context.repository.completePaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 			paymentMethodId: "pm_1",
@@ -120,12 +120,12 @@ localDescribe("Payment setup persistence", () => {
 		expect(completed.status).toBe("completed");
 		expect(completed.claimed_by).toBeNull();
 		expect(
-			(await context.repository.getPaymentSetupSession(voysee, "setup_account", created.setup.id))
+			(await context.repository.getPaymentSetupSession(acme, "setup_account", created.setup.id))
 				.url,
 		).toBeNull();
 
 		const session = await context.repository.getPaymentSetupSession(
-			voysee,
+			acme,
 			"setup_account",
 			"cs_setup_1",
 		);
@@ -138,14 +138,14 @@ localDescribe("Payment setup persistence", () => {
 	});
 
 	it("applies a completion that overtook the creation response", async () => {
-		const created = await context.repository.reservePaymentSetup(voysee, reservation());
-		await context.repository.claimPaymentSetup(voysee, {
+		const created = await context.repository.reservePaymentSetup(acme, reservation());
+		await context.repository.claimPaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 		});
 
 		// The row is still `creating`; the event carries the session identity it has not stored.
-		const applying = await context.repository.recordPaymentSetupIntent(voysee, {
+		const applying = await context.repository.recordPaymentSetupIntent(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 			externalSetupIntentId: "seti_race",
@@ -155,7 +155,7 @@ localDescribe("Payment setup persistence", () => {
 		expect(applying.status).toBe("applying_default");
 		expect(applying.external_session_id).toBe("cs_setup_race");
 
-		await context.repository.completePaymentSetup(voysee, {
+		await context.repository.completePaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 			paymentMethodId: "pm_race",
@@ -163,7 +163,7 @@ localDescribe("Payment setup persistence", () => {
 		});
 
 		// The creation response lands afterwards and never drags the setup back.
-		const linked = await context.repository.recordPaymentSetupLink(voysee, {
+		const linked = await context.repository.recordPaymentSetupLink(acme, {
 			setupId: created.setup.id,
 			externalSessionId: "cs_setup_race",
 			sessionUrl: "https://checkout.stripe.test/setup/cs_setup_race",
@@ -178,8 +178,8 @@ localDescribe("Payment setup persistence", () => {
 	});
 
 	it("keeps one unresolved setup per account and provider identity", async () => {
-		const created = await context.repository.reservePaymentSetup(voysee, reservation());
-		await context.repository.recordPaymentSetupLink(voysee, {
+		const created = await context.repository.reservePaymentSetup(acme, reservation());
+		await context.repository.recordPaymentSetupLink(acme, {
 			setupId: created.setup.id,
 			externalSessionId: "cs_setup_1",
 			sessionUrl: "https://checkout.stripe.test/setup/cs_setup_1",
@@ -188,7 +188,7 @@ localDescribe("Payment setup persistence", () => {
 		});
 
 		const matching = await context.repository.reservePaymentSetup(
-			voysee,
+			acme,
 			reservation({ previewToken: "22222222-2222-4222-8222-222222222222" }),
 		);
 		expect(matching).toMatchObject({ kind: "reused" });
@@ -196,7 +196,7 @@ localDescribe("Payment setup persistence", () => {
 
 		const conflict = await context.repository
 			.reservePaymentSetup(
-				voysee,
+				acme,
 				reservation({
 					previewToken: "33333333-3333-4333-8333-333333333333",
 					requestHash: "b".repeat(64),
@@ -211,7 +211,7 @@ localDescribe("Payment setup persistence", () => {
 
 		// Another provider identity has a slot of its own.
 		const otherAccount = await context.repository.reservePaymentSetup(
-			voysee,
+			acme,
 			reservation({
 				previewToken: "44444444-4444-4444-8444-444444444444",
 				providerAccountId: "acct_stripe_2",
@@ -221,12 +221,12 @@ localDescribe("Payment setup persistence", () => {
 	});
 
 	it("frees the slot only once the setup is completed or expired", async () => {
-		const created = await context.repository.reservePaymentSetup(voysee, reservation());
-		await context.repository.claimPaymentSetup(voysee, {
+		const created = await context.repository.reservePaymentSetup(acme, reservation());
+		await context.repository.claimPaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 		});
-		const flagged = await context.repository.flagPaymentSetupAttention(voysee, {
+		const flagged = await context.repository.flagPaymentSetupAttention(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 			reason: "The hosted setup link could not be confirmed",
@@ -235,30 +235,30 @@ localDescribe("Payment setup persistence", () => {
 
 		// Attention still holds the slot, so the uncertain setup stays visible.
 		expect(
-			await context.repository.findActivePaymentSetup(voysee, {
+			await context.repository.findActivePaymentSetup(acme, {
 				billingAccountId: "setup_account",
 				providerAccountId: "acct_stripe_1",
 			}),
 		).toMatchObject({ id: created.setup.id, status: "needs_attention" });
 
-		await context.repository.claimPaymentSetup(voysee, {
+		await context.repository.claimPaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 		});
-		const expired = await context.repository.expirePaymentSetup(voysee, {
+		const expired = await context.repository.expirePaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 		});
 		expect(expired.status).toBe("expired");
 		expect(
-			await context.repository.findActivePaymentSetup(voysee, {
+			await context.repository.findActivePaymentSetup(acme, {
 				billingAccountId: "setup_account",
 				providerAccountId: "acct_stripe_1",
 			}),
 		).toBeNull();
 
 		const next = await context.repository.reservePaymentSetup(
-			voysee,
+			acme,
 			reservation({ previewToken: "55555555-5555-4555-8555-555555555555" }),
 		);
 		expect(next.kind).toBe("created");
@@ -266,52 +266,52 @@ localDescribe("Payment setup persistence", () => {
 	});
 
 	it("scopes setups to their project", async () => {
-		const created = await context.repository.reservePaymentSetup(voysee, reservation());
+		const created = await context.repository.reservePaymentSetup(acme, reservation());
 
 		// The same account name in another project gets its own slot.
-		const other = await context.repository.reservePaymentSetup(wiseley, reservation());
+		const other = await context.repository.reservePaymentSetup(globex, reservation());
 		expect(other.kind).toBe("created");
 		expect(other.setup.id).not.toBe(created.setup.id);
 
-		expect(await context.repository.findPaymentSetupById(wiseley, created.setup.id)).toBeNull();
+		expect(await context.repository.findPaymentSetupById(globex, created.setup.id)).toBeNull();
 		expect(
-			await context.repository.claimPaymentSetup(wiseley, {
+			await context.repository.claimPaymentSetup(globex, {
 				setupId: created.setup.id,
 				workerId: "foreign-worker",
 			}),
 		).toBeNull();
 		expect(
-			await context.repository.claimPaymentSetup(voysee, {
+			await context.repository.claimPaymentSetup(acme, {
 				setupId: "not-a-uuid",
 				workerId: "worker-a",
 			}),
 		).toBeNull();
 		const missing = await context.repository
-			.getPaymentSetupSession(wiseley, "setup_account", created.setup.id)
+			.getPaymentSetupSession(globex, "setup_account", created.setup.id)
 			.catch((error: unknown) => error);
 		if (!isBillingError(missing)) throw new Error("Expected a billing error");
 		expect(missing.code).toBe("PAYMENT_SETUP_NOT_FOUND");
 	});
 
 	it("queues one reconciliation task per setup and brings it forward", async () => {
-		const created = await context.repository.reservePaymentSetup(voysee, reservation());
+		const created = await context.repository.reservePaymentSetup(acme, reservation());
 		const later = new Date(Date.now() + 6 * hour);
 		const sooner = new Date(Date.now() + 5 * 60_000);
 		// Reservation commits its recovery task before any provider call can begin.
 		const initial = await context.sql<Array<{ id: string; customer_id: string }>>`
 			SELECT id, customer_id FROM store_events
-			WHERE project_id = ${voysee.projectInstanceId}
+			WHERE project_id = ${acme.projectInstanceId}
 				AND event_type = 'quotum.payment_setup.reconcile'
 				AND transaction_id = ${created.setup.id}
 		`;
 		expect(initial).toHaveLength(1);
 		expect(initial[0]?.customer_id).toBe(created.setup.customer_id);
 
-		const first = await context.repository.schedulePaymentSetupReconciliation(voysee, {
+		const first = await context.repository.schedulePaymentSetupReconciliation(acme, {
 			setupId: created.setup.id,
 			nextAttemptAt: later,
 		});
-		const second = await context.repository.schedulePaymentSetupReconciliation(voysee, {
+		const second = await context.repository.schedulePaymentSetupReconciliation(acme, {
 			setupId: created.setup.id,
 			nextAttemptAt: sooner,
 		});
@@ -329,7 +329,7 @@ localDescribe("Payment setup persistence", () => {
 	});
 
 	it("queues a provider event once, however many times it is delivered", async () => {
-		const first = await context.repository.enqueueProviderStoreEvent(voysee, {
+		const first = await context.repository.enqueueProviderStoreEvent(acme, {
 			provider: "stripe",
 			channel: "web",
 			externalEventId: "evt_setup_1",
@@ -337,7 +337,7 @@ localDescribe("Payment setup persistence", () => {
 			transactionId: "cs_setup_1",
 			rawPayload: { id: "evt_setup_1", type: "checkout.session.completed", data: { object: {} } },
 		});
-		const second = await context.repository.enqueueProviderStoreEvent(voysee, {
+		const second = await context.repository.enqueueProviderStoreEvent(acme, {
 			provider: "stripe",
 			channel: "web",
 			externalEventId: "evt_setup_1",
@@ -358,7 +358,7 @@ localDescribe("Payment setup persistence", () => {
 		await context.sql`ALTER TABLE store_events ADD CONSTRAINT payment_setup_test_queue_failure CHECK (event_type <> 'quotum.payment_setup.reconcile') NOT VALID`;
 		let failure: unknown;
 		try {
-			await context.repository.reservePaymentSetup(voysee, reservation());
+			await context.repository.reservePaymentSetup(acme, reservation());
 		} catch (error) {
 			failure = error;
 		} finally {
@@ -367,12 +367,12 @@ localDescribe("Payment setup persistence", () => {
 		// A check violation: the injected constraint, not some earlier failure, stopped it.
 		expect(sqlstateOf(failure)).toBe("23514");
 		const rows =
-			await context.sql`SELECT id FROM payment_setup_sessions WHERE project_id = ${voysee.projectInstanceId}`;
+			await context.sql`SELECT id FROM payment_setup_sessions WHERE project_id = ${acme.projectInstanceId}`;
 		expect(rows).toHaveLength(0);
 	});
 
 	it("preserves the original link and expiry and exposes URLs only while awaiting the customer", async () => {
-		const created = await context.repository.reservePaymentSetup(voysee, reservation());
+		const created = await context.repository.reservePaymentSetup(acme, reservation());
 		const link = {
 			setupId: created.setup.id,
 			externalSessionId: "cs_original",
@@ -380,20 +380,20 @@ localDescribe("Payment setup persistence", () => {
 			externalSetupIntentId: null,
 			expiresAt: new Date(Date.now() + 48 * hour),
 		};
-		const linked = await context.repository.recordPaymentSetupLink(voysee, link);
+		const linked = await context.repository.recordPaymentSetupLink(acme, link);
 		expect(new Date(linked.expires_at).toISOString()).toBe(
 			new Date(created.setup.expires_at).toISOString(),
 		);
 		const view = () =>
-			context.repository.getPaymentSetupSession(voysee, "setup_account", created.setup.id);
+			context.repository.getPaymentSetupSession(acme, "setup_account", created.setup.id);
 		expect((await view()).url).toBe(link.sessionUrl);
-		const repeat = await context.repository.recordPaymentSetupLink(voysee, {
+		const repeat = await context.repository.recordPaymentSetupLink(acme, {
 			...link,
 			sessionUrl: "https://checkout.stripe.test/setup/replaced",
 		});
 		expect(repeat.session_url).toBe(link.sessionUrl);
 		await expect(
-			context.repository.recordPaymentSetupLink(voysee, {
+			context.repository.recordPaymentSetupLink(acme, {
 				...link,
 				externalSessionId: "cs_different",
 			}),
@@ -402,21 +402,21 @@ localDescribe("Payment setup persistence", () => {
 		expect((await view()).url).toBeNull();
 		await context.sql`UPDATE payment_setup_sessions SET expires_at = ${new Date(created.setup.expires_at).toISOString()} WHERE id = ${created.setup.id}`;
 		expect((await view()).url).toBe(link.sessionUrl);
-		await context.repository.claimPaymentSetup(voysee, {
+		await context.repository.claimPaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker",
 		});
-		await context.repository.flagPaymentSetupAttention(voysee, {
+		await context.repository.flagPaymentSetupAttention(acme, {
 			setupId: created.setup.id,
 			workerId: "worker",
 			reason: "Needs investigation",
 		});
 		expect((await view()).url).toBeNull();
-		await context.repository.claimPaymentSetup(voysee, {
+		await context.repository.claimPaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker",
 		});
-		await context.repository.recordPaymentSetupIntent(voysee, {
+		await context.repository.recordPaymentSetupIntent(acme, {
 			setupId: created.setup.id,
 			workerId: "worker",
 			externalSetupIntentId: "seti_original",
@@ -424,7 +424,7 @@ localDescribe("Payment setup persistence", () => {
 			externalSessionId: link.externalSessionId,
 		});
 		expect((await view()).url).toBeNull();
-		const applied = await context.repository.recordPaymentSetupLink(voysee, link);
+		const applied = await context.repository.recordPaymentSetupLink(acme, link);
 		expect(applied.status).toBe("applying_default");
 		expect(new Date(applied.expires_at).toISOString()).toBe(
 			new Date(created.setup.expires_at).toISOString(),
@@ -434,76 +434,76 @@ localDescribe("Payment setup persistence", () => {
 
 	it("returns existing state for own-preview replays after creation instead of recreating a session", async () => {
 		const input = reservation();
-		const created = await context.repository.reservePaymentSetup(voysee, input);
-		expect((await context.repository.reservePaymentSetup(voysee, input)).kind).toBe("resume");
-		await context.repository.recordPaymentSetupLink(voysee, {
+		const created = await context.repository.reservePaymentSetup(acme, input);
+		expect((await context.repository.reservePaymentSetup(acme, input)).kind).toBe("resume");
+		await context.repository.recordPaymentSetupLink(acme, {
 			setupId: created.setup.id,
 			externalSessionId: "cs_replay",
 			sessionUrl: "https://checkout.stripe.test/replay",
 			externalSetupIntentId: null,
 			expiresAt: input.expiresAt,
 		});
-		expect((await context.repository.reservePaymentSetup(voysee, input)).kind).toBe("reused");
+		expect((await context.repository.reservePaymentSetup(acme, input)).kind).toBe("reused");
 		await context.sql`UPDATE payment_setup_sessions SET expires_at = now() - interval '1 second' WHERE id = ${created.setup.id}`;
-		expect((await context.repository.reservePaymentSetup(voysee, input)).kind).toBe("existing");
-		await context.repository.claimPaymentSetup(voysee, {
+		expect((await context.repository.reservePaymentSetup(acme, input)).kind).toBe("existing");
+		await context.repository.claimPaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker",
 		});
-		await context.repository.flagPaymentSetupAttention(voysee, {
+		await context.repository.flagPaymentSetupAttention(acme, {
 			setupId: created.setup.id,
 			workerId: "worker",
 			reason: "Needs investigation",
 		});
-		expect((await context.repository.reservePaymentSetup(voysee, input)).kind).toBe("existing");
-		await context.repository.claimPaymentSetup(voysee, {
+		expect((await context.repository.reservePaymentSetup(acme, input)).kind).toBe("existing");
+		await context.repository.claimPaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker",
 		});
-		await context.repository.recordPaymentSetupIntent(voysee, {
+		await context.repository.recordPaymentSetupIntent(acme, {
 			setupId: created.setup.id,
 			workerId: "worker",
 			externalSetupIntentId: "seti_replay",
 			paymentMethodId: "pm_replay",
 			externalSessionId: "cs_replay",
 		});
-		expect((await context.repository.reservePaymentSetup(voysee, input)).kind).toBe("existing");
-		await context.repository.completePaymentSetup(voysee, {
+		expect((await context.repository.reservePaymentSetup(acme, input)).kind).toBe("existing");
+		await context.repository.completePaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker",
 			paymentMethodId: "pm_replay",
 			card: null,
 		});
-		const completed = await context.repository.reservePaymentSetup(voysee, input);
+		const completed = await context.repository.reservePaymentSetup(acme, input);
 		expect(completed).toMatchObject({
 			kind: "existing",
 			setup: { id: created.setup.id, status: "completed" },
 		});
 		const nextInput = reservation({ previewToken: "66666666-6666-4666-8666-666666666666" });
-		const next = await context.repository.reservePaymentSetup(voysee, nextInput);
-		await context.repository.claimPaymentSetup(voysee, {
+		const next = await context.repository.reservePaymentSetup(acme, nextInput);
+		await context.repository.claimPaymentSetup(acme, {
 			setupId: next.setup.id,
 			workerId: "worker",
 		});
-		await context.repository.expirePaymentSetup(voysee, {
+		await context.repository.expirePaymentSetup(acme, {
 			setupId: next.setup.id,
 			workerId: "worker",
 		});
-		expect(await context.repository.reservePaymentSetup(voysee, nextInput)).toMatchObject({
+		expect(await context.repository.reservePaymentSetup(acme, nextInput)).toMatchObject({
 			kind: "existing",
 			setup: { id: next.setup.id, status: "expired" },
 		});
 	});
 
 	it("links setup events to a persisted customer only within the event's project", async () => {
-		const local = await context.repository.reservePaymentSetup(voysee, reservation());
-		const foreign = await context.repository.reservePaymentSetup(wiseley, reservation());
+		const local = await context.repository.reservePaymentSetup(acme, reservation());
+		const foreign = await context.repository.reservePaymentSetup(globex, reservation());
 		for (const [id, setupId] of [
 			["local", local.setup.id],
 			["foreign", foreign.setup.id],
 			["malformed", "not-a-uuid"],
 		]) {
-			const queued = await context.repository.enqueueProviderStoreEvent(voysee, {
+			const queued = await context.repository.enqueueProviderStoreEvent(acme, {
 				provider: "stripe",
 				channel: "web",
 				externalEventId: `evt_${id}`,
@@ -526,7 +526,7 @@ localDescribe("Payment setup persistence", () => {
 
 	it("stores a plan, records its outcome under the claim, and rejects a partial plan", async () => {
 		const created = await context.repository.reservePaymentSetup(
-			voysee,
+			acme,
 			reservation({
 				plan: { planKey: "pro", planVersionId: "42", quantities: { seats: 5 } },
 			}),
@@ -537,30 +537,30 @@ localDescribe("Payment setup persistence", () => {
 			plan_status: "pending",
 			plan_quantities: { seats: 5 },
 		});
-		await context.repository.recordPaymentSetupLink(voysee, {
+		await context.repository.recordPaymentSetupLink(acme, {
 			setupId: created.setup.id,
 			externalSessionId: "cs_plan_1",
 			sessionUrl: "https://checkout.stripe.test/setup/cs_plan_1",
 			externalSetupIntentId: null,
 			expiresAt: new Date(Date.now() + 24 * hour),
 		});
-		await context.repository.claimPaymentSetup(voysee, {
+		await context.repository.claimPaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 		});
-		await context.repository.recordPaymentSetupIntent(voysee, {
+		await context.repository.recordPaymentSetupIntent(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 			externalSetupIntentId: "seti_plan_1",
 			paymentMethodId: "pm_plan_1",
 			externalSessionId: "cs_plan_1",
 		});
-		await context.repository.recordPaymentSetupSubscriptionId(voysee, {
+		await context.repository.recordPaymentSetupSubscriptionId(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 			externalSubscriptionId: "sub_plan_1",
 		});
-		const started = await context.repository.recordPaymentSetupPlanOutcome(voysee, {
+		const started = await context.repository.recordPaymentSetupPlanOutcome(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 			status: "started",
@@ -570,7 +570,7 @@ localDescribe("Payment setup persistence", () => {
 		});
 		expect(started.plan_status).toBe("started");
 		expect(started.plan_resolved_at).not.toBeNull();
-		const completed = await context.repository.completePaymentSetup(voysee, {
+		const completed = await context.repository.completePaymentSetup(acme, {
 			setupId: created.setup.id,
 			workerId: "worker-a",
 			paymentMethodId: "pm_plan_1",
@@ -578,7 +578,7 @@ localDescribe("Payment setup persistence", () => {
 		});
 		expect(completed.status).toBe("completed");
 		const session = await context.repository.getPaymentSetupSession(
-			voysee,
+			acme,
 			"setup_account",
 			created.setup.id,
 		);
@@ -591,7 +591,7 @@ localDescribe("Payment setup persistence", () => {
 		});
 
 		const partial = await context.repository.reservePaymentSetup(
-			wiseley,
+			globex,
 			reservation({ previewToken: "33333333-3333-4333-8333-333333333333" }),
 		);
 		await expectConstraint(

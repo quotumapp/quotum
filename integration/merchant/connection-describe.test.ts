@@ -97,19 +97,19 @@ describe("connection describe", () => {
 			enabled: true,
 			settings: { checkoutCancelUrl: "https://shop.example/cancel", livemode: false, retries: 3 },
 			validatedAt,
-			identity: "acct_voysee",
+			identity: "acct_acme",
 		});
 		await seedConnection(instanceId, "apple", {
 			enabled: false,
-			settings: { bundleId: "com.voysee.app" },
+			settings: { bundleId: "com.acme.app" },
 			validatedAt: null,
-			identity: "com.voysee.app",
+			identity: "com.acme.app",
 		});
 		await seedConnection(instanceId, "google", {
 			enabled: true,
-			settings: { packageName: "com.voysee.app" },
+			settings: { packageName: "com.acme.app" },
 			validatedAt,
-			identity: "com.voysee.app",
+			identity: "com.acme.app",
 			activate: false,
 		});
 		const repository = new ConnectionRepository(f.sql, refusingCipher);
@@ -120,12 +120,12 @@ describe("connection describe", () => {
 			active_version_id: expect.any(String),
 			settings: { checkoutCancelUrl: "https://shop.example/cancel", livemode: false, retries: 3 },
 			validated_at: validatedAt,
-			external_identity: "acct_voysee",
+			external_identity: "acct_acme",
 		});
 		expect(await repository.describe(instanceId, "apple")).toMatchObject({
 			enabled: false,
 			validated_at: null,
-			external_identity: "com.voysee.app",
+			external_identity: "com.acme.app",
 		});
 		expect(await repository.describe(instanceId, "google")).toEqual({
 			enabled: true,
@@ -144,7 +144,7 @@ describe("connection describe", () => {
 			active: true,
 			validated: true,
 			validatedAt: "2026-09-18T10:00:00.000Z",
-			accountIdentity: "acct_voysee",
+			accountIdentity: "acct_acme",
 			settings: { checkoutCancelUrl: "https://shop.example/cancel", livemode: false },
 		});
 		expect(await resolver.describe?.(project, "apple")).toMatchObject({

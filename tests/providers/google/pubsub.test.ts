@@ -5,7 +5,7 @@ import { verifyGooglePubSubPush } from "../../../src/providers/google/pubsub";
 import type { GoogleDeveloperNotification } from "../../../src/providers/google/types";
 
 const config: GooglePlayConfig = {
-	packageName: "com.voysee.app",
+	packageName: "com.acme.app",
 	serviceAccountCredentials: {
 		client_email: "play-publisher@example.iam.gserviceaccount.com",
 		private_key: "-----BEGIN PRIVATE KEY-----\\nkey\\n-----END PRIVATE KEY-----\\n",
@@ -20,7 +20,7 @@ const config: GooglePlayConfig = {
 
 const notification: GoogleDeveloperNotification = {
 	version: "1.0",
-	packageName: "com.voysee.app",
+	packageName: "com.acme.app",
 	eventTimeMillis: "1780185600000",
 	subscriptionNotification: {
 		version: "1.0",
@@ -256,7 +256,7 @@ describe("Google Pub/Sub RTDN push verification", () => {
 					body: envelope(
 						encode({
 							version: "1.0",
-							packageName: "com.voysee.app",
+							packageName: "com.acme.app",
 							eventTimeMillis: "1",
 						}),
 					),

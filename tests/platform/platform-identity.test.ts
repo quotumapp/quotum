@@ -123,7 +123,7 @@ describe("platform bootstrap manifest", () => {
 			name: "Another Project",
 			instances: [
 				{
-					key: "voysee-production",
+					key: "acme-production",
 					environment: "production",
 					lifecycleStatus: "active",
 					issueCredential: true,
@@ -154,10 +154,10 @@ describe("platform bootstrap manifest", () => {
 
 describe("platform bootstrap check", () => {
 	it("requires both exact topology and all declared credentials", () => {
-		expect(platformBootstrapCheckExitCode({ state: "empty", credentialsToIssue: ["voysee"] })).toBe(
+		expect(platformBootstrapCheckExitCode({ state: "empty", credentialsToIssue: ["acme"] })).toBe(
 			2,
 		);
-		expect(platformBootstrapCheckExitCode({ state: "exact", credentialsToIssue: ["voysee"] })).toBe(
+		expect(platformBootstrapCheckExitCode({ state: "exact", credentialsToIssue: ["acme"] })).toBe(
 			2,
 		);
 		expect(platformBootstrapCheckExitCode({ state: "exact", credentialsToIssue: [] })).toBe(0);
@@ -168,11 +168,11 @@ describe("platform bootstrap check", () => {
 		const path = join(directory, "credentials.json");
 		const token = `pqpk_${secret}`;
 		try {
-			await writePlatformCredentialOutput(path, [{ projectInstanceKey: "voysee", token }]);
+			await writePlatformCredentialOutput(path, [{ projectInstanceKey: "acme", token }]);
 			expect((await stat(path)).mode & 0o777).toBe(0o600);
 			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
 				version: 1,
-				credentials: [{ projectInstanceKey: "voysee", credential: token }],
+				credentials: [{ projectInstanceKey: "acme", credential: token }],
 			});
 			await expect(writePlatformCredentialOutput(path, [])).rejects.toMatchObject({
 				code: "EEXIST",
@@ -184,16 +184,14 @@ describe("platform bootstrap check", () => {
 
 	it("derives each issued credential's prefix from the validated manifest", () => {
 		const manifest = parsePlatformBootstrapManifest(JSON.stringify(validManifest()));
-		expect(platformBootstrapCredentialEnvironment(manifest, "voysee-production")).toBe(
-			"production",
-		);
-		expect(platformBootstrapCredentialEnvironment(manifest, "voysee-sandbox")).toBe("sandbox");
+		expect(platformBootstrapCredentialEnvironment(manifest, "acme-production")).toBe("production");
+		expect(platformBootstrapCredentialEnvironment(manifest, "acme-sandbox")).toBe("sandbox");
 
 		const undeclared = validManifest();
 		const sandbox = undeclared.organizations[0]?.projects[0]?.instances[1];
 		if (sandbox === undefined) throw new Error("Expected a sandbox bootstrap instance");
 		sandbox.issueCredential = false;
-		for (const key of ["voysee-sandbox", "unknown-instance"]) {
+		for (const key of ["acme-sandbox", "unknown-instance"]) {
 			expect(() =>
 				platformBootstrapCredentialEnvironment(
 					parsePlatformBootstrapManifest(JSON.stringify(undeclared)),
@@ -232,7 +230,7 @@ describe("platform bootstrap check", () => {
 						},
 					},
 					manifest,
-					["voysee-production", "voysee-sandbox"],
+					["acme-production", "acme-sandbox"],
 					path,
 					() => {
 						throw new Error("stdout unavailable");
@@ -245,8 +243,8 @@ describe("platform bootstrap check", () => {
 			const written = new Map(
 				output.credentials.map((entry) => [entry.projectInstanceKey, entry.credential]),
 			);
-			const production = written.get("voysee-production") ?? "";
-			const sandbox = written.get("voysee-sandbox") ?? "";
+			const production = written.get("acme-production") ?? "";
+			const sandbox = written.get("acme-sandbox") ?? "";
 			expect(production).toMatch(/^pqpk_[A-Za-z0-9_-]{43}$/u);
 			expect(sandbox).toMatch(/^sqpk_[A-Za-z0-9_-]{43}$/u);
 			const parsedProduction = parseProjectApiCredential(production);
@@ -260,14 +258,14 @@ describe("platform bootstrap check", () => {
 					credentials: [
 						{
 							credentialId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
-							projectInstanceKey: "voysee-production",
+							projectInstanceKey: "acme-production",
 							environment: "production",
 							access: "full",
 							secretVerifier: parsedProduction.secretVerifier,
 						},
 						{
 							credentialId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
-							projectInstanceKey: "voysee-sandbox",
+							projectInstanceKey: "acme-sandbox",
 							environment: "sandbox",
 							access: "full",
 							secretVerifier: parsedSandbox.secretVerifier,
@@ -297,7 +295,7 @@ describe("platform bootstrap check", () => {
 								...declared.organizations[0]?.projects[0],
 								instances: instances.map((instance) => ({
 									...instance,
-									issueReadOnlyCredential: instance.key === "voysee-production",
+									issueReadOnlyCredential: instance.key === "acme-production",
 								})),
 							},
 						],
@@ -334,10 +332,10 @@ describe("platform bootstrap check", () => {
 					},
 				},
 				manifest,
-				["voysee-production"],
+				["acme-production"],
 				path,
 				() => {},
-				["voysee-production"],
+				["acme-production"],
 			);
 			const output = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
 			expect(Object.keys(output)).toEqual(["version", "credentials", "readOnlyCredentials"]);
@@ -350,11 +348,11 @@ describe("platform bootstrap check", () => {
 				credential: string;
 			}>;
 			expect(full?.credential).toMatch(/^pqpk_[A-Za-z0-9_-]{43}$/u);
-			expect(readOnly).toMatchObject({ projectInstanceKey: "voysee-production" });
+			expect(readOnly).toMatchObject({ projectInstanceKey: "acme-production" });
 			expect(readOnly?.credential).toMatch(/^pqrk_[A-Za-z0-9_-]{43}$/u);
 			expect(prepared).toEqual([
-				{ projectInstanceKey: "voysee-production", access: "full" },
-				{ projectInstanceKey: "voysee-production", access: "read_only" },
+				{ projectInstanceKey: "acme-production", access: "full" },
+				{ projectInstanceKey: "acme-production", access: "read_only" },
 			]);
 		} finally {
 			await rm(directory, { recursive: true, force: true });
@@ -372,9 +370,9 @@ describe("platform bootstrap check", () => {
 				[],
 				join(directory, "unused.json"),
 				() => {},
-				["voysee-sandbox"],
+				["acme-sandbox"],
 			),
-		).rejects.toThrow("Bootstrap does not declare a credential for voysee-sandbox");
+		).rejects.toThrow("Bootstrap does not declare a credential for acme-sandbox");
 	});
 
 	it("holds read-only credentials to the same manifest rules and check exit code", () => {
@@ -384,7 +382,7 @@ describe("platform bootstrap check", () => {
 			if (project === undefined) throw new Error("fixture has a project");
 			project.instances = [
 				{
-					key: "voysee-instance",
+					key: "acme-instance",
 					environment: environment as "sandbox",
 					lifecycleStatus: lifecycleStatus as "active",
 					issueCredential: false,
@@ -404,7 +402,7 @@ describe("platform bootstrap check", () => {
 			platformBootstrapCheckExitCode({
 				state: "exact",
 				credentialsToIssue: [],
-				readOnlyCredentialsToIssue: ["voysee"],
+				readOnlyCredentialsToIssue: ["acme"],
 			}),
 		).toBe(2);
 	});
@@ -422,10 +420,10 @@ describe("platform bootstrap check", () => {
 						},
 					},
 					manifest,
-					["voysee-internal"],
+					["acme-internal"],
 					path,
 				),
-			).rejects.toThrow("Bootstrap does not declare a credential for voysee-internal");
+			).rejects.toThrow("Bootstrap does not declare a credential for acme-internal");
 			await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 		} finally {
 			await rm(directory, { recursive: true, force: true });
@@ -445,7 +443,7 @@ describe("platform bootstrap check", () => {
 						},
 					},
 					manifest,
-					["voysee-production"],
+					["acme-production"],
 					path,
 				),
 			).rejects.toThrow("transaction rolled back");
@@ -462,21 +460,21 @@ function validManifest() {
 		version: 1 as const,
 		organizations: [
 			{
-				slug: "voysee-organization",
-				name: "Voysee Organization",
+				slug: "acme-organization",
+				name: "Acme Organization",
 				projects: [
 					{
-						key: "voysee",
-						name: "Voysee",
+						key: "acme",
+						name: "Acme",
 						instances: [
 							{
-								key: "voysee-production",
+								key: "acme-production",
 								environment: "production" as Environment,
 								lifecycleStatus: "active" as const,
 								issueCredential: true,
 							},
 							{
-								key: "voysee-sandbox",
+								key: "acme-sandbox",
 								environment: "sandbox" as Environment,
 								lifecycleStatus: "active" as const,
 								issueCredential: true,

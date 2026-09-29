@@ -34,20 +34,20 @@ localDescribe("operator grants and administrative debits", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const operator = (idempotencyKey?: string, projectKey = "voysee"): HeadersInit => ({
+		const operator = (idempotencyKey?: string, projectKey = "acme"): HeadersInit => ({
 			...authHeaders(projectKey),
 			"x-billing-operator-key": context.env.operatorApiKey ?? "",
 			"x-billing-actor": actor,
 			"content-type": "application/json",
 			...(idempotencyKey === undefined ? {} : { "idempotency-key": idempotencyKey }),
 		});
-		const post = (path: string, idempotencyKey: string, body: unknown, projectKey = "voysee") =>
+		const post = (path: string, idempotencyKey: string, body: unknown, projectKey = "acme") =>
 			testRequest(app, path, {
 				method: "POST",
 				headers: operator(idempotencyKey, projectKey),
 				body: JSON.stringify(body),
 			});
-		const get = (path: string, projectKey = "voysee") =>
+		const get = (path: string, projectKey = "acme") =>
 			testRequest(app, path, { headers: operator(undefined, projectKey) });
 		const usage = (billingAccountId: string, action: string, key: string, body: unknown) =>
 			testRequest(app, `/v1/billing-accounts/${billingAccountId}/usage/${action}`, {
@@ -190,7 +190,7 @@ localDescribe("operator grants and administrative debits", () => {
 		expect((await read.json()).data).toMatchObject({ consumedQuantity: "40", heldQuantity: "0" });
 		const crossProject = await get(
 			`/v1/admin/operator-grants/revoke_account/${created.id}`,
-			"wiseley",
+			"globex",
 		);
 		expect(crossProject.status).toBe(404);
 	});

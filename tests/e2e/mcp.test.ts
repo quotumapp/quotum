@@ -47,16 +47,16 @@ e2eDescribe("E2E MCP server", () => {
 		// The shared fixtures seed production instances only; the MCP server accepts sandbox keys.
 		await seedIntegrationProjectsAndCatalog(connection.sql, [
 			{
-				projectInstanceKey: "voysee-sandbox",
-				name: "Voysee Sandbox",
-				projectionUrl: "https://voysee-sandbox.projection.integration.test",
-				projectionSecret: "voysee-sandbox-projection-secret",
+				projectInstanceKey: "acme-sandbox",
+				name: "Acme Sandbox",
+				projectionUrl: "https://acme-sandbox.projection.integration.test",
+				projectionSecret: "acme-sandbox-projection-secret",
 			},
 		]);
 		const repository = new BillingRepository(connection.db as never);
 		for (const instance of [
-			integrationProjectContext("voysee-sandbox"),
-			integrationProjectContext("voysee"),
+			integrationProjectContext("acme-sandbox"),
+			integrationProjectContext("acme"),
 		]) {
 			await publishAiCreditsCatalog(repository, instance);
 			await repository.grantAllocation(instance, {

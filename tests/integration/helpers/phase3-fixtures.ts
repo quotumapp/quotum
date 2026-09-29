@@ -4,22 +4,22 @@ export async function seedPhase3ControlCatalog(sql: SQL): Promise<void> {
 	await sql`
 		INSERT INTO catalog_revisions (project_id, revision, status, intent_hash, created_by, published_at)
 		SELECT id, 1, 'published', repeat('a', 64), 'integration-test', now()
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = 'acme'
 	`;
 	await sql`
 		UPDATE projects SET published_catalog_revision_id = revision.id
 		FROM catalog_revisions revision
-		WHERE projects.id = revision.project_id AND projects.key = 'voysee'
+		WHERE projects.id = revision.project_id AND projects.key = 'acme'
 	`;
 	await sql`
 		INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
 		SELECT id, 'ai_credits', 'AI credits', 'metered', 'consumable', 'credit', 0
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = 'acme'
 	`;
 	await sql`
 		INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
 		SELECT id, 'model_tokens', 'Model tokens', 'metered', 'consumable', 'token', 0
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = 'acme'
 	`;
 	await sql`
 		INSERT INTO rate_card_entries (
@@ -30,7 +30,7 @@ export async function seedPhase3ControlCatalog(sql: SQL): Promise<void> {
 		JOIN catalog_revisions revision ON revision.project_id = project.id AND revision.revision = 1
 		JOIN features meter ON meter.project_id = project.id AND meter.key = 'model_tokens'
 		JOIN features wallet ON wallet.project_id = project.id AND wallet.key = 'ai_credits'
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 	await sql`
 		INSERT INTO topup_options (project_id, catalog_revision_id, key, feature_id, quantity)
@@ -38,7 +38,7 @@ export async function seedPhase3ControlCatalog(sql: SQL): Promise<void> {
 		FROM projects project
 		JOIN catalog_revisions revision ON revision.project_id = project.id AND revision.revision = 1
 		JOIN features feature ON feature.project_id = project.id AND feature.key = 'ai_credits'
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 	await sql`
 		INSERT INTO provider_topup_bindings (
@@ -49,11 +49,11 @@ export async function seedPhase3ControlCatalog(sql: SQL): Promise<void> {
 		JOIN topup_options option ON option.project_id = project.id AND option.key = 'credits_10'
 		JOIN store_products store ON store.project_id = project.id
 			AND store.provider = 'stripe' AND store.external_price_id = 'price_credits_10'
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 }
 
-export async function seedPhase3CatalogMigration(sql: SQL, projectKey = "voysee"): Promise<void> {
+export async function seedPhase3CatalogMigration(sql: SQL, projectKey = "acme"): Promise<void> {
 	await sql`
 		INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
 		SELECT id, 'licensed_seats', 'Licensed seats', 'metered', 'non_consumable', 'seat', 0
@@ -205,7 +205,7 @@ export async function seedPhase3CatalogMigration(sql: SQL, projectKey = "voysee"
 export async function seedPhase3MeteringCatalog(sql: SQL): Promise<void> {
 	await sql`
 		WITH project AS (
-			SELECT id FROM projects WHERE key = 'voysee'
+			SELECT id FROM projects WHERE key = 'acme'
 		), revision AS (
 			INSERT INTO catalog_revisions (project_id, revision, status, intent_hash, created_by, published_at)
 			SELECT id, 1, 'published', repeat('a', 64), 'integration-test', now()
@@ -287,7 +287,7 @@ export async function seedPhase3MeteringSubscription(
 	await sql`
 		WITH customer AS (
 			INSERT INTO customers (project_id, billing_account_id)
-			SELECT id, ${billingAccountId} FROM projects WHERE key = 'voysee'
+			SELECT id, ${billingAccountId} FROM projects WHERE key = 'acme'
 			RETURNING id, project_id
 		), entity AS (
 			INSERT INTO entities (project_id, customer_id, external_id, kind)
@@ -332,7 +332,7 @@ export async function linkStripeCustomer(
 ): Promise<void> {
 	await sql`
 		INSERT INTO customers (project_id, billing_account_id)
-		SELECT id, ${billingAccountId} FROM projects WHERE key = 'voysee'
+		SELECT id, ${billingAccountId} FROM projects WHERE key = 'acme'
 		ON CONFLICT (project_id, billing_account_id) DO NOTHING
 	`;
 	await sql`
@@ -340,7 +340,7 @@ export async function linkStripeCustomer(
 		SELECT project.id, customer.id, 'stripe', ${externalCustomerId}
 		FROM projects project
 		JOIN customers customer ON customer.project_id = project.id
-		WHERE project.key = 'voysee' AND customer.billing_account_id = ${billingAccountId}
+		WHERE project.key = 'acme' AND customer.billing_account_id = ${billingAccountId}
 		ON CONFLICT (project_id, provider, external_customer_id) DO NOTHING
 	`;
 }

@@ -425,7 +425,7 @@ localDescribe("Phase 3 release journeys", () => {
 				wrapStripeService(
 					new StripeBillingService({
 						config: {
-							projectKey: "voysee",
+							projectKey: "acme",
 							checkoutSuccessUrl: config.checkoutSuccessUrl,
 							checkoutCancelUrl: config.checkoutCancelUrl,
 							portalReturnUrl: config.portalReturnUrl,
@@ -595,7 +595,7 @@ function stripeService(options: FakeStripeBillingClientOptions = {}): StripeBill
 	const config = stripeConfig();
 	return new StripeBillingService({
 		config: {
-			projectKey: "voysee",
+			projectKey: "acme",
 			checkoutSuccessUrl: config.checkoutSuccessUrl,
 			checkoutCancelUrl: config.checkoutCancelUrl,
 			portalReturnUrl: config.portalReturnUrl,
@@ -697,14 +697,14 @@ async function seedTieredUsageSubscription(
 	await sql`
 		INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
 		SELECT id, ${featureKey}, ${featureKey}, 'metered', 'consumable', 'call', 1
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = 'acme'
 	`;
 	await sql`
 		WITH target AS (
 			SELECT project.id AS project_id, revision.id AS revision_id
 			FROM projects project
 			JOIN catalog_revisions revision ON revision.project_id = project.id AND revision.revision = 1
-			WHERE project.key = 'voysee'
+			WHERE project.key = 'acme'
 		), plan AS (
 			INSERT INTO plans (project_id, key, name)
 			SELECT project_id, ${planKey}, ${planKey} FROM target
@@ -769,7 +769,7 @@ async function seedTieredUsageSubscription(
 		INSERT INTO products (project_id, key, entitlement_key, credit_amount, name, type, active)
 		SELECT id, ${`usage_${pricingModel}`}, ${`usage_${pricingModel}`}, 0,
 			${`Usage ${pricingModel}`}, 'subscription', true
-		FROM projects WHERE key = 'voysee'
+		FROM projects WHERE key = 'acme'
 	`;
 	await sql`
 		INSERT INTO store_products (
@@ -780,7 +780,7 @@ async function seedTieredUsageSubscription(
 			${externalPriceId}, 'month', 'USD', 0, true
 		FROM projects project
 		JOIN products product ON product.project_id = project.id AND product.key = ${`usage_${pricingModel}`}
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 	await sql`
 		INSERT INTO provider_price_bindings (
@@ -814,7 +814,7 @@ async function seedTieredUsageSubscription(
 		JOIN plans plan ON plan.project_id = project.id AND plan.key = ${planKey}
 		JOIN plan_versions version ON version.project_id = plan.project_id
 			AND version.id = plan.active_version_id
-		WHERE project.key = 'voysee'
+		WHERE project.key = 'acme'
 	`;
 }
 

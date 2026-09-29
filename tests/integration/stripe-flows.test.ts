@@ -71,7 +71,7 @@ localDescribe("Stripe route flows integration", () => {
 			{
 				method: "POST",
 				headers: {
-					...authHeaders("voysee"),
+					...authHeaders("acme"),
 					"content-type": "application/json",
 				},
 				body: JSON.stringify({
@@ -86,7 +86,7 @@ localDescribe("Stripe route flows integration", () => {
 			{
 				method: "POST",
 				headers: {
-					...authHeaders("voysee"),
+					...authHeaders("acme"),
 					"content-type": "application/json",
 				},
 				body: JSON.stringify({ productKey: "premium_monthly" }),
@@ -186,7 +186,7 @@ localDescribe("Stripe route flows integration", () => {
 			repository: context.repository,
 		});
 		const headers = {
-			...authHeaders("voysee"),
+			...authHeaders("acme"),
 			"content-type": "application/json",
 		};
 		const previewResponse = await testRequest(
@@ -262,7 +262,7 @@ localDescribe("Stripe route flows integration", () => {
 			repository: context.repository,
 		});
 		const headers = {
-			...authHeaders("voysee"),
+			...authHeaders("acme"),
 			"content-type": "application/json",
 		};
 		const expiresAt = Math.floor(Date.now() / 1000) + 2 * 60 * 60;
@@ -307,7 +307,7 @@ localDescribe("Stripe route flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 
 		const previewResponse = await testRequest(
 			app,
@@ -357,7 +357,7 @@ localDescribe("Stripe route flows integration", () => {
 		const open = await testRequest(
 			app,
 			`/v1/billing-accounts/integration_user/payment-setup-sessions/${creation.setupId}`,
-			{ headers: authHeaders("voysee") },
+			{ headers: authHeaders("acme") },
 		);
 		expect(open.status).toBe(200);
 		expect((await open.json()).data).toMatchObject({
@@ -380,7 +380,7 @@ localDescribe("Stripe route flows integration", () => {
 			"evt_payment_setup_completed",
 		);
 		stripe.setWebhookEvent(completionEvent);
-		const webhook = await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+		const webhook = await testRequest(app, "/v1/projects/acme/webhooks/stripe", {
 			method: "POST",
 			headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=test" },
 			body: JSON.stringify(completionEvent),
@@ -395,7 +395,7 @@ localDescribe("Stripe route flows integration", () => {
 			providers: {
 				apple: null,
 				google: null,
-				stripe: projectProviderServices.voysee?.stripeBillingService ?? null,
+				stripe: projectProviderServices.acme?.stripeBillingService ?? null,
 			},
 		});
 		expect(run.processed).toBeGreaterThanOrEqual(1);
@@ -410,7 +410,7 @@ localDescribe("Stripe route flows integration", () => {
 		const completed = await testRequest(
 			app,
 			`/v1/billing-accounts/integration_user/payment-setup-sessions/${creation.sessionId}`,
-			{ headers: authHeaders("voysee") },
+			{ headers: authHeaders("acme") },
 		);
 		expect(completed.status).toBe(200);
 		expect((await completed.json()).data).toMatchObject({
@@ -443,7 +443,7 @@ localDescribe("Stripe route flows integration", () => {
 			"evt_payment_setup_expired",
 		);
 		stripe.setWebhookEvent(expiryEvent);
-		await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+		await testRequest(app, "/v1/projects/acme/webhooks/stripe", {
 			method: "POST",
 			headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=test" },
 			body: JSON.stringify(expiryEvent),
@@ -454,7 +454,7 @@ localDescribe("Stripe route flows integration", () => {
 			providers: {
 				apple: null,
 				google: null,
-				stripe: projectProviderServices.voysee?.stripeBillingService ?? null,
+				stripe: projectProviderServices.acme?.stripeBillingService ?? null,
 			},
 		});
 		const [row] = await context.sql<Array<{ status: string }>>`
@@ -463,14 +463,14 @@ localDescribe("Stripe route flows integration", () => {
 		expect(row?.status).toBe("completed");
 
 		// The saved card is what a later automatic top-up charges.
-		const stripeService = projectProviderServices.voysee?.stripeBillingService;
+		const stripeService = projectProviderServices.acme?.stripeBillingService;
 		if (stripeService === undefined || stripeService === null) {
 			throw new Error("The integration app did not build a Stripe service");
 		}
 		const charge = await stripeService.createAutoTopupCharge({
 			jobId: "00000000-0000-4000-8000-00000000a001",
 			projectId: "project_1",
-			projectKey: "voysee",
+			projectKey: "acme",
 			provider: "stripe",
 			providerAccountId: null,
 			policyId: "00000000-0000-4000-8000-00000000b001",
@@ -498,7 +498,7 @@ localDescribe("Stripe route flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 		const setup = async (currency: string, key: string) => {
 			const previewResponse = await testRequest(
 				app,
@@ -558,7 +558,7 @@ localDescribe("Stripe route flows integration", () => {
 	it("refuses a hosted setup and its session read from a read-only project credential", async () => {
 		const { app } = createIntegrationApp({ env: context.env, repository: context.repository });
 		const headers = {
-			authorization: `Bearer ${integrationProjectReadOnlyCredential("voysee")}`,
+			authorization: `Bearer ${integrationProjectReadOnlyCredential("acme")}`,
 			"content-type": "application/json",
 		};
 
@@ -589,7 +589,7 @@ localDescribe("Stripe route flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 
 		const previewResponse = await testRequest(
 			app,
@@ -613,8 +613,8 @@ localDescribe("Stripe route flows integration", () => {
 
 	it.each([
 		{ email: `${"a".repeat(309)}@example.com` },
-		{ successUrl: `https://app.voysee.com/${"a".repeat(2000)}` },
-		{ cancelUrl: `https://app.voysee.com/${"a".repeat(2000)}` },
+		{ successUrl: `https://app.acme.com/${"a".repeat(2000)}` },
+		{ cancelUrl: `https://app.acme.com/${"a".repeat(2000)}` },
 	])("rejects oversized setup input before persisting a preview: %j", async (overrides) => {
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -625,7 +625,7 @@ localDescribe("Stripe route flows integration", () => {
 			"/v1/billing-accounts/integration_user/commercial-actions/preview",
 			{
 				method: "POST",
-				headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+				headers: { ...authHeaders("acme"), "content-type": "application/json" },
 				body: JSON.stringify({ intent: { kind: "setup_payment", currency: "usd", ...overrides } }),
 			},
 		);
@@ -645,7 +645,7 @@ localDescribe("Stripe route flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 		const previewResponse = await testRequest(
 			app,
 			"/v1/billing-accounts/integration_user/commercial-actions/preview",
@@ -697,7 +697,7 @@ localDescribe("Stripe route flows integration", () => {
 		stripe.setWebhookEvent(completionEvent);
 		expect(
 			(
-				await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+				await testRequest(app, "/v1/projects/acme/webhooks/stripe", {
 					method: "POST",
 					headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=test" },
 					body: JSON.stringify(completionEvent),
@@ -710,7 +710,7 @@ localDescribe("Stripe route flows integration", () => {
 			providers: {
 				apple: null,
 				google: null,
-				stripe: projectProviderServices.voysee?.stripeBillingService ?? null,
+				stripe: projectProviderServices.acme?.stripeBillingService ?? null,
 			},
 		});
 		expect(stripe.subscriptionCreateParams).toHaveLength(1);
@@ -757,7 +757,7 @@ localDescribe("Stripe route flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 		const previewResponse = await testRequest(
 			app,
 			"/v1/billing-accounts/integration_user/commercial-actions/preview",
@@ -804,7 +804,7 @@ localDescribe("Stripe route flows integration", () => {
 			"evt_payment_setup_plan_decline",
 		);
 		stripe.setWebhookEvent(completionEvent);
-		await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+		await testRequest(app, "/v1/projects/acme/webhooks/stripe", {
 			method: "POST",
 			headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=test" },
 			body: JSON.stringify(completionEvent),
@@ -815,7 +815,7 @@ localDescribe("Stripe route flows integration", () => {
 			providers: {
 				apple: null,
 				google: null,
-				stripe: projectProviderServices.voysee?.stripeBillingService ?? null,
+				stripe: projectProviderServices.acme?.stripeBillingService ?? null,
 			},
 		});
 		const [setup] = await context.sql<
@@ -844,7 +844,7 @@ localDescribe("Stripe route flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 		const previewResponse = await testRequest(
 			app,
 			"/v1/billing-accounts/integration_user/commercial-actions/preview",
@@ -893,7 +893,7 @@ localDescribe("Stripe route flows integration", () => {
 			"evt_payment_setup_plan_changed",
 		);
 		stripe.setWebhookEvent(completionEvent);
-		await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+		await testRequest(app, "/v1/projects/acme/webhooks/stripe", {
 			method: "POST",
 			headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=test" },
 			body: JSON.stringify(completionEvent),
@@ -904,7 +904,7 @@ localDescribe("Stripe route flows integration", () => {
 			providers: {
 				apple: null,
 				google: null,
-				stripe: projectProviderServices.voysee?.stripeBillingService ?? null,
+				stripe: projectProviderServices.acme?.stripeBillingService ?? null,
 			},
 		});
 		const [setup] = await context.sql<Array<{ status: string; plan_status: string }>>`
@@ -928,7 +928,7 @@ localDescribe("Stripe route flows integration", () => {
 			{
 				method: "POST",
 				headers: {
-					...authHeaders("voysee"),
+					...authHeaders("acme"),
 					"content-type": "application/json",
 				},
 				body: JSON.stringify({
@@ -964,7 +964,7 @@ localDescribe("Stripe route flows integration", () => {
 			SET tier_rank = 5
 			FROM plans plan, projects project
 			WHERE version.project_id = plan.project_id AND version.plan_id = plan.id
-				AND plan.project_id = project.id AND project.key = 'voysee'
+				AND plan.project_id = project.id AND project.key = 'acme'
 				AND plan.key = 'migration-plan' AND version.version = 2
 		`;
 		const project = integrationProjectContext();
@@ -979,7 +979,7 @@ localDescribe("Stripe route flows integration", () => {
 				{
 					method: "POST",
 					headers: {
-						...authHeaders("voysee"),
+						...authHeaders("acme"),
 						"content-type": "application/json",
 						"idempotency-key": idempotencyKey,
 					},
@@ -1024,7 +1024,7 @@ localDescribe("Stripe route flows integration", () => {
 				wrapStripeService(
 					new StripeBillingService({
 						config: {
-							projectKey: "voysee",
+							projectKey: "acme",
 							checkoutSuccessUrl:
 								"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
 							checkoutCancelUrl: "https://app.integration.test/billing",
@@ -1079,7 +1079,7 @@ localDescribe("Stripe route flows integration", () => {
 			SET tier_rank = 5
 			FROM plans plan, projects project
 			WHERE version.project_id = plan.project_id AND version.plan_id = plan.id
-				AND plan.project_id = project.id AND project.key = 'voysee'
+				AND plan.project_id = project.id AND project.key = 'acme'
 				AND plan.key = 'migration-plan' AND version.version = 2
 		`;
 		const project = integrationProjectContext();
@@ -1099,7 +1099,7 @@ localDescribe("Stripe route flows integration", () => {
 			{
 				method: "POST",
 				headers: {
-					...authHeaders("voysee"),
+					...authHeaders("acme"),
 					"content-type": "application/json",
 					"idempotency-key": "period-end-downgrade:ended",
 				},
@@ -1133,7 +1133,7 @@ localDescribe("Stripe route flows integration", () => {
 				wrapStripeService(
 					new StripeBillingService({
 						config: {
-							projectKey: "voysee",
+							projectKey: "acme",
 							checkoutSuccessUrl:
 								"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
 							checkoutCancelUrl: "https://app.integration.test/billing",
@@ -1188,7 +1188,7 @@ localDescribe("Stripe route flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 		const periodEnd = new Date(Math.floor(Date.now() / 1000) * 1000 + 29 * 24 * 60 * 60 * 1000);
 		await context.sql`
 			UPDATE subscriptions SET current_period_end = ${periodEnd.toISOString()}::timestamptz
@@ -1330,7 +1330,7 @@ localDescribe("Stripe route flows integration", () => {
 			SET tier_rank = 5
 			FROM plans plan, projects project
 			WHERE version.project_id = plan.project_id AND version.plan_id = plan.id
-				AND plan.project_id = project.id AND project.key = 'voysee'
+				AND plan.project_id = project.id AND project.key = 'acme'
 				AND plan.key = 'migration-plan' AND version.version = 2
 		`;
 		const project = integrationProjectContext();
@@ -1338,7 +1338,7 @@ localDescribe("Stripe route flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 		const periodEnd = new Date(Math.floor(Date.now() / 1000) * 1000 + 29 * 24 * 60 * 60 * 1000);
 		await context.sql`
 			UPDATE subscriptions SET current_period_end = ${periodEnd.toISOString()}::timestamptz
@@ -1476,7 +1476,7 @@ localDescribe("Stripe route flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 		const cancelIntent = (externalSubscriptionId: string) =>
 			testRequest(app, "/v1/billing-accounts/migration-stripe/commercial-actions/preview", {
 				method: "POST",
@@ -1510,7 +1510,7 @@ localDescribe("Stripe route flows integration", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 		// Stripe reports a trialing subscription as active, so only its trial window marks it here.
 		await context.sql`
 			UPDATE subscriptions
@@ -1562,7 +1562,7 @@ localDescribe("Stripe route flows integration", () => {
 		await seedPhase3CatalogMigration(context.sql);
 		const { app } = createIntegrationApp({ env: context.env, repository: context.repository });
 		const headers = {
-			authorization: `Bearer ${integrationProjectReadOnlyCredential("voysee")}`,
+			authorization: `Bearer ${integrationProjectReadOnlyCredential("acme")}`,
 			"content-type": "application/json",
 		};
 
@@ -1603,7 +1603,7 @@ localDescribe("Stripe route flows integration", () => {
 			repository: context.repository,
 		});
 		const headers = {
-			...authHeaders("voysee"),
+			...authHeaders("acme"),
 			"content-type": "application/json",
 		};
 		const preview = async (billingAccountId: string) => {
@@ -1672,7 +1672,7 @@ localDescribe("Stripe route flows integration", () => {
 			stripeCheckoutSessionFailures: 1,
 		});
 		const headers = {
-			...authHeaders("voysee"),
+			...authHeaders("acme"),
 			"content-type": "application/json",
 		};
 		const previewResponse = await testRequest(
@@ -1731,7 +1731,7 @@ localDescribe("Stripe route flows integration", () => {
 			testRequest(app, "/v1/billing-accounts/integration_user/providers/stripe/checkout-sessions", {
 				method: "POST",
 				headers: {
-					...authHeaders("voysee"),
+					...authHeaders("acme"),
 					"content-type": "application/json",
 					"idempotency-key": "checkout-receipt-1",
 				},
@@ -1774,7 +1774,7 @@ localDescribe("Stripe route flows integration", () => {
 			{
 				method: "POST",
 				headers: {
-					...authHeaders("voysee"),
+					...authHeaders("acme"),
 					"content-type": "application/json",
 				},
 				body: JSON.stringify({ productKey: "missing_product" }),
@@ -1804,7 +1804,7 @@ localDescribe("Stripe route flows integration", () => {
 			"/v1/billing-accounts/integration_user/providers/stripe/portal-sessions",
 			{
 				method: "POST",
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 		const second = await testRequest(
@@ -1812,7 +1812,7 @@ localDescribe("Stripe route flows integration", () => {
 			"/v1/billing-accounts/integration_user/providers/stripe/portal-sessions",
 			{
 				method: "POST",
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 
@@ -1867,7 +1867,7 @@ localDescribe("Stripe route flows integration", () => {
 			app,
 			"/v1/billing-accounts/integration_user/providers/stripe/checkout-sessions/cs_test_integration",
 			{
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 
@@ -1920,7 +1920,7 @@ localDescribe("Stripe route flows integration", () => {
 			providers: {
 				apple: null,
 				google: null,
-				stripe: fixture.projectProviderServices.voysee?.stripeBillingService ?? null,
+				stripe: fixture.projectProviderServices.acme?.stripeBillingService ?? null,
 			},
 		});
 		expect(run).toMatchObject({ processed: 1, failed: 0 });
@@ -1956,7 +1956,7 @@ localDescribe("Stripe route flows integration", () => {
 		expect(before[0].original_transaction_id).toBe("ch_integration");
 		expect(before[0].raw_payload.payment_intent).toBe("pi_integration");
 		const search = await testRequest(fixture.app, "/v1/admin/customers/search?q=ch_integration", {
-			headers: fixture.authHeaders("voysee"),
+			headers: fixture.authHeaders("acme"),
 		});
 		expect(search.status).toBe(200);
 		expect(JSON.stringify(await search.json())).toContain("integration_user");
@@ -2177,7 +2177,7 @@ localDescribe("Stripe route flows integration", () => {
 			fixture.app,
 			"/v1/billing-accounts/integration_user/entitlements",
 			{
-				headers: fixture.authHeaders("voysee"),
+				headers: fixture.authHeaders("acme"),
 			},
 		);
 
@@ -2186,10 +2186,10 @@ localDescribe("Stripe route flows integration", () => {
 	});
 
 	it("keeps the upgraded price when a later invoice still carries Checkout metadata", async () => {
-		const project = integrationProjectContext("voysee");
+		const project = integrationProjectContext("acme");
 		const service = new StripeBillingService({
 			config: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				checkoutSuccessUrl:
 					"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
 				checkoutCancelUrl: "https://app.integration.test/billing",
@@ -2356,14 +2356,14 @@ localDescribe("Stripe route flows integration", () => {
 	it("records an invoice delivered after a newer subscription event", async () => {
 		const service = new StripeBillingService({
 			config: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				checkoutSuccessUrl:
 					"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
 				checkoutCancelUrl: "https://app.integration.test/billing",
 				portalReturnUrl: "https://app.integration.test/account/billing",
 			},
 			client: createFakeStripeBillingClient().client,
-			repository: context.repository.forProject(integrationProjectContext("voysee")),
+			repository: context.repository.forProject(integrationProjectContext("acme")),
 		});
 		const start = Math.floor(Date.now() / 1000) - 86_400;
 		const end = start + 30 * 86_400;
@@ -2488,7 +2488,7 @@ localDescribe("Stripe route flows integration", () => {
 			)
 			SELECT id, 'lifetime_access', 'lifetime_access', 0, 'Lifetime access',
 				'non_consumable', true
-			FROM projects WHERE key = 'voysee'
+			FROM projects WHERE key = 'acme'
 		`;
 		await context.sql`
 			INSERT INTO store_products (
@@ -2500,7 +2500,7 @@ localDescribe("Stripe route flows integration", () => {
 			FROM projects project
 			JOIN products product
 				ON product.project_id = project.id AND product.key = 'lifetime_access'
-			WHERE project.key = 'voysee'
+			WHERE project.key = 'acme'
 		`;
 		const checkout = createIntegrationApp({
 			env: context.env,
@@ -2756,13 +2756,13 @@ localDescribe("Stripe route flows integration", () => {
 		await context.sql`
 			UPDATE products
 			SET credit_amount = 100
-			WHERE project_id = (SELECT id FROM projects WHERE key = 'voysee')
+			WHERE project_id = (SELECT id FROM projects WHERE key = 'acme')
 				AND key = 'echo_credits_10'
 		`;
 		await context.sql`
 			UPDATE store_products
 			SET price_amount = 1000
-			WHERE project_id = (SELECT id FROM projects WHERE key = 'voysee')
+			WHERE project_id = (SELECT id FROM projects WHERE key = 'acme')
 				AND provider = 'stripe'
 				AND external_product_id = 'prod_stripe_credits_10'
 				AND external_price_id = 'price_credits_10'
@@ -3155,7 +3155,7 @@ localDescribe("Stripe route flows integration", () => {
 		);
 
 		const snapshot = await context.repository.getEntitlementSnapshot(
-			integrationProjectContext("voysee"),
+			integrationProjectContext("acme"),
 			"integration_user",
 		);
 		expect(snapshot.entitlements).toEqual([
@@ -3443,14 +3443,14 @@ localDescribe("Stripe route flows integration", () => {
 function createVerifiedEventService(): StripeBillingService {
 	return new StripeBillingService({
 		config: {
-			projectKey: "voysee",
+			projectKey: "acme",
 			checkoutSuccessUrl:
 				"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
 			checkoutCancelUrl: "https://app.integration.test/billing",
 			portalReturnUrl: "https://app.integration.test/account/billing",
 		},
 		client: createFakeStripeBillingClient().client,
-		repository: context.repository.forProject(integrationProjectContext("voysee")),
+		repository: context.repository.forProject(integrationProjectContext("acme")),
 	});
 }
 
@@ -3541,7 +3541,7 @@ async function postStripeWebhook(
 		headers["stripe-signature"] = signature;
 	}
 
-	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/stripe", {
+	return await testRequest(fixture.app, "/v1/projects/acme/webhooks/stripe", {
 		method: "POST",
 		headers,
 		body: JSON.stringify({
@@ -3658,7 +3658,7 @@ async function expectProviderCustomerRow(
 			billing_account_id: match.billingAccountId,
 			provider: match.provider,
 			external_customer_id: match.externalCustomerId,
-			project_key: "voysee",
+			project_key: "acme",
 		},
 	]);
 }
@@ -3707,7 +3707,7 @@ async function expectStripeConsumablePurchaseRows(
 		JOIN products ON products.id = purchases.product_id
 			AND products.project_id = purchases.project_id
 		JOIN projects ON projects.id = purchases.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND purchases.provider = 'stripe'
 			AND purchases.purchase_kind = 'consumable'
 	`;
@@ -3764,7 +3764,7 @@ async function expectStripeSubscriptionRows(
 		JOIN entitlements ON entitlements.source_subscription_id = subscriptions.id
 			AND entitlements.project_id = subscriptions.project_id
 		JOIN projects ON projects.id = subscriptions.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND subscriptions.provider = 'stripe'
 	`;
 
@@ -3805,7 +3805,7 @@ async function expectStripeStoreEventRows(
 			store_events.processing_status
 		FROM store_events
 		JOIN projects ON projects.id = store_events.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND store_events.provider = 'stripe'
 			AND store_events.external_event_id = ${expected.externalEventId}
 	`;
@@ -3859,7 +3859,7 @@ async function expectProjectionJobByKey(
 			jobs.status, jobs.payload
 		FROM projection_sync_jobs jobs
 		JOIN projects ON projects.id = jobs.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND jobs.idempotency_key = ${idempotencyKey}
 	`;
 

@@ -52,7 +52,7 @@ describe("fake provider clients", () => {
 		const verified = await fake.client.verifyTransaction("txn_1");
 		const normalized = normalizeVerifiedStoreKitTransaction({
 			billingAccountId: "integration_user",
-			expectedBundleId: "com.voysee.app",
+			expectedBundleId: "com.acme.app",
 			expectedEnvironment: "sandbox",
 			renewalInfo: verified.renewalInfo,
 			transaction: verified.transaction,
@@ -217,15 +217,15 @@ describe("fake provider clients", () => {
 	it("captures Stripe Checkout and Portal request params", async () => {
 		const fake = createFakeStripeBillingClient();
 		const checkoutParams = {
-			cancel_url: "https://voysee.test/cancel",
+			cancel_url: "https://acme.test/cancel",
 			client_reference_id: "integration_user",
 			line_items: [{ price: "price_credits_10", quantity: 1 }],
 			mode: "payment" as const,
-			success_url: "https://voysee.test/success",
+			success_url: "https://acme.test/success",
 		};
 		const portalParams = {
 			customer: "cus_integration",
-			return_url: "https://voysee.test/account",
+			return_url: "https://acme.test/account",
 		};
 
 		await fake.client.createCheckoutSession(checkoutParams);

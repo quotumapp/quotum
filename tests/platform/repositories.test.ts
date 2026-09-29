@@ -28,13 +28,13 @@ describe("platform schema-neutral repositories", () => {
 			[
 				{
 					id: "organization-id",
-					slug: "voysee",
-					name: "Voysee",
+					slug: "acme",
+					name: "Acme",
 					status: "active",
 					has_members: false,
 				},
 			],
-			[{ id: "created-id", slug: "wiseley", name: "Wiseley" }],
+			[{ id: "created-id", slug: "globex", name: "Globex" }],
 			[{ id: "other-id" }],
 			[],
 			[{ id: "organization-id" }],
@@ -44,35 +44,35 @@ describe("platform schema-neutral repositories", () => {
 		await expect(repository.list()).resolves.toEqual([
 			{
 				id: "organization-id",
-				slug: "voysee",
-				name: "Voysee",
+				slug: "acme",
+				name: "Acme",
 				status: "active",
 				hasMembers: false,
 			},
 		]);
-		await expect(repository.create({ slug: "wiseley", name: "Wiseley" })).resolves.toEqual({
+		await expect(repository.create({ slug: "globex", name: "Globex" })).resolves.toEqual({
 			id: "created-id",
-			slug: "wiseley",
-			name: "Wiseley",
+			slug: "globex",
+			name: "Globex",
 		});
 		expect(executor.calls[0]?.text).toContain("FROM platform_organizations o");
 		expect(executor.calls[0]?.text).toContain("WHERE m.organization_id = o.id");
 		expect(executor.calls[1]?.text).toContain("VALUES ($1, $2)");
-		expect(executor.calls[1]?.values).toEqual(["wiseley", "Wiseley"]);
+		expect(executor.calls[1]?.values).toEqual(["globex", "Globex"]);
 		await expect(
-			repository.slugBelongsToAnotherOrganization("wiseley", "organization-id"),
+			repository.slugBelongsToAnotherOrganization("globex", "organization-id"),
 		).resolves.toBe(true);
 		expect(executor.calls[2]?.text).toContain("WHERE slug = $1 AND id <> $2");
-		expect(executor.calls[2]?.values).toEqual(["wiseley", "organization-id"]);
+		expect(executor.calls[2]?.values).toEqual(["globex", "organization-id"]);
 		const updatedAt = new Date("2026-09-18T12:00:00.000Z");
 		await repository.update({
 			id: "organization-id",
-			name: "Wiseley",
-			slug: "wiseley",
+			name: "Globex",
+			slug: "globex",
 			updatedAt,
 		});
 		expect(executor.calls[3]?.text).toContain("SET name = $1, slug = $2, updated_at = $3");
-		expect(executor.calls[3]?.values).toEqual(["Wiseley", "wiseley", updatedAt, "organization-id"]);
+		expect(executor.calls[3]?.values).toEqual(["Globex", "globex", updatedAt, "organization-id"]);
 		await repository.lockById("organization-id");
 		expect(executor.calls[4]?.text).toContain("WHERE id = $1");
 		expect(executor.calls[4]?.text).toContain("FOR UPDATE");

@@ -18,9 +18,9 @@ const env: BillingEnv = {
 	trustGatewayProjectHeader: false,
 	connectionFixtures: [
 		{
-			projectInstanceKey: "voysee",
-			projectionUrl: "https://voysee.example.com",
-			projectionSecret: "voysee-projection-secret",
+			projectInstanceKey: "acme",
+			projectionUrl: "https://acme.example.com",
+			projectionSecret: "acme-projection-secret",
 		},
 	],
 	runtimeEnvironment: "development",
@@ -95,10 +95,10 @@ function testApp(
 		promotionService: recordingService(calls),
 		trialService: recordingService(calls),
 		projectContextResolver: projectContextResolver({
-			contexts: [projectInstanceContext("voysee")],
+			contexts: [projectInstanceContext("acme")],
 			credentials: {
-				"full-key": "voysee",
-				"read-key": { projectInstanceKey: "voysee", access: "read_only" },
+				"full-key": "acme",
+				"read-key": { projectInstanceKey: "acme", access: "read_only" },
 			},
 		}),
 		entitlementService: new EntitlementService({
@@ -258,7 +258,7 @@ describe("read-only project credentials", () => {
 				message: "Read-only project credential refused",
 				context: {
 					source: "credential",
-					projectKey: "voysee",
+					projectKey: "acme",
 					method: "POST",
 					route: "/v1/billing-accounts/:billingAccountId/usage/consume",
 				},
@@ -279,8 +279,8 @@ describe("gateway credential access header", () => {
 	function gatewayApp(authMode: "gateway" | "api_key" = "gateway") {
 		const lookups: string[] = [];
 		const inner = projectContextResolver({
-			contexts: [projectInstanceContext("voysee")],
-			credentials: { "full-key": "voysee" },
+			contexts: [projectInstanceContext("acme")],
+			credentials: { "full-key": "acme" },
 		});
 		const app = createBillingApp({
 			env: { ...env, authMode, trustGatewayProjectHeader: authMode === "gateway" },
@@ -301,7 +301,7 @@ describe("gateway credential access header", () => {
 		return { app, lookups };
 	}
 	const gatewayHeaders = (access?: string): Record<string, string> => ({
-		"x-billing-project-key": "voysee",
+		"x-billing-project-key": "acme",
 		"content-type": "application/json",
 		"idempotency-key": "gateway-access",
 		...(access === undefined ? {} : { "x-billing-credential-access": access }),

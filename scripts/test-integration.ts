@@ -11,9 +11,9 @@ import { assertLaneReport, junitReporterArgs, readJunitSummary } from "./lib/tes
 
 const logger = createCliBillingLogger();
 
-const postgresDatabase = "voysee_billing_test";
+const postgresDatabase = "acme_billing_test";
 const testTargets = process.argv.slice(2);
-const projectInstanceKeys = ["voysee", "wiseley"] as const;
+const projectInstanceKeys = ["acme", "globex"] as const;
 const merchantLane = testTargets.some((target) => target.startsWith("integration/merchant"));
 const lane = merchantLane ? "merchant" : "integration";
 

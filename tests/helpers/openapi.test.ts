@@ -49,13 +49,13 @@ describe("OpenAPI assertions", () => {
 				),
 		});
 		await expect(
-			testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+			testRequest(app, "/v1/projects/acme/webhooks/stripe", {
 				method: "POST",
 				headers: { "content-type": "application/json", "stripe-signature": "sig" },
 				body: JSON.stringify({ id: "evt" }),
 			}),
 		).rejects.toThrow("data must have required property 'type'");
-		const valid = await testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+		const valid = await testRequest(app, "/v1/projects/acme/webhooks/stripe", {
 			method: "POST",
 			headers: { "content-type": "application/json", "stripe-signature": "sig" },
 			body: JSON.stringify({
@@ -72,7 +72,7 @@ describe("OpenAPI assertions", () => {
 			handle: async () => new Response("ignored", { headers: { "content-type": "text/plain" } }),
 		});
 		await expect(
-			testRequest(app, "/v1/projects/voysee/webhooks/stripe", {
+			testRequest(app, "/v1/projects/acme/webhooks/stripe", {
 				method: "POST",
 				headers: { "content-type": "application/json", "stripe-signature": "sig" },
 				body: JSON.stringify({

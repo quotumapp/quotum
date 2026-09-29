@@ -251,11 +251,7 @@ describe("pre-auth rate limit gates", () => {
 
 describe("projectScopedRateLimitGuard", () => {
 	/** Mirrors the shell: post-auth guards throw `RateLimitExceeded`, `onError` renders the envelope. */
-	function postAuthApp(
-		guard: PostAuthRateLimitGuard,
-		path = "/limited",
-		projectKey = "proj_voysee",
-	) {
+	function postAuthApp(guard: PostAuthRateLimitGuard, path = "/limited", projectKey = "proj_acme") {
 		return new Elysia()
 			.onError(({ error, set }) => {
 				if (!(error instanceof RateLimitExceeded)) {
@@ -298,7 +294,7 @@ describe("projectScopedRateLimitGuard", () => {
 
 		const response = await testRequest(app, "/limited");
 
-		expect(keys).toEqual(["project:proj_voysee:unknown:/limited"]);
+		expect(keys).toEqual(["project:proj_acme:unknown:/limited"]);
 		expect(response.status).toBe(200);
 		expect(response.headers.get("ratelimit-remaining")).toBe("4");
 		expect(response.headers.get("ratelimit-reset")).toBe(new Date(10_000).toISOString());
@@ -355,7 +351,7 @@ describe("projectScopedRateLimitGuard", () => {
 		await testRequest(postAuthApp(untrusted), "/limited", {
 			headers: { "cf-connecting-ip": "198.51.100.30" },
 		});
-		expect(key).toBe("project:proj_voysee:unknown:/limited");
+		expect(key).toBe("project:proj_acme:unknown:/limited");
 
 		const trusted = projectScopedRateLimitGuard({
 			limiter: {
@@ -370,7 +366,7 @@ describe("projectScopedRateLimitGuard", () => {
 		await testRequest(postAuthApp(trusted), "/limited", {
 			headers: { "cf-connecting-ip": "198.51.100.30" },
 		});
-		expect(key).toBe("project:proj_voysee:198.51.100.30:/limited");
+		expect(key).toBe("project:proj_acme:198.51.100.30:/limited");
 	});
 
 	it("keys buckets on the route pattern, not the values in the path", async () => {
@@ -390,8 +386,8 @@ describe("projectScopedRateLimitGuard", () => {
 		await testRequest(app, "/v1/billing-accounts/user_2/usage/check");
 
 		expect(keys).toEqual([
-			"project:proj_voysee:unknown:/v1/billing-accounts/:billingAccountId/usage/check",
-			"project:proj_voysee:unknown:/v1/billing-accounts/:billingAccountId/usage/check",
+			"project:proj_acme:unknown:/v1/billing-accounts/:billingAccountId/usage/check",
+			"project:proj_acme:unknown:/v1/billing-accounts/:billingAccountId/usage/check",
 		]);
 	});
 
@@ -588,14 +584,14 @@ describe("requestProjectIpAndPath", () => {
 	it("composes the key from the resolved project key, peer, and normalized path", () => {
 		const key = requestProjectIpAndPath(
 			{
-				request: new Request("http://localhost/v1/projects/voysee/usage/events"),
+				request: new Request("http://localhost/v1/projects/acme/usage/events"),
 				server: null,
 				projectKey: "abc",
 			},
 			{ remoteAddress: () => "203.0.113.9" },
 		);
 
-		expect(key).toBe("project:abc:203.0.113.9:/v1/projects/voysee/usage/events");
+		expect(key).toBe("project:abc:203.0.113.9:/v1/projects/acme/usage/events");
 	});
 
 	it("treats blank project keys as unknown", () => {
@@ -640,23 +636,23 @@ describe("requestProjectIpAndPath", () => {
 		);
 
 		const first = await testRequest(app, "/v1/projects/attacker-a/webhooks/stripe");
-		const second = await testRequest(app, "/v1/projects/voysee/webhooks/stripe");
+		const second = await testRequest(app, "/v1/projects/acme/webhooks/stripe");
 
 		expect(await first.text()).toBe(
 			"project:attacker-a:203.0.113.42:/v1/projects/:projectKey/webhooks/stripe",
 		);
 		expect(await second.text()).toBe(
-			"project:voysee:203.0.113.42:/v1/projects/:projectKey/webhooks/stripe",
+			"project:acme:203.0.113.42:/v1/projects/:projectKey/webhooks/stripe",
 		);
 	});
 });
 
 describe("normalizedRateLimitPath", () => {
 	it("collapses provider webhook paths onto the route template", () => {
-		expect(normalizedRateLimitPath("/v1/projects/voysee/webhooks/apple")).toBe(
+		expect(normalizedRateLimitPath("/v1/projects/acme/webhooks/apple")).toBe(
 			"/v1/projects/:projectKey/webhooks/apple",
 		);
-		expect(normalizedRateLimitPath("/v1/projects/voysee/webhooks/google")).toBe(
+		expect(normalizedRateLimitPath("/v1/projects/acme/webhooks/google")).toBe(
 			"/v1/projects/:projectKey/webhooks/google",
 		);
 		expect(normalizedRateLimitPath("/v1/projects/attacker-a/webhooks/stripe")).toBe(
@@ -665,11 +661,11 @@ describe("normalizedRateLimitPath", () => {
 	});
 
 	it("leaves other paths untouched", () => {
-		expect(normalizedRateLimitPath("/v1/projects/voysee/usage/events")).toBe(
-			"/v1/projects/voysee/usage/events",
+		expect(normalizedRateLimitPath("/v1/projects/acme/usage/events")).toBe(
+			"/v1/projects/acme/usage/events",
 		);
-		expect(normalizedRateLimitPath("/v1/projects/voysee/webhooks/unknown")).toBe(
-			"/v1/projects/voysee/webhooks/unknown",
+		expect(normalizedRateLimitPath("/v1/projects/acme/webhooks/unknown")).toBe(
+			"/v1/projects/acme/webhooks/unknown",
 		);
 	});
 });
@@ -754,8 +750,8 @@ describe("limiter isolation", () => {
 			env: { ...env, rateLimit: { ...env.rateLimit, ...rateLimit } },
 			connections: fixtureConnections([]),
 			projectContextResolver: projectContextResolver({
-				contexts: [projectInstanceContext("voysee"), projectInstanceContext("wiseley")],
-				credentials: { voysee: "voysee", wiseley: "wiseley" },
+				contexts: [projectInstanceContext("acme"), projectInstanceContext("globex")],
+				credentials: { acme: "acme", globex: "globex" },
 			}),
 			stripeBillingService: {
 				handleWebhook: async () => ({ status: "ignored", eventType: "ping", entitlements: null }),
@@ -808,7 +804,7 @@ describe("limiter isolation", () => {
 			budget: 10 * LIMIT,
 			request: (value) =>
 				post(`/v1/projects/${value}/webhooks/stripe`, { "stripe-signature": "t=1,v1=00" }),
-			victimValue: "voysee",
+			victimValue: "acme",
 			projectScoped: false,
 			windowMs: WINDOW_MS,
 		},
@@ -879,7 +875,7 @@ describe("limiter isolation", () => {
 			// An unsupported provider is answered before any lookup, so no repository is needed.
 			request: (value) =>
 				post(`/v1/projects/${value}/connections/${crypto.randomUUID()}/webhooks/paddle`, {}),
-			victimValue: "voysee",
+			victimValue: "acme",
 			projectScoped: false,
 			windowMs: INGRESS_WINDOW_MS,
 		},
@@ -910,9 +906,9 @@ describe("limiter isolation", () => {
 
 	/** What the other client, and another project behind the flooding address, get back. */
 	async function bystanders(app: IsolationApp, testCase: IsolationCase) {
-		const otherPeer = await send(app, testCase.request(testCase.victimValue, "voysee"), PEER_Z);
+		const otherPeer = await send(app, testCase.request(testCase.victimValue, "acme"), PEER_Z);
 		const otherProject = testCase.projectScoped
-			? (await send(app, testCase.request(testCase.victimValue, "wiseley"), PEER_X)).status
+			? (await send(app, testCase.request(testCase.victimValue, "globex"), PEER_X)).status
 			: null;
 		return { otherPeer: otherPeer.status, otherProject };
 	}
@@ -928,7 +924,7 @@ describe("limiter isolation", () => {
 				const app = testCase.createApp();
 				const statuses: number[] = [];
 				for (let index = 0; index <= testCase.budget; index += 1) {
-					const request = testCase.request(`value-${index}`, "voysee");
+					const request = testCase.request(`value-${index}`, "acme");
 					statuses.push((await send(app, request, PEER_X)).status);
 				}
 
@@ -944,7 +940,7 @@ describe("limiter isolation", () => {
 				const app = testCase.createApp();
 				for (let index = 0; index < FLOOD; index += 1) {
 					const address = `10.${(index >> 16) & 255}.${(index >> 8) & 255}.${index & 255}`;
-					await send(app, testCase.request(`value-${index}`, "voysee"), address);
+					await send(app, testCase.request(`value-${index}`, "acme"), address);
 				}
 
 				expect(await bystanders(app, testCase)).toEqual(baseline);
@@ -954,7 +950,7 @@ describe("limiter isolation", () => {
 
 	it("caps the project lookups one client can cause with unknown webhook project keys", async () => {
 		let lookups = 0;
-		const resolver = projectContextResolver({ contexts: [projectInstanceContext("voysee")] });
+		const resolver = projectContextResolver({ contexts: [projectInstanceContext("acme")] });
 		const app = createApp({
 			env: { ...env, rateLimit: { ...env.rateLimit, webhookLimit: LIMIT } },
 			connections: fixtureConnections([]),
@@ -998,7 +994,7 @@ describe("limiter isolation", () => {
 			},
 		];
 		const path = {
-			"connection setup ingress": `/v1/projects/voysee/connections/${crypto.randomUUID()}/webhooks/paddle`,
+			"connection setup ingress": `/v1/projects/acme/connections/${crypto.randomUUID()}/webhooks/paddle`,
 			"Stripe App ingress": "/v1/stripe-app/webhooks/live",
 		} as const;
 

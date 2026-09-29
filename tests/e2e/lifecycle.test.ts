@@ -74,7 +74,7 @@ e2eDescribe("E2E lifecycle", () => {
 
 	it("finishes an in-flight projection on SIGTERM and releases locks", async () => {
 		await resetAndSeedIntegrationData(sql);
-		receiver = createLocalProjectionReceiver({ secret: "voysee-e2e-projection-secret" });
+		receiver = createLocalProjectionReceiver({ secret: "acme-e2e-projection-secret" });
 		const hold = receiver.holdNextResponse();
 		service = await startBillingService(
 			e2eServiceEnv({ postgresUri: process.env.POSTGRES_URI ?? "", receiverUrl: receiver.url }),
@@ -160,7 +160,7 @@ async function postSignedStripeWebhook(event: Record<string, unknown>): Promise<
 		throw new Error("Billing service is not running");
 	}
 	const payload = JSON.stringify(event);
-	return await service.request("/v1/projects/voysee/webhooks/stripe", {
+	return await service.request("/v1/projects/acme/webhooks/stripe", {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",

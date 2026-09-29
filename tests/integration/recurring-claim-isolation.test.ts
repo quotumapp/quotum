@@ -156,7 +156,7 @@ localDescribe("Recurring billing claim isolation", () => {
 		const adapter = wrapStripeService(
 			new StripeBillingService({
 				config: {
-					projectKey: "voysee",
+					projectKey: "acme",
 					checkoutSuccessUrl: "https://app.integration.test/billing/success",
 					checkoutCancelUrl: "https://app.integration.test/billing",
 					portalReturnUrl: "https://app.integration.test/account/billing",

@@ -14,7 +14,7 @@ import { assertLaneReport, junitReporterArgs, readJunitSummary } from "./lib/tes
 
 const logger = createCliBillingLogger();
 
-const postgresDatabase = "voysee_billing_e2e";
+const postgresDatabase = "acme_billing_e2e";
 
 const retainedReportDirectory = process.env.QUOTUM_TEST_REPORT_DIR;
 const interrupts = trapInterrupts();
@@ -43,7 +43,7 @@ async function runE2eTests(): Promise<void> {
 
 		run("bun", ["run", "scripts/test-migration-integrity.ts"], { env: migrationEnv });
 		run("bun", ["run", "migrate"], { env: migrationEnv });
-		const manifest = createTestPlatformManifest(["voysee", "wiseley"]);
+		const manifest = createTestPlatformManifest(["acme", "globex"]);
 		credentialDirectory = await mkdtemp(join(tmpdir(), "quotum-e2e-platform-"));
 		const credentialPath = join(credentialDirectory, "credentials.json");
 		const bootstrapEnv = {

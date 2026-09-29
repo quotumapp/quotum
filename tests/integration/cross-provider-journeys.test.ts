@@ -39,7 +39,7 @@ localDescribe("Cross-provider journeys integration", () => {
 	});
 
 	it("combines Apple premium and Stripe credits for one customer", async () => {
-		const receiver = createLocalProjectionReceiver({ secret: "voysee-projection-secret" });
+		const receiver = createLocalProjectionReceiver({ secret: "acme-projection-secret" });
 		const env = withProjectionUrl(receiver.url);
 
 		try {
@@ -60,7 +60,7 @@ localDescribe("Cross-provider journeys integration", () => {
 			const entitlementResponse = await testRequest(
 				fixture.app,
 				"/v1/billing-accounts/integration_user/entitlements",
-				{ headers: fixture.authHeaders("voysee") },
+				{ headers: fixture.authHeaders("acme") },
 			);
 			expect((await entitlementResponse.json()).data.entitlements).toHaveLength(1);
 			await expectProviderSummary(context.sql, {
@@ -99,7 +99,7 @@ localDescribe("Cross-provider journeys integration", () => {
 		});
 		await createAppleAccountToken(appleFixture);
 		expect((await verifyAppleSubscription(appleFixture)).status).toBe(200);
-		await makeSubscriptionExpired(context.sql, "voysee", "100000000000001");
+		await makeSubscriptionExpired(context.sql, "acme", "100000000000001");
 
 		const reconciliation = await runSubscriptionReconciliationWorkerOnce({
 			env: context.env,
@@ -132,7 +132,7 @@ localDescribe("Cross-provider journeys integration", () => {
 		const entitlements = await testRequest(
 			stripeFixture.app,
 			"/v1/billing-accounts/integration_user/entitlements",
-			{ headers: stripeFixture.authHeaders("voysee") },
+			{ headers: stripeFixture.authHeaders("acme") },
 		);
 		expect((await entitlements.json()).data.entitlements).toHaveLength(1);
 	});
@@ -167,7 +167,7 @@ localDescribe("Cross-provider journeys integration", () => {
 			refund.app,
 			"/v1/billing-accounts/integration_user/entitlements",
 			{
-				headers: refund.authHeaders("voysee"),
+				headers: refund.authHeaders("acme"),
 			},
 		);
 		expect((await entitlements.json()).data.entitlements).toHaveLength(1);
@@ -183,7 +183,7 @@ localDescribe("Cross-provider journeys integration", () => {
 		const google = await testRequest(
 			fixture.app,
 			"/v1/billing-accounts/integration_user/providers/google/account-link",
-			{ headers: fixture.authHeaders("voysee") },
+			{ headers: fixture.authHeaders("acme") },
 		);
 		expect(google.status).toBe(200);
 		const checkout = await testRequest(
@@ -192,7 +192,7 @@ localDescribe("Cross-provider journeys integration", () => {
 			{
 				method: "POST",
 				headers: {
-					...fixture.authHeaders("voysee"),
+					...fixture.authHeaders("acme"),
 					"content-type": "application/json",
 				},
 				body: JSON.stringify({ productKey: "echo_credits_10" }),
@@ -214,7 +214,7 @@ function withProjectionUrl(projectionUrl: string): LocalPostgresContext["env"] {
 	return {
 		...context.env,
 		connectionFixtures: context.env.connectionFixtures.map((project) =>
-			project.projectInstanceKey === "voysee" ? { ...project, projectionUrl } : project,
+			project.projectInstanceKey === "acme" ? { ...project, projectionUrl } : project,
 		),
 	};
 }
@@ -225,7 +225,7 @@ async function createAppleAccountToken(
 	const response = await testRequest(
 		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
-		{ headers: fixture.authHeaders("voysee") },
+		{ headers: fixture.authHeaders("acme") },
 	);
 	const body = await response.json();
 	expect(response.status).toBe(200);
@@ -238,7 +238,7 @@ async function verifyAppleSubscription(
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...fixture.authHeaders("voysee"),
+			...fixture.authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -253,7 +253,7 @@ async function postStripeWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	body: Record<string, unknown>,
 ): Promise<Response> {
-	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/stripe", {
+	return await testRequest(fixture.app, "/v1/projects/acme/webhooks/stripe", {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
@@ -289,7 +289,7 @@ async function expectPremiumState(
 		JOIN subscriptions ON subscriptions.id = entitlements.source_subscription_id
 			AND subscriptions.project_id = entitlements.project_id
 		JOIN projects ON projects.id = entitlements.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND entitlements.entitlement_key = 'premium'
 			AND entitlements.active = true
 		ORDER BY subscriptions.provider
@@ -300,7 +300,7 @@ async function expectPremiumState(
 		SELECT provider, status
 		FROM subscriptions
 		JOIN projects ON projects.id = subscriptions.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 		ORDER BY provider, status
 	`;
 	expect(subscriptionRows.map((row) => `${row.provider}:${row.status}`)).toEqual(expected.statuses);
@@ -313,7 +313,7 @@ async function expectStripePurchaseRefunded(sql: SQL): Promise<void> {
 		SELECT provider, status, reversed_credit_amount, purchase_kind
 		FROM purchases
 		JOIN projects ON projects.id = purchases.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND provider = 'stripe'
 	`;
 	expect(rows).toEqual([
@@ -333,7 +333,7 @@ async function expectLinkedProviders(sql: SQL, providers: string[]): Promise<voi
 		JOIN customers ON customers.id = provider_customers.customer_id
 			AND customers.project_id = provider_customers.project_id
 		JOIN projects ON projects.id = customers.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND customers.billing_account_id = 'integration_user'
 		ORDER BY provider_customers.provider
 	`;

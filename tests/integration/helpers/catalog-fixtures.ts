@@ -92,16 +92,16 @@ export const publicBillingTableResetOrder = [
 
 export const integrationProjects = [
 	{
-		projectInstanceKey: "voysee",
-		name: "Voysee",
-		projectionUrl: "https://voysee.projection.integration.test",
-		projectionSecret: "voysee-projection-secret",
+		projectInstanceKey: "acme",
+		name: "Acme",
+		projectionUrl: "https://acme.projection.integration.test",
+		projectionSecret: "acme-projection-secret",
 	},
 	{
-		projectInstanceKey: "wiseley",
-		name: "Wiseley",
-		projectionUrl: "https://wiseley.projection.integration.test",
-		projectionSecret: "wiseley-projection-secret",
+		projectInstanceKey: "globex",
+		name: "Globex",
+		projectionUrl: "https://globex.projection.integration.test",
+		projectionSecret: "globex-projection-secret",
 	},
 ] as const satisfies readonly IntegrationProjectFixture[];
 

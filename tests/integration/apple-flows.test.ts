@@ -44,7 +44,7 @@ localDescribe("Apple route flows integration", () => {
 			app,
 			"/v1/billing-accounts/integration_user/providers/apple/account-token",
 			{
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 		const body = await response.json();
@@ -219,7 +219,7 @@ localDescribe("Apple route flows integration", () => {
 		await createAppleAccountToken(app, authHeaders, apple);
 
 		const response = await withIsoDateSqlParameters(() =>
-			testRequest(app, "/v1/projects/voysee/webhooks/apple", {
+			testRequest(app, "/v1/projects/acme/webhooks/apple", {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({ signedPayload: "signed-notification" }),
@@ -570,7 +570,7 @@ localDescribe("Apple route flows integration", () => {
 		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
-				...authHeaders("voysee"),
+				...authHeaders("acme"),
 				"content-type": "application/json",
 			},
 			body: JSON.stringify({
@@ -612,7 +612,7 @@ localDescribe("Apple route flows integration", () => {
 		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
-				...authHeaders("voysee"),
+				...authHeaders("acme"),
 				"content-type": "application/json",
 			},
 			body: JSON.stringify({
@@ -672,7 +672,7 @@ async function createAppleAccountToken(
 		app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
 		{
-			headers: authHeaders("voysee"),
+			headers: authHeaders("acme"),
 		},
 	);
 	const body = await response.json();
@@ -688,7 +688,7 @@ async function verifyAppleSubscription(
 	return await testRequest(app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...authHeaders("voysee"),
+			...authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -753,7 +753,7 @@ async function expectProviderCustomerRow(
 			billing_account_id: match.billingAccountId,
 			provider: match.provider,
 			external_customer_id: match.externalCustomerId,
-			project_key: "voysee",
+			project_key: "acme",
 		},
 	]);
 }
@@ -805,7 +805,7 @@ async function expectApplePurchaseRows(
 		JOIN entitlements ON entitlements.source_subscription_id = subscriptions.id
 			AND entitlements.project_id = subscriptions.project_id
 		JOIN projects ON projects.id = purchases.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND purchases.provider = 'apple'
 	`;
 
@@ -847,7 +847,7 @@ async function expectAppleWebhookRows(sql: SQL): Promise<void> {
 		FROM store_events
 		JOIN projection_sync_jobs ON projection_sync_jobs.project_id = store_events.project_id
 		JOIN projects ON projects.id = store_events.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND store_events.provider = 'apple'
 			AND store_events.external_event_id = '00000000-0000-0000-0000-000000000001'
 	`;
@@ -878,7 +878,7 @@ async function expectProjectionJobByKey(
 		SELECT projection_sync_jobs.idempotency_key, projection_sync_jobs.payload
 		FROM projection_sync_jobs
 		JOIN projects ON projects.id = projection_sync_jobs.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND projection_sync_jobs.idempotency_key = ${idempotencyKey}
 	`;
 

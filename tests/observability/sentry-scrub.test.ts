@@ -125,9 +125,9 @@ describe("maskPath", () => {
 		["/v1/admin/store-events/evt-1/replay", "/v1/admin/store-events/:id/replay"],
 		["/v1/admin/projection-jobs/job-1/retry", "/v1/admin/projection-jobs/:id/retry"],
 		["/v1/admin/promotions/SUMMER/codes", "/v1/admin/promotions/:id/codes"],
-		["/v1/projects/voysee/webhooks/stripe", "/v1/projects/:id/webhooks/stripe"],
+		["/v1/projects/acme/webhooks/stripe", "/v1/projects/:id/webhooks/stripe"],
 		[
-			"/v1/projects/voysee/connections/ver-1/webhooks/stripe",
+			"/v1/projects/acme/connections/ver-1/webhooks/stripe",
 			"/v1/projects/:id/connections/:id/webhooks/stripe",
 		],
 		["/v1/stripe-app/webhooks/live", "/v1/stripe-app/webhooks/live"],
@@ -231,7 +231,7 @@ describe("sensitive and url keys", () => {
 describe("scrubRecord", () => {
 	it("drops sensitive keys and masks url keys", () => {
 		const output = scrubRecord({
-			projectKey: "voysee",
+			projectKey: "acme",
 			featureKey: "api_calls",
 			promotionKey: "SUMMER",
 			jobId: "123e4567-e89b-12d3-a456-426614174000",
@@ -246,7 +246,7 @@ describe("scrubRecord", () => {
 			path: "/v1/billing-accounts/abc/usage",
 			projectionUrl: "https://merchant.example/hooks?a=1",
 		});
-		expect(output.projectKey).toBe("voysee");
+		expect(output.projectKey).toBe("acme");
 		expect(output.featureKey).toBe("api_calls");
 		expect(output.promotionKey).toBe("SUMMER");
 		expect(output.jobId).toBe("123e4567-e89b-12d3-a456-426614174000");
@@ -366,7 +366,7 @@ describe("scrubEvent", () => {
 			contexts: {
 				trace: { data: { "url.full": "https://x/y?z=1", "http.request.header.cookie": "c" } },
 				response: { status_code: 500, headers: { "set-cookie": "s" } },
-				billing: { projectKey: "voysee", authorization: "secret" },
+				billing: { projectKey: "acme", authorization: "secret" },
 				os: { name: "linux" },
 			},
 			extra: { authorization: "secret", jobId: "abc" },
@@ -411,7 +411,7 @@ describe("scrubEvent", () => {
 		expect(cleaned.transaction).toBe("POST /v1/billing-accounts/:id/usage/consume");
 		expect(cleaned.breadcrumbs).toHaveLength(1);
 		expect(cleaned.contexts?.response).toEqual({ status_code: 500 });
-		expect(cleaned.contexts?.billing).toEqual({ projectKey: "voysee" });
+		expect(cleaned.contexts?.billing).toEqual({ projectKey: "acme" });
 		expect(cleaned.contexts?.os).toEqual({ name: "linux" });
 		expect(cleaned.extra).toEqual({ jobId: "abc" });
 		expect(cleaned.spans).toHaveLength(1);

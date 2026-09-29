@@ -8,11 +8,11 @@ import { isTenantTrafficEligible } from "../../src/projects/context";
 
 const mappedContext = {
 	organizationId: "00000000-0000-4000-8000-000000000001",
-	organizationSlug: "voysee-organization",
+	organizationSlug: "acme-organization",
 	logicalProjectId: "00000000-0000-4000-8000-000000000002",
-	logicalProjectKey: "voysee",
+	logicalProjectKey: "acme",
 	projectInstanceId: "00000000-0000-4000-8000-000000000003",
-	projectInstanceKey: "voysee",
+	projectInstanceKey: "acme",
 	environment: "production" as const,
 	lifecycleStatus: "active" as const,
 	internalProject: false,
@@ -47,7 +47,7 @@ describe("Postgres project instance composition adapter", () => {
 		const credential = generateProjectApiCredential("production", "full").token;
 
 		await expect(resolver.resolveCredential(credential)).resolves.toEqual({ kind: "unavailable" });
-		await expect(resolver.resolveInstanceKey("voysee")).resolves.toEqual({ kind: "unavailable" });
+		await expect(resolver.resolveInstanceKey("acme")).resolves.toEqual({ kind: "unavailable" });
 		await expect(
 			resolver.resolveInstanceId("00000000-0000-4000-8000-000000000003"),
 		).resolves.toEqual({ kind: "unavailable" });
@@ -123,7 +123,7 @@ describe("Postgres project instance composition adapter", () => {
 			context: mappedContext,
 			access: "full",
 		});
-		await expect(resolver.resolveInstanceKey("voysee")).resolves.toEqual({
+		await expect(resolver.resolveInstanceKey("acme")).resolves.toEqual({
 			kind: "resolved",
 			context: mappedContext,
 		});
@@ -260,16 +260,16 @@ describe("principal project listing", () => {
 	const principalId = "00000000-0000-4000-8000-0000000000aa";
 	const project = {
 		project_id: mappedContext.logicalProjectId,
-		project_key: "voysee",
-		project_name: "Voysee",
-		organization_slug: "voysee-organization",
+		project_key: "acme",
+		project_name: "Acme",
+		organization_slug: "acme-organization",
 	};
 	const instanceRow = (environment: "production" | "sandbox", id: string) => ({
 		...project,
 		id,
 		platform_project_id: project.project_id,
-		key: environment === "production" ? "voysee" : "voysee-sandbox",
-		name: "Voysee",
+		key: environment === "production" ? "acme" : "acme-sandbox",
+		name: "Acme",
 		environment,
 		lifecycle_status: environment === "production" ? "inactive" : "active",
 		internal_project: false,
@@ -288,7 +288,7 @@ describe("principal project listing", () => {
 						project_id: "00000000-0000-4000-8000-000000000005",
 						project_key: "pending",
 						project_name: "Pending",
-						organization_slug: "voysee-organization",
+						organization_slug: "acme-organization",
 						id: null,
 						platform_project_id: null,
 						key: null,
@@ -304,15 +304,15 @@ describe("principal project listing", () => {
 		await expect(store.forPrincipal(principalId)).resolves.toEqual([
 			{
 				id: project.project_id,
-				key: "voysee",
-				name: "Voysee",
-				organizationSlug: "voysee-organization",
+				key: "acme",
+				name: "Acme",
+				organizationSlug: "acme-organization",
 				instances: [
 					{
 						id: "00000000-0000-4000-8000-000000000003",
 						platformProjectId: project.project_id,
-						key: "voysee",
-						name: "Voysee",
+						key: "acme",
+						name: "Acme",
 						environment: "production",
 						lifecycleStatus: "inactive",
 						internalProject: false,
@@ -320,8 +320,8 @@ describe("principal project listing", () => {
 					{
 						id: "00000000-0000-4000-8000-000000000004",
 						platformProjectId: project.project_id,
-						key: "voysee-sandbox",
-						name: "Voysee",
+						key: "acme-sandbox",
+						name: "Acme",
 						environment: "sandbox",
 						lifecycleStatus: "active",
 						internalProject: false,
@@ -332,7 +332,7 @@ describe("principal project listing", () => {
 				id: "00000000-0000-4000-8000-000000000005",
 				key: "pending",
 				name: "Pending",
-				organizationSlug: "voysee-organization",
+				organizationSlug: "acme-organization",
 				instances: [],
 			},
 		]);

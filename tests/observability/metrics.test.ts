@@ -61,7 +61,7 @@ describe("createInMemoryBillingMetrics", () => {
 			code: "STRIPE_WEBHOOK_SIGNATURE_INVALID",
 		});
 		metrics.increment("billing_projection_delivery_total", {
-			project: "voysee",
+			project: "acme",
 			result: "succeeded",
 			code: "OK",
 		});
@@ -73,7 +73,7 @@ describe("createInMemoryBillingMetrics", () => {
 			'billing_provider_operations_total{code="STRIPE_WEBHOOK_SIGNATURE_INVALID",operation="webhook",provider="stripe",result="failed"} 1',
 		);
 		expect(metrics.renderPrometheus()).toContain(
-			'billing_projection_delivery_total{code="OK",project="voysee",result="succeeded"} 1',
+			'billing_projection_delivery_total{code="OK",project="acme",result="succeeded"} 1',
 		);
 	});
 

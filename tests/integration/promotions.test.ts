@@ -531,7 +531,7 @@ localDescribe("promotion HTTP API", () => {
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 		await publishAiCreditsCatalog(context.repository);
-		await publishAiCreditsCatalog(context.repository, "wiseley");
+		await publishAiCreditsCatalog(context.repository, "globex");
 	});
 
 	afterAll(async () => {
@@ -544,7 +544,7 @@ localDescribe("promotion HTTP API", () => {
 			repository: context.repository,
 		});
 		const operator = {
-			...authHeaders("voysee"),
+			...authHeaders("acme"),
 			"x-billing-operator-key": context.env.operatorApiKey ?? "",
 			"x-billing-actor": actor,
 			"content-type": "application/json",
@@ -597,7 +597,7 @@ localDescribe("promotion HTTP API", () => {
 				`/v1/billing-accounts/${billingAccountId}/promotion-codes/validate`,
 				{
 					method: "POST",
-					headers: { ...authHeaders("voysee"), "content-type": "application/json" },
+					headers: { ...authHeaders("acme"), "content-type": "application/json" },
 					body: JSON.stringify(payload),
 				},
 			);
@@ -696,27 +696,27 @@ localDescribe("promotion HTTP API", () => {
 			project,
 			discountPromotion({ codes: [{ code: "SHARED" }] }),
 		);
-		const wiseleyOperator = {
-			...authHeaders("wiseley"),
+		const globexOperator = {
+			...authHeaders("globex"),
 			"x-billing-operator-key": context.env.operatorApiKey ?? "",
 			"x-billing-actor": actor,
 			"content-type": "application/json",
 		};
 
 		const read = await testRequest(app, "/v1/admin/promotions/spring-sale", {
-			headers: wiseleyOperator,
+			headers: globexOperator,
 		});
 		const validate = await testRequest(app, "/v1/billing-accounts/buyer/promotion-codes/validate", {
 			method: "POST",
-			headers: { ...authHeaders("wiseley"), "content-type": "application/json" },
+			headers: { ...authHeaders("globex"), "content-type": "application/json" },
 			body: JSON.stringify({ code: "SHARED" }),
 		});
 		const sameKey = await testRequest(app, "/v1/admin/promotions", {
 			method: "POST",
-			headers: wiseleyOperator,
+			headers: globexOperator,
 			body: JSON.stringify({
 				key: "spring-sale",
-				name: "Wiseley spring",
+				name: "Globex spring",
 				effect: {
 					kind: "discount",
 					discount: { type: "percent", percentOffBps: 500, duration: "forever" },
@@ -732,9 +732,9 @@ localDescribe("promotion HTTP API", () => {
 			reason: "PROMOTION_CODE_NOT_FOUND",
 		});
 		expect(sameKey.status).toBe(201);
-		const listed = await testRequest(app, "/v1/admin/promotions", { headers: wiseleyOperator });
+		const listed = await testRequest(app, "/v1/admin/promotions", { headers: globexOperator });
 		expect((await listed.json()).data.map((item: { name: string }) => item.name)).toEqual([
-			"Wiseley spring",
+			"Globex spring",
 		]);
 	});
 });
@@ -921,7 +921,7 @@ localDescribe("promotion Checkout", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 
 		const previewResponse = await testRequest(
 			app,
@@ -1076,7 +1076,7 @@ localDescribe("promotion Checkout", () => {
 			env: context.env,
 			repository: context.repository,
 		});
-		const headers = { ...authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...authHeaders("acme"), "content-type": "application/json" };
 		const preview = async (intent: Record<string, unknown>) =>
 			await testRequest(app, "/v1/billing-accounts/launch_user/commercial-actions/preview", {
 				method: "POST",
@@ -1198,7 +1198,7 @@ localDescribe("promotion Checkout", () => {
 		);
 		expect(hostedObject).toMatchObject({ status: "ready", providerActive: true });
 
-		const headers = { ...fixture.authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...fixture.authHeaders("acme"), "content-type": "application/json" };
 		const previewResponse = await testRequest(
 			fixture.app,
 			"/v1/billing-accounts/hosted_user/commercial-actions/preview",
@@ -1329,7 +1329,7 @@ localDescribe("promotion subscription changes", () => {
 	// capability: promotion.code_entry
 	it("reserves with the change, keeps merchant discounts on Stripe and applies with the change", async () => {
 		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
-		const headers = { ...fixture.authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...fixture.authHeaders("acme"), "content-type": "application/json" };
 		const preview = await testRequest(
 			fixture.app,
 			"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
@@ -1393,7 +1393,7 @@ localDescribe("promotion subscription changes", () => {
 		]);
 		const service = new StripeBillingService({
 			config: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				checkoutSuccessUrl: "https://app.integration.test/success?session_id={CHECKOUT_SESSION_ID}",
 				checkoutCancelUrl: "https://app.integration.test/cancel",
 				portalReturnUrl: "https://app.integration.test/account",
@@ -1431,7 +1431,7 @@ localDescribe("promotion subscription changes", () => {
 
 	it("releases the reserved use when the change is cancelled with its subscription", async () => {
 		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
-		const headers = { ...fixture.authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...fixture.authHeaders("acme"), "content-type": "application/json" };
 		const preview = (
 			await (
 				await testRequest(
@@ -1474,7 +1474,7 @@ localDescribe("promotion subscription changes", () => {
 
 	it("releases the reserved use when the change fails for good", async () => {
 		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
-		const headers = { ...fixture.authHeaders("voysee"), "content-type": "application/json" };
+		const headers = { ...fixture.authHeaders("acme"), "content-type": "application/json" };
 		const preview = (
 			await (
 				await testRequest(
@@ -1550,7 +1550,7 @@ localDescribe("promotion feature grants", () => {
 			testRequest(app, `/v1/billing-accounts/${billingAccountId}/promotion-redemptions`, {
 				method: "POST",
 				headers: {
-					...authHeaders("voysee"),
+					...authHeaders("acme"),
 					"content-type": "application/json",
 					"idempotency-key": key,
 				},
@@ -1640,7 +1640,7 @@ localDescribe("promotion feature grants", () => {
 			`,
 		).toHaveLength(1);
 
-		const read = (path: string) => testRequest(app, path, { headers: authHeaders("voysee") });
+		const read = (path: string) => testRequest(app, path, { headers: authHeaders("acme") });
 		const ledger = await read("/v1/billing-accounts/reader/promotion-redemptions");
 		const detail = await read(
 			`/v1/billing-accounts/reader/promotion-redemptions/${grantedData.redemption.id}`,
@@ -1724,21 +1724,21 @@ localDescribe("promotion feature grants", () => {
 			WHERE source_kind = 'reward' AND expires_at IS NOT NULL
 		`;
 		await context.sql`DELETE FROM projection_sync_jobs`;
-		const operator = (key: string, projectKey = "voysee") => ({
+		const operator = (key: string, projectKey = "acme") => ({
 			...authHeaders(projectKey),
 			"x-billing-operator-key": context.env.operatorApiKey ?? "",
 			"x-billing-actor": actor,
 			"content-type": "application/json",
 			"idempotency-key": key,
 		});
-		const revoke = (id: string, key: string, projectKey = "voysee") =>
+		const revoke = (id: string, key: string, projectKey = "acme") =>
 			testRequest(app, `/v1/admin/promotion-redemptions/${id}/revoke`, {
 				method: "POST",
 				headers: operator(key, projectKey),
 				body: JSON.stringify({ reason: "Abuse report" }),
 			});
 
-		const foreign = await revoke(redeemed.redemption.id, "revoke-1", "wiseley");
+		const foreign = await revoke(redeemed.redemption.id, "revoke-1", "globex");
 		const revoked = await revoke(redeemed.redemption.id, "revoke-1");
 		const replay = await revoke(redeemed.redemption.id, "revoke-1");
 		const twice = await revoke(redeemed.redemption.id, "revoke-2");
@@ -1828,7 +1828,7 @@ async function postWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	eventId: string,
 ): Promise<Response> {
-	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/stripe", {
+	return await testRequest(fixture.app, "/v1/projects/acme/webhooks/stripe", {
 		method: "POST",
 		headers: { "content-type": "application/json", "stripe-signature": "sig_test" },
 		body: JSON.stringify({ id: eventId, type: "checkout.session.completed", data: { object: {} } }),

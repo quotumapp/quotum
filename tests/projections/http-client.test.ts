@@ -9,20 +9,20 @@ import { FixtureProjectionHttpClient as ProjectionHttpClient } from "../../src/t
 
 const projects: ProjectRuntimeConfig[] = [
 	{
-		projectInstanceKey: "voysee",
-		projectionUrl: "https://voysee.example.com/",
-		projectionSecret: "voysee-projection-secret",
+		projectInstanceKey: "acme",
+		projectionUrl: "https://acme.example.com/",
+		projectionSecret: "acme-projection-secret",
 	},
 	{
-		projectInstanceKey: "wiseley",
-		projectionUrl: "https://wiseley.example.com/app?ignored=true#fragment",
-		projectionSecret: "wiseley-projection-secret",
+		projectInstanceKey: "globex",
+		projectionUrl: "https://globex.example.com/app?ignored=true#fragment",
+		projectionSecret: "globex-projection-secret",
 	},
 ];
 
 const projection = {
 	schemaVersion: 1 as const,
-	projectKey: "wiseley",
+	projectKey: "globex",
 	jobId: "job_1",
 	idempotencyKey: "projection:key",
 	billingAccountId: "user_1",
@@ -53,19 +53,19 @@ describe("ProjectionHttpClient", () => {
 		await adapter.deliver(projection);
 
 		expect(requests).toHaveLength(1);
-		expect(requests[0]?.url).toBe("https://wiseley.example.com/app/internal/billing/projections");
+		expect(requests[0]?.url).toBe("https://globex.example.com/app/internal/billing/projections");
 		expect(requests[0]?.init.method).toBe("POST");
 		expect(requests[0]?.init.redirect).toBe("error");
 		expect(requests[0]?.init.signal).toBeInstanceOf(AbortSignal);
 		const body = String(requests[0]?.init.body);
 		const timestamp = String(Math.floor(now.getTime() / 1000));
 		const signature = createExpectedProjectionSignature(
-			"wiseley-projection-secret",
+			"globex-projection-secret",
 			timestamp,
 			body,
 		);
 		expect(requests[0]?.init.headers).toEqual({
-			authorization: "Bearer wiseley-projection-secret",
+			authorization: "Bearer globex-projection-secret",
 			"content-type": "application/json",
 			"X-Billing-Signature": signature,
 			"X-Billing-Timestamp": timestamp,
@@ -77,14 +77,14 @@ describe("ProjectionHttpClient", () => {
 		const body = JSON.stringify(projection);
 		const timestamp = "1780833600";
 		const signature = createExpectedProjectionSignature(
-			"wiseley-projection-secret",
+			"globex-projection-secret",
 			timestamp,
 			body,
 		);
 
 		expect(
 			verifyProjectionSignature({
-				secret: "wiseley-projection-secret",
+				secret: "globex-projection-secret",
 				body,
 				timestamp,
 				signature,
@@ -93,7 +93,7 @@ describe("ProjectionHttpClient", () => {
 		).toBe(true);
 		expect(
 			verifyProjectionSignature({
-				secret: "wiseley-projection-secret",
+				secret: "globex-projection-secret",
 				body,
 				timestamp,
 				signature,
@@ -102,7 +102,7 @@ describe("ProjectionHttpClient", () => {
 		).toBe(false);
 		expect(
 			verifyProjectionSignature({
-				secret: "wiseley-projection-secret",
+				secret: "globex-projection-secret",
 				body: `${body}\n`,
 				timestamp,
 				signature,
@@ -121,7 +121,7 @@ describe("ProjectionHttpClient", () => {
 		const flipped = `${signature.slice(0, -1)}${signature.endsWith("0") ? "1" : "0"}`;
 		expect(
 			verifyProjectionSignature({
-				secret: "wiseley-projection-secret",
+				secret: "globex-projection-secret",
 				body,
 				timestamp,
 				signature: flipped,
@@ -130,7 +130,7 @@ describe("ProjectionHttpClient", () => {
 		).toBe(false);
 		expect(
 			verifyProjectionSignature({
-				secret: "wiseley-projection-secret",
+				secret: "globex-projection-secret",
 				body,
 				timestamp,
 				signature: signature.replace("sha256=", ""),
@@ -148,7 +148,7 @@ describe("ProjectionHttpClient", () => {
 		]) {
 			expect(
 				verifyProjectionSignature({
-					secret: "wiseley-projection-secret",
+					secret: "globex-projection-secret",
 					body,
 					timestamp: malformed,
 					signature,
@@ -159,7 +159,7 @@ describe("ProjectionHttpClient", () => {
 		const now = () => new Date(1_780_833_600_000);
 		expect(
 			verifyProjectionSignature({
-				secret: "wiseley-projection-secret",
+				secret: "globex-projection-secret",
 				body,
 				timestamp,
 				signature,
@@ -168,7 +168,7 @@ describe("ProjectionHttpClient", () => {
 		).toBe(false);
 		expect(
 			verifyProjectionSignature({
-				secret: "wiseley-projection-secret",
+				secret: "globex-projection-secret",
 				body,
 				timestamp,
 				signature,
@@ -186,10 +186,10 @@ describe("ProjectionHttpClient", () => {
 		});
 
 		await expect(adapter.deliver(projection)).rejects.toThrow(
-			"Projection delivery failed for project wiseley with status 503",
+			"Projection delivery failed for project globex with status 503",
 		);
 		expect(metrics.renderPrometheus()).toContain(
-			'billing_projection_delivery_total{code="HTTP_503",project="wiseley",result="failed"} 1',
+			'billing_projection_delivery_total{code="HTTP_503",project="globex",result="failed"} 1',
 		);
 	});
 
@@ -204,7 +204,7 @@ describe("ProjectionHttpClient", () => {
 		await adapter.deliver(projection);
 
 		expect(metrics.renderPrometheus()).toContain(
-			'billing_projection_delivery_total{code="OK",project="wiseley",result="succeeded"} 1',
+			'billing_projection_delivery_total{code="OK",project="globex",result="succeeded"} 1',
 		);
 	});
 
@@ -217,7 +217,7 @@ describe("ProjectionHttpClient", () => {
 		});
 
 		await expect(adapter.deliver(projection)).rejects.toThrow(
-			"Projection delivery failed for project wiseley: connection refused",
+			"Projection delivery failed for project globex: connection refused",
 		);
 	});
 
@@ -229,7 +229,7 @@ describe("ProjectionHttpClient", () => {
 		});
 
 		await expect(adapter.deliver(projection)).rejects.toThrow(
-			"Projection delivery response for project wiseley was invalid",
+			"Projection delivery response for project globex was invalid",
 		);
 	});
 
@@ -245,7 +245,7 @@ describe("ProjectionHttpClient", () => {
 		});
 
 		await expect(adapter.deliver(projection)).rejects.toThrow(
-			"Projection delivery response for project wiseley was too large",
+			"Projection delivery response for project globex was too large",
 		);
 	});
 });

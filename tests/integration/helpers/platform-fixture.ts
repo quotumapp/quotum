@@ -7,7 +7,7 @@ import { projectInstanceContext } from "../../helpers/project-context";
 let cachedContexts: readonly ProjectInstanceContext[] | null = null;
 let cachedCredentials: Readonly<Record<string, string>> | null = null;
 
-export function integrationProjectContext(projectInstanceKey = "voysee"): ProjectInstanceContext {
+export function integrationProjectContext(projectInstanceKey = "acme"): ProjectInstanceContext {
 	const context = integrationProjectContexts().find(
 		(candidate) => candidate.projectInstanceKey === projectInstanceKey,
 	);
@@ -21,7 +21,7 @@ export function integrationProjectContexts(): readonly ProjectInstanceContext[] 
 	return contexts();
 }
 
-export function integrationProjectCredential(projectInstanceKey = "voysee"): string {
+export function integrationProjectCredential(projectInstanceKey = "acme"): string {
 	const credential = credentials()[projectInstanceKey];
 	if (credential === undefined) {
 		throw new Error(`Integration project credential ${projectInstanceKey} is not configured`);
@@ -30,7 +30,7 @@ export function integrationProjectCredential(projectInstanceKey = "voysee"): str
 }
 
 /** The read-only key the lane bootstrap issued for the instance (`sqrk_` or `pqrk_`). */
-export function integrationProjectReadOnlyCredential(projectInstanceKey = "voysee"): string {
+export function integrationProjectReadOnlyCredential(projectInstanceKey = "acme"): string {
 	const raw = process.env.BILLING_TEST_PROJECT_READ_ONLY_CREDENTIALS_JSON;
 	const credential =
 		raw === undefined ? undefined : (JSON.parse(raw) as Record<string, string>)[projectInstanceKey];
@@ -72,7 +72,7 @@ function contexts(): readonly ProjectInstanceContext[] {
 	if (cachedContexts !== null) return cachedContexts;
 	const raw = process.env.BILLING_TEST_PROJECT_CONTEXTS_JSON;
 	if (raw === undefined) {
-		cachedContexts = [projectInstanceContext(), projectInstanceContext("wiseley")];
+		cachedContexts = [projectInstanceContext(), projectInstanceContext("globex")];
 		return cachedContexts;
 	}
 	const value = JSON.parse(raw) as unknown;
@@ -86,8 +86,8 @@ function credentials(): Readonly<Record<string, string>> {
 	const raw = process.env.BILLING_TEST_PROJECT_CREDENTIALS_JSON;
 	if (raw === undefined) {
 		cachedCredentials = {
-			voysee: "voysee-integration-api-key",
-			wiseley: "wiseley-integration-api-key",
+			acme: "acme-integration-api-key",
+			globex: "globex-integration-api-key",
 		};
 		return cachedCredentials;
 	}

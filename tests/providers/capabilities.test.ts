@@ -801,7 +801,7 @@ describe("connection summary helpers", () => {
 		active: true,
 		validated: true,
 		validatedAt: "2026-09-18T10:00:00.000Z",
-		accountIdentity: "acct_voysee",
+		accountIdentity: "acct_acme",
 		settings: { authMethod: "oauth", livemode: false },
 	};
 
@@ -826,7 +826,7 @@ describe("connection summary helpers", () => {
 			enabled: false,
 			validated: true,
 			validatedAt: "2026-09-18T10:00:00.000Z",
-			accountIdentity: "acct_voysee",
+			accountIdentity: "acct_acme",
 		});
 	});
 

@@ -11,7 +11,7 @@ import { projectContextResolver, projectInstanceContext } from "../helpers/proje
 
 const job = (objectId: string, attempts = 1): PromotionStripeSyncJob => ({
 	projectId: "project-1",
-	projectKey: "voysee",
+	projectKey: "acme",
 	provider: "stripe",
 	objectId,
 	promotionKey: "spring-sale",
@@ -29,7 +29,7 @@ const job = (objectId: string, attempts = 1): PromotionStripeSyncJob => ({
 });
 
 const resolver = projectContextResolver({
-	contexts: [projectInstanceContext("voysee", { projectInstanceId: "project-1" })],
+	contexts: [projectInstanceContext("acme", { projectInstanceId: "project-1" })],
 });
 
 function repository(jobs: PromotionStripeSyncJob[]) {
@@ -159,7 +159,7 @@ describe("PromotionMaintenanceWorker", () => {
 		});
 
 		expect(await worker.runOnce()).toMatchObject({ claimed: 1, retryScheduled: 1 });
-		expect(selected).toEqual(["voysee:google"]);
+		expect(selected).toEqual(["acme:google"]);
 		expect(outcomes).toEqual([
 			{
 				objectId: "google-object",
