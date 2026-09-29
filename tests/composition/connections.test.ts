@@ -13,18 +13,18 @@ import type { MerchantSql } from "../../src/platform/database";
 import type { RuntimeConnectionKind } from "../../src/projects/connections";
 import { projectInstanceContext } from "../helpers/project-context";
 
-const project = projectInstanceContext("voysee");
-const sandboxProject = projectInstanceContext("voysee", { environment: "sandbox" });
+const project = projectInstanceContext("acme");
+const sandboxProject = projectInstanceContext("acme", { environment: "sandbox" });
 
 const stripeSettings = {
-	checkoutSuccessUrl: "https://voysee.example.com/success?session_id={CHECKOUT_SESSION_ID}",
-	checkoutCancelUrl: "https://voysee.example.com/cancel",
-	portalReturnUrl: "https://voysee.example.com/account",
+	checkoutSuccessUrl: "https://acme.example.com/success?session_id={CHECKOUT_SESSION_ID}",
+	checkoutCancelUrl: "https://acme.example.com/cancel",
+	portalReturnUrl: "https://acme.example.com/account",
 };
 
 const settingsByKind: Record<RuntimeConnectionKind, Record<string, unknown>> = {
 	apple: {
-		bundleId: "com.voysee.app",
+		bundleId: "com.acme.app",
 		appAppleId: 123456789,
 		issuerId: "issuer",
 		keyId: "key",
@@ -32,14 +32,14 @@ const settingsByKind: Record<RuntimeConnectionKind, Record<string, unknown>> = {
 		enableOnlineChecks: true,
 	},
 	google: {
-		packageName: "com.voysee.app",
+		packageName: "com.acme.app",
 		serviceAccountJson: null,
 		rtdnAudience: null,
 		rtdnServiceAccountEmail: null,
 		enablePublisherMutations: true,
 	},
 	stripe: stripeSettings,
-	projection: { projectionUrl: "https://voysee.example.com/billing/projection" },
+	projection: { projectionUrl: "https://acme.example.com/billing/projection" },
 };
 
 const secretsByKind: Record<RuntimeConnectionKind, Record<string, string>> = {
@@ -48,7 +48,7 @@ const secretsByKind: Record<RuntimeConnectionKind, Record<string, string>> = {
 		serviceAccountJson: JSON.stringify({ client_email: "play@example.iam.gserviceaccount.com" }),
 		obfuscatedAccountIdSecret: "account-link-secret",
 	},
-	stripe: { secretKey: "sk_live_voysee", webhookSecret: "whsec_voysee" },
+	stripe: { secretKey: "sk_live_acme", webhookSecret: "whsec_acme" },
 	projection: { projectionSecret: "projection-secret" },
 };
 
@@ -90,7 +90,7 @@ function oauthRepository(externalIdentity: string) {
 	const version = connectionVersion({ ...stripeSettings, authMethod: "oauth" }, externalIdentity);
 	const envelopes = [
 		{ purpose: "accessToken", envelope: { value: "rk_test_access" } },
-		{ purpose: "refreshToken", envelope: { value: "rt_voysee" } },
+		{ purpose: "refreshToken", envelope: { value: "rt_acme" } },
 		{ purpose: "expiresAt", envelope: { value: String(Date.now() + 3_600_000) } },
 	];
 	const tx = Object.assign(
@@ -153,7 +153,7 @@ describe("runtime connection resolver account identity", () => {
 		const config = await resolver.resolve(project, "stripe", "recovery");
 
 		expect(config?.accountIdentity).toBe("acct_api_key");
-		expect(config?.secretKey).toBe("sk_live_voysee");
+		expect(config?.secretKey).toBe("sk_live_acme");
 		expect(config).not.toHaveProperty("connectedAccountId");
 		expect(config).not.toHaveProperty("connectedAccountLivemode");
 		expect(lookups).toEqual([
@@ -187,26 +187,26 @@ describe("runtime connection resolver account identity", () => {
 
 	it("fills accountIdentity for Apple and Google connections", async () => {
 		const apple = await createRuntimeConnectionResolver(
-			apiKeyRepository("apple", "com.voysee.app").repository,
+			apiKeyRepository("apple", "com.acme.app").repository,
 		).resolve(project, "apple");
 		const google = await createRuntimeConnectionResolver(
-			apiKeyRepository("google", "com.voysee.android").repository,
+			apiKeyRepository("google", "com.acme.android").repository,
 		).resolve(project, "google");
 
-		expect(apple).toMatchObject({ bundleId: "com.voysee.app", accountIdentity: "com.voysee.app" });
+		expect(apple).toMatchObject({ bundleId: "com.acme.app", accountIdentity: "com.acme.app" });
 		expect(google).toMatchObject({
-			packageName: "com.voysee.app",
-			accountIdentity: "com.voysee.android",
+			packageName: "com.acme.app",
+			accountIdentity: "com.acme.android",
 		});
 	});
 
 	it("leaves projection connections without an account identity", async () => {
 		const config = await createRuntimeConnectionResolver(
-			apiKeyRepository("projection", "https://voysee.example.com").repository,
+			apiKeyRepository("projection", "https://acme.example.com").repository,
 		).resolve(project, "projection");
 
 		expect(config).toEqual({
-			projectionUrl: "https://voysee.example.com/billing/projection",
+			projectionUrl: "https://acme.example.com/billing/projection",
 			projectionSecret: "projection-secret",
 			projectionContract: "billing_state_v1",
 			usageDelivery: "coalesced",
@@ -228,7 +228,7 @@ describe("connection description", () => {
 			list: ["a"],
 		},
 		validated_at: new Date("2026-09-18T10:00:00.000Z"),
-		external_identity: "acct_voysee",
+		external_identity: "acct_acme",
 	};
 
 	it("keeps only string and boolean settings of the active version", () => {
@@ -237,7 +237,7 @@ describe("connection description", () => {
 			active: true,
 			validated: true,
 			validatedAt: "2026-09-18T10:00:00.000Z",
-			accountIdentity: "acct_voysee",
+			accountIdentity: "acct_acme",
 			settings: { ...stripeSettings, authMethod: "oauth", livemode: false },
 		});
 	});
@@ -255,7 +255,7 @@ describe("connection description", () => {
 			active: true,
 			validated: true,
 			validatedAt: "2020-01-01T00:00:00.000Z",
-			accountIdentity: "acct_voysee",
+			accountIdentity: "acct_acme",
 			settings: {},
 		});
 		expect(connectionDescription({ ...row, validated_at: null })).toMatchObject({
@@ -310,9 +310,9 @@ describe("runtime connection resolver describe", () => {
 		const { repository, lookups } = describingRepository(async () => ({
 			enabled: false,
 			active_version_id: "version_1",
-			settings: { bundleId: "com.voysee.app", appAppleId: 123456789 },
+			settings: { bundleId: "com.acme.app", appAppleId: 123456789 },
 			validated_at: new Date("2026-09-18T10:00:00.000Z"),
-			external_identity: "com.voysee.app",
+			external_identity: "com.acme.app",
 		}));
 		const resolver = createRuntimeConnectionResolver(repository);
 
@@ -321,8 +321,8 @@ describe("runtime connection resolver describe", () => {
 			active: true,
 			validated: true,
 			validatedAt: "2026-09-18T10:00:00.000Z",
-			accountIdentity: "com.voysee.app",
-			settings: { bundleId: "com.voysee.app" },
+			accountIdentity: "com.acme.app",
+			settings: { bundleId: "com.acme.app" },
 		});
 		expect(
 			await createRuntimeConnectionResolver(

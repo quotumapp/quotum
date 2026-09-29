@@ -20,7 +20,7 @@ function changeFixture(overrides: Partial<SubscriptionChangeOperation> = {}) {
 	return {
 		changeId: "change-1",
 		projectInstanceId: projectInstanceContext().projectInstanceId,
-		projectKey: "voysee",
+		projectKey: "acme",
 		provider: "stripe",
 		providerAccountId: null,
 		status: "processing",
@@ -45,7 +45,7 @@ function usageFixture(overrides: Partial<UsageInvoiceJob> = {}) {
 		periodId: "period-1",
 		adjustmentId: null,
 		projectInstanceId: projectInstanceContext().projectInstanceId,
-		projectKey: "voysee",
+		projectKey: "acme",
 		provider: "stripe",
 		providerAccountId: null,
 		billingAccountId: "account-1",
@@ -223,7 +223,7 @@ it("fails claimed recurring-billing work when its project id and key disagree", 
 	const failures: string[] = [];
 	const change = changeFixture({
 		changeId: "mismatched-change",
-		projectKey: "wiseley",
+		projectKey: "globex",
 		externalSubscriptionId: "sub_mismatch",
 	});
 	const worker = new RecurringBillingWorker({
@@ -312,8 +312,8 @@ it("selects each job's adapter by the provider the job stores", async () => {
 		failed: 0,
 	});
 	expect(selected).toEqual([
-		{ project: "voysee", provider: "google" },
-		{ project: "voysee", provider: "apple" },
+		{ project: "acme", provider: "google" },
+		{ project: "acme", provider: "apple" },
 	]);
 	expect(
 		calls.map(({ kind, providerRequestId, externalInvoiceId }) => ({
@@ -387,7 +387,7 @@ it("never finalizes an uncertain provider write and fails it for reconciliation"
 		{
 			message: "Subscription change failed",
 			context: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				changeId: "change-1",
 				correlation: { requestKey: "change-1" },
 			},
@@ -395,7 +395,7 @@ it("never finalizes an uncertain provider write and fails it for reconciliation"
 		{
 			message: "Usage invoice failed",
 			context: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				provider: "stripe",
 				periodId: "period-1",
 				correlation: { requestKey: "adjustment-1" },
@@ -473,19 +473,19 @@ it("logs a failing failure marker and still finishes the batch", async () => {
 		{
 			message: "Subscription change failed",
 			context: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				changeId: "poison-change",
 				correlation: { requestKey: "poison-change" },
 			},
 		},
 		{
 			message: "Subscription change failure marker failed",
-			context: { projectKey: "voysee", changeId: "poison-change", workerId: "worker-1" },
+			context: { projectKey: "acme", changeId: "poison-change", workerId: "worker-1" },
 		},
 		{
 			message: "Usage invoice failed",
 			context: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				provider: "stripe",
 				periodId: "poison-period",
 				correlation: { requestKey: "poison-period" },
@@ -494,7 +494,7 @@ it("logs a failing failure marker and still finishes the batch", async () => {
 		{
 			message: "Usage invoice failure marker failed",
 			context: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				jobKind: "period",
 				jobId: "poison-period",
 				workerId: "worker-1",
@@ -643,7 +643,7 @@ it("skips a claimed job whose lease was lost without marking it", async () => {
 		{
 			message: "Subscription change lease lost",
 			context: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				changeId: "reclaimed-change",
 				workerId: "worker-1",
 			},
@@ -651,7 +651,7 @@ it("skips a claimed job whose lease was lost without marking it", async () => {
 		{
 			message: "Usage invoice lease lost",
 			context: {
-				projectKey: "voysee",
+				projectKey: "acme",
 				jobKind: "period",
 				jobId: "reclaimed-period",
 				workerId: "worker-1",

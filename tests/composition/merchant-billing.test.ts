@@ -10,8 +10,8 @@ import type { ProviderCapabilityReads } from "../../src/providers/capability-rea
 import { evaluateCapability } from "../../src/shared/provider-capabilities";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
-const project = projectInstanceContext("voysee");
-const inactive = projectInstanceContext("wiseley", { lifecycleStatus: "inactive" });
+const project = projectInstanceContext("acme");
+const inactive = projectInstanceContext("globex", { lifecycleStatus: "inactive" });
 
 function requiredOnlyStripeService(): StripeBillingServiceLike {
 	return {

@@ -163,7 +163,7 @@ e2eDescribe("E2E Phase 3 release journeys", () => {
 			JOIN plan_items item ON item.project_id = project.id
 				AND item.plan_version_id = subscription.plan_version_id
 				AND item.feature_id = feature.id AND item.item_kind = 'allocation'
-			WHERE project.key = 'voysee'
+			WHERE project.key = 'acme'
 		`;
 
 		service = await startBillingService(runtimeEnv());

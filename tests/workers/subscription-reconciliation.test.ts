@@ -12,8 +12,8 @@ import { projectContextResolver, projectInstanceContext } from "../helpers/proje
 
 const workerProjectResolver = projectContextResolver({
 	contexts: [
-		projectInstanceContext("voysee", { projectInstanceId: "project_1" }),
-		projectInstanceContext("wiseley", { projectInstanceId: "project_2" }),
+		projectInstanceContext("acme", { projectInstanceId: "project_1" }),
+		projectInstanceContext("globex", { projectInstanceId: "project_2" }),
 	],
 });
 
@@ -22,7 +22,7 @@ const subscription = (
 ): ProviderSubscriptionReconciliationRow => ({
 	id: "subscription_1",
 	project_id: "project_1",
-	project_key: "voysee",
+	project_key: "acme",
 	provider: "apple",
 	channel: "ios",
 	provider_account_id: null,
@@ -289,11 +289,11 @@ describe("SubscriptionReconciliationWorker", () => {
 	it("selects reconciliation providers from the claimed row project key", async () => {
 		const { repository } = createRepository({
 			subscriptions: [
-				subscription({ id: "subscription_voysee", project_key: "voysee" }),
+				subscription({ id: "subscription_acme", project_key: "acme" }),
 				subscription({
-					id: "subscription_wiseley",
+					id: "subscription_globex",
 					project_id: "project_2",
-					project_key: "wiseley",
+					project_key: "globex",
 				}),
 			],
 		});
@@ -319,7 +319,7 @@ describe("SubscriptionReconciliationWorker", () => {
 
 		await worker.runOnce();
 
-		expect(providerCalls).toEqual(["voysee:subscription_voysee", "wiseley:subscription_wiseley"]);
+		expect(providerCalls).toEqual(["acme:subscription_acme", "globex:subscription_globex"]);
 	});
 
 	it("does not mark processed or skipped subscriptions failed when success finalization throws", async () => {

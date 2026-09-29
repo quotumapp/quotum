@@ -11,7 +11,7 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		await repository.searchCustomers(projectInstanceContext("wiseley"), {
+		await repository.searchCustomers(projectInstanceContext("globex"), {
 			query: "GPA.123",
 			limit: 10,
 			cursor: null,
@@ -54,7 +54,7 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		const result = await repository.listCatalogProducts(projectInstanceContext("wiseley"), {
+		const result = await repository.listCatalogProducts(projectInstanceContext("globex"), {
 			limit: 1,
 			cursor: null,
 		});
@@ -93,7 +93,7 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		const result = await repository.listPurchases(projectInstanceContext("wiseley"), {
+		const result = await repository.listPurchases(projectInstanceContext("globex"), {
 			limit: 10,
 			cursor: null,
 			provider: "stripe",
@@ -104,7 +104,7 @@ describe("AdminBillingRepository", () => {
 		expect(result.items[0]?.provider).toBe("stripe");
 		expect(database.queries[0]).toContain("project_id =");
 		expect(database.boundParameter("project_id", 0)).toBe(
-			projectInstanceContext("wiseley").projectInstanceId,
+			projectInstanceContext("globex").projectInstanceId,
 		);
 	});
 
@@ -118,7 +118,7 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		await repository.listSubscriptions(projectInstanceContext("wiseley"), {
+		await repository.listSubscriptions(projectInstanceContext("globex"), {
 			limit: 10,
 			cursor: null,
 			needsAttention: true,
@@ -135,7 +135,7 @@ describe("AdminBillingRepository", () => {
 		);
 
 		await expect(
-			repository.getCustomerByBillingAccountId(projectInstanceContext("wiseley"), "missing-user"),
+			repository.getCustomerByBillingAccountId(projectInstanceContext("globex"), "missing-user"),
 		).rejects.toThrow("Billing customer was not found");
 	});
 
@@ -144,7 +144,7 @@ describe("AdminBillingRepository", () => {
 			[
 				{
 					id: "customer-id",
-					projectKey: "wiseley",
+					projectKey: "globex",
 					billingAccountId: "user-1",
 					email: null,
 					metadata: {},
@@ -166,7 +166,7 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		await repository.getCustomerByBillingAccountId(projectInstanceContext("wiseley"), "user-1");
+		await repository.getCustomerByBillingAccountId(projectInstanceContext("globex"), "user-1");
 
 		expect(database.queries.join("\n")).toContain(",6]");
 		expect(database.queries.join("\n")).toContain('"s".status IN');
@@ -193,7 +193,7 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		const result = await repository.getStatsSummary(projectInstanceContext("wiseley"), {});
+		const result = await repository.getStatsSummary(projectInstanceContext("globex"), {});
 
 		expect(result.storeEvents).toEqual({
 			pending: 0,
@@ -233,7 +233,7 @@ describe("AdminBillingRepository", () => {
 			database as never,
 		);
 
-		await repository.getStatsSummary(projectInstanceContext("wiseley"), {
+		await repository.getStatsSummary(projectInstanceContext("globex"), {
 			provider: "stripe",
 			from: "2026-01-01T00:00:00.000Z",
 		});

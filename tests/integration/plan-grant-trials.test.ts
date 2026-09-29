@@ -242,7 +242,7 @@ localDescribe("Plan grant trials integration", () => {
 		const api = trialApi();
 		await api.start("reader", { planKey: "starter" }, "start");
 		const { app } = createIntegrationApp({ env: context.env, repository: context.repository });
-		const readOnly = { authorization: `Bearer ${integrationProjectReadOnlyCredential("voysee")}` };
+		const readOnly = { authorization: `Bearer ${integrationProjectReadOnlyCredential("acme")}` };
 
 		const list = await testRequest(app, "/v1/billing-accounts/reader/trials", {
 			headers: readOnly,
@@ -427,7 +427,7 @@ function trialApi() {
 		env: context.env,
 		repository: context.repository,
 	});
-	const headers = authHeaders("voysee");
+	const headers = authHeaders("acme");
 	const json = async (response: Response) => ({
 		status: response.status,
 		// biome-ignore lint/suspicious/noExplicitAny: test responses are asserted field by field

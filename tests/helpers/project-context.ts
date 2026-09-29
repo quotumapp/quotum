@@ -7,12 +7,12 @@ import type { CredentialAccess } from "../../src/shared/credential-access";
 
 const idsByKey: Record<string, { organization: string; logicalProject: string; instance: string }> =
 	{
-		voysee: {
+		acme: {
 			organization: "00000000-0000-4000-8000-000000000001",
 			logicalProject: "00000000-0000-4000-8000-000000000002",
 			instance: "00000000-0000-4000-8000-000000000003",
 		},
-		wiseley: {
+		globex: {
 			organization: "00000000-0000-4000-8000-000000000011",
 			logicalProject: "00000000-0000-4000-8000-000000000012",
 			instance: "00000000-0000-4000-8000-000000000013",
@@ -20,7 +20,7 @@ const idsByKey: Record<string, { organization: string; logicalProject: string; i
 	};
 
 export function projectInstanceContext(
-	projectInstanceKey = "voysee",
+	projectInstanceKey = "acme",
 	overrides: Partial<ProjectInstanceContext> = {},
 ): ProjectInstanceContext {
 	const ids = idsByKey[projectInstanceKey] ?? {
@@ -44,7 +44,7 @@ export function projectInstanceContext(
 
 export function projectContextResolver({
 	contexts = [projectInstanceContext()],
-	credentials = { "test-api-key": "voysee" },
+	credentials = { "test-api-key": "acme" },
 	unavailable = false,
 }: {
 	contexts?: readonly ProjectInstanceContext[];

@@ -69,28 +69,28 @@ localDescribe("Worker flows integration", () => {
 		expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
 		expect(projection.requests).toHaveLength(1);
 		expect(projection.requests[0].url).toBe(
-			"https://voysee.projection.integration.test/internal/billing/projections",
+			"https://acme.projection.integration.test/internal/billing/projections",
 		);
 		expect(projection.requests[0].init.method).toBe("POST");
 		expect(projection.requests[0].init.redirect).toBe("error");
 		expect(projection.requests[0].init.signal).toBeInstanceOf(AbortSignal);
 		const headers = projection.requests[0].init.headers as Record<string, string>;
 		expect(headers).toMatchObject({
-			authorization: "Bearer voysee-projection-secret",
+			authorization: "Bearer acme-projection-secret",
 			"content-type": "application/json",
 		});
 		expect(headers["X-Billing-Timestamp"]).toEqual(expect.any(String));
 		expect(headers["X-Billing-Signature"]).toMatch(/^sha256=[a-f0-9]{64}$/);
 		expect(
 			verifyProjectionSignature({
-				secret: "voysee-projection-secret",
+				secret: "acme-projection-secret",
 				body: projection.requests[0].rawBody,
 				timestamp: headers["X-Billing-Timestamp"],
 				signature: headers["X-Billing-Signature"],
 			}),
 		).toBe(true);
 		expect(projection.requests[0].body).toMatchObject({
-			projectKey: "voysee",
+			projectKey: "acme",
 			jobId: pendingJob.id,
 			idempotencyKey: pendingJob.idempotency_key,
 			billingAccountId: "integration_user",
@@ -126,7 +126,7 @@ localDescribe("Worker flows integration", () => {
 	});
 
 	it("times out a held projection delivery, releases the lock, and records exactly one request", async () => {
-		const receiver = createLocalProjectionReceiver({ secret: "voysee-projection-secret" });
+		const receiver = createLocalProjectionReceiver({ secret: "acme-projection-secret" });
 		try {
 			const env = withProjectionUrl(context.env, receiver.url);
 			const fixture = createIntegrationApp({
@@ -150,7 +150,7 @@ localDescribe("Worker flows integration", () => {
 			expect(failedJob.attempts).toBe(1);
 			expect(failedJob.locked_by).toBeNull();
 			expect(failedJob.last_error).toMatch(
-				/^Projection delivery failed for project voysee: .*(timed out|TimeoutError|abort)/i,
+				/^Projection delivery failed for project acme: .*(timed out|TimeoutError|abort)/i,
 			);
 			expect(receiver.requests).toHaveLength(1);
 			hold.release();
@@ -168,22 +168,22 @@ localDescribe("Worker flows integration", () => {
 			{
 				name: "non-2xx response",
 				response: new Response(JSON.stringify({ success: true }), { status: 503 }),
-				expectedLastError: "Projection delivery failed for project voysee with status 503",
+				expectedLastError: "Projection delivery failed for project acme with status 503",
 			},
 			{
 				name: "network error",
 				response: new Error("socket closed"),
-				expectedLastError: "Projection delivery failed for project voysee: socket closed",
+				expectedLastError: "Projection delivery failed for project acme: socket closed",
 			},
 			{
 				name: "invalid JSON response",
 				response: new Response("not-json", { status: 200 }),
-				expectedLastError: "Projection delivery response for project voysee was invalid",
+				expectedLastError: "Projection delivery response for project acme was invalid",
 			},
 			{
 				name: "invalid success envelope",
 				response: new Response(JSON.stringify({ success: false }), { status: 200 }),
-				expectedLastError: "Projection delivery response for project voysee was invalid",
+				expectedLastError: "Projection delivery response for project acme was invalid",
 			},
 		];
 
@@ -336,21 +336,21 @@ localDescribe("Worker flows integration", () => {
 	});
 
 	it("replays skipped store events through project-selected providers", async () => {
-		const voyseeEventId = await seedReplayEvent(context.sql, {
-			projectKey: "voysee",
+		const acmeEventId = await seedReplayEvent(context.sql, {
+			projectKey: "acme",
 			provider: "google",
 			channel: "android",
 			status: "skipped",
 			eventType: "REPLAY_GOOGLE",
-			externalEventId: "google:replay:voysee",
+			externalEventId: "google:replay:acme",
 		});
-		const wiseleyEventId = await seedReplayEvent(context.sql, {
-			projectKey: "wiseley",
+		const globexEventId = await seedReplayEvent(context.sql, {
+			projectKey: "globex",
 			provider: "stripe",
 			channel: "web",
 			status: "failed",
 			eventType: "checkout.session.completed",
-			externalEventId: "stripe:replay:wiseley",
+			externalEventId: "stripe:replay:globex",
 		});
 		const calls: string[] = [];
 
@@ -369,15 +369,15 @@ localDescribe("Worker flows integration", () => {
 			failed: 0,
 		});
 		expect(calls.sort()).toEqual([
-			"voysee:google:REPLAY_GOOGLE",
-			"wiseley:stripe:checkout.session.completed",
+			"acme:google:REPLAY_GOOGLE",
+			"globex:stripe:checkout.session.completed",
 		]);
-		await expectReplayEventsProcessed(context.sql, [voyseeEventId, wiseleyEventId]);
+		await expectReplayEventsProcessed(context.sql, [acmeEventId, globexEventId]);
 	});
 
 	it("marks store event replay failures retryable", async () => {
 		await seedReplayEvent(context.sql, {
-			projectKey: "voysee",
+			projectKey: "acme",
 			provider: "google",
 			channel: "android",
 			status: "skipped",
@@ -496,15 +496,15 @@ localDescribe("Worker flows integration", () => {
 			repository: context.repository,
 		});
 		await verifyGoogleSubscription(fixture, {
-			projectKey: "voysee",
+			projectKey: "acme",
 			purchaseToken: "purchase_token_expired",
 		});
 		await verifyGoogleSubscription(fixture, {
-			projectKey: "wiseley",
+			projectKey: "globex",
 			purchaseToken: "purchase_token_stale",
 		});
-		await makeSubscriptionExpired(context.sql, "voysee", "purchase_token_expired");
-		await makeSubscriptionStale(context.sql, "wiseley", "purchase_token_stale");
+		await makeSubscriptionExpired(context.sql, "acme", "purchase_token_expired");
+		await makeSubscriptionStale(context.sql, "globex", "purchase_token_stale");
 		const calls: string[] = [];
 
 		const result = await runSubscriptionReconciliationWorkerOnce({
@@ -528,12 +528,12 @@ localDescribe("Worker flows integration", () => {
 			providerFailed: 0,
 		});
 		expect(calls.sort()).toEqual([
-			"voysee:google:purchase_token_expired",
-			"wiseley:google:purchase_token_stale",
+			"acme:google:purchase_token_expired",
+			"globex:google:purchase_token_stale",
 		]);
 		await expectSubscriptionReconciliationRows(context.sql);
 		const expiryProjection = await expectProjectionJob(context.sql, {
-			projectKey: "voysee",
+			projectKey: "acme",
 			billingAccountId: "integration_user",
 			reason: "expiry_reconciliation",
 			status: "pending",
@@ -556,13 +556,13 @@ localDescribe("Worker flows integration", () => {
 			repository: context.repository,
 		});
 		await verifyGoogleSubscription(fixture, {
-			projectKey: "voysee",
+			projectKey: "acme",
 			purchaseToken: "purchase_token_recovered",
 		});
 		await markSubscriptionLocallyExpired(context.sql, "purchase_token_recovered");
 		const google = new GooglePlayBillingService({
 			config: {
-				packageName: "com.voysee.app",
+				packageName: "com.acme.app",
 				obfuscatedAccountIdSecret: "google-account-link-secret",
 				previousObfuscatedAccountIdSecrets: [],
 				rtdnAudience: null,
@@ -597,7 +597,7 @@ localDescribe("Worker flows integration", () => {
 			JOIN projects ON projects.id = subscriptions.project_id
 			JOIN entitlements ON entitlements.project_id = subscriptions.project_id
 				AND entitlements.source_subscription_id = subscriptions.id
-			WHERE projects.key = 'voysee'
+			WHERE projects.key = 'acme'
 				AND subscriptions.external_subscription_id = 'purchase_token_recovered'
 		`;
 		expect(rows).toEqual([
@@ -743,10 +743,10 @@ localDescribe("Worker flows integration", () => {
 			repository: context.repository,
 		});
 		await verifyGoogleSubscription(fixture, {
-			projectKey: "wiseley",
+			projectKey: "globex",
 			purchaseToken: "purchase_token_stale",
 		});
-		await makeSubscriptionStale(context.sql, "wiseley", "purchase_token_stale");
+		await makeSubscriptionStale(context.sql, "globex", "purchase_token_stale");
 
 		const result = await runSubscriptionReconciliationWorkerOnce({
 			env: context.env,
@@ -755,7 +755,7 @@ localDescribe("Worker flows integration", () => {
 				apple: null,
 				google: {
 					async reconcileSubscription(subscription) {
-						expect(subscription.project_key).toBe("wiseley");
+						expect(subscription.project_key).toBe("globex");
 						expect(subscription.external_subscription_id).toBe("purchase_token_stale");
 						throw new Error("provider outage");
 					},
@@ -787,17 +787,17 @@ localDescribe("Worker flows integration", () => {
 			repository: context.repository,
 		});
 		await verifyGoogleSubscription(fixture, {
-			projectKey: "wiseley",
+			projectKey: "globex",
 			purchaseToken: "purchase_token_stale",
 		});
-		await makeSubscriptionStale(context.sql, "wiseley", "purchase_token_stale");
+		await makeSubscriptionStale(context.sql, "globex", "purchase_token_stale");
 		fixture.google.failNext(
 			"getSubscriptionPurchase",
 			Object.assign(new Error("Google Play 404"), { status: 404 }),
 		);
 		const google = new GooglePlayBillingService({
 			config: {
-				packageName: "com.voysee.app",
+				packageName: "com.acme.app",
 				obfuscatedAccountIdSecret: "google-account-link-secret",
 				previousObfuscatedAccountIdSecrets: [],
 				rtdnAudience: null,
@@ -806,7 +806,7 @@ localDescribe("Worker flows integration", () => {
 				enablePublisherMutations: true,
 			},
 			client: fixture.google.client,
-			repository: context.repository.forProject(integrationProjectContext("wiseley")),
+			repository: context.repository.forProject(integrationProjectContext("globex")),
 		});
 		const result = await runSubscriptionReconciliationWorkerOnce({
 			env: context.env,
@@ -831,7 +831,7 @@ localDescribe("Worker flows integration", () => {
 				provider_reconciliation_locked_by
 			FROM subscriptions
 			JOIN projects ON projects.id = subscriptions.project_id
-			WHERE projects.key = 'wiseley'
+			WHERE projects.key = 'globex'
 				AND subscriptions.external_subscription_id = 'purchase_token_stale'
 		`;
 		expect(row.provider_reconciliation_attempts).toBe(1);
@@ -847,7 +847,7 @@ async function verifyGoogleConsumable(
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...fixture.authHeaders("voysee"),
+			...fixture.authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -862,7 +862,7 @@ async function verifyGoogleConsumable(
 
 async function verifyGoogleSubscription(
 	fixture: ReturnType<typeof createIntegrationApp>,
-	input: { projectKey: "voysee" | "wiseley"; purchaseToken: string },
+	input: { projectKey: "acme" | "globex"; purchaseToken: string },
 ): Promise<Response> {
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
@@ -887,7 +887,7 @@ async function createGoogleAccountLink(
 		fixture.app,
 		`/v1/billing-accounts/${billingAccountId}/providers/google/account-link`,
 		{
-			headers: fixture.authHeaders("voysee"),
+			headers: fixture.authHeaders("acme"),
 		},
 	);
 
@@ -1046,7 +1046,7 @@ async function makeProjectionJobDue(sql: SQL, jobId: string): Promise<void> {
 async function seedReplayEvent(
 	sql: SQL,
 	input: {
-		projectKey: "voysee" | "wiseley";
+		projectKey: "acme" | "globex";
 		provider: "google" | "stripe";
 		channel: "android" | "web";
 		status: "skipped" | "failed";
@@ -1083,10 +1083,10 @@ function replayProvidersForProject(projectKey: string, calls: string[]): StoreEv
 	return {
 		apple: null,
 		google:
-			projectKey === "voysee"
+			projectKey === "acme"
 				? {
 						async replayStoreEvent(event: StoreEventReplayJobRow) {
-							expect(event.project_key).toBe("voysee");
+							expect(event.project_key).toBe("acme");
 							expect(event.provider).toBe("google");
 							calls.push(`${event.project_key}:${event.provider}:${event.event_type}`);
 							return { status: "processed" };
@@ -1094,10 +1094,10 @@ function replayProvidersForProject(projectKey: string, calls: string[]): StoreEv
 					}
 				: null,
 		stripe:
-			projectKey === "wiseley"
+			projectKey === "globex"
 				? {
 						async replayStoreEvent(event: StoreEventReplayJobRow) {
-							expect(event.project_key).toBe("wiseley");
+							expect(event.project_key).toBe("globex");
 							expect(event.provider).toBe("stripe");
 							calls.push(`${event.project_key}:${event.provider}:${event.event_type}`);
 							return { status: "processed" };
@@ -1170,7 +1170,7 @@ async function expectNullExternalReplayStoreEvents(
 
 async function makeSubscriptionExpired(
 	sql: SQL,
-	projectKey: "voysee" | "wiseley",
+	projectKey: "acme" | "globex",
 	externalSubscriptionId: string,
 ): Promise<void> {
 	await sql`
@@ -1191,14 +1191,14 @@ async function makeSubscriptionExpired(
 		WHERE subscriptions.id = entitlements.source_subscription_id
 			AND subscriptions.project_id = entitlements.project_id
 			AND projects.id = subscriptions.project_id
-			AND projects.key = 'voysee'
+			AND projects.key = 'acme'
 			AND subscriptions.external_subscription_id = ${externalSubscriptionId}
 	`;
 }
 
 async function makeSubscriptionStale(
 	sql: SQL,
-	projectKey: "voysee" | "wiseley",
+	projectKey: "acme" | "globex",
 	externalSubscriptionId: string,
 ): Promise<void> {
 	await sql`
@@ -1228,7 +1228,7 @@ async function markSubscriptionLocallyExpired(
 			provider_reconciliation_next_attempt_at = now() - INTERVAL '1 hour'
 		FROM projects
 		WHERE projects.id = subscriptions.project_id
-			AND projects.key = 'voysee'
+			AND projects.key = 'acme'
 			AND subscriptions.external_subscription_id = ${externalSubscriptionId}
 	`;
 }
@@ -1283,7 +1283,7 @@ async function expectSubscriptionReconciliationRows(sql: SQL): Promise<void> {
 
 	expect(rows).toEqual([
 		{
-			project_key: "voysee",
+			project_key: "acme",
 			external_subscription_id: "purchase_token_expired",
 			status: "expired",
 			auto_renew: false,
@@ -1293,7 +1293,7 @@ async function expectSubscriptionReconciliationRows(sql: SQL): Promise<void> {
 			provider_reconciled_at: expect.any(String),
 		},
 		{
-			project_key: "wiseley",
+			project_key: "globex",
 			external_subscription_id: "purchase_token_stale",
 			status: "active",
 			auto_renew: true,
@@ -1324,13 +1324,13 @@ async function expectSubscriptionReconciliationFailure(sql: SQL): Promise<void> 
 			subscriptions.provider_reconciliation_locked_by
 		FROM subscriptions
 		JOIN projects ON projects.id = subscriptions.project_id
-		WHERE projects.key = 'wiseley'
+		WHERE projects.key = 'globex'
 			AND subscriptions.external_subscription_id = 'purchase_token_stale'
 	`;
 
 	expect(rows).toEqual([
 		{
-			project_key: "wiseley",
+			project_key: "globex",
 			external_subscription_id: "purchase_token_stale",
 			provider_reconciliation_attempts: 1,
 			provider_reconciliation_error: "provider outage",

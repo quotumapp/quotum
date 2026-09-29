@@ -73,11 +73,11 @@ localDescribe("local Postgres billing integration", () => {
 		`;
 
 		expect(rows).toEqual([
+			{ key: "acme", name: "Acme" },
+			{ key: "acme-sandbox", name: "Acme" },
 			{ key: "billing-internal", name: "Billing Internal" },
-			{ key: "voysee", name: "Voysee" },
-			{ key: "voysee-sandbox", name: "Voysee" },
-			{ key: "wiseley", name: "Wiseley" },
-			{ key: "wiseley-sandbox", name: "Wiseley" },
+			{ key: "globex", name: "Globex" },
+			{ key: "globex-sandbox", name: "Globex" },
 		]);
 		expect(Number(storeProductCount[0]?.count ?? "0")).toBe(12);
 	});
@@ -85,7 +85,7 @@ localDescribe("local Postgres billing integration", () => {
 	it("imports a catalog only for an existing mapped project instance", async () => {
 		const configured = [
 			{
-				projectInstanceKey: "voysee",
+				projectInstanceKey: "acme",
 				catalog: [
 					{
 						key: "creator_monthly",
@@ -135,12 +135,12 @@ localDescribe("local Postgres billing integration", () => {
 			JOIN products ON products.project_id = projects.id
 			JOIN store_products ON store_products.project_id = projects.id
 				AND store_products.product_id = products.id
-			WHERE projects.key = 'voysee'
+			WHERE projects.key = 'acme'
 				AND products.key = 'creator_monthly'
 		`;
 		expect(rows).toEqual([
 			{
-				project_key: "voysee",
+				project_key: "acme",
 				product_key: "creator_monthly",
 				credit_amount: 500,
 				external_product_id: "prod_thru_creator",

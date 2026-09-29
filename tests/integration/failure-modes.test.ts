@@ -33,7 +33,7 @@ localDescribe("Failure modes integration", () => {
 	});
 
 	it("recovers projection delivery after receiver outages", async () => {
-		const receiver = createLocalProjectionReceiver({ secret: "voysee-projection-secret" });
+		const receiver = createLocalProjectionReceiver({ secret: "acme-projection-secret" });
 		receiver.queueResponses(
 			{ status: 503, body: { success: false } },
 			{ status: 503, body: { success: false } },
@@ -164,7 +164,7 @@ localDescribe("Failure modes integration", () => {
 	});
 
 	it("keeps ingestion available while projection delivery fails", async () => {
-		const env = withProjectionUrl(context.env, "https://voysee.projection.integration.test");
+		const env = withProjectionUrl(context.env, "https://acme.projection.integration.test");
 		const response = await ingestStripeCheckout(env, "evt_delivery_down");
 		expect(response.status).toBe(200);
 		const storeEvent = await expectStoreEvent(context.sql, {
@@ -219,7 +219,7 @@ async function postStripeWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
 	body: Record<string, unknown>,
 ): Promise<Response> {
-	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/stripe", {
+	return await testRequest(fixture.app, "/v1/projects/acme/webhooks/stripe", {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
@@ -239,7 +239,7 @@ async function createAppleAccountToken(
 	const response = await testRequest(
 		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
-		{ headers: fixture.authHeaders("voysee") },
+		{ headers: fixture.authHeaders("acme") },
 	);
 	const body = await response.json();
 	expect(response.status).toBe(200);
@@ -252,7 +252,7 @@ async function verifyAppleSubscription(
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...fixture.authHeaders("voysee"),
+			...fixture.authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -286,7 +286,7 @@ async function seedProjectionJobs(
 			WITH project_row AS (
 				SELECT id
 				FROM projects
-				WHERE key = 'voysee'
+				WHERE key = 'acme'
 			),
 			customer_row AS (
 				INSERT INTO customers (project_id, billing_account_id)

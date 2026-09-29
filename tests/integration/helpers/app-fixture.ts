@@ -22,7 +22,7 @@ import { integrationProjectContext, integrationProjectCredential } from "./platf
 
 export const integrationGoogleOidcKeys = createGoogleOidcTestKeys();
 export const integrationGoogleRtdnAudience =
-	"https://billing.integration.test/v1/projects/voysee/webhooks/google";
+	"https://billing.integration.test/v1/projects/acme/webhooks/google";
 
 type StripeEventFixture = ReturnType<typeof import("./fake-provider-clients").stripeEvent>;
 
@@ -93,14 +93,14 @@ export function createIntegrationApp({
 
 		projectProviderServices[project.projectInstanceKey] = {
 			appleStoreKitService: new AppleStoreKitService({
-				bundleId: "com.voysee.app",
+				bundleId: "com.acme.app",
 				environment: "sandbox",
 				client: apple.client,
 				repository: projectRepository,
 			}),
 			googlePlayBillingService: new GooglePlayBillingService({
 				config: {
-					packageName: "com.voysee.app",
+					packageName: "com.acme.app",
 					obfuscatedAccountIdSecret: "google-account-link-secret",
 					previousObfuscatedAccountIdSecrets: [],
 					rtdnAudience: integrationGoogleRtdnAudience,
@@ -133,7 +133,7 @@ export function createIntegrationApp({
 											externalEventId: `google:${messageId}`,
 											notification: {
 												version: "1.0",
-												packageName: "com.voysee.app",
+												packageName: "com.acme.app",
 												eventTimeMillis: googleVoidedEventTimeMillis,
 												voidedPurchaseNotification: {
 													purchaseToken: googleVoidedPurchaseToken,
@@ -149,7 +149,7 @@ export function createIntegrationApp({
 												externalEventId: `google:${messageId}`,
 												notification: {
 													version: "1.0",
-													packageName: "com.voysee.app",
+													packageName: "com.acme.app",
 													eventTimeMillis: "1780185600000",
 													oneTimeProductNotification: {
 														version: "1.0",
@@ -164,7 +164,7 @@ export function createIntegrationApp({
 												externalEventId: `google:${messageId}`,
 												notification: {
 													version: "1.0",
-													packageName: "com.voysee.app",
+													packageName: "com.acme.app",
 													eventTimeMillis: "1780185600000",
 													subscriptionNotification: {
 														version: "1.0",
@@ -225,7 +225,7 @@ export function createIntegrationApp({
 		stripe,
 		/** The same services the app uses, so a test can drive a worker over identical state. */
 		projectProviderServices,
-		authHeaders(projectKey = "voysee"): HeadersInit {
+		authHeaders(projectKey = "acme"): HeadersInit {
 			const project = env.connectionFixtures.find(
 				(candidate) => candidate.projectInstanceKey === projectKey,
 			);

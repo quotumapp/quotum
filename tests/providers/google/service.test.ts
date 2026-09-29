@@ -13,7 +13,7 @@ const snapshot: EntitlementSnapshot = {
 };
 
 const config = {
-	packageName: "com.voysee.app",
+	packageName: "com.acme.app",
 	obfuscatedAccountIdSecret: "account-link-secret",
 	previousObfuscatedAccountIdSecrets: [] as string[],
 	rtdnAudience: "https://billing.example.com/v1/webhooks/google",
@@ -67,7 +67,7 @@ const reconciliationSubscription = (
 ): ProviderSubscriptionReconciliationRow => ({
 	id: "subscription_1",
 	project_id: "project_1",
-	project_key: "voysee",
+	project_key: "acme",
 	provider: "google",
 	channel: "android",
 	provider_account_id: null,
@@ -171,7 +171,7 @@ function serviceFixture(
 				externalEventId: "google:message_1",
 				notification: {
 					version: "1.0",
-					packageName: "com.voysee.app",
+					packageName: "com.acme.app",
 					eventTimeMillis: "1780185600000",
 					subscriptionNotification: {
 						version: "1.0",
@@ -384,7 +384,7 @@ describe("GooglePlayBillingService", () => {
 				externalEventId: "google:message_product",
 				notification: {
 					version: "1.0",
-					packageName: "com.voysee.app",
+					packageName: "com.acme.app",
 					eventTimeMillis: "1780185600000",
 					oneTimeProductNotification: {
 						version: "1.0",
@@ -424,7 +424,7 @@ describe("GooglePlayBillingService", () => {
 				externalEventId: "google:message_voided",
 				notification: {
 					version: "1.0",
-					packageName: "com.voysee.app",
+					packageName: "com.acme.app",
 					eventTimeMillis: "1780185600000",
 					voidedPurchaseNotification: {
 						purchaseToken: "purchase_token_voided",
@@ -480,7 +480,7 @@ describe("GooglePlayBillingService", () => {
 				externalEventId: "google:message_2",
 				notification: {
 					version: "1.0",
-					packageName: "com.voysee.app",
+					packageName: "com.acme.app",
 					eventTimeMillis: "1780185600000",
 					testNotification: { version: "1.0" },
 				},
@@ -504,7 +504,7 @@ describe("GooglePlayBillingService", () => {
 		const result = await service.replayStoreEvent({
 			id: "event_1",
 			project_id: "project_1",
-			project_key: "voysee",
+			project_key: "acme",
 			provider: "google",
 			channel: "android",
 			external_event_id: "google:message_1",
@@ -547,7 +547,7 @@ describe("GooglePlayBillingService", () => {
 		const result = await service.replayStoreEvent({
 			id: "event_1",
 			project_id: "project_1",
-			project_key: "voysee",
+			project_key: "acme",
 			provider: "google",
 			channel: "android",
 			external_event_id: "google:message_1",
@@ -581,7 +581,7 @@ describe("GooglePlayBillingService", () => {
 		const result = await service.replayStoreEvent({
 			id: "event_voided",
 			project_id: "project_1",
-			project_key: "voysee",
+			project_key: "acme",
 			provider: "google",
 			channel: "android",
 			external_event_id:
@@ -597,7 +597,7 @@ describe("GooglePlayBillingService", () => {
 			next_attempt_at: null,
 			raw_payload: {
 				version: "1.0",
-				packageName: "com.voysee.app",
+				packageName: "com.acme.app",
 				eventTimeMillis: "1780185600000",
 				voidedPurchaseNotification: {
 					purchaseToken: "purchase_token_voided",
@@ -636,7 +636,7 @@ describe("GooglePlayBillingService", () => {
 		const result = await service.replayStoreEvent({
 			id: "event_1",
 			project_id: "project_1",
-			project_key: "voysee",
+			project_key: "acme",
 			provider: "google",
 			channel: "android",
 			external_event_id: "google:message_1",

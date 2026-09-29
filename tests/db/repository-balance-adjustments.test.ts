@@ -3,7 +3,7 @@ import { BalanceAdjustmentRepository } from "../../src/db/repository/balance-adj
 import { projectInstanceContext } from "../helpers/project-context";
 import { FakeDatabase } from "./repository-fixture";
 
-const project = projectInstanceContext("voysee");
+const project = projectInstanceContext("acme");
 const customer = { id: "customer-id", billing_account_id: "acct_1" };
 
 function grantRow(overrides: Record<string, unknown> = {}) {

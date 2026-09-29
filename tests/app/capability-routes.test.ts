@@ -20,16 +20,16 @@ import { testRequest, withOpenApiAssertions } from "../helpers/openapi";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const stripeFixture: ProjectConnectionFixture = {
-	projectInstanceKey: "voysee",
-	projectionUrl: "https://voysee.example.com",
-	projectionSecret: "voysee-projection-secret",
+	projectInstanceKey: "acme",
+	projectionUrl: "https://acme.example.com",
+	projectionSecret: "acme-projection-secret",
 	stripe: {
-		accountIdentity: "acct_1Voysee",
-		secretKey: "sk_test_voysee",
-		webhookSecret: "whsec_voysee",
-		checkoutSuccessUrl: "https://voysee.example.com/success",
-		checkoutCancelUrl: "https://voysee.example.com/cancel",
-		portalReturnUrl: "https://voysee.example.com/account",
+		accountIdentity: "acct_1Acme",
+		secretKey: "sk_test_acme",
+		webhookSecret: "whsec_acme",
+		checkoutSuccessUrl: "https://acme.example.com/success",
+		checkoutCancelUrl: "https://acme.example.com/cancel",
+		portalReturnUrl: "https://acme.example.com/account",
 	},
 };
 
@@ -74,8 +74,8 @@ const headers = { authorization: "Bearer secret" };
 const capabilitiesPath = "/v1/admin/providers/capabilities";
 const resolver = () =>
 	projectContextResolver({
-		contexts: [projectInstanceContext("voysee")],
-		credentials: { secret: "voysee" },
+		contexts: [projectInstanceContext("acme")],
+		credentials: { secret: "acme" },
 	});
 
 function capabilityApp(overrides: Partial<Parameters<typeof createApp>[0]> = {}) {
@@ -124,7 +124,7 @@ describe("provider capability routes", () => {
 			enabled: true,
 			validated: true,
 			validatedAt: null,
-			accountIdentity: "acct_1Voysee",
+			accountIdentity: "acct_1Acme",
 		});
 		expect(stripe?.operations.find((entry) => entry.operation === "checkout.hosted")?.outcome).toBe(
 			"available",
@@ -150,7 +150,7 @@ describe("provider capability routes", () => {
 			await testRequest(
 				capabilityApp({
 					stripeBillingService: untouchableStripe,
-					projectProviderServices: { voysee: { stripeBillingService: null } },
+					projectProviderServices: { acme: { stripeBillingService: null } },
 				}),
 				capabilitiesPath,
 				{ headers },

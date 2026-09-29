@@ -9,7 +9,7 @@ import { projectContextResolver, projectInstanceContext } from "../helpers/proje
 const job = {
 	id: "job_1",
 	project_id: "project_1",
-	project_key: "voysee",
+	project_key: "acme",
 	customer_id: "customer_1",
 	idempotency_key: "stripe:txn_1:projection",
 	reason: "provider_webhook",
@@ -35,7 +35,7 @@ const job = {
 	updated_at: "2026-05-31T00:00:00.000Z",
 } satisfies ProjectionSyncJobRow;
 const workerProjectResolver = projectContextResolver({
-	contexts: [projectInstanceContext("voysee", { projectInstanceId: job.project_id })],
+	contexts: [projectInstanceContext("acme", { projectInstanceId: job.project_id })],
 });
 
 function createRecordingLogger() {
@@ -95,7 +95,7 @@ describe("ProjectionSyncWorker", () => {
 			'billing_projection_sync_jobs_total{result="succeeded"} 1',
 		);
 		expect(metrics.renderPrometheus()).toContain(
-			'billing_worker_jobs_total{project="voysee",result="succeeded",worker="projection_sync"} 1',
+			'billing_worker_jobs_total{project="acme",result="succeeded",worker="projection_sync"} 1',
 		);
 		expect(infos).toEqual([
 			{
@@ -218,7 +218,7 @@ describe("ProjectionSyncWorker", () => {
 		expect(synced).toEqual([
 			{
 				schemaVersion: 1,
-				projectKey: "voysee",
+				projectKey: "acme",
 				jobId: "job_1",
 				idempotencyKey: "google:purchase_token_1:purchase_verified",
 				billingAccountId: "user_1",
@@ -290,7 +290,7 @@ describe("ProjectionSyncWorker", () => {
 		expect(synced).toEqual([
 			{
 				schemaVersion: 1,
-				projectKey: "voysee",
+				projectKey: "acme",
 				jobId: "job_1",
 				idempotencyKey: "stripe:refund_re_1:provider_webhook",
 				billingAccountId: "user_1",
@@ -361,7 +361,7 @@ describe("ProjectionSyncWorker", () => {
 		expect(synced).toEqual([
 			{
 				schemaVersion: 1,
-				projectKey: "voysee",
+				projectKey: "acme",
 				jobId: "job_1",
 				idempotencyKey: "trial_ending:subscription:sub_row:2026-06-14T00:00:00.000Z",
 				billingAccountId: "user_1",

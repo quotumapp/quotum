@@ -29,7 +29,7 @@ describe("BillingRepository Stripe", () => {
 		const repository = new BillingRepository(database as never);
 
 		const product = await repository.getStripeWebStoreProductByKey(
-			projectInstanceContext("wiseley"),
+			projectInstanceContext("globex"),
 			"credits_100",
 		);
 
@@ -38,7 +38,7 @@ describe("BillingRepository Stripe", () => {
 		expect(queries).not.toContain("FROM projects");
 		expect(queries).toContain("sp.project_id = $1");
 		expect(database.boundParameter("sp.project_id")).toBe(
-			projectInstanceContext("wiseley").projectInstanceId,
+			projectInstanceContext("globex").projectInstanceId,
 		);
 	});
 
@@ -66,7 +66,7 @@ describe("BillingRepository Stripe", () => {
 
 		await expect(
 			repository.recordStripeCreditReversalAndEnqueueProjection(
-				projectInstanceContext("wiseley"),
+				projectInstanceContext("globex"),
 				stripeReversalInput({
 					reversalAmount: Number(unsafeAmount),
 					rawPayload: { id: "re_unsafe", amount: Number(unsafeAmount) },
@@ -108,7 +108,7 @@ describe("BillingRepository Stripe", () => {
 
 		await expect(
 			repository.recordStripeCreditReversalAndEnqueueProjection(
-				projectInstanceContext("wiseley"),
+				projectInstanceContext("globex"),
 				stripeReversalInput(),
 			),
 		).resolves.toEqual({
@@ -162,7 +162,7 @@ describe("BillingRepository Stripe", () => {
 
 		await expect(
 			repository.recordStripeCreditReversalAndEnqueueProjection(
-				projectInstanceContext("wiseley"),
+				projectInstanceContext("globex"),
 				stripeReversalInput({
 					reversalAmount: 250,
 					rawPayload: { id: "re_partial", amount: 250 },
@@ -245,7 +245,7 @@ describe("BillingRepository Stripe", () => {
 
 		await expect(
 			repository.recordStripeSubscriptionAndEnqueueProjection(
-				projectInstanceContext("wiseley"),
+				projectInstanceContext("globex"),
 				stripeSubscriptionInput(),
 			),
 		).resolves.toMatchObject({
@@ -293,7 +293,7 @@ describe("BillingRepository Stripe", () => {
 		const repository = new BillingRepository(database as never);
 
 		await repository.recordStripeSubscriptionAndEnqueueProjection(
-			projectInstanceContext("wiseley"),
+			projectInstanceContext("globex"),
 			stripeSubscriptionInput(),
 		);
 

@@ -70,7 +70,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 		await expectProviderScopedPurchases(context.sql, "apple", "200000000000001", [
 			{
 				billing_account_id: "integration_user",
-				project_key: "voysee",
+				project_key: "acme",
 				purchase_kind: "subscription",
 				status: "completed",
 				transaction_id: "200000000000001",
@@ -111,7 +111,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 		await expectProviderScopedPurchases(context.sql, "google", "purchase_token_repeat", [
 			{
 				billing_account_id: "integration_user",
-				project_key: "voysee",
+				project_key: "acme",
 				purchase_kind: "consumable",
 				status: "completed",
 				transaction_id: "purchase_token_repeat",
@@ -126,7 +126,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 					billing_account_id: "integration_user",
 					event_type: "purchase_verified",
 					external_event_id: "google:purchase_token_repeat:purchase_verified",
-					project_key: "voysee",
+					project_key: "acme",
 					processing_status: "processed",
 					transaction_id: "purchase_token_repeat",
 				},
@@ -136,7 +136,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 			{
 				billing_account_id: "integration_user",
 				idempotency_key: "google:purchase_token_repeat:purchase_verified",
-				project_key: "voysee",
+				project_key: "acme",
 				reason: "purchase_verified",
 				status: "pending",
 			},
@@ -151,10 +151,10 @@ localDescribe("billing idempotency and integrity integration", () => {
 		await createGoogleAccountLink(fixture, "integration_user");
 
 		const first = await withIsoDateSqlParameters(() =>
-			postGoogleRtdn(fixture, "voysee", "message_1"),
+			postGoogleRtdn(fixture, "acme", "message_1"),
 		);
 		const second = await withIsoDateSqlParameters(() =>
-			postGoogleRtdn(fixture, "voysee", "message_1"),
+			postGoogleRtdn(fixture, "acme", "message_1"),
 		);
 
 		expect(first.status).toBe(200);
@@ -171,7 +171,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 		await expectProviderScopedPurchases(context.sql, "google", "purchase_token_1", [
 			{
 				billing_account_id: "integration_user",
-				project_key: "voysee",
+				project_key: "acme",
 				purchase_kind: "subscription",
 				status: "completed",
 				transaction_id: "purchase_token_1",
@@ -182,7 +182,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 				billing_account_id: "integration_user",
 				event_type: "SUBSCRIPTION_PURCHASED",
 				external_event_id: "google:message_1",
-				project_key: "voysee",
+				project_key: "acme",
 				processing_status: "processed",
 				transaction_id: "purchase_token_1",
 			},
@@ -191,7 +191,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 			{
 				billing_account_id: "integration_user",
 				idempotency_key: "google:message_1:projection",
-				project_key: "voysee",
+				project_key: "acme",
 				reason: "provider_webhook",
 				status: "pending",
 			},
@@ -232,7 +232,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 				billing_account_id: "integration_user",
 				event_type: "customer.subscription.updated",
 				external_event_id: "evt_subscription_repeat",
-				project_key: "voysee",
+				project_key: "acme",
 				processing_status: "processed",
 				transaction_id: "in_integration",
 			},
@@ -245,7 +245,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 					billing_account_id: "integration_user",
 					idempotency_key:
 						"stripe:subscription:sub_1:customer.subscription.updated:evt_subscription_repeat:projection",
-					project_key: "voysee",
+					project_key: "acme",
 					reason: "provider_webhook",
 					status: "pending",
 				},
@@ -495,7 +495,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 		await expectProviderScopedPurchases(context.sql, "stripe", "pi_payment_intent_repeat", [
 			{
 				billing_account_id: "integration_user",
-				project_key: "voysee",
+				project_key: "acme",
 				purchase_kind: "consumable",
 				status: "completed",
 				transaction_id: "pi_payment_intent_repeat",
@@ -506,7 +506,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 				billing_account_id: "integration_user",
 				event_type: "checkout.session.completed",
 				external_event_id: "evt_payment_intent_first",
-				project_key: "voysee",
+				project_key: "acme",
 				processing_status: "processed",
 				transaction_id: "pi_payment_intent_repeat",
 			},
@@ -516,7 +516,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 				billing_account_id: "integration_user",
 				event_type: "checkout.session.completed",
 				external_event_id: "evt_payment_intent_second",
-				project_key: "voysee",
+				project_key: "acme",
 				processing_status: "processed",
 				transaction_id: "pi_payment_intent_repeat",
 			},
@@ -528,7 +528,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 				{
 					billing_account_id: "integration_user",
 					idempotency_key: "stripe:payment:pi_payment_intent_repeat:projection",
-					project_key: "voysee",
+					project_key: "acme",
 					reason: "provider_webhook",
 					status: "pending",
 				},
@@ -538,7 +538,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 	});
 
 	it("isolates colliding customer, provider, and idempotency ids across project instances", async () => {
-		const projectInstanceKeys = ["voysee", "voysee-sandbox", "wiseley", "wiseley-sandbox"] as const;
+		const projectInstanceKeys = ["acme", "acme-sandbox", "globex", "globex-sandbox"] as const;
 		await seedIntegrationProjectsAndCatalog(
 			context.sql,
 			projectInstanceKeys.map((projectInstanceKey) => ({
@@ -663,10 +663,10 @@ localDescribe("billing idempotency and integrity integration", () => {
 		await createGoogleAccountLink(fixture, "another_user");
 
 		const originalResponse = await withIsoDateSqlParameters(() =>
-			verifyGoogleConsumable(fixture, "purchase_token_identity_mismatch", "voysee"),
+			verifyGoogleConsumable(fixture, "purchase_token_identity_mismatch", "acme"),
 		);
 		const mismatchResponse = await withIsoDateSqlParameters(() =>
-			verifyGoogleConsumable(fixture, "purchase_token_identity_mismatch", "voysee", "another_user"),
+			verifyGoogleConsumable(fixture, "purchase_token_identity_mismatch", "acme", "another_user"),
 		);
 
 		expect(originalResponse.status).toBe(200);
@@ -690,7 +690,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 		await expectProviderScopedPurchases(context.sql, "google", "purchase_token_identity_mismatch", [
 			{
 				billing_account_id: "integration_user",
-				project_key: "voysee",
+				project_key: "acme",
 				purchase_kind: "consumable",
 				status: "completed",
 				transaction_id: "purchase_token_identity_mismatch",
@@ -704,7 +704,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 				{
 					billing_account_id: "integration_user",
 					external_customer_id: googleAccountId("integration_user"),
-					project_key: "voysee",
+					project_key: "acme",
 					provider: "google",
 				},
 			],
@@ -713,7 +713,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 			{
 				billing_account_id: "another_user",
 				external_customer_id: googleAccountId("another_user"),
-				project_key: "voysee",
+				project_key: "acme",
 				provider: "google",
 			},
 		]);
@@ -777,7 +777,7 @@ async function createAppleAccountToken(fixture: Fixture): Promise<void> {
 		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
 		{
-			headers: fixture.authHeaders("voysee"),
+			headers: fixture.authHeaders("acme"),
 		},
 	);
 	const body = await response.json();
@@ -790,7 +790,7 @@ async function verifyAppleSubscription(fixture: Fixture): Promise<Response> {
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...fixture.authHeaders("voysee"),
+			...fixture.authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -804,7 +804,7 @@ async function verifyAppleSubscription(fixture: Fixture): Promise<Response> {
 async function verifyGoogleConsumable(
 	fixture: Fixture,
 	purchaseToken: string,
-	projectKey = "voysee",
+	projectKey = "acme",
 	billingAccountId = "integration_user",
 ): Promise<Response> {
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
@@ -826,7 +826,7 @@ async function verifyGoogleConsumable(
 async function postStripeWebhook(
 	fixture: Fixture,
 	body: Record<string, unknown>,
-	projectKey = "voysee",
+	projectKey = "acme",
 ): Promise<Response> {
 	return await testRequest(fixture.app, `/v1/projects/${projectKey}/webhooks/stripe`, {
 		method: "POST",
@@ -845,7 +845,7 @@ async function postStripeWebhook(
 async function createGoogleAccountLink(
 	fixture: Fixture,
 	billingAccountId: string,
-	projectKey = "voysee",
+	projectKey = "acme",
 ): Promise<string> {
 	const response = await testRequest(
 		fixture.app,
@@ -862,7 +862,7 @@ async function createGoogleAccountLink(
 
 async function postGoogleRtdn(
 	fixture: Fixture,
-	projectKey = "voysee",
+	projectKey = "acme",
 	messageId = "message_1",
 ): Promise<Response> {
 	return await testRequest(fixture.app, `/v1/projects/${projectKey}/webhooks/google`, {
@@ -942,7 +942,7 @@ async function seedNonConsumableStoreProduct(sql: SQL): Promise<string> {
 			SELECT projects.id, 'lifetime_unlock', 'premium', 0, 'Lifetime Unlock',
 				'non_consumable', true
 			FROM projects
-			WHERE projects.key = 'voysee'
+			WHERE projects.key = 'acme'
 			RETURNING id, project_id
 		)
 		INSERT INTO store_products (
@@ -1185,7 +1185,7 @@ async function seedProcessingStripeStoreEvent(
 			'processing', 'integration processing seed', ${JSON.stringify({ seeded: true })}::text::jsonb,
 			now(), 'integration-worker', now() - INTERVAL '1 second'
 		FROM projects
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 		RETURNING id
 	`;
 

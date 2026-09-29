@@ -50,7 +50,7 @@ describe("BillingRepository workers", () => {
 				{
 					id: "job-id",
 					project_id: "project-id",
-					project_key: "wiseley",
+					project_key: "globex",
 					customer_id: "customer-id",
 					idempotency_key: "projection:key",
 					reason: "provider_webhook",
@@ -81,7 +81,7 @@ describe("BillingRepository workers", () => {
 		const jobs = await repository.claimProjectionSyncJobs("worker-a", 1);
 
 		expect(jobs[0]?.id).toBe("job-id");
-		expect(jobs[0]?.project_key).toBe("wiseley");
+		expect(jobs[0]?.project_key).toBe("globex");
 		expect(database.queries[0]).toContain("FOR UPDATE OF jobs SKIP LOCKED");
 		expect(database.queries[0]).toContain("status = 'processing'");
 		expect(database.queries[0]).toContain("ROW_NUMBER() OVER");
@@ -115,7 +115,7 @@ describe("BillingRepository workers", () => {
 		const repository = new BillingRepository(database as never);
 
 		await repository.recordPurchaseAndEnqueueProjection(
-			projectInstanceContext("wiseley"),
+			projectInstanceContext("globex"),
 			purchaseProjectionInput(),
 		);
 
@@ -150,7 +150,7 @@ describe("BillingRepository workers", () => {
 				{
 					id: "event-id",
 					project_id: "project-id",
-					project_key: "wiseley",
+					project_key: "globex",
 					provider: "google",
 					channel: "android",
 					external_event_id: "external-event-id",
@@ -176,16 +176,16 @@ describe("BillingRepository workers", () => {
 
 		const row = await repository.claimStoreEventReplayJobById(
 			"worker-a",
-			projectInstanceContext("wiseley"),
+			projectInstanceContext("globex"),
 			"event-id",
 		);
 
-		expect(row.project_key).toBe("wiseley");
+		expect(row.project_key).toBe("globex");
 		const queries = database.queries.join("\n");
 		expect(queries).not.toContain("SELECT p.id FROM projects p");
 		expect(queries).toContain("events.project_id = $3");
 		expect(database.boundParameter("events.project_id")).toBe(
-			projectInstanceContext("wiseley").projectInstanceId,
+			projectInstanceContext("globex").projectInstanceId,
 		);
 	});
 
@@ -217,7 +217,7 @@ describe("BillingRepository workers", () => {
 		const repository = new BillingRepository(database as never);
 
 		await expect(
-			repository.retryProjectionSyncJob(projectInstanceContext("wiseley"), "job-id"),
+			repository.retryProjectionSyncJob(projectInstanceContext("globex"), "job-id"),
 		).resolves.toEqual({ jobId: "job-id", status: "pending" });
 
 		const queries = database.queries.join("\n");
@@ -226,7 +226,7 @@ describe("BillingRepository workers", () => {
 		expect(queries).toContain("last_error = NULL");
 		expect(queries).toContain("next_attempt_at = now()");
 		expect(database.boundParameter("jobs.project_id")).toBe(
-			projectInstanceContext("wiseley").projectInstanceId,
+			projectInstanceContext("globex").projectInstanceId,
 		);
 	});
 
@@ -384,12 +384,12 @@ describe("BillingRepository workers", () => {
 	it("claims subscription changes as ids carrying their project", async () => {
 		const database = new FakeDatabase([
 			[],
-			[{ id: "change-id", project_id: "project-id", project_key: "wiseley" }],
+			[{ id: "change-id", project_id: "project-id", project_key: "globex" }],
 		]);
 		const repository = new BillingRepository(database as never);
 
 		await expect(repository.claimSubscriptionChanges("worker-a", 5)).resolves.toEqual([
-			{ projectInstanceId: "project-id", projectKey: "wiseley", changeId: "change-id" },
+			{ projectInstanceId: "project-id", projectKey: "globex", changeId: "change-id" },
 		]);
 
 		expect(database.queries[0]).toContain("UPDATE catalog_migration_jobs");
@@ -400,7 +400,7 @@ describe("BillingRepository workers", () => {
 
 	it("claims subscription changes after staging fails and reports the failure", async () => {
 		const inner = new FakeDatabase([
-			[{ id: "change-id", project_id: "project-id", project_key: "wiseley" }],
+			[{ id: "change-id", project_id: "project-id", project_key: "globex" }],
 		]);
 		const database = new FailingStagingDatabase(inner);
 		const repository = new BillingRepository(database as never);
@@ -411,7 +411,7 @@ describe("BillingRepository workers", () => {
 		});
 
 		expect(claimed).toEqual([
-			{ projectInstanceId: "project-id", projectKey: "wiseley", changeId: "change-id" },
+			{ projectInstanceId: "project-id", projectKey: "globex", changeId: "change-id" },
 		]);
 		expect(stagingErrors).toEqual([new Error("staging failed")]);
 	});
@@ -425,12 +425,12 @@ describe("BillingRepository workers", () => {
 			[{ usage: "10" }],
 			[{ id: "materialized-period-id" }],
 			[usageInvoicePeriod()],
-			[{ id: "period-id", project_id: "project-id", project_key: "wiseley" }],
+			[{ id: "period-id", project_id: "project-id", project_key: "globex" }],
 			[
 				{
 					id: 7,
 					project_id: "project-id",
-					project_key: "wiseley",
+					project_key: "globex",
 					closed_period_id: "closed-period-id",
 				},
 			],
@@ -447,14 +447,14 @@ describe("BillingRepository workers", () => {
 			jobs: [
 				{
 					projectInstanceId: "project-id",
-					projectKey: "wiseley",
+					projectKey: "globex",
 					jobKind: "period",
 					jobId: "period-id",
 					periodId: "period-id",
 				},
 				{
 					projectInstanceId: "project-id",
-					projectKey: "wiseley",
+					projectKey: "globex",
 					jobKind: "adjustment",
 					jobId: "7",
 					periodId: "closed-period-id",
@@ -481,7 +481,7 @@ describe("BillingRepository workers", () => {
 			[{ usage: "10" }],
 			[{ id: "materialized-period-id" }],
 			[usageInvoicePeriod()],
-			[{ id: "period-id", project_id: "project-id", project_key: "wiseley" }],
+			[{ id: "period-id", project_id: "project-id", project_key: "globex" }],
 			[],
 		]);
 		let inserts = 0;
@@ -507,7 +507,7 @@ describe("BillingRepository workers", () => {
 	it("rolls the claimed periods back when the adjustment claim fails", async () => {
 		const inner = new FakeDatabase([
 			[],
-			[{ id: "period-id", project_id: "project-id", project_key: "wiseley" }],
+			[{ id: "period-id", project_id: "project-id", project_key: "globex" }],
 		]);
 		const database = new TransactionalDatabase(inner, (query) =>
 			query.includes("UPDATE usage_invoice_adjustments adjustment")

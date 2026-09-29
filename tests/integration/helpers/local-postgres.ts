@@ -128,7 +128,7 @@ export function createIntegrationBillingEnv(
 export function withProjectionUrl(
 	env: BillingEnv,
 	projectionUrl: string,
-	projectInstanceKey = "voysee",
+	projectInstanceKey = "acme",
 ): BillingEnv {
 	return {
 		...env,

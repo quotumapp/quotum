@@ -63,7 +63,7 @@ export async function seedSubscriptionChanges(sql: SQL, count: number): Promise<
 		WITH source AS (
 			SELECT subscription.*
 			FROM subscriptions subscription
-			JOIN projects project ON project.id = subscription.project_id AND project.key = 'voysee'
+			JOIN projects project ON project.id = subscription.project_id AND project.key = 'acme'
 			WHERE subscription.external_subscription_id = 'sub_migrate_stripe'
 		),
 		accounts AS (
@@ -115,7 +115,7 @@ export async function seedSubscriptionChanges(sql: SQL, count: number): Promise<
 			concat('change:', subscription.external_subscription_id), repeat('b', 64),
 			'{"licensed_seats": 7}'::jsonb
 		FROM subscriptions subscription
-		JOIN projects project ON project.id = subscription.project_id AND project.key = 'voysee'
+		JOIN projects project ON project.id = subscription.project_id AND project.key = 'acme'
 		JOIN plans plan ON plan.project_id = project.id AND plan.key = 'migration-plan'
 		JOIN plan_versions from_version
 			ON from_version.project_id = plan.project_id AND from_version.plan_id = plan.id
@@ -150,7 +150,7 @@ export async function seedUsageInvoicePeriods(sql: SQL, count: number): Promise<
 			2, 1, 1, 1, 100, 100, 'USD', 'pending'
 		FROM generate_series(1, ${count}) AS generate_series(n)
 		JOIN subscriptions subscription ON subscription.external_subscription_id = 'sub_migrate_stripe'
-		JOIN projects project ON project.id = subscription.project_id AND project.key = 'voysee'
+		JOIN projects project ON project.id = subscription.project_id AND project.key = 'acme'
 		JOIN plans plan ON plan.project_id = project.id AND plan.key = 'migration-plan'
 		JOIN plan_versions version
 			ON version.project_id = plan.project_id AND version.plan_id = plan.id AND version.version = 1
@@ -177,7 +177,7 @@ export async function seedReconciliationSubscriptions(sql: SQL, count: number): 
 			SELECT project.id, concat('recon-account-', generate_series.n::text)
 			FROM projects project
 			CROSS JOIN generate_series(1, ${count}) AS generate_series(n)
-			WHERE project.key = 'voysee'
+			WHERE project.key = 'acme'
 			RETURNING id, project_id, billing_account_id
 		)
 		INSERT INTO subscriptions (

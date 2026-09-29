@@ -8,15 +8,15 @@ import { createDeferred } from "../helpers/deferred";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const workerContexts = [
-	projectInstanceContext("voysee", { projectInstanceId: "project_1" }),
-	projectInstanceContext("wiseley", { projectInstanceId: "project_2" }),
+	projectInstanceContext("acme", { projectInstanceId: "project_1" }),
+	projectInstanceContext("globex", { projectInstanceId: "project_2" }),
 ];
 const workerProjectResolver = projectContextResolver({ contexts: workerContexts });
 
 const storeEvent = (overrides: Partial<StoreEventReplayJobRow> = {}): StoreEventReplayJobRow => ({
 	id: "event_1",
 	project_id: "project_1",
-	project_key: "voysee",
+	project_key: "acme",
 	provider: "apple",
 	channel: "ios",
 	external_event_id: "notification_1",
@@ -214,7 +214,7 @@ describe("StoreEventReplayWorker", () => {
 			'billing_store_event_replay_jobs_total{provider="apple",result="processed"} 1',
 		);
 		expect(metrics.renderPrometheus()).toContain(
-			'billing_worker_jobs_total{project="voysee",provider="apple",result="processed",worker="store_event_replay"} 1',
+			'billing_worker_jobs_total{project="acme",provider="apple",result="processed",worker="store_event_replay"} 1',
 		);
 		expect(infos).toEqual([
 			{
@@ -234,8 +234,8 @@ describe("StoreEventReplayWorker", () => {
 
 	it("selects replay providers from the claimed row project key", async () => {
 		const events = [
-			storeEvent({ id: "event_voysee", project_key: "voysee" }),
-			storeEvent({ id: "event_wiseley", project_id: "project_2", project_key: "wiseley" }),
+			storeEvent({ id: "event_acme", project_key: "acme" }),
+			storeEvent({ id: "event_globex", project_id: "project_2", project_key: "globex" }),
 		];
 		const providerCalls: string[] = [];
 		const { repository } = createRepository(events);
@@ -259,7 +259,7 @@ describe("StoreEventReplayWorker", () => {
 
 		await worker.runOnce();
 
-		expect(providerCalls).toEqual(["voysee:event_voysee", "wiseley:event_wiseley"]);
+		expect(providerCalls).toEqual(["acme:event_acme", "globex:event_globex"]);
 	});
 
 	it("does not flip successful jobs when observability fails", async () => {
@@ -580,7 +580,7 @@ describe("StoreEventReplayWorker", () => {
 
 	it("runOne claims by event id and uses the same dispatch semantics", async () => {
 		const { calls, repository } = createRepository([
-			storeEvent({ id: "event_target", project_id: "project_2", project_key: "wiseley" }),
+			storeEvent({ id: "event_target", project_id: "project_2", project_key: "globex" }),
 		]);
 		const worker = new StoreEventReplayWorker({
 			projectContextResolver: workerProjectResolver,
@@ -598,7 +598,7 @@ describe("StoreEventReplayWorker", () => {
 		});
 
 		const project = workerContexts[1];
-		if (project === undefined) throw new Error("missing Wiseley test project context");
+		if (project === undefined) throw new Error("missing Globex test project context");
 		const result = await worker.runOne(project, "event_target");
 
 		expect(result).toEqual({ eventId: "event_target", status: "processed" });

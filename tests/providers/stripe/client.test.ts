@@ -7,9 +7,9 @@ import type { DeepPartial } from "../../helpers/deep-partial";
 const stripeEnv = {
 	secretKey: "sk_test_123",
 	webhookSecret: "whsec_123",
-	checkoutSuccessUrl: "https://app.voysee.com/billing/success?session_id={CHECKOUT_SESSION_ID}",
-	checkoutCancelUrl: "https://app.voysee.com/billing",
-	portalReturnUrl: "https://app.voysee.com/account/billing",
+	checkoutSuccessUrl: "https://app.acme.com/billing/success?session_id={CHECKOUT_SESSION_ID}",
+	checkoutCancelUrl: "https://app.acme.com/billing",
+	portalReturnUrl: "https://app.acme.com/account/billing",
 };
 
 function stripeFixture(options: { asyncWebhook?: boolean } = {}) {

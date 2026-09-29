@@ -74,7 +74,7 @@ export async function createMerchantTestRuntime(
 						for (const key of Object.keys(projectServices))
 							if (key.startsWith("merchant_")) delete projectServices[key];
 						await database`TRUNCATE platform_idempotency,platform_audit_events,platform_policy_acceptances,platform_service_principals,platform_step_up_grants,platform_project_api_credentials,platform_provisioning_steps,platform_provisioning_operations,platform_projects,platform_onboarding_drafts,platform_invitations,platform_memberships,platform_organizations,platform_merchant_sessions,platform_external_identities,platform_principals,platform_auth_users,platform_auth_verifications,platform_auth_rate_limits,platform_rate_limits,platform_auth_links CASCADE`;
-						await bootstrapTestPlatform(env.postgresUri, ["voysee", "wiseley"]);
+						await bootstrapTestPlatform(env.postgresUri, ["acme", "globex"]);
 						await resetAndSeedIntegrationData(database);
 						await database`INSERT INTO platform_service_principals(name,token_hash) VALUES('merchant-e2e',${tokenHash(serviceToken, config.secret)})`;
 						mailer.reset();

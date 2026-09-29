@@ -16,7 +16,7 @@ import {
 } from "../../../src/providers/apple/client";
 
 const appleEnv = (overrides: Partial<AppleBillingEnv> = {}): AppleBillingEnv => ({
-	bundleId: "com.voysee.app",
+	bundleId: "com.acme.app",
 	appAppleId: null,
 	issuerId: "99b16628-15e4-4668-972b-eeff55eeff55",
 	keyId: "ABCDEFGHIJ",
@@ -158,7 +158,7 @@ describe("Apple StoreKit client", () => {
 							expect(signedTransactionInfo).toBe("signed-transaction");
 							return Promise.resolve({
 								transactionId: "200000000000001",
-								bundleId: "com.voysee.app",
+								bundleId: "com.acme.app",
 								environment: "Sandbox",
 							});
 						},
@@ -209,7 +209,7 @@ describe("Apple StoreKit client", () => {
 						verifyAndDecodeTransaction() {
 							return Promise.resolve({
 								transactionId: "200000000000001",
-								bundleId: "com.voysee.app",
+								bundleId: "com.acme.app",
 								environment,
 							});
 						},
@@ -264,7 +264,7 @@ describe("Apple StoreKit client", () => {
 								notificationUUID: "notification_1",
 								data: {
 									environment: "Sandbox",
-									bundleId: "com.voysee.app",
+									bundleId: "com.acme.app",
 									signedTransactionInfo: "nested-transaction",
 									signedRenewalInfo: "nested-renewal",
 								},
@@ -325,7 +325,7 @@ describe("Apple StoreKit client", () => {
 								notificationUUID: "notification_1",
 								data: {
 									environment: "Sandbox",
-									bundleId: "com.voysee.app",
+									bundleId: "com.acme.app",
 								},
 							});
 						},
@@ -379,7 +379,7 @@ describe("Apple StoreKit client", () => {
 								notificationUUID: "notification_1",
 								data: {
 									environment: "Sandbox",
-									bundleId: "com.voysee.app",
+									bundleId: "com.acme.app",
 								},
 							});
 						},
@@ -494,7 +494,7 @@ describe("Apple StoreKit client", () => {
 							return Promise.resolve({
 								transactionId: "200000000000002",
 								originalTransactionId: "100000000000001",
-								bundleId: "com.voysee.app",
+								bundleId: "com.acme.app",
 								environment: "Sandbox",
 							});
 						},
@@ -554,7 +554,7 @@ describe("Apple StoreKit client", () => {
 								return Promise.resolve({
 									transactionId: "200000000000002",
 									originalTransactionId: "100000000000001",
-									bundleId: "com.voysee.app",
+									bundleId: "com.acme.app",
 									environment: "Sandbox",
 								});
 							},
@@ -626,7 +626,7 @@ describe("Apple StoreKit client", () => {
 								"signed-unrelated": {
 									transactionId: "200000000009999",
 									originalTransactionId: "999999999999999",
-									bundleId: "com.voysee.app",
+									bundleId: "com.acme.app",
 									environment: "Sandbox",
 									purchaseDate: Date.parse("2026-07-01T00:00:00.000Z"),
 									expiresDate: Date.parse("2026-08-01T00:00:00.000Z"),
@@ -634,7 +634,7 @@ describe("Apple StoreKit client", () => {
 								"signed-matching-old": {
 									transactionId: "200000000000001",
 									originalTransactionId: "100000000000001",
-									bundleId: "com.voysee.app",
+									bundleId: "com.acme.app",
 									environment: "Sandbox",
 									purchaseDate: Date.parse("2026-05-31T00:00:00.000Z"),
 									expiresDate: Date.parse("2026-06-30T00:00:00.000Z"),
@@ -642,7 +642,7 @@ describe("Apple StoreKit client", () => {
 								"signed-matching-new": {
 									transactionId: "200000000000002",
 									originalTransactionId: "100000000000001",
-									bundleId: "com.voysee.app",
+									bundleId: "com.acme.app",
 									environment: "Sandbox",
 									purchaseDate: Date.parse("2026-06-30T00:00:00.000Z"),
 									expiresDate: Date.parse("2026-07-31T00:00:00.000Z"),
@@ -714,7 +714,7 @@ describe("Apple StoreKit client", () => {
 									transactionId: "90071992547409930001",
 									originalTransactionId: "100000000000001",
 									webOrderLineItemId: "90071992547409940001",
-									bundleId: "com.voysee.app",
+									bundleId: "com.acme.app",
 									environment: "Sandbox",
 									purchaseDate: Date.parse("2026-05-31T00:00:00.000Z"),
 									expiresDate: Date.parse("2026-06-30T00:00:00.000Z"),
@@ -723,7 +723,7 @@ describe("Apple StoreKit client", () => {
 									transactionId: "90071992547409930002",
 									originalTransactionId: "100000000000001",
 									webOrderLineItemId: "90071992547409940002",
-									bundleId: "com.voysee.app",
+									bundleId: "com.acme.app",
 									environment: "Sandbox",
 									purchaseDate: Date.parse("2026-05-31T00:00:00.000Z"),
 									expiresDate: Date.parse("2026-06-30T00:00:00.000Z"),
@@ -788,7 +788,7 @@ describe("Apple StoreKit client", () => {
 									transactionId: "90071992547409930001",
 									originalTransactionId: "100000000000001",
 									webOrderLineItemId: "90071992547409940001",
-									bundleId: "com.voysee.app",
+									bundleId: "com.acme.app",
 									environment: "Sandbox",
 									purchaseDate: Date.parse("2026-05-31T00:00:00.000Z"),
 									expiresDate: Date.parse("2026-06-30T00:00:00.000Z"),
@@ -797,7 +797,7 @@ describe("Apple StoreKit client", () => {
 									transactionId: "90071992547409930001",
 									originalTransactionId: "100000000000001",
 									webOrderLineItemId: "90071992547409940002",
-									bundleId: "com.voysee.app",
+									bundleId: "com.acme.app",
 									environment: "Sandbox",
 									purchaseDate: Date.parse("2026-05-31T00:00:00.000Z"),
 									expiresDate: Date.parse("2026-06-30T00:00:00.000Z"),
@@ -857,7 +857,7 @@ describe("Apple StoreKit client", () => {
 							return Promise.resolve({
 								transactionId: "200000000009999",
 								originalTransactionId: "999999999999999",
-								bundleId: "com.voysee.app",
+								bundleId: "com.acme.app",
 								environment: "Sandbox",
 							});
 						},
@@ -953,7 +953,7 @@ describe("Apple StoreKit client", () => {
 							return Promise.resolve({
 								transactionId: "200000000000001",
 								originalTransactionId: "100000000000001",
-								bundleId: "com.voysee.app",
+								bundleId: "com.acme.app",
 								environment,
 							});
 						},

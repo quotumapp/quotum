@@ -7,7 +7,7 @@ import { projectContextResolver, projectInstanceContext } from "../helpers/proje
 const job: AutoTopupJob = {
 	jobId: "job-1",
 	projectId: "project-1",
-	projectKey: "voysee",
+	projectKey: "acme",
 	provider: "stripe",
 	providerAccountId: null,
 	policyId: "7",
@@ -28,7 +28,7 @@ const timing: OperationTiming = {
 	entitlement: { kind: "unchanged" },
 };
 const workerProjectResolver = projectContextResolver({
-	contexts: [projectInstanceContext("voysee", { projectInstanceId: job.projectId })],
+	contexts: [projectInstanceContext("acme", { projectInstanceId: job.projectId })],
 });
 
 describe("AutoTopupWorker", () => {
@@ -240,7 +240,7 @@ describe("AutoTopupWorker", () => {
 		});
 
 		expect(await worker.runOnce()).toMatchObject({ claimed: 1, failed: 1, retryScheduled: 1 });
-		expect(selected).toEqual(["voysee:google"]);
+		expect(selected).toEqual(["acme:google"]);
 		expect(failures).toEqual([
 			{ kind: "retryable", error: "google provider does not serve topup.automatic" },
 		]);

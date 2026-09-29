@@ -42,7 +42,7 @@ interface StoreEventAssertionRow {
 	locked_by: string | null;
 }
 
-export async function projectId(sql: SQL, key = "voysee"): Promise<string> {
+export async function projectId(sql: SQL, key = "acme"): Promise<string> {
 	const rows = await sql<{ id: string }[]>`
 		SELECT id
 		FROM projects
@@ -100,7 +100,7 @@ export async function expectNoLocks(
 export async function expectCustomer(
 	sql: SQL,
 	billingAccountId: string,
-	projectKey = "voysee",
+	projectKey = "acme",
 ): Promise<CustomerAssertionRow> {
 	const rows = await sql<CustomerAssertionRow[]>`
 		SELECT customers.id, customers.billing_account_id, projects.key AS project_key
@@ -123,7 +123,7 @@ export async function expectProjectionJob(
 		status?: ProjectionSyncStatus;
 	},
 ): Promise<ProjectionJobAssertionRow> {
-	const projectKey = match.projectKey ?? "voysee";
+	const projectKey = match.projectKey ?? "acme";
 	const rows =
 		match.status === undefined
 			? await sql<ProjectionJobAssertionRow[]>`
@@ -175,7 +175,7 @@ export async function expectStoreEvent(
 			events.locked_by
 		FROM store_events events
 		JOIN projects ON projects.id = events.project_id
-		WHERE projects.key = ${match.projectKey ?? "voysee"}
+		WHERE projects.key = ${match.projectKey ?? "acme"}
 			AND events.provider = ${match.provider}
 			AND events.event_type = ${match.eventType}
 			AND events.processing_status = ${match.status}

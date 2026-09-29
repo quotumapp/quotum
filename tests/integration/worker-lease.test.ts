@@ -31,7 +31,7 @@ localDescribe("Worker lease fencing", () => {
 
 	it("keeps a live replay heartbeat past the stale window so a second worker claims nothing", async () => {
 		const eventId = await seedReplayEvent(context.sql, {
-			projectKey: "voysee",
+			projectKey: "acme",
 			provider: "stripe",
 			channel: "web",
 			status: "pending",
@@ -89,7 +89,7 @@ localDescribe("Worker lease fencing", () => {
 
 	it("fences store-event replay finalizers after a reclaimed lease", async () => {
 		const eventId = await seedReplayEvent(context.sql, {
-			projectKey: "voysee",
+			projectKey: "acme",
 			provider: "stripe",
 			channel: "web",
 			status: "pending",
@@ -172,7 +172,7 @@ async function seedProjectionJobs(sql: LocalPostgresContext["sql"], count: numbe
 		};
 		const rows = await sql<{ id: string; project_id: string }[]>`
 			WITH project_row AS (
-				SELECT id FROM projects WHERE key = 'voysee'
+				SELECT id FROM projects WHERE key = 'acme'
 			),
 			customer_row AS (
 				INSERT INTO customers (project_id, billing_account_id)

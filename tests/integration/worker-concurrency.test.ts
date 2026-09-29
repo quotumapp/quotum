@@ -260,7 +260,7 @@ localDescribe("Worker concurrency integration", () => {
 
 async function seedProjectionJobs(
 	sql: SQL,
-	{ count, projectKey = "voysee" }: { count: number; projectKey?: "voysee" | "wiseley" },
+	{ count, projectKey = "acme" }: { count: number; projectKey?: "acme" | "globex" },
 ): Promise<Array<{ id: string; idempotency_key: string }>> {
 	const jobs: Array<{ id: string; idempotency_key: string }> = [];
 	for (let index = 0; index < count; index += 1) {
@@ -320,7 +320,7 @@ async function seedReplayEvents(
 	for (let index = 0; index < count; index += 1) {
 		ids.push(
 			await seedReplayEvent(sql, {
-				projectKey: "voysee",
+				projectKey: "acme",
 				provider: "stripe",
 				channel: "web",
 				status: "skipped",

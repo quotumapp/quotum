@@ -184,7 +184,7 @@ function changeIntent(effectiveMode: "immediate" | "period_end") {
 
 function jsonHeaders(fixture: ReturnType<typeof createIntegrationApp>): Record<string, string> {
 	return {
-		...(fixture.authHeaders("voysee") as Record<string, string>),
+		...(fixture.authHeaders("acme") as Record<string, string>),
 		"content-type": "application/json",
 	};
 }

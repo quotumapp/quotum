@@ -53,7 +53,7 @@ localDescribe("Google route flows integration", () => {
 			app,
 			"/v1/billing-accounts/integration_user/providers/google/account-link",
 			{
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 
@@ -554,7 +554,7 @@ localDescribe("Google route flows integration", () => {
 		const response = await testRequest(app, "/v1/purchases/verify", {
 			method: "POST",
 			headers: {
-				...authHeaders("voysee"),
+				...authHeaders("acme"),
 				"content-type": "application/json",
 			},
 			body: JSON.stringify({
@@ -681,7 +681,7 @@ async function createGoogleAccountLink(
 		app,
 		"/v1/billing-accounts/integration_user/providers/google/account-link",
 		{
-			headers: authHeaders("voysee"),
+			headers: authHeaders("acme"),
 		},
 	);
 	const body = await response.json();
@@ -696,7 +696,7 @@ async function verifyGoogleSubscription(
 	return await testRequest(app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...authHeaders("voysee"),
+			...authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -715,7 +715,7 @@ async function verifyGoogleConsumable(
 	return await testRequest(app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...authHeaders("voysee"),
+			...authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -754,7 +754,7 @@ async function postSignedGoogleRtdn(
 	}
 	const notification = {
 		version: "1.0",
-		packageName: "com.voysee.app",
+		packageName: "com.acme.app",
 		eventTimeMillis: "1780185600000",
 		subscriptionNotification: {
 			version: "1.0",
@@ -762,7 +762,7 @@ async function postSignedGoogleRtdn(
 			purchaseToken: "purchase_token_1",
 		},
 	};
-	return await testRequest(app, "/v1/projects/voysee/webhooks/google", {
+	return await testRequest(app, "/v1/projects/acme/webhooks/google", {
 		method: "POST",
 		headers: {
 			authorization: `Bearer ${token}`,
@@ -782,7 +782,7 @@ async function postGoogleRtdn(
 	app: ReturnType<typeof createIntegrationApp>["app"],
 	messageId = "message_1",
 ): Promise<Response> {
-	return await testRequest(app, "/v1/projects/voysee/webhooks/google", {
+	return await testRequest(app, "/v1/projects/acme/webhooks/google", {
 		method: "POST",
 		headers: {
 			authorization: "Bearer pubsub-token",
@@ -941,7 +941,7 @@ async function expectProviderCustomerRow(
 			billing_account_id: match.billingAccountId,
 			provider: match.provider,
 			external_customer_id: match.externalCustomerId,
-			project_key: "voysee",
+			project_key: "acme",
 		},
 	]);
 }
@@ -984,7 +984,7 @@ async function expectGoogleSubscriptionRows(
 		JOIN entitlements ON entitlements.source_subscription_id = subscriptions.id
 			AND entitlements.project_id = subscriptions.project_id
 		JOIN projects ON projects.id = purchases.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND purchases.provider = 'google'
 	`;
 
@@ -1035,7 +1035,7 @@ async function expectGoogleConsumableRows(
 		JOIN products ON products.id = purchases.product_id
 			AND products.project_id = purchases.project_id
 		JOIN projects ON projects.id = purchases.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND purchases.provider = 'google'
 			AND purchases.purchase_kind = 'consumable'
 	`;
@@ -1090,7 +1090,7 @@ async function expectGoogleWebhookRows(
 		JOIN projection_sync_jobs ON projection_sync_jobs.project_id = store_events.project_id
 			AND projection_sync_jobs.idempotency_key = ${expected.projectionIdempotencyKey}
 		JOIN projects ON projects.id = store_events.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND store_events.provider = 'google'
 			AND store_events.external_event_id = ${expected.externalEventId}
 	`;
@@ -1128,7 +1128,7 @@ async function expectGoogleVoidedPurchaseRows(sql: SQL): Promise<void> {
 			(raw_payload->'voidedPurchaseNotification'->>'refundType')::int AS raw_refund_type
 		FROM store_events
 		JOIN projects ON projects.id = store_events.project_id
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 			AND store_events.provider = 'google'
 			AND store_events.external_event_id = ${googleVoidedEventId}
 	`;

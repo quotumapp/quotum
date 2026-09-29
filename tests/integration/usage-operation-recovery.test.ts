@@ -441,7 +441,7 @@ localDescribe("usage operation recovery", () => {
 		const { app, authHeaders } = createIntegrationApp(context);
 		const path = `/v1/billing-accounts/recovery/usage/operations/consume/${encodeURIComponent(input.idempotencyKey)}`;
 		expect((await testRequest(app, path)).status).toBe(401);
-		expect((await testRequest(app, path, { headers: authHeaders("wiseley") })).status).toBe(404);
+		expect((await testRequest(app, path, { headers: authHeaders("globex") })).status).toBe(404);
 		expect(
 			(await testRequest(app, `${path}?projectId=spoof`, { headers: authHeaders() })).status,
 		).toBe(400);
@@ -458,7 +458,7 @@ localDescribe("usage operation recovery", () => {
 		const { app, authHeaders } = createIntegrationApp(context);
 		const path = `/v1/billing-accounts/recovery/usage/operations/consume/${encodeURIComponent(input.idempotencyKey)}`;
 		const eventIds = new Set([first.usageEventId]);
-		for (const key of ["voysee-sandbox", "wiseley"]) {
+		for (const key of ["acme-sandbox", "globex"]) {
 			const otherProject = integrationProjectContext(key);
 			await seedIntegrationProjectsAndCatalog(context.sql, [
 				{

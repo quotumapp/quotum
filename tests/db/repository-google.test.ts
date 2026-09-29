@@ -9,7 +9,7 @@ describe("BillingRepository Google", () => {
 		const repository = new BillingRepository(database as never);
 
 		await repository.recordGoogleVoidedPurchaseAndEnqueueProjection(
-			projectInstanceContext("wiseley"),
+			projectInstanceContext("globex"),
 			{
 				purchaseToken: "purchase-token-mismatch",
 				orderId: "GPA.1111-2222-3333-44444",

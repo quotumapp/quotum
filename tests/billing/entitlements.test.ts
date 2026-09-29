@@ -21,7 +21,7 @@ describe("EntitlementService", () => {
 			},
 		});
 
-		const snapshot = await service.getSnapshot(projectInstanceContext("wiseley"), "user_1");
+		const snapshot = await service.getSnapshot(projectInstanceContext("globex"), "user_1");
 
 		expect(snapshot.entitlements[0]).toEqual({
 			key: "premium",
@@ -41,7 +41,7 @@ describe("EntitlementService", () => {
 			},
 		});
 
-		await expect(service.getSnapshot(projectInstanceContext("wiseley"), " ")).rejects.toThrow(
+		await expect(service.getSnapshot(projectInstanceContext("globex"), " ")).rejects.toThrow(
 			"billingAccountId is required",
 		);
 		expect(called).toBe(false);

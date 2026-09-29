@@ -14,7 +14,7 @@ function couponJob(
 ): Extract<PromotionStripeSyncJob, { objectKind: "coupon" }> {
 	return {
 		projectId: "project-1",
-		projectKey: "voysee",
+		projectKey: "acme",
 		provider: "stripe",
 		objectId,
 		promotionKey: "spring-sale",
@@ -46,7 +46,7 @@ function codeJob(
 ): Extract<PromotionStripeSyncJob, { objectKind: "promotion_code" }> {
 	return {
 		projectId: "project-1",
-		projectKey: "voysee",
+		projectKey: "acme",
 		provider: "stripe",
 		objectId: "11111111-2222-4333-8444-555555555555",
 		promotionKey: "spring-sale",
@@ -87,7 +87,7 @@ describe("Stripe promotion provisioning", () => {
 			duration_in_months: 3,
 			applies_to: { products: ["prod_pro"] },
 			metadata: {
-				quotumProjectKey: "voysee",
+				quotumProjectKey: "acme",
 				quotumPromotionKey: "spring-sale",
 				quotumProviderObjectId: objectId,
 			},
@@ -103,10 +103,10 @@ describe("Stripe promotion provisioning", () => {
 		const retry = await syncPromotionStripeObject(stripe, {
 			...couponJob(),
 			// A later retry gets a fresh idempotency window but the same coupon id.
-			projectKey: "voysee-after-rotation",
+			projectKey: "acme-after-rotation",
 		});
 		const percent = await syncPromotionStripeObject(stripe, {
-			...couponJob({ projectKey: "voysee-other-key" }),
+			...couponJob({ projectKey: "acme-other-key" }),
 			discount: { type: "percent", percentOffBps: 1250, duration: "forever", durationMonths: null },
 		});
 
@@ -173,7 +173,7 @@ describe("Stripe promotion provisioning", () => {
 		);
 		const adopted = await syncPromotionStripeObject(stripe, {
 			...codeJob(),
-			projectKey: "voysee-retry",
+			projectKey: "acme-retry",
 		});
 		const missingCoupon = await syncPromotionStripeObject(
 			stripe,

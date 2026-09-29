@@ -129,7 +129,7 @@ export async function expireSubscriptionReconciliationLock(
 export async function seedReplayEvent(
 	sql: SQL,
 	input: {
-		projectKey: "voysee" | "wiseley";
+		projectKey: "acme" | "globex";
 		provider: Extract<BillingProvider, "google" | "stripe">;
 		channel: Extract<BillingChannel, "android" | "web">;
 		status: Extract<StoreEventProcessingStatus, "pending" | "skipped" | "failed">;
@@ -166,7 +166,7 @@ export async function seedReplayEvent(
 
 export async function makeSubscriptionExpired(
 	sql: SQL,
-	projectKey: "voysee" | "wiseley",
+	projectKey: "acme" | "globex",
 	externalSubscriptionId: string,
 ): Promise<void> {
 	await sql`

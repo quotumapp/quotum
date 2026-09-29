@@ -33,7 +33,7 @@ describe("BillingRepository mutations", () => {
 		const repository = new BillingRepository(database as never);
 
 		await repository.recordPurchaseAndEnqueueProjection(
-			projectInstanceContext("wiseley"),
+			projectInstanceContext("globex"),
 			purchaseProjectionInput(),
 		);
 
@@ -52,7 +52,7 @@ describe("BillingRepository mutations", () => {
 		const repository = new BillingRepository(database as never);
 
 		await expect(
-			repository.recordStripeSkippedEvent(projectInstanceContext("wiseley"), {
+			repository.recordStripeSkippedEvent(projectInstanceContext("globex"), {
 				eventType: "checkout.session.completed",
 				externalEventId: null,
 				transactionId: "pi_null_event",
@@ -80,7 +80,7 @@ describe("BillingRepository mutations", () => {
 		const database = new FakeDatabase([[{ id: "store-event-id" }]]);
 		const repository = new BillingRepository(database as never);
 
-		await repository.recordStripeSkippedEvent(projectInstanceContext("wiseley"), {
+		await repository.recordStripeSkippedEvent(projectInstanceContext("globex"), {
 			eventType: "checkout.session.completed",
 			externalEventId: "evt_processing_duplicate",
 			transactionId: "pi_processing_duplicate",

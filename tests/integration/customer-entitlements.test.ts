@@ -35,7 +35,7 @@ localDescribe("customer entitlement route integration", () => {
 		});
 
 		const response = await testRequest(app, "/v1/billing-accounts/new_customer/entitlements", {
-			headers: authHeaders("voysee"),
+			headers: authHeaders("acme"),
 		});
 
 		expect(response.status).toBe(200);
@@ -60,7 +60,7 @@ localDescribe("customer entitlement route integration", () => {
 			app,
 			"/v1/billing-accounts/shared_user/providers/apple/account-token",
 			{
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 
@@ -71,7 +71,7 @@ localDescribe("customer entitlement route integration", () => {
 			testRequest(app, "/v1/purchases/verify", {
 				method: "POST",
 				headers: {
-					...authHeaders("voysee"),
+					...authHeaders("acme"),
 					"content-type": "application/json",
 				},
 				body: JSON.stringify({
@@ -81,21 +81,21 @@ localDescribe("customer entitlement route integration", () => {
 				}),
 			}),
 		);
-		const voysee = await testRequest(app, "/v1/billing-accounts/shared_user/entitlements", {
-			headers: authHeaders("voysee"),
+		const acme = await testRequest(app, "/v1/billing-accounts/shared_user/entitlements", {
+			headers: authHeaders("acme"),
 		});
-		const wiseley = await testRequest(app, "/v1/billing-accounts/shared_user/entitlements", {
-			headers: authHeaders("wiseley"),
+		const globex = await testRequest(app, "/v1/billing-accounts/shared_user/entitlements", {
+			headers: authHeaders("globex"),
 		});
 
 		expect(verification.status).toBe(200);
-		expect(voysee.status).toBe(200);
-		expect(wiseley.status).toBe(200);
-		expectActivePremiumSnapshot((await voysee.json()).data, "shared_user", "apple", "ios");
-		expectEmptySnapshot((await wiseley.json()).data, "shared_user");
+		expect(acme.status).toBe(200);
+		expect(globex.status).toBe(200);
+		expectActivePremiumSnapshot((await acme.json()).data, "shared_user", "apple", "ios");
+		expectEmptySnapshot((await globex.json()).data, "shared_user");
 		await expectEntitlementProjectRows(context.sql, [
-			{ project_key: "voysee", entitlement_count: "1", active_count: "1" },
-			{ project_key: "wiseley", entitlement_count: "0", active_count: "0" },
+			{ project_key: "acme", entitlement_count: "1", active_count: "1" },
+			{ project_key: "globex", entitlement_count: "0", active_count: "0" },
 		]);
 	});
 
@@ -114,14 +114,14 @@ localDescribe("customer entitlement route integration", () => {
 			app,
 			"/v1/billing-accounts/subscription_lifecycle_user/entitlements",
 			{
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 		const legacyResponse = await testRequest(
 			app,
 			"/v1/billing-accounts/legacy_null_subscription_user/entitlements",
 			{
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 
@@ -216,7 +216,7 @@ async function expectEntitlementProjectRows(
 			count(entitlements.id) FILTER (WHERE entitlements.active)::text AS active_count
 		FROM projects
 		LEFT JOIN entitlements ON entitlements.project_id = projects.id
-		WHERE projects.key IN ('voysee', 'wiseley')
+		WHERE projects.key IN ('acme', 'globex')
 		GROUP BY projects.key
 		ORDER BY projects.key
 	`;
@@ -241,7 +241,7 @@ async function seedSubscriptionExpiryFixtures(sql: SQL): Promise<void> {
 			AND store_products.provider = 'google'
 			AND store_products.external_product_id = 'premium_monthly'
 			AND store_products.external_price_id = 'monthly-base'
-		WHERE projects.key = 'voysee'
+		WHERE projects.key = 'acme'
 	`;
 	expect(catalogRows).toHaveLength(1);
 	const catalog = catalogRows[0];

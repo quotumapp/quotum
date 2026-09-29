@@ -19,9 +19,9 @@ const env: BillingEnv = {
 	trustGatewayProjectHeader: false,
 	connectionFixtures: [
 		{
-			projectInstanceKey: "voysee",
-			projectionUrl: "https://voysee.example.com",
-			projectionSecret: "voysee-projection-secret",
+			projectInstanceKey: "acme",
+			projectionUrl: "https://acme.example.com",
+			projectionSecret: "acme-projection-secret",
 		},
 	],
 	runtimeEnvironment: "development",
@@ -137,8 +137,8 @@ function adjustmentApp(service: BalanceAdjustmentServiceLike) {
 			env,
 			connections: fixtureConnections(env.connectionFixtures),
 			projectContextResolver: projectContextResolver({
-				contexts: [projectInstanceContext("voysee")],
-				credentials: { secret: "voysee" },
+				contexts: [projectInstanceContext("acme")],
+				credentials: { secret: "acme" },
 			}),
 			balanceAdjustmentService: service,
 		}),
@@ -174,7 +174,7 @@ describe("balance adjustment routes", () => {
 			{
 				method: "grantOperatorBalance",
 				args: [
-					expect.objectContaining({ projectInstanceKey: "voysee" }),
+					expect.objectContaining({ projectInstanceKey: "acme" }),
 					{
 						billingAccountId: "acct_1",
 						featureKey: "ai_credits",

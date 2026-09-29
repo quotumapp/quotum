@@ -13,8 +13,8 @@ import { publishAiCreditsCatalog } from "./helpers/metering-catalog";
 import { seedPhase3CatalogMigration, seedPhase3ControlCatalog } from "./helpers/phase3-fixtures";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
-const voysee = integrationProjectContext("voysee");
-const wiseley = integrationProjectContext("wiseley");
+const acme = integrationProjectContext("acme");
+const globex = integrationProjectContext("globex");
 const sharedAccount = "shared-account";
 let context: LocalPostgresContext;
 
@@ -32,23 +32,23 @@ localDescribe("Cross-tenant identifiers", () => {
 	});
 
 	it("rejects reservation confirm and release against another project's id", async () => {
-		await publishAiCreditsCatalog(context.repository, "voysee");
-		await publishAiCreditsCatalog(context.repository, "wiseley");
-		await context.repository.grantAllocation(voysee, {
+		await publishAiCreditsCatalog(context.repository, "acme");
+		await publishAiCreditsCatalog(context.repository, "globex");
+		await context.repository.grantAllocation(acme, {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
 			sourceKind: "credit_grant",
-			sourceKey: "fixture:voysee-shared",
+			sourceKey: "fixture:acme-shared",
 		});
-		await context.repository.grantAllocation(wiseley, {
+		await context.repository.grantAllocation(globex, {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
 			sourceKind: "credit_grant",
-			sourceKey: "fixture:wiseley-shared",
+			sourceKey: "fixture:globex-shared",
 		});
-		const reserved = await context.repository.reserveUsage(voysee, {
+		const reserved = await context.repository.reserveUsage(acme, {
 			billingAccountId: sharedAccount,
 			featureKey: "model_tokens",
 			quantity: "100",
@@ -65,7 +65,7 @@ localDescribe("Cross-tenant identifiers", () => {
 			{
 				method: "POST",
 				headers: {
-					...authHeaders("wiseley"),
+					...authHeaders("globex"),
 					"content-type": "application/json",
 					"idempotency-key": "confirm:foreign",
 				},
@@ -80,7 +80,7 @@ localDescribe("Cross-tenant identifiers", () => {
 			{
 				method: "POST",
 				headers: {
-					...authHeaders("wiseley"),
+					...authHeaders("globex"),
 					"content-type": "application/json",
 					"idempotency-key": "release:foreign",
 				},
@@ -90,7 +90,7 @@ localDescribe("Cross-tenant identifiers", () => {
 		expect(release.status).toBe(404);
 		expect((await release.json()).error.code).toBe("RESERVATION_NOT_FOUND");
 		expect(
-			await context.repository.getMeteringBalance(voysee, sharedAccount, "ai_credits"),
+			await context.repository.getMeteringBalance(acme, sharedAccount, "ai_credits"),
 		).toMatchObject({ held: "0.5" });
 		await expectTableCounts(context.sql, {
 			reservations: 1,
@@ -100,21 +100,21 @@ localDescribe("Cross-tenant identifiers", () => {
 	});
 
 	it("rejects usage-event corrections against another project's id", async () => {
-		await publishAiCreditsCatalog(context.repository, "voysee");
-		await publishAiCreditsCatalog(context.repository, "wiseley");
-		await context.repository.grantAllocation(voysee, {
+		await publishAiCreditsCatalog(context.repository, "acme");
+		await publishAiCreditsCatalog(context.repository, "globex");
+		await context.repository.grantAllocation(acme, {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
 			sourceKind: "credit_grant",
-			sourceKey: "fixture:voysee-shared",
+			sourceKey: "fixture:acme-shared",
 		});
-		await context.repository.grantAllocation(wiseley, {
+		await context.repository.grantAllocation(globex, {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
 			sourceKind: "credit_grant",
-			sourceKey: "fixture:wiseley-shared",
+			sourceKey: "fixture:globex-shared",
 		});
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -123,7 +123,7 @@ localDescribe("Cross-tenant identifiers", () => {
 		const consumed = await testRequest(app, `/v1/billing-accounts/${sharedAccount}/usage/consume`, {
 			method: "POST",
 			headers: {
-				...authHeaders("voysee"),
+				...authHeaders("acme"),
 				"content-type": "application/json",
 				"idempotency-key": "consume:shared",
 			},
@@ -137,7 +137,7 @@ localDescribe("Cross-tenant identifiers", () => {
 			{
 				method: "POST",
 				headers: {
-					...authHeaders("wiseley"),
+					...authHeaders("globex"),
 					"content-type": "application/json",
 					"idempotency-key": "correction:foreign",
 					"x-billing-actor": "product-worker",
@@ -155,55 +155,55 @@ localDescribe("Cross-tenant identifiers", () => {
 	});
 
 	it("keeps project usage event lists isolated by project", async () => {
-		await publishAiCreditsCatalog(context.repository, "voysee");
-		await publishAiCreditsCatalog(context.repository, "wiseley");
-		await context.repository.grantAllocation(voysee, {
+		await publishAiCreditsCatalog(context.repository, "acme");
+		await publishAiCreditsCatalog(context.repository, "globex");
+		await context.repository.grantAllocation(acme, {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
 			sourceKind: "credit_grant",
-			sourceKey: "fixture:voysee-shared",
+			sourceKey: "fixture:acme-shared",
 		});
-		await context.repository.grantAllocation(wiseley, {
+		await context.repository.grantAllocation(globex, {
 			billingAccountId: sharedAccount,
 			featureKey: "ai_credits",
 			quantity: "10",
 			sourceKind: "credit_grant",
-			sourceKey: "fixture:wiseley-shared",
+			sourceKey: "fixture:globex-shared",
 		});
-		await context.repository.consumeUsage(voysee, {
+		await context.repository.consumeUsage(acme, {
 			billingAccountId: sharedAccount,
 			featureKey: "model_tokens",
 			quantity: "100",
-			idempotencyKey: "consume:voysee-shared",
+			idempotencyKey: "consume:acme-shared",
 		});
-		await context.repository.consumeUsage(wiseley, {
+		await context.repository.consumeUsage(globex, {
 			billingAccountId: sharedAccount,
 			featureKey: "model_tokens",
 			quantity: "200",
-			idempotencyKey: "consume:wiseley-shared",
+			idempotencyKey: "consume:globex-shared",
 		});
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
 		});
-		const voyseeList = await testRequest(app, "/v1/admin/usage-events", {
-			headers: authHeaders("voysee"),
+		const acmeList = await testRequest(app, "/v1/admin/usage-events", {
+			headers: authHeaders("acme"),
 		});
-		expect(voyseeList.status).toBe(200);
-		const voyseeBody = await voyseeList.json();
-		expect(voyseeBody.data).toHaveLength(1);
-		expect(voyseeBody.data[0]).toMatchObject({
+		expect(acmeList.status).toBe(200);
+		const acmeBody = await acmeList.json();
+		expect(acmeBody.data).toHaveLength(1);
+		expect(acmeBody.data[0]).toMatchObject({
 			billingAccountId: sharedAccount,
 			quantity: "100",
 		});
-		const wiseleyList = await testRequest(app, "/v1/admin/usage-events", {
-			headers: authHeaders("wiseley"),
+		const globexList = await testRequest(app, "/v1/admin/usage-events", {
+			headers: authHeaders("globex"),
 		});
-		expect(wiseleyList.status).toBe(200);
-		const wiseleyBody = await wiseleyList.json();
-		expect(wiseleyBody.data).toHaveLength(1);
-		expect(wiseleyBody.data[0]).toMatchObject({
+		expect(globexList.status).toBe(200);
+		const globexBody = await globexList.json();
+		expect(globexBody.data).toHaveLength(1);
+		expect(globexBody.data[0]).toMatchObject({
 			billingAccountId: sharedAccount,
 			quantity: "200",
 		});
@@ -214,18 +214,18 @@ localDescribe("Cross-tenant identifiers", () => {
 		await seedPhase3CatalogMigration(context.sql);
 		await context.sql`
 			INSERT INTO customers (project_id, billing_account_id)
-			SELECT id, 'migration-stripe' FROM projects WHERE key = 'wiseley'
+			SELECT id, 'migration-stripe' FROM projects WHERE key = 'globex'
 		`;
-		await context.repository.controlsEnterprise.createEntity(voysee, {
+		await context.repository.controlsEnterprise.createEntity(acme, {
 			billingAccountId: "migration-stripe",
 			externalId: "workspace-a",
 			kind: "workspace",
 		});
 		const [pool] = await context.repository.controlsEnterprise.listLicensePools(
-			voysee,
+			acme,
 			"migration-stripe",
 		);
-		const assignment = await context.repository.controlsEnterprise.assignLicense(voysee, {
+		const assignment = await context.repository.controlsEnterprise.assignLicense(acme, {
 			billingAccountId: "migration-stripe",
 			poolId: pool?.id ?? "",
 			entityId: "workspace-a",
@@ -233,7 +233,7 @@ localDescribe("Cross-tenant identifiers", () => {
 			actor: "integration-test",
 		});
 		await expect(
-			context.repository.controlsEnterprise.revokeLicense(wiseley, {
+			context.repository.controlsEnterprise.revokeLicense(globex, {
 				billingAccountId: "migration-stripe",
 				assignmentId: String(assignment.id),
 				actor: "integration-test",
@@ -246,7 +246,7 @@ localDescribe("Cross-tenant identifiers", () => {
 			FROM plans plan, customers customer, projects project
 			WHERE version.project_id = project.id AND version.plan_id = plan.id
 				AND customer.project_id = project.id
-				AND project.key = 'voysee' AND plan.key = 'migration-plan'
+				AND project.key = 'acme' AND plan.key = 'migration-plan'
 				AND version.version = 2 AND customer.billing_account_id = 'migration-stripe'
 		`;
 		const currentIntent = {
@@ -268,19 +268,16 @@ localDescribe("Cross-tenant identifiers", () => {
 			actor: "integration-test",
 		};
 		const preview = await context.repository.controlsEnterprise.previewEnterpriseContract(
-			voysee,
+			acme,
 			currentIntent,
 		);
-		const published = await context.repository.controlsEnterprise.publishEnterpriseContract(
-			voysee,
-			{
-				...currentIntent,
-				previewToken: preview.previewToken,
-			},
-		);
+		const published = await context.repository.controlsEnterprise.publishEnterpriseContract(acme, {
+			...currentIntent,
+			previewToken: preview.previewToken,
+		});
 		await expect(
 			context.repository.controlsEnterprise.terminateEnterpriseContract(
-				wiseley,
+				globex,
 				"migration-stripe",
 				String(published.id),
 				"integration-test",
@@ -297,7 +294,7 @@ localDescribe("Cross-tenant identifiers", () => {
 			{
 				method: "DELETE",
 				headers: {
-					...authHeaders("wiseley"),
+					...authHeaders("globex"),
 					"x-billing-operator-key": context.env.operatorApiKey ?? "",
 					"x-billing-actor": "integration-test",
 				},
@@ -325,7 +322,7 @@ localDescribe("Cross-tenant identifiers", () => {
 			{
 				method: "POST",
 				headers: {
-					...authHeaders("voysee"),
+					...authHeaders("acme"),
 					"content-type": "application/json",
 				},
 				body: JSON.stringify({
@@ -341,7 +338,7 @@ localDescribe("Cross-tenant identifiers", () => {
 			{
 				method: "POST",
 				headers: {
-					...authHeaders("wiseley"),
+					...authHeaders("globex"),
 					"content-type": "application/json",
 					"idempotency-key": "commercial:foreign",
 				},
@@ -368,7 +365,7 @@ localDescribe("Cross-tenant identifiers", () => {
 			`/v1/billing-accounts/${sharedAccount}/providers/stripe/checkout-sessions/cs_test_integration/expire`,
 			{
 				method: "POST",
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 		expect(expired.status).toBe(200);
@@ -380,7 +377,7 @@ localDescribe("Cross-tenant identifiers", () => {
 			"/v1/billing-accounts/other-account/providers/stripe/checkout-sessions/cs_test_integration/expire",
 			{
 				method: "POST",
-				headers: authHeaders("voysee"),
+				headers: authHeaders("acme"),
 			},
 		);
 		expect(mismatched.status).toBe(403);

@@ -163,7 +163,7 @@ localDescribe("usage projection coalescing", () => {
 async function setUsageDebounce(milliseconds: number): Promise<void> {
 	await context.sql`
 		INSERT INTO metering_settings (project_id, projection_usage_debounce_ms)
-		SELECT id, ${milliseconds} FROM projects WHERE key = 'voysee'
+		SELECT id, ${milliseconds} FROM projects WHERE key = 'acme'
 		ON CONFLICT (project_id) DO UPDATE SET projection_usage_debounce_ms = EXCLUDED.projection_usage_debounce_ms
 	`;
 }

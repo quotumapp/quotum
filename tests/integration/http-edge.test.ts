@@ -51,13 +51,13 @@ localDescribe("HTTP edge integration", () => {
 			repository: context.repository,
 		});
 
-		expect((await invalidVerify(fixture, "voysee")).status).toBe(400);
-		expect((await invalidVerify(fixture, "voysee")).status).toBe(400);
-		expect((await invalidVerify(fixture, "voysee")).status).toBe(429);
+		expect((await invalidVerify(fixture, "acme")).status).toBe(400);
+		expect((await invalidVerify(fixture, "acme")).status).toBe(400);
+		expect((await invalidVerify(fixture, "acme")).status).toBe(429);
 
-		const wiseley = await invalidVerify(fixture, "wiseley");
-		expect(wiseley.status).toBe(400);
-		expect(wiseley.headers.get("ratelimit-remaining")).toBe("1");
+		const globex = await invalidVerify(fixture, "globex");
+		expect(globex.status).toBe(400);
+		expect(globex.headers.get("ratelimit-remaining")).toBe("1");
 	});
 
 	it("limits webhook, verify, and admin route groups independently", async () => {
@@ -81,22 +81,22 @@ localDescribe("HTTP edge integration", () => {
 			repository: context.repository,
 		});
 
-		expect(
-			(await invalidVerify(untrusted, "voysee", { "x-forwarded-for": "10.0.0.1" })).status,
-		).toBe(400);
-		expect(
-			(await invalidVerify(untrusted, "voysee", { "x-forwarded-for": "10.0.0.2" })).status,
-		).toBe(429);
+		expect((await invalidVerify(untrusted, "acme", { "x-forwarded-for": "10.0.0.1" })).status).toBe(
+			400,
+		);
+		expect((await invalidVerify(untrusted, "acme", { "x-forwarded-for": "10.0.0.2" })).status).toBe(
+			429,
+		);
 
 		const trusted = createIntegrationApp({
 			env: withRateLimit({ verifyLimit: 1, trustProxyHeaders: true }),
 			repository: context.repository,
 		});
 
-		expect((await invalidVerify(trusted, "voysee", { "x-forwarded-for": "10.0.0.1" })).status).toBe(
+		expect((await invalidVerify(trusted, "acme", { "x-forwarded-for": "10.0.0.1" })).status).toBe(
 			400,
 		);
-		expect((await invalidVerify(trusted, "voysee", { "x-forwarded-for": "10.0.0.2" })).status).toBe(
+		expect((await invalidVerify(trusted, "acme", { "x-forwarded-for": "10.0.0.2" })).status).toBe(
 			400,
 		);
 	});
@@ -123,23 +123,23 @@ localDescribe("HTTP edge integration", () => {
 			),
 		});
 		await createAppleAccountToken(fixture);
-		await createGoogleAccountLink(fixture, "wiseley");
+		await createGoogleAccountLink(fixture, "globex");
 
-		const [appleVerify, googleVerify, stripeWebhook, wiseleyRead] = await Promise.all([
+		const [appleVerify, googleVerify, stripeWebhook, globexRead] = await Promise.all([
 			verifyAppleSubscription(fixture),
-			verifyGoogleConsumable(fixture, "wiseley"),
+			verifyGoogleConsumable(fixture, "globex"),
 			postStripeWebhook(fixture),
 			testRequest(fixture.app, "/v1/billing-accounts/integration_user/entitlements", {
-				headers: fixture.authHeaders("wiseley"),
+				headers: fixture.authHeaders("globex"),
 			}),
 		]);
 
 		expect(appleVerify.status).toBe(200);
 		expect(googleVerify.status).toBe(200);
 		expect(stripeWebhook.status).toBe(200);
-		expect(wiseleyRead.status).toBe(200);
+		expect(globexRead.status).toBe(200);
 		await expectProjectCounts(context.sql, {
-			voysee: {
+			acme: {
 				customers: 1,
 				provider_customers: 2,
 				purchases: 2,
@@ -147,7 +147,7 @@ localDescribe("HTTP edge integration", () => {
 				entitlements: 1,
 				projection_sync_jobs: 2,
 			},
-			wiseley: {
+			globex: {
 				customers: 1,
 				provider_customers: 1,
 				purchases: 1,
@@ -157,18 +157,18 @@ localDescribe("HTTP edge integration", () => {
 			},
 		});
 
-		const voyseeEntitlements = await testRequest(
+		const acmeEntitlements = await testRequest(
 			fixture.app,
 			"/v1/billing-accounts/integration_user/entitlements",
-			{ headers: fixture.authHeaders("voysee") },
+			{ headers: fixture.authHeaders("acme") },
 		);
-		const wiseleyEntitlements = await testRequest(
+		const globexEntitlements = await testRequest(
 			fixture.app,
 			"/v1/billing-accounts/integration_user/entitlements",
-			{ headers: fixture.authHeaders("wiseley") },
+			{ headers: fixture.authHeaders("globex") },
 		);
-		expect((await voyseeEntitlements.json()).data.entitlements).toHaveLength(1);
-		expect((await wiseleyEntitlements.json()).data.entitlements).toHaveLength(0);
+		expect((await acmeEntitlements.json()).data.entitlements).toHaveLength(1);
+		expect((await globexEntitlements.json()).data.entitlements).toHaveLength(0);
 	});
 });
 
@@ -191,7 +191,7 @@ function withRateLimit(
 
 async function invalidVerify(
 	fixture: ReturnType<typeof createIntegrationApp>,
-	projectKey: "voysee" | "wiseley" = "voysee",
+	projectKey: "acme" | "globex" = "acme",
 	headers: HeadersInit = {},
 ): Promise<Response> {
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
@@ -208,7 +208,7 @@ async function invalidVerify(
 async function invalidAppleWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<Response> {
-	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/apple", {
+	return await testRequest(fixture.app, "/v1/projects/acme/webhooks/apple", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({}),
@@ -218,7 +218,7 @@ async function invalidAppleWebhook(
 async function adminMetrics(fixture: ReturnType<typeof createIntegrationApp>): Promise<Response> {
 	return await testRequest(fixture.app, "/v1/admin/metrics", {
 		headers: {
-			...fixture.authHeaders("voysee"),
+			...fixture.authHeaders("acme"),
 			"x-billing-operator-key": "billing-integration-operator-key",
 		},
 	});
@@ -230,7 +230,7 @@ async function createAppleAccountToken(
 	const response = await testRequest(
 		fixture.app,
 		"/v1/billing-accounts/integration_user/providers/apple/account-token",
-		{ headers: fixture.authHeaders("voysee") },
+		{ headers: fixture.authHeaders("acme") },
 	);
 	const body = await response.json();
 	expect(response.status).toBe(200);
@@ -239,7 +239,7 @@ async function createAppleAccountToken(
 
 async function createGoogleAccountLink(
 	fixture: ReturnType<typeof createIntegrationApp>,
-	projectKey: "wiseley",
+	projectKey: "globex",
 ): Promise<void> {
 	const response = await testRequest(
 		fixture.app,
@@ -255,7 +255,7 @@ async function verifyAppleSubscription(
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
 		headers: {
-			...fixture.authHeaders("voysee"),
+			...fixture.authHeaders("acme"),
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({
@@ -268,7 +268,7 @@ async function verifyAppleSubscription(
 
 async function verifyGoogleConsumable(
 	fixture: ReturnType<typeof createIntegrationApp>,
-	projectKey: "wiseley",
+	projectKey: "globex",
 ): Promise<Response> {
 	return await testRequest(fixture.app, "/v1/purchases/verify", {
 		method: "POST",
@@ -280,7 +280,7 @@ async function verifyGoogleConsumable(
 			provider: "google",
 			billingAccountId: "integration_user",
 			purchaseKind: "consumable",
-			purchaseToken: "wiseley_http_edge_purchase",
+			purchaseToken: "globex_http_edge_purchase",
 			productId: "echo_credits_10",
 		}),
 	});
@@ -289,7 +289,7 @@ async function verifyGoogleConsumable(
 async function postStripeWebhook(
 	fixture: ReturnType<typeof createIntegrationApp>,
 ): Promise<Response> {
-	return await testRequest(fixture.app, "/v1/projects/voysee/webhooks/stripe", {
+	return await testRequest(fixture.app, "/v1/projects/acme/webhooks/stripe", {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
@@ -306,7 +306,7 @@ async function postStripeWebhook(
 async function expectProjectCounts(
 	sql: SQL,
 	expected: Record<
-		"voysee" | "wiseley",
+		"acme" | "globex",
 		{
 			customers: number;
 			provider_customers: number;

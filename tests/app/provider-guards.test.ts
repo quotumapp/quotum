@@ -16,9 +16,9 @@ const env: BillingEnv = {
 	trustGatewayProjectHeader: false,
 	connectionFixtures: [
 		{
-			projectInstanceKey: "voysee",
-			projectionUrl: "https://voysee.example.com",
-			projectionSecret: "voysee-projection-secret",
+			projectInstanceKey: "acme",
+			projectionUrl: "https://acme.example.com",
+			projectionSecret: "acme-projection-secret",
 		},
 	],
 	runtimeEnvironment: "development",
@@ -80,8 +80,8 @@ function appWith(stripeBillingService: StripeBillingServiceLike) {
 			env,
 			connections: fixtureConnections(env.connectionFixtures),
 			projectContextResolver: projectContextResolver({
-				contexts: [projectInstanceContext("voysee")],
-				credentials: { secret: "voysee" },
+				contexts: [projectInstanceContext("acme")],
+				credentials: { secret: "acme" },
 			}),
 			stripeBillingService,
 		}),

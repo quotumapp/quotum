@@ -17,7 +17,7 @@ const entitlementSnapshot = {
 const transaction = (
 	overrides: Partial<AppleDecodedTransactionPayload> = {},
 ): AppleDecodedTransactionPayload => ({
-	bundleId: "com.voysee.app",
+	bundleId: "com.acme.app",
 	environment: "Sandbox",
 	productId: "premium_monthly",
 	type: "AUTO_RENEWABLE_SUBSCRIPTION",
@@ -36,7 +36,7 @@ const notification = (
 	notificationType: "DID_RENEW",
 	notificationUUID: "notification_1",
 	data: {
-		bundleId: "com.voysee.app",
+		bundleId: "com.acme.app",
 		environment: "Sandbox",
 	},
 	...overrides,
@@ -47,7 +47,7 @@ const reconciliationSubscription = (
 ): ProviderSubscriptionReconciliationRow => ({
 	id: "subscription_1",
 	project_id: "project_1",
-	project_key: "voysee",
+	project_key: "acme",
 	provider: "apple",
 	channel: "ios",
 	provider_account_id: null,
@@ -123,7 +123,7 @@ function createService({
 	return {
 		calls,
 		service: new AppleStoreKitService({
-			bundleId: "com.voysee.app",
+			bundleId: "com.acme.app",
 			environment,
 			client,
 			repository,
@@ -354,7 +354,7 @@ describe("AppleStoreKitService", () => {
 		const result = await service.replayStoreEvent({
 			id: "event_1",
 			project_id: "project_1",
-			project_key: "voysee",
+			project_key: "acme",
 			provider: "apple",
 			channel: "ios",
 			external_event_id: "notification_1",
@@ -409,7 +409,7 @@ describe("AppleStoreKitService", () => {
 		const result = await service.replayStoreEvent({
 			id: "event_1",
 			project_id: "project_1",
-			project_key: "voysee",
+			project_key: "acme",
 			provider: "apple",
 			channel: "ios",
 			external_event_id: "notification_1",
@@ -439,7 +439,7 @@ describe("AppleStoreKitService", () => {
 		const result = await service.replayStoreEvent({
 			id: "event_1",
 			project_id: "project_1",
-			project_key: "voysee",
+			project_key: "acme",
 			provider: "apple",
 			channel: "ios",
 			external_event_id: "notification_1",
@@ -472,7 +472,7 @@ describe("AppleStoreKitService", () => {
 		const result = await service.replayStoreEvent({
 			id: "event_1",
 			project_id: "project_1",
-			project_key: "voysee",
+			project_key: "acme",
 			provider: "apple",
 			channel: "ios",
 			external_event_id: "notification_1",
