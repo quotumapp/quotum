@@ -55,6 +55,7 @@ import {
 	recordUsageControlEntries,
 	scheduleAutoTopupIfNeeded,
 } from "./controls-runtime";
+import { readDefaultPlanAllowance } from "./default-plan-grants";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
 import { storedCadence } from "./meter-limit-windows";
@@ -258,7 +259,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 			);
 		}
 		return customer === null
-			? emptyBalance(feature)
+			? await defaultPlanBalance(this.database, projectId, feature)
 			: await readBalance(this.database, projectId, customer.id, feature, entityId);
 	}
 
@@ -321,7 +322,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 		const walletQuantity = await calculateWalletQuantity(this.database, rate, requestedQuantity);
 		const balance =
 			customer === null
-				? emptyBalance(rate.wallet)
+				? await defaultPlanBalance(this.database, projectId, rate.wallet)
 				: await readBalance(this.database, projectId, customer.id, rate.wallet, entityId);
 		const decision = await buildDecision(
 			this.database,
@@ -2214,4 +2215,20 @@ function confirmedRows(
 			held_quantity: unitsToDecimal(held - change.release, scale),
 		};
 	});
+}
+
+/**
+ * The balance an account Quotum has not recorded yet would start with: the default plan's allowance
+ * of the feature, or nothing. Its first write creates the account and that same allowance.
+ */
+async function defaultPlanBalance(
+	executor: QueryExecutor,
+	projectId: string,
+	feature: FeatureRow,
+): Promise<MeteringBalance> {
+	const allowance = await readDefaultPlanAllowance(executor, projectId, featureId(feature));
+	const balance = emptyBalance(feature);
+	if (allowance === null) return balance;
+	const quantity = databaseDecimal(allowance, "default plan allowance", feature.credit_scale);
+	return { ...balance, granted: quantity, available: quantity };
 }

@@ -34,6 +34,7 @@ import {
 	recordUsageControlEntries,
 	releaseControlHolds,
 } from "./controls-runtime";
+import { defaultPlanTargetSql } from "./default-plan-grants";
 import { enqueueUsageProjection } from "./entitlements";
 import {
 	meterLimitWindowBounds,
@@ -206,7 +207,7 @@ export function queryMeterLimitRows(
 	customerId: string | null,
 	feature: FeatureRow,
 ): Promise<MeterLimitRow[]> {
-	if (customerId === null) return Promise.resolve([]);
+	if (customerId === null) return queryDefaultPlanMeterLimitRows(executor, projectId, feature);
 	return executeRows<MeterLimitRow>(
 		executor,
 		// A paying subscription's limit comes before a plan grant's, which has no payment method and
@@ -291,6 +292,41 @@ export function queryMeterLimitRows(
 	);
 }
 
+/**
+ * The meter limit an account Quotum has not recorded yet would have on the default plan: its
+ * window starts now, as the grant it gets on its first write will, and has no usage.
+ */
+function queryDefaultPlanMeterLimitRows(
+	executor: QueryExecutor,
+	projectId: string,
+	feature: FeatureRow,
+): Promise<MeterLimitRow[]> {
+	return executeRows<MeterLimitRow>(
+		executor,
+		drizzleSql`
+			SELECT
+				pi.id AS plan_item_id,
+				NULL::uuid AS subscription_id,
+				NULL::uuid AS plan_grant_id,
+				pi.quantity,
+				'blocked'::text AS overage_policy,
+				pi.reset_interval,
+				pi.reset_interval_count,
+				pv.billing_interval,
+				pv.billing_interval_count,
+				now() AS period_start_at,
+				NULL::timestamptz AS period_end_at
+			FROM (${defaultPlanTargetSql(projectId)}) target
+			JOIN plan_items pi
+				ON pi.project_id = ${projectId}
+				AND pi.plan_version_id = target.plan_version_id::bigint
+			JOIN plan_versions pv ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
+			WHERE pi.feature_id = ${featureId(feature)}
+				AND pi.item_kind = 'meter_limit'
+		`,
+	);
+}
+
 export function queryMeterLimitConfigured(
 	executor: QueryExecutor,
 	projectId: string,
@@ -346,8 +382,9 @@ export async function meterLimitDecision(
 	const active = rows[0];
 	if (active !== undefined) {
 		const reset = storedCadence(active.reset_interval, active.reset_interval_count);
+		// A plan grant, or the default plan an unrecorded account would get, windows from its start.
 		const bounds =
-			active.plan_grant_id !== null
+			active.plan_grant_id !== null || active.subscription_id === null
 				? planGrantWindowBounds(active.period_start_at, active.period_end_at, reset, new Date())
 				: meterLimitWindowBounds(
 						active.period_start_at,

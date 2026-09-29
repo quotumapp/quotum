@@ -44,7 +44,7 @@ export async function readDefaultPlanTarget(
 		plan_version_id: string;
 		entitlement_keys: string[];
 		revision: number;
-	}>(executor, drizzleSql`${targetSql(projectId)}`);
+	}>(executor, drizzleSql`${defaultPlanTargetSql(projectId)}`);
 	return row === null
 		? null
 		: {
@@ -66,7 +66,8 @@ export function sameDefaultPlanTarget(
 	);
 }
 
-function targetSql(projectId: string) {
+/** The published default plan's target row, for joining into other reads. */
+export function defaultPlanTargetSql(projectId: string) {
 	return drizzleSql`
 		SELECT
 			marker.plan_id::text AS plan_id,
@@ -115,7 +116,7 @@ export async function reconcileDefaultPlanGrant(
 					AS funding_subscription_id,
 				${activeBaseGrantSql(projectId, drizzleSql`${customerId}::uuid`)} AS base_grant_id
 			FROM (SELECT 1) anchor
-			LEFT JOIN (${targetSql(projectId)}) target ON true
+			LEFT JOIN (${defaultPlanTargetSql(projectId)}) target ON true
 			LEFT JOIN plan_grants held
 				ON held.project_id = ${projectId}
 				AND held.customer_id = ${customerId}::uuid
@@ -317,4 +318,31 @@ async function moveGrant(
 		`,
 	);
 	await materializePlanGrantPeriod(executor, projectId, grantId);
+}
+
+/**
+ * What an account Quotum has not recorded yet would hold of a feature on the default plan: the sum
+ * of the published version's account-wide allocation items, or null without a default plan.
+ * A read never creates the account, so this answers `check` and balance reads without writing.
+ */
+export async function readDefaultPlanAllowance(
+	executor: QueryExecutor,
+	projectId: string,
+	featureId: string,
+): Promise<string | null> {
+	const row = await executeOne<{ quantity: string | null }>(
+		executor,
+		drizzleSql`
+			SELECT sum(item.quantity)::text AS quantity
+			FROM (${defaultPlanTargetSql(projectId)}) target
+			LEFT JOIN plan_items item
+				ON item.project_id = ${projectId}
+				AND item.plan_version_id = target.plan_version_id::bigint
+				AND item.feature_id = ${featureId}::bigint
+				AND item.item_kind = 'allocation'
+				AND item.allocation_scope = 'account'
+			GROUP BY target.plan_id
+		`,
+	);
+	return row === null ? null : (row.quantity ?? "0");
 }
