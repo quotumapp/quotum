@@ -187,7 +187,7 @@ describe("BillingRepository Stripe", () => {
 		expect(queries).toContain('\\"totalCreditAmount\\":10');
 		expect(queries).not.toContain("Stripe credit reversal amount or currency does not match");
 		const customerLockIndex = database.queries.findIndex(
-			(query) => query.includes("SELECT c.id") && query.includes("FOR UPDATE"),
+			(query) => query.includes("SELECT c.id") && query.includes("FOR NO KEY UPDATE"),
 		);
 		const purchaseLockIndex = database.queries.findIndex(
 			(query) => query.includes("FROM purchases pu") && query.includes("FOR UPDATE OF pu"),

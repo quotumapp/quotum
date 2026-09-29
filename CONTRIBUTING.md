@@ -118,6 +118,10 @@ generated files.
   together with `Promise.all`; they execute in issue order on the connection, so put writes before
   the reads that must observe them, and never feed one statement's result into another in the
   same batch.
+- Lock a `customers` row as a mutex with `FOR NO KEY UPDATE`, never `FOR UPDATE`. Every insert
+  that references a customer (usage events, idempotency claims, allocations) takes a key-share
+  lock on it through its foreign key; `FOR UPDATE` conflicts with that and deadlocks against
+  concurrent usage, while `FOR NO KEY UPDATE` still serializes the writers that take it.
 - Stripe test fixtures are written in the pinned API version's shape and checked with
   `satisfies DeepPartial<Stripe.X>` (`tests/helpers/deep-partial.ts`), so a field the version
   does not have fails to compile. Older shapes the normalizer still accepts belong in

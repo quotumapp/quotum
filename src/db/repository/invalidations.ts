@@ -52,7 +52,7 @@ export async function findAppleInvalidationTarget(
 			)
 		ORDER BY CASE WHEN pu.transaction_id = ${input.transactionId} THEN 0 ELSE 1 END
 		LIMIT 1
-		FOR UPDATE OF c
+		FOR NO KEY UPDATE OF c
 	`,
 	);
 	if (purchase !== null) {
@@ -81,7 +81,7 @@ export async function findAppleInvalidationTarget(
 			AND s.provider = 'apple'
 			AND s.external_subscription_id = ${input.originalTransactionId}
 		LIMIT 1
-		FOR UPDATE OF c
+		FOR NO KEY UPDATE OF c
 	`,
 	);
 }
@@ -121,7 +121,7 @@ export async function findGooglePurchaseInvalidationTarget(
 			)
 		ORDER BY CASE WHEN pu.transaction_id = ${input.purchaseToken} THEN 0 ELSE 1 END
 		LIMIT 1
-		FOR UPDATE OF c
+		FOR NO KEY UPDATE OF c
 	`,
 	);
 	if (purchase !== null) {
@@ -154,7 +154,7 @@ export async function findGooglePurchaseInvalidationTarget(
 			)
 		ORDER BY CASE WHEN s.external_subscription_id = ${input.purchaseToken} THEN 0 ELSE 1 END
 		LIMIT 1
-		FOR UPDATE OF c
+		FOR NO KEY UPDATE OF c
 	`,
 	);
 }
@@ -200,7 +200,7 @@ export async function findGoogleVoidedTarget(
 			AND pu.provider = 'google'
 			AND pu.transaction_id = ${purchaseToken}
 		LIMIT 1
-		FOR UPDATE OF c
+		FOR NO KEY UPDATE OF c
 	`,
 	);
 	if (purchase !== null) {
@@ -228,7 +228,7 @@ export async function findGoogleVoidedTarget(
 			AND s.provider = 'google'
 			AND s.external_subscription_id = ${purchaseToken}
 		LIMIT 1
-		FOR UPDATE OF c
+		FOR NO KEY UPDATE OF c
 	`,
 	);
 }
@@ -296,7 +296,7 @@ export async function lockCustomerRow(
 			FROM customers c
 			WHERE c.id = ${customerId}
 				AND c.project_id = ${projectId}
-			FOR UPDATE
+			FOR NO KEY UPDATE
 		`,
 		`customer ${customerId} was not found while acquiring a billing mutation lock`,
 	);

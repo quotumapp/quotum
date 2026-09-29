@@ -205,7 +205,7 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 				drizzleSql`
 					SELECT id, billing_account_id FROM customers
 					WHERE project_id = ${projectId} AND billing_account_id = ${input.billingAccountId}
-					FOR UPDATE
+					FOR NO KEY UPDATE
 				`,
 			);
 			if (customer === null) throw trialError("TRIAL_NOT_FOUND");
@@ -416,7 +416,7 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 					JOIN (SELECT DISTINCT customer_id FROM candidates) candidate_customers
 						ON candidate_customers.customer_id = c.id
 					ORDER BY c.id
-					FOR UPDATE OF c
+					FOR NO KEY UPDATE OF c
 				),
 				due AS MATERIALIZED (
 					SELECT g.id
@@ -509,7 +509,7 @@ export async function catchUpPlanGrants(
 		drizzleSql`
 			SELECT id, billing_account_id FROM customers
 			WHERE project_id = ${projectId} AND id = ${customerId}
-			FOR UPDATE
+			FOR NO KEY UPDATE
 		`,
 	);
 	if (customer === null) return;
@@ -540,7 +540,7 @@ export async function supersedeBasePlanGrants(
 		drizzleSql`
 			SELECT id FROM customers
 			WHERE project_id = ${input.projectId} AND id = ${input.customerId}
-			FOR UPDATE
+			FOR NO KEY UPDATE
 		`,
 	);
 	await executeRows(
@@ -729,7 +729,7 @@ async function expirePlanGrantsWhere(
 			JOIN (SELECT DISTINCT customer_id FROM candidates) candidate_customers
 				ON candidate_customers.customer_id = c.id
 			ORDER BY c.id
-			FOR UPDATE OF c
+			FOR NO KEY UPDATE OF c
 		),
 		due AS MATERIALIZED (
 			SELECT g.id
@@ -832,7 +832,7 @@ async function reconcileDefaultPlanSlice(
 			await executeOne(
 				executor,
 				drizzleSql`
-					SELECT id FROM customers WHERE project_id = ${projectId} AND id = ${customer.id} FOR UPDATE
+					SELECT id FROM customers WHERE project_id = ${projectId} AND id = ${customer.id} FOR NO KEY UPDATE
 				`,
 			);
 			if ((await applyDefaultPlan(executor, projectId, customer)) !== null) changed += 1;

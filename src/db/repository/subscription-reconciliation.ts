@@ -46,7 +46,7 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 					JOIN (SELECT DISTINCT customer_id FROM candidates) candidate_customers
 						ON candidate_customers.customer_id = c.id
 					ORDER BY c.id
-					FOR UPDATE OF c
+					FOR NO KEY UPDATE OF c
 				),
 				due_subscriptions AS MATERIALIZED (
 					SELECT s.id, s.customer_id
@@ -149,7 +149,7 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 					JOIN (SELECT DISTINCT customer_id FROM candidates) candidate_customers
 						ON candidate_customers.customer_id = c.id
 					ORDER BY c.id
-					FOR UPDATE OF c
+					FOR NO KEY UPDATE OF c
 				),
 				due_trials AS MATERIALIZED (
 					SELECT s.id, s.customer_id, p.key AS product_key, pl.key AS plan_key

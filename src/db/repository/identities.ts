@@ -112,7 +112,7 @@ export async function findCustomerByProviderCustomer(
 			AND pc.provider = ${provider}
 			AND pc.external_customer_id = ${externalCustomerId}
 		LIMIT 1
-		FOR UPDATE OF c
+		FOR NO KEY UPDATE OF c
 	`,
 	);
 }
@@ -133,7 +133,7 @@ export async function findCustomerBySubscription(
 			AND s.provider = ${provider}
 			AND s.external_subscription_id = ${externalSubscriptionId}
 		LIMIT 1
-		FOR UPDATE OF c
+		FOR NO KEY UPDATE OF c
 	`,
 	);
 }
@@ -155,7 +155,7 @@ export async function findGoogleCustomerBySubscriptionTokens(
 			AND s.external_subscription_id IN (${token}, ${linkedToken})
 		ORDER BY CASE WHEN s.external_subscription_id = ${token} THEN 0 ELSE 1 END
 		LIMIT 1
-		FOR UPDATE OF c
+		FOR NO KEY UPDATE OF c
 	`,
 	);
 }
@@ -177,7 +177,7 @@ export async function findGoogleCustomerByPurchaseTokens(
 			AND pu.transaction_id IN (${token}, ${linkedToken})
 		ORDER BY CASE WHEN pu.transaction_id = ${token} THEN 0 ELSE 1 END
 		LIMIT 1
-		FOR UPDATE OF c
+		FOR NO KEY UPDATE OF c
 	`,
 	);
 }

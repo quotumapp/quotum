@@ -16,7 +16,9 @@ describe("supersedeBasePlanGrants", () => {
 
 		database.assertConsumed();
 		const [lock, supersede] = database.queries;
-		expect(lock).toMatch(/FROM customers\s+WHERE project_id = \$1 AND id = \$2\s+FOR UPDATE/);
+		expect(lock).toMatch(
+			/FROM customers\s+WHERE project_id = \$1 AND id = \$2\s+FOR NO KEY UPDATE/,
+		);
 		expect(supersede).toContain("status = 'superseded'");
 		expect(supersede).toContain("g.plan_kind = 'base'");
 		expect(supersede).toContain("g.ends_at > now()");
