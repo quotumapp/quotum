@@ -1745,6 +1745,103 @@ localDescribe("authoritative metering flows", () => {
 		);
 		expect(balance.held).toBe("0");
 	});
+
+	it("decides reservation and allocation expiry on the database clock, whatever the process clock says", async () => {
+		const project = integrationProjectContext();
+		const realNow = Date.now;
+		const shiftProcessClock = (milliseconds: number) => {
+			Date.now = () => realNow() + milliseconds;
+		};
+		try {
+			await context.repository.grantAllocation(project, {
+				billingAccountId: "clock",
+				featureKey: "ai_credits",
+				quantity: "100",
+				sourceKind: "credit_grant",
+				sourceKey: "clock",
+			});
+			// The process clock runs 6 minutes ahead of the database: a 5-minute hold is still live.
+			const live = await context.repository.reserveUsage(project, {
+				billingAccountId: "clock",
+				featureKey: "model_tokens",
+				quantity: "100",
+				idempotencyKey: "clock-live",
+				expiresInSeconds: 300,
+			});
+			shiftProcessClock(6 * 60_000);
+			const confirmed = await context.repository.confirmUsageReservation(project, {
+				billingAccountId: "clock",
+				reservationId: live.reservationId ?? "",
+				quantity: "100",
+				idempotencyKey: "clock-live-confirm",
+			});
+			expect(confirmed).toMatchObject({ allowed: true, status: "confirmed" });
+
+			// The process clock runs 10 minutes behind: a hold whose second has passed is expired.
+			Date.now = realNow;
+			const short = await context.repository.reserveUsage(project, {
+				billingAccountId: "clock",
+				featureKey: "model_tokens",
+				quantity: "100",
+				idempotencyKey: "clock-short",
+				expiresInSeconds: 1,
+			});
+			await Bun.sleep(1_200);
+			shiftProcessClock(-10 * 60_000);
+			const late = await context.repository.confirmUsageReservation(project, {
+				billingAccountId: "clock",
+				reservationId: short.reservationId ?? "",
+				quantity: "100",
+				idempotencyKey: "clock-short-confirm",
+			});
+			expect(late).toMatchObject({ status: "expired" });
+
+			// A correction refunds an allocation the database still holds live.
+			Date.now = realNow;
+			await context.repository.grantAllocation(project, {
+				billingAccountId: "clock-refund",
+				featureKey: "ai_credits",
+				quantity: "100",
+				sourceKind: "credit_grant",
+				sourceKey: "clock-refund",
+				expiresAt: new Date(realNow() + 120_000),
+			});
+			const consumed = await context.repository.consumeUsage(project, {
+				billingAccountId: "clock-refund",
+				featureKey: "model_tokens",
+				quantity: "1000",
+				idempotencyKey: "clock-refund-use",
+			});
+			const [event] = await context.sql<Array<{ id: string; recorded_at: Date }>>`
+				SELECT id::text, recorded_at FROM usage_events WHERE id = ${consumed.usageEventId}::uuid
+			`;
+			const before = await context.repository.getMeteringBalance(
+				project,
+				"clock-refund",
+				"ai_credits",
+			);
+			shiftProcessClock(5 * 60_000);
+			await context.repository.correctUsage(project, {
+				billingAccountId: "clock-refund",
+				originalUsageEventId: event?.id ?? "",
+				originalRecordedAt: new Date(event?.recorded_at ?? 0),
+				quantity: "1000",
+				actor: "clock-test",
+				reason: "clock skew",
+				idempotencyKey: "clock-refund-correct",
+			});
+			Date.now = realNow;
+			const after = await context.repository.getMeteringBalance(
+				project,
+				"clock-refund",
+				"ai_credits",
+			);
+			expect(Number(after.available)).toBeGreaterThan(Number(before.available));
+			expect(after.available).toBe("100");
+		} finally {
+			Date.now = realNow;
+		}
+	});
 });
 
 async function seedMeteringCatalog(sql: SQL): Promise<void> {

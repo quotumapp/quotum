@@ -91,7 +91,9 @@ controls, alerts, automatic top-ups, and license assignments also require `X-Bil
 Confirming more than the reserved quantity returns `RESERVATION_QUANTITY_EXCEEDED`, a changed
 confirmation returns `RESERVATION_ALREADY_CONFIRMED`, and using a newly published meter absent from
 the account's purchased catalog returns `METER_RATE_NOT_ACTIVATED`. Omitted `expiresInSeconds` on a
-reservation defaults to 300. License pools follow the purchased subscription-item quantity: an
+reservation defaults to 300. A reservation's expiry, and whether a correction or confirmation may
+still use an allocation, are decided on the database clock, so an application host whose clock
+drifts never expires a live hold or refuses a valid refund. License pools follow the purchased subscription-item quantity: an
 entity license check honors active assignments in assignment order up to that capacity, so a seat
 downgrade stops authorizing the assignments beyond it until they are revoked.
 

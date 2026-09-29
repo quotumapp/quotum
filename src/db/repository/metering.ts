@@ -479,7 +479,9 @@ export class MeteringBillingRepository extends RepositoryModule {
 					await releaseReservationHolds(
 						tx,
 						reservation,
-						new Date(reservation.expires_at).getTime() <= Date.now() ? "expired" : "released",
+						new Date(reservation.expires_at).getTime() <= new Date(reservation.db_now).getTime()
+							? "expired"
+							: "released",
 					);
 				}
 				const current = await lockReservation(tx, projectId, customer.id, input.reservationId);
@@ -1246,10 +1248,11 @@ async function reverseOriginalDeductions(
 			consumed_quantity: unknown;
 			expires_at: Date | string | null;
 			reversed_at: Date | string | null;
+			db_now: Date | string;
 		}>(
 			executor,
 			drizzleSql`
-				SELECT consumed_quantity, expires_at, reversed_at
+				SELECT consumed_quantity, expires_at, reversed_at, clock_timestamp() AS db_now
 				FROM balance_allocations
 				WHERE project_id = ${projectId}
 					AND id = ${deduction.allocationId}::bigint
@@ -1259,7 +1262,8 @@ async function reverseOriginalDeductions(
 		const eligible =
 			allocation !== null &&
 			allocation.reversed_at === null &&
-			(allocation.expires_at === null || new Date(allocation.expires_at).getTime() > Date.now());
+			(allocation.expires_at === null ||
+				new Date(allocation.expires_at).getTime() > new Date(allocation.db_now).getTime());
 		if (eligible) {
 			const updated = await executeOne(
 				executor,
@@ -1881,8 +1885,8 @@ async function reserveWithinTransaction(
 	}
 
 	const effectiveAt = new Date();
-	const expiresAt = new Date(effectiveAt.getTime() + input.expiresInSeconds * 1000);
-	const reservation = await executeOne<{ id: string }>(
+	// Expiry is decided on the database clock, like the expiry worker and the held sums.
+	const reservation = await executeOne<{ id: string; expires_at: Date | string }>(
 		tx,
 		drizzleSql`
 			INSERT INTO reservations (
@@ -1911,9 +1915,9 @@ async function reserveWithinTransaction(
 				${requestedQuantity}::numeric,
 				${walletQuantity}::numeric,
 				${effectiveAt.toISOString()},
-				${expiresAt.toISOString()}
+				clock_timestamp() + ${input.expiresInSeconds} * interval '1 second'
 			)
-			RETURNING id
+			RETURNING id, expires_at
 		`,
 	);
 	if (reservation === null) {
@@ -1961,7 +1965,7 @@ async function reserveWithinTransaction(
 		balance: balanceFromRows(rate.wallet, deductedRows(rows, deductions, scale, "held_quantity")),
 		reservationId: reservation.id,
 		status: "active",
-		expiresAt: expiresAt.toISOString(),
+		expiresAt: toIso(reservation.expires_at),
 		deductions,
 	};
 }
@@ -1995,7 +1999,8 @@ async function confirmWithinTransaction(
 	if (reservation.status === "expired") return await finalizedReservationResult(tx, reservation);
 	if (reservation.status === "released")
 		throw new PersistenceConflictError("Reservation has been released", "RESERVATION_RELEASED");
-	if (new Date(reservation.expires_at).getTime() <= Date.now()) {
+	const now = new Date(reservation.db_now);
+	if (new Date(reservation.expires_at).getTime() <= now.getTime()) {
 		await releaseReservationHolds(tx, reservation, "expired");
 		return await finalizedReservationResult(
 			tx,
@@ -2075,7 +2080,7 @@ async function confirmWithinTransaction(
 	});
 	let plan: ConfirmationPlan;
 	try {
-		plan = planConfirmation(rows, reservationRows, scale, walletQuantity);
+		plan = planConfirmation(rows, reservationRows, scale, walletQuantity, now);
 	} catch (error) {
 		if (error instanceof BillingError && error.code === "INSUFFICIENT_BALANCE") {
 			return await denied("insufficient_balance", null);
@@ -2158,7 +2163,7 @@ async function confirmWithinTransaction(
 			alerts,
 		});
 	}
-	const balance = balanceFromRows(rate.wallet, confirmedRows(rows, plan, scale));
+	const balance = balanceFromRows(rate.wallet, confirmedRows(rows, plan, scale, now));
 	await Promise.all([
 		enqueueUsageProjection(tx, { projectId, customerId: customer.id }),
 		scheduleAutoTopupIfNeeded(tx, {
@@ -2219,13 +2224,13 @@ function confirmedRows(
 	rows: readonly AllocationRow[],
 	plan: ConfirmationPlan,
 	scale: number,
+	now: Date,
 ): AllocationRow[] {
-	const now = Date.now();
 	const changes = new Map(plan.changes.map((change) => [change.allocationId, change]));
 	const live = rows.filter(
 		(row) =>
 			row.reversed_at === null &&
-			(row.expires_at === null || new Date(row.expires_at).getTime() > now),
+			(row.expires_at === null || new Date(row.expires_at).getTime() > now.getTime()),
 	);
 	return live.map((row) => {
 		const change = changes.get(String(row.id));

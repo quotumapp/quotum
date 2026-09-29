@@ -128,6 +128,8 @@ export interface AllocationRow {
 }
 
 export interface ReservationRow {
+	/** The database clock when the row was locked; every expiry decision uses it. */
+	db_now: Date | string;
 	id: string;
 	project_id: string;
 	customer_id: string;
@@ -772,8 +774,8 @@ export async function reserveMeterLimit(
 		};
 	}
 	const effectiveAt = new Date();
-	const expiresAt = new Date(effectiveAt.getTime() + input.expiresInSeconds * 1000);
-	const reservation = await executeOne<{ id: string }>(
+	// Expiry is decided on the database clock, like the expiry worker and the held sums.
+	const reservation = await executeOne<{ id: string; expires_at: Date | string }>(
 		executor,
 		drizzleSql`
 			INSERT INTO reservations (
@@ -804,9 +806,9 @@ export async function reserveMeterLimit(
 				${input.quantity}::numeric,
 				${input.quantity}::numeric,
 				${effectiveAt.toISOString()},
-				${expiresAt.toISOString()}
+				clock_timestamp() + ${input.expiresInSeconds} * interval '1 second'
 			)
-			RETURNING id
+			RETURNING id, expires_at
 		`,
 	);
 	if (reservation === null) throw new Error("Meter-limit reservation could not be persisted");
@@ -855,7 +857,7 @@ export async function reserveMeterLimit(
 		),
 		reservationId: reservation.id,
 		status: "active",
-		expiresAt: expiresAt.toISOString(),
+		expiresAt: toIso(reservation.expires_at),
 		deductions: [],
 	};
 }
@@ -2068,6 +2070,7 @@ export async function lockReservation(
 		drizzleSql`
 			SELECT
 				r.*,
+				clock_timestamp() AS db_now,
 				c.billing_account_id,
 				meter.key AS meter_feature_key,
 				meter.unit AS meter_unit,
@@ -2195,6 +2198,7 @@ export function planConfirmation(
 	reservationAllocations: readonly ReservationAllocationRow[],
 	scale: number,
 	walletQuantity: string,
+	now: Date,
 ): ConfirmationPlan {
 	const holds = new Map(
 		reservationAllocations.map((row) => [
@@ -2213,12 +2217,11 @@ export function planConfirmation(
 	}
 
 	if (remaining > 0n) {
-		const now = Date.now();
 		for (const row of allocations) {
 			if (remaining === 0n) break;
 			if (
 				row.reversed_at !== null ||
-				(row.expires_at !== null && new Date(row.expires_at).getTime() <= now)
+				(row.expires_at !== null && new Date(row.expires_at).getTime() <= now.getTime())
 			) {
 				continue;
 			}
@@ -2498,6 +2501,7 @@ export async function confirmMeterLimitReservation(
 			usageEventId: event.id,
 			usageEventRecordedAtExact: event.recorded_at_exact,
 			quantity,
+			now: new Date(reservation.db_now),
 		});
 	}
 	await executeOne(
@@ -2560,13 +2564,14 @@ async function recordLateConfirmationAdjustment(
 		usageEventId: string;
 		usageEventRecordedAtExact: string;
 		quantity: string;
+		now: Date;
 	},
 ): Promise<void> {
 	const { window } = input;
 	if (
 		window.subscription_id === null ||
 		window.anchor_plan_item_id === null ||
-		new Date(window.window_end_at).getTime() > Date.now()
+		new Date(window.window_end_at).getTime() > input.now.getTime()
 	) {
 		return;
 	}
