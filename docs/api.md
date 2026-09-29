@@ -161,6 +161,21 @@ valid for 15 minutes. Execution accepts only the `previewToken` with an `Idempot
 rejects expired previews, catalog or customer drift, or a changed target. A durable
 subscription-change result is HTTP 202; every other result, including a cancellation, is HTTP 200.
 
+### Allowances across a plan change
+
+When a subscription moves to another plan version, the quantity the outgoing version granted ends
+with it and the incoming version grants afresh. That applies to an API change, a catalog migration
+and a switch in the provider's portal. The switch happens when Quotum records the provider's
+update:
+
+- The outgoing version's live plan allowances end at that moment and are not rolled over.
+- The incoming version's allowance for the current period, or reset window, is granted in full.
+- Allowances that already ended at a period boundary roll over under the old item's policy as
+  before, so a period-end change keeps its rollover.
+- Top-ups, promotion rewards, operator grants, plan grants and rolled-over quantity are not
+  plan-granted and are untouched.
+- An open reservation still settles from its hold on the ended allowance.
+
 ### Cancelling and uncancelling a subscription
 
 `cancel` names `externalSubscriptionId` and an `effectiveMode`; `uncancel` names the subscription

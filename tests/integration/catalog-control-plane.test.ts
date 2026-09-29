@@ -589,7 +589,8 @@ localDescribe("catalog control plane", () => {
 		`;
 		await sync("evt_pinned_migrated", 3);
 		expect(await pinnedVersion()).toEqual({ plan_key: "premium", version: 2, revision: 2 });
-		expect(await allocations()).toEqual(["1000", "500"]);
+		// Version 1's allowance ends with it; the new version grants afresh.
+		expect(await allocations()).toEqual(["500"]);
 		// The change was staged from version 1, so it cannot move the subscription again.
 		await sync("evt_pinned_after_migration", 4);
 		expect(await pinnedVersion()).toEqual({ plan_key: "premium", version: 2, revision: 2 });
@@ -633,7 +634,8 @@ localDescribe("catalog control plane", () => {
 			externalPriceId: "price_pro_monthly",
 		});
 		expect(await pinnedVersion()).toEqual({ plan_key: "pro", version: 1, revision: 3 });
-		expect(await allocations()).toEqual(["1000", "500", "5000"]);
+		// A provider-side switch ends the outgoing version's allowance too.
+		expect(await allocations()).toEqual(["5000"]);
 	});
 
 	// capability: catalog.product.subscription

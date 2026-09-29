@@ -47,6 +47,49 @@ describeLocalPostgres(describe, describe.skip)("Catalog migration synchronizatio
 		await context.sql.close();
 	});
 
+	it("ends the outgoing version's live allowance at the switch, not rolled over, while its holds settle", async () => {
+		await addAllowance(1, "100", true);
+		await addAllowance(2, "300", false);
+		await sync(1);
+		const balance = async () =>
+			(await context.repository.getMeteringBalance(project, "migration-stripe", "ai_credits"))
+				.available;
+		expect(await balance()).toBe("100");
+		const hold = await context.repository.reserveUsage(project, {
+			billingAccountId: "migration-stripe",
+			featureKey: "model_tokens",
+			quantity: "10",
+			idempotencyKey: "hold-before-switch",
+			expiresInSeconds: 300,
+		});
+		if (hold.reservationId === null) throw new Error("Expected a reservation");
+
+		await stageMigration(1, 2);
+		await sync(2);
+
+		expect(await allowanceRows()).toEqual([
+			{ version: 1, quantity: "100.000000000", consumed: "0.000000000", ended: true, rolls: false },
+			{ version: 2, quantity: "300.000000000", consumed: "0.000000000", ended: false, rolls: true },
+		]);
+		// Only the incoming allowance counts: no double allowance after an immediate change.
+		expect(await balance()).toBe("300");
+		const confirmed = await context.repository.confirmUsageReservation(project, {
+			billingAccountId: "migration-stripe",
+			reservationId: hold.reservationId,
+			quantity: "10",
+			idempotencyKey: "confirm-after-switch",
+		});
+		expect(confirmed).toMatchObject({ status: "confirmed" });
+		expect((await allowanceRows())[0]).toMatchObject({ version: 1, consumed: "10.000000000" });
+		await context.repository.runMeteringMaintenance(100);
+		const [rollovers] = await context.sql<Array<{ count: number }>>`
+			SELECT count(*)::integer AS count FROM balance_allocations WHERE source_kind = 'rollover'
+		`;
+		expect(rollovers?.count).toBe(0);
+		await sync(2);
+		expect(await allowanceRows()).toHaveLength(2);
+	});
+
 	it("keeps a 1 → 2 → 1 migration settled through ordinary item updates", async () => {
 		const original = await itemRows();
 		await context.repository.controlsEnterprise.createEntity(project, {
@@ -160,6 +203,42 @@ describeLocalPostgres(describe, describe.skip)("Catalog migration synchronizatio
 		expect(await pinnedVersion()).toBe(2);
 	});
 });
+
+/** An `ai_credits` allowance on one version of the migration plan, resetting monthly. */
+async function addAllowance(version: number, quantity: string, rollover: boolean): Promise<void> {
+	await context.sql`
+		INSERT INTO plan_items (
+			project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval,
+			rollover_enabled, rollover_max_quantity, rollover_expiry_mode, rollover_expiry_interval,
+			rollover_expiry_interval_count
+		)
+		SELECT version.project_id, version.id, feature.id, 'allocation', ${quantity}::numeric, 'month',
+			${rollover}, NULL, ${rollover ? "forever" : "none"}, NULL, 1
+		FROM plan_versions version
+		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+		JOIN features feature ON feature.project_id = version.project_id AND feature.key = 'ai_credits'
+		WHERE plan.key = 'migration-plan' AND version.version = ${version}
+	`;
+}
+
+async function allowanceRows() {
+	const rows = await context.sql<
+		Array<{ version: number; quantity: string; consumed: string; ended: boolean; rolls: boolean }>
+	>`
+		SELECT version.version, allocation.quantity::text AS quantity,
+			allocation.consumed_quantity::text AS consumed,
+			(allocation.expires_at IS NOT NULL AND allocation.expires_at <= now()) AS ended,
+			allocation.rollover_processed_at IS NULL AS rolls
+		FROM balance_allocations allocation
+		JOIN plan_items item ON item.id = allocation.plan_item_id
+		JOIN plan_versions version ON version.id = item.plan_version_id
+		JOIN subscriptions subscription ON subscription.id = allocation.subscription_id
+		WHERE subscription.external_subscription_id = 'sub_migrate_stripe'
+			AND allocation.source_kind = 'subscription'
+		ORDER BY version.version
+	`;
+	return rows.map((row) => ({ ...row }));
+}
 
 async function stageMigration(
 	fromVersion: number,
