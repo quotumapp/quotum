@@ -1,5 +1,10 @@
 import { sql as drizzleSql } from "drizzle-orm";
-import { databaseDecimal } from "../../billing/decimal";
+import {
+	databaseDecimal,
+	decimalToUnits,
+	signedDecimalToUnits,
+	unitsToDecimal,
+} from "../../billing/decimal";
 import { NotFoundBillingError } from "../../billing/errors";
 import type {
 	AvailableActionFacts,
@@ -16,6 +21,7 @@ import type {
 import type { BillingChannel, BillingProvider, SubscriptionStatus } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
+import { type PendingAllowance, readPendingAllowances } from "./plan-grant-windows";
 import { executeOne, executeRows } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -160,7 +166,7 @@ export class BillingInsightsRepository extends RepositoryModule {
 		if (customer === null) {
 			return emptySummary(billingAccountId);
 		}
-		const [subscriptions, balances, usage, invoices] = await Promise.all([
+		const [subscriptions, allocationBalances, usage, invoices, pending] = await Promise.all([
 			executeRows<{
 				id: string;
 				provider: BillingProvider;
@@ -248,7 +254,9 @@ export class BillingInsightsRepository extends RepositoryModule {
 					LIMIT 12
 				`,
 			),
+			readPendingAllowances(this.database, projectId, customer.id, null),
 		]);
+		const balances = withPendingBalances(allocationBalances, pending);
 		return {
 			schemaVersion: 1,
 			billingAccountId,
@@ -462,6 +470,69 @@ function emptySummary(billingAccountId: string): CustomerBillingSummary {
 		usage: [],
 		recentInvoices: [],
 	};
+}
+
+interface BalanceRow {
+	feature_key: string;
+	unit: string;
+	available: unknown;
+	held: unknown;
+	expires_at: Date | string | null;
+}
+
+/**
+ * Adds what the account's plan grants give in windows no write has created yet to its per-feature
+ * allocation totals, which, like those totals, are not clamped at zero.
+ */
+function withPendingBalances(
+	rows: readonly BalanceRow[],
+	pending: readonly PendingAllowance[],
+): BalanceRow[] {
+	if (pending.length === 0) return [...rows];
+	const scale = 9;
+	const byFeature = new Map(
+		rows.map((row) => [
+			row.feature_key,
+			{
+				...row,
+				available: signedDecimalToUnits(signedDecimal(row.available, "available balance"), scale),
+				held: decimalToUnits(databaseDecimal(row.held, "held balance"), scale),
+			},
+		]),
+	);
+	for (const allowance of pending) {
+		const units = (value: string) =>
+			decimalToUnits(databaseDecimal(value, "pending allowance"), scale);
+		const current = byFeature.get(allowance.featureKey) ?? {
+			feature_key: allowance.featureKey,
+			unit: allowance.unit,
+			available: 0n,
+			held: 0n,
+			expires_at: null,
+		};
+		current.available +=
+			units(allowance.quantity) -
+			units(allowance.reversed) -
+			units(allowance.consumed) -
+			units(allowance.held);
+		current.held += units(allowance.held);
+		if (
+			allowance.expiresAt !== null &&
+			(current.expires_at === null || allowance.expiresAt > new Date(current.expires_at))
+		) {
+			current.expires_at = allowance.expiresAt;
+		}
+		byFeature.set(allowance.featureKey, current);
+	}
+	return [...byFeature.values()]
+		.sort((left, right) =>
+			left.feature_key < right.feature_key ? -1 : left.feature_key > right.feature_key ? 1 : 0,
+		)
+		.map((row) => ({
+			...row,
+			available: unitsToDecimal(row.available, scale),
+			held: unitsToDecimal(row.held, scale),
+		}));
 }
 
 function iso(value: Date | string): string {

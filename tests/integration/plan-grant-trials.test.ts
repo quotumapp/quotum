@@ -307,6 +307,7 @@ localDescribe("Plan grant trials integration", () => {
 		const api = trialApi();
 		const trial = (await api.start("converter", { planKey: "premium", durationDays: 14 }, "start"))
 			.body.data.trial;
+		await spend("converter", "spend-1");
 
 		await recordAppleSubscription("converter", { expiresInDays: 30, trial: false });
 
@@ -331,32 +332,46 @@ localDescribe("Plan grant trials integration", () => {
 		expect(facts[0]?.count).toBe("0");
 	});
 
-	it("materializes later windows, notices the end once, and expires the trial", async () => {
+	it("opens each window on the first spend in it, notices the end once, and expires the trial", async () => {
 		const api = trialApi();
 		const trial = (await api.start("long_user", { planKey: "premium", durationDays: 60 }, "start"))
 			.body.data.trial;
-		const [grant] = await context.sql<{ next_period_at: Date | null }[]>`
-			SELECT next_period_at FROM plan_grants WHERE id = ${trial.id}::uuid
-		`;
-		expect(grant?.next_period_at).toEqual(new Date(addMonth(trial.startsAt)));
-
-		// Forty days later the second, clamped window has begun.
-		await shiftGrant(trial.id, -40);
-		expect(await context.repository.reconcilePlanGrants(25)).toEqual({
-			expiredPlanGrants: 0,
-			planGrantPeriods: 1,
-			defaultPlanGrants: 0,
-		});
-		const windows = await context.sql<{ period_end_at: Date }[]>`
-			SELECT period_end_at FROM balance_allocations
+		const windows = () => context.sql<{ period_start_at: Date; period_end_at: Date }[]>`
+			SELECT period_start_at, period_end_at FROM balance_allocations
 			WHERE plan_grant_id = ${trial.id}::uuid ORDER BY period_start_at
 		`;
-		expect(windows).toHaveLength(2);
-		expect(await context.repository.reconcilePlanGrants(25)).toEqual({
+		const balance = async () =>
+			(await api.get("/v1/billing-accounts/long_user/balances/ai_credits")).body.data;
+
+		// No allowance row exists until the account spends; a read counts the window in full.
+		expect(await windows()).toHaveLength(0);
+		expect(await balance()).toMatchObject({ granted: "1000", available: "1000" });
+		await spend("long_user", "spend-1");
+		expect((await windows()).map((row) => row.period_end_at.toISOString())).toEqual([
+			addMonth(trial.startsAt),
+		]);
+		expect(await balance()).toMatchObject({ granted: "1000", available: "990" });
+
+		// Forty days later the second, clamped window has begun, and the worker has nothing to do.
+		await shiftGrant(trial.id, -40);
+		const idle = {
 			expiredPlanGrants: 0,
-			planGrantPeriods: 0,
 			defaultPlanGrants: 0,
-		});
+			defaultPlanSkipped: 0,
+			defaultPlanFailedSlices: 0,
+		};
+		expect(await context.repository.reconcilePlanGrants(25)).toEqual(idle);
+		expect(await windows()).toHaveLength(1);
+		expect(await balance()).toMatchObject({ granted: "1000", available: "1000" });
+		await spend("long_user", "spend-2");
+		const [shiftedGrant] = await context.sql<{ ends_at: Date }[]>`
+			SELECT ends_at FROM plan_grants WHERE id = ${trial.id}::uuid
+		`;
+		expect((await windows()).map((row) => row.period_end_at.toISOString())).toEqual([
+			new Date(Date.parse(addMonth(trial.startsAt)) - 40 * 86_400_000).toISOString(),
+			shiftedGrant?.ends_at.toISOString(),
+		]);
+		expect(await balance()).toMatchObject({ granted: "1000", available: "990" });
 
 		// Within three days of the end, one ending notice.
 		await shiftGrant(trial.id, -18);
@@ -389,9 +404,8 @@ localDescribe("Plan grant trials integration", () => {
 			(await api.get(`/v1/billing-accounts/long_user/trials/${trial.id}`)).body.data.status,
 		).toBe("expired");
 		expect(await context.repository.reconcilePlanGrants(25)).toEqual({
+			...idle,
 			expiredPlanGrants: 1,
-			planGrantPeriods: 0,
-			defaultPlanGrants: 0,
 		});
 		const [expired] = await context.sql<{ status: string; ends_at: Date }[]>`
 			SELECT status, ends_at FROM plan_grants WHERE id = ${trial.id}::uuid
@@ -482,15 +496,32 @@ async function recordAppleSubscription(
 	);
 }
 
-/** Moves a grant and its pending window by whole days, as if that much time had passed. */
+/** Moves a grant and its allowances by whole days, as if that much time had passed. */
 async function shiftGrant(grantId: string, days: number): Promise<void> {
 	await context.sql`
 		UPDATE plan_grants
 		SET starts_at = starts_at + ${days} * interval '1 day',
-			ends_at = ends_at + ${days} * interval '1 day',
-			next_period_at = next_period_at + ${days} * interval '1 day'
+			ends_at = ends_at + ${days} * interval '1 day'
 		WHERE id = ${grantId}::uuid
 	`;
+	await context.sql`
+		UPDATE balance_allocations
+		SET period_start_at = period_start_at + ${days} * interval '1 day',
+			period_end_at = period_end_at + ${days} * interval '1 day',
+			expires_at = expires_at + ${days} * interval '1 day'
+		WHERE plan_grant_id = ${grantId}::uuid
+	`;
+}
+
+/** Spends ten credits of the account's allowance. */
+async function spend(billingAccountId: string, idempotencyKey: string): Promise<void> {
+	const result = await context.repository.consumeUsage(integrationProjectContext(), {
+		billingAccountId,
+		featureKey: "model_tokens",
+		quantity: "2000",
+		idempotencyKey,
+	});
+	expect(result.allowed).toBe(true);
 }
 
 async function projectionJob(

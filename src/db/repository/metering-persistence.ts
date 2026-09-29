@@ -34,7 +34,11 @@ import {
 	recordUsageControlEntries,
 	releaseControlHolds,
 } from "./controls-runtime";
-import { defaultPlanTargetSql } from "./default-plan-grants";
+import {
+	defaultPlanPendingSql,
+	defaultPlanTargetSql,
+	previousDefaultGrantSql,
+} from "./default-plan-sql";
 import { enqueueUsageProjection } from "./entitlements";
 import {
 	meterLimitWindowBounds,
@@ -43,6 +47,7 @@ import {
 	startOfUtcMonth,
 	storedCadence,
 } from "./meter-limit-windows";
+import { readPendingAllowances, type WindowAllocation } from "./plan-grant-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import {
@@ -201,13 +206,18 @@ interface MeterLimitRow {
 	period_end_at: Date | string | null;
 }
 
+/**
+ * The meter limits that apply to the account's feature: a paying subscription's, a plan grant's,
+ * or the default plan's when the account would start it on its next write. A null account is one
+ * Quotum has not recorded yet.
+ */
 export function queryMeterLimitRows(
 	executor: QueryExecutor,
 	projectId: string,
 	customerId: string | null,
 	feature: FeatureRow,
 ): Promise<MeterLimitRow[]> {
-	if (customerId === null) return queryDefaultPlanMeterLimitRows(executor, projectId, feature);
+	const customer = drizzleSql`${customerId}::uuid`;
 	return executeRows<MeterLimitRow>(
 		executor,
 		// A paying subscription's limit comes before a plan grant's, which has no payment method and
@@ -249,7 +259,7 @@ export function queryMeterLimitRows(
 					ON pv.project_id = pi.project_id
 					AND pv.id = pi.plan_version_id
 				WHERE s.project_id = ${projectId}
-					AND s.customer_id = ${customerId}
+					AND s.customer_id = ${customer}
 					AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
 					AND (s.expires_at IS NULL OR s.expires_at > now())
 					AND pi.feature_id = ${featureId(feature)}
@@ -280,49 +290,43 @@ export function queryMeterLimitRows(
 					ON pv.project_id = pi.project_id
 					AND pv.id = pi.plan_version_id
 				WHERE g.project_id = ${projectId}
-					AND g.customer_id = ${customerId}
+					AND g.customer_id = ${customer}
 					AND g.status = 'active'
 					AND (g.ends_at IS NULL OR g.ends_at > now())
 					AND pi.feature_id = ${featureId(feature)}
 					AND pi.item_kind = 'meter_limit'
+
+				UNION ALL
+
+				-- The default plan the account starts on its next write, windowed from where its
+				-- previous default-plan grant started, or from now.
+				SELECT
+					pi.id AS plan_item_id,
+					NULL::uuid AS subscription_id,
+					NULL::uuid AS plan_grant_id,
+					pi.quantity,
+					'blocked'::text AS overage_policy,
+					pi.reset_interval,
+					pi.reset_interval_count,
+					pv.billing_interval,
+					pv.billing_interval_count,
+					COALESCE(previous.starts_at, now()) AS period_start_at,
+					NULL::timestamptz AS period_end_at,
+					2 AS source_rank,
+					now() AS sort_at,
+					'' AS sort_id
+				FROM (${defaultPlanTargetSql(projectId)}) target
+				JOIN plan_items pi
+					ON pi.project_id = ${projectId}
+					AND pi.plan_version_id = target.plan_version_id::bigint
+				JOIN plan_versions pv ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
+				LEFT JOIN LATERAL (${previousDefaultGrantSql(projectId, customer)}) previous ON true
+				WHERE pi.feature_id = ${featureId(feature)}
+					AND pi.item_kind = 'meter_limit'
+					AND ${defaultPlanPendingSql(projectId, customer)}
 			) sources
 			ORDER BY source_rank, sort_at, sort_id
 			LIMIT 2
-		`,
-	);
-}
-
-/**
- * The meter limit an account Quotum has not recorded yet would have on the default plan: its
- * window starts now, as the grant it gets on its first write will, and has no usage.
- */
-function queryDefaultPlanMeterLimitRows(
-	executor: QueryExecutor,
-	projectId: string,
-	feature: FeatureRow,
-): Promise<MeterLimitRow[]> {
-	return executeRows<MeterLimitRow>(
-		executor,
-		drizzleSql`
-			SELECT
-				pi.id AS plan_item_id,
-				NULL::uuid AS subscription_id,
-				NULL::uuid AS plan_grant_id,
-				pi.quantity,
-				'blocked'::text AS overage_policy,
-				pi.reset_interval,
-				pi.reset_interval_count,
-				pv.billing_interval,
-				pv.billing_interval_count,
-				now() AS period_start_at,
-				NULL::timestamptz AS period_end_at
-			FROM (${defaultPlanTargetSql(projectId)}) target
-			JOIN plan_items pi
-				ON pi.project_id = ${projectId}
-				AND pi.plan_version_id = target.plan_version_id::bigint
-			JOIN plan_versions pv ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
-			WHERE pi.feature_id = ${featureId(feature)}
-				AND pi.item_kind = 'meter_limit'
 		`,
 	);
 }
@@ -1463,14 +1467,65 @@ export async function validateOccurredAt(
 	}
 }
 
+/**
+ * The account's balance of a feature: its live allocations, plus what its plan grants give in
+ * windows no write has created yet (see `readPendingAllowances`). A null account is one Quotum has
+ * not recorded yet, which holds only the default plan it would start on its first write. The
+ * breakdown lists allocations; a pending allowance counts in the totals only.
+ */
 export async function readBalance(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string | null,
+	feature: FeatureRow,
+	entityId: string | null = null,
+): Promise<MeteringBalance> {
+	const [rows, pending] = await Promise.all([
+		customerId === null
+			? Promise.resolve<AllocationRow[]>([])
+			: readAllocationRows(executor, projectId, customerId, feature, entityId),
+		readPendingAllowances(executor, projectId, customerId, featureId(feature)),
+	]);
+	const balance = rows.length === 0 ? emptyBalance(feature) : balanceFromRows(feature, rows);
+	return withPendingAllowances(balance, feature.credit_scale, pending);
+}
+
+/** Adds allowances no write has created yet to a balance's totals. */
+export function withPendingAllowances(
+	balance: MeteringBalance,
+	scale: number,
+	pending: readonly WindowAllocation[],
+): MeteringBalance {
+	if (pending.length === 0) return balance;
+	const units = (value: string, label: string) =>
+		decimalToUnits(databaseDecimal(value, label, scale), scale);
+	let granted = units(balance.granted, "balance granted");
+	let consumed = units(balance.consumed, "balance consumed");
+	let held = units(balance.held, "balance held");
+	for (const allowance of pending) {
+		granted +=
+			units(allowance.quantity, "pending allowance") -
+			units(allowance.reversed, "pending allowance reversed");
+		consumed += units(allowance.consumed, "pending allowance consumed");
+		held += units(allowance.held, "pending allowance held");
+	}
+	return {
+		...balance,
+		granted: unitsToDecimal(granted, scale),
+		consumed: unitsToDecimal(consumed, scale),
+		held: unitsToDecimal(held, scale),
+		available: unitsToDecimal(granted > consumed + held ? granted - consumed - held : 0n, scale),
+	};
+}
+
+async function readAllocationRows(
 	executor: QueryExecutor,
 	projectId: string,
 	customerId: string,
 	feature: FeatureRow,
-	entityId: string | null = null,
-): Promise<MeteringBalance> {
-	const rows = await executeRows<AllocationRow>(
+	entityId: string | null,
+): Promise<AllocationRow[]> {
+	return await executeRows<AllocationRow>(
 		executor,
 		drizzleSql`
 			SELECT allocation.id, allocation.quantity, allocation.reversed_quantity,
@@ -1493,7 +1548,6 @@ export async function readBalance(
 			ORDER BY allocation.expires_at ASC NULLS LAST, allocation.created_at, allocation.id
 		`,
 	);
-	return rows.length === 0 ? emptyBalance(feature) : balanceFromRows(feature, rows);
 }
 
 export function emptyBalance(feature: FeatureRow): MeteringBalance {

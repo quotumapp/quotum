@@ -2587,7 +2587,7 @@ export const balanceAllocations = pgTable(
 			.on(table.projectId, table.promotionRedemptionId)
 			.where(sql`${table.promotionRedemptionId} IS NOT NULL`),
 		index("idx_billing_balance_allocations_plan_grant")
-			.on(table.projectId, table.planGrantId)
+			.on(table.projectId, table.planGrantId, table.featureId, table.periodStartAt.desc())
 			.where(sql`${table.planGrantId} IS NOT NULL`),
 		check(
 			"balance_allocations_reward_provenance_check",
@@ -5015,7 +5015,6 @@ export const planGrants = pgTable(
 		endsAt: timestamp("ends_at", { withTimezone: true }),
 		endedAt: timestamp("ended_at", { withTimezone: true }),
 		entitlementKeys: text("entitlement_keys").array().notNull().default(sql`ARRAY[]::text[]`),
-		nextPeriodAt: timestamp("next_period_at", { withTimezone: true }),
 		endingNotifiedAt: timestamp("ending_notified_at", { withTimezone: true }),
 		supersededBySubscriptionId: uuid("superseded_by_subscription_id"),
 		supersededByPlanGrantId: uuid("superseded_by_plan_grant_id"),
@@ -5089,7 +5088,7 @@ export const planGrants = pgTable(
 		),
 		check(
 			"plan_grants_state_check",
-			sql`((((status = 'active'::text) AND (ended_at IS NULL) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL) AND (end_idempotency_key IS NULL)) OR ((status = 'expired'::text) AND (ends_at IS NOT NULL) AND (ended_at = ends_at) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL) AND (next_period_at IS NULL)) OR ((status = 'ended'::text) AND (ended_at IS NOT NULL) AND ((ends_at IS NULL) OR (ended_at < ends_at)) AND ((end_idempotency_key IS NOT NULL) OR (origin = 'default'::text)) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL) AND (next_period_at IS NULL)) OR ((status = 'superseded'::text) AND (ended_at IS NOT NULL) AND (next_period_at IS NULL) AND (num_nonnulls(superseded_by_subscription_id, superseded_by_plan_grant_id) = 1))))`,
+			sql`((((status = 'active'::text) AND (ended_at IS NULL) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL) AND (end_idempotency_key IS NULL)) OR ((status = 'expired'::text) AND (ends_at IS NOT NULL) AND (ended_at = ends_at) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL)) OR ((status = 'ended'::text) AND (ended_at IS NOT NULL) AND ((ends_at IS NULL) OR (ended_at < ends_at)) AND ((end_idempotency_key IS NOT NULL) OR (origin = 'default'::text)) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL)) OR ((status = 'superseded'::text) AND (ended_at IS NOT NULL) AND (num_nonnulls(superseded_by_subscription_id, superseded_by_plan_grant_id) = 1))))`,
 		),
 		unique("plan_grants_project_id_id_unique").on(table.projectId, table.id),
 		unique("plan_grants_idempotency_unique").on(
@@ -5135,9 +5134,6 @@ export const planGrants = pgTable(
 		index("idx_billing_plan_grants_due")
 			.on(table.endsAt, table.id)
 			.where(sql`${table.status} = 'active' AND ${table.endsAt} IS NOT NULL`),
-		index("idx_billing_plan_grants_next_period")
-			.on(table.nextPeriodAt, table.id)
-			.where(sql`${table.status} = 'active' AND ${table.nextPeriodAt} IS NOT NULL`),
 		index("idx_billing_plan_grants_customer_created").on(
 			table.projectId,
 			table.customerId,
@@ -5365,6 +5361,9 @@ export const defaultPlanReconciliations = pgTable(
 		afterCustomerId: uuid("after_customer_id"),
 		customersChecked: integer("customers_checked").notNull().default(0),
 		grantsChanged: integer("grants_changed").notNull().default(0),
+		customersSkipped: integer("customers_skipped").notNull().default(0),
+		lastSkippedCustomerId: uuid("last_skipped_customer_id"),
+		lastSkipError: text("last_skip_error"),
 		attempts: integer("attempts").notNull().default(0),
 		nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
 		lastError: text("last_error"),
@@ -5378,6 +5377,7 @@ export const defaultPlanReconciliations = pgTable(
 		),
 		check("default_plan_reconciliations_customers_checked_check", sql`((customers_checked >= 0))`),
 		check("default_plan_reconciliations_grants_changed_check", sql`((grants_changed >= 0))`),
+		check("default_plan_reconciliations_customers_skipped_check", sql`((customers_skipped >= 0))`),
 		check("default_plan_reconciliations_attempts_check", sql`((attempts >= 0))`),
 		check(
 			"default_plan_reconciliations_completion_check",

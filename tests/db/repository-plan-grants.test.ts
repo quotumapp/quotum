@@ -26,8 +26,7 @@ describe("supersedeBasePlanGrants", () => {
 });
 
 describe("default-plan passes", () => {
-	it("backs a pass off by its own id and project after a slice fails, then rethrows", async () => {
-		const failure = new Error("slice failed");
+	it("backs a pass off by its own id and project after a slice fails, and moves on", async () => {
 		const writes: string[] = [];
 		const database = {
 			async execute(query: unknown) {
@@ -40,10 +39,11 @@ describe("default-plan passes", () => {
 					text.includes("FOR UPDATE SKIP LOCKED") &&
 					text.includes("default_plan_reconciliations")
 				) {
-					throw failure;
+					throw new Error("slice failed");
 				}
+				// Once backed off, the pass is no longer due.
 				if (text.includes("FROM default_plan_reconciliations")) {
-					return [{ id: "7", project_id: "project-id" }];
+					return writes.length === 0 ? [{ id: "7", project_id: "project-id" }] : [];
 				}
 				return [];
 			},
@@ -52,11 +52,14 @@ describe("default-plan passes", () => {
 			},
 		};
 
-		const outcome = await new PlanGrantRepository(database as never)
-			.reconcilePlanGrants(25)
-			.catch((error: unknown) => error);
+		const outcome = await new PlanGrantRepository(database as never).reconcilePlanGrants(25);
 
-		expect(outcome).toBe(failure);
+		expect(outcome).toEqual({
+			expiredPlanGrants: 0,
+			defaultPlanGrants: 0,
+			defaultPlanSkipped: 0,
+			defaultPlanFailedSlices: 1,
+		});
 		expect(writes).toHaveLength(1);
 		expect(writes[0]).toMatch(
 			/WHERE project_id = \$\d+\s+AND id = \$\d+::bigint\s+AND status = 'pending'/,

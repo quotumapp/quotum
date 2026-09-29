@@ -153,6 +153,7 @@ describe("BillingRepository Stripe", () => {
 				[{ projection_sequence: 1, billing_account_id: "user-1" }],
 				[],
 				[],
+				[],
 				[{ project_id: "project-id" }],
 			],
 			{ strict: true },
@@ -194,7 +195,7 @@ describe("BillingRepository Stripe", () => {
 		expect(customerLockIndex).toBeGreaterThan(-1);
 		expect(purchaseLockIndex).toBeGreaterThan(customerLockIndex);
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(13);
+		expect(database.queries).toHaveLength(14);
 	});
 
 	it("records Stripe subscription events without synthetic purchase rows", async () => {
@@ -229,8 +230,11 @@ describe("BillingRepository Stripe", () => {
 						metadata: { source: "subscription" },
 					},
 				],
+				// No default plan the account would start.
+				[],
 				[{ project_id: "project-id" }],
 				[{ projection_sequence: 1, billing_account_id: "user-1" }],
+				[],
 				[],
 				[],
 				[{ id: "projection-job-id" }],
@@ -250,7 +254,7 @@ describe("BillingRepository Stripe", () => {
 		});
 
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(18);
+		expect(database.queries).toHaveLength(20);
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("INSERT INTO subscriptions");
 		expect(queries).not.toContain("INSERT INTO purchases");
@@ -278,8 +282,10 @@ describe("BillingRepository Stripe", () => {
 			[],
 			[{ id: "customer-id" }],
 			[],
+			[],
 			[{ project_id: "project-id" }],
 			[{ projection_sequence: 1, billing_account_id: "user-1" }],
+			[],
 			[],
 			[],
 			[{ id: "projection-job-id" }],

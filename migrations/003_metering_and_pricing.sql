@@ -2342,7 +2342,8 @@ CREATE INDEX IF NOT EXISTS idx_billing_promotion_audit_events_promotion_created
 -- A plan grant holds a published plan version without a payment provider. It is its own access
 -- source, never a subscription. A trial holds its plan for a fixed time; the default plan is held
 -- with no end by an account without a paid base plan, and follows the catalog's marker. Its
--- allowances are `reward` allocations linked to it, and none outlives it.
+-- allowances are `reward` allocations linked to it, created for a reset window by the account's
+-- first write in it, and none outlives it.
 CREATE TABLE IF NOT EXISTS plan_grants (
 	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
@@ -2355,14 +2356,14 @@ CREATE TABLE IF NOT EXISTS plan_grants (
 	status TEXT NOT NULL CHECK (status IN ('active', 'expired', 'ended', 'superseded')),
 	duration_unit TEXT CHECK (duration_unit IN ('day', 'month')),
 	duration_count INTEGER CHECK (duration_count BETWEEN 1 AND 730),
+	-- Anchors the grant's reset windows. A default-plan grant that replaces an earlier one keeps
+	-- that grant's start, so the account's windows never move.
 	starts_at TIMESTAMPTZ NOT NULL,
 	ends_at TIMESTAMPTZ,
 	ended_at TIMESTAMPTZ,
 	-- A trial copies them at start from the version's published bindings, so a later publish cannot
 	-- move them; the default plan takes them from the catalog's marker and follows it.
 	entitlement_keys TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
-	-- Start of the next reset window whose allowances are not materialized yet.
-	next_period_at TIMESTAMPTZ,
 	ending_notified_at TIMESTAMPTZ,
 	superseded_by_subscription_id UUID,
 	-- A trial that replaced the default plan.
@@ -2422,13 +2423,11 @@ CREATE TABLE IF NOT EXISTS plan_grants (
 		(status = 'active' AND ended_at IS NULL AND superseded_by_subscription_id IS NULL
 			AND superseded_by_plan_grant_id IS NULL AND end_idempotency_key IS NULL)
 		OR (status = 'expired' AND ends_at IS NOT NULL AND ended_at = ends_at
-			AND superseded_by_subscription_id IS NULL AND superseded_by_plan_grant_id IS NULL
-			AND next_period_at IS NULL)
+			AND superseded_by_subscription_id IS NULL AND superseded_by_plan_grant_id IS NULL)
 		OR (status = 'ended' AND ended_at IS NOT NULL AND (ends_at IS NULL OR ended_at < ends_at)
 			AND (end_idempotency_key IS NOT NULL OR origin = 'default')
-			AND superseded_by_subscription_id IS NULL AND superseded_by_plan_grant_id IS NULL
-			AND next_period_at IS NULL)
-		OR (status = 'superseded' AND ended_at IS NOT NULL AND next_period_at IS NULL
+			AND superseded_by_subscription_id IS NULL AND superseded_by_plan_grant_id IS NULL)
+		OR (status = 'superseded' AND ended_at IS NOT NULL
 			AND num_nonnulls(superseded_by_subscription_id, superseded_by_plan_grant_id) = 1)
 	)
 );
@@ -2450,10 +2449,6 @@ CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_customer_active
 CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_due
 	ON plan_grants (ends_at, id)
 	WHERE status = 'active' AND ends_at IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_next_period
-	ON plan_grants (next_period_at, id)
-	WHERE status = 'active' AND next_period_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_customer_created
 	ON plan_grants (project_id, customer_id, created_at DESC, id DESC);
@@ -2582,6 +2577,10 @@ CREATE TABLE IF NOT EXISTS default_plan_reconciliations (
 	after_customer_id UUID,
 	customers_checked INTEGER NOT NULL DEFAULT 0 CHECK (customers_checked >= 0),
 	grants_changed INTEGER NOT NULL DEFAULT 0 CHECK (grants_changed >= 0),
+	-- Accounts whose change failed; the pass records the last one and moves on without them.
+	customers_skipped INTEGER NOT NULL DEFAULT 0 CHECK (customers_skipped >= 0),
+	last_skipped_customer_id UUID,
+	last_skip_error TEXT,
 	attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
 	next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	last_error TEXT,
@@ -2626,8 +2625,9 @@ ALTER TABLE balance_allocations
 			FOREIGN KEY (project_id, plan_grant_id)
 			REFERENCES plan_grants(project_id, id);
 
+-- A write finds a grant's latest allowance of a feature to tell whether its window is open yet.
 CREATE INDEX IF NOT EXISTS idx_billing_balance_allocations_plan_grant
-	ON balance_allocations (project_id, plan_grant_id)
+	ON balance_allocations (project_id, plan_grant_id, feature_id, period_start_at DESC)
 	WHERE plan_grant_id IS NOT NULL;
 
 ALTER TABLE balance_allocations

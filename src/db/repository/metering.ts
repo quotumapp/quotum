@@ -55,7 +55,6 @@ import {
 	recordUsageControlEntries,
 	scheduleAutoTopupIfNeeded,
 } from "./controls-runtime";
-import { readDefaultPlanAllowance } from "./default-plan-grants";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
 import { storedCadence } from "./meter-limit-windows";
@@ -80,7 +79,6 @@ import {
 	confirmMeterLimitReservation,
 	controlDeniedDecision,
 	deductedRows,
-	emptyBalance,
 	enqueueMeteringProjection,
 	expireSubjectReservations,
 	featureId,
@@ -119,6 +117,8 @@ import {
 	validateFilters,
 	validateOccurredAt,
 } from "./metering-persistence";
+import { openPlanGrantWindows } from "./plan-grant-windows";
+import { catchUpPlanGrants, planGrantsNeedCatchUp } from "./plan-grants";
 import { executeOne, executeRows, jsonb } from "./query";
 import { materializeDueSubscriptionAllocations } from "./subscription-allocation-periods";
 import type { QueryExecutor } from "./types";
@@ -258,9 +258,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 				meterLimit,
 			);
 		}
-		return customer === null
-			? await defaultPlanBalance(this.database, projectId, feature)
-			: await readBalance(this.database, projectId, customer.id, feature, entityId);
+		return await readBalance(this.database, projectId, customer?.id ?? null, feature, entityId);
 	}
 
 	async check(
@@ -320,10 +318,13 @@ export class MeteringBillingRepository extends RepositoryModule {
 		);
 		validateFilters(rate.meter, input.filters);
 		const walletQuantity = await calculateWalletQuantity(this.database, rate, requestedQuantity);
-		const balance =
-			customer === null
-				? await defaultPlanBalance(this.database, projectId, rate.wallet)
-				: await readBalance(this.database, projectId, customer.id, rate.wallet, entityId);
+		const balance = await readBalance(
+			this.database,
+			projectId,
+			customer?.id ?? null,
+			rate.wallet,
+			entityId,
+		);
 		const decision = await buildDecision(
 			this.database,
 			projectId,
@@ -1609,7 +1610,10 @@ async function consumeWithinTransaction(
 	}
 	const rate = await subject.rate();
 	validateFilters(rate.meter, input.filters);
-	const walletQuantity = await calculateWalletQuantity(tx, rate, requestedQuantity);
+	const [walletQuantity] = await Promise.all([
+		calculateWalletQuantity(tx, rate, requestedQuantity),
+		openPlanGrantWindows(tx, projectId, customer.id, featureId(rate.wallet)),
+	]);
 	const rows = await lockAllocations(tx, projectId, customer.id, rate.wallet, entityId);
 	const decision = await buildDecision(
 		tx,
@@ -1754,14 +1758,16 @@ interface MeteringSubject {
 /**
  * Resolves what a usage mutation needs before it locks balances: the feature, the entity, the
  * meter-limit or rate-card decision and, when asked, the alert list. Reads that depend only on
- * the customer and feature identifiers are issued together.
+ * the customer and feature identifiers are issued together, with the check for plan grants the
+ * worker has not caught up with; when there are some, the account is caught up under its lock and
+ * the reads run again, so the write sees what a read already counted.
  */
 async function resolveMeteringSubject(
 	tx: QueryExecutor,
 	projectId: string,
 	customerId: string,
 	input: MeteringSubjectInputFields,
-	options: { alerts: boolean },
+	options: { alerts: boolean; caughtUp?: boolean },
 ): Promise<MeteringSubject> {
 	const feature =
 		input.feature ??
@@ -1775,6 +1781,7 @@ async function resolveMeteringSubject(
 	validateFilters(feature, input.filters);
 	const requestedQuantity = positiveDecimal(input.quantity, "quantity", feature.credit_scale);
 	const [
+		catchUp,
 		meterLimitRows,
 		meterLimitConfigured,
 		pinnedRates,
@@ -1782,6 +1789,9 @@ async function resolveMeteringSubject(
 		purchasedRevision,
 		alerts,
 	] = await Promise.all([
+		options.caughtUp === true
+			? Promise.resolve(false)
+			: planGrantsNeedCatchUp(tx, projectId, customerId),
 		queryMeterLimitRows(tx, projectId, customerId, feature),
 		queryMeterLimitConfigured(tx, projectId, feature),
 		queryPinnedRateCards(tx, projectId, customerId, feature),
@@ -1791,6 +1801,16 @@ async function resolveMeteringSubject(
 			? queryUsageAlerts(tx, { projectId, customerId, entityId, featureId: featureId(feature) })
 			: Promise.resolve<UsageAlertRow[]>([]),
 	]);
+	if (catchUp) {
+		await catchUpPlanGrants(tx, projectId, customerId);
+		return await resolveMeteringSubject(
+			tx,
+			projectId,
+			customerId,
+			{ ...input, feature },
+			{ ...options, caughtUp: true },
+		);
+	}
 	const meterLimit = await meterLimitDecision(
 		tx,
 		projectId,
@@ -1843,7 +1863,10 @@ async function reserveWithinTransaction(
 	}
 	const rate = await subject.rate();
 	validateFilters(rate.meter, input.filters);
-	const walletQuantity = await calculateWalletQuantity(tx, rate, requestedQuantity);
+	const [walletQuantity] = await Promise.all([
+		calculateWalletQuantity(tx, rate, requestedQuantity),
+		openPlanGrantWindows(tx, projectId, customer.id, featureId(rate.wallet)),
+	]);
 	const rows = await lockAllocations(tx, projectId, customer.id, rate.wallet, entityId);
 	const decision = await buildDecision(
 		tx,
@@ -2215,20 +2238,4 @@ function confirmedRows(
 			held_quantity: unitsToDecimal(held - change.release, scale),
 		};
 	});
-}
-
-/**
- * The balance an account Quotum has not recorded yet would start with: the default plan's allowance
- * of the feature, or nothing. Its first write creates the account and that same allowance.
- */
-async function defaultPlanBalance(
-	executor: QueryExecutor,
-	projectId: string,
-	feature: FeatureRow,
-): Promise<MeteringBalance> {
-	const allowance = await readDefaultPlanAllowance(executor, projectId, featureId(feature));
-	const balance = emptyBalance(feature);
-	if (allowance === null) return balance;
-	const quantity = databaseDecimal(allowance, "default plan allowance", feature.credit_scale);
-	return { ...balance, granted: quantity, available: quantity };
 }

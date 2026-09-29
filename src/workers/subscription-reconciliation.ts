@@ -86,8 +86,9 @@ export interface SubscriptionReconciliationRunResult {
 	expiredSubscriptions: number;
 	affectedCustomers: number;
 	expiredPlanGrants: number;
-	planGrantPeriods: number;
 	defaultPlanGrants: number;
+	defaultPlanSkipped: number;
+	defaultPlanFailedSlices: number;
 	trialEndingNotices: number;
 	providerClaimed: number;
 	providerProcessed: number;
@@ -153,8 +154,9 @@ export class SubscriptionReconciliationWorker {
 				expiredSubscriptions: 0,
 				affectedCustomers: 0,
 				expiredPlanGrants: 0,
-				planGrantPeriods: 0,
 				defaultPlanGrants: 0,
+				defaultPlanSkipped: 0,
+				defaultPlanFailedSlices: 0,
 				trialEndingNotices: 0,
 				providerClaimed: subscriptions.length,
 				providerProcessed: 0,
@@ -186,8 +188,9 @@ export class SubscriptionReconciliationWorker {
 			result.affectedCustomers = expired.affectedCustomers;
 			const grants = await this.repository.reconcilePlanGrants(this.batchSize);
 			result.expiredPlanGrants = grants.expiredPlanGrants;
-			result.planGrantPeriods = grants.planGrantPeriods;
 			result.defaultPlanGrants = grants.defaultPlanGrants;
+			result.defaultPlanSkipped = grants.defaultPlanSkipped;
+			result.defaultPlanFailedSlices = grants.defaultPlanFailedSlices;
 			const notices = await this.repository.enqueueTrialEndingNotices(this.batchSize);
 			result.trialEndingNotices = notices.noticedTrials;
 			result.outcome = reconciliationOutcome(result);
@@ -347,10 +350,16 @@ export class SubscriptionReconciliationWorker {
 }
 
 function reconciliationOutcome(
-	result: Pick<SubscriptionReconciliationRunResult, "providerClaimed" | "providerFailed">,
+	result: Pick<
+		SubscriptionReconciliationRunResult,
+		"providerClaimed" | "providerFailed" | "defaultPlanSkipped" | "defaultPlanFailedSlices"
+	>,
 ): SubscriptionReconciliationRunResult["outcome"] {
 	if (result.providerFailed === 0) {
-		return "succeeded";
+		// A default-plan pass that left accounts behind or backed off still ran the rest.
+		return result.defaultPlanSkipped > 0 || result.defaultPlanFailedSlices > 0
+			? "partial"
+			: "succeeded";
 	}
 	return result.providerFailed === result.providerClaimed ? "failed" : "partial";
 }

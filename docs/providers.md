@@ -351,6 +351,11 @@ it expires (reason `expiry_reconciliation`) or is ended early (a stored `usage_c
 entitlement metadata, which describes each entitlement's current source, the fact describes the one
 subscription or grant whose trial is ending or has ended.
 
+Each balance reports `periodEndsAt`, the end of its earliest allowance or meter-limit window. A
+plan grant's allowance (a trial's or the default plan's) resets without a delivery, as a meter-limit
+window does, so a snapshot's balance holds until its `periodEndsAt`; the next delivery, or a
+balance read, reports the new window.
+
 Purchase, provider-webhook and reconciliation projections are delivered per event. Usage-driven
 projections are coalesced: one delivery per billing account covers every consume, reservation and
 confirmation since the previous one, is sent after the project's debounce

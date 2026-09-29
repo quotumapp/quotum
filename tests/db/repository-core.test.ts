@@ -34,7 +34,10 @@ describe("BillingRepository core", () => {
 			],
 		});
 		const queries = database.queries.join("\n");
-		expect(queries).not.toContain("FROM projects");
+		// The only project read is the published default plan, by the context's id.
+		expect(queries.match(/FROM projects/g)?.length).toBe(
+			queries.match(/FROM projects project\s+JOIN catalog_revisions/g)?.length,
+		);
 		expect(queries).toContain("FROM entitlements");
 		expect(queries).not.toContain("FROM billing.entitlements");
 		expect(queries).toContain("e.project_id = $1");
