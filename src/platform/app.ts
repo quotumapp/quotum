@@ -909,8 +909,10 @@ export function createMerchantApp({
 			}
 			for (const field of ["callbackURL", "errorCallbackURL", "newUserCallbackURL"]) {
 				if (input[field] !== undefined) {
-					const url = new URL(String(input[field]), store.config.origin);
+					// A value that is not a URL at all is refused like a foreign one, not as a 503.
+					const url = URL.parse(String(input[field]), store.config.origin);
 					if (
+						url === null ||
 						url.origin !== store.config.origin ||
 						!["/auth/callback", "/auth/error"].includes(url.pathname)
 					)
