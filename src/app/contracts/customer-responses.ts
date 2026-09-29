@@ -187,6 +187,18 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 					]),
 				}),
 			]),
+			carryOver: z.union([
+				z.null(),
+				z.object({
+					features: z.array(
+						z.object({
+							featureKey: z.string(),
+							balance: z.object({ carried: z.boolean(), quantity: z.string() }),
+							usage: z.object({ carried: z.boolean(), quantity: z.string() }),
+						}),
+					),
+				}),
+			]),
 			effectiveMode: z.union([z.null(), z.literal("immediate"), z.literal("period_end")]),
 			effectiveAt: z.union([z.null(), z.string()]),
 			prorationBehavior: z.union([

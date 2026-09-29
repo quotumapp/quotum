@@ -136,6 +136,18 @@ function previewService(recurringPlan: StripeRecurringCheckoutPlan = plan): {
 		previewSubscriptionCancellation() {
 			return Promise.resolve(cancellation);
 		},
+		previewSubscriptionCarryOver(input) {
+			// Echoes what reached the repository, so a test sees the canonical choice.
+			return Promise.resolve({
+				features: [...new Set([...input.carryOver.balances, ...input.carryOver.usages])].map(
+					(featureKey) => ({
+						featureKey,
+						balance: { carried: input.carryOver.balances.includes(featureKey), quantity: "0" },
+						usage: { carried: input.carryOver.usages.includes(featureKey), quantity: "0" },
+					}),
+				),
+			});
+		},
 		createCommercialActionPreview(draft: CommercialPreviewDraft) {
 			drafts.push(draft);
 			return Promise.resolve({
@@ -165,6 +177,72 @@ function previewService(recurringPlan: StripeRecurringCheckoutPlan = plan): {
 	});
 	return { service, drafts };
 }
+
+describe("subscription change carry-over", () => {
+	const base = {
+		kind: "subscription_change" as const,
+		externalSubscriptionId: "sub_123",
+		targetPlanKey: plan.planKey,
+		quantities: {},
+	};
+
+	it("hashes a canonical choice, keeps the earlier hash without one and previews each feature", async () => {
+		const { service, drafts } = previewService();
+
+		const carried = await service.previewCommercialAction({
+			billingAccountId,
+			intent: {
+				...base,
+				carryOver: { balances: [" credits", "credits"], usages: ["tokens", "credits"] },
+			},
+		});
+		await service.previewCommercialAction({
+			billingAccountId,
+			intent: { ...base, carryOver: { balances: [], usages: [] } },
+		});
+
+		expect(drafts[0]?.intentHash).toBe(
+			sha256Hex(
+				stableJson({
+					...base,
+					carryOver: { balances: ["credits"], usages: ["credits", "tokens"] },
+				}),
+			),
+		);
+		expect(drafts[1]?.intentHash).toBe(sha256Hex(stableJson(base)));
+		expect(carried.carryOver).toEqual({
+			features: [
+				{
+					featureKey: "credits",
+					balance: { carried: true, quantity: "0" },
+					usage: { carried: true, quantity: "0" },
+				},
+				{
+					featureKey: "tokens",
+					balance: { carried: false, quantity: "0" },
+					usage: { carried: true, quantity: "0" },
+				},
+			],
+		});
+		expect(drafts[1]?.preview.carryOver).toBeNull();
+	});
+
+	it("refuses a carry-over on a change that takes effect at period end", async () => {
+		const { service } = previewService();
+		change.effectiveMode = "period_end";
+		try {
+			const refused = await service
+				.previewCommercialAction({
+					billingAccountId,
+					intent: { ...base, carryOver: { balances: ["credits"] } },
+				})
+				.catch((error: unknown) => error);
+			expect(refused).toMatchObject({ code: "CARRY_OVER_REQUIRES_IMMEDIATE_CHANGE", status: 400 });
+		} finally {
+			change.effectiveMode = "immediate";
+		}
+	});
+});
 
 describe("commercial preview provider", () => {
 	it("reports the declared provider for every action and hashes only the intent", async () => {

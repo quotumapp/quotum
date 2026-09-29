@@ -507,6 +507,7 @@ describe("billing app", () => {
 				nextCycle: null,
 				cancellation: null,
 				paymentSetup: null,
+				carryOver: null,
 				effectiveMode: null,
 				effectiveAt: null,
 				prorationBehavior: null,

@@ -1,6 +1,7 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type { SubscriptionStatus } from "../../billing/types";
 import { resetSplitsBillingPeriodSql } from "./cadence-sql";
+import { carryOverAllowances } from "./carry-over";
 import { supersedeBasePlanGrants } from "./plan-grants";
 import { executeOne, executeRows, jsonb } from "./query";
 import { materializeSubscriptionResetAllocations } from "./subscription-allocation-periods";
@@ -29,6 +30,8 @@ async function resolveSubscriptionPlanVersion(
 	changeId: string | null;
 	/** The version the subscription held before this sync; null when it had none. */
 	previousPlanVersionId: string | null;
+	/** What the applied immediate change moving the version carries over; null otherwise. */
+	carryOver: { balances: string[]; usages: string[] } | null;
 } | null> {
 	const row = await executeOne<{
 		current_version_id: string | number | bigint | null;
@@ -41,6 +44,8 @@ async function resolveSubscriptionPlanVersion(
 		change_synchronized_at: Date | string | null;
 		change_version_id: string | number | bigint | null;
 		change_revision_id: string | number | bigint | null;
+		change_effective_mode: "immediate" | "period_end" | null;
+		change_carry_over: { balances?: string[]; usages?: string[] } | null;
 	}>(
 		executor,
 		drizzleSql`
@@ -54,7 +59,9 @@ async function resolveSubscriptionPlanVersion(
 				applied_change.id AS change_id,
 				applied_change.synchronized_at AS change_synchronized_at,
 				change_version.id AS change_version_id,
-				change_version.catalog_revision_id AS change_revision_id
+				change_version.catalog_revision_id AS change_revision_id,
+				applied_change.effective_mode AS change_effective_mode,
+				applied_change.carry_over AS change_carry_over
 			FROM subscriptions subscription
 			LEFT JOIN plan_versions current_version
 				ON current_version.project_id = subscription.project_id
@@ -69,7 +76,7 @@ async function resolveSubscriptionPlanVersion(
 				AND binding_version.status = 'published'
 			LEFT JOIN LATERAL (
 				SELECT change.id, change.from_plan_version_id, change.to_plan_version_id,
-					change.synchronized_at
+					change.synchronized_at, change.effective_mode, change.carry_over
 				FROM subscription_changes change
 				WHERE change.project_id = subscription.project_id
 					AND change.subscription_id = subscription.id
@@ -109,7 +116,7 @@ async function resolveSubscriptionPlanVersion(
 	if (current === null) {
 		return binding === null
 			? null
-			: { ...binding, changed: true, changeId, previousPlanVersionId: null };
+			: { ...binding, changed: true, changeId, previousPlanVersionId: null, carryOver: null };
 	}
 	const previousPlanVersionId = current.planVersionId;
 	// 2. Only the latest applied change can move the pinned version. Filtering by its source
@@ -122,6 +129,10 @@ async function resolveSubscriptionPlanVersion(
 			changed: true,
 			changeId,
 			previousPlanVersionId,
+			carryOver:
+				changeId !== null && row.change_effective_mode === "immediate"
+					? appliedCarryOver(row.change_carry_over)
+					: null,
 		};
 	}
 	// 3. A product of another plan is a provider-side switch, so its bound version applies.
@@ -135,10 +146,19 @@ async function resolveSubscriptionPlanVersion(
 			changed: binding.planVersionId !== current.planVersionId,
 			changeId,
 			previousPlanVersionId,
+			carryOver: null,
 		};
 	}
 	// 4. Otherwise the subscription stays grandfathered on its pinned version.
-	return { ...current, changed: false, changeId, previousPlanVersionId };
+	return { ...current, changed: false, changeId, previousPlanVersionId, carryOver: null };
+}
+
+function appliedCarryOver(
+	stored: { balances?: string[]; usages?: string[] } | null,
+): { balances: string[]; usages: string[] } | null {
+	const balances = stored?.balances ?? [];
+	const usages = stored?.usages ?? [];
+	return balances.length === 0 && usages.length === 0 ? null : { balances, usages };
 }
 
 export async function materializeSubscriptionAllocations(
@@ -185,18 +205,13 @@ export async function materializeSubscriptionAllocations(
 				RETURNING id
 			`,
 		);
-		if (
-			version.previousPlanVersionId !== null &&
-			version.previousPlanVersionId !== version.planVersionId
-		) {
-			await endOutgoingPlanAllowances(
-				executor,
-				input.projectId,
-				input.subscriptionId,
-				version.previousPlanVersionId,
-			);
-		}
 	}
+	const outgoingPlanVersionId =
+		version.changed &&
+		version.previousPlanVersionId !== null &&
+		version.previousPlanVersionId !== version.planVersionId
+			? version.previousPlanVersionId
+			: null;
 
 	if (!allocationFundingStatuses.has(input.status)) {
 		if (input.status === "refunded" || input.status === "revoked") {
@@ -208,6 +223,14 @@ export async function materializeSubscriptionAllocations(
 					WHERE project_id = ${input.projectId}
 						AND subscription_id = ${input.subscriptionId}
 				`,
+			);
+		}
+		if (outgoingPlanVersionId !== null) {
+			await endOutgoingPlanAllowances(
+				executor,
+				input.projectId,
+				input.subscriptionId,
+				outgoingPlanVersionId,
 			);
 		}
 		return 0;
@@ -314,6 +337,29 @@ export async function materializeSubscriptionAllocations(
 		input.projectId,
 		input.subscriptionId,
 	);
+	if (outgoingPlanVersionId !== null) {
+		// Carry needs the incoming allowances granted and the outgoing ones still live.
+		if (version.carryOver !== null && version.changeId !== null) {
+			await carryOverAllowances(executor, {
+				projectId: input.projectId,
+				customerId: input.customerId,
+				subscriptionId: input.subscriptionId,
+				changeId: version.changeId,
+				outgoingPlanVersionId,
+				incomingPlanVersionId: version.planVersionId,
+				balances: version.carryOver.balances,
+				usages: version.carryOver.usages,
+				periodStartAt: input.periodStartAt,
+				periodEndAt: input.periodEndAt,
+			});
+		}
+		await endOutgoingPlanAllowances(
+			executor,
+			input.projectId,
+			input.subscriptionId,
+			outgoingPlanVersionId,
+		);
+	}
 	return inserted.length + resetWindows.granted;
 }
 

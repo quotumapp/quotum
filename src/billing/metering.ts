@@ -86,6 +86,8 @@ export interface BalanceAllocationBreakdown {
 	sourceKind: string;
 	sourceKey: string;
 	rolloverOriginAllocationId: string | null;
+	/** The outgoing plan allowance a plan change carried this quantity from. */
+	carryOverOriginAllocationId: string | null;
 	rolloverPolicyRevision: number | null;
 	quantity: string;
 	reversed: string;

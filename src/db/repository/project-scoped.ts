@@ -1,6 +1,7 @@
 import type {
 	CommercialActionExecutionResult,
 	CommercialActionPreview,
+	CommercialPreviewCarryOver,
 	CommercialPreviewDraft,
 	StoredCommercialActionPreview,
 } from "../../billing/commercial";
@@ -117,6 +118,12 @@ export class ProjectScopedBillingRepository {
 		externalSubscriptionId: string;
 	}): Promise<SubscriptionCancellationContext> {
 		return await this.repository.previewSubscriptionCancellation(this.project, input);
+	}
+
+	async previewSubscriptionCarryOver(
+		input: Parameters<BillingRepository["previewSubscriptionCarryOver"]>[1],
+	): Promise<CommercialPreviewCarryOver> {
+		return await this.repository.previewSubscriptionCarryOver(this.project, input);
 	}
 
 	async createCommercialActionPreview(

@@ -4,6 +4,12 @@ import type { StripeProrationBehavior } from "./pricing";
 import type { CommercialPromotion, PromotionDiscountDuration } from "./promotions";
 import type { BillingProvider } from "./types";
 
+/** Feature keys whose allowance or usage an immediate plan change carries over. */
+export interface CommercialCarryOver {
+	balances?: string[];
+	usages?: string[];
+}
+
 export type CommercialActionIntent =
 	| {
 			kind: "checkout_plan";
@@ -34,6 +40,11 @@ export type CommercialActionIntent =
 			effectiveMode?: "immediate" | "period_end";
 			prorationBehavior?: StripeProrationBehavior;
 			promotionCode?: string | null;
+			/**
+			 * Consumable features whose unused allowance (`balances`) or usage this period (`usages`)
+			 * an immediate change carries into the new plan version; by default neither carries.
+			 */
+			carryOver?: CommercialCarryOver;
 	  }
 	| {
 			kind: "cancel";
@@ -107,6 +118,20 @@ export interface CommercialPreviewNextCycle {
 }
 
 /**
+ * What an immediate plan change would carry into the new version, per named feature. Quantities are
+ * the live figures when previewed; execution carries what the outgoing allowances hold at the switch.
+ */
+export interface CommercialPreviewCarryOver {
+	features: Array<{
+		featureKey: string;
+		/** Unused quantity of the outgoing plan's live allowances. */
+		balance: { carried: boolean; quantity: string };
+		/** Usage this period, deducted from the new allowance up to what it grants. */
+		usage: { carried: boolean; quantity: string };
+	}>;
+}
+
+/**
  * The effects a cancel or uncancel preview reports. Access and entitlements end together; plan
  * allocations already granted for the paid period keep their own expiry, and postpaid usage in the
  * open period is not accelerated, so it settles when that window ends.
@@ -174,6 +199,7 @@ export interface CommercialActionPreview {
 	nextCycle: CommercialPreviewNextCycle | null;
 	cancellation: CommercialPreviewCancellation | null;
 	paymentSetup: CommercialPreviewPaymentSetup | null;
+	carryOver: CommercialPreviewCarryOver | null;
 	effectiveMode: "immediate" | "period_end" | null;
 	effectiveAt: string | null;
 	prorationBehavior: StripeProrationBehavior | null;

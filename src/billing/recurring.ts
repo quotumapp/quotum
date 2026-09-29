@@ -1,4 +1,5 @@
 import type { BillingCadenceUnit } from "../shared/cadence";
+import type { CommercialCarryOver } from "./commercial";
 import type { StripeProrationBehavior } from "./pricing";
 import type { BillingProvider, SubscriptionStatus } from "./types";
 
@@ -11,6 +12,8 @@ export interface SubscriptionChangeInput {
 	prorationBehavior?: StripeProrationBehavior;
 	idempotencyKey: string;
 	expectedStateFingerprint?: string;
+	/** Features an immediate change carries into the new version; applied at the switch. */
+	carryOver?: Required<CommercialCarryOver>;
 	/** A validated discount to reserve with the change and apply to the Stripe subscription. */
 	promotion?: {
 		promotionCodeId: string;

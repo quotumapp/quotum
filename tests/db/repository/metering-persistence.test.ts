@@ -154,6 +154,7 @@ describe("reservation confirmation plan", () => {
 			reversed_at: null,
 			entity_external_id: null,
 			rollover_origin_allocation_id: null,
+			carry_over_origin_allocation_id: null,
 			rollover_policy_revision: null,
 			period_start_at: null,
 			period_end_at: null,

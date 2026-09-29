@@ -122,6 +122,7 @@ describe("baseline schema files", () => {
 			"administrative_debit_allocations",
 			"catalog_default_plans",
 			"default_plan_reconciliations",
+			"carried_usages",
 		]) {
 			expect(metering).toContain(`CREATE TABLE IF NOT EXISTS ${table} (`);
 		}
