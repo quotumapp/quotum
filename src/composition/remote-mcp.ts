@@ -283,6 +283,9 @@ export function createRemoteMcpApp(options: {
 				token_endpoint_auth_methods_supported: ["none"],
 				revocation_endpoint_auth_methods_supported: ["none"],
 				code_challenge_methods_supported: ["S256"],
+				// The authorization endpoint is on the UI origin, so clients that bind a callback to
+				// its issuer (RFC 9207) need this before they accept the split; every callback carries `iss`.
+				authorization_response_iss_parameter_supported: true,
 				scopes_supported: MCP_SCOPES,
 				client_id_metadata_document_supported: true,
 			}),
