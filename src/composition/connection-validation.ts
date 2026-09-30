@@ -14,6 +14,7 @@ import {
 	stripeProjectConfigSchema,
 } from "../projects/config";
 import {
+	DestinationError,
 	type DestinationPolicy,
 	type DestinationPostDependencies,
 	postToDestination,
@@ -154,16 +155,28 @@ export function createConnectionValidation({
 				const secret = input.secrets.projectionSecret;
 				if (!secret)
 					throw new MerchantError("CONNECTION_INVALID", "Generate a receiver secret first.");
-				const response = await postToDestination(
-					url.toString(),
-					body,
-					{
-						authorization: `Bearer ${secret}`,
-						"content-type": "application/json",
-						...createProjectionSignatureHeaders({ secret, body, now: () => new Date() }),
-					},
-					{ ...destinationDependencies, policy: destinationPolicy },
-				);
+				let response: { status: number; body: string };
+				try {
+					response = await postToDestination(
+						url.toString(),
+						body,
+						{
+							authorization: `Bearer ${secret}`,
+							"content-type": "application/json",
+							...createProjectionSignatureHeaders({ secret, body, now: () => new Date() }),
+						},
+						{ ...destinationDependencies, policy: destinationPolicy },
+					);
+				} catch (error) {
+					if (!(error instanceof DestinationError)) throw error;
+					// One answer for a refused address and an unreachable one, so validation cannot
+					// tell which private names resolve.
+					throw new MerchantError(
+						"PROJECTION_RECEIVER_UNREACHABLE",
+						"Quotum could not reach the receiver. Check that its address is allowed and that it answers within 10 seconds.",
+						422,
+					);
+				}
 				let result: unknown;
 				try {
 					result = JSON.parse(response.body);

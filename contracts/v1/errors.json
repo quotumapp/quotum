@@ -844,6 +844,12 @@
       ]
     },
     {
+      "code": "PROJECTION_RECEIVER_UNREACHABLE",
+      "sources": [
+        "src/composition/connection-validation.ts"
+      ]
+    },
+    {
       "code": "PROJECTION_VERIFICATION_FAILED",
       "sources": [
         "src/composition/connection-validation.ts"

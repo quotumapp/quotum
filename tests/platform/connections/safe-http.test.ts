@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import type { request as httpRequest, IncomingMessage } from "node:http";
 import type { request as httpsRequest } from "node:https";
 import {
+	DestinationError,
 	type DestinationPolicy,
 	isPublicAddress,
 	parseAllowedNetworks,
@@ -263,6 +264,38 @@ it("rejects oversized responses, request errors, and timeouts", async () => {
 			},
 		),
 	).rejects.toThrow("Receiver request failed");
+});
+
+it("reports every refused or unreachable destination as a DestinationError", async () => {
+	const refused = await publicHttpsPost(
+		"https://internal.example.com",
+		"body",
+		{},
+		{ lookup: async () => [{ address: "10.0.0.1", family: 4 }] },
+	).catch((error: unknown) => error);
+	expect(refused).toBeInstanceOf(DestinationError);
+	expect((refused as Error).message).toBe("A public HTTPS destination is required");
+
+	const unresolved = await publicHttpsPost(
+		"https://missing.example.com",
+		"body",
+		{},
+		{
+			lookup: async () => {
+				throw new Error("getaddrinfo ENOTFOUND missing.example.com");
+			},
+		},
+	).catch((error: unknown) => error);
+	expect(unresolved).toBeInstanceOf(DestinationError);
+	// The resolver's reason stays in the message for delivery logs.
+	expect((unresolved as Error).message).toBe(
+		"Destination lookup failed: getaddrinfo ENOTFOUND missing.example.com",
+	);
+
+	const scheme = await publicHttpsPost("http://example.com", "body", {}).catch(
+		(error: unknown) => error,
+	);
+	expect(scheme).toBeInstanceOf(DestinationError);
 });
 
 it("approves only private networks for receivers", () => {
