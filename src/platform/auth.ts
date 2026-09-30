@@ -287,6 +287,16 @@ export function createMerchantAuth(
 							code: "INVALID_TWO_FACTOR_COOKIE",
 							message: "Enter your password again to request a code.",
 						});
+					// Verification would refuse any code until the lockout ends, so send none. The
+					// application clock matches the plugin's own lockout check.
+					const [locked] =
+						await store.sql`SELECT 1 FROM platform_auth_two_factors WHERE user_id=${proof.value} AND locked_until>${new Date()}`;
+					if (locked)
+						throw new APIError("TOO_MANY_REQUESTS", {
+							code: "ACCOUNT_TEMPORARILY_LOCKED",
+							message:
+								"Too many failed verification attempts. Your account is temporarily locked. Please try again later.",
+						});
 					try {
 						await store.rateLimit(`otp:cooldown:${proof.value}`, 1, 30_000);
 						await store.rateLimit(`otp:quarter:${proof.value}`, 3, 15 * 60_000);

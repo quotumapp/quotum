@@ -572,6 +572,13 @@ export function createMerchantApp({
 		"/api/platform/invitations/preview",
 		async ({ body, request, set }) => {
 			const input = postApiPlatformInvitationsPreviewBodySchema.parse(body);
+			// A preview with a token registers a link, like a signup intent; bound them the same way.
+			if (input.token)
+				await store.rateLimit(
+					`invitation-preview:${request.headers.get("x-quotum-client-ip") ?? "unknown"}`,
+					20,
+					60 * 60_000,
+				);
 			let identity: MerchantIdentity | null = null;
 			if (cookieValue(request.headers, SESSION_COOKIE)) {
 				try {

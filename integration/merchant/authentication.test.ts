@@ -229,6 +229,12 @@ describe("real Better Auth merchant authentication", () => {
 		expect(factor.locked_until.getTime() - Date.now()).toBeGreaterThan(14 * 60_000);
 		expect((await browser.request("/api/auth/two-factor/verify-otp", { code })).status).toBe(429);
 		expect((await browser.request("/api/platform/session/exchange", {})).status).toBe(401);
+		// A locked account is not sent a code it cannot use.
+		const sent = f.mailer.messages.length;
+		f.advance(31_000);
+		const send = await browser.request("/api/auth/two-factor/send-otp", {});
+		expect([send.status, (await send.json()).code]).toEqual([429, "ACCOUNT_TEMPORARILY_LOCKED"]);
+		expect(f.mailer.messages).toHaveLength(sent);
 	});
 	it("rejects expired OTPs and trusted devices without issuing an authenticated session", async () => {
 		const owner = new MerchantBrowser(f);

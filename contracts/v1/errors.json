@@ -7,6 +7,12 @@
       ]
     },
     {
+      "code": "ACCOUNT_TEMPORARILY_LOCKED",
+      "sources": [
+        "src/platform/auth.ts"
+      ]
+    },
+    {
       "code": "ACTION_MISMATCH",
       "sources": [
         "src/platform/step-up.ts"

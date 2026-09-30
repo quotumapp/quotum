@@ -293,10 +293,14 @@ export class MerchantTeam {
 		return this.store.idempotent(identity, key, ["invitation.revoke", id, slug], async (tx) => {
 			const member = await this.store.membership(tx, identity.principalId, slug, true);
 			requireCapability(member.role, "team.manage");
-			const rows =
-				await tx`UPDATE platform_invitations SET status='revoked' WHERE id=${id} AND organization_id=${member.organization_id} AND status<>'used' RETURNING id`;
-			if (!rows.length)
+			const [invitation] = await tx<
+				{ status: string }[]
+			>`SELECT status FROM platform_invitations WHERE id=${id} AND organization_id=${member.organization_id} FOR UPDATE`;
+			if (!invitation || invitation.status === "used")
 				throw new MerchantError("INVITATION_NOT_FOUND", "Invitation not found.", 404);
+			// Revoking again changes nothing, so it records nothing.
+			if (invitation.status === "revoked") return { status: "revoked" };
+			await tx`UPDATE platform_invitations SET status='revoked' WHERE id=${id}`;
 			await this.store.audit(
 				tx,
 				identity.principalId,
