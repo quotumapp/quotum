@@ -75,6 +75,15 @@ describe("operator grant input", () => {
 		).toThrow("reason must contain between 1 and 500 characters");
 	});
 
+	it("counts the reason in characters, as the column does", () => {
+		expect(normalizeOperatorGrantInput({ ...grantInput, reason: "🎁".repeat(500) }).reason).toBe(
+			"🎁".repeat(500),
+		);
+		expect(() => normalizeOperatorGrantInput({ ...grantInput, reason: "🎁".repeat(501) })).toThrow(
+			"reason must contain between 1 and 500 characters",
+		);
+	});
+
 	it("hashes a revocation by grant and reason", () => {
 		const revoke = {
 			billingAccountId: "acct_1",

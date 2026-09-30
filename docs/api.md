@@ -1088,8 +1088,10 @@ one grant conflicts on another.
   an optional `entityId` and an optional future `expiresAt`. It gives the account one allocation
   with `sourceKind: "operator"`, spent in the usual order, and never records a payment. The feature
   must be a consumable that usage spends: a rate card's wallet, or a feature a plan allocates that
-  no published rate card prices as a meter. A meter a rate card charges to its wallet, or a
-  consumable nothing prices, answers `OPERATOR_GRANT_FEATURE_INVALID`. The quantity must fit its
+  no published rate card prices as a meter. A meter a rate card charges to its wallet, a
+  consumable nothing prices, or a boolean or non-consumable feature answers
+  `OPERATOR_GRANT_FEATURE_INVALID`; a key that names no active feature answers
+  `404 FEATURE_NOT_FOUND`. The quantity must fit its
   credit scale. It creates the customer when needed and returns `201` with the grant. A grant
   carries its allocation's consumed, held, reversed and available quantity, and its `status` is
   `active`, `expired` or `revoked`. A feature that the account's plan caps with a meter limit is
@@ -1109,6 +1111,11 @@ one grant conflicts on another.
   returns `ADMINISTRATIVE_DEBIT_EXCEEDS_AVAILABLE`, and the error `details` carry the
   `allocationId` and its `available` quantity. A debit needs an existing account
   (`BILLING_ACCOUNT_NOT_FOUND`).
+
+The two lists, `GET .../operator-grants/:billingAccountId` and
+`GET .../administrative-debits/:billingAccountId`, page newest first with `cursor` and `limit`
+(default 25, at most 100). A `reason` counts characters, so 500 emoji fit. Every `/v1` list reads
+its `limit` in decimal digits only: `0x2`, `1e1` or `2.0` answer `400 INVALID_REQUEST`.
 
 Each change enqueues the coalesced `usage_changed` projection, as promotion grants do. A revoked
 promotion reward reports only the quantity its revocation took, net of an earlier debit.

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BillingError } from "../billing/errors";
 import { decodeUsageCursor, encodeUsageCursor } from "../billing/insights";
 import { operationDetail } from "../shared/http";
-import { storableDateTimeSchema } from "../shared/input-bounds";
+import { decimalDigitsQuery, storableDateTimeSchema } from "../shared/input-bounds";
 import * as responses from "./contracts/insights-responses";
 import { privateProject } from "./request-context";
 import type { BillingElysia, BillingInsightsServiceLike } from "./types";
@@ -14,7 +14,7 @@ const usageEventsFilterFields = {
 	operation: z.enum(["consume", "confirm", "correction"]).optional(),
 	from: storableDateTimeSchema().optional(),
 	to: storableDateTimeSchema().optional(),
-	limit: z.coerce.number().int().min(1).max(200).default(50),
+	limit: decimalDigitsQuery(z.coerce.number().int().min(1).max(200).default(50)),
 	cursor: z.string().trim().min(1).optional(),
 };
 export const usageEventsQuerySchema = z.object(usageEventsFilterFields).strict();

@@ -169,7 +169,8 @@ export function balanceAdjustmentError(
 
 function requireReason(value: string): string {
 	const reason = value.trim();
-	if (reason === "" || reason.length > adjustmentReasonMaxLength) {
+	// Characters, as the reason column's `char_length` counts them, not UTF-16 units.
+	if (reason === "" || [...reason].length > adjustmentReasonMaxLength) {
 		throw new InvalidRequestError(
 			`reason must contain between 1 and ${adjustmentReasonMaxLength} characters`,
 		);

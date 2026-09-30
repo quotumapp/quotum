@@ -2,6 +2,7 @@ import { z } from "zod";
 import { InvalidRequestError } from "../billing/errors";
 import { type TrialServiceLike, trialDurationMaxDays } from "../billing/plan-grants";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
+import { decimalDigitsQuery } from "../shared/input-bounds";
 import * as responses from "./contracts/trial-responses";
 import { requirePromotionIdempotencyKey } from "./promotion-routes";
 import { privateProject, rejectCallerProjectSelectorBody } from "./request-context";
@@ -30,7 +31,7 @@ const endTrialBodySchema = z
 
 const listTrialsQuerySchema = z
 	.object({
-		limit: z.coerce.number().int().positive().max(100).default(25),
+		limit: decimalDigitsQuery(z.coerce.number().int().positive().max(100).default(25)),
 		cursor: z.string().trim().min(1).optional(),
 	})
 	.strict();

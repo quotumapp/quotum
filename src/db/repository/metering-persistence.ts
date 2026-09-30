@@ -166,6 +166,17 @@ export async function requireMeteredFeature(
 	projectId: string,
 	key: string,
 ): Promise<FeatureRow> {
+	const row = await requireActiveFeature(executor, projectId, key);
+	if (row.kind !== "metered") throw meteredFeatureNotFound(row.key);
+	return row;
+}
+
+/** An active feature of any kind; callers that need a meter check `kind` themselves. */
+export async function requireActiveFeature(
+	executor: QueryExecutor,
+	projectId: string,
+	key: string,
+): Promise<FeatureRow> {
 	const normalizedKey = key.trim();
 	if (normalizedKey === "") {
 		throw new InvalidRequestError("featureKey is required");
@@ -181,13 +192,12 @@ export async function requireMeteredFeature(
 			LIMIT 1
 		`,
 	);
-	if (row === null || row.kind !== "metered") {
-		throw new NotFoundBillingError(
-			`Metered feature ${normalizedKey} was not found`,
-			"FEATURE_NOT_FOUND",
-		);
-	}
+	if (row === null) throw meteredFeatureNotFound(normalizedKey);
 	return row;
+}
+
+function meteredFeatureNotFound(key: string): NotFoundBillingError {
+	return new NotFoundBillingError(`Metered feature ${key} was not found`, "FEATURE_NOT_FOUND");
 }
 
 interface MeterLimitRow {

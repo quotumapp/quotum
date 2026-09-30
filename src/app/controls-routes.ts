@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ControlsEnterpriseRepositoryLike } from "../billing/controls";
+import { InvalidRequestError } from "../billing/errors";
 import { billingProviders } from "../billing/types";
 import { cadenceUnits, maxCadenceCount } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
@@ -288,6 +289,9 @@ export function registerControlsRoutes({
 		"/v1/billing-accounts/:billingAccountId/usage-alert-events",
 		async ({ params, project, request }) => {
 			const rawLimit = new URL(request.url).searchParams.get("limit");
+			// Decimal digits only: `Number()` would also read `0x2` or `1e1`.
+			if (rawLimit !== null && !/^\d+$/.test(rawLimit))
+				throw new InvalidRequestError("limit must be between 1 and 500");
 			const limit = rawLimit === null ? 100 : Number(rawLimit);
 			return {
 				success: true,

@@ -5,7 +5,7 @@ import {
 	type BalanceAdjustmentServiceLike,
 } from "../billing/balance-adjustments";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
-import { isBigintId, storableDateTimeSchema } from "../shared/input-bounds";
+import { decimalDigitsQuery, isBigintId, storableDateTimeSchema } from "../shared/input-bounds";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/balance-adjustment-responses";
 import { requirePromotionIdempotencyKey } from "./promotion-routes";
@@ -66,7 +66,7 @@ export const administrativeDebitBodySchema = z
 
 const listQuerySchema = z
 	.object({
-		limit: z.coerce.number().int().positive().max(100).default(25),
+		limit: decimalDigitsQuery(z.coerce.number().int().positive().max(100).default(25)),
 		cursor: z.string().trim().min(1).optional(),
 	})
 	.strict();
