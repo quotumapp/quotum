@@ -388,6 +388,33 @@ describe("input Postgres would refuse", () => {
 	});
 });
 
+describe("documented bounds", () => {
+	it("refuses a license assignment above the documented quantity limit before the service", async () => {
+		const calls: string[] = [];
+		const controlsEnterpriseService = new Proxy(
+			{},
+			{
+				get: (_target, name) => async () => {
+					calls.push(String(name));
+					return {};
+				},
+			},
+		) as NonNullable<AppDependencies["controlsEnterpriseService"]>;
+		const { app } = createApp({ controlsEnterpriseService });
+		const response = await send(app, "/v1/billing-accounts/user_1/license-assignments", {
+			method: "POST",
+			headers: { ...auth, "content-type": "application/json", "x-billing-actor": "ops" },
+			body: JSON.stringify({ poolId: "1", entityId: "seat_1", quantity: 1_000_001 }),
+		});
+		expect(response.status).toBe(400);
+		expect(await response.json()).toMatchObject({
+			success: false,
+			error: { code: "INVALID_REQUEST" },
+		});
+		expect(calls).toEqual([]);
+	});
+});
+
 describe("operations without a request body", () => {
 	it("never reads the body of an unauthenticated request", async () => {
 		for (const { method, path } of bodylessOperations) {

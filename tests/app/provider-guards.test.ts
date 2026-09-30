@@ -203,6 +203,35 @@ describe("Stripe method guards", () => {
 		}
 	});
 
+	it("rejects an idempotency key longer than 200 characters before checking the Stripe service", async () => {
+		const app = appWith(requiredOnlyStripeService());
+
+		for (const [path, body, message] of [
+			[
+				"/v1/billing-accounts/user_1/commercial-actions",
+				{ previewToken },
+				"Invalid commercial action execution",
+			],
+			[
+				"/v1/billing-accounts/user_1/subscriptions/sub_1/changes",
+				{ targetPlanKey: "pro" },
+				"Invalid Stripe subscription change request",
+			],
+		] as const) {
+			const response = await testRequest(app, path, {
+				method: "POST",
+				headers: { ...json, "idempotency-key": "k".repeat(201) },
+				body: JSON.stringify(body),
+			});
+
+			expect(response.status, path).toBe(400);
+			expect(await response.json(), path).toEqual({
+				success: false,
+				error: { code: "INVALID_REQUEST", message },
+			});
+		}
+	});
+
 	it("calls a present method on its service", async () => {
 		const catalog = { schemaVersion: 1 as const, plans: [], oneTimePurchases: [] };
 		const stripe: StripeBillingServiceLike & { catalog: typeof catalog } = {

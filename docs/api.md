@@ -16,6 +16,10 @@ than 64 levels deep; a NUL character or an unpaired surrogate in any body key or
 segment or query value; a numeric id beyond the signed 64-bit range; a date-time outside years 1 to
 9999; and a decimal with more than 19 digits before the decimal point.
 
+Where a `/v1` operation requires an `Idempotency-Key`, the key holds 1 to 200 characters after
+surrounding whitespace is trimmed; anything else answers `400 INVALID_REQUEST`. The contract lists
+every query parameter an operation reads, including the admin list filters.
+
 Regenerate and validate after changing a route:
 
 ```sh
