@@ -1,4 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import type { ProviderSubscriptionReconciliationRow } from "../../src/db/repository/types";
+import {
+	StripeBillingService,
+	type StripeBillingServiceDependencies,
+} from "../../src/providers/stripe/service";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
@@ -381,6 +386,34 @@ describeLocalPostgres(describe, describe.skip)("Catalog migration synchronizatio
 		expect(await pinnedVersion()).toBe(2);
 		expect(await changeRows()).toEqual([{ status: "applied", synchronized: true, to: 2 }]);
 		expect(await carryOverRows()).toBe(1);
+	});
+
+	it("keeps the event order through a live read that records no read time", async () => {
+		await sync(1, 7, false, { created: 500 });
+		// The customer switched in the portal, and a live read saw it before the event arrived.
+		await sync(2, 7, false, { reconciliation: true });
+		expect(await pinnedVersion()).toBe(2);
+		expect(await eventWatermark()).toBe(500);
+
+		// An event older than one already applied arrives late and changes nothing.
+		await sync(1, 7, false, { created: 400 });
+		expect(await pinnedVersion()).toBe(2);
+	});
+
+	it("ignores events from before a reconciliation read and applies those after it", async () => {
+		await sync(1, 7, false, { created: secondsFromNow(-3600) });
+
+		// The customer switched to version 2 in the portal; reconciliation reads it live.
+		expect(await reconcile(2)).toEqual({ status: "processed" });
+		expect(await pinnedVersion()).toBe(2);
+
+		// An event Stripe created before the read, still showing version 1, arrives late.
+		await sync(1, 7, false, { created: secondsFromNow(-1800) });
+		expect(await pinnedVersion()).toBe(2);
+
+		// An event created after the read is newer: the customer switched back.
+		await sync(1, 7, false, { created: secondsFromNow(30) });
+		expect(await pinnedVersion()).toBe(1);
 	});
 
 	it("keeps an applied change waiting for an unstamped event from its own second", async () => {
@@ -800,8 +833,68 @@ async function sync(
 		externalEventId: options.reconciliation ? null : id,
 		projectionReason: options.reconciliation ? "provider_reconciliation" : "provider_webhook",
 		projectionIdempotencyKey: `${id}:projection`,
-		providerEventCreated: options.reconciliation ? 0 : (options.created ?? eventOrder),
+		providerEventCreated: options.reconciliation
+			? (options.created ?? 0)
+			: (options.created ?? eventOrder),
 	});
+}
+
+/**
+ * Reconciles the subscription through the Stripe service, whose live read of Stripe reports it on
+ * `version`'s prices, the way the reconciliation worker does.
+ */
+async function reconcile(version: number) {
+	const [subscription] = await context.sql<{ start: number; end: number }[]>`
+		SELECT extract(epoch FROM current_period_start)::bigint::int AS start,
+			extract(epoch FROM current_period_end)::bigint::int AS end
+		FROM subscriptions WHERE external_subscription_id = 'sub_migrate_stripe'
+	`;
+	if (subscription === undefined) throw new Error("Expected the seeded subscription");
+	const item = (id: string, kind: string, quantity: number) => ({
+		id,
+		quantity,
+		price: { id: `price_migrate_v${version}_${kind}`, product: `prod_migrate_v${version}_${kind}` },
+		current_period_start: subscription.start,
+		current_period_end: subscription.end,
+	});
+	const liveSubscription = {
+		id: "sub_migrate_stripe",
+		object: "subscription",
+		status: "active",
+		customer: "cus_migration",
+		created: subscription.start,
+		cancel_at_period_end: false,
+		metadata: { billingAccountId: "migration-stripe" },
+		latest_invoice: null,
+		items: { data: [item("si_migrate_base", "base", 1), item("si_migrate_seats", "seats", 7)] },
+	};
+	const service = new StripeBillingService({
+		config: {
+			projectKey: project.projectInstanceKey,
+			checkoutSuccessUrl: "https://app.integration.test/success?session_id={CHECKOUT_SESSION_ID}",
+			checkoutCancelUrl: "https://app.integration.test/cancel",
+			portalReturnUrl: "https://app.integration.test/account",
+		},
+		client: {
+			retrieveSubscription: async () => liveSubscription,
+		} as unknown as StripeBillingServiceDependencies["client"],
+		repository: context.repository.forProject(project),
+	});
+	return await service.reconcileSubscription({
+		provider: "stripe",
+		channel: "web",
+		external_subscription_id: "sub_migrate_stripe",
+	} as ProviderSubscriptionReconciliationRow);
+}
+
+/** The Stripe event order the subscription last recorded. */
+async function eventWatermark(): Promise<number> {
+	const [row] = await context.sql<{ order: string }[]>`
+		SELECT last_provider_event_created::text AS order FROM subscriptions
+		WHERE external_subscription_id = 'sub_migrate_stripe'
+	`;
+	if (row === undefined) throw new Error("Expected the seeded subscription");
+	return Number(row.order);
 }
 
 async function pinnedVersion(): Promise<number> {

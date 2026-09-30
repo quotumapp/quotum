@@ -78,6 +78,7 @@ import {
 	normalizeStripeInvoice,
 	normalizeStripeRefund,
 	normalizeStripeSubscription,
+	stripeLiveReadOrder,
 } from "./normalizer";
 import {
 	applyPaymentSetupEvent,
@@ -2088,24 +2089,32 @@ export class StripeBillingService
 			subscription.external_subscription_id,
 			"stripeSubscriptionId",
 		);
+		const readStartedAt = new Date();
 		const providerSubscription =
 			await this.dependencies.client.retrieveSubscription(stripeSubscriptionId);
 		const result = await this.recordProviderSubscription(
 			requireRecord(providerSubscription, "Stripe subscription"),
 			`provider_reconciliation:${stripeSubscriptionId}`,
+			readStartedAt,
 		);
 
 		return { status: result.processingStatus === "processed" ? "processed" : "skipped" };
 	}
 
-	/** Normalizes a Stripe subscription response and records it, the same way reconciliation does. */
+	/**
+	 * Normalizes a Stripe subscription response and records it, the same way reconciliation does.
+	 * The live read orders against webhook events from when it began: events Stripe created earlier
+	 * are already in the response. By default that is now, after the response arrived.
+	 */
 	private async recordProviderSubscription(
 		subscription: Record<string, unknown>,
 		eventId: string,
+		readStartedAt: Date = new Date(),
 	): Promise<StripeRecordingResult> {
 		const command = normalizeStripeSubscription({
 			eventId,
 			eventType: "provider_reconciliation",
+			eventCreated: stripeLiveReadOrder(readStartedAt),
 			subscription,
 			projectionReason: "provider_reconciliation",
 		});

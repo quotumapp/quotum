@@ -286,7 +286,11 @@ Stripe's view of a subscription decides its plan version. When Quotum records a 
   failing its catalog migration job, as a cancellation does. A change the worker already holds ends
   the same way before the worker calls Stripe.
 - Updates apply in Stripe's event order, so an older event that arrives late never moves the
-  subscription back.
+  subscription back. A reconciliation read of the live subscription counts as an update from the
+  moment the read began, less one minute: an event Stripe created before then is already in the read
+  and changes nothing when it arrives later, while an event created after it still applies. The
+  minute keeps a newer event from being dropped when the host's clock runs ahead of Stripe's; an
+  older event from that last minute before the read can still apply until the next update.
 - A Stripe price that no published version binds does not fail the update. The subscription's status,
   period and cancellation are recorded, it keeps its plan version and the items it already tracks,
   and the store event's `processingError` names the unbound prices, for example

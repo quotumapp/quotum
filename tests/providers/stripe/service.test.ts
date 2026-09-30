@@ -9,6 +9,7 @@ import type {
 	StripeRecurringCheckoutPlan,
 	StripeWebStoreProductRow,
 } from "../../../src/db/repository";
+import { STRIPE_LIVE_READ_ORDER_MARGIN_SECONDS } from "../../../src/providers/stripe/normalizer";
 import { StripeBillingService } from "../../../src/providers/stripe/service";
 import type { StripeCatalog } from "../../../src/providers/stripe/types";
 import type { DeepPartial } from "../../helpers/deep-partial";
@@ -2139,13 +2140,20 @@ describe("StripeBillingService", () => {
 			retrievedSubscription: subscriptionObject(),
 		});
 
+		const readStartedAt = Math.floor(Date.now() / 1000);
 		const result = await service.reconcileSubscription(reconciliationSubscription());
+		const recordedAt = Math.floor(Date.now() / 1000);
 
 		expect(result).toEqual({ status: "processed" });
 		expect(calls).toContainEqual({
 			method: "retrieveSubscription",
 			subscriptionId: "sub_123",
 		});
+		// The live read is ordered from when it began, so events Stripe created before it are stale.
+		const order =
+			(repositoryInputs[0] as { providerEventCreated?: number }).providerEventCreated ?? 0;
+		expect(order).toBeGreaterThanOrEqual(readStartedAt - STRIPE_LIVE_READ_ORDER_MARGIN_SECONDS);
+		expect(order).toBeLessThanOrEqual(recordedAt - STRIPE_LIVE_READ_ORDER_MARGIN_SECONDS);
 		expect(repositoryInputs[0]).toMatchObject({
 			billingAccountId: "user_1",
 			stripeCustomerId: "cus_123",
