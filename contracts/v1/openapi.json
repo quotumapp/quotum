@@ -29666,7 +29666,6 @@
                                     "type": "object"
                                   },
                                   "maxItems": 100,
-                                  "minItems": 1,
                                   "type": "array"
                                 },
                                 "unitAmountMinor": {
@@ -29969,7 +29968,6 @@
                                           "type": "object"
                                         },
                                         "maxItems": 100,
-                                        "minItems": 1,
                                         "type": "array"
                                       },
                                       "unitAmountMinor": {
@@ -30291,7 +30289,6 @@
                                 "type": "object"
                               },
                               "maxItems": 100,
-                              "minItems": 1,
                               "type": "array"
                             },
                             "walletFeatureKey": {
@@ -31118,7 +31115,6 @@
                                     "type": "object"
                                   },
                                   "maxItems": 100,
-                                  "minItems": 1,
                                   "type": "array"
                                 },
                                 "unitAmountMinor": {
@@ -31421,7 +31417,6 @@
                                           "type": "object"
                                         },
                                         "maxItems": 100,
-                                        "minItems": 1,
                                         "type": "array"
                                       },
                                       "unitAmountMinor": {
@@ -31743,7 +31738,6 @@
                                 "type": "object"
                               },
                               "maxItems": 100,
-                              "minItems": 1,
                               "type": "array"
                             },
                             "walletFeatureKey": {
@@ -53044,7 +53038,6 @@
                                     "type": "object"
                                   },
                                   "maxItems": 100,
-                                  "minItems": 1,
                                   "type": "array"
                                 },
                                 "unitAmountMinor": {
@@ -53347,7 +53340,6 @@
                                           "type": "object"
                                         },
                                         "maxItems": 100,
-                                        "minItems": 1,
                                         "type": "array"
                                       },
                                       "unitAmountMinor": {
@@ -53669,7 +53661,6 @@
                                 "type": "object"
                               },
                               "maxItems": 100,
-                              "minItems": 1,
                               "type": "array"
                             },
                             "walletFeatureKey": {
@@ -54416,7 +54407,6 @@
                                     "type": "object"
                                   },
                                   "maxItems": 100,
-                                  "minItems": 1,
                                   "type": "array"
                                 },
                                 "unitAmountMinor": {
@@ -54719,7 +54709,6 @@
                                           "type": "object"
                                         },
                                         "maxItems": 100,
-                                        "minItems": 1,
                                         "type": "array"
                                       },
                                       "unitAmountMinor": {
@@ -55041,7 +55030,6 @@
                                 "type": "object"
                               },
                               "maxItems": 100,
-                              "minItems": 1,
                               "type": "array"
                             },
                             "walletFeatureKey": {

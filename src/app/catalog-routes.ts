@@ -56,7 +56,8 @@ const priceSchema = z
 		maximumQuantity: z.number().int().positive().nullable(),
 		taxBehavior: z.enum(["inclusive", "exclusive", "unspecified"]),
 		pricingModel: z.enum(["flat", "graduated", "volume"]).optional(),
-		tiers: z.array(priceTierSchema).min(1).max(100).optional(),
+		// Empty for a flat price, which is how the published catalog returns one.
+		tiers: z.array(priceTierSchema).max(100).optional(),
 		providerBindings: z.array(providerBindingSchema).min(1).max(20),
 	})
 	.strict();
@@ -147,7 +148,7 @@ const rateCardSchema = z
 					})
 					.strict(),
 			)
-			.min(1)
+			// Empty for a flat rate card, which is how the published catalog returns one.
 			.max(100)
 			.optional(),
 	})
