@@ -461,9 +461,10 @@ entity-scoped allocations or rollover, and each of its allocations must reset. A
 declared on the marker (at most 100). Changing or removing the marker creates no plan version.
 Preview and publish report `impact.defaultPlanAccounts`: the accounts the default plan covers,
 meaning those without a funding subscription to a base plan (or to no plan version, as recorded
-before plans existed) and without an active base plan grant such as a trial. A revision published
-before this field existed reports `0`. How accounts hold it is described under
-[Default plan](#default-plan).
+before plans existed) and without an active base plan grant such as a trial. A publish that removes
+the marker reports the accounts that lose the default plan, counted the same way, and one without a
+marker before or after it reports `0`, as does a revision published before this field existed. How
+accounts hold it is described under [Default plan](#default-plan).
 
 The same contract is available as code:
 

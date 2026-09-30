@@ -1045,8 +1045,12 @@ async function calculateImpact(
 				AND plan_version_id IS NOT NULL
 		`,
 	);
+	const marksDefaultPlan = (intent: CatalogIntent | null) =>
+		intent?.defaultPlan !== undefined && intent.defaultPlan !== null;
+	// The accounts without a base plan: those the marked default plan covers, or, when this
+	// publish removes the marker, those that lose it.
 	const defaultPlanAccounts =
-		catalog.defaultPlan === undefined || catalog.defaultPlan === null
+		!marksDefaultPlan(catalog) && !marksDefaultPlan(currentCatalog)
 			? null
 			: await executeOne<{ count: number | string }>(
 					executor,
