@@ -220,27 +220,53 @@ export async function runUsageOperation<T extends UsageOperationResult, P = unde
 		mutation({ id: customer.id, billingAccountId: scope.billingAccountId }, prefetched),
 	]);
 	if (claim === null) throw new Error("Usage operation claim was not persisted");
+	// A result too large for the bounded recovery snapshot is answered, and replayed, with only the
+	// allocations the operation changed in its breakdown.
+	for (const outcome of [result, withChangedAllocationsOnly(result)]) {
+		if (await completeClaim(executor, projectId, claim.id, outcome)) return outcome;
+	}
+	throw new InternalBillingError(
+		"Usage outcome exceeds the bounded recovery snapshot",
+		"OPERATION_OUTCOME_TOO_LARGE",
+	);
+}
+
+/**
+ * The result with its balance breakdown narrowed to the allocations the operation changed. Totals
+ * stay exact; the balance read still lists every allocation.
+ */
+export function withChangedAllocationsOnly<T extends UsageOperationResult>(result: T): T {
+	const changed = new Set(result.deductions.map((deduction) => deduction.allocationId));
+	return {
+		...result,
+		balance: {
+			...result.balance,
+			breakdown: result.balance.breakdown.filter((row) => changed.has(row.allocationId)),
+		},
+	};
+}
+
+/** Stores the outcome and completes the claim, unless the outcome exceeds the 64 KiB bound. */
+async function completeClaim(
+	executor: QueryExecutor,
+	projectId: string,
+	claimId: string,
+	outcome: UsageOperationResult,
+): Promise<boolean> {
 	const completed = await executeOne<{ id: string }>(
 		executor,
 		sql`
-  UPDATE client_idempotency_claims SET outcome = ${jsonb(result)},
+  UPDATE client_idempotency_claims SET outcome = ${jsonb(outcome)},
    completed_at = statement_timestamp(),
    result_expires_at = statement_timestamp() + make_interval(secs => GREATEST(86400,
     COALESCE((SELECT client_idempotency_ttl_seconds FROM metering_settings WHERE project_id = ${projectId}), 86400))),
    expires_at = statement_timestamp() + make_interval(secs => GREATEST(604800,
     COALESCE((SELECT client_idempotency_ttl_seconds FROM metering_settings WHERE project_id = ${projectId}), 86400)))
-  WHERE id = ${claim.id} AND octet_length((${jsonb(result)})::text) <= 65536
+  WHERE id = ${claimId} AND octet_length((${jsonb(outcome)})::text) <= 65536
    RETURNING id::text
  `,
 	);
-	if (completed === null) {
-		throw new InternalBillingError(
-			"Usage outcome exceeds the bounded recovery snapshot",
-			"OPERATION_OUTCOME_TOO_LARGE",
-		);
-	}
-
-	return result;
+	return completed !== null;
 }
 
 export async function lookupUsageOperation(
