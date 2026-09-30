@@ -229,6 +229,7 @@ localDescribe("default plan", () => {
 			(await entitlements("paying_user")).find((row) => row.key === "free_tier"),
 		).toMatchObject({
 			active: false,
+			metadata: { source: "plan_grant", origin: "default", status: "superseded" },
 		});
 
 		await context.sql`UPDATE subscriptions SET status = 'expired', expires_at = now() - INTERVAL '1 second'`;
@@ -583,9 +584,11 @@ localDescribe("default plan", () => {
 				quantity: "200",
 			}),
 		).toMatchObject({ allowed: false });
-		expect((await entitlements("leaving_user")).map((row) => [row.key, row.active])).toEqual([
-			["free_tier", false],
-		]);
+		// The write ends the grant, so the read already reports the entitlement as ended.
+		const ended = [["free_tier", false, "ended"]];
+		const entries = async () =>
+			(await entitlements("leaving_user")).map((row) => [row.key, row.active, row.metadata.status]);
+		expect(await entries()).toEqual(ended);
 		expect(
 			(await context.repository.getCustomerBillingSummary(project, "leaving_user")).balances,
 		).toEqual([]);
@@ -593,8 +596,45 @@ localDescribe("default plan", () => {
 
 		expect(await consume("leaving_user", 1, "spend-2")).toMatchObject({ allowed: false });
 		expect(await grants("leaving_user")).toMatchObject([{ status: "ended" }]);
-		expect((await entitlements("leaving_user")).map((row) => [row.key, row.active])).toEqual([
-			["free_tier", false],
+		expect(await entries()).toEqual(ended);
+	});
+
+	it("reads a key the default plan drops as inactive, before and after the pass", async () => {
+		await publish(catalog(freePlan(1, "100"), ["free_tier", "starter"]));
+		await consume("dropping_user", 1, "spend-1");
+		const entries = async () =>
+			(await entitlements("dropping_user")).map((row) => [
+				row.key,
+				row.active,
+				row.metadata.status,
+			]);
+		expect(await entries()).toEqual([
+			["free_tier", true, "active"],
+			["starter", true, "active"],
+		]);
+
+		await publish(catalog(freePlan(1, "100"), ["free_tier"]));
+		// The grant keeps running without the key, so the entry reads inactive rather than ended.
+		const dropped = [
+			["free_tier", true, "active"],
+			["starter", false, "inactive"],
+		];
+		expect(await entries()).toEqual(dropped);
+		await runWorker(25);
+		expect(await grants("dropping_user")).toMatchObject([
+			{ status: "active", entitlement_keys: ["free_tier"] },
+		]);
+		expect(await entries()).toEqual(dropped);
+		const stored = await context.sql<Array<{ key: string; status: string }>>`
+			SELECT e.entitlement_key AS key, e.metadata->>'status' AS status
+			FROM entitlements e
+			JOIN customers c ON c.id = e.customer_id AND c.project_id = e.project_id
+			WHERE c.billing_account_id = 'dropping_user'
+			ORDER BY e.entitlement_key
+		`;
+		expect(stored).toEqual([
+			{ key: "free_tier", status: "active" },
+			{ key: "starter", status: "inactive" },
 		]);
 	});
 

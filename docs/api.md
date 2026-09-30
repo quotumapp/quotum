@@ -1100,7 +1100,10 @@ An account whose default plan a publish changed reads the same way before the pa
 the version its next write moves it to, with that version's meter limits, usage limits and the
 marker's current keys, without the allowances that move ends, and with the allowance of a feature
 the version adds or resets on another interval. Once the marker is removed, it reads without the
-default plan: none of its allowances, limits or controls, and its keys inactive.
+default plan: none of its allowances, limits or controls, and its keys inactive with
+`metadata.status: "ended"`. A key the marker drops reads inactive with `status: "inactive"`, since
+the grant runs on without it (see [Projections](providers.md#projections) for inactive
+entitlement metadata).
 
 Its next write first records what the read assumed: it starts the default plan, records an elapsed
 trial, or applies a changed default plan, so the write sees what the read reported. The default

@@ -332,6 +332,13 @@ catalog cannot declare; Quotum records their bounds from the store's purchase da
 [Apple StoreKit](#apple-storekit) and [Google Play Billing](#google-play-billing)). A trial is
 recorded only from a purchase Quotum sees while it runs.
 
+An inactive entitlement keeps its last source's metadata, and its `status` says why it stopped:
+the source's own status once it ended (`expired`, `refunded`, `revoked` or `voided` for a
+subscription or purchase, `expired`, `ended` or `superseded` for a plan grant), or `inactive` while
+that source still runs without granting the key. The latter is a key the default plan's marker
+dropped, or a subscription or trial whose end passed before Quotum recorded it. An inactive
+entitlement never reports a running status such as `active`; use `active` to decide access.
+
 A payload carries at most one fact: `purchase`, `reversal` or `trial`. A `trial` fact with
 `event: "ending"` arrives once per trial, about three days before its end: for Stripe from
 `customer.subscription.trial_will_end` (reason `provider_webhook`), and for Apple and Google, which
