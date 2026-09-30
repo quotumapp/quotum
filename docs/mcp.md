@@ -49,7 +49,10 @@ Password reset and principal/membership suspension revoke affected authorization
 request and refresh rechecks current principal, membership, environment, and grant access.
 
 Discovery lives on the API origin at `/.well-known/oauth-authorization-server` and
-`/.well-known/oauth-protected-resource/mcp`. The authorization endpoint is on the UI origin;
+`/.well-known/oauth-protected-resource/mcp`. The authorization endpoint is on the UI origin, so the
+metadata advertises `authorization_response_iss_parameter_supported` and every authorization
+response carries `iss` (RFC 9207); clients such as Codex refuse an authorization endpoint on
+another origin without it.
 `/oauth/token`, `/oauth/revoke`, and `/oauth/jwks` are cookie-free API endpoints. Browser auth and
 selection stay behind the BFF's exact route allowlist, service identity, Origin and CSRF checks.
 An auth proof belongs to one OAuth request and cannot be exchanged for a console session or

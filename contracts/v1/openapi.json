@@ -19143,6 +19143,9 @@
                     "authorization_endpoint": {
                       "type": "string"
                     },
+                    "authorization_response_iss_parameter_supported": {
+                      "const": true
+                    },
                     "client_id_metadata_document_supported": {
                       "const": true
                     },
@@ -19200,7 +19203,8 @@
                     "authorization_endpoint",
                     "token_endpoint",
                     "revocation_endpoint",
-                    "jwks_uri"
+                    "jwks_uri",
+                    "authorization_response_iss_parameter_supported"
                   ],
                   "type": "object"
                 }

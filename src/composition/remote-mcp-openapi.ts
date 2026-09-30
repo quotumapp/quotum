@@ -46,6 +46,7 @@ export function remoteMcpOpenApi(): PathsObject {
 				"token_endpoint",
 				"revocation_endpoint",
 				"jwks_uri",
+				"authorization_response_iss_parameter_supported",
 			],
 			properties: {
 				issuer: string,
@@ -58,6 +59,7 @@ export function remoteMcpOpenApi(): PathsObject {
 				token_endpoint_auth_methods_supported: strings,
 				revocation_endpoint_auth_methods_supported: strings,
 				code_challenge_methods_supported: strings,
+				authorization_response_iss_parameter_supported: { const: true },
 				scopes_supported: strings,
 				client_id_metadata_document_supported: { const: true },
 			},

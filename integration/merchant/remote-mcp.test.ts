@@ -141,6 +141,7 @@ async function authorize(
 	const callback = new URL(accepted.redirect_uri ?? accepted.url);
 	expect(callback.origin + callback.pathname).toBe(redirect);
 	expect(callback.searchParams.get("state")).toBe(pending.state);
+	expect(callback.searchParams.get("iss")).toBe(origin);
 	return {
 		code: callback.searchParams.get("code") ?? "",
 		verifier: pending.verifier,
@@ -432,6 +433,8 @@ describe("remote MCP browser authorization", () => {
 			await remote.handle(new Request(`${origin}/.well-known/oauth-authorization-server`))
 		).json();
 		expect(document.authorization_endpoint).toBe(`${testConfig.origin}/oauth/authorize`);
+		expect(document.issuer).toBe(origin);
+		expect(document.authorization_response_iss_parameter_supported).toBe(true);
 		expect(document.token_endpoint_auth_methods_supported).toEqual(["none"]);
 		expect(document.registration_endpoint).toBeUndefined();
 		expect(document.dpop_signing_alg_values_supported).toBeUndefined();
