@@ -572,10 +572,13 @@ The backend SDK (`quotum-api/sdk`) wraps catalog, commercial, usage, provider ca
 selected admin calls and keeps credentials server-side. Its admin reads (`admin.customer`,
 `admin.searchCustomers`, `admin.storeEvents`, `admin.storeEvent`, `admin.projectionJobs`,
 `admin.statsSummary`) and `accounts.controls` use project authentication only and never send the
-operator key; `admin.storeEvent` never requests the raw provider payload. On a 429,
-`BillingApiError.rateLimitResetAt` carries the `ratelimit-reset` timestamp. A response whose body
-is empty or not JSON, such as a proxy's text or HTML 502, raises `BillingApiError` with code
-`HTTP_ERROR` and the HTTP status, so callers can retry on 5xx. The read-only
+operator key; `admin.storeEvent` never requests the raw provider payload. Operator reads, such as
+`adjustments.grants`, `adjustments.getGrant`, `adjustments.debits` and the promotion lists, need the
+client's `operatorKey` only; operator changes also need its `actor`, and the client refuses them
+before any request when either is missing. An `actor` set on the client is sent with reads too.
+On a 429, `BillingApiError.rateLimitResetAt` carries the `ratelimit-reset` timestamp. A response
+whose body is empty or not JSON, such as a proxy's text or HTML 502, raises `BillingApiError` with
+code `HTTP_ERROR` and the HTTP status, so callers can retry on 5xx. The read-only
 [MCP server](mcp.md) for coding agents is built on these reads.
 
 An applied catalog migration settles once when the subscription is synchronized. Later updates,

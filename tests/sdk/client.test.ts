@@ -518,6 +518,72 @@ describe("BillingClient", () => {
 		});
 	});
 
+	it("reads operator records with the operator key alone and needs an actor only for changes", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			operatorKey: "operator-secret",
+			fetch: async (input, init) => {
+				const request = new Request(input, init);
+				calls.push(request);
+				const path = new URL(request.url).pathname;
+				return path.endsWith("/grant-1") || path.endsWith("/launch")
+					? Response.json({ success: true, data: {} })
+					: Response.json({ success: true, data: [], pagination: { nextCursor: null } });
+			},
+		});
+
+		await client.adjustments.grants("account 1");
+		await client.adjustments.getGrant("account 1", "grant-1");
+		await client.adjustments.debits("account 1");
+		await client.promotions.list();
+		await client.promotions.get("launch");
+		await client.promotions.listCodes("launch");
+		await client.promotions.listRedemptions("launch");
+
+		expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+			"/v1/admin/operator-grants/account%201",
+			"/v1/admin/operator-grants/account%201/grant-1",
+			"/v1/admin/administrative-debits/account%201",
+			"/v1/admin/promotions",
+			"/v1/admin/promotions/launch",
+			"/v1/admin/promotions/launch/codes",
+			"/v1/admin/promotions/launch/redemptions",
+		]);
+		for (const call of calls) {
+			expect(call.method).toBe("GET");
+			expect(call.headers.get("x-billing-operator-key")).toBe("operator-secret");
+			expect(call.headers.has("x-billing-actor")).toBe(false);
+		}
+
+		calls.length = 0;
+		await expect(
+			client.adjustments.grant(
+				"account 1",
+				{ featureKey: "ai_credits", quantity: "25", reason: "Outage goodwill" },
+				"grant-1",
+			),
+		).rejects.toThrow("operatorKey and actor are required for operator changes");
+		await expect(
+			client.adjustments.revokeGrant("account 1", "grant-1", "Error", "revoke-1"),
+		).rejects.toThrow("operatorKey and actor are required for operator changes");
+		await expect(client.promotions.archive("launch")).rejects.toThrow(
+			"operatorKey and actor are required for operator changes",
+		);
+		expect(calls).toEqual([]);
+
+		const withoutOperatorKey = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			actor: "support@example.com",
+			fetch: async () => Response.json({ success: true, data: {} }),
+		});
+		await expect(withoutOperatorKey.adjustments.grants("account 1")).rejects.toThrow(
+			"operatorKey is required for operator requests",
+		);
+	});
+
 	it("uses the reviewed catalog body for preview and publication", async () => {
 		const calls: Request[] = [];
 		const catalog = { features: [], plans: [], topups: [], rateCards: [] };

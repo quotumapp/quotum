@@ -425,7 +425,7 @@ export class BillingClient {
 					{ method: "POST", body: input },
 				),
 		};
-		// Operator grants and debits change balances, so each call sends the operator key and actor.
+		// Operator grants and debits send the operator key; the changes also name their actor.
 		this.adjustments = {
 			/** Gives a goodwill credit of a consumable feature; it never records a payment. */
 			grant: (
@@ -517,9 +517,14 @@ export class BillingClient {
 			idempotencyKey?: string;
 		} = {},
 	): Promise<T> {
+		const method = options.method ?? "GET";
 		const response = await this.requestFetch(`${this.baseUrl}${path}`, {
-			method: options.method ?? "GET",
-			headers: this.headers({ ...options, hasBody: options.body !== undefined }),
+			method,
+			headers: this.headers({
+				...options,
+				change: method !== "GET",
+				hasBody: options.body !== undefined,
+			}),
 			body: options.body === undefined ? undefined : JSON.stringify(options.body),
 		});
 		const payload = await readEnvelope<ApiEnvelope<T>>(response);
@@ -559,6 +564,8 @@ export class BillingClient {
 
 	private headers(options: {
 		operator?: boolean;
+		/** An operator change is audited, so it names its actor; an operator read does not. */
+		change?: boolean;
 		idempotencyKey?: string;
 		hasBody?: boolean;
 	}): Headers {
@@ -570,11 +577,19 @@ export class BillingClient {
 			headers.set("x-billing-project-key", this.options.projectKey);
 		}
 		if (options.operator) {
-			if (this.options.operatorKey === undefined || this.options.actor === undefined) {
-				throw new Error("operatorKey and actor are required for operator requests");
+			if (
+				options.change &&
+				(this.options.operatorKey === undefined || this.options.actor === undefined)
+			) {
+				throw new Error("operatorKey and actor are required for operator changes");
+			}
+			if (this.options.operatorKey === undefined) {
+				throw new Error("operatorKey is required for operator requests");
 			}
 			headers.set("x-billing-operator-key", this.options.operatorKey);
-			headers.set("x-billing-actor", this.options.actor);
+			if (this.options.actor !== undefined) {
+				headers.set("x-billing-actor", this.options.actor);
+			}
 		}
 		if (options.idempotencyKey !== undefined) {
 			headers.set("idempotency-key", options.idempotencyKey);
