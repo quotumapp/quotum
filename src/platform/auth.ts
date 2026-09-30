@@ -3,6 +3,7 @@ import { type BetterAuthOptions, type BetterAuthPlugin, betterAuth } from "bette
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { twoFactor } from "better-auth/plugins/two-factor";
 import { verifyGoogleIdToken } from "better-auth/social-providers";
+import { toDisplayName } from "../shared/input-bounds";
 import type { MerchantEmail, MerchantMailer } from "./email";
 import { linkMessage } from "./email";
 import { createMcpAuthProvider } from "./mcp/auth-provider";
@@ -243,6 +244,8 @@ export function createMerchantAuth(
 						return {
 							data: {
 								...user,
+								// Password sign-up validates the name; a Google profile name is only cleaned.
+								name: toDisplayName(user.name ?? "", 100),
 								email: normalizeEmail(user.email),
 								twoFactorEnabled: true,
 								termsVersion: config.termsVersion,

@@ -149,6 +149,15 @@ describe("Google OAuth using signed local provider tokens", () => {
 		expect(replay.headers.get("location")).toContain("error=");
 		expect(google.externalRequests.every((url) => url.includes("googleapis.com"))).toBe(true);
 	});
+	it("keeps control and text-direction characters out of a Google profile name", async () => {
+		google.profile = { ...google.profile, name: "  Google\r\nMerchant\u202e  " };
+		const browser = new MerchantBrowser(f);
+		await oauth(browser);
+		await browser.json("/api/platform/session/exchange", {});
+		expect(await f.sql`SELECT name FROM platform_auth_users`).toEqual([
+			{ name: "Google Merchant" },
+		]);
+	});
 	it("does not create an account on an implicit sign-in", async () => {
 		const browser = new MerchantBrowser(f);
 		const { result } = await oauth(browser, false);

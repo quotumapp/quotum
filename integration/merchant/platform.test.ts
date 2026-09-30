@@ -277,6 +277,40 @@ describe("merchant platform transactions", () => {
 			await errorCode({ name: "Acme", slug: "acme-labs", revision: started.revision }),
 		).toEqual([409, "DRAFT_CHANGED"]);
 	});
+	it("refuses organization and project names with control or text-direction characters", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		const errorCode = async (path: string, body: unknown) => {
+			const response = await browser.request(path, body);
+			return [response.status, (await response.json()).error?.code];
+		};
+		for (const name of [
+			"Acme\u0000Company",
+			"Acme\r\nBcc: victim@example.com",
+			"Acme\u202eynapmoC",
+			"Acme\u2066Company\u2069",
+			"a".repeat(101),
+		])
+			expect(
+				await errorCode("/api/platform/onboarding/organization", { name, slug: "acme" }),
+			).toEqual([400, "INVALID_REQUEST"]);
+		const org = await browser.json<OnboardingDraftView>("/api/platform/onboarding/organization", {
+			name: "  شركة Acme 🙂  ",
+			slug: "acme",
+		});
+		expect(org.organization?.name).toBe("شركة Acme 🙂");
+		for (const name of ["Example\u0000Project", "Example\nProject", "Example\u202eProject"])
+			expect(
+				await errorCode("/api/platform/onboarding/project", {
+					name,
+					key: "example",
+					revision: org.revision,
+				}),
+			).toEqual([400, "INVALID_REQUEST"]);
+		expect(await f.sql`SELECT name FROM platform_organizations`).toEqual([
+			{ name: "شركة Acme 🙂" },
+		]);
+	});
 	it("reports a concurrent organization rename loser as a changed draft", async () => {
 		const first = new MerchantBrowser(f);
 		await first.signup();

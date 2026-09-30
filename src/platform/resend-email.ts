@@ -1,5 +1,5 @@
 import type { QuotumEmailConfig } from "./config";
-import type { MerchantEmail, MerchantMailer } from "./email";
+import { type MerchantEmail, type MerchantMailer, subjectLine } from "./email";
 import { MerchantError } from "./security";
 
 export class ResendMerchantMailer implements MerchantMailer {
@@ -15,7 +15,7 @@ export class ResendMerchantMailer implements MerchantMailer {
 		const body = JSON.stringify({
 			from: `Quotum <${this.config.from}>`,
 			to: [message.to],
-			subject: message.subject,
+			subject: subjectLine(message.subject),
 			text: message.text,
 			html: message.html,
 		});

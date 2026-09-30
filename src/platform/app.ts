@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import { z } from "zod";
 import { readCappedText } from "../shared/body-limit";
 import { type ElysiaPluginLike, HTTP_APP_CONFIG, operationDetail } from "../shared/http";
+import { displayNameSchema, isStorableText } from "../shared/input-bounds";
 import type { MerchantAuth } from "./auth";
 import { SIGNUP_COOKIE } from "./auth";
 import { merchantBillingRoute } from "./billing";
@@ -31,7 +32,9 @@ import { MerchantTeam } from "./team";
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/);
 const projectKey = z.string().regex(/^[a-z0-9][a-z0-9_-]{1,62}$/);
-const name = z.string().trim().min(2).max(100);
+const name = displayNameSchema(2, 100);
+/** A person's name at sign-up; Google profile names go through `toDisplayName` instead. */
+export const userNameSchema = displayNameSchema(1, 100);
 const token = z.string().min(16).max(4096);
 export const resetPasswordBodySchema = z.object({
 	token,
@@ -869,6 +872,9 @@ export function createMerchantApp({
 		if (request.method !== "POST" || !MERCHANT_AUTH_POST_PATHS.has(path))
 			throw new MerchantError("NOT_FOUND", "Route not found.", 404);
 		const input = z.record(z.string(), z.unknown()).parse(await merchantJson(request));
+		// Text Postgres cannot store would fail inside the library as a 422 or 503.
+		if (Object.values(input).some((value) => typeof value === "string" && !isStorableText(value)))
+			throw new MerchantError("INVALID_REQUEST", "Check the form fields and try again.");
 		const ip = request.headers.get("x-quotum-client-ip") ?? "unknown";
 		if (typeof input.email === "string") input.email = normalizeEmail(input.email);
 		if (path === "/sign-up/email") {
@@ -882,6 +888,7 @@ export function createMerchantApp({
 					"POLICY_ACCEPTANCE_REQUIRED",
 					"Accept the current terms and privacy policy first.",
 				);
+			input.name = userNameSchema.parse(input.name);
 		}
 		if (path === "/sign-in/email") {
 			await store.rateLimit(`password:ip:${ip}`, 20, 15 * 60_000);

@@ -32,12 +32,20 @@ export function escapeHtml(value: string): string {
 			({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char,
 	);
 }
+/**
+ * A subject on one line. Subjects can carry an organization name, and a line break there must
+ * never start another header line, whatever the provider does with it.
+ */
+export function subjectLine(value: string): string {
+	return value.replace(/[\r\n\u2028\u2029]+/g, " ").replace(/ {2,}/g, " ");
+}
 export function linkMessage(
 	to: string,
 	kind: "verification" | "reset" | "invitation",
-	subject: string,
+	title: string,
 	link: string,
 ): MerchantEmail {
+	const subject = subjectLine(title);
 	return {
 		to,
 		kind,
@@ -70,7 +78,7 @@ export class CloudflareMerchantMailer implements MerchantMailer {
 						body: JSON.stringify({
 							from: { address: this.config.from, name: "Quotum" },
 							to: message.to,
-							subject: message.subject,
+							subject: subjectLine(message.subject),
 							text: message.text,
 							html: message.html,
 						}),

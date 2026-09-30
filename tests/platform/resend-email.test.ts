@@ -58,6 +58,13 @@ describe("Resend platform email", () => {
 			timeout.mockRestore();
 		}
 	});
+	it("sends subjects without line breaks", async () => {
+		const f = fixture(() => Response.json({ id: "email-id" }));
+		await f.mailer.send({ ...message, subject: "Join Acme\r\nBcc: victim@example.com" });
+		expect(await f.requests[0]?.json()).toMatchObject({
+			subject: "Join Acme Bcc: victim@example.com",
+		});
+	});
 	it("keeps Cloudflare selectable through the same factory", async () => {
 		const f = fixture(() => Response.json({ success: true, result: { permanent_bounces: [] } }));
 		await createMerchantMailer(

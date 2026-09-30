@@ -23225,6 +23225,8 @@
                   },
                   "name": {
                     "description": "The name of the user",
+                    "maxLength": 100,
+                    "minLength": 1,
                     "type": "string"
                   },
                   "password": {

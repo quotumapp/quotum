@@ -245,4 +245,27 @@ describe("merchant email transport", () => {
 			).html,
 		).not.toContain("<script>");
 	});
+	it("keeps line breaks out of subjects", async () => {
+		const message = linkMessage(
+			"person@example.com",
+			"invitation",
+			"Join Acme\r\nBcc: victim@example.com\u2028 on Quotum",
+			"https://app.quotum.dev/invite",
+		);
+		expect(message.subject).toBe("Join Acme Bcc: victim@example.com on Quotum");
+		expect(message.text.split("\n")[0]).toBe(message.subject);
+		const requests: Request[] = [];
+		const transport = Object.assign(
+			async (input: string | URL | Request, init?: RequestInit) => {
+				requests.push(new Request(input, init));
+				return Response.json({ success: true, result: { permanent_bounces: [] } });
+			},
+			{ preconnect: fetch.preconnect },
+		);
+		await new CloudflareMerchantMailer(
+			{ accountId: "synthetic-account", apiToken: "synthetic-token", from: "auth@quotum.dev" },
+			transport,
+		).send({ ...message, subject: "Line one\rLine two\nLine three" });
+		expect(await requests[0]?.json()).toMatchObject({ subject: "Line one Line two Line three" });
+	});
 });
