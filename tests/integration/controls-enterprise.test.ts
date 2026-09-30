@@ -92,6 +92,106 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		});
 	});
 
+	it("starts a new alert from the usage its window already recorded", async () => {
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "alert-seed",
+			featureKey: "ai_credits",
+			quantity: "20",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:alert-seed",
+		});
+		const controls = context.repository.controlsEnterprise;
+		const alert = (thresholdValue: string) =>
+			controls.createUsageAlert(project, {
+				billingAccountId: "alert-seed",
+				featureKey: "ai_credits",
+				thresholdType: "absolute",
+				thresholdValue,
+				interval: "day",
+				actor: "integration-test",
+			});
+		await consume("alert-seed", "4", "alert-seed:1");
+
+		// Today's 4 count toward a new alert of 5; the next unit crosses it.
+		expect(await alert("5")).toMatchObject({
+			thresholdValue: "5",
+			currentValue: "4",
+			crossed: false,
+		});
+		expect(await controls.listUsageAlertEvents(project, "alert-seed", 10)).toEqual([]);
+		await consume("alert-seed", "1", "alert-seed:2");
+		expect(await controls.listUsageAlertEvents(project, "alert-seed", 10)).toMatchObject([
+			{ eventType: "threshold_crossed", currentValue: "5", thresholdValue: "5" },
+		]);
+
+		// An alert whose threshold today's usage already reached records its crossing on creation.
+		const reached = await alert("3");
+		expect(reached).toMatchObject({ currentValue: "5", crossed: true });
+		const events = await controls.listUsageAlertEvents(project, "alert-seed", 10);
+		expect(events).toHaveLength(2);
+		expect(events[0]).toMatchObject({
+			alertId: reached.id,
+			eventType: "threshold_crossed",
+			currentValue: "5",
+			thresholdValue: "3",
+		});
+		await consume("alert-seed", "1", "alert-seed:3");
+		expect(await controls.listUsageAlertEvents(project, "alert-seed", 10)).toHaveLength(2);
+	});
+
+	it("leaves a window's alert counter alone when usage from an earlier window is corrected", async () => {
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "alert-window",
+			featureKey: "ai_credits",
+			quantity: "20",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:alert-window",
+		});
+		const controls = context.repository.controlsEnterprise;
+		await controls.createUsageAlert(project, {
+			billingAccountId: "alert-window",
+			featureKey: "ai_credits",
+			thresholdType: "absolute",
+			thresholdValue: "5",
+			interval: "day",
+			actor: "integration-test",
+		});
+		const earlier = await consume("alert-window", "4", "alert-window:1");
+		// That usage belongs to yesterday, and today's window has counted nothing yet.
+		const [moved] = await context.sql<Array<{ recorded_at: Date }>>`
+			UPDATE usage_events SET recorded_at = recorded_at - interval '1 day'
+			WHERE id = ${earlier.usageEventId} RETURNING recorded_at
+		`;
+		await context.sql`UPDATE usage_alert_states SET current_value = 0`;
+
+		await consume("alert-window", "3", "alert-window:2");
+		await context.repository.correctUsage(project, {
+			billingAccountId: "alert-window",
+			originalUsageEventId: earlier.usageEventId ?? "",
+			originalRecordedAt: moved?.recorded_at ?? new Date(),
+			quantity: "4",
+			idempotencyKey: "alert-window:correction",
+			actor: "integration-test",
+			reason: "yesterday's usage",
+		});
+		expect(await controls.listUsageAlerts(project, "alert-window")).toMatchObject([
+			{ currentValue: "3", crossed: false },
+		]);
+		await consume("alert-window", "2", "alert-window:3");
+		expect(await controls.listUsageAlertEvents(project, "alert-window", 10)).toMatchObject([
+			{ eventType: "threshold_crossed", currentValue: "5" },
+		]);
+
+		// Once the window is over, the alert reports nothing counted until the next usage.
+		await context.sql`
+			UPDATE usage_alert_states SET window_start_at = window_start_at - interval '1 day',
+				window_end_at = window_end_at - interval '1 day'
+		`;
+		expect(await controls.listUsageAlerts(project, "alert-window")).toMatchObject([
+			{ currentValue: "0", crossed: false },
+		]);
+	});
+
 	it("counts usage limits and alerts in calendar windows of any cadence", async () => {
 		await context.repository.grantAllocation(project, {
 			billingAccountId: "cadence-account",
@@ -171,7 +271,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		expect(alert).toMatchObject({ interval: "day", intervalCount: 14 });
 		await consume("cadence-account", "6", "cadence:3");
 		expect(await controls.listUsageAlertEvents(project, "cadence-account", 10)).toMatchObject([
-			{ eventType: "threshold_crossed", thresholdValue: "5.000000000" },
+			{ eventType: "threshold_crossed", thresholdValue: "5" },
 		]);
 
 		// Hourly windows start on the hour.

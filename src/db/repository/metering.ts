@@ -627,6 +627,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 					entityId: original.entity_id === null ? null : String(original.entity_id),
 					featureId: String(original.meter_feature_id),
 					delta: negativeDecimal(correctionQuantity),
+					correctsRecordedAt: original.recorded_at,
 				});
 				await enqueueMeteringProjection(
 					tx,

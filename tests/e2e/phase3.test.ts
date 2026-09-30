@@ -72,7 +72,7 @@ e2eDescribe("E2E Phase 3 release journeys", () => {
 			{ headers: authHeaders() },
 		);
 		expect((await events.json()).data).toMatchObject([
-			{ eventType: "threshold_crossed", currentValue: "6.000000000" },
+			{ eventType: "threshold_crossed", currentValue: "6" },
 		]);
 		const balance = await requireService().request(
 			"/v1/billing-accounts/phase3-http/balances/ai_credits",
