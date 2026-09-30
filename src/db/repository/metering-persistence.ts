@@ -1093,17 +1093,24 @@ interface RateCardRow {
 	wallet_scale: number;
 }
 
-export function queryPinnedRateCards(
+/**
+ * The rate card the account's pinned catalog revisions price the meter with. Each subscription pins
+ * the revision it was bought from, so an account can hold several: the base plan's revision prices
+ * usage and an add-on bought from a later revision never re-prices it. Without a base plan whose
+ * revision prices the meter, the newest add-on revision that does applies, and of several base
+ * plans the newest.
+ */
+export function queryPinnedRateCard(
 	executor: QueryExecutor,
 	projectId: string,
 	customerId: string | null,
 	meter: FeatureRow,
-): Promise<RateCardRow[]> {
-	if (customerId === null) return Promise.resolve([]);
-	return executeRows<RateCardRow>(
+): Promise<RateCardRow | null> {
+	if (customerId === null) return Promise.resolve(null);
+	return executeOne<RateCardRow>(
 		executor,
 		drizzleSql`
-			SELECT DISTINCT
+			SELECT
 				rce.id AS entry_id,
 				cr.id AS revision_id,
 				cr.revision,
@@ -1114,6 +1121,9 @@ export function queryPinnedRateCards(
 				wallet.unit AS wallet_unit,
 				wallet.credit_scale AS wallet_scale
 			FROM subscriptions s
+			LEFT JOIN plan_versions version
+				ON version.project_id = s.project_id
+				AND version.id = s.plan_version_id
 			JOIN catalog_revisions cr
 				ON cr.project_id = s.project_id
 				AND cr.id = s.catalog_revision_id
@@ -1128,8 +1138,9 @@ export function queryPinnedRateCards(
 				AND s.customer_id = ${customerId}
 				AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
 				AND (s.expires_at IS NULL OR s.expires_at > now())
-			ORDER BY cr.revision DESC
-			LIMIT 2
+			-- A subscription without a plan version is a base purchase, as everywhere else.
+			ORDER BY COALESCE(version.plan_kind, 'base') = 'base' DESC, cr.revision DESC
+			LIMIT 1
 		`,
 	);
 }
@@ -1256,7 +1267,7 @@ export async function resolveRateDecision(
 ): Promise<RateDecision> {
 	const feature = meter ?? (await requireMeteredFeature(executor, projectId, featureKey));
 	return await rateDecision(executor, projectId, feature, {
-		pinned: await queryPinnedRateCards(executor, projectId, customerId, feature),
+		pinned: await queryPinnedRateCard(executor, projectId, customerId, feature),
 		additive: () => queryAdditiveRateCard(executor, projectId, feature),
 		purchased: () => queryPurchasedRevision(executor, projectId, customerId),
 	});
@@ -1268,22 +1279,13 @@ export async function rateDecision(
 	projectId: string,
 	meter: FeatureRow,
 	prefetched: {
-		pinned: readonly RateCardRow[];
+		pinned: RateCardRow | null;
 		additive: RateCardRow | null | (() => Promise<RateCardRow | null>);
 		purchased: boolean | (() => Promise<boolean>);
 	},
 ): Promise<RateDecision> {
-	if (prefetched.pinned.length > 1) {
-		throw new BillingError(
-			`Multiple pinned rate cards price feature ${meter.key}`,
-			"METERING_CONFIGURATION_ERROR",
-			409,
-			{ classification: "persistence_conflict" },
-		);
-	}
-	const pinned = prefetched.pinned[0];
-	if (pinned !== undefined) {
-		return await rateDecisionFromRow(executor, projectId, meter, pinned, "pinned");
+	if (prefetched.pinned !== null) {
+		return await rateDecisionFromRow(executor, projectId, meter, prefetched.pinned, "pinned");
 	}
 	const additive =
 		typeof prefetched.additive === "function" ? await prefetched.additive() : prefetched.additive;

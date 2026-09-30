@@ -112,6 +112,13 @@ the pool, against what is left in the pool, and what it buys goes to the pool. A
 evaluated after that entity's usage against everything the entity can spend, its own allocations and
 the pool, and what it buys is credited to the entity. One write can trigger both.
 
+Every subscription pins the catalog revision it was bought from, and the rate card of that
+revision prices the account's usage, whatever the catalog publishes later. When an account's
+subscriptions pin several revisions that price a meter, such as a base plan bought before a later
+revision and an add-on bought from it, the base plan's revision prices the usage: an add-on never
+re-prices it. Without a base plan whose revision prices the meter, the newest add-on revision that
+does applies, and of several base plans the newest.
+
 A meter priced by a rate card charges its wallet feature once per request, rounded up to the
 wallet's `creditScale`. Any positive quantity therefore costs at least one wallet unit: at 0.001
 credits per token and a wallet scale of 0, one to 1,000 tokens cost 1 credit. Splitting usage into
