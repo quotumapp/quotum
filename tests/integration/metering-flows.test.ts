@@ -715,6 +715,70 @@ localDescribe("authoritative metering flows", () => {
 		});
 	});
 
+	it("refuses a correction with more decimal places than the meter, as consume does", async () => {
+		await context.repository.grantAllocation(integrationProjectContext(), {
+			billingAccountId: "correction_scale",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:correction_scale",
+		});
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const fractionalConsume = await usageRequest(
+			app,
+			authHeaders(),
+			"correction_scale",
+			"consume",
+			{ featureKey: "model_tokens", quantity: "100.5" },
+			"correction-scale:fractional-consume",
+		);
+		expect(fractionalConsume.status).toBe(400);
+		const consumeError = (await fractionalConsume.json()).error;
+		const consumed = await usageRequest(
+			app,
+			authHeaders(),
+			"correction_scale",
+			"consume",
+			{ featureKey: "model_tokens", quantity: "400" },
+			"correction-scale:consume",
+		);
+		const original = (await consumed.json()).data;
+
+		const correction = await testRequest(
+			app,
+			`/v1/billing-accounts/correction_scale/usage/events/${original.usageEventId}/corrections`,
+			{
+				method: "POST",
+				headers: {
+					...jsonHeaders(authHeaders(), "correction-scale:fractional"),
+					"x-billing-actor": "product-worker",
+				},
+				body: JSON.stringify({
+					originalRecordedAt: original.recordedAt,
+					quantity: "100.5",
+					reason: "half a token",
+				}),
+			},
+		);
+
+		expect(correction.status).toBe(400);
+		expect((await correction.json()).error).toMatchObject({
+			code: consumeError.code,
+			message: consumeError.message,
+		});
+		expect(consumeError).toMatchObject({
+			code: "INVALID_REQUEST",
+			message: "quantity supports at most 0 decimal places",
+		});
+		const [{ corrections }] = await context.sql<Array<{ corrections: number }>>`
+			SELECT count(*)::integer AS corrections FROM usage_events WHERE operation = 'correction'
+		`;
+		expect(corrections).toBe(0);
+	});
+
 	it("charges at least one wallet unit per request and corrects only what was charged", async () => {
 		await seedWholeCreditRate(context.sql);
 		const project = integrationProjectContext();
