@@ -346,7 +346,7 @@ export function registerCustomerRoutes({
 		"/v1/billing-accounts/:billingAccountId/commercial-actions",
 		async ({ params, body, request, set, project }) => {
 			const idempotencyKey = request.headers.get("idempotency-key")?.trim();
-			if (idempotencyKey === undefined || idempotencyKey === "") {
+			if (idempotencyKey === undefined || idempotencyKey === "" || idempotencyKey.length > 200) {
 				throw new BillingError("Invalid commercial action execution", "INVALID_REQUEST", 400);
 			}
 			const executeCommercialAction = requireProviderMethod(
@@ -547,7 +547,7 @@ export function registerCustomerRoutes({
 		"/v1/billing-accounts/:billingAccountId/subscriptions/:subscriptionId/changes",
 		async ({ params, body, request, set, project }) => {
 			const idempotencyKey = request.headers.get("idempotency-key")?.trim();
-			if (idempotencyKey === undefined || idempotencyKey === "") {
+			if (idempotencyKey === undefined || idempotencyKey === "" || idempotencyKey.length > 200) {
 				throw new BillingError(
 					"Invalid Stripe subscription change request",
 					"INVALID_REQUEST",

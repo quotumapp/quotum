@@ -3,19 +3,27 @@ import {
 	paginationSchema,
 	parseBillingAccountIdParam,
 	parseCatalogStoreProductListQuery,
+	parseCatalogStoreProductListQuerySchema,
 	parseCustomerIdParam,
 	parseCustomerProjectionJobListQuery,
 	parseCustomerPurchaseListQuery,
 	parseCustomerSearchQuery,
+	parseCustomerSearchQuerySchema,
 	parseCustomerStoreEventListQuery,
 	parseCustomerSubscriptionListQuery,
 	parseEventIdParam,
 	parseProjectionJobListQuery,
+	parseProjectionJobListQuerySchema,
 	parsePurchaseListQuery,
+	parsePurchaseListQuerySchema,
 	parseStatsSummaryQuery,
+	parseStatsSummaryQuerySchema,
 	parseStoreEventDetailQuery,
+	parseStoreEventDetailQuerySchema,
 	parseStoreEventListQuery,
+	parseStoreEventListQuerySchema,
 	parseSubscriptionListQuery,
+	parseSubscriptionListQuerySchema,
 } from "../admin/query";
 import type { AdminBillingReader, AdminListResult } from "../admin/types";
 import { BillingError } from "../billing/errors";
@@ -32,6 +40,8 @@ import type { BillingElysia, PostAuthGuard } from "./types";
 const OPERATOR_PATH_PATTERN =
 	/^\/v1\/admin\/(store-events\/[^/]+\/replay|projection-jobs\/[^/]+\/retry|reconciliation\/subscriptions\/run|metrics)$/;
 
+/** Customer-scoped lists take the customer from the path; a `customerId` query value is ignored. */
+const customerScoped = { customerId: true } as const;
 const billingAccountIdParamsSchema = z.object({ billingAccountId: z.string().min(1) });
 const customerIdParamsSchema = z.object({ customerId: z.string().min(1) });
 const eventIdParamsSchema = z.object({ eventId: z.string().min(1) });
@@ -107,6 +117,7 @@ export function registerAdminRoutes({
 				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/search",
+				request: { query: parseCustomerSearchQuerySchema },
 				responses: { 200: responses.getV1AdminCustomersSearchResponse200Schema },
 			}),
 		},
@@ -152,6 +163,7 @@ export function registerAdminRoutes({
 				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/:customerId/purchases",
+				request: { query: parsePurchaseListQuerySchema.omit(customerScoped) },
 				responses: { 200: responses.getV1AdminCustomersByCustomerIdPurchasesResponse200Schema },
 			}),
 		},
@@ -174,6 +186,7 @@ export function registerAdminRoutes({
 				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/:customerId/subscriptions",
+				request: { query: parseSubscriptionListQuerySchema.omit(customerScoped) },
 				responses: { 200: responses.getV1AdminCustomersByCustomerIdSubscriptionsResponse200Schema },
 			}),
 		},
@@ -196,6 +209,7 @@ export function registerAdminRoutes({
 				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/:customerId/store-events",
+				request: { query: parseStoreEventListQuerySchema.omit(customerScoped) },
 				responses: { 200: responses.getV1AdminCustomersByCustomerIdStoreEventsResponse200Schema },
 			}),
 		},
@@ -218,6 +232,7 @@ export function registerAdminRoutes({
 				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/customers/:customerId/projection-jobs",
+				request: { query: parseProjectionJobListQuerySchema.omit(customerScoped) },
 				responses: {
 					200: responses.getV1AdminCustomersByCustomerIdProjectionJobsResponse200Schema,
 				},
@@ -263,6 +278,7 @@ export function registerAdminRoutes({
 				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/purchases",
+				request: { query: parsePurchaseListQuerySchema },
 				responses: { 200: responses.getV1AdminPurchasesResponse200Schema },
 			}),
 		},
@@ -284,6 +300,7 @@ export function registerAdminRoutes({
 				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/subscriptions",
+				request: { query: parseSubscriptionListQuerySchema },
 				responses: { 200: responses.getV1AdminSubscriptionsResponse200Schema },
 			}),
 		},
@@ -305,6 +322,7 @@ export function registerAdminRoutes({
 				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/store-events",
+				request: { query: parseStoreEventListQuerySchema },
 				responses: { 200: responses.getV1AdminStoreEventsResponse200Schema },
 			}),
 		},
@@ -342,6 +360,7 @@ export function registerAdminRoutes({
 				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/store-events/:eventId",
+				request: { query: parseStoreEventDetailQuerySchema },
 				responses: { 200: responses.getV1AdminStoreEventsByEventIdResponse200Schema },
 			}),
 		},
@@ -363,6 +382,7 @@ export function registerAdminRoutes({
 				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/projection-jobs",
+				request: { query: parseProjectionJobListQuerySchema },
 				responses: { 200: responses.getV1AdminProjectionJobsResponse200Schema },
 			}),
 		},
@@ -405,6 +425,7 @@ export function registerAdminRoutes({
 				credentialAccess: "read_only",
 				tags: ["admin"],
 				path: "/v1/admin/stats/summary",
+				request: { query: parseStatsSummaryQuerySchema },
 				responses: { 200: responses.getV1AdminStatsSummaryResponse200Schema },
 			}),
 		},
@@ -424,6 +445,7 @@ export function registerAdminRoutes({
 				operationId: "getV1AdminCatalogStoreProducts",
 				tags: ["admin"],
 				path: "/v1/admin/catalog/store-products",
+				request: { query: parseCatalogStoreProductListQuerySchema },
 				responses: { 200: responses.getV1AdminCatalogStoreProductsResponse200Schema },
 			}),
 		},

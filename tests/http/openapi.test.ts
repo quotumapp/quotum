@@ -154,6 +154,35 @@ test("documents request bodies, required headers and the named schemas clients i
 		headers(operation("/v1/billing-accounts/{billingAccountId}/trial-eligibility", "get")),
 	).toEqual([]);
 	expect(jsonBody(operation("/v1/purchases/verify", "post"))).toBeDefined();
+	expect(consume.parameters).toContainEqual({
+		in: "header",
+		name: "Idempotency-Key",
+		required: true,
+		schema: { type: "string", minLength: 1, maxLength: 200 },
+	});
+	// The portal session body is optional; only a present body must match its schema.
+	expect(
+		operation("/v1/billing-accounts/{billingAccountId}/providers/stripe/portal-sessions", "post")
+			.requestBody,
+	).toMatchObject({ required: false });
+	expect(consume.requestBody).toMatchObject({ required: true });
+	const queryNames = (entry: OperationObject) =>
+		(entry.parameters ?? [])
+			.map((parameter) => parameter as { in: string; name: string; required?: boolean })
+			.filter((parameter) => parameter.in === "query")
+			.map((parameter) => `${parameter.name}${parameter.required ? "!" : "?"}`);
+	expect(queryNames(operation("/v1/admin/customers/search", "get"))).toEqual([
+		"limit?",
+		"cursor?",
+		"q!",
+	]);
+	expect(queryNames(operation("/v1/admin/store-events/{eventId}", "get"))).toEqual([
+		"includeRawPayload?",
+	]);
+	expect(queryNames(operation("/v1/admin/customers/{customerId}/purchases", "get"))).not.toContain(
+		"customerId?",
+	);
+	expect(queryNames(operation("/v1/admin/purchases", "get"))).toContain("customerId?");
 	const alertEvents = operation(
 		"/v1/billing-accounts/{billingAccountId}/usage-alert-events",
 		"get",

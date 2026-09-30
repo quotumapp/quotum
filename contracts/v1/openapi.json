@@ -24918,6 +24918,14 @@
             }
           },
           {
+            "in": "query",
+            "name": "entityId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "X-Quotum-Organization",
             "required": true,
@@ -32047,6 +32055,64 @@
         "operationId": "merchantGetV1AdminCatalogStoreProducts",
         "parameters": [
           {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "X-Quotum-Organization",
             "required": true,
@@ -33144,6 +33210,129 @@
             }
           },
           {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "pending",
+                "processing",
+                "succeeded",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "enum": [
+                "purchase_verified",
+                "provider_webhook",
+                "expiry_reconciliation",
+                "provider_reconciliation",
+                "usage_changed"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "X-Quotum-Organization",
             "required": true,
@@ -33343,6 +33532,145 @@
             "in": "path",
             "name": "customerId",
             "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "purchaseKind",
+            "required": false,
+            "schema": {
+              "enum": [
+                "subscription",
+                "consumable",
+                "non_consumable"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "completed",
+                "refunded",
+                "revoked",
+                "voided"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "transactionId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orderId",
+            "required": false,
             "schema": {
               "minLength": 1,
               "type": "string"
@@ -33554,6 +33882,133 @@
             }
           },
           {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "processingStatus",
+            "required": false,
+            "schema": {
+              "enum": [
+                "pending",
+                "processing",
+                "processed",
+                "skipped",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "eventType",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "externalEventId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "X-Quotum-Organization",
             "required": true,
@@ -33755,6 +34210,129 @@
             "required": true,
             "schema": {
               "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "grace_period",
+                "billing_retry",
+                "cancelled",
+                "expired",
+                "refunded",
+                "revoked"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "needsAttention",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
               "type": "string"
             }
           },
@@ -34160,6 +34738,39 @@
         "operationId": "merchantGetV1AdminCustomersSearch",
         "parameters": [
           {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "X-Quotum-Organization",
             "required": true,
@@ -34355,6 +34966,138 @@
         "description": "Requires billing.read in sandbox and billing.read in production.  ",
         "operationId": "merchantGetV1AdminProjectionJobs",
         "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customerId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "pending",
+                "processing",
+                "succeeded",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "enum": [
+                "purchase_verified",
+                "provider_webhook",
+                "expiry_reconciliation",
+                "provider_reconciliation",
+                "usage_changed"
+              ],
+              "type": "string"
+            }
+          },
           {
             "in": "header",
             "name": "X-Quotum-Organization",
@@ -37711,6 +38454,154 @@
         "operationId": "merchantGetV1AdminPurchases",
         "parameters": [
           {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customerId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "purchaseKind",
+            "required": false,
+            "schema": {
+              "enum": [
+                "subscription",
+                "consumable",
+                "non_consumable"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "completed",
+                "refunded",
+                "revoked",
+                "voided"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "transactionId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orderId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "X-Quotum-Organization",
             "required": true,
@@ -37907,6 +38798,50 @@
         "operationId": "merchantGetV1AdminStatsSummary",
         "parameters": [
           {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "X-Quotum-Organization",
             "required": true,
@@ -38102,6 +39037,142 @@
         "description": "Requires billing.read in sandbox and billing.read in production.  ",
         "operationId": "merchantGetV1AdminStoreEvents",
         "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customerId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "processingStatus",
+            "required": false,
+            "schema": {
+              "enum": [
+                "pending",
+                "processing",
+                "processed",
+                "skipped",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "eventType",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "externalEventId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
           {
             "in": "header",
             "name": "X-Quotum-Organization",
@@ -38304,6 +39375,18 @@
             "required": true,
             "schema": {
               "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeRawPayload",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
               "type": "string"
             }
           },
@@ -38732,6 +39815,138 @@
         "description": "Requires billing.read in sandbox and billing.read in production.  ",
         "operationId": "merchantGetV1AdminSubscriptions",
         "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customerId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "grace_period",
+                "billing_retry",
+                "cancelled",
+                "expired",
+                "refunded",
+                "revoked"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "needsAttention",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
           {
             "in": "header",
             "name": "X-Quotum-Organization",
@@ -50390,6 +51605,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -54138,6 +55354,66 @@
     "/v1/admin/catalog/store-products": {
       "get": {
         "operationId": "getV1AdminCatalogStoreProducts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -55437,6 +56713,129 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "pending",
+                "processing",
+                "succeeded",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "enum": [
+                "purchase_verified",
+                "provider_webhook",
+                "expiry_reconciliation",
+                "provider_reconciliation",
+                "usage_changed"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -55604,6 +57003,145 @@
             "in": "path",
             "name": "customerId",
             "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "purchaseKind",
+            "required": false,
+            "schema": {
+              "enum": [
+                "subscription",
+                "consumable",
+                "non_consumable"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "completed",
+                "refunded",
+                "revoked",
+                "voided"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "transactionId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orderId",
+            "required": false,
             "schema": {
               "minLength": 1,
               "type": "string"
@@ -55779,6 +57317,133 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "processingStatus",
+            "required": false,
+            "schema": {
+              "enum": [
+                "pending",
+                "processing",
+                "processed",
+                "skipped",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "eventType",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "externalEventId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -55948,6 +57613,129 @@
             "required": true,
             "schema": {
               "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "grace_period",
+                "billing_retry",
+                "cancelled",
+                "expired",
+                "refunded",
+                "revoked"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "needsAttention",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
               "type": "string"
             }
           }
@@ -56283,6 +58071,41 @@
     "/v1/admin/customers/search": {
       "get": {
         "operationId": "getV1AdminCustomersSearch",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -56956,6 +58779,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -57772,6 +59596,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -58088,6 +59913,140 @@
     "/v1/admin/projection-jobs": {
       "get": {
         "operationId": "getV1AdminProjectionJobs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customerId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "pending",
+                "processing",
+                "succeeded",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "enum": [
+                "purchase_verified",
+                "provider_webhook",
+                "expiry_reconciliation",
+                "provider_reconciliation",
+                "usage_changed"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -58445,6 +60404,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -60909,6 +62869,156 @@
     "/v1/admin/purchases": {
       "get": {
         "operationId": "getV1AdminPurchases",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customerId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "purchaseKind",
+            "required": false,
+            "schema": {
+              "enum": [
+                "subscription",
+                "consumable",
+                "non_consumable"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "completed",
+                "refunded",
+                "revoked",
+                "voided"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "transactionId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orderId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -61230,6 +63340,52 @@
     "/v1/admin/stats/summary": {
       "get": {
         "operationId": "getV1AdminStatsSummary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -61390,6 +63546,144 @@
     "/v1/admin/store-events": {
       "get": {
         "operationId": "getV1AdminStoreEvents",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customerId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "processingStatus",
+            "required": false,
+            "schema": {
+              "enum": [
+                "pending",
+                "processing",
+                "processed",
+                "skipped",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "eventType",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "externalEventId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -61557,6 +63851,18 @@
             "required": true,
             "schema": {
               "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeRawPayload",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
               "type": "string"
             }
           }
@@ -61893,6 +64199,140 @@
     "/v1/admin/subscriptions": {
       "get": {
         "operationId": "getV1AdminSubscriptions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "apple",
+                "google",
+                "stripe"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingAccountId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customerId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entitlementKey",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "grace_period",
+                "billing_retry",
+                "cancelled",
+                "expired",
+                "refunded",
+                "revoked"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "needsAttention",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -62932,6 +65372,14 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "entityId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -63451,6 +65899,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -64989,10 +67438,9 @@
             "name": "quantity",
             "required": false,
             "schema": {
-              "type": [
-                "number",
-                "null"
-              ]
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -65366,6 +67814,7 @@
                   },
                   "quantity": {
                     "exclusiveMinimum": 0,
+                    "maximum": 1000000,
                     "type": "integer"
                   }
                 },
@@ -66517,6 +68966,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -67839,7 +70289,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -68024,6 +70474,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -68810,6 +71261,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -69599,6 +72051,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -69620,7 +72073,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -70762,6 +73215,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -71264,6 +73718,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -71684,6 +74139,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -71942,6 +74398,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -72163,6 +74620,7 @@
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             }
@@ -72178,7 +74636,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {

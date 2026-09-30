@@ -107,7 +107,7 @@ const postV1BillingAccountsByBillingAccountIdLicenseAssignmentsBodySchema = z
 	.object({
 		poolId: bigintIdSchema(),
 		entityId: z.string().trim().min(1).max(200),
-		quantity: z.number().int().positive(),
+		quantity: z.number().int().positive().max(1_000_000),
 	})
 	.strict();
 const autoTopupQuerySchema = z
@@ -639,7 +639,10 @@ export function registerControlsRoutes({
 				responses: {
 					200: responses.getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKeyResponse200Schema,
 				},
-				request: { query: z.object({ quantity: z.coerce.number().nullable().optional() }) },
+				// The handler reads `quantity` itself and defaults it to 1.
+				request: {
+					query: z.object({ quantity: z.coerce.number().int().min(1).max(1_000_000).optional() }),
+				},
 			}),
 		},
 	);

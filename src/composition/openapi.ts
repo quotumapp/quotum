@@ -352,7 +352,10 @@ function headerParameters(route: DocumentedRoute): ParameterObject[] {
 			headers.push(
 				header("X-Billing-Actor", false, { type: "string", minLength: 1, maxLength: 200 }),
 			);
-		if (idempotent) headers.push(header("Idempotency-Key", true, { type: "string", minLength: 1 }));
+		if (idempotent)
+			headers.push(
+				header("Idempotency-Key", true, { type: "string", minLength: 1, maxLength: 200 }),
+			);
 	}
 	if (route.path.startsWith("/api/") && mutation) headers.push(header("Origin", true));
 	return headers;
@@ -396,7 +399,8 @@ function operationObject(renderer: SchemaRenderer, route: DocumentedRoute): Oper
 		...(route.body !== undefined && route.method !== "get"
 			? {
 					requestBody: {
-						required: true,
+						// A body declared `.optional()`, such as the portal session's, may be left out.
+						required: !(route.body instanceof z.ZodOptional),
 						content: { "application/json": { schema: renderer.render(route.body, "input") } },
 					},
 				}

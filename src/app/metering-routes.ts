@@ -138,6 +138,8 @@ export function registerMeteringRoutes({
 				credentialAccess: "read_only",
 				tags: ["metering"],
 				path: "/v1/billing-accounts/:billingAccountId/balances/:featureKey",
+				// The handler reads `entityId` itself; omitted, the balance is the account's own.
+				request: { query: z.object({ entityId: z.string().optional() }) },
 				responses: {
 					200: responses.getV1BillingAccountsByBillingAccountIdBalancesByFeatureKeyResponse200Schema,
 				},
