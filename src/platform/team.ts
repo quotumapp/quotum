@@ -71,7 +71,8 @@ export class MerchantTeam {
 				{ status: string }[]
 			>`SELECT status FROM platform_memberships WHERE organization_id=${row.organization_id} AND principal_id=${identity.principalId}`;
 			if (member?.status === "active") return "already_member";
-			if (member) return "revoked";
+			// A removed member rejoins through a new invitation; a suspended one is reactivated.
+			if (member?.status === "suspended") return "revoked";
 		}
 		const [seats] = await tx<
 			{ used: number; member_limit: number }[]
@@ -132,7 +133,9 @@ export class MerchantTeam {
 							: "This invitation can no longer be accepted. Ask an administrator for a new invitation.",
 						409,
 					);
-				await tx`INSERT INTO platform_memberships(organization_id,principal_id,role) VALUES(${row.organization_id},${identity.principalId},${row.role})`;
+				// The removed membership, if any, comes back with the invited role; its revision bump
+				// keeps invitations it issued before the removal retired.
+				await tx`INSERT INTO platform_memberships(organization_id,principal_id,role) VALUES(${row.organization_id},${identity.principalId},${row.role}) ON CONFLICT(organization_id,principal_id) DO UPDATE SET role=EXCLUDED.role,status='active',revision=platform_memberships.revision+1 WHERE platform_memberships.status='removed'`;
 				await tx`UPDATE platform_invitations SET status='used',accepted_by=${identity.principalId},accepted_at=${this.store.now()} WHERE id=${row.id}`;
 				await this.store.audit(
 					tx,
@@ -197,12 +200,19 @@ export class MerchantTeam {
 						);
 					await tx`UPDATE platform_invitations SET status='replaced' WHERE id=${replaceId}`;
 				}
-				const existing =
-					await tx`SELECT m.id FROM platform_memberships m JOIN platform_principals p ON p.id=m.principal_id JOIN platform_auth_users u ON u.id=p.auth_user_id WHERE m.organization_id=${member.organization_id} AND u.email=${input.email} AND m.status='active'`;
-				if (existing.length)
+				const existing = await tx<
+					{ status: string }[]
+				>`SELECT m.status FROM platform_memberships m JOIN platform_principals p ON p.id=m.principal_id JOIN platform_auth_users u ON u.id=p.auth_user_id WHERE m.organization_id=${member.organization_id} AND u.email=${input.email} AND m.status<>'removed'`;
+				if (existing.some((m) => m.status === "active"))
 					throw new MerchantError(
 						"ALREADY_MEMBER",
 						"This person is already an organization member.",
+						409,
+					);
+				if (existing.length)
+					throw new MerchantError(
+						"MEMBER_SUSPENDED",
+						"This person is a suspended member. Reactivate their membership instead of inviting them.",
 						409,
 					);
 				await tx`UPDATE platform_invitations SET status='replaced' WHERE organization_id=${member.organization_id} AND email=${input.email} AND status='valid' AND expires_at<=${this.store.now()}`;
@@ -319,6 +329,12 @@ export class MerchantTeam {
 				{ principal_id: string; role: MerchantRole; status: string }[]
 			>`SELECT principal_id,role,status FROM platform_memberships WHERE id=${id} AND organization_id=${actor.organization_id} FOR UPDATE`;
 			if (!target) throw new MerchantError("NOT_FOUND", "Member not found.", 404);
+			if (target.status === "removed")
+				throw new MerchantError(
+					"MEMBER_REMOVED",
+					"This person was removed. Invite them again to restore their access.",
+					409,
+				);
 			if (target.role === "Owner")
 				throw new MerchantError(
 					"OWNER_PROTECTED",
