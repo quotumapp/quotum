@@ -27,6 +27,17 @@ interface InviteRow {
 	inviter_revision: number;
 	accepted_by: string | null;
 }
+interface MembershipAccess {
+	role: MerchantRole;
+	status: string;
+}
+/** True when the member loses any capability they held: a demotion, suspension or removal. */
+export function reducesAccess(before: MembershipAccess, after: MembershipAccess): boolean {
+	const held = (access: MembershipAccess) =>
+		access.status === "active" ? capabilitiesFor(access.role) : [];
+	const kept = new Set(held(after));
+	return held(before).some((capability) => !kept.has(capability));
+}
 export class MerchantTeam {
 	constructor(
 		private readonly store: MerchantStore,
@@ -341,7 +352,9 @@ export class MerchantTeam {
 					"Owner changes require an ownership transfer.",
 					403,
 				);
+			const nextRole = input.role ?? target.role;
 			const nextStatus = input.status ?? target.status;
+			if (nextRole === target.role && nextStatus === target.status) return { status: "updated" };
 			if (nextStatus === "active" && target.status !== "active") {
 				const [seats] = await tx<
 					{ used: number }[]
@@ -353,17 +366,23 @@ export class MerchantTeam {
 						409,
 					);
 			}
-			await tx`UPDATE platform_memberships SET role=${input.role ?? target.role},status=${nextStatus},revision=revision+1 WHERE id=${id}`;
-			// Reauthentication is required after every membership change, including demotion.
-			await tx`UPDATE platform_merchant_sessions SET revoked_at=${this.store.now()} WHERE principal_id=${target.principal_id} AND revoked_at IS NULL`;
-			await tx`UPDATE platform_invitations SET status='revoked' WHERE inviter_membership_id=${id} AND status='valid'`;
+			// The revision stamps invitations this member issued, so any change retires them.
+			await tx`UPDATE platform_memberships SET role=${nextRole},status=${nextStatus},revision=revision+1 WHERE id=${id}`;
+			// Sessions belong to the person, not to one organization, and every request re-reads the
+			// membership, so reduced access takes effect without signing them out elsewhere. What
+			// this organization issued under the old access ends here; the status trigger revokes
+			// its MCP authorizations.
+			if (reducesAccess(target, { role: nextRole, status: nextStatus })) {
+				await tx`UPDATE platform_invitations SET status='revoked' WHERE inviter_membership_id=${id} AND status='valid'`;
+				await tx`UPDATE platform_step_up_grants SET expires_at=${this.store.now()} WHERE organization_id=${actor.organization_id} AND consumed_at IS NULL AND expires_at>${this.store.now()} AND session_id IN (SELECT id FROM platform_merchant_sessions WHERE principal_id=${target.principal_id})`;
+			}
 			await this.store.audit(
 				tx,
 				identity.principalId,
 				actor.organization_id,
 				"membership.updated",
 				id,
-				{ role: input.role ?? target.role, status: nextStatus },
+				{ role: nextRole, status: nextStatus },
 			);
 			return { status: "updated" };
 		});
