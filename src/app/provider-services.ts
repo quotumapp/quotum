@@ -21,45 +21,51 @@ export function projectProviderServiceResolver(
 	};
 }
 
+/** The error a request gets when the project has no Apple StoreKit connection. */
+export function appleStoreKitNotConfigured(): NotConfiguredError {
+	return new NotConfiguredError(
+		"Apple StoreKit provider is not configured",
+		"BILLING_PROVIDER_NOT_CONFIGURED",
+		501,
+	);
+}
+
+/** The error a request gets when the project has no Google Play connection. */
+export function googlePlayNotConfigured(): NotConfiguredError {
+	return new NotConfiguredError(
+		"Google Play provider is not configured",
+		"BILLING_PROVIDER_NOT_CONFIGURED",
+		501,
+	);
+}
+
+/** The error a request gets when the project has no Stripe connection. */
+export function stripeNotConfigured(): NotConfiguredError {
+	return new NotConfiguredError(
+		"Stripe provider is not configured",
+		"BILLING_PROVIDER_NOT_CONFIGURED",
+		503,
+	);
+}
+
 export function requireAppleStoreKitService(
 	service: AppleStoreKitServiceLike | null,
 ): AppleStoreKitServiceLike {
-	if (service === null) {
-		throw new NotConfiguredError(
-			"Apple StoreKit provider is not configured",
-			"BILLING_PROVIDER_NOT_CONFIGURED",
-			501,
-		);
-	}
-
+	if (service === null) throw appleStoreKitNotConfigured();
 	return service;
 }
 
 export function requireGooglePlayBillingService(
 	service: GooglePlayBillingServiceLike | null,
 ): GooglePlayBillingServiceLike {
-	if (service === null) {
-		throw new NotConfiguredError(
-			"Google Play provider is not configured",
-			"BILLING_PROVIDER_NOT_CONFIGURED",
-			501,
-		);
-	}
-
+	if (service === null) throw googlePlayNotConfigured();
 	return service;
 }
 
 export function requireStripeBillingService(
 	service: StripeBillingServiceLike | null,
 ): StripeBillingServiceLike {
-	if (service === null) {
-		throw new NotConfiguredError(
-			"Stripe provider is not configured",
-			"BILLING_PROVIDER_NOT_CONFIGURED",
-			503,
-		);
-	}
-
+	if (service === null) throw stripeNotConfigured();
 	return service;
 }
 

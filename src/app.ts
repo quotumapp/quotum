@@ -236,6 +236,7 @@ export function createApp({
 	};
 
 	app.parser(LENIENT_JSON_PARSE, lenientJsonParser);
+	const routeMethods = routeMethodIndex(() => app.routes);
 
 	if (requestObservabilityMiddleware !== undefined) {
 		app.use(requestObservabilityMiddleware);
@@ -259,6 +260,21 @@ export function createApp({
 			return billingJsonResponse(request, 400, {
 				success: false,
 				error: { code: "INVALID_REQUEST", message: "Request must carry a valid Host header" },
+			});
+		}
+		// Bodies are read as the bytes sent; a compressed body would only fail validation later.
+		if (
+			path.startsWith("/v1/") &&
+			request.method !== "GET" &&
+			request.method !== "HEAD" &&
+			encodedBody(request.headers.get("content-encoding"))
+		) {
+			return billingJsonResponse(request, 415, {
+				success: false,
+				error: {
+					code: "UNSUPPORTED_CONTENT_ENCODING",
+					message: "Send the request body without a Content-Encoding",
+				},
 			});
 		}
 		if (
@@ -332,6 +348,23 @@ export function createApp({
 		}
 
 		if (code === "NOT_FOUND" && !isBillingError(error)) {
+			const allowed = routeMethods.allowed(
+				URL.parse(request.url, "http://unknown.invalid")?.pathname ?? "/",
+			);
+			if (allowed.length > 0) {
+				return billingJsonResponse(
+					request,
+					405,
+					{
+						success: false,
+						error: {
+							code: "METHOD_NOT_ALLOWED",
+							message: `This route accepts ${allowed.join(", ")}`,
+						},
+					},
+					{ ...headers, allow: allowed.join(", ") },
+				);
+			}
 			return billingJsonResponse(
 				request,
 				404,
@@ -662,6 +695,54 @@ function oversizedContentLength(contentLength: string | null): boolean {
 	return (
 		String(parsedContentLength) === contentLength && parsedContentLength > DEFAULT_BODY_LIMIT_BYTES
 	);
+}
+
+/** A request body sent with any coding other than `identity`. */
+function encodedBody(contentEncoding: string | null): boolean {
+	if (contentEncoding === null) return false;
+	return contentEncoding
+		.split(",")
+		.map((coding) => coding.trim().toLowerCase())
+		.some((coding) => coding !== "" && coding !== "identity");
+}
+
+/**
+ * The methods registered for a path, for answering a known path's wrong method with 405 and
+ * `Allow` instead of 404. HEAD is listed with GET because Elysia answers it for every GET route.
+ * The patterns are compiled once per route table and rebuilt if routes are added later.
+ */
+function routeMethodIndex(routes: () => ReadonlyArray<{ method: string; path: string }>) {
+	let compiled: { count: number; patterns: Array<{ method: string; pattern: RegExp }> } | null =
+		null;
+	return {
+		allowed(pathname: string): string[] {
+			const current = routes();
+			if (compiled?.count !== current.length) {
+				compiled = {
+					count: current.length,
+					patterns: current
+						.filter((route) => route.method !== "ALL")
+						.map((route) => ({ method: route.method, pattern: routePattern(route.path) })),
+				};
+			}
+			const methods = new Set(
+				compiled.patterns
+					.filter((route) => route.pattern.test(pathname))
+					.map((route) => route.method),
+			);
+			if (methods.has("GET")) methods.add("HEAD");
+			return [...methods].sort();
+		},
+	};
+}
+
+function routePattern(path: string): RegExp {
+	const segments = path.split("/").map((segment) => {
+		if (segment.startsWith(":")) return "[^/]+";
+		if (segment === "*") return ".*";
+		return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	});
+	return new RegExp(`^${segments.join("/")}$`);
 }
 
 /** The error envelope, carrying the request's ID so a caller can quote it from the body alone. */
