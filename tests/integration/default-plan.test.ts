@@ -877,6 +877,61 @@ localDescribe("default plan", () => {
 		expect(await balance("stranger")).toMatchObject({ granted: "100", available: "90" });
 	});
 
+	it("answers an unknown account's billing summary and controls from the default plan", async () => {
+		const controlsError = async () => {
+			try {
+				await context.repository.controlsEnterprise.listEffectiveControls(project, "stranger");
+				return null;
+			} catch (error) {
+				return error;
+			}
+		};
+		await publish(catalog(null));
+		expect(await context.repository.getCustomerBillingSummary(project, "stranger")).toMatchObject({
+			customerExists: false,
+			balances: [],
+		});
+		expect(await controlsError()).toMatchObject({ code: "BILLING_ACCOUNT_NOT_FOUND" });
+
+		await publish(
+			catalog({
+				...freePlan(1, "100"),
+				controls: [
+					{
+						controlKind: "usage_limit",
+						featureKey: "model_tokens",
+						currency: null,
+						limitValue: "300",
+						interval: "day",
+					},
+				],
+			}),
+		);
+
+		const summary = await context.repository.getCustomerBillingSummary(project, "stranger");
+		expect(summary).toMatchObject({
+			customerExists: false,
+			subscriptions: [],
+			balances: [{ featureKey: "ai_credits", available: "100", held: "0" }],
+		});
+		expect(
+			await context.repository.controlsEnterprise.listEffectiveControls(project, "stranger"),
+		).toMatchObject([
+			{
+				controlKind: "usage_limit",
+				featureKey: "model_tokens",
+				limitValue: "300",
+				source: "plan_default",
+				consumedValue: "0",
+				remainingValue: "300",
+			},
+		]);
+		expect(await balance("stranger")).toMatchObject({ granted: "100", available: "100" });
+		expect(
+			await context.sql`SELECT id FROM customers WHERE billing_account_id = 'stranger'`,
+		).toHaveLength(0);
+	});
+
 	it("applies the default plan's meter limit to an unknown account in a window starting now", async () => {
 		const limited = freePlan(1, "100");
 		limited.items.push({

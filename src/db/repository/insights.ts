@@ -165,7 +165,13 @@ export class BillingInsightsRepository extends RepositoryModule {
 			`,
 		);
 		if (customer === null) {
-			return emptySummary(billingAccountId);
+			// An account Quotum has not recorded holds only the default plan its first write starts,
+			// so it reads as holding it, as balance reads do.
+			const pending = await readPendingAllowances(this.database, projectId, null, null);
+			return {
+				...emptySummary(billingAccountId),
+				balances: summaryBalances(withPendingBalances([], pending)),
+			};
 		}
 		const [subscriptions, allocationBalances, usage, invoices, pending] = await Promise.all([
 			executeRows<{
@@ -274,13 +280,7 @@ export class BillingInsightsRepository extends RepositoryModule {
 				currentPeriodEnd: row.current_period_end === null ? null : iso(row.current_period_end),
 				cancelAtPeriodEnd: row.cancel_at_period_end,
 			})),
-			balances: balances.map((row) => ({
-				featureKey: row.feature_key,
-				unit: row.unit,
-				available: signedDecimal(row.available, "available balance"),
-				held: databaseDecimal(row.held, "held balance"),
-				expiresAt: row.expires_at === null ? null : iso(row.expires_at),
-			})),
+			balances: summaryBalances(balances),
 			usage: usage.map((row) => ({
 				featureKey: row.feature_key,
 				unit: row.unit,
@@ -459,6 +459,18 @@ async function requireCustomer(
 		throw new NotFoundBillingError("Billing account was not found", "BILLING_ACCOUNT_NOT_FOUND");
 	}
 	return customer;
+}
+
+function summaryBalances(
+	balances: ReturnType<typeof withPendingBalances>,
+): CustomerBillingSummary["balances"] {
+	return balances.map((row) => ({
+		featureKey: row.feature_key,
+		unit: row.unit,
+		available: signedDecimal(row.available, "available balance"),
+		held: databaseDecimal(row.held, "held balance"),
+		expiresAt: row.expires_at === null ? null : iso(row.expires_at),
+	}));
 }
 
 function emptySummary(billingAccountId: string): CustomerBillingSummary {

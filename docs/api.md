@@ -180,6 +180,10 @@ still reaches such a combination another way, such as a later base-plan change, 
 limit and the add-on limits that can join it; usage never fails over it. A plan grant, such as a
 trial or the default plan, caps alone, and a paying subscription's limit replaces it.
 
+A usage limit caps the quantity recorded for the feature it names and nothing else: when a rate
+card charges a meter's usage to a wallet feature, a usage limit on the meter counts it and one on
+the wallet does not. To cap how fast a wallet drains, use a spend limit or a meter limit.
+
 Spend and usage limits (`PUT /controls`, plan `controls`, contract `controls`) and usage alerts
 count in UTC calendar windows: `interval` is one of `day`, `week`, `month`, `quarter`,
 `semi_annual`, `year`, `hour` or `lifetime`, times an optional `intervalCount` (default 1; none for
@@ -566,7 +570,9 @@ holds a trial. The marked plan must be an active, public base plan with no price
 billing interval or provider binding and no trial days. It cannot hold licensed quantities,
 entity-scoped allocations or rollover, and each of its allocations must reset. A violation returns
 `400 INVALID_REQUEST`. An unpriced plan has no provider product, so its entitlement keys are
-declared on the marker (at most 100). Changing or removing the marker creates no plan version.
+declared on the marker (at most 100). A marker key may also be one a paid plan grants, such as a
+`basic` key held on both the free and the paid plan; publication does not refuse it. Changing or
+removing the marker creates no plan version.
 Preview and publish report `impact.defaultPlanAccounts`: the accounts the default plan covers,
 meaning those without a funding subscription to a base plan (or to no plan version, as recorded
 before plans existed) and without an active base plan grant such as a trial. A publish that removes
@@ -1148,7 +1154,11 @@ ended moments ago, such as a trial the worker has not recorded as expired yet. F
 - `GET .../entitlements` reports the marker's keys, active, with
   `metadata: { source: "plan_grant", origin: "default", status: "active", planKey }` and no
   `planGrantId`;
-- the billing summary of a recorded account counts the same allowance.
+- the billing summary counts the same allowance, also for an account Quotum has not recorded,
+  which it reports with `customerExists: false`;
+- `GET .../controls` lists the default version's controls, with nothing counted yet for an account
+  Quotum has not recorded. Without a default plan, or with an `entityId`, such an account still
+  answers `404 BILLING_ACCOUNT_NOT_FOUND`.
 
 An account whose default plan a publish changed reads the same way before the pass reaches it: at
 the version its next write moves it to, with that version's meter limits, usage limits and the
@@ -1228,7 +1238,10 @@ The two lists, `GET .../operator-grants/:billingAccountId` and
 its `limit` in decimal digits only: `0x2`, `1e1` or `2.0` answer `400 INVALID_REQUEST`.
 
 Each change enqueues the coalesced `usage_changed` projection, as promotion grants do. A revoked
-promotion reward reports only the quantity its revocation took, net of an earlier debit.
+promotion reward reports only the quantity its revocation took, net of an earlier debit. A grant,
+revocation or debit replayed with its `Idempotency-Key` returns the original result, attributed to
+the actor who made it, whatever `X-Billing-Actor` the replay sends: the actor records who acted and
+is not part of the request a key identifies.
 Balances cannot be set to a value, and usage counters or reset times cannot be edited.
 
 ## Admin operations
