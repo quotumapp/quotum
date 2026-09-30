@@ -54,6 +54,11 @@ usage and the settings it reads without running it; an unknown command or unexpe
 | `quotum init` | Print a newly generated `QUOTUM_SECRETS_KEY_*`, `QUOTUM_AUTH_SECRET` and `BILLING_OPERATOR_API_KEY`. |
 | `quotum version`, `quotum help` | Build version and command list. |
 
+`bootstrap`, `catalog`, `partitions`, `connections` and `credentials` report a failure as one line
+on stderr and exit `64` for wrong arguments or `1` otherwise. A missing table reads as "the
+database schema is not migrated", and an invalid `BILLING_PLATFORM_BOOTSTRAP_JSON` names the field
+at fault.
+
 `quotum init` prints secrets on purpose: redirect it to a file only you can read
 (`umask 077; quotum init > quotum.env`) and move the values to your secret manager. The image's
 working directory is not writable by its `bun` user, so point `--credentials-out` at a mounted

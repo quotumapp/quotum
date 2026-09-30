@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { open, stat, unlink } from "node:fs/promises";
 import { SQL } from "bun";
+import { DrizzleQueryError } from "drizzle-orm/errors";
+import { sqlstateOf } from "../../db/postgres-errors";
 import { loadPostgresPreparedStatements, loadProjectionReceivers } from "../../env";
 import { loadAuthSecret, merchantPlatformEnabled } from "../../platform/config";
 import { loadConnectionCipher } from "../../platform/connections/cipher";
@@ -13,6 +15,7 @@ import type { ConnectionValidationPort } from "../../platform/connections/ports"
 import { ConnectionRepository } from "../../platform/connections/repository";
 import type { MerchantSql } from "../../platform/database";
 import { MerchantError, tokenHash } from "../../platform/security";
+import { BillingApiError } from "../../sdk/client";
 import { writeStderr, writeStdout } from "../../shared/cli-output";
 import { createConnectionValidation } from "../connection-validation";
 import { merchantSql } from "../merchant-persistence";
@@ -288,17 +291,32 @@ export async function runOperatorCommand(
 		if (report.notice !== undefined) output.stderr(report.notice);
 		return report.exitCode;
 	} catch (error) {
-		if (error instanceof CliUsageError) {
-			output.stderr(`${error.message} Run \`${help}\` for usage.`);
-			return 64;
-		}
-		output.stderr(
-			error instanceof MerchantError
-				? `${error.code}: ${error.message}`
-				: error instanceof Error
-					? error.message
-					: String(error),
-		);
-		return 1;
+		return reportOperatorFailure(error, help, output);
 	}
+}
+
+/** Writes one line for a failed command and returns its exit code: 64 for usage, otherwise 1. */
+export function reportOperatorFailure(error: unknown, help: string, output: CommandOutput): 1 | 64 {
+	if (error instanceof CliUsageError) {
+		output.stderr(`${error.message} Run \`${help}\` for usage.`);
+		return 64;
+	}
+	output.stderr(describeOperatorError(error));
+	return 1;
+}
+
+/**
+ * The operator-facing reason a command failed, on one line. A failed query reports the
+ * database's reason rather than the SQL and parameters Drizzle puts in its message, and a missing
+ * table means the schema was never migrated.
+ */
+export function describeOperatorError(error: unknown): string {
+	if (error instanceof MerchantError || error instanceof BillingApiError)
+		return `${error.code}: ${error.message}`;
+	const reason =
+		error instanceof DrizzleQueryError && error.cause !== undefined ? error.cause : error;
+	const message = reason instanceof Error ? reason.message : String(reason);
+	if (sqlstateOf(error) === "42P01")
+		return `The database schema is not migrated (${message}); run \`quotum migrate\` first.`;
+	return message;
 }

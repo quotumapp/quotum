@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { DrizzleQueryError } from "drizzle-orm/errors";
 import {
 	type PartitionsCommandDependencies,
 	runPartitionsCommand,
@@ -191,5 +192,34 @@ describe("quotum partitions arguments and settings", () => {
 		);
 		expect(invalid.code).toBe(1);
 		expect(invalid.stderr.join("\n")).toContain("BILLING_POSTGRES_PREPARED_STATEMENTS");
+	});
+
+	it("says an unmigrated database needs migrating instead of printing the failed SQL", async () => {
+		const cause = Object.assign(new Error('relation "usage_events" does not exist'), {
+			errno: "42P01",
+		});
+		const result = await run(["status"], {
+			inspect: async () => {
+				throw new DrizzleQueryError("SELECT child.relname FROM pg_inherits", [], cause);
+			},
+		});
+		expect(result.code).toBe(1);
+		expect(result.json).toBeUndefined();
+		expect(result.stderr).toEqual([
+			'The database schema is not migrated (relation "usage_events" does not exist); run `quotum migrate` first.',
+		]);
+	});
+
+	it("reports another failed query by the database's reason alone", async () => {
+		const cause = Object.assign(new Error("permission denied for table usage_events"), {
+			errno: "42501",
+		});
+		const result = await run(["status"], {
+			inspect: async () => {
+				throw new DrizzleQueryError("SELECT child.relname FROM pg_inherits", ["secret"], cause);
+			},
+		});
+		expect(result.code).toBe(1);
+		expect(result.stderr).toEqual(["permission denied for table usage_events"]);
 	});
 });

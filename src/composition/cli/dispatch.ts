@@ -75,7 +75,7 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		usage: "catalog status | diff <file> | push <file>",
 		summary: "Read, preview or publish the catalog through the API",
 		environment:
-			"BILLING_BASE_URL, BILLING_PROJECT_API_KEY (or BILLING_PROJECT_KEY), BILLING_OPERATOR_API_KEY, optional BILLING_ACTOR",
+			"BILLING_BASE_URL, BILLING_PROJECT_API_KEY (or BILLING_PROJECT_KEY); diff and push also BILLING_OPERATOR_API_KEY and optional BILLING_ACTOR",
 		accepts: (args) =>
 			(args.length === 1 && args[0] === "status") ||
 			(args.length === 2 && (args[0] === "diff" || args[0] === "push")),
