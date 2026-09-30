@@ -1118,6 +1118,59 @@ localDescribe("catalog control plane", () => {
 			currency: "usd",
 		});
 	});
+
+	it("accepts the published catalog read back as an unchanged preview", async () => {
+		await seedPhaseTwoStripePrices();
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = operatorHeaders(authHeaders());
+		const catalog = richCatalogIntent();
+		const first = await testRequest(app, "/v1/admin/catalog/preview", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ expectedRevision: null, catalog }),
+		});
+		expect(first.status).toBe(200);
+		const publish = await testRequest(app, "/v1/admin/catalog/publish", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				expectedRevision: null,
+				previewToken: (await first.json()).data.previewToken,
+				catalog,
+			}),
+		});
+		expect(publish.status).toBe(200);
+		const published = (await publish.json()).data;
+
+		const read = await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() });
+		expect(read.status).toBe(200);
+		const readData = (await read.json()).data;
+		expect(readData).toMatchObject({ revision: 1, intentHash: published.intentHash });
+
+		const again = await testRequest(app, "/v1/admin/catalog/preview", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ expectedRevision: 1, catalog: readData.catalog }),
+		});
+		const againBody = await again.json();
+		expect({ status: again.status, error: againBody.error }).toEqual({
+			status: 200,
+			error: undefined,
+		});
+		expect(againBody.data.intentHash).toBe(published.intentHash);
+		// Every revision writes its own top-up options, so only these counts show a change.
+		expect(againBody.data.impact).toMatchObject({
+			featuresCreated: 0,
+			featuresRetired: 0,
+			plansCreated: 0,
+			planVersionsCreated: 0,
+			plansRetired: 0,
+			topupsRetired: 0,
+		});
+	});
 });
 
 async function seedPhaseTwoStripePrices(period = { unit: "month", count: 1 }) {
@@ -1342,6 +1395,130 @@ function catalogIntent(version: number, ratePerUnit: string) {
 				ratePerUnit,
 			},
 		],
+	};
+}
+
+/**
+ * A catalog that uses every intent section the read returns: priced, licensed and metered plan
+ * items, an add-on, allocation rollover, controls, a trial, graduated rate-card tiers, a top-up and
+ * an unpriced default plan.
+ */
+function richCatalogIntent() {
+	const phaseTwo = phaseTwoCatalogIntent();
+	const base = catalogIntent(1, "0.005");
+	const [pro, addon] = phaseTwo.plans;
+	return {
+		features: [
+			...phaseTwo.features,
+			...base.features,
+			{
+				key: "image_generations",
+				name: "Image generations",
+				kind: "metered",
+				meterKind: "consumable",
+				unit: "image",
+				creditScale: 0,
+				filterDimensions: [],
+			},
+			{
+				key: "free_tier",
+				name: "Free tier",
+				kind: "boolean",
+				meterKind: null,
+				unit: "access",
+				creditScale: 0,
+				filterDimensions: [],
+			},
+		],
+		plans: [
+			{
+				...pro,
+				items: [
+					...(pro?.items ?? []),
+					{
+						featureKey: "ai_credits",
+						itemKind: "allocation",
+						quantity: "1000",
+						resetInterval: "month",
+						expiresAfterSeconds: null,
+						overagePolicy: "blocked",
+						rollover: {
+							maxQuantity: "500",
+							expiry: { mode: "after", interval: "month", intervalCount: 3 },
+						},
+					},
+				],
+				controls: [
+					{
+						controlKind: "usage_limit",
+						featureKey: "model_tokens",
+						currency: null,
+						limitValue: "100000",
+						interval: "day",
+					},
+					{
+						controlKind: "spend_limit",
+						featureKey: null,
+						currency: "USD",
+						limitValue: "50",
+						interval: "month",
+					},
+				],
+			},
+			addon,
+			{
+				key: "free",
+				name: "Free",
+				version: 1,
+				currency: null,
+				baseAmountMinor: null,
+				billingInterval: null,
+				trialDays: null,
+				items: [
+					{
+						featureKey: "free_tier",
+						itemKind: "access",
+						quantity: null,
+						resetInterval: null,
+						expiresAfterSeconds: null,
+						overagePolicy: "blocked",
+					},
+					{
+						featureKey: "ai_credits",
+						itemKind: "allocation",
+						quantity: "50",
+						resetInterval: "month",
+						expiresAfterSeconds: null,
+						overagePolicy: "blocked",
+					},
+					{
+						featureKey: "api_calls",
+						itemKind: "meter_limit",
+						quantity: "100",
+						resetInterval: "day",
+						resetIntervalCount: 1,
+						expiresAfterSeconds: null,
+						overagePolicy: "blocked",
+					},
+				],
+				providerBindings: [],
+			},
+		],
+		topups: base.topups,
+		rateCards: [
+			{
+				meterFeatureKey: "model_tokens",
+				walletFeatureKey: "ai_credits",
+				ratePerUnit: "0.005",
+				pricingModel: "graduated",
+				tiers: [
+					{ upToQuantity: "10000", ratePerUnit: "0.005" },
+					{ upToQuantity: null, ratePerUnit: "0.002" },
+				],
+			},
+			{ meterFeatureKey: "image_generations", walletFeatureKey: "ai_credits", ratePerUnit: "2" },
+		],
+		defaultPlan: { planKey: "free", entitlementKeys: ["free_tier"] },
 	};
 }
 

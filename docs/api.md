@@ -492,7 +492,10 @@ and operator authentication plus `X-Billing-Actor`. Provider bindings adopt pre-
 products and must all be ready before the active pointer advances. Previously active features,
 plans, and top-ups must be retained or listed explicitly for retirement; omission is not deletion.
 Retiring a plan removes it from new selection without rewriting pinned subscriptions.
-`GET /v1/admin/catalog` returns the active intent and needs project authentication only. See
+`GET /v1/admin/catalog` returns the active intent and needs project authentication only. It
+returns the intent as publish normalized it, with defaults filled in and `tiers: []` on a flat price
+or rate card; preview accepts that output unchanged, and previewing it reports the published
+`intentHash` with no features, plans or versions created. See
 [`examples/quickstart/catalog.json`](../examples/quickstart/catalog.json) for a minimal intent.
 
 Preview and publish validate the intent's structure first and reject the first structural problem,
