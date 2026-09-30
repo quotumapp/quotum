@@ -182,6 +182,20 @@ describe("real Better Auth merchant authentication", () => {
 		expect(
 			(await recovery.request("/api/auth/reset-password", { token, newPassword: password })).status,
 		).toBe(410);
+		const [principal] = await f.sql<
+			{ id: string; auth_user_id: string }[]
+		>`SELECT id,auth_user_id FROM platform_principals`;
+		expect(
+			await f.sql`SELECT principal_id,organization_id,action,target,metadata FROM platform_audit_events WHERE action='password.reset'`,
+		).toEqual([
+			{
+				principal_id: principal?.id,
+				organization_id: null,
+				action: "password.reset",
+				target: principal?.auth_user_id,
+				metadata: { sessionsRevoked: 1 },
+			},
+		]);
 	});
 	it("uses atomic rate-limit buckets under concurrent requests", async () => {
 		await f.store.rateLimit("initial-probe", 5, 60_000);

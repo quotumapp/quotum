@@ -136,7 +136,17 @@ export function createMerchantAuth(
 				);
 			},
 			async onPasswordReset({ user }) {
-				await store.sql`UPDATE platform_merchant_sessions SET revoked_at=${store.now()} WHERE principal_id IN (SELECT id FROM platform_principals WHERE auth_user_id=${user.id}) AND revoked_at IS NULL`;
+				await store.sql.begin(async (tx) => {
+					const revoked =
+						await tx`UPDATE platform_merchant_sessions SET revoked_at=${store.now()} WHERE principal_id IN (SELECT id FROM platform_principals WHERE auth_user_id=${user.id}) AND revoked_at IS NULL RETURNING id`;
+					// A person who never finished signing in has no principal yet; the target names them.
+					const [principal] = await tx<
+						{ id: string }[]
+					>`SELECT id FROM platform_principals WHERE auth_user_id=${user.id}`;
+					await store.audit(tx, principal?.id ?? null, null, "password.reset", user.id, {
+						sessionsRevoked: revoked.length,
+					});
+				});
 				await new McpAuthorizations(store).revokeUser(user.id);
 			},
 		},
