@@ -111,32 +111,34 @@ e2eDescribe("E2E HTTP surface", () => {
 		});
 	});
 
-	it("rejects unknown project and invalid Stripe signatures before durable writes", async () => {
+	it("rejects unknown project and invalid Stripe signatures alike, before durable writes", async () => {
 		const before = await durableCounts();
-		const unknown = await service.request("/v1/projects/unknown/webhooks/stripe", {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: "{}",
-		});
-		expect(unknown.status).toBe(404);
-
-		const invalidSignature = await service.request("/v1/projects/acme/webhooks/stripe", {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				"stripe-signature": "bad-signature",
-			},
-			body: JSON.stringify({ id: "evt_bad" }),
-		});
-		expect(invalidSignature.status).toBe(400);
-		expect(await invalidSignature.json()).toEqual({
+		const signed = (projectKey: string) =>
+			service.request(`/v1/projects/${projectKey}/webhooks/stripe`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"stripe-signature": "bad-signature",
+				},
+				body: JSON.stringify({ id: "evt_bad" }),
+			});
+		const signatureInvalid = {
 			success: false,
 			error: {
 				code: "STRIPE_WEBHOOK_SIGNATURE_INVALID",
 				message: "Stripe webhook signature is invalid",
 				requestId: expect.any(String),
 			},
-		});
+		};
+
+		// An unknown project key must not be told apart from a known one with a bad signature.
+		const unknown = await signed("unknown");
+		expect(unknown.status).toBe(400);
+		expect(await unknown.json()).toEqual(signatureInvalid);
+
+		const invalidSignature = await signed("acme");
+		expect(invalidSignature.status).toBe(400);
+		expect(await invalidSignature.json()).toEqual(signatureInvalid);
 		expect(await durableCounts()).toEqual(before);
 	});
 });

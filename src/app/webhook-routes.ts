@@ -11,6 +11,7 @@ import {
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
+import { appleSignedDataInvalid } from "../providers/apple/signed-data-errors";
 import { parseCappedJson, readCappedText } from "../shared/body-limit";
 import { operationDetail } from "../shared/http";
 import {
@@ -19,9 +20,9 @@ import {
 	GoogleWebhookResultSchema,
 } from "./contracts/provider-responses";
 import {
-	requireAppleStoreKitService,
-	requireGooglePlayBillingService,
-	requireStripeBillingService,
+	appleStoreKitNotConfigured,
+	googlePlayNotConfigured,
+	stripeNotConfigured,
 } from "./provider-services";
 import type {
 	BillingElysia,
@@ -121,7 +122,13 @@ export function registerWebhookRoutes(input: {
 		),
 	);
 
-	const webhookProject = async (projectKey: string): Promise<ProjectInstanceContext> => {
+	/**
+	 * A webhook path is public and its project key unauthenticated. An unknown key answers null, and
+	 * each handler then tells the sender exactly what a sender that fails that provider's own
+	 * verification is told, after the same body and header checks, so the answer never says whether
+	 * a project key exists.
+	 */
+	const webhookProject = async (projectKey: string): Promise<ProjectInstanceContext | null> => {
 		const resolution = await contextResolver.resolveInstanceKey(projectKey);
 		if (resolution.kind === "unavailable") {
 			throw new BillingError(
@@ -130,13 +137,7 @@ export function registerWebhookRoutes(input: {
 				503,
 			);
 		}
-		if (resolution.kind !== "resolved") {
-			throw new BillingError(
-				"Billing project is not configured",
-				"BILLING_PROJECT_NOT_CONFIGURED",
-				404,
-			);
-		}
+		if (resolution.kind !== "resolved") return null;
 
 		if (resolution.context.lifecycleStatus === "inactive")
 			throw new BillingError(
@@ -155,43 +156,72 @@ export function registerWebhookRoutes(input: {
 		try {
 			return await run();
 		} catch (error) {
+			// A concealed failure is logged with its real reason and answered as a failed verification.
+			const reason = error instanceof ConcealedWebhookFailure ? error.reason : error;
 			recordWebhookFailure(
 				billingMetrics,
 				billingLogger,
 				provider,
-				error,
+				reason,
 				message,
 				project.projectInstanceKey,
 			);
-			throw error;
+			throw error instanceof ConcealedWebhookFailure ? error.answer : error;
 		}
 	};
-	const handleAppleWebhook = async (request: Request, project: ProjectInstanceContext) =>
-		withWebhookFailureRecording("apple", "Apple webhook failed", project, async () => {
-			const body = await parseCappedJson(request, publicWebhookMaxBodyBytes, tooLargeError);
-			const parsed = appleWebhookSchema.safeParse(body);
-			if (!parsed.success) {
-				throw new BillingError("Invalid Apple webhook body", "INVALID_REQUEST", 400);
-			}
-
-			const result = await requireAppleStoreKitService(
+	/** A project without this provider's connection answers like an unknown project key. */
+	const connected = <T>(service: T | null, reason: () => BillingError, answer: BillingError): T => {
+		if (service === null) throw new ConcealedWebhookFailure(reason(), answer);
+		return service;
+	};
+	const readAppleNotification = async (request: Request) => {
+		const body = await parseCappedJson(request, publicWebhookMaxBodyBytes, tooLargeError);
+		const parsed = appleWebhookSchema.safeParse(body);
+		if (!parsed.success) {
+			throw new BillingError("Invalid Apple webhook body", "INVALID_REQUEST", 400);
+		}
+		return parsed.data;
+	};
+	const requireGoogleBearer = (request: Request): string => {
+		const authorizationHeader = request.headers.get("authorization") ?? null;
+		if (authorizationHeader === null || !hasBearerToken(authorizationHeader)) {
+			throw new BillingError(
+				"Google Pub/Sub push token is required",
+				"GOOGLE_PLAY_RTDN_UNAUTHORIZED",
+				401,
+			);
+		}
+		return authorizationHeader;
+	};
+	const handleAppleWebhook = async (request: Request, projectKey: string) => {
+		const project = await webhookProject(projectKey);
+		if (project === null) {
+			await readAppleNotification(request);
+			throw appleUnverified();
+		}
+		return withWebhookFailureRecording("apple", "Apple webhook failed", project, async () => {
+			const notification = await readAppleNotification(request);
+			const service = connected(
 				await providerServices.appleStoreKitService(project, "recovery"),
-			).handleNotification(parsed.data);
+				appleStoreKitNotConfigured,
+				appleUnverified(),
+			);
+			const result = await service.handleNotification(notification);
 			return { success: true as const, data: result };
 		});
-	const handleGoogleWebhook = async (request: Request, project: ProjectInstanceContext) =>
-		withWebhookFailureRecording("google", "Google webhook failed", project, async () => {
-			const authorizationHeader = request.headers.get("authorization") ?? null;
-			if (!hasBearerToken(authorizationHeader)) {
-				throw new BillingError(
-					"Google Pub/Sub push token is required",
-					"GOOGLE_PLAY_RTDN_UNAUTHORIZED",
-					401,
-				);
-			}
-
-			const service = requireGooglePlayBillingService(
+	};
+	const handleGoogleWebhook = async (request: Request, projectKey: string) => {
+		const project = await webhookProject(projectKey);
+		if (project === null) {
+			requireGoogleBearer(request);
+			throw googleUnverified();
+		}
+		return withWebhookFailureRecording("google", "Google webhook failed", project, async () => {
+			const authorizationHeader = requireGoogleBearer(request);
+			const service = connected(
 				await providerServices.googlePlayBillingService(project, "recovery"),
+				googlePlayNotConfigured,
+				googleUnverified(),
 			);
 			await service.verifyRtdnAuthorization?.(authorizationHeader);
 
@@ -207,22 +237,29 @@ export function registerWebhookRoutes(input: {
 			});
 			return { success: true as const, data: result };
 		});
-	const handleStripeWebhook = async (request: Request, project: ProjectInstanceContext) =>
-		withWebhookFailureRecording("stripe", "Stripe webhook failed", project, async () => {
+	};
+	const handleStripeWebhook = async (request: Request, projectKey: string) => {
+		const project = await webhookProject(projectKey);
+		const signatureHeader = request.headers.get("stripe-signature") ?? null;
+		if (project === null) {
+			await readCappedText(request, publicWebhookMaxBodyBytes, tooLargeError);
+			throw stripeUnverified(signatureHeader);
+		}
+		return withWebhookFailureRecording("stripe", "Stripe webhook failed", project, async () => {
 			const rawBody = await readCappedText(request, publicWebhookMaxBodyBytes, tooLargeError);
-			const result = await requireStripeBillingService(
+			const service = connected(
 				await providerServices.stripeBillingService(project, "recovery"),
-			).handleWebhook({
-				rawBody,
-				signatureHeader: request.headers.get("stripe-signature") ?? null,
-			});
+				stripeNotConfigured,
+				stripeUnverified(signatureHeader),
+			);
+			const result = await service.handleWebhook({ rawBody, signatureHeader });
 			return { success: true as const, data: result };
 		});
+	};
 
 	app.post(
 		"/v1/projects/:projectKey/webhooks/apple",
-		async ({ params, request }) =>
-			handleAppleWebhook(request, await webhookProject(params.projectKey)),
+		async ({ params, request }) => handleAppleWebhook(request, params.projectKey),
 		{
 			parse: "none",
 			params: z.object({ projectKey: z.string().min(1) }),
@@ -241,8 +278,7 @@ export function registerWebhookRoutes(input: {
 
 	app.post(
 		"/v1/projects/:projectKey/webhooks/google",
-		async ({ params, request }) =>
-			handleGoogleWebhook(request, await webhookProject(params.projectKey)),
+		async ({ params, request }) => handleGoogleWebhook(request, params.projectKey),
 		{
 			parse: "none",
 			params: z.object({ projectKey: z.string().min(1) }),
@@ -261,8 +297,7 @@ export function registerWebhookRoutes(input: {
 
 	app.post(
 		"/v1/projects/:projectKey/webhooks/stripe",
-		async ({ params, request }) =>
-			handleStripeWebhook(request, await webhookProject(params.projectKey)),
+		async ({ params, request }) => handleStripeWebhook(request, params.projectKey),
 		{
 			parse: "none",
 			params: z.object({ projectKey: z.string().min(1) }),
@@ -310,6 +345,45 @@ function recordWebhookFailure(
 
 function billingErrorCode(error: unknown): string {
 	return isBillingError(error) ? error.code : "INTERNAL_ERROR";
+}
+
+/**
+ * A webhook failure answered as a failed verification: the sender learns nothing about the project,
+ * while the log keeps the real reason.
+ */
+class ConcealedWebhookFailure extends Error {
+	constructor(
+		readonly reason: BillingError,
+		readonly answer: BillingError,
+	) {
+		super(reason.message);
+		this.name = "ConcealedWebhookFailure";
+	}
+}
+
+/** What Stripe's signature check answers a sender it cannot verify. */
+function stripeUnverified(signatureHeader: string | null): BillingError {
+	return (signatureHeader ?? "").trim() === ""
+		? new BillingError("Stripe signature must not be blank", "INVALID_REQUEST", 400)
+		: new BillingError(
+				"Stripe webhook signature is invalid",
+				"STRIPE_WEBHOOK_SIGNATURE_INVALID",
+				400,
+			);
+}
+
+/** What Apple's notification verification answers a payload it cannot verify. */
+function appleUnverified(): BillingError {
+	return appleSignedDataInvalid("Apple signed data failed verification");
+}
+
+/** What the Pub/Sub token check answers a push token it cannot verify. */
+function googleUnverified(): BillingError {
+	return new BillingError(
+		"Google Pub/Sub push token is invalid",
+		"GOOGLE_PLAY_RTDN_UNAUTHORIZED",
+		401,
+	);
 }
 
 function hasBearerToken(authorizationHeader: string | null): boolean {

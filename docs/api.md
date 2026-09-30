@@ -29,6 +29,14 @@ Where a `/v1` operation requires an `Idempotency-Key`, the key holds 1 to 200 ch
 surrounding whitespace is trimmed; anything else answers `400 INVALID_REQUEST`. The contract lists
 every query parameter an operation reads, including the admin list filters.
 
+A `/v1` path that exists answers another method with `405 METHOD_NOT_ALLOWED` and an `Allow`
+header listing the methods it accepts (`HEAD` wherever `GET` is); a path that does not exist answers
+`404 NOT_FOUND`. A `/v1` request body sent with a `Content-Encoding` other than `identity` answers
+`415 UNSUPPORTED_CONTENT_ENCODING`: bodies are read as sent and must not be compressed. A body over
+256 KB answers `413 REQUEST_BODY_TOO_LARGE`. Bun itself answers a request line or headers beyond its
+limits, and a body beyond its 128 MB limit, before the service runs, so those answers carry no JSON
+envelope.
+
 Regenerate and validate after changing a route:
 
 ```sh

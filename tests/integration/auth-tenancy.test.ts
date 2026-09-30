@@ -146,7 +146,7 @@ localDescribe("billing auth and tenancy integration", () => {
 		});
 	});
 
-	it("returns 404 for unknown project Apple webhooks before provider calls", async () => {
+	it("answers unknown project Apple webhooks as unverifiable, before provider calls", async () => {
 		const { app, apple } = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
@@ -158,12 +158,12 @@ localDescribe("billing auth and tenancy integration", () => {
 			body: JSON.stringify({ signedPayload: "signed-notification" }),
 		});
 
-		expect(response.status).toBe(404);
+		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			success: false,
 			error: {
-				code: "BILLING_PROJECT_NOT_CONFIGURED",
-				message: "Billing project is not configured",
+				code: "APPLE_SIGNED_DATA_INVALID",
+				message: "Apple signed data failed verification",
 				requestId: expect.any(String),
 			},
 		});

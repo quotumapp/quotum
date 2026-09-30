@@ -2494,18 +2494,150 @@ describe("billing app", () => {
 		});
 	});
 
+	it("answers an unknown project key exactly like a failed provider verification", async () => {
+		const { logger, errors } = createRecordingLogger();
+		// A known project without these connections must answer the same, and log the real reason.
+		const unconnected = createApp({
+			env,
+			logger,
+			stripeBillingService: null,
+			appleStoreKitService: null,
+			googlePlayBillingService: null,
+		});
+		const post = (projectKey: string, provider: string, init: RequestInit) =>
+			testRequest(unconnected, `/v1/projects/${projectKey}/webhooks/${provider}`, {
+				method: "POST",
+				...init,
+			});
+		// Each response names its own request; everything else must match.
+		const answer = async (response: Response) => {
+			const body = (await response.json()) as { error: { code: string; requestId?: string } };
+			expect(body.error.requestId).toBe(response.headers.get("x-request-id") ?? "");
+			delete body.error.requestId;
+			return { status: response.status, body };
+		};
+		const cases: Array<{ provider: string; init: RequestInit; status: number; code: string }> = [
+			{
+				provider: "stripe",
+				init: { headers: { "stripe-signature": "t=1,v1=00" }, body: "{}" },
+				status: 400,
+				code: "STRIPE_WEBHOOK_SIGNATURE_INVALID",
+			},
+			{ provider: "stripe", init: { body: "{}" }, status: 400, code: "INVALID_REQUEST" },
+			{
+				provider: "apple",
+				init: { body: JSON.stringify({ signedPayload: "signed-notification" }) },
+				status: 400,
+				code: "APPLE_SIGNED_DATA_INVALID",
+			},
+			{ provider: "apple", init: { body: "{}" }, status: 400, code: "INVALID_REQUEST" },
+			{
+				provider: "google",
+				init: { headers: { authorization: "Bearer not-a-token" }, body: "{}" },
+				status: 401,
+				code: "GOOGLE_PLAY_RTDN_UNAUTHORIZED",
+			},
+			{
+				provider: "google",
+				init: { body: "{}" },
+				status: 401,
+				code: "GOOGLE_PLAY_RTDN_UNAUTHORIZED",
+			},
+		];
+		for (const { provider, init, status, code } of cases) {
+			const unknown = await answer(await post("unknown-project", provider, init));
+			const known = await answer(await post("acme", provider, init));
+			expect(unknown.status, `${provider} ${code}`).toBe(status);
+			expect(unknown.body.error.code, provider).toBe(code);
+			expect(known, `${provider} ${code}`).toEqual(unknown);
+		}
+		const oversized = { body: "x".repeat(256 * 1024 + 1) };
+		expect(await answer(await post("unknown-project", "stripe", oversized))).toEqual(
+			await answer(await post("acme", "stripe", oversized)),
+		);
+		expect(
+			errors
+				.filter((entry) => entry.context?.code === "BILLING_PROVIDER_NOT_CONFIGURED")
+				.map((entry) => entry.context),
+		).toEqual([
+			// Both Stripe cases reach the connection check; a malformed Apple body or a missing
+			// Google token is refused first, as it is for a connected project.
+			{ provider: "stripe", code: "BILLING_PROVIDER_NOT_CONFIGURED", projectKey: "acme" },
+			{ provider: "stripe", code: "BILLING_PROVIDER_NOT_CONFIGURED", projectKey: "acme" },
+			{ provider: "apple", code: "BILLING_PROVIDER_NOT_CONFIGURED", projectKey: "acme" },
+			{ provider: "google", code: "BILLING_PROVIDER_NOT_CONFIGURED", projectKey: "acme" },
+		]);
+	});
+
+	it("answers a known path's wrong method with 405 and the methods it accepts", async () => {
+		const app = createBillingApp({ env, connections: fixtureConnections(env.connectionFixtures) });
+		const wrong = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
+			method: "DELETE",
+		});
+		expect(wrong.status).toBe(405);
+		expect(wrong.headers.get("allow")).toBe("GET, HEAD");
+		expect(await wrong.json()).toEqual({
+			success: false,
+			error: {
+				code: "METHOD_NOT_ALLOWED",
+				message: "This route accepts GET, HEAD",
+				requestId: expect.any(String),
+			},
+		});
+		const post = await testRequest(app, "/v1/admin/catalog/preview", { method: "GET" });
+		expect(post.status).toBe(405);
+		expect(post.headers.get("allow")).toBe("POST");
+		for (const path of ["/v1/unknown", "/v1/billing-accounts/user_1/entitlements/", "/v1"]) {
+			const missing = await testRequest(app, path, { method: "DELETE" });
+			expect(missing.status, path).toBe(404);
+			expect(missing.headers.get("allow"), path).toBeNull();
+		}
+	});
+
+	it("refuses a compressed /v1 body with 415 before reading it", async () => {
+		const app = createApp({ env });
+		for (const encoding of ["gzip", "deflate", "identity, br", "GZIP"]) {
+			const response = await testRequest(app, "/v1/billing-accounts/user_1/usage/consume", {
+				method: "POST",
+				headers: {
+					authorization: "Bearer secret",
+					"content-type": "application/json",
+					"content-encoding": encoding,
+				},
+				body: "{}",
+			});
+			expect(response.status, encoding).toBe(415);
+			expect(await response.json()).toEqual({
+				success: false,
+				error: {
+					code: "UNSUPPORTED_CONTENT_ENCODING",
+					message: "Send the request body without a Content-Encoding",
+					requestId: expect.any(String),
+				},
+			});
+		}
+		for (const encoding of ["identity", " "]) {
+			const response = await testRequest(app, "/v1/billing-accounts/user_1/usage/consume", {
+				method: "POST",
+				headers: {
+					authorization: "Bearer secret",
+					"content-type": "application/json",
+					"content-encoding": encoding,
+				},
+				body: "{}",
+			});
+			expect(response.status, encoding).toBe(400);
+		}
+		const read = await testRequest(app, "/v1/billing-accounts/user_1/entitlements", {
+			headers: { "content-encoding": "gzip" },
+		});
+		expect(read.status).toBe(401);
+	});
+
 	it("returns provider-not-configured for disabled Stripe routes", async () => {
 		const app = createApp({ env, stripeBillingService: null });
 
 		for (const request of [
-			new Request("http://localhost/v1/projects/acme/webhooks/stripe", {
-				method: "POST",
-				body: JSON.stringify({
-					id: "evt_test",
-					type: "checkout.session.completed",
-					data: { object: {} },
-				}),
-			}),
 			new Request(
 				"http://localhost/v1/billing-accounts/user_1/providers/stripe/checkout-sessions",
 				{

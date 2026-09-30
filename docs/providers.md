@@ -271,8 +271,14 @@ maintenance worker releases them an hour after the session could have completed 
 `customer.subscription.trial_will_end` for [trial-ending facts](#projections); without it, Stripe
 trials get no ending notice.
 
-Regular provider webhooks use `/v1/projects/:projectKey/webhooks/:provider`. Connection setup also
-exposes the version-specific route
+Regular provider webhooks use `/v1/projects/:projectKey/webhooks/:provider`. The project key in the
+path is not a secret, so the answer never says whether it exists: an unknown key, and a project
+without a connection for that provider, answer exactly what a request failing that provider's own
+verification gets, after the same body and header checks (Stripe
+`400 STRIPE_WEBHOOK_SIGNATURE_INVALID`, or `400 INVALID_REQUEST` without a `Stripe-Signature`; Apple
+`400 APPLE_SIGNED_DATA_INVALID`; Google `401 GOOGLE_PLAY_RTDN_UNAUTHORIZED`). For a known project
+the log keeps the real reason, `BILLING_PROVIDER_NOT_CONFIGURED`. An inactive environment still
+answers `403 ENVIRONMENT_INACTIVE`. Connection setup also exposes the version-specific route
 `/v1/projects/:projectKey/connections/:versionId/webhooks/:provider` to verify the draft connection.
 Stripe App OAuth events instead use `/v1/stripe-app/webhooks/test` or `/v1/stripe-app/webhooks/live`
 when OAuth is enabled. These signed app-level events resolve the connection by Stripe account and

@@ -163,8 +163,7 @@
     {
       "code": "BILLING_PROJECT_NOT_CONFIGURED",
       "sources": [
-        "src/app.ts",
-        "src/app/webhook-routes.ts"
+        "src/app.ts"
       ]
     },
     {
@@ -676,6 +675,12 @@
       "sources": [
         "src/db/repository/meter-limit-windows.ts",
         "src/db/repository/metering-persistence.ts"
+      ]
+    },
+    {
+      "code": "METHOD_NOT_ALLOWED",
+      "sources": [
+        "src/app.ts"
       ]
     },
     {
@@ -1294,6 +1299,7 @@
     {
       "code": "STRIPE_WEBHOOK_SIGNATURE_INVALID",
       "sources": [
+        "src/app/webhook-routes.ts",
         "src/providers/stripe/service.ts"
       ]
     },
@@ -1377,6 +1383,12 @@
         "src/app.ts",
         "src/app/admin-routes.ts",
         "src/billing/errors.ts"
+      ]
+    },
+    {
+      "code": "UNSUPPORTED_CONTENT_ENCODING",
+      "sources": [
+        "src/app.ts"
       ]
     },
     {
