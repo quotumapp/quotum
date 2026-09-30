@@ -202,6 +202,8 @@ const BREADCRUMB_DATA_DROP = new Set([
 	"arguments",
 	"http.query",
 	"http.fragment",
+	"url.query",
+	"url.fragment",
 	"query",
 	"fragment",
 	"body",

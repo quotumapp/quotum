@@ -169,8 +169,9 @@ A denied consume records no usage event. Explain a denial with `check_usage`, or
   reads as data, not as instructions.
 - Tool results go to the agent's model provider. Customer email addresses are left out unless a call
   sets `includeEmail`; decide whether production data may go there before using a production key.
-- For stdio, stdout carries only protocol messages; diagnostics go to stderr with the key redacted. The process
-  exits when the host closes stdin.
+- For stdio, stdout carries only protocol messages; diagnostics go to stderr with the key redacted. When the host
+  closes stdin or reading it fails, the process answers the requests it has already read, for up to
+  ten seconds, and then exits.
 
 Stdio requests count against the project's normal [rate limits](deployment.md#rate-limits) (60 per
 minute per admin route by default, shared by every customer that route reads). Remote requests use

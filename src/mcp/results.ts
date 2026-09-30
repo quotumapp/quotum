@@ -24,25 +24,6 @@ const hints: Readonly<Record<string, string>> = {
 	BILLING_ACCOUNT_NOT_FOUND: "Use find_customer to look the account up by another identifier.",
 };
 
-let activeRequests = 0;
-const idleWaiters: Array<() => void> = [];
-
-/** Resolves once no request is being answered, so shutdown does not drop a response in flight. */
-export function whenIdle(): Promise<void> {
-	return activeRequests === 0 ? Promise.resolve() : new Promise((done) => idleWaiters.push(done));
-}
-
-/** Counts a tool call or resource read as in flight until it settles. */
-export async function trackRequest<T>(work: () => Promise<T>): Promise<T> {
-	activeRequests += 1;
-	try {
-		return await work();
-	} finally {
-		activeRequests -= 1;
-		if (activeRequests === 0) for (const done of idleWaiters.splice(0)) done();
-	}
-}
-
 /**
  * Runs a tool body and turns every outcome into a tool result. The MCP SDK would otherwise return a
  * thrown error's raw message to the model, so nothing may escape this function.
@@ -51,20 +32,18 @@ export async function runTool(
 	body: () => Promise<unknown>,
 	log: DiagnosticLog,
 ): Promise<ToolResult> {
-	return trackRequest(async () => {
-		try {
-			const text = JSON.stringify(await body());
-			if (Buffer.byteLength(text, "utf8") > maxResultBytes) {
-				return errorResult({
-					code: "RESULT_TOO_LARGE",
-					message: "The result is too large to return. Lower `limit` or narrow the filters.",
-				});
-			}
-			return { content: [{ type: "text", text }] };
-		} catch (error) {
-			return errorResult(describeError(error, log));
+	try {
+		const text = JSON.stringify(await body());
+		if (Buffer.byteLength(text, "utf8") > maxResultBytes) {
+			return errorResult({
+				code: "RESULT_TOO_LARGE",
+				message: "The result is too large to return. Lower `limit` or narrow the filters.",
+			});
 		}
-	});
+		return { content: [{ type: "text", text }] };
+	} catch (error) {
+		return errorResult(describeError(error, log));
+	}
 }
 
 export interface ToolErrorBody {

@@ -5,8 +5,8 @@ import { BillingClient } from "../sdk/index";
 import { writeStderr } from "../shared/cli-output";
 import { McpConfigError, readMcpConfig } from "./config";
 import { createContractStore } from "./contracts";
+import { DrainingStdioTransport } from "./draining-stdio-transport";
 import { createGuardedFetch } from "./guarded-fetch";
-import { whenIdle } from "./results";
 import { createQuotumMcpServer } from "./server";
 
 // stdout carries the protocol, so every diagnostic goes to stderr.
@@ -26,32 +26,18 @@ try {
 		? createContractStore(contractsDirectory)
 		: undefined;
 	if (contracts === undefined) log("quotum-mcp: contracts/v1 not found; contract tools are off");
+	// When stdin ends, the transport answers what the host already sent, bounded like the service's
+	// own shutdown, and then closes, which also ends `docker run -i` containers. A signal means
+	// nobody is listening, so it closes at once.
+	const transport = new DrainingStdioTransport(process.stdin, process.stdout);
 	const handle = serveStdio(() => createQuotumMcpServer({ client, log, version, contracts }), {
+		transport,
 		onerror: (error) => log(`quotum-mcp: ${error.name}: ${error.message}`),
 	});
-
-	let closing = false;
-	const close = (drain: boolean) => {
-		if (closing) return;
-		closing = true;
-		const pause = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
-		// A host that closes stdin may still be waiting for answers to what it already sent. The
-		// wait is bounded like the service's own shutdown; a signal means nobody is listening.
-		const drained = drain
-			? Promise.race([
-					pause(50)
-						.then(whenIdle)
-						.then(() => pause(50)),
-					pause(10_000),
-				])
-			: Promise.resolve();
-		void drained.then(() => handle.close()).finally(() => process.exit(0));
-	};
-	process.once("SIGINT", () => close(false));
-	process.once("SIGTERM", () => close(false));
-	// The stdio transport ignores end-of-input, which would orphan `docker run -i` containers.
-	process.stdin.once("end", () => close(true));
-	process.stdin.once("close", () => close(true));
+	const exit = () => void handle.close().finally(() => process.exit(0));
+	void transport.closed.then(exit);
+	process.once("SIGINT", exit);
+	process.once("SIGTERM", exit);
 } catch (error) {
 	writeStderr(
 		error instanceof McpConfigError

@@ -302,6 +302,25 @@ describe("scrubBreadcrumb", () => {
 		expect(cleaned?.data?.["http.query"]).toBeUndefined();
 		expect(cleaned?.data?.arguments).toBeUndefined();
 	});
+
+	it("drops the query and fragment attributes of outbound request breadcrumbs", () => {
+		const cleaned = scrubBreadcrumb({
+			category: "fetch",
+			type: "http",
+			data: {
+				method: "GET",
+				url: "https://api.example/v1/items",
+				"url.query": "token=abc",
+				"url.fragment": "access_token=abc",
+				status_code: 200,
+			},
+		});
+		expect(cleaned?.data).toEqual({
+			method: "GET",
+			url: "https://api.example/v1/items",
+			status_code: 200,
+		});
+	});
 });
 
 describe("scrubSpan", () => {
@@ -310,6 +329,7 @@ describe("scrubSpan", () => {
 			span_id: "a",
 			trace_id: "b",
 			start_timestamp: 1,
+			status: "ok",
 			data: {
 				"http.request.header.cookie": "secret",
 				"url.path.parameter.id": "abc",

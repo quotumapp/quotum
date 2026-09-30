@@ -389,9 +389,12 @@ With a DSN, the service reports staff and merchant 5xx responses and worker fail
   `SENTRY_TRACES_SAMPLE_RATE` (`0.01`; `0` disables tracing),
   `SENTRY_CAPTURE_EXPECTED_ERRORS` (`false`).
 
-Sent: scrubbed error messages and stack frames, route patterns, method, status, error codes,
-project key, provider, worker names, hostname, runtime, OS and module versions, and sampled
-transactions.
+Sent: scrubbed error messages and stack frames with five source lines around each frame, route
+patterns, method, status, error codes, project key, provider, worker names, hostname, runtime, OS
+and module versions, breadcrumbs of outbound HTTP requests (method, masked URL and status), and
+sampled transactions. Sentry 11 uses the static transaction lifecycle so the transaction and span
+scrubbers both run. Outbound requests never carry `sentry-trace` or `baggage` headers.
+Self-hosted Sentry must be version 26.4.2 or newer.
 
 Never collected: request and response headers, cookies, query strings and fragments, bodies,
 client IP addresses, user data, local variables, SQL query parameters, and console
