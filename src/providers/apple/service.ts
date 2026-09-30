@@ -1,3 +1,4 @@
+import type { ApplePromotionSigner } from "../../billing/apple-promotions";
 import { BillingError } from "../../billing/errors";
 import type { EntitlementSnapshot } from "../../billing/types";
 import type {
@@ -56,6 +57,7 @@ interface AppleStoreKitRepositoryDependency {
 }
 
 export interface AppleStoreKitServiceDependencies {
+	promotionSigner?: ApplePromotionSigner;
 	bundleId: string;
 	environment: AppleEnvironmentName;
 	client: AppleStoreKitClientDependency;
@@ -66,6 +68,16 @@ export class AppleStoreKitService
 	implements StoreEventReplayProvider, SubscriptionReconciliationProvider
 {
 	constructor(private readonly dependencies: AppleStoreKitServiceDependencies) {}
+
+	getPromotionSigner(): ApplePromotionSigner {
+		if (!this.dependencies.promotionSigner)
+			throw new BillingError(
+				"Apple offer signing is not configured",
+				"APPLE_PROMOTION_SIGNING_UNAVAILABLE",
+				503,
+			);
+		return this.dependencies.promotionSigner;
+	}
 
 	async getOrCreateAppAccountToken(billingAccountId: string): Promise<string> {
 		const normalizedBillingAccountId = requireNonBlank(billingAccountId, "billingAccountId");
@@ -88,7 +100,14 @@ export class AppleStoreKitService
 			expectedEnvironment: this.dependencies.environment,
 		});
 
-		if (command.appAccountToken !== expectedAppAccountToken) {
+		if (
+			command.appAccountToken !== expectedAppAccountToken &&
+			!(
+				command.appAccountToken === null &&
+				command.appleOffer?.type === 3 &&
+				command.originalTransactionId !== null
+			)
+		) {
 			throw new BillingError(
 				"StoreKit transaction app account token does not match customer",
 				"STOREKIT_ACCOUNT_TOKEN_MISMATCH",
@@ -198,6 +217,7 @@ function toRepositoryInput(
 	replayStoreEventId?: string,
 ): RecordStoreKitTransactionProjectionInput {
 	return {
+		appleOffer: command.appleOffer,
 		billingAccountId: command.billingAccountId,
 		appAccountToken: command.appAccountToken,
 		channel: "ios",

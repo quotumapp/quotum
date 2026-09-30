@@ -99,7 +99,7 @@ export function merchantBillingRoute(
 		};
 	if (
 		(method === "POST" &&
-			/^(?:admin\/(?:contracts|catalog-migrations)\/publish|admin\/billing-accounts\/[^/]+\/(?:commercial-actions|usage\/events\/[^/]+\/corrections)|admin\/promotions(?:\/[^/]+\/(?:archive|provider-sync|codes|codes\/[^/]+\/deactivate))?|admin\/promotion-redemptions\/[^/]+\/revoke)$/.test(
+			/^(?:admin\/(?:contracts|catalog-migrations)\/publish|admin\/billing-accounts\/[^/]+\/(?:commercial-actions|usage\/events\/[^/]+\/corrections)|admin\/promotions(?:\/[^/]+\/(?:archive|provider-sync|apple-offers|apple-offers\/[^/]+\/retire|codes|codes\/[^/]+\/deactivate))?|admin\/promotion-redemptions\/[^/]+\/revoke)$/.test(
 				suffix,
 			)) ||
 		(method === "PUT" && /^admin\/billing-accounts\/[^/]+\/controls$/.test(suffix))

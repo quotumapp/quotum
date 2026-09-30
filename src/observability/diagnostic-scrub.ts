@@ -55,6 +55,7 @@ const COLLECTIONS = new Set([
 	"payment-setup-sessions",
 	"projection-jobs",
 	"projects",
+	"apple-offers",
 	"promotion-redemptions",
 	"promotions",
 	"provisioning",

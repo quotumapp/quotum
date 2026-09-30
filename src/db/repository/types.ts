@@ -116,6 +116,7 @@ export interface RecordPurchaseProjectionInput {
 }
 
 export interface RecordStoreKitTransactionProjectionInput {
+	appleOffer?: { type: 2 | 3; identifier: string; bundleId: string };
 	billingAccountId: string | null;
 	appAccountToken: string | null;
 	channel: BillingChannel;

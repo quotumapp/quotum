@@ -88,8 +88,10 @@ connections cannot serve. See
 | Customer-initiated top-up<br>`topup.customer_initiated` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Requires policy decision (DEC-14) · Native<br>Questions: Q-ELIG-03, Q-CHK-03 |
 | Automatic top-up<br>`topup.automatic` | Unsupported | Unsupported | Conditional · Quotum-composed via Stripe invoices with a top-up price line<br>The customer must have a saved payment method; without one, use payment_method.setup.<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts), [workers/auto-topup](../tests/workers/auto-topup.test.ts), [integration/phase3-release-journeys](../tests/integration/phase3-release-journeys.test.ts) | Requires policy decision (DEC-14) · Quotum-composed via one-time subscription charge<br>The connection setting "spmConsent" must be true.<br>The customer must have a saved payment method; without one, use topup.customer_initiated.<br>The operation is unavailable during the 30 minutes before the next renewal.<br>The subscription state must be active.<br>Questions: Q-SET-02, Q-SET-04, Q-ELIG-03, Q-RET-01, Q-RET-02, Q-RATE-02 |
 | **Promotions** | | | | |
-| Promotion code applied by Quotum<br>`promotion.code_entry` | Not evaluated | Not evaluated | Supported · Quotum-composed via Stripe coupons applied as Checkout and subscription discounts<br>Tests: [integration/promotions](../tests/integration/promotions.test.ts), [providers/stripe/promotions](../tests/providers/stripe/promotions.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Requires semantic validation (Q-PROMO-01) · Native<br>Questions: Q-PROMO-01 |
+| Promotion code applied by Quotum<br>`promotion.code_entry` | Supported · Quotum-composed via Apple subscription promotional offers<br>Tests: [integration/apple-promotions](../tests/integration/apple-promotions.test.ts) | Not evaluated | Supported · Quotum-composed via Stripe coupons applied as Checkout and subscription discounts<br>Tests: [integration/promotions](../tests/integration/promotions.test.ts), [providers/stripe/promotions](../tests/providers/stripe/promotions.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Requires semantic validation (Q-PROMO-01) · Native<br>Questions: Q-PROMO-01 |
 | Hosted promotion code entry<br>`promotion.hosted_code` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/promotions](../tests/integration/promotions.test.ts), [providers/stripe/promotions](../tests/providers/stripe/promotions.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Requires semantic validation (Q-PROMO-01) · Native<br>Questions: Q-PROMO-01, Q-PROMO-02 |
+| Signed subscription offers<br>`promotion.signed_offer` | Supported · Quotum-composed via Apple subscription promotional offers<br>Tests: [integration/apple-promotions](../tests/integration/apple-promotions.test.ts) | Unsupported | Unsupported | Unsupported |
+| Native store offer codes<br>`promotion.store_offer_code` | Managed by provider, mirrored by Quotum<br>Tests: [integration/apple-promotions](../tests/integration/apple-promotions.test.ts) | Unsupported | Unsupported | Unsupported |
 
 Billing intervals a plan can bind to, as `unit × count`; a quarter is three months and a half-year six:
 
@@ -136,7 +138,7 @@ Client flow:
    transaction id to the backend.
 3. The backend calls `POST /v1/purchases/verify` with `provider="apple"`, `billingAccountId`, and
    `transactionId`. Quotum verifies with Apple, requires the transaction's token to match the
-   customer, records state, enqueues projection sync, and returns the entitlement snapshot.
+   customer (or an already owned lineage for a tokenless native offer-code purchase), records state, enqueues projection sync, and returns the entitlement snapshot.
 
 Configure App Store Server Notifications V2 to
 `https://<billing-host>/v1/projects/<projectKey>/webhooks/apple`. Notification types that do not
@@ -152,6 +154,21 @@ promotional, offer code or win-back), records its purchase date and transaction 
 subscription's trial. A billing grace period after the trial does not move the trial end. Later
 renewals keep the recorded trial; only a later free trial that starts at or after its end replaces
 it.
+
+Apple subscription promotions link existing App Store Connect offers to an iOS discount
+promotion. Signed promotional offers use the connection's private key and key ID and return an
+account-bound ECDSA signature, nonce and millisecond timestamp valid for 24 hours. The subscription
+must already be linked and match the mapped product and bundle. The same attempt key replays its
+signature; an explicit refresh with a new key reuses the reservation and creates a fresh signature.
+
+Native Apple offer codes need no Quotum code or signature. Verified `offerType` 2/3 and
+`offerIdentifier` drive attribution through purchase verification, notifications, replay and
+reconciliation. A native-code transaction without an account token requires an already owned
+subscription lineage; no token is invented or attached to an unclaimed purchase. Literal native
+codes are not available from the verified transaction. Retiring a mapping stops new signing while
+retaining attribution; disable the offer separately in App Store Connect. Pricing, eligibility and
+availability are managed there, so the merchant UI labels mappings **Linked**, not synchronized.
+See [Apple subscription offers](api.md#apple-subscription-offers) for requests and retry semantics.
 
 ## Google Play Billing
 

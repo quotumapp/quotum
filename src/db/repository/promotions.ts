@@ -47,6 +47,7 @@ import type { BillingProvider } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { toIso } from "../../shared/date";
 import { allocationSpendOrderSql } from "./allocation-order";
+import { linkAppleOfferInTx } from "./apple-promotions";
 import { RepositoryModule } from "./base";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
@@ -146,6 +147,11 @@ interface CodeAvailabilityRow {
 }
 
 interface RedemptionRow {
+	provider_object_id: string | null;
+	provider_offer_type: string | null;
+	provider_transaction_id: string | null;
+	last_observed_transaction_id: string | null;
+
 	id: string;
 	promotion_id: string;
 	promotion_key: string;
@@ -230,6 +236,7 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 	async createPromotion(
 		project: ProjectInstanceContext,
 		input: CreatePromotionInput,
+		appleBundleId?: string,
 	): Promise<{ promotion: PromotionRecord; created: boolean }> {
 		const normalized = normalizeCreatePromotionInput(input);
 		return await this.transaction(async (tx) => {
@@ -292,6 +299,16 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 				await insertCodes(tx, projectId, promotionId, normalized.codes, normalized.actor, {
 					requireActive: inserted === null,
 				});
+			}
+			for (const offer of input.appleOffers ?? []) {
+				await linkAppleOfferInTx(
+					tx,
+					projectId,
+					promotionId,
+					offer,
+					appleBundleId,
+					normalized.actor,
+				);
 			}
 			return {
 				promotion: await requirePromotion(tx, projectId, drizzleSql`p.id = ${promotionId}`),
@@ -513,6 +530,15 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 			this.database,
 			drizzleSql`SELECT now() AS now`,
 		);
+		const appleOffers =
+			input.channel === "ios"
+				? promotion.providerObjects.filter(
+						(offer) =>
+							offer.objectKind === "apple_promotional_offer" &&
+							offer.status === "ready" &&
+							offer.desiredActive,
+					)
+				: undefined;
 		const reason =
 			promotionCodeUnavailability(
 				{
@@ -532,12 +558,16 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 					channel: input.channel,
 				},
 			) ??
+			(input.channel === "ios" && (promotion.effect.kind !== "discount" || !appleOffers?.length)
+				? "PROMOTION_CODE_CHANNEL_NOT_SUPPORTED"
+				: null) ??
 			targetMismatch(promotion, input.target ?? null) ??
 			(await customerIneligibility(this.database, projectId, input.billingAccountId, code));
 		if (reason === "PROMOTION_CODE_NOT_FOUND") {
 			return notFound;
 		}
 		return {
+			appleOffers,
 			valid: reason === null,
 			reason,
 			promotion: {
@@ -778,6 +808,7 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 			) {
 				throw promotionError("PROMOTION_CODE_NOT_FOUND");
 			}
+			if (input.channel === "ios") throw promotionError("PROMOTION_CODE_CHANNEL_NOT_SUPPORTED");
 			if (resolved.promotion.effect.kind === "discount") {
 				return {
 					kind: "requires_commercial_action",
@@ -812,10 +843,6 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 					);
 				}
 				return { ...replay.result, duplicate: true } as PromotionRedeemResult;
-			}
-			// App Store rules forbid unlocking digital content in iOS apps with a developer's own codes.
-			if (input.channel === "ios") {
-				throw promotionError("PROMOTION_CODE_CHANNEL_NOT_SUPPORTED");
 			}
 			const { redemption } = await reservePromotionRedemptionInTx(tx, projectId, {
 				customerId: customer.id,
@@ -1986,13 +2013,19 @@ async function existingCodesMatch(
 	return true;
 }
 
-async function insertAudit(
+export async function insertAudit(
 	executor: QueryExecutor,
 	projectId: string,
 	input: {
 		promotionId: string;
 		promotionCodeId?: string | null;
-		action: "promotion_created" | "promotion_archived" | "codes_added" | "code_deactivated";
+		action:
+			| "promotion_created"
+			| "promotion_archived"
+			| "codes_added"
+			| "code_deactivated"
+			| "provider_mapping_added"
+			| "provider_mapping_retired";
 		actor: string;
 		details: Record<string, unknown>;
 	},
@@ -2012,7 +2045,7 @@ async function insertAudit(
 	);
 }
 
-async function requirePromotion(
+export async function requirePromotion(
 	executor: QueryExecutor,
 	projectId: string,
 	condition: DrizzleSQL,
@@ -2096,6 +2129,8 @@ async function promotionRows(
 							'objectKind', o.object_kind,
 							'promotionCodeId', o.promotion_code_id,
 							'externalId', o.external_id,
+							'productExternalId', o.product_external_id,
+							'providerAccountId', o.provider_account_id,
 							'status', o.status,
 							'desiredActive', o.desired_active,
 							'providerActive', o.provider_active,
@@ -2150,7 +2185,7 @@ async function codeRows(
 	);
 }
 
-async function requireRedemption(
+export async function requireRedemption(
 	executor: QueryExecutor,
 	projectId: string,
 	redemptionId: string,
@@ -2181,6 +2216,7 @@ async function redemptionRows(
 				r.id, r.promotion_id, p.key AS promotion_key, r.promotion_code_id, c.code,
 				r.customer_id, cu.billing_account_id, r.channel, r.status, r.provider, r.source,
 				r.stripe_checkout_session_id, r.external_subscription_id, r.currency,
+				r.provider_object_id, r.provider_offer_type, r.provider_transaction_id, r.last_observed_transaction_id,
 				r.amount_subtotal_minor, r.amount_discount_minor, r.amount_total_minor,
 				r.limit_violation, r.actor, r.reason, r.request_hash, r.result, r.reserved_until,
 				r.applied_at, r.released_at, r.reversed_at, r.created_at,
@@ -2293,6 +2329,11 @@ function toCodeRecord(row: PromotionCodeRow): PromotionCodeRecord {
 
 function toRedemptionRecord(row: RedemptionRow): PromotionRedemptionRecord {
 	return {
+		providerObjectId: row.provider_object_id,
+		providerOfferType: row.provider_offer_type,
+		providerTransactionId: row.provider_transaction_id,
+		lastObservedTransactionId: row.last_observed_transaction_id,
+
 		id: row.id,
 		promotionKey: row.promotion_key,
 		promotionCodeId: row.promotion_code_id,

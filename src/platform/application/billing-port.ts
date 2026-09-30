@@ -58,6 +58,12 @@ export const merchantBillingOperations = [
 	["POST", "/admin/catalog-migrations/preview", "migrations.preview"],
 	["POST", "/admin/catalog-migrations/publish", "migrations.publish"],
 	["POST", "/admin/promotions", "promotions.create"],
+	["POST", "/admin/promotions/:promotionKey/apple-offers", "promotions.apple-offers.link"],
+	[
+		"POST",
+		"/admin/promotions/:promotionKey/apple-offers/:offerId/retire",
+		"promotions.apple-offers.retire",
+	],
 	["POST", "/admin/promotions/:promotionKey/archive", "promotions.archive"],
 	["POST", "/admin/promotions/:promotionKey/provider-sync", "promotions.sync"],
 	["POST", "/admin/promotion-redemptions/:redemptionId/revoke", "promotions.redemptions.revoke"],

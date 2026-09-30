@@ -10,6 +10,34 @@ moves to a changed baseline by restoring its data into a freshly migrated databa
 the later sections name the steps they reuse and add what their own change needs. A release's pull requests name the baselines it changes under
 `Upgrade notes`.
 
+## Upgrading a populated deployment to v0.20.0
+
+v0.20.0 changes `migrations/003_metering_and_pricing.sql` for
+[Apple promotion signatures](#apple-promotion-signatures) only. Move a populated v0.19.x deployment
+with the data-only restore of [stored job provider identity](#stored-job-provider-identity):
+
+1. **Check on v0.19.x.** v0.19.x never writes Apple promotion provider objects, so this query must
+   return `0`; if it does not, rows were added by hand and need a bundle identity before the
+   upgrade (see [Apple promotion signatures](#apple-promotion-signatures)):
+
+   ```sql
+   SELECT count(*) FROM promotion_provider_objects WHERE provider = 'apple';
+   ```
+
+2. **Stop the whole old service**: API, provider webhooks, merchant application and workers, as in
+   step 1 of [stored job provider identity](#stored-job-provider-identity). Usage callers need no
+   drain beyond pausing: v0.20.0 keeps v0.19.0's usage contract.
+3. **Back up, migrate and restore**: take the `pg_dump --format=custom` backup, create an empty
+   database, run `quotum migrate` from the new image, delete the seeded OAuth clients and restore
+   the data without the migrations table, as in steps 1, 2 and 4 of
+   [stored job provider identity](#stored-job-provider-identity). Skip its step 3: the v0.19.x data
+   already carries every provider column.
+4. **Start v0.20.0**, API and workers, and confirm `/ready`. Then deploy the console pinned to the
+   release and pass its `bun run check:deployment`. A v0.19.0 console keeps working against
+   v0.20.0, but only the new one manages Apple offers.
+
+A rollback restores the pre-upgrade backup with the v0.19.x image and loses what was written since.
+
 ## Upgrading a populated deployment to v0.19.0
 
 v0.19.0 changes the metering baseline for five changes at once: the
@@ -84,6 +112,41 @@ legacy outcome rather than returning another response type or charging again. Dr
 in-flight legacy operations before cutover; never mint replacement keys for uncertain charges.
 Reserve/confirm/release/correction retain their current response contract for this preview.
 No environment variable or API package version change is required.
+## Apple promotion signatures
+
+`migrations/003_metering_and_pricing.sql` now adds `promotion_apple_signature_attempts`, binding
+each idempotent signing response to its project, customer and redemption. Apple provider objects
+also require a bundle identity, have uniqueness by bundle/product/kind/offer identifier, and the
+ledger enforces one redemption per Apple offer/subscription. The audit vocabulary adds mapping
+retirement. No environment variable changes are required; the existing encrypted Apple connection
+holds the signing key. Signature responses contain no private key.
+
+Upgrade schema and API together before deploying the merchant UI pinned to the new API contract,
+following [upgrading a populated deployment to v0.20.0](#upgrading-a-populated-deployment-to-v0200).
+Recreate disposable development and test databases from the target baseline. The restore can only
+fail on Apple rows that v0.19.x never writes: an Apple provider object without
+`provider_account_id`, or two Apple redemptions of one provider object for one subscription. If the
+check in that procedure finds Apple provider objects, relax the shape constraint in the freshly
+migrated database before the restore, then give each object its app's bundle identifier and
+restore the constraint:
+
+```sql
+-- Before the restore: keep the definition, then relax the constraint.
+SELECT pg_get_constraintdef(oid) FROM pg_constraint
+  WHERE conname = 'promotion_provider_objects_shape_check';
+ALTER TABLE promotion_provider_objects DROP CONSTRAINT promotion_provider_objects_shape_check;
+-- After the restore: backfill, then restore the constraint with the definition kept above.
+UPDATE promotion_provider_objects SET provider_account_id = '<bundle identifier>'
+  WHERE provider = 'apple' AND provider_account_id IS NULL;
+ALTER TABLE promotion_provider_objects
+  ADD CONSTRAINT promotion_provider_objects_shape_check <definition> NOT VALID;
+ALTER TABLE promotion_provider_objects VALIDATE CONSTRAINT promotion_provider_objects_shape_check;
+```
+
+Do not bypass checksum verification or reset a populated database. Rollback restores the
+pre-upgrade backup with its matching image. The reservation maintenance worker releases abandoned
+signatures after their 24-hour deadline; provider-confirmed late purchases remain recorded even if
+a local limit is then exceeded.
 
 ## Stored job provider identity
 

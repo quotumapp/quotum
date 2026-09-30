@@ -196,6 +196,16 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 			[promotionsTest, promotionProvisioningTest, normalizerTest],
 			"Quotum validates and reserves the code, then applies the promotion's Stripe coupon to the Checkout Session or subscription change.",
 		),
+		"promotion.signed_offer": {
+			level: "unsupported",
+			verification: { status: "not_applicable" },
+			conditions: [],
+		},
+		"promotion.store_offer_code": {
+			level: "unsupported",
+			verification: { status: "not_applicable" },
+			conditions: [],
+		},
 		"promotion.hosted_code": native([promotionsTest, promotionProvisioningTest, normalizerTest], {
 			notes: "The connection needs write access to Stripe Coupons and Promotion codes.",
 		}),

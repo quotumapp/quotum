@@ -2156,6 +2156,7 @@ CREATE TABLE IF NOT EXISTS promotion_provider_objects (
 	promotion_id UUID NOT NULL,
 	promotion_code_id UUID,
 	parent_object_id UUID,
+	provider_account_id TEXT,
 	provider TEXT NOT NULL CHECK (provider IN ('stripe', 'apple', 'google')),
 	object_kind TEXT NOT NULL CHECK (
 		object_kind IN (
@@ -2212,7 +2213,7 @@ CREATE TABLE IF NOT EXISTS promotion_provider_objects (
 		)
 		OR (
 			object_kind IN ('apple_promotional_offer', 'apple_offer_code') AND provider = 'apple'
-			AND parent_object_id IS NULL AND external_id IS NOT NULL AND product_external_id IS NOT NULL
+			AND parent_object_id IS NULL AND external_id IS NOT NULL AND product_external_id IS NOT NULL AND provider_account_id IS NOT NULL
 		)
 		OR (
 			object_kind IN ('google_developer_offer', 'google_promo_code') AND provider = 'google'
@@ -2239,7 +2240,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_live_co
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_external
 	ON promotion_provider_objects (project_id, provider, object_kind, external_id)
-	WHERE external_id IS NOT NULL;
+	WHERE external_id IS NOT NULL AND provider <> 'apple';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_apple
+	ON promotion_provider_objects (project_id, provider_account_id, product_external_id, object_kind, external_id)
+	WHERE provider = 'apple';
 
 CREATE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_promotion
 	ON promotion_provider_objects (project_id, promotion_id, created_at);
@@ -2361,6 +2366,27 @@ CREATE INDEX IF NOT EXISTS idx_billing_promotion_redemptions_purchase
 	ON promotion_redemptions (project_id, purchase_id)
 	WHERE purchase_id IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_redemptions_apple_offer
+	ON promotion_redemptions (project_id, provider_object_id, external_subscription_id)
+	WHERE provider = 'apple';
+
+CREATE TABLE IF NOT EXISTS promotion_apple_signature_attempts (
+	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	customer_id UUID NOT NULL,
+	redemption_id UUID NOT NULL,
+	idempotency_key TEXT NOT NULL,
+	request_hash TEXT NOT NULL,
+	result JSONB NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT promotion_apple_signature_attempts_key_unique UNIQUE (project_id, customer_id, idempotency_key),
+	CONSTRAINT promotion_apple_signature_attempts_customer_fk FOREIGN KEY (project_id, customer_id) REFERENCES customers(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_apple_signature_attempts_redemption_fk FOREIGN KEY (project_id, redemption_id) REFERENCES promotion_redemptions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_apple_signature_attempts_key_check CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
+	CONSTRAINT promotion_apple_signature_attempts_hash_check CHECK (char_length(request_hash) = 64),
+	CONSTRAINT promotion_apple_signature_attempts_result_check CHECK (jsonb_typeof(result) = 'object' AND octet_length(result::text) <= 16384)
+);
+
 CREATE TABLE IF NOT EXISTS promotion_audit_events (
 	id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
@@ -2372,7 +2398,7 @@ CREATE TABLE IF NOT EXISTS promotion_audit_events (
 			'promotion_archived',
 			'codes_added',
 			'code_deactivated',
-			'provider_mapping_added',
+			'provider_mapping_added', 'provider_mapping_retired',
 			'provider_sync_requested'
 		)
 	),

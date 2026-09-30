@@ -290,6 +290,18 @@
       "domain": "promotions",
       "id": "promotion.hosted_code",
       "title": "Hosted promotion code entry"
+    },
+    {
+      "description": "Signs a mapped subscription offer for a linked account; access changes only after a verified store purchase.",
+      "domain": "promotions",
+      "id": "promotion.signed_offer",
+      "title": "Signed subscription offers"
+    },
+    {
+      "description": "Records mapped store offer codes on an already-linked subscription. The store owns code distribution and redemption.",
+      "domain": "promotions",
+      "id": "promotion.store_offer_code",
+      "title": "Native store offer codes"
     }
   ],
   "providers": [
@@ -495,11 +507,20 @@
           }
         },
         "promotion.code_entry": {
+          "composedVia": "Apple subscription promotional offers",
           "conditions": [],
-          "level": "not_evaluated",
-          "notes": "Quotum rejects iOS promotion-code redemption because App Store rules forbid unlocking digital content with a developer's own codes.",
+          "level": "quotum_composed",
+          "notes": "Mapped iOS discount codes return a signed StoreKit action. Direct feature and plan grants remain unsupported.",
           "verification": {
-            "status": "not_applicable"
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/apple-promotions.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-10-01"
           }
         },
         "promotion.hosted_code": {
@@ -507,6 +528,39 @@
           "level": "not_evaluated",
           "verification": {
             "status": "not_applicable"
+          }
+        },
+        "promotion.signed_offer": {
+          "composedVia": "Apple subscription promotional offers",
+          "conditions": [],
+          "level": "quotum_composed",
+          "notes": "Requires an active mapping and an existing linked subscription; a signature reserves one use for 24 hours, and StoreKit confirms the purchase.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/apple-promotions.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-10-01"
+          }
+        },
+        "promotion.store_offer_code": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "App Store Connect owns offer codes; Quotum records one mapped use per linked subscription.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/apple-promotions.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-10-01"
           }
         },
         "purchase.verify": {
@@ -899,6 +953,20 @@
         "promotion.hosted_code": {
           "conditions": [],
           "level": "not_evaluated",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "promotion.signed_offer": {
+          "conditions": [],
+          "level": "unsupported",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "promotion.store_offer_code": {
+          "conditions": [],
+          "level": "unsupported",
           "verification": {
             "status": "not_applicable"
           }
@@ -1424,6 +1492,20 @@
             },
             "status": "verified",
             "verifiedOn": "2026-09-17"
+          }
+        },
+        "promotion.signed_offer": {
+          "conditions": [],
+          "level": "unsupported",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "promotion.store_offer_code": {
+          "conditions": [],
+          "level": "unsupported",
+          "verification": {
+            "status": "not_applicable"
           }
         },
         "purchase.verify": {
@@ -2112,6 +2194,20 @@
               "tests": []
             },
             "status": "planned"
+          }
+        },
+        "promotion.signed_offer": {
+          "conditions": [],
+          "level": "unsupported",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "promotion.store_offer_code": {
+          "conditions": [],
+          "level": "unsupported",
+          "verification": {
+            "status": "not_applicable"
           }
         },
         "purchase.verify": {

@@ -76,6 +76,8 @@ const promotionSchema = z.object({
 			]),
 			promotionCodeId: z.union([z.null(), z.string()]),
 			externalId: z.union([z.null(), z.string()]),
+			productExternalId: z.string().nullable().optional(),
+			providerAccountId: z.string().nullable().optional(),
 			status: z.enum(["pending", "ready", "failed", "retired"]),
 			desiredActive: z.boolean(),
 			providerActive: z.union([z.null(), z.boolean()]),
@@ -122,6 +124,10 @@ const promotionRedemptionSchema = z.object({
 		"apple_offer",
 		"google_offer",
 	]),
+	providerObjectId: z.string().nullable().optional(),
+	providerOfferType: z.string().nullable().optional(),
+	providerTransactionId: z.string().nullable().optional(),
+	lastObservedTransactionId: z.string().nullable().optional(),
 	stripeCheckoutSessionId: z.union([z.null(), z.string()]),
 	externalSubscriptionId: z.union([z.null(), z.string()]),
 	currency: z.union([z.null(), z.string()]),
@@ -203,6 +209,7 @@ export const postV1BillingAccountsByBillingAccountIdPromotionCodesValidateRespon
 		success: z.literal(true),
 		data: z.object({
 			valid: z.boolean(),
+			appleOffers: promotionSchema.shape.providerObjects.optional(),
 			reason: z.union([z.null(), z.string()]),
 			promotion: z.union([
 				z.null(),
@@ -225,10 +232,32 @@ export const postV1BillingAccountsByBillingAccountIdPromotionCodesValidateRespon
 		}),
 	});
 
+export const applePromotionActionSchema = z.object({
+	kind: z.literal("provider_action_required"),
+	provider: z.literal("apple"),
+	duplicate: z.boolean(),
+	redemption: promotionRedemptionSchema,
+	appleOffer: z.object({
+		productId: z.string(),
+		offerIdentifier: z.string(),
+		appAccountToken: z.string(),
+		keyId: z.string(),
+		nonce: z.string(),
+		timestamp: z.number(),
+		signature: z.string(),
+		expiresAt: z.string(),
+	}),
+});
+export const applePromotionActionResponseSchema = z.object({
+	success: z.literal(true),
+	data: applePromotionActionSchema,
+});
+
 export const postV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse200Schema =
 	z.object({
 		success: z.literal(true),
 		data: z.discriminatedUnion("kind", [
+			applePromotionActionSchema,
 			z.object({
 				kind: z.literal("granted"),
 				duplicate: z.boolean(),

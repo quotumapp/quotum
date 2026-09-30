@@ -23,6 +23,7 @@ import {
 } from "../app/metering-routes";
 import {
 	addPromotionCodesBodySchema,
+	appleOfferBodySchema,
 	createPromotionBodySchema,
 	createPromotionInput,
 	listAccountRedemptionsQuerySchema,
@@ -32,7 +33,11 @@ import {
 	promotionCodeInputs,
 	revokePromotionRedemptionBodySchema,
 } from "../app/promotion-routes";
-import { requireProviderMethod, requireStripeBillingService } from "../app/provider-services";
+import {
+	requireApplePromotionSigner,
+	requireProviderMethod,
+	requireStripeBillingService,
+} from "../app/provider-services";
 import type { ProjectProviderServiceResolver } from "../app/types";
 import {
 	BillingError,
@@ -417,12 +422,28 @@ export function createMerchantBillingPort(input: {
 				);
 			}
 			case "promotions.create": {
+				const body = parse(createPromotionBodySchema, command.body);
 				const result = await repo.promotions.createPromotion(
 					project,
-					createPromotionInput(parse(createPromotionBodySchema, command.body), actor),
+					createPromotionInput(body, actor),
+					body.appleOffers?.length
+						? requireApplePromotionSigner(await providers.appleStoreKitService(project)).bundleId
+						: undefined,
 				);
 				return ok(result.promotion, result.created ? 201 : 200);
 			}
+			case "promotions.apple-offers.link":
+				return ok(
+					await repo.applePromotions.link(
+						project,
+						id,
+						parse(appleOfferBodySchema, command.body),
+						requireApplePromotionSigner(await providers.appleStoreKitService(project)),
+						actor,
+					),
+				);
+			case "promotions.apple-offers.retire":
+				return ok(await repo.applePromotions.retire(project, id, parse(z.uuid(), event), actor));
 			case "promotions.archive":
 				return ok(await repo.promotions.archivePromotion(project, id, actor));
 			case "account.promotion-redemptions": {

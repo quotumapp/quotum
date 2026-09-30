@@ -71,6 +71,8 @@ export const providerOperations = [
 	"topup.automatic",
 	"promotion.code_entry",
 	"promotion.hosted_code",
+	"promotion.signed_offer",
+	"promotion.store_offer_code",
 ] as const;
 export type ProviderOperation = (typeof providerOperations)[number];
 
@@ -312,6 +314,18 @@ export const providerOperationDefinitions: Record<ProviderOperation, ProviderOpe
 			title: "Hosted promotion code entry",
 			description:
 				"The provider's hosted checkout accepts codes that Quotum mirrors as provider promotion codes, and Quotum records each use from the completed checkout event.",
+		},
+		"promotion.signed_offer": {
+			domain: "promotions",
+			title: "Signed subscription offers",
+			description:
+				"Signs a mapped subscription offer for a linked account; access changes only after a verified store purchase.",
+		},
+		"promotion.store_offer_code": {
+			domain: "promotions",
+			title: "Native store offer codes",
+			description:
+				"Records mapped store offer codes on an already-linked subscription. The store owns code distribution and redemption.",
 		},
 	};
 

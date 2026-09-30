@@ -1,3 +1,4 @@
+export type { AppleOfferInput, ApplePromotionAction } from "../billing/apple-promotions";
 export type {
 	AdministrativeDebitMutationResult,
 	AdministrativeDebitRecord,

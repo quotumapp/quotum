@@ -273,7 +273,7 @@ describe("error inventory", () => {
 			[...codes]
 				.filter(([, sources]) => sources.some((source) => capabilitySources.has(source)))
 				.map(([code]) => code),
-		).toEqual(["BILLING_PROVIDER_NOT_CONFIGURED"]);
+		).toEqual(["APPLE_PROMOTION_SIGNING_UNAVAILABLE", "BILLING_PROVIDER_NOT_CONFIGURED"]);
 	});
 
 	it("keeps STRIPE_NOT_CONFIGURED to the Stripe service's own dependency guards", async () => {

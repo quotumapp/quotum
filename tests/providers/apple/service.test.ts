@@ -626,4 +626,38 @@ describe("AppleStoreKitService", () => {
 			),
 		).rejects.toMatchObject({ code: "INVALID_REQUEST", status: 400 });
 	});
+	it.each([undefined, 2, 3] as const)(
+		"keeps tokenless verification restricted to native offer codes (type %s)",
+		async (offerType) => {
+			let recorded = false;
+			const { service } = createService({
+				clientOverrides: {
+					verifyTransaction: async () => ({
+						environment: "sandbox",
+						signedTransactionInfo: "signed",
+						transaction: transaction({
+							appAccountToken: undefined,
+							offerType,
+							offerIdentifier: "native20",
+						}),
+						renewalInfo: null,
+					}),
+				},
+				repositoryOverrides: {
+					recordStoreKitTransactionAndEnqueueProjection: async (input) => {
+						recorded = true;
+						expect(input).toMatchObject({
+							appAccountToken: null,
+							appleOffer: { type: 3, identifier: "native20" },
+						});
+						throw new BillingError("Unowned lineage", "STOREKIT_ACCOUNT_TOKEN_MISMATCH", 403);
+					},
+				},
+			});
+			await expect(
+				service.verifyPurchase({ billingAccountId: "user_1", transactionId: "tx" }),
+			).rejects.toMatchObject({ code: "STOREKIT_ACCOUNT_TOKEN_MISMATCH" });
+			expect(recorded).toBe(offerType === 3);
+		},
+	);
 });

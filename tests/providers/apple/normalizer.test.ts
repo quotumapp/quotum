@@ -49,6 +49,35 @@ const renewalInfo = (
 });
 
 describe("StoreKit normalizer", () => {
+	it.each([2, 3] as const)(
+		"preserves verified offer type %s through purchase, notification and reconciliation",
+		(offerType) => {
+			const transaction = subscriptionTransaction({ offerType, offerIdentifier: "spring20" });
+			const expected = { type: offerType, identifier: "spring20", bundleId: "com.acme.app" };
+			const common = {
+				transaction,
+				renewalInfo: renewalInfo(),
+				expectedBundleId: "com.acme.app",
+				expectedEnvironment: "sandbox" as const,
+				now,
+			};
+			expect(
+				normalizeVerifiedStoreKitTransaction({ ...common, billingAccountId: "user_1" }).appleOffer,
+			).toEqual(expected);
+			expect(
+				normalizeStoreKitSubscriptionStatusRefresh({
+					...common,
+					billingAccountId: "user_1",
+					storeKitStatus: 1,
+				}).appleOffer,
+			).toEqual(expected);
+			expect(
+				normalizeStoreKitNotification({ ...common, notification: notification("OFFER_REDEEMED") })
+					?.appleOffer,
+			).toEqual(expected);
+		},
+	);
+
 	it("maps active auto-renewable subscriptions to active billing commands", () => {
 		const command = normalizeVerifiedStoreKitTransaction({
 			billingAccountId: "user_1",

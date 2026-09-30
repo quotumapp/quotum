@@ -263,6 +263,15 @@ function normalizeTransaction(input: NormalizeTransactionInput): NormalizedStore
 			: null;
 
 	return {
+		appleOffer:
+			(input.transaction.offerType === 2 || input.transaction.offerType === 3) &&
+			input.transaction.offerIdentifier
+				? {
+						type: input.transaction.offerType,
+						identifier: input.transaction.offerIdentifier,
+						bundleId: input.transaction.bundleId ?? "",
+					}
+				: undefined,
 		billingAccountId: input.billingAccountId,
 		appAccountToken: input.transaction.appAccountToken ?? null,
 		externalProductId: productId,

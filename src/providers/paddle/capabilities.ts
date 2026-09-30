@@ -236,6 +236,16 @@ export const paddleCapabilities: ProviderCapabilityDeclaration = {
 			notes:
 				"Paddle has discount entities; stacking, product scope and duration parity with Quotum promotions is unvalidated.",
 		}),
+		"promotion.signed_offer": {
+			level: "unsupported",
+			verification: { status: "not_applicable" },
+			conditions: [],
+		},
+		"promotion.store_offer_code": {
+			level: "unsupported",
+			verification: { status: "not_applicable" },
+			conditions: [],
+		},
 		"promotion.hosted_code": awaitingAnswer("Q-PROMO-01", {
 			questions: ["Q-PROMO-01", "Q-PROMO-02"],
 		}),
