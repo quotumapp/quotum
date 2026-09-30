@@ -27,6 +27,7 @@ import type { BillingProvider } from "../../billing/types";
 import { purchaseActionFor } from "../../providers/capabilities";
 import { addUtcMonths } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
+import { allocationSpendOrderSql } from "./allocation-order";
 import type { AutoTopupPolicyRow, ControlDenial } from "./controls-runtime";
 import {
 	confirmControlHolds,
@@ -1464,7 +1465,7 @@ async function readAllocationRows(
 				AND allocation.feature_id = ${featureId(feature)}
 				AND (allocation.entity_id IS NULL OR allocation.entity_id = ${entityId}::bigint)
 				AND (NOT state.closed OR holds.held_quantity > 0)
-			ORDER BY allocation.expires_at ASC NULLS LAST, allocation.created_at, allocation.id
+			ORDER BY ${allocationSpendOrderSql(drizzleSql`allocation`)}
 		`,
 	);
 }
@@ -1518,7 +1519,7 @@ export async function lockAllocations(
 					AND (allocation.entity_id IS NULL OR allocation.entity_id = ${entityId}::bigint)
 					AND allocation.reversed_at IS NULL
 					AND (allocation.expires_at IS NULL OR allocation.expires_at > now())
-				ORDER BY allocation.expires_at ASC NULLS LAST, allocation.created_at ASC, allocation.id ASC
+				ORDER BY ${allocationSpendOrderSql(drizzleSql`allocation`)}
 				FOR UPDATE OF allocation
 		`,
 	);
@@ -1558,7 +1559,7 @@ export async function lockAllAllocationRows(
 					AND allocation.customer_id = ${customerId}
 					AND allocation.feature_id = ${featureId(feature)}
 					AND (allocation.entity_id IS NULL OR allocation.entity_id = ${entityId}::bigint)
-				ORDER BY allocation.expires_at ASC NULLS LAST, allocation.created_at ASC, allocation.id ASC
+				ORDER BY ${allocationSpendOrderSql(drizzleSql`allocation`)}
 				FOR UPDATE OF allocation
 		`,
 	);
@@ -2654,7 +2655,7 @@ export async function releaseReservationHolds(
 				ON held.project_id = allocation.project_id AND held.allocation_id = allocation.id
 			WHERE allocation.project_id = ${reservation.project_id}
 				AND held.reservation_id = ${reservation.id}
-			ORDER BY allocation.expires_at ASC NULLS LAST, allocation.created_at ASC, allocation.id ASC
+			ORDER BY ${allocationSpendOrderSql(drizzleSql`allocation`)}
 			FOR UPDATE OF allocation
 		`,
 	);

@@ -46,6 +46,7 @@ import {
 import type { BillingProvider } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { toIso } from "../../shared/date";
+import { allocationSpendOrderSql } from "./allocation-order";
 import { RepositoryModule } from "./base";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
@@ -989,7 +990,7 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 					WHERE a.project_id = ${projectId}
 						AND a.promotion_redemption_id = ${current.id}
 						AND a.reversed_at IS NULL
-					ORDER BY a.feature_id, a.expires_at ASC NULLS LAST, a.created_at, a.id
+					ORDER BY a.feature_id, ${allocationSpendOrderSql(drizzleSql`a`)}
 					FOR UPDATE OF a
 				`,
 			);
