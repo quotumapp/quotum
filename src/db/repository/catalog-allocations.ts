@@ -2,6 +2,7 @@ import { sql as drizzleSql } from "drizzle-orm";
 import type { SubscriptionStatus } from "../../billing/types";
 import { lifetimeItemSql, resetSplitsBillingPeriodSql } from "./cadence-sql";
 import { carryOverAllowances } from "./carry-over";
+import { keepNonConsumableLevels } from "./kept-levels";
 import { supersedeBasePlanGrants } from "./plan-grants";
 import { executeOne, executeRows, jsonb } from "./query";
 import { cancelSupersededSubscriptionChanges } from "./recurring-pricing";
@@ -466,6 +467,17 @@ export async function materializeSubscriptionAllocations(
 	if (invalidEntityScope?.invalid === true) {
 		throw new Error("Entity-scoped plan allocations require an entity-scoped subscription");
 	}
+	if (outgoingPlanVersionId !== null) {
+		// A non-consumable level moves to the incoming version before its allowances are granted.
+		await keepNonConsumableLevels(executor, {
+			projectId: input.projectId,
+			subscriptionId: input.subscriptionId,
+			outgoingPlanVersionId,
+			incomingPlanVersionId: version.planVersionId,
+			periodStartAt: input.periodStartAt,
+			periodEndAt: input.periodEndAt,
+		});
+	}
 
 	const inserted = await executeRows<{ id: string | number | bigint }>(
 		executor,
@@ -555,6 +567,21 @@ export async function materializeSubscriptionAllocations(
 							AND (held.expires_at IS NULL OR held.expires_at > now())
 					)
 				)
+				-- Nor is a non-consumable item whose allowance for this period already holds a level
+				-- a switch moved onto it: that allowance keeps its own source key.
+				AND NOT EXISTS (
+					SELECT 1 FROM balance_allocations kept
+					JOIN features kept_feature
+						ON kept_feature.project_id = kept.project_id AND kept_feature.id = kept.feature_id
+					WHERE kept.project_id = pi.project_id
+						AND kept.subscription_id = subscription.id
+						AND kept.plan_item_id = pi.id
+						AND kept.source_kind = 'subscription'
+						AND kept.reversed_at IS NULL
+						AND (kept.expires_at IS NULL OR kept.expires_at > now())
+						AND kept_feature.meter_kind = 'non_consumable'
+						AND kept.period_start_at = ${input.periodStartAt.toISOString()}::timestamptz
+				)
 			ON CONFLICT (project_id, feature_id, source_kind, source_key) DO NOTHING
 			RETURNING id
 		`,
@@ -631,6 +658,21 @@ async function resumeReturningAllowances(
 					AND allocation.source_kind = 'subscription'
 					AND allocation.reversed_at IS NULL
 					AND item.plan_version_id = ${input.incomingPlanVersionId}::bigint
+					-- A non-consumable level the switch kept on a live allowance of this item is the
+					-- item's allowance; an older ended one is not reopened beside it.
+					AND NOT EXISTS (
+						SELECT 1 FROM balance_allocations kept
+						JOIN features kept_feature
+							ON kept_feature.project_id = kept.project_id AND kept_feature.id = kept.feature_id
+						WHERE kept.project_id = allocation.project_id
+							AND kept.subscription_id = allocation.subscription_id
+							AND kept.plan_item_id = allocation.plan_item_id
+							AND kept.id <> allocation.id
+							AND kept.source_kind = 'subscription'
+							AND kept.reversed_at IS NULL
+							AND (kept.expires_at IS NULL OR kept.expires_at > now())
+							AND kept_feature.meter_kind = 'non_consumable'
+					)
 					AND allocation.expires_at <= now()
 					AND allocation.rollover_processed_at IS NOT NULL
 					AND allocation.period_start_at <= now()
