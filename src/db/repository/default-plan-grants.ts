@@ -258,11 +258,14 @@ async function endGrant(
 
 /**
  * Moves the grant to the plan's current version or keys in place, keeping its id and start, so its
- * windows keep their anchor. A live allowance whose feature keeps the same reset in the new
- * version stays for the rest of its window; the others end. New quantities apply from the next
- * window a write creates, so republishing the plan never refills what the window already gave: an
- * allowance a move ended because its version dropped the feature is reopened, not granted again,
- * when a later version adds the feature back within the window (see `openPlanGrantWindows`).
+ * windows keep their anchor. A live allowance whose feature the new version still allocates stays
+ * for the rest of its window: on the same reset it becomes the new item's allowance, and on another
+ * reset it keeps its own window, and the new reset's quantity starts where it ends (see
+ * `PlanGrantWindow.start`). An allowance whose feature the new version drops ends. New quantities
+ * apply from the next window a write creates, so republishing the plan never refills what the
+ * window already gave: an allowance a move ended because its version dropped the feature is
+ * reopened, not granted again, when a later version adds the feature back within the window (see
+ * `openPlanGrantWindows`).
  */
 async function moveGrant(
 	executor: QueryExecutor,
@@ -316,8 +319,10 @@ async function moveGrant(
 				AND NOT EXISTS (
 					SELECT 1 FROM plan_items item
 					WHERE item.project_id = allocation.project_id
-						AND item.id = allocation.plan_item_id
 						AND item.plan_version_id = ${target.planVersionId}::bigint
+						AND item.item_kind = 'allocation'
+						AND item.allocation_scope = 'account'
+						AND item.feature_id = allocation.feature_id
 				)
 		`,
 	);

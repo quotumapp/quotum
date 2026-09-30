@@ -103,8 +103,9 @@ export function defaultPlanReadGrantSql(projectId: string, customerId: DrizzleSQ
 /**
  * Whether a live allocation is an allowance of the account's default-plan grant that its next
  * write ends: the catalog dropped the marker, a base plan took over, or the version reads count
- * no longer allocates its feature on the same reset. Reads leave such an allowance out, as that
- * write will (see `reconcileDefaultPlanGrant`). Takes the allocation's table alias.
+ * no longer allocates its feature. An allowance whose feature that version allocates on another
+ * reset runs to the end of its window. Reads leave an ending allowance out, as that write will
+ * (see `reconcileDefaultPlanGrant`). Takes the allocation's table alias.
  */
 export function defaultPlanAllowanceEndingSql(
 	projectId: string,
@@ -113,8 +114,6 @@ export function defaultPlanAllowanceEndingSql(
 	return drizzleSql`EXISTS (
 		SELECT 1
 		FROM plan_grants held
-		JOIN plan_items allocated
-			ON allocated.project_id = held.project_id AND allocated.id = ${allocation}.plan_item_id
 		WHERE held.project_id = ${projectId}
 			AND held.id = ${allocation}.plan_grant_id
 			AND held.origin = 'default'
@@ -125,9 +124,7 @@ export function defaultPlanAllowanceEndingSql(
 					AND kept.plan_version_id = ${defaultPlanReadVersionSql(projectId, drizzleSql`held.customer_id`)}
 					AND kept.item_kind = 'allocation'
 					AND kept.allocation_scope = 'account'
-					AND kept.feature_id = allocated.feature_id
-					AND kept.reset_interval IS NOT DISTINCT FROM allocated.reset_interval
-					AND kept.reset_interval_count = allocated.reset_interval_count
+					AND kept.feature_id = ${allocation}.feature_id
 			)
 	)`;
 }

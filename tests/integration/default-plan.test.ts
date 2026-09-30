@@ -499,24 +499,20 @@ localDescribe("default plan", () => {
 		expect(await runWorker(25)).toEqual(idle);
 	});
 
-	it("reads a republished allowance as the account's next write applies it, before the pass", async () => {
+	it("reads a republished reset as the account's next write applies it, before the pass", async () => {
 		await publish(catalog(freePlan(1, "100")));
 		await consume("reset_user", 30, "spend-1");
-		// Version 2 resets weekly: the account's next write ends the monthly allowance and grants a
-		// weekly one, so a read answers with the weekly one already.
+		// Version 2 resets weekly. The account's next write keeps the monthly allowance for the rest of
+		// its window and starts the weekly reset where it ends, so a read answers with it already.
 		const weekly = freePlan(2, "100");
 		weekly.items = weekly.items.map((item) => ({ ...item, resetInterval: "week" as const }));
 		await publish(catalog(weekly));
 
-		expect(await balance("reset_user")).toMatchObject({
-			granted: "100",
-			consumed: "0",
-			available: "100",
-			breakdown: [],
-		});
+		const kept = { granted: "100", consumed: "30", available: "70" };
+		expect(await balance("reset_user")).toMatchObject(kept);
 		expect(
 			(await context.repository.getCustomerBillingSummary(project, "reset_user")).balances,
-		).toMatchObject([{ featureKey: "ai_credits", available: "100" }]);
+		).toMatchObject([{ featureKey: "ai_credits", available: "70" }]);
 		const [customer] = await context.sql<Array<{ id: string }>>`
 			SELECT id FROM customers WHERE billing_account_id = 'reset_user'
 		`;
@@ -526,14 +522,69 @@ localDescribe("default plan", () => {
 				project.projectInstanceId,
 				customer?.id ?? "",
 			),
-		).toMatchObject([{ featureKey: "ai_credits", available: "100" }]);
+		).toMatchObject([{ featureKey: "ai_credits", available: "70" }]);
 		expect(await grants("reset_user")).toMatchObject([{ status: "active", plan_version: 1 }]);
 
 		expect(await consume("reset_user", 10, "spend-2")).toMatchObject({
 			allowed: true,
-			balance: { granted: "100", available: "90" },
+			balance: { granted: "100", available: "60" },
 		});
 		expect(await grants("reset_user")).toMatchObject([{ status: "active", plan_version: 2 }]);
+		expect((await allowanceRows("reset_user")).map((row) => row.live)).toEqual([true]);
+	});
+
+	it("keeps a window's allowance through a reset change and starts the new reset at its end", async () => {
+		const weekly = freePlan(1, "200");
+		weekly.items = weekly.items.map((item) => ({ ...item, resetInterval: "week" as const }));
+		await publish(catalog(weekly));
+		await consume("reset_change", 169, "spend-1");
+		expect(await balance("reset_change")).toMatchObject({ available: "31" });
+
+		// Version 2 resets monthly. Changing the reset never refills the window: the weekly allowance
+		// runs to its end, before and after the pass reaches the account.
+		await publish(catalog(freePlan(2, "200")));
+		const kept = { granted: "200", consumed: "169", available: "31" };
+		expect(await balance("reset_change")).toMatchObject(kept);
+		await runWorker(25);
+		expect(await grants("reset_change")).toMatchObject([{ status: "active", plan_version: 2 }]);
+		expect(await balance("reset_change")).toMatchObject(kept);
+		expect(await consume("reset_change", 1, "spend-2")).toMatchObject({
+			allowed: true,
+			balance: { available: "30" },
+		});
+		expect(await consume("reset_change", 31, "spend-3")).toMatchObject({ allowed: false });
+		expect((await allowanceRows("reset_change")).map((row) => row.live)).toEqual([true]);
+
+		// A week later the weekly allowance has ended, and the monthly quantity starts where it ended.
+		await context.sql`
+			UPDATE plan_grants SET starts_at = starts_at - interval '7 days 1 minute'
+			WHERE origin = 'default'
+		`;
+		await context.sql`
+			UPDATE balance_allocations
+			SET period_start_at = period_start_at - interval '7 days 1 minute',
+				period_end_at = period_end_at - interval '7 days 1 minute',
+				expires_at = expires_at - interval '7 days 1 minute'
+			WHERE plan_grant_id IS NOT NULL
+		`;
+		expect(await balance("reset_change")).toMatchObject({
+			granted: "200",
+			consumed: "0",
+			available: "200",
+		});
+		expect(await consume("reset_change", 10, "spend-4")).toMatchObject({
+			allowed: true,
+			balance: { available: "190" },
+		});
+		const [grant] = await grants("reset_change");
+		const rows = await allowanceRows("reset_change");
+		expect(rows.map((row) => [Number(row.consumed), row.live])).toEqual([
+			[170, false],
+			[10, true],
+		]);
+		expect(rows[1]?.period_start_at.getTime()).toBe(
+			(grant?.starts_at.getTime() ?? 0) + 7 * 24 * 60 * 60 * 1000,
+		);
 	});
 
 	it("reads an allowance and keys a republish adds, before the pass reaches the account", async () => {
