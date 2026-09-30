@@ -446,6 +446,52 @@ describe("operations without a request body", () => {
 	});
 });
 
+describe("requests without a usable Host", () => {
+	/** Raw HTTP, because a Request object cannot carry the relative URL Bun builds without a Host. */
+	async function rawRequest(port: number, head: string): Promise<{ status: number; body: string }> {
+		const { connect } = await import("node:net");
+		const text = await new Promise<string>((resolve) => {
+			let data = "";
+			const socket = connect(port, "127.0.0.1", () => socket.write(`${head}\r\n\r\n`));
+			socket.on("data", (chunk) => {
+				data += chunk;
+			});
+			socket.on("close", () => resolve(data));
+		});
+		const [statusLine = "", ...rest] = text.split("\r\n");
+		return {
+			status: Number(statusLine.split(" ")[1]),
+			body: rest.join("\r\n").split("\r\n\r\n").slice(1).join(""),
+		};
+	}
+
+	it("answers /v1 with a JSON 400 and keeps health checks working", async () => {
+		const { app } = createApp();
+		const server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: (request) => app.handle(request),
+		});
+		try {
+			for (const head of [
+				"GET /v1/catalog HTTP/1.0",
+				"GET /v1/catalog HTTP/1.1\r\nHost: \r\nConnection: close",
+				"GET /v1/catalog HTTP/1.1\r\nHost: a b\r\nConnection: close",
+			]) {
+				const response = await rawRequest(server.port ?? 0, head);
+				expect(response.status).toBe(400);
+				expect(JSON.parse(response.body)).toMatchObject({
+					success: false,
+					error: { code: "INVALID_REQUEST" },
+				});
+			}
+			expect((await rawRequest(server.port ?? 0, "GET /livez HTTP/1.0")).status).toBe(200);
+		} finally {
+			server.stop(true);
+		}
+	});
+});
+
 describe("routing", () => {
 	it("keeps the verify limiter on every URL form that reaches the verify handler", async () => {
 		const { app } = createApp({ rateLimit: { verifyLimit: 1 } });

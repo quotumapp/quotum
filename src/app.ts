@@ -238,6 +238,14 @@ export function createApp({
 		set.headers["x-request-id"] = requestId;
 
 		const path = routedPath(context);
+		// Without a usable Host, Bun hands over a relative URL that `new URL()` cannot parse, and
+		// every later step would fail on it. Health checks stay open: some probes send no Host.
+		if (path.startsWith("/v1/") && !URL.canParse(request.url)) {
+			return billingJsonResponse(400, {
+				success: false,
+				error: { code: "INVALID_REQUEST", message: "Request must carry a valid Host header" },
+			});
+		}
 		if (
 			path.startsWith("/v1/") &&
 			request.method !== "GET" &&
@@ -319,8 +327,9 @@ export function createApp({
 		}
 
 		const classified = classifyBillingError(error);
-		const url = new URL(request.url);
-		const routeGroup = routeGroupForPath(url.pathname);
+		// The error handler must never throw itself, whatever URL the request carried.
+		const pathname = URL.parse(request.url, "http://unknown.invalid")?.pathname ?? "/";
+		const routeGroup = routeGroupForPath(pathname);
 		if (classified.status >= 500) {
 			safelyIncrementBillingMetric(billingMetrics, "billing_http_errors_total", {
 				route_group: routeGroup,
@@ -331,7 +340,7 @@ export function createApp({
 			safelyLogError(billingLogger, "Billing request failed", error, {
 				requestId,
 				method: request.method,
-				path: url.pathname,
+				path: pathname,
 				routeGroup,
 				status: String(classified.status),
 				code: classified.code,
