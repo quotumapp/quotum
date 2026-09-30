@@ -42,7 +42,11 @@ localDescribe("billing auth and tenancy integration", () => {
 		expect(missing.status).toBe(401);
 		expect(await missing.json()).toEqual({
 			success: false,
-			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+			error: {
+				code: "UNAUTHORIZED",
+				message: "Invalid billing API key",
+				requestId: expect.any(String),
+			},
 		});
 		expect(allowed.status).toBe(200);
 		expectEmptySnapshot((await allowed.json()).data, "integration_user");
@@ -86,7 +90,11 @@ localDescribe("billing auth and tenancy integration", () => {
 			expect(afterRevocation.status).toBe(401);
 			expect(await afterRevocation.json()).toEqual({
 				success: false,
-				error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+				error: {
+					code: "UNAUTHORIZED",
+					message: "Invalid billing API key",
+					requestId: expect.any(String),
+				},
 			});
 		} finally {
 			await context.sql`
@@ -123,6 +131,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			error: {
 				code: "INVALID_REQUEST",
 				message: "Project is resolved from billing credentials",
+				requestId: expect.any(String),
 			},
 		});
 		expect(google.calls).toEqual([]);
@@ -155,6 +164,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			error: {
 				code: "BILLING_PROJECT_NOT_CONFIGURED",
 				message: "Billing project is not configured",
+				requestId: expect.any(String),
 			},
 		});
 		expect(apple.calls).toEqual([]);
@@ -267,6 +277,7 @@ localDescribe("billing auth and tenancy integration", () => {
 			error: {
 				code: "BILLING_PROJECT_REQUIRED",
 				message: "Billing project context is required",
+				requestId: expect.any(String),
 			},
 		});
 		expect(allowed.status).toBe(200);
@@ -328,7 +339,7 @@ localDescribe("billing auth and tenancy integration", () => {
 		const body = await webhook.json();
 		expect(body).toEqual({
 			success: false,
-			error: { code: "NOT_FOUND", message: "Route not found" },
+			error: { code: "NOT_FOUND", message: "Route not found", requestId: expect.any(String) },
 		});
 		expect(apple.calls).toEqual([]);
 	});

@@ -41,7 +41,8 @@ describe("composeRuntimeApp request scopes", () => {
 		const store = {
 			config: { origin: "https://app.example.test", mcp: { origin: "https://api.example.test" } },
 			async rateLimit() {
-				if (++rateLimits > 3) throw new MerchantError("RATE_LIMITED", "Too many requests.", 429);
+				if (++rateLimits > 3)
+					throw new MerchantError("RATE_LIMITED", "Too many requests.", 429, 42);
 			},
 		} as unknown as MerchantStore;
 		const remoteMcp = createRemoteMcpApp({
@@ -95,6 +96,7 @@ describe("composeRuntimeApp request scopes", () => {
 		}
 		const limited = await app.fetch(new Request("https://api.example.test/mcp"));
 		expect(limited.status).toBe(429);
+		expect(limited.headers.get("retry-after")).toBe("42");
 		expect(await limited.json()).toMatchObject({ error: "RATE_LIMITED" });
 		expect((await app.fetch(new Request("http://127.0.0.1/livez"))).status).toBe(200);
 		expect(calls).toHaveLength(6);

@@ -11,6 +11,15 @@ Error codes are extensible, so handle unknown codes and ignore `details` keys yo
 Health/metrics and authentication/provider callback surfaces have their own response shapes;
 consult the generated contract rather than applying the billing envelope to every route.
 
+`/v1` and `/api` responses carry `X-Request-Id`. On `/v1`, a caller's own `X-Request-Id` is kept
+when it is 1 to 128 characters of letters, digits, `.`, `_`, `:` and `-`; any other value is
+replaced with a generated ID and never echoed or logged. `/v1` error bodies repeat it as
+`error.requestId`, as the merchant API already does, so quote it when reporting a failure. A `401`
+carries `WWW-Authenticate: Bearer realm="quotum"`, and a `429` carries `Retry-After` in whole
+seconds, also repeated as `error.retryAfter`. Responses are sent with `Cache-Control: no-store` and
+`X-Content-Type-Options: nosniff`: billing state is private to the caller and changes with every
+write.
+
 `/v1` refuses, with `400 INVALID_REQUEST`, input the database could not store: a body nested more
 than 64 levels deep; a NUL character or an unpaired surrogate in any body key or string, path
 segment or query value; a numeric id beyond the signed 64-bit range; a date-time outside years 1 to
@@ -585,9 +594,10 @@ operator key; `admin.storeEvent` never requests the raw provider payload. Operat
 `adjustments.grants`, `adjustments.getGrant`, `adjustments.debits` and the promotion lists, need the
 client's `operatorKey` only; operator changes also need its `actor`, and the client refuses them
 before any request when either is missing. An `actor` set on the client is sent with reads too.
-On a 429, `BillingApiError.rateLimitResetAt` carries the `ratelimit-reset` timestamp. A response
-whose body is empty or not JSON, such as a proxy's text or HTML 502, raises `BillingApiError` with
-code `HTTP_ERROR` and the HTTP status, so callers can retry on 5xx. The read-only
+On a 429, `BillingApiError.rateLimitResetAt` carries the `ratelimit-reset` timestamp and
+`BillingApiError.retryAfterSeconds` the `Retry-After` delay. A response whose body is empty or not
+JSON, such as a proxy's text or HTML 502, raises `BillingApiError` with code `HTTP_ERROR` and the
+HTTP status, so callers can retry on 5xx. The read-only
 [MCP server](mcp.md) for coding agents is built on these reads.
 
 An applied catalog migration settles once when the subscription is synchronized. Later updates,

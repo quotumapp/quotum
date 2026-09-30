@@ -62,6 +62,7 @@ const refusal = {
 	error: {
 		code: "READ_ONLY_CREDENTIAL",
 		message: "This operation is not available to a read-only project credential",
+		requestId: expect.any(String),
 	},
 };
 

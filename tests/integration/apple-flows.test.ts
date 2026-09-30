@@ -586,6 +586,7 @@ localDescribe("Apple route flows integration", () => {
 			error: {
 				code: "STOREKIT_ACCOUNT_TOKEN_MISMATCH",
 				message: "StoreKit transaction app account token does not match customer",
+				requestId: expect.any(String),
 			},
 		});
 		expect(apple.calls).toEqual(["verifyTransaction:200000000000001"]);
@@ -628,6 +629,7 @@ localDescribe("Apple route flows integration", () => {
 			error: {
 				code: "STOREKIT_ACCOUNT_TOKEN_MISMATCH",
 				message: "StoreKit transaction app account token does not match customer",
+				requestId: expect.any(String),
 			},
 		});
 		expect(apple.calls).toEqual(["verifyTransaction:200000000000001"]);

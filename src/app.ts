@@ -42,6 +42,7 @@ import {
 	createFixedWindowRateLimiter,
 	RateLimitExceeded,
 	type RateLimitServer,
+	rateLimitedBody,
 	rateLimitHeaders,
 	rateLimitResponse,
 	requestIp,
@@ -246,12 +247,16 @@ export function createApp({
 			requestIdFromHeader(request.headers.get("x-request-id")) ?? crypto.randomUUID();
 		requestIds.set(request, requestId);
 		set.headers["x-request-id"] = requestId;
+		// Billing state is per caller and changes with every write: no shared or browser cache may
+		// keep a response, and JSON must never be sniffed as another type.
+		set.headers["cache-control"] = "no-store";
+		set.headers["x-content-type-options"] = "nosniff";
 
 		const path = routedPath(context);
 		// Without a usable Host, Bun hands over a relative URL that `new URL()` cannot parse, and
 		// every later step would fail on it. Health checks stay open: some probes send no Host.
 		if (path.startsWith("/v1/") && !URL.canParse(request.url)) {
-			return billingJsonResponse(400, {
+			return billingJsonResponse(request, 400, {
 				success: false,
 				error: { code: "INVALID_REQUEST", message: "Request must carry a valid Host header" },
 			});
@@ -262,14 +267,14 @@ export function createApp({
 			request.method !== "HEAD" &&
 			oversizedContentLength(request.headers.get("content-length"))
 		) {
-			return billingJsonResponse(413, {
+			return billingJsonResponse(request, 413, {
 				success: false,
 				error: { code: "REQUEST_BODY_TOO_LARGE", message: "Request body is too large" },
 			});
 		}
 		// A path segment or query value decoding to NUL would reach SQL, which cannot store it.
 		if (path.startsWith("/v1/") && urlHasEncodedNul(request.url)) {
-			return billingJsonResponse(400, {
+			return billingJsonResponse(request, 400, {
 				success: false,
 				error: { code: "INVALID_REQUEST", message: "Request URL must not contain NUL characters" },
 			});
@@ -282,7 +287,7 @@ export function createApp({
 			}
 			const rejection = gate.gate({ request, path, server: rateLimitServer, set });
 			if (rejection !== undefined) {
-				return rejection;
+				return gateRejection(request, rejection);
 			}
 		}
 		return undefined;
@@ -298,6 +303,7 @@ export function createApp({
 
 		if (isBodyTooLarge(error) || isBodyTooLarge((error as { cause?: unknown })?.cause)) {
 			return billingJsonResponse(
+				request,
 				413,
 				{
 					success: false,
@@ -310,6 +316,7 @@ export function createApp({
 		if (code === "VALIDATION" || (typeof code === "string" && code === "PARSE")) {
 			set.status = 400;
 			return billingJsonResponse(
+				request,
 				400,
 				{
 					success: false,
@@ -321,15 +328,12 @@ export function createApp({
 
 		if (error instanceof RateLimitExceeded) {
 			Object.assign(set.headers, rateLimitHeaders(error.result));
-			return billingJsonResponse(
-				429,
-				{ success: false, error: { code: "RATE_LIMITED", message: "Too many requests" } },
-				headers,
-			);
+			return billingJsonResponse(request, 429, rateLimitedBody(error.result), headers);
 		}
 
 		if (code === "NOT_FOUND" && !isBillingError(error)) {
 			return billingJsonResponse(
+				request,
 				404,
 				{ success: false, error: { code: "NOT_FOUND", message: "Route not found" } },
 				headers,
@@ -357,7 +361,12 @@ export function createApp({
 				classification: classified.classification,
 			});
 		}
+		if (classified.status === 401) {
+			// RFC 9110 requires a challenge on 401; project credentials are bearer tokens.
+			headers["www-authenticate"] = 'Bearer realm="quotum"';
+		}
 		return billingJsonResponse(
+			request,
 			classified.status,
 			{
 				success: false,
@@ -655,20 +664,55 @@ function oversizedContentLength(contentLength: string | null): boolean {
 	);
 }
 
+/** The error envelope, carrying the request's ID so a caller can quote it from the body alone. */
 function billingJsonResponse(
+	request: Request,
 	status: number,
 	body: ErrorEnvelopeBody,
 	extraHeaders: Record<string, string> = {},
 ): Response {
-	return new Response(JSON.stringify(body), {
+	return new Response(JSON.stringify(withRequestId(request, body)), {
 		status,
 		headers: { "content-type": "application/json", ...extraHeaders },
 	});
 }
 
+function withRequestId(request: Request, body: ErrorEnvelopeBody): ErrorEnvelopeBody {
+	const requestId = requestIds.get(request);
+	return requestId === undefined ? body : { ...body, error: { ...body.error, requestId } };
+}
+
+/**
+ * A pre-authentication gate builds its refusal without the request's ID; add it to the error
+ * envelope. Anything that is not the envelope passes through unchanged.
+ */
+async function gateRejection(request: Request, rejection: Response): Promise<Response> {
+	const body: unknown = await rejection
+		.clone()
+		.json()
+		.catch(() => null);
+	if (!isErrorEnvelope(body)) return rejection;
+	return new Response(JSON.stringify(withRequestId(request, body)), {
+		status: rejection.status,
+		headers: rejection.headers,
+	});
+}
+
+function isErrorEnvelope(value: unknown): value is ErrorEnvelopeBody {
+	if (typeof value !== "object" || value === null) return false;
+	const { success, error } = value as { success?: unknown; error?: unknown };
+	return success === false && typeof error === "object" && error !== null;
+}
+
+/**
+ * A caller's request ID is kept only when it is a short token that is safe to echo and log; any
+ * other value is replaced with a generated one and never repeated back or written to a log.
+ */
+const CALLER_REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+
 function requestIdFromHeader(value: string | null): string | null {
 	const requestId = value?.trim();
-	return requestId === undefined || requestId === "" ? null : requestId;
+	return requestId !== undefined && CALLER_REQUEST_ID.test(requestId) ? requestId : null;
 }
 
 function routeGroupForPath(path: string): string {

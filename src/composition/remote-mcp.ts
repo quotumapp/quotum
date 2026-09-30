@@ -88,6 +88,8 @@ export function createRemoteMcpApp(options: {
 	app.onError(({ error, request, route, set }) => {
 		const known = error instanceof MerchantError;
 		set.status = known ? error.status : 503;
+		if (known && error.retryAfter !== undefined)
+			set.headers["retry-after"] = String(error.retryAfter);
 		if (!known) report(error, request, route, 503, "temporarily_unavailable");
 		return {
 			error: known ? error.code : "temporarily_unavailable",

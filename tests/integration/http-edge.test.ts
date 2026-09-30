@@ -41,7 +41,12 @@ localDescribe("HTTP edge integration", () => {
 		expect(limited.headers.get("ratelimit-reset")).toEqual(expect.any(String));
 		expect(await limited.json()).toEqual({
 			success: false,
-			error: { code: "RATE_LIMITED", message: "Too many requests" },
+			error: {
+				code: "RATE_LIMITED",
+				message: "Too many requests",
+				requestId: expect.any(String),
+				retryAfter: expect.any(Number),
+			},
 		});
 	});
 

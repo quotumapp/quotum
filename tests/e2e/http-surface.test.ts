@@ -40,7 +40,11 @@ e2eDescribe("E2E HTTP surface", () => {
 		expect(missing.headers.get("x-request-id")).toBe("e2e-missing-key");
 		expect(await missing.json()).toEqual({
 			success: false,
-			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+			error: {
+				code: "UNAUTHORIZED",
+				message: "Invalid billing API key",
+				requestId: expect.any(String),
+			},
 		});
 
 		const wrong = await service.request("/v1/billing-accounts/integration_user/entitlements", {
@@ -98,7 +102,12 @@ e2eDescribe("E2E HTTP surface", () => {
 		expect(limited.headers.get("ratelimit-reset")).toBe(resetAt);
 		expect(await limited.json()).toEqual({
 			success: false,
-			error: { code: "RATE_LIMITED", message: "Too many requests" },
+			error: {
+				code: "RATE_LIMITED",
+				message: "Too many requests",
+				requestId: expect.any(String),
+				retryAfter: expect.any(Number),
+			},
 		});
 	});
 
@@ -125,6 +134,7 @@ e2eDescribe("E2E HTTP surface", () => {
 			error: {
 				code: "STRIPE_WEBHOOK_SIGNATURE_INVALID",
 				message: "Stripe webhook signature is invalid",
+				requestId: expect.any(String),
 			},
 		});
 		expect(await durableCounts()).toEqual(before);

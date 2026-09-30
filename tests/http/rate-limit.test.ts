@@ -29,7 +29,13 @@ import { projectContextResolver, projectInstanceContext } from "../helpers/proje
 
 const RATE_LIMITED_ENVELOPE = {
 	success: false,
-	error: { code: "RATE_LIMITED", message: "Too many requests" },
+	error: { code: "RATE_LIMITED", message: "Too many requests", retryAfter: expect.any(Number) },
+};
+
+/** The same envelope as the shell renders it, with the request's ID. */
+const SHELL_RATE_LIMITED_ENVELOPE = {
+	success: false,
+	error: { ...RATE_LIMITED_ENVELOPE.error, requestId: expect.any(String) },
 };
 
 interface RateLimitKeyOptions {
@@ -67,6 +73,7 @@ describe("createFixedWindowRateLimiter", () => {
 			allowed: false,
 			remaining: 0,
 			resetAt: new Date(2_000),
+			retryAfterSeconds: 1,
 		});
 
 		now = 1_500;
@@ -74,7 +81,18 @@ describe("createFixedWindowRateLimiter", () => {
 			allowed: false,
 			remaining: 0,
 			resetAt: new Date(2_000),
+			retryAfterSeconds: 1,
 		});
+	});
+
+	it("tells a rejected client how many whole seconds remain in the window", () => {
+		let now = 1_500;
+		const limiter = createFixedWindowRateLimiter({ windowMs: 60_000, limit: 1, now: () => now });
+
+		expect(limiter.check("user_1").retryAfterSeconds).toBeUndefined();
+		expect(limiter.check("user_1").retryAfterSeconds).toBe(59);
+		now = 59_999;
+		expect(limiter.check("user_1").retryAfterSeconds).toBe(1);
 	});
 
 	it("resets the bucket when the fixed window changes", () => {
@@ -975,7 +993,7 @@ describe("limiter isolation", () => {
 
 		expect(lookups).toBe(10 * LIMIT);
 		expect(rejected?.headers.get("ratelimit-remaining")).toBe("0");
-		expect(await rejected?.json()).toEqual(RATE_LIMITED_ENVELOPE);
+		expect(await rejected?.json()).toEqual(SHELL_RATE_LIMITED_ENVELOPE);
 	});
 
 	describe("setup ingress behind a trusted proxy", () => {

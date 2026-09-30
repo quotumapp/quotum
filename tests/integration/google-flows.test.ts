@@ -568,7 +568,11 @@ localDescribe("Google route flows integration", () => {
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "INVALID_REQUEST", message: "Invalid purchase verification body" },
+			error: {
+				code: "INVALID_REQUEST",
+				message: "Invalid purchase verification body",
+				requestId: expect.any(String),
+			},
 		});
 		expect(google.calls).toEqual([]);
 		await expectTableCounts(context.sql, {

@@ -676,6 +676,7 @@ localDescribe("billing idempotency and integrity integration", () => {
 			error: {
 				code: "GOOGLE_PLAY_ACCOUNT_ID_MISMATCH",
 				message: "Google Play purchase account id does not match customer",
+				requestId: expect.any(String),
 			},
 		});
 		await expectTableCounts(context.sql, {
