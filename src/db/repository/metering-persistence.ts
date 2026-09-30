@@ -1205,6 +1205,44 @@ function queryDirectPricing(
 	).then((row) => row?.direct === true);
 }
 
+/**
+ * Whether usage ever spends allocations of this feature, as rate resolution decides: a rate card's
+ * wallet is spent by the meters it prices, and a feature a plan allocates is spent directly unless
+ * the published catalog prices it as a meter, whose usage then charges the card's wallet instead.
+ */
+export async function featureSpentByUsage(
+	executor: QueryExecutor,
+	projectId: string,
+	feature: FeatureRow,
+): Promise<boolean> {
+	const row = await executeOne<{ wallet: boolean; allocated: boolean; priced: boolean }>(
+		executor,
+		drizzleSql`
+			SELECT
+				EXISTS (
+					SELECT 1 FROM rate_card_entries rce
+					WHERE rce.project_id = ${projectId} AND rce.wallet_feature_id = ${featureId(feature)}
+				) AS wallet,
+				EXISTS (
+					SELECT 1 FROM plan_items pi
+					WHERE pi.project_id = ${projectId}
+						AND pi.feature_id = ${featureId(feature)}
+						AND pi.item_kind = 'allocation'
+				) AS allocated,
+				EXISTS (
+					SELECT 1
+					FROM projects p
+					JOIN rate_card_entries rce
+						ON rce.project_id = p.id
+						AND rce.catalog_revision_id = p.published_catalog_revision_id
+						AND rce.meter_feature_id = ${featureId(feature)}
+					WHERE p.id = ${projectId}
+				) AS priced
+		`,
+	);
+	return row !== null && (row.wallet || (row.allocated && !row.priced));
+}
+
 export async function resolveRateDecision(
 	executor: QueryExecutor,
 	projectId: string,

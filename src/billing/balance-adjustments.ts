@@ -136,7 +136,7 @@ const balanceAdjustmentErrorDefinitions = [
 	{
 		code: "OPERATOR_GRANT_FEATURE_INVALID",
 		status: 400,
-		message: "Operator grants give quantity of a consumable metered feature only",
+		message: "Operator grants give quantity of a consumable feature that usage spends only",
 	},
 	{ code: "ALLOCATION_NOT_FOUND", status: 404, message: "Allocation was not found" },
 	{

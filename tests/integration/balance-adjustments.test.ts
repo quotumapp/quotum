@@ -138,6 +138,32 @@ localDescribe("operator grants and administrative debits", () => {
 		expect(await context.sql`SELECT id FROM operator_grants`).toHaveLength(0);
 	});
 
+	it("refuses a consumable feature that usage never spends", async () => {
+		const { grant } = fixture();
+		// `model_tokens` is a meter its rate card charges to the `ai_credits` wallet, and
+		// `loose_credits` has neither a rate card nor a plan allocation: usage spends neither.
+		await context.sql`
+			INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
+			SELECT id, 'loose_credits', 'Loose credits', 'metered', 'consumable', 'credit', 0
+			FROM projects WHERE key = 'acme'
+		`;
+		const meter = await grant("spend_account", "grant-meter", "5", { featureKey: "model_tokens" });
+		const loose = await grant("spend_account", "grant-loose", "5", { featureKey: "loose_credits" });
+		const wallet = await grant("spend_account", "grant-wallet", "5");
+
+		for (const refused of [meter, loose]) {
+			expect(refused.status).toBe(400);
+			expect((await refused.json()).error.code).toBe("OPERATOR_GRANT_FEATURE_INVALID");
+		}
+		expect(wallet.status).toBe(201);
+		const grants = await context.sql<Array<{ feature: string }>>`
+			SELECT feature.key AS feature FROM balance_allocations allocation
+			JOIN features feature ON feature.id = allocation.feature_id
+			WHERE allocation.source_kind = 'operator'
+		`;
+		expect(grants.map((row) => row.feature)).toEqual(["ai_credits"]);
+	});
+
 	it("revokes only free quantity, lets an open reservation confirm and replays", async () => {
 		const { get, post, usage, grant } = fixture();
 		const created = (await (await grant("revoke_account", "grant-1", "100")).json()).data.grant;
