@@ -45,6 +45,7 @@ import { RepositoryModule } from "./base";
 import type { ControlDenial, UsageAlertRow } from "./controls-runtime";
 import {
 	checkControls,
+	checkUnrecordedControls,
 	confirmControlHolds,
 	consumeControls,
 	correctControlConsumption,
@@ -293,7 +294,16 @@ export class MeteringBillingRepository extends RepositoryModule {
 				meterLimit,
 				requestedQuantity,
 			);
-			if (!decision.allowed || customer === null) return decision;
+			if (!decision.allowed) return decision;
+			if (customer === null) {
+				const denial = await checkUnrecordedControls(this.database, {
+					projectId,
+					featureId: featureId(feature),
+					featureKey: feature.key,
+					usageDelta: requestedQuantity,
+				});
+				return denial === null ? decision : controlDeniedDecision(decision, denial);
+			}
 			const spend = meterLimitSpendDelta(
 				meterLimit,
 				await readMeterLimitSpendBalance(this.database, projectId, customer.id, meterLimit),
@@ -333,7 +343,16 @@ export class MeteringBillingRepository extends RepositoryModule {
 			walletQuantity,
 			balance,
 		);
-		if (!decision.allowed || customer === null) return decision;
+		if (!decision.allowed) return decision;
+		if (customer === null) {
+			const denial = await checkUnrecordedControls(this.database, {
+				projectId,
+				featureId: featureId(rate.meter),
+				featureKey: rate.meter.key,
+				usageDelta: requestedQuantity,
+			});
+			return denial === null ? decision : controlDeniedDecision(decision, denial);
+		}
 		const denial = await checkControls(this.database, {
 			projectId,
 			customerId: customer.id,

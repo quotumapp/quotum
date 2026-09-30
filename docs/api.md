@@ -1017,14 +1017,16 @@ pass has not reached or whose last base plan ended moments ago, such as a trial 
 recorded as expired yet. For such an account:
 - `check` and `GET .../balances/:featureKey` report the default version's allowance of the feature
   in the current window, or what the previous default-plan grant left of it, and its meter limit
-  in the window it would count;
+  in the window it would count; for an account Quotum has not recorded, `check` also applies the
+  default version's usage limits against windows that hold nothing yet;
 - `GET .../entitlements` reports the marker's keys, active, with
   `metadata: { source: "plan_grant", origin: "default", status: "active", planKey }` and no
   `planGrantId`;
 - the billing summary of a recorded account counts the same allowance.
 
 Its next write first records what the read assumed: it starts the default plan, records an elapsed
-trial, or applies a changed default plan, so the write sees what the read reported. A product that
+trial, or applies a changed default plan, so the write sees what the read reported. The default
+plan's controls apply to that write too, including the first one that starts the plan. A product that
 checks before it consumes therefore admits a new free user at once.
 
 A balance counts an allowance no write has recorded in `granted` and `available`, but its

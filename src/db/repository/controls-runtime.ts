@@ -58,6 +58,24 @@ export async function checkControls(
 	return (await evaluateControls(executor, input, "check", null)).denial;
 }
 
+/**
+ * The controls an account Quotum has not recorded would meet on its first write: the default
+ * plan's, against windows that hold nothing yet. A read never records the account.
+ */
+export async function checkUnrecordedControls(
+	executor: QueryExecutor,
+	input: Omit<ControlDeltaInput, "customerId" | "entityId">,
+): Promise<ControlDenial | null> {
+	return (
+		await evaluateControls(
+			executor,
+			{ ...input, customerId: null, entityId: null, assumeDefaultPlan: true },
+			"check",
+			null,
+		)
+	).denial;
+}
+
 export async function consumeControls(
 	executor: QueryExecutor,
 	input: ControlDeltaInput,
@@ -75,21 +93,29 @@ export async function holdControls(
 
 async function evaluateControls(
 	executor: QueryExecutor,
-	input: ControlDeltaInput,
+	input: Omit<ControlDeltaInput, "customerId"> & {
+		customerId: string | null;
+		assumeDefaultPlan?: boolean;
+	},
 	mode: "check" | "consume" | "hold",
 	reservationId: string | null,
 ): Promise<ControlConsumptionResult> {
 	const now = await readControlClock(executor, input.now);
+	const customerId = input.customerId;
+	if (customerId === null && mode !== "check") {
+		throw new Error("Only a check evaluates controls for an account that is not recorded");
+	}
 	// The customer lock is issued first, so it executes before the pipelined control read.
 	const [, effectiveControls] = await Promise.all([
-		mode === "check"
+		mode === "check" || customerId === null
 			? Promise.resolve()
-			: lockCustomerControls(executor, input.projectId, input.customerId),
+			: lockCustomerControls(executor, input.projectId, customerId),
 		resolveEffectiveControls(executor, {
 			projectId: input.projectId,
-			customerId: input.customerId,
+			customerId,
 			entityId: input.entityId,
 			now,
+			...(input.assumeDefaultPlan === true ? { assumeDefaultPlan: true } : {}),
 		}),
 	]);
 	const controls = effectiveControls
