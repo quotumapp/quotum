@@ -36,3 +36,63 @@ export function storableDateTimeSchema() {
 export function bigintIdSchema() {
 	return z.string().regex(/^\d+$/).refine(isBigintId, "Id is out of range");
 }
+
+/**
+ * A code point a display name must not carry: C0 and C1 controls (NUL, tab, CR and LF included),
+ * the Unicode line and paragraph separators, and the bidirectional embedding, override and
+ * isolate controls, which make a name read as different text.
+ */
+function isNameControl(codePoint: number): boolean {
+	return (
+		codePoint <= 0x1f ||
+		(codePoint >= 0x7f && codePoint <= 0x9f) ||
+		codePoint === 0x2028 ||
+		codePoint === 0x2029 ||
+		(codePoint >= 0x202a && codePoint <= 0x202e) ||
+		(codePoint >= 0x2066 && codePoint <= 0x2069)
+	);
+}
+
+/** Storable text that people read as a name: no control or text-direction characters. */
+export function isDisplayName(value: string): boolean {
+	if (!isStorableText(value)) return false;
+	for (const character of value) {
+		if (isNameControl(character.codePointAt(0) ?? 0)) return false;
+	}
+	return true;
+}
+
+/** A trimmed display name of `min` to `max` UTF-16 code units. */
+export function displayNameSchema(min: number, max: number) {
+	return z
+		.string()
+		.trim()
+		.min(min)
+		.max(max)
+		.refine(isDisplayName, "Names cannot contain control or text-direction characters");
+}
+
+/**
+ * A display name built from text Quotum does not validate, such as an identity provider's
+ * profile: controls become spaces, text-direction characters are dropped, runs of whitespace
+ * collapse, and the result is trimmed and cut to `max` UTF-16 code units without splitting a
+ * character.
+ */
+export function toDisplayName(value: string, max: number): string {
+	let cleaned = "";
+	for (const character of value.toWellFormed()) {
+		const codePoint = character.codePointAt(0) ?? 0;
+		if (
+			(codePoint >= 0x202a && codePoint <= 0x202e) ||
+			(codePoint >= 0x2066 && codePoint <= 0x2069)
+		)
+			continue;
+		cleaned += isNameControl(codePoint) ? " " : character;
+	}
+	let result = "";
+	for (const character of cleaned.replace(/\s+/g, " ").trim()) {
+		if (result.length + character.length > max) break;
+		result += character;
+	}
+	return result.trimEnd();
+}

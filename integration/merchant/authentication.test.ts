@@ -109,6 +109,47 @@ describe("real Better Auth merchant authentication", () => {
 			).status,
 		).toBe(401);
 	});
+	it("refuses sign-up names with control or text-direction characters or over 100 characters", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.json("/api/platform/config");
+		await browser.json("/api/platform/signup-intent", {
+			accepted: true,
+			termsVersion: testConfig.termsVersion,
+			privacyVersion: testConfig.privacyVersion,
+		});
+		for (const [index, name] of [
+			"Jane\u0000Doe",
+			"Jane\r\nDoe",
+			"Jane\u202eeoD",
+			"",
+			"a".repeat(101),
+		].entries()) {
+			await f.sql`DELETE FROM platform_rate_limits`;
+			const response = await browser.request("/api/auth/sign-up/email", {
+				name,
+				email: `refused-${index}@example.com`,
+				password,
+			});
+			expect([response.status, (await response.json()).error?.code]).toEqual([
+				400,
+				"INVALID_REQUEST",
+			]);
+		}
+		const email = await browser.request("/api/auth/sign-up/email", {
+			name: "Jane",
+			email: "owner\u0000@example.com",
+			password,
+		});
+		expect(email.status).toBe(400);
+		expect(await f.sql`SELECT id FROM platform_auth_users`).toHaveLength(0);
+		await f.sql`DELETE FROM platform_rate_limits`;
+		await browser.json("/api/auth/sign-up/email", {
+			name: "  Jane Doe  ",
+			email: "owner@example.com",
+			password,
+		});
+		expect(await f.sql`SELECT name FROM platform_auth_users`).toEqual([{ name: "Jane Doe" }]);
+	});
 	it("expires sessions on both idle and absolute limits", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();

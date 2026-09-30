@@ -2,7 +2,7 @@ import { betterAuth } from "better-auth";
 import { openAPI } from "better-auth/plugins";
 import type { OpenAPIObject, SchemaObject } from "openapi3-ts/oas31";
 import { z } from "zod";
-import { MERCHANT_AUTH_POST_PATHS, resetPasswordBodySchema } from "../platform/app";
+import { MERCHANT_AUTH_POST_PATHS, resetPasswordBodySchema, userNameSchema } from "../platform/app";
 import { createMerchantAuth } from "../platform/auth";
 import { createMcpAuthProvider } from "../platform/mcp/auth-provider";
 import { MerchantStore } from "../platform/store";
@@ -103,6 +103,17 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 						},
 					},
 				};
+			if (suffix === "/sign-up/email") {
+				const body = operation.requestBody;
+				const schema =
+					body && "content" in body ? body.content["application/json"]?.schema : undefined;
+				if (schema && "properties" in schema && schema.properties?.name) {
+					const { $schema: _, ...bounds } = JSON.parse(
+						JSON.stringify(z.toJSONSchema(userNameSchema)),
+					);
+					schema.properties.name = { ...schema.properties.name, ...bounds };
+				}
+			}
 			operation.security = [{ serviceToken: [] }];
 			operation.parameters = [
 				{ in: "header", name: "Origin", required: true, schema: { type: "string" } },

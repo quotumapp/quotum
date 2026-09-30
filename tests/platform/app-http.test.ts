@@ -115,6 +115,24 @@ describe("merchant request bodies", () => {
 			expect(await response.json(), path).toMatchObject({ error: { code: "SESSION_REQUIRED" } });
 		}
 	});
+
+	it("refuses authentication input Postgres cannot store before any lookup", async () => {
+		const app = merchantApp();
+		for (const body of [
+			{ email: "owner\u0000@example.com", password: "synthetic password" },
+			{ email: "owner@example.com", password: "synthetic \ud800 password" },
+		]) {
+			const response = await app.handle(
+				mutation("/api/auth/sign-in/email", {
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify(body),
+				}),
+			);
+
+			expect(response.status).toBe(400);
+			expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+		}
+	});
 });
 
 describe("merchant observability hooks", () => {
