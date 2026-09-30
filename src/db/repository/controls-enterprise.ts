@@ -37,6 +37,7 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import { type Cadence, cadenceKey, calendarWindow } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
+import { defaultPlanTargetSql } from "./default-plan-sql";
 import { ensureCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -1126,12 +1127,21 @@ export class ControlsEnterpriseRepository
 	}
 }
 
-/** Match policy activation and window bounds to their authoritative database clock. */
+/**
+ * Match policy activation and window bounds to their authoritative database clock. A JavaScript
+ * date holds milliseconds, so the transaction clock is rounded up to the next one: a row this
+ * transaction stamped with now(), such as the plan grant an account's first write starts, is then
+ * at or before the clock it is compared with, not a few microseconds after it.
+ */
 export async function readControlClock(executor: QueryExecutor, now?: Date): Promise<Date> {
 	if (now !== undefined) return now;
 	const clock = await executeOne<{ current_time: Date | string }>(
 		executor,
-		drizzleSql`SELECT CURRENT_TIMESTAMP AS current_time`,
+		drizzleSql`
+			SELECT date_trunc('milliseconds', CURRENT_TIMESTAMP)
+				+ CASE WHEN CURRENT_TIMESTAMP > date_trunc('milliseconds', CURRENT_TIMESTAMP)
+					THEN interval '1 millisecond' ELSE interval '0' END AS current_time
+		`,
 	);
 	if (clock === null) throw new Error("Database clock could not be read");
 	return clock.current_time instanceof Date ? clock.current_time : new Date(clock.current_time);
@@ -1139,7 +1149,14 @@ export async function readControlClock(executor: QueryExecutor, now?: Date): Pro
 
 export async function resolveEffectiveControls(
 	executor: QueryExecutor,
-	input: { projectId: string; customerId: string; entityId: string | null; now?: Date },
+	input: {
+		projectId: string;
+		customerId: string | null;
+		entityId: string | null;
+		now?: Date;
+		/** An account not recorded yet meets the default plan's controls on its first write. */
+		assumeDefaultPlan?: boolean;
+	},
 ): Promise<EffectiveControl[]> {
 	const now = await readControlClock(executor, input.now);
 	// One statement: the active contract is resolved inline so this read can be pipelined.
@@ -1181,6 +1198,14 @@ export async function resolveEffectiveControls(
 						AND plan_grant.starts_at <= ${now.toISOString()}
 						AND (plan_grant.ends_at IS NULL OR plan_grant.ends_at > ${now.toISOString()})
 				)))
+				${
+					input.assumeDefaultPlan === true
+						? drizzleSql`OR (policy.source_type = 'plan_default' AND policy.plan_version_id = (
+								SELECT default_target.plan_version_id::bigint
+								FROM (${defaultPlanTargetSql(input.projectId)}) default_target
+							))`
+						: drizzleSql``
+				}
 				OR (policy.source_type = 'contract' AND policy.contract_id = (SELECT id FROM active_contract))
 				OR (policy.source_type = 'account' AND policy.customer_id = ${input.customerId})
 				OR (policy.source_type = 'entity' AND policy.customer_id = ${input.customerId}

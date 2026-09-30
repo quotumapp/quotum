@@ -679,6 +679,40 @@ localDescribe("default plan", () => {
 		).toHaveLength(0);
 	});
 
+	it("applies the default plan's usage limit from an account's first write, and to a check before it", async () => {
+		await publish(
+			catalog({
+				...freePlan(1, "100"),
+				controls: [
+					{
+						controlKind: "usage_limit",
+						featureKey: "model_tokens",
+						currency: null,
+						limitValue: "300",
+						interval: "day",
+					},
+				],
+			}),
+		);
+
+		const checked = await context.repository.checkUsage(project, {
+			billingAccountId: "limited",
+			featureKey: "model_tokens",
+			quantity: "400",
+		});
+		expect(checked).toMatchObject({ allowed: false, reason: "control_limit_exceeded" });
+		// The first write starts the grant in its own transaction; its controls apply at once.
+		expect(await consume("limited", 2, "limited-first")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+		expect(await consume("limited", 1, "limited-second")).toMatchObject({ allowed: true });
+		expect(await consume("limited", 1, "limited-third")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+	});
+
 	it("gives two concurrent first requests one default grant", async () => {
 		await publish(catalog(freePlan(1, "100")));
 
