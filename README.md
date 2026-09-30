@@ -21,8 +21,16 @@ your own [merchant proxy](docs/deployment.md#merchant-proxy-service-principal). 
 - [Deployment and configuration](docs/deployment.md): container image, required and optional
   variables, authentication modes, test entrypoints. See [`.env.example`](.env.example).
 - [Provider integrations](docs/providers.md): Apple, Google, Stripe, and signed projections.
-- [API guide](docs/api.md): metering, recovery, catalog publication, admin operations.
-- [Operations](docs/operations.md): backup, restore, upgrade, rollback, workers, support policy.
+- [API guide](docs/api.md): request rules, read-only credentials, the backend SDK and admin
+  operations, with topic guides for [metering](docs/metering.md),
+  [subscriptions and commercial actions](docs/subscriptions.md),
+  [catalog publication](docs/catalog.md), [promotions](docs/promotions.md),
+  [trials, the default plan and operator grants](docs/grants.md) and
+  [provider capability errors and reads](docs/provider-capabilities.md).
+- [Operations](docs/operations.md): backup, restore, upgrade, rollback, credentials, health and
+  workers; [upgrade transitions](docs/upgrade-transitions.md) for populated databases.
+- [Releasing](docs/releasing.md): release verification, support policy and container publishing;
+  [load testing](docs/load-testing.md) for the load lane.
 - [MCP server](docs/mcp.md): read-only browser authorization or stdio access for coding agents.
 - [Architecture](docs/architecture.md): module boundaries and source map.
 - [Releases](https://github.com/quotumapp/quotum/releases), [SECURITY.md](SECURITY.md),
@@ -73,8 +81,8 @@ customer integrations and production activation have separate checks.
 
 Database/process lanes require Docker and are not implied by a plain unit-test pass. Browser
 integration is owned by the separate quotum-autotests project. Follow
-[docs/operations.md](docs/operations.md) for upgrade, credentials, catalog, worker recovery, metrics
-and rollback. Before 1.0 the schema files under `migrations/` evolve in place and are checksum-verified; recreate
+[docs/operations.md](docs/operations.md) for upgrade, credentials, worker recovery, metrics and
+rollback, and [docs/upgrade-transitions.md](docs/upgrade-transitions.md) for populated databases. Before 1.0 the schema files under `migrations/` evolve in place and are checksum-verified; recreate
 a database from them rather than migrating it.
 
 ## Source map

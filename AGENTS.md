@@ -111,7 +111,7 @@ changelog file. Do not bump the `package.json` version in feature pull requests.
 
 ## Releases and container publishing
 
-For release work, follow the [publishing checklist](docs/operations.md#publish-a-container-release).
+For release work, follow the [publishing checklist](docs/releasing.md#publish-a-container-release).
 Keep `package.json` and the committed contract at `0.0.0-dev`; no release branch or version-bump
 PR is required. Verify an existing `main` commit, then push the chosen `vX.Y.Z` tag to the GitHub
 repository `quotumapp/quotum`. Confirm the tag's `Publish image` run succeeds, GHCR contains

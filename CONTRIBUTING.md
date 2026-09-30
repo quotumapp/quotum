@@ -185,7 +185,7 @@ stays at `0.0.0-dev`. Release versions come from Git tags.
 
 ## Publishing a release
 
-Follow the [container release checklist](docs/operations.md#publish-a-container-release) for the
+Follow the [container release checklist](docs/releasing.md#publish-a-container-release) for the
 verification, the GitHub tag push, and confirmation of the GHCR image. Tag an existing verified
 `main` commit; no release branch or version-bump PR is required. Pushing `main` publishes only
 the rolling `main` image. The tag's workflow publishes

@@ -1,5 +1,7 @@
 # Self-hosting Quotum
 
+- Document kind: Current behavior
+
 Quotum Cloud runs Quotum together with a merchant web application. A self-hosted Quotum runs
 **headless**: the `/v1` API your backends call, provider webhooks and the background workers,
 operated with the `quotum` command-line tool. This guide takes a deployment from nothing to a
@@ -141,7 +143,7 @@ The field names and event lists for each provider are in
 
 Declare features, plans and top-ups, and bind them to your provider products. Then preview and
 publish them with `quotum catalog diff <file>` and `quotum catalog push <file>`, which call the
-[catalog API](api.md#catalog-publication). Both commands need `BILLING_BASE_URL`, a project key and
+[catalog API](catalog.md). Both commands need `BILLING_BASE_URL`, a project key and
 the operator key. `quotum catalog status` shows what is live and needs no operator key.
 
 ## 6. Keep backends on a private network (optional)

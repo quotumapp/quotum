@@ -44,7 +44,7 @@ usage and the settings it reads without running it; an unknown command or unexpe
 | `quotum partitions status` / `ensure [--months <n>]` | Report or extend the monthly [usage partitions](operations.md#usage-partitions). |
 | `quotum bootstrap --check` / `--apply [--credentials-out <path>]` | The [platform bootstrap](#first-start). |
 | `quotum catalog provision` | Import the store products in `BILLING_CATALOG_IMPORT_JSON`. |
-| `quotum catalog status` / `diff <file>` / `push <file>` | [Catalog automation](api.md#catalog-publication) over HTTP. |
+| `quotum catalog status` / `diff <file>` / `push <file>` | [Catalog automation](catalog.md) over HTTP. |
 | `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play and projections. |
 | `quotum credentials status` / `rotate` / `revoke` | Inspect, [rotate](operations.md#project-credentials) or revoke an instance's project API keys. |
 | `quotum connections rotate-secrets` | [Encryption-key rotation](#encryption-key-rotation). |
