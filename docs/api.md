@@ -249,9 +249,10 @@ update:
 
 - The outgoing version's live plan allowances end at that moment and are not rolled over.
 - The incoming version's allowance for the current period, or reset window, is granted in full.
-- A version grants that allowance at most once per period or window. A subscription that returns
-  to a version it held earlier in the same period or window gets that allowance back as it was
-  left, with its use kept, not a fresh one. A carry taken from it ends, and its quantity returns
+- A version grants that allowance at most once per period or window, and a lifetime allowance
+  (no reset, no expiry) once per subscription. A subscription that returns to a version it held
+  earlier in the same period or window, or at any time for a lifetime allowance, gets that
+  allowance back as it was left, with its use kept, not a fresh one. A carry taken from it ends, and its quantity returns
   to the resumed allowance instead of counting twice; what the carry spent is taken from it.
 - Allowances that already ended at a period boundary roll over under the old item's policy as
   before, so a period-end change keeps its rollover.
@@ -270,11 +271,12 @@ An immediate `subscription_change` intent can carry some of that over, per consu
 - **`balances`:** the unused quantity of each live outgoing allowance of the feature becomes a
   one-off `carry_over` allocation. It expires at the end of the new plan's first reset window for
   that feature, or at the end of the billing period when the new item does not reset or the new
-  plan lacks the feature. It is never rolled over, and the balance breakdown names its origin in
-  `carryOverOriginAllocationId`.
-- **`usages`:** the feature's usage in the outgoing allowance's current reset window, or its
-  period when it does not reset, is written as consumed quantity on the new allowance, so an
-  upgrade does not reset consumption. Usage in earlier windows of the period has reset already and
+  plan lacks the feature. What a lifetime allowance left never expires: it stays the lifetime
+  credit the outgoing version granted. It is never rolled over, and the balance breakdown names its
+  origin in `carryOverOriginAllocationId`.
+- **`usages`:** the feature's usage in the outgoing allowance's current reset window, its period
+  when it does not reset, or everything a lifetime allowance consumed, is written as consumed
+  quantity on the new allowance, so an upgrade does not reset consumption. Usage in earlier windows of the period has reset already and
   does not carry. It is capped at what the new allowance holds; usage beyond it is forgiven, not
   charged.
 - The preview reports `carryOver.features[]`, with each feature's current unused balance and usage
@@ -569,6 +571,13 @@ window is granted; elapsed windows are not reconstructed. Existing rollover rule
 allocations that were actually issued. Grants use the subscription's pinned plan version and
 account/entity scope, and stop when its recorded period or access ends. Period-end cancellation
 continues grants while access remains valid.
+
+An allocation with neither `resetInterval` nor `expiresAfterSeconds` is a lifetime allowance: a
+subscription is granted it once, in its first period, and keeps it across renewals instead of
+receiving the quantity again every period. It ends with the version, at a switch to another one,
+and a return to the version resumes it with its use kept, as the plan-change rules below describe.
+A subscription that already held such an allowance granted per period, before lifetime allowances
+existed, keeps what it has and is not granted another.
 
 A catalog may mark one plan as its default with
 `"defaultPlan": { "planKey": "free", "entitlementKeys": ["free_tier"] }`. An account that has no

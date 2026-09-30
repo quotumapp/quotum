@@ -35,6 +35,17 @@ export function resetSplitsBillingPeriodSql(itemAlias: string, versionAlias: str
 	)`;
 }
 
+/**
+ * Whether a plan item grants a lifetime allowance: it neither resets nor expires, so a subscription
+ * holds it once, from its first period until a version switch or the subscription's end ends it,
+ * rather than once per period.
+ */
+export function lifetimeItemSql(itemAlias: string): SQL {
+	return drizzleSql.raw(
+		`(${itemAlias}.reset_interval IS NULL AND ${itemAlias}.expires_after_seconds IS NULL)`,
+	);
+}
+
 /** A plan item's reset cadence as a Postgres interval, or NULL when the item does not reset. */
 export function resetIntervalSql(itemAlias: string): SQL {
 	const count = `${itemAlias}.reset_interval_count`;

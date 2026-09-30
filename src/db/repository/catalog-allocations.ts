@@ -1,6 +1,6 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type { SubscriptionStatus } from "../../billing/types";
-import { resetSplitsBillingPeriodSql } from "./cadence-sql";
+import { lifetimeItemSql, resetSplitsBillingPeriodSql } from "./cadence-sql";
 import { carryOverAllowances } from "./carry-over";
 import { supersedeBasePlanGrants } from "./plan-grants";
 import { executeOne, executeRows, jsonb } from "./query";
@@ -492,19 +492,28 @@ export async function materializeSubscriptionAllocations(
 				pi.id,
 				${input.subscriptionId},
 				'subscription',
-				concat(
-					'subscription:',
-					${input.subscriptionId}::text,
-					':',
-					pi.id::text,
-					':',
-					${input.periodStartAt.toISOString()}::text,
-					':',
-					COALESCE(${input.periodEndAt?.toISOString() ?? null}::text, 'open')
-				),
+				-- An item without a reset or an expiry grants a lifetime allowance, once per
+				-- subscription: renewals find its key taken. Every other item grants per period.
+				CASE
+					WHEN ${lifetimeItemSql("pi")}
+						THEN concat('subscription:', ${input.subscriptionId}::text, ':', pi.id::text, ':lifetime')
+					ELSE concat(
+						'subscription:',
+						${input.subscriptionId}::text,
+						':',
+						pi.id::text,
+						':',
+						${input.periodStartAt.toISOString()}::text,
+						':',
+						COALESCE(${input.periodEndAt?.toISOString() ?? null}::text, 'open')
+					)
+				END,
 				pi.quantity,
 				${input.periodStartAt.toISOString()},
-				${input.periodEndAt?.toISOString() ?? null},
+				CASE
+					WHEN ${lifetimeItemSql("pi")} THEN NULL
+					ELSE ${input.periodEndAt?.toISOString() ?? null}::timestamptz
+				END,
 				CASE
 					WHEN pi.expires_after_seconds IS NOT NULL AND ${input.periodEndAt?.toISOString() ?? null}::timestamptz IS NOT NULL
 						THEN LEAST(
@@ -531,6 +540,20 @@ export async function materializeSubscriptionAllocations(
 				AND NOT EXISTS (
 					SELECT 1 FROM plan_versions pv WHERE pv.project_id = pi.project_id
 						AND pv.id = pi.plan_version_id AND ${resetSplitsBillingPeriodSql("pi", "pv")}
+				)
+				-- A lifetime item the subscription already holds a live allowance of, granted per
+				-- period before lifetime keys existed, is not granted again.
+				AND NOT (
+					${lifetimeItemSql("pi")}
+					AND EXISTS (
+						SELECT 1 FROM balance_allocations held
+						WHERE held.project_id = pi.project_id
+							AND held.subscription_id = subscription.id
+							AND held.plan_item_id = pi.id
+							AND held.source_kind = 'subscription'
+							AND held.reversed_at IS NULL
+							AND (held.expires_at IS NULL OR held.expires_at > now())
+					)
 				)
 			ON CONFLICT (project_id, feature_id, source_kind, source_key) DO NOTHING
 			RETURNING id
