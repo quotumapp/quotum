@@ -77,6 +77,9 @@ describe("platform schema-neutral repositories", () => {
 		expect(executor.calls[4]?.text).toContain("WHERE id = $1");
 		expect(executor.calls[4]?.text).toContain("FOR UPDATE");
 		expect(executor.calls[4]?.values).toEqual(["organization-id"]);
+		await repository.lockSlug("globex");
+		expect(executor.calls[5]?.text).toContain("pg_advisory_xact_lock(hashtextextended($1, 0))");
+		expect(executor.calls[5]?.values).toEqual(["platform_organizations.slug:globex"]);
 	});
 
 	it("conditionally bumps onboarding draft revisions with bound values", async () => {
