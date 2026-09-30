@@ -281,20 +281,49 @@ export class ControlsEnterpriseRepository
 			);
 			if (row === null) throw new Error("Usage alert could not be persisted");
 			const bounds = controlWindowBounds(input.interval, cadence?.count ?? null, new Date());
+			// The alert counts its window from the start: usage already recorded in it counts, and a
+			// threshold that usage already reached is crossed now, once.
+			const used = await readAlertWindowUsage(tx, {
+				projectId,
+				customerId: customer.id,
+				entityId: entity?.id ?? null,
+				featureId: String(feature.id),
+				start: bounds.start,
+				end: bounds.end,
+			});
+			const crossed = decimalToUnits(used, 9) >= decimalToUnits(evaluatedThreshold, 9);
 			await executeOne(
 				tx,
 				drizzleSql`
 					INSERT INTO usage_alert_states (
-						project_id, alert_id, window_start_at, window_end_at, threshold_value
+						project_id, alert_id, window_start_at, window_end_at, current_value,
+						threshold_value, crossed, crossing_sequence
 					)
 					VALUES (
 						${projectId}, ${String(row.id)}::bigint, ${bounds.start.toISOString()},
-						${bounds.end?.toISOString() ?? null}, ${evaluatedThreshold}::numeric
+						${bounds.end?.toISOString() ?? null}, ${used}::numeric,
+						${evaluatedThreshold}::numeric, ${crossed}, ${crossed ? 1 : 0}
 					)
 					RETURNING alert_id
 				`,
 			);
-			return alertRecord(row, feature.key, entity?.external_id ?? null, "0", false);
+			if (crossed) {
+				await executeOne(
+					tx,
+					drizzleSql`
+						INSERT INTO usage_alert_events (
+							project_id, alert_id, customer_id, entity_id, feature_id, window_start_at,
+							crossing_sequence, current_value, threshold_value, event_type
+						) VALUES (
+							${projectId}, ${String(row.id)}::bigint, ${customer.id},
+							${entity?.id ?? null}::bigint, ${feature.id}::bigint, ${bounds.start.toISOString()},
+							1, ${used}::numeric, ${evaluatedThreshold}::numeric, 'threshold_crossed'
+						)
+						RETURNING id
+					`,
+				);
+			}
+			return alertRecord(row, feature.key, entity?.external_id ?? null, used, crossed);
 		});
 	}
 
@@ -318,8 +347,11 @@ export class ControlsEnterpriseRepository
 					alert.interval, alert.interval_count, alert.active, alert.created_at,
 					feature.key AS feature_key,
 					entity.external_id AS entity_external_id,
-					COALESCE(state.current_value, 0)::text AS current_value,
-					COALESCE(state.crossed, false) AS crossed
+					-- A window that has ended counts nothing until usage opens the next one.
+					CASE WHEN state.window_end_at <= now() THEN 0
+						ELSE COALESCE(state.current_value, 0) END::text AS current_value,
+					CASE WHEN state.window_end_at <= now() THEN false
+						ELSE COALESCE(state.crossed, false) END AS crossed
 				FROM usage_alerts alert
 				JOIN features feature ON feature.project_id = alert.project_id AND feature.id = alert.feature_id
 				LEFT JOIN entities entity ON entity.project_id = alert.project_id AND entity.id = alert.entity_id
@@ -333,7 +365,7 @@ export class ControlsEnterpriseRepository
 				row,
 				row.feature_key,
 				row.entity_external_id,
-				String(row.current_value),
+				databaseDecimal(row.current_value, "alert current value"),
 				row.crossed,
 			),
 		);
@@ -377,8 +409,8 @@ export class ControlsEnterpriseRepository
 			entityId: row.entity_external_id,
 			featureKey: row.feature_key,
 			eventType: row.event_type,
-			currentValue: String(row.current_value),
-			thresholdValue: String(row.threshold_value),
+			currentValue: databaseDecimal(row.current_value, "alert event current value"),
+			thresholdValue: databaseDecimal(row.threshold_value, "alert event threshold"),
 			windowStartAt: toIso(row.window_start_at),
 			createdAt: toIso(row.created_at),
 		}));
@@ -1129,6 +1161,41 @@ export class ControlsEnterpriseRepository
 }
 
 /**
+ * The usage an alert's window has recorded in its scope: consumption recorded in the window, less
+ * corrections of that consumption whenever they were recorded. An account's alert counts every
+ * entity's usage; an entity's alert counts that entity's.
+ */
+export async function readAlertWindowUsage(
+	executor: QueryExecutor,
+	input: {
+		projectId: string;
+		customerId: string;
+		entityId: string | null;
+		featureId: string;
+		start: Date;
+		end: Date | null;
+	},
+): Promise<string> {
+	const start = input.start.toISOString();
+	const end = input.end?.toISOString() ?? null;
+	const row = await executeOne<{ used: unknown }>(
+		executor,
+		drizzleSql`
+			SELECT GREATEST(COALESCE(sum(event.quantity), 0), 0)::text AS used
+			FROM usage_events event
+			WHERE event.project_id = ${input.projectId} AND event.customer_id = ${input.customerId}
+				AND event.meter_feature_id = ${input.featureId}::bigint
+				AND (${input.entityId}::bigint IS NULL OR event.entity_id = ${input.entityId}::bigint)
+				AND event.recorded_at >= ${start}::timestamptz
+				AND COALESCE(event.original_event_recorded_at, event.recorded_at) >= ${start}::timestamptz
+				AND (${end}::timestamptz IS NULL
+					OR COALESCE(event.original_event_recorded_at, event.recorded_at) < ${end}::timestamptz)
+		`,
+	);
+	return databaseDecimal(row?.used ?? "0", "alert window usage");
+}
+
+/**
  * What this window already counted for the customer under another control of the same kind,
  * feature, currency and entity scope. A replaced control, a republished plan's control or a
  * control that takes over from a competing one keeps counting the window instead of starting at
@@ -1559,7 +1626,7 @@ function alertRecord(
 		entityId,
 		featureKey,
 		thresholdType: row.threshold_type,
-		thresholdValue: String(row.threshold_value),
+		thresholdValue: databaseDecimal(String(row.threshold_value), "alert threshold"),
 		interval: row.interval,
 		intervalCount: row.interval === "lifetime" ? null : row.interval_count,
 		active: row.active,

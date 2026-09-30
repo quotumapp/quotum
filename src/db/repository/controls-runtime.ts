@@ -676,14 +676,22 @@ export async function recordUsageAlertDelta(
 		delta: string;
 		now?: Date;
 		alerts?: readonly UsageAlertRow[];
+		/**
+		 * A correction passes when the usage it corrects was recorded: the delta counts in that
+		 * usage's window, and only while the alert still counts that window.
+		 */
+		correctsRecordedAt?: Date | string;
 	},
 ): Promise<void> {
 	const deltaUnits = signedDecimalToUnits(input.delta, 9);
 	if (deltaUnits === 0n) return;
 	const now = input.now ?? new Date();
+	const correcting = input.correctsRecordedAt !== undefined;
+	const countedAt =
+		input.correctsRecordedAt === undefined ? now : new Date(input.correctsRecordedAt);
 	const alerts = input.alerts ?? (await queryUsageAlerts(executor, input));
 	for (const alert of alerts) {
-		const bounds = controlWindowBounds(alert.interval, alert.interval_count, now);
+		const bounds = controlWindowBounds(alert.interval, alert.interval_count, countedAt);
 		let threshold = canonicalDecimal(String(alert.threshold_value), "alert threshold", 9);
 		if (alert.threshold_type === "percentage") {
 			const controls = await resolveEffectiveControls(executor, {
@@ -710,17 +718,19 @@ export async function recordUsageAlertDelta(
 				9,
 			);
 		}
-		await executeRows(
-			executor,
-			drizzleSql`
-			INSERT INTO usage_alert_states (
-				project_id, alert_id, window_start_at, window_end_at, threshold_value
-			) VALUES (
-				${input.projectId}, ${String(alert.id)}::bigint, ${bounds.start.toISOString()},
-				${bounds.end?.toISOString() ?? null}, ${threshold}::numeric
-			) ON CONFLICT (project_id, alert_id) DO NOTHING
-		`,
-		);
+		if (!correcting) {
+			await executeRows(
+				executor,
+				drizzleSql`
+				INSERT INTO usage_alert_states (
+					project_id, alert_id, window_start_at, window_end_at, threshold_value
+				) VALUES (
+					${input.projectId}, ${String(alert.id)}::bigint, ${bounds.start.toISOString()},
+					${bounds.end?.toISOString() ?? null}, ${threshold}::numeric
+				) ON CONFLICT (project_id, alert_id) DO NOTHING
+			`,
+			);
+		}
 		const state = await executeOne<{
 			window_start_at: Date | string;
 			current_value: unknown;
@@ -739,6 +749,8 @@ export async function recordUsageAlertDelta(
 		);
 		if (state === null) continue;
 		const sameWindow = new Date(state.window_start_at).getTime() === bounds.start.getTime();
+		// The alert keeps no count for a window it has left, so a correction of its usage changes nothing.
+		if (correcting && !sameWindow) continue;
 		const currentUnits = sameWindow ? signedDecimalToUnits(String(state.current_value), 9) : 0n;
 		const nextUnits = currentUnits + deltaUnits > 0n ? currentUnits + deltaUnits : 0n;
 		const thresholdUnits = decimalToUnits(threshold, 9);

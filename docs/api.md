@@ -159,6 +159,13 @@ and `windowEndAt` (both `null` for `lifetime`). A percentage alert follows the u
 in its own window, and a hold stays in the window it was taken in: confirming after the window rolls
 charges the earlier window.
 
+A usage alert counts its window from the window's start: a new alert starts from the usage already
+recorded in the current window, and if that usage has already reached the threshold, the alert records
+its `threshold_crossed` event when it is created. A correction counts in the window of the usage it
+corrects. After that window has ended, the correction does not change the alert's current count.
+Once a window has ended, `GET /usage-alerts` reports `currentValue` 0 and `crossed` false until
+usage opens the next window.
+
 Spend-control activation and window boundaries use the database clock by default, so API clock
 skew cannot bypass a newly active policy. Spend controls rate committed usage independently of pending reservations: held quantities never
 unlock volume discounts on consumed usage. A monetary reservation hold is a fixed budget quote,
