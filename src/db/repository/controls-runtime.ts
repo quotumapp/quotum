@@ -806,6 +806,8 @@ function automaticTopupProviders(
 
 export interface AutoTopupPolicyRow {
 	id: string | number | bigint;
+	/** Null for the account's policy, which covers the shared pool. */
+	entity_id: string | number | bigint | null;
 	provider: BillingProvider;
 	provider_account_id: string | null;
 	threshold_quantity: unknown;
@@ -818,15 +820,19 @@ export interface AutoTopupPolicyRow {
 	store_product_id: string;
 }
 
-/** The active automatic top-up policy for one wallet feature, if any; safe to prefetch. */
-export function queryAutoTopupPolicy(
+/**
+ * The active automatic top-up policies a usage write on one wallet feature can trigger: the
+ * account's and, for usage tagged with an entity, that entity's. Safe to prefetch; in id order,
+ * the order their states are locked.
+ */
+export function queryAutoTopupPolicies(
 	executor: QueryExecutor,
 	input: { projectId: string; customerId: string; entityId: string | null; featureId: string },
-): Promise<AutoTopupPolicyRow | null> {
-	return executeOne<AutoTopupPolicyRow>(
+): Promise<AutoTopupPolicyRow[]> {
+	return executeRows<AutoTopupPolicyRow>(
 		executor,
 		drizzleSql`
-		SELECT policy.id, policy.provider,
+		SELECT policy.id, policy.entity_id, policy.provider,
 			(
 				SELECT provider_customer.provider_account_id
 				FROM provider_customers provider_customer
@@ -847,10 +853,30 @@ export function queryAutoTopupPolicy(
 		JOIN store_products store ON store.project_id = binding.project_id AND store.id = binding.store_product_id
 		WHERE policy.project_id = ${input.projectId} AND policy.customer_id = ${input.customerId}
 			AND policy.feature_id = ${input.featureId}::bigint AND policy.active = true
-			AND policy.entity_id IS NOT DISTINCT FROM ${input.entityId}::bigint
-		LIMIT 1
+			AND (policy.entity_id IS NULL OR policy.entity_id = ${input.entityId}::bigint)
+		ORDER BY policy.id
 	`,
 	);
+}
+
+/** Schedules a top-up for each triggered policy, one at a time so their states lock in order. */
+export async function scheduleAutoTopups(
+	executor: QueryExecutor,
+	input: {
+		projectId: string;
+		customerId: string;
+		triggerKey: string;
+		triggers: ReadonlyArray<{ policy: AutoTopupPolicyRow; availableQuantity: string }>;
+	},
+): Promise<void> {
+	for (const trigger of input.triggers) {
+		await scheduleAutoTopupIfNeeded(executor, {
+			projectId: input.projectId,
+			customerId: input.customerId,
+			triggerKey: input.triggerKey,
+			...trigger,
+		});
+	}
 }
 
 export async function scheduleAutoTopupIfNeeded(
@@ -858,18 +884,15 @@ export async function scheduleAutoTopupIfNeeded(
 	input: {
 		projectId: string;
 		customerId: string;
-		entityId: string | null;
-		featureId: string;
+		/** What the policy's scope can still spend after the write. */
 		availableQuantity: string;
 		triggerKey: string;
-		policy?: AutoTopupPolicyRow | null;
+		policy: AutoTopupPolicyRow;
 		/** Overrides the declarations the chargeable providers are derived from; for tests. */
 		capabilities?: ProviderCapabilityLookup;
 	},
 ): Promise<void> {
-	const policy =
-		input.policy === undefined ? await queryAutoTopupPolicy(executor, input) : input.policy;
-	if (policy === null) return;
+	const policy = input.policy;
 	if (
 		decimalToUnits(input.availableQuantity, 9) >
 		decimalToUnits(String(policy.threshold_quantity), 9)

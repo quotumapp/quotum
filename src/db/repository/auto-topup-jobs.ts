@@ -46,6 +46,8 @@ interface ClaimedJobRow {
 
 interface LockedJobRow extends ClaimedJobRow {
 	product_id: string;
+	/** The entity an entity-scoped policy credits; null for the account's shared pool. */
+	policy_entity_id: string | number | bigint | null;
 	trigger_key: string;
 	status: "pending" | "processing" | "succeeded" | "failed" | "provider_action_required";
 	locked_by: string | null;
@@ -164,6 +166,7 @@ export class AutoTopupJobRepository extends RepositoryModule {
 				storeProductId: job.store_product_id,
 				purchaseId,
 				purchasedAt,
+				entityId: job.policy_entity_id === null ? null : String(job.policy_entity_id),
 			});
 			await recordAutoTopupInvoice(tx, {
 				projectId,
@@ -425,6 +428,7 @@ async function lockJobForCompletion(
 			job.charged_amount_minor, job.currency, job.attempts, job.trigger_key, job.status,
 			job.locked_by, job.external_invoice_id, job.external_payment_id,
 			job.budget_reserved_at, job.budget_interval_started_at, policy.active AS policy_active,
+			policy.entity_id AS policy_entity_id,
 			policy.limit_interval_seconds, policy.max_purchases_per_interval, policy.max_spend_minor,
 			policy.max_consecutive_failures, state.status AS state_status,
 			state.interval_started_at, state.purchases_in_interval, state.spend_minor_in_interval,

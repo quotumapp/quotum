@@ -23,6 +23,7 @@ import type {
 } from "../../billing/controls";
 import {
 	canonicalDecimal,
+	databaseDecimal,
 	decimalToUnits,
 	sha256Hex,
 	stableJson,
@@ -1622,7 +1623,7 @@ async function requireAutoTopupPolicy(
 		featureKey: row.feature_key,
 		topupKey: row.topup_key,
 		provider: row.provider,
-		thresholdQuantity: String(row.threshold_quantity),
+		thresholdQuantity: databaseDecimal(row.threshold_quantity, "auto top-up threshold"),
 		status: row.state_status,
 		cooldownUntil: row.cooldown_until === null ? null : toIso(row.cooldown_until),
 		consecutiveFailures: row.consecutive_failures,

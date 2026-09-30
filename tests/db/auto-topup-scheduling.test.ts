@@ -2,7 +2,13 @@ import { describe, expect, it } from "bun:test";
 import {
 	type AutoTopupPolicyRow,
 	scheduleAutoTopupIfNeeded,
+	scheduleAutoTopups,
 } from "../../src/db/repository/controls-runtime";
+import {
+	type AllocationRow,
+	autoTopupTriggers,
+	type FeatureRow,
+} from "../../src/db/repository/metering-persistence";
 import { FakeDatabase } from "./repository-fixture";
 
 /**
@@ -16,6 +22,7 @@ const isoTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 function policyRow(overrides: Partial<AutoTopupPolicyRow> = {}): AutoTopupPolicyRow {
 	return {
 		id: "11",
+		entity_id: null,
 		provider: "stripe",
 		// PR1 added this column; scheduling copies it into the job row.
 		provider_account_id: "cus_fixture",
@@ -51,8 +58,6 @@ async function schedule(
 	await scheduleAutoTopupIfNeeded(database as never, {
 		projectId: "project-1",
 		customerId: "customer-1",
-		entityId: null,
-		featureId: "5",
 		availableQuantity: "1",
 		triggerKey: "wallet:low",
 		policy,
@@ -135,5 +140,119 @@ describe("automatic top-up scheduling", () => {
 		expect(queries[0]).toContain("FROM auto_topup_states");
 		expect(insertParams).toEqual([]);
 		expect(queries.some((query) => query.includes("auto_topup_jobs"))).toBe(false);
+	});
+});
+
+describe("which automatic top-up policies a usage write triggers", () => {
+	const wallet: FeatureRow = {
+		id: "5",
+		key: "ai_credits",
+		unit: "credit",
+		credit_scale: 0,
+		kind: "metered",
+		meter_kind: "consumable",
+		filter_dimensions: [],
+	};
+	const account = policyRow({ id: "11", entity_id: null });
+	const entity = policyRow({ id: "12", entity_id: "7" });
+
+	function allocation(id: string, entity: string | null, quantity: string, consumed: string) {
+		return {
+			id,
+			quantity,
+			reversed_quantity: "0",
+			consumed_quantity: consumed,
+			held_quantity: "0",
+			source_kind: "credit_grant",
+			source_key: `fixture:${id}`,
+			expires_at: null,
+			created_at: new Date("2026-09-01T00:00:00.000Z"),
+			reversed_at: null,
+			entity_external_id: entity,
+			rollover_origin_allocation_id: null,
+			carry_over_origin_allocation_id: null,
+			rollover_policy_revision: null,
+			period_start_at: null,
+			period_end_at: null,
+		} satisfies AllocationRow;
+	}
+	function deduction(allocationId: string) {
+		return {
+			allocationId,
+			quantity: "1",
+			sourceKind: "credit_grant",
+			sourceKey: `fixture:${allocationId}`,
+			expiresAt: null,
+		};
+	}
+	// The pool has 3 left and the entity's own allocation 4.
+	const rows = [allocation("1", null, "10", "7"), allocation("2", "team-a", "10", "6")];
+
+	it("compares the account's policy with the pool for account usage", () => {
+		const triggers = autoTopupTriggers({
+			policies: [account],
+			entityId: null,
+			wallet,
+			rows: [rows[0] as AllocationRow],
+			deductions: [deduction("1")],
+		});
+		expect(triggers).toEqual([{ policy: account, availableQuantity: "3" }]);
+	});
+
+	it("compares the entity's policy with all it can spend and the account's with the pool", () => {
+		const triggers = autoTopupTriggers({
+			policies: [account, entity],
+			entityId: "7",
+			wallet,
+			rows,
+			deductions: [deduction("2"), deduction("1")],
+		});
+		expect(triggers).toEqual([
+			{ policy: account, availableQuantity: "3" },
+			{ policy: entity, availableQuantity: "7" },
+		]);
+	});
+
+	it("leaves the account's policy out when entity usage never reached the pool", () => {
+		const triggers = autoTopupTriggers({
+			policies: [account, entity],
+			entityId: "7",
+			wallet,
+			rows,
+			deductions: [deduction("2")],
+		});
+		expect(triggers).toEqual([{ policy: entity, availableQuantity: "7" }]);
+	});
+
+	it("schedules each triggered policy in turn", async () => {
+		const database = new FakeDatabase(
+			[
+				readyState(),
+				[{ pending: false }],
+				[{ id: "77" }],
+				[{ policy_id: "11" }],
+				readyState(),
+				[{ pending: false }],
+				[{ id: "78" }],
+				[{ policy_id: "12" }],
+			],
+			{ strict: true },
+		);
+		await scheduleAutoTopups(database as never, {
+			projectId: "project-1",
+			customerId: "customer-1",
+			triggerKey: "usage:1",
+			triggers: [
+				{ policy: account, availableQuantity: "1" },
+				{ policy: entity, availableQuantity: "1" },
+			],
+		});
+		const inserts = database.queries.flatMap((query, index) =>
+			query.includes("INSERT INTO auto_topup_jobs") ? [database.params[index] ?? []] : [],
+		);
+		expect(inserts).toHaveLength(2);
+		expect(inserts[0]).toContain("11");
+		expect(inserts[1]).toContain("12");
+		database.assertConsumed();
 	});
 });

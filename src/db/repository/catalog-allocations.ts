@@ -655,6 +655,8 @@ export async function materializeTopupAllocation(
 		purchaseId: string;
 		purchasedAt: Date;
 		quantityMultiplier?: number;
+		/** The entity an entity-scoped automatic top-up credits; otherwise the shared pool. */
+		entityId?: string | null;
 	},
 ): Promise<boolean> {
 	const multiplier = input.quantityMultiplier ?? 1;
@@ -667,6 +669,7 @@ export async function materializeTopupAllocation(
 			INSERT INTO balance_allocations (
 				project_id,
 				customer_id,
+				entity_id,
 				feature_id,
 				purchase_id,
 				source_kind,
@@ -677,6 +680,7 @@ export async function materializeTopupAllocation(
 			SELECT
 				${input.projectId},
 				${input.customerId},
+				${input.entityId ?? null}::bigint,
 				options.feature_id,
 				${input.purchaseId},
 				'topup',
