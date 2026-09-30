@@ -1,4 +1,4 @@
-import { sql as drizzleSql } from "drizzle-orm";
+import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import { controlCadence } from "../../billing/cadence";
 import type {
 	AutoTopupPolicyInput,
@@ -1128,6 +1128,39 @@ export class ControlsEnterpriseRepository
 }
 
 /**
+ * What this window already counted for the customer under another control of the same kind,
+ * feature, currency and entity scope. A replaced control, a republished plan's control or a
+ * control that takes over from a competing one keeps counting the window instead of starting at
+ * zero; only the winning control counts at a time, so the highest window is the usage.
+ */
+export function carriedControlConsumptionSql(input: {
+	projectId: string;
+	policyId: string;
+	customerId: string | null;
+	windowStartAt: string;
+	windowEndAt: string | null;
+}): DrizzleSQL {
+	return drizzleSql`COALESCE((
+		SELECT max(sibling.consumed_value)
+		FROM control_windows sibling
+		JOIN control_policies sibling_policy
+			ON sibling_policy.project_id = sibling.project_id
+			AND sibling_policy.id = sibling.control_policy_id
+		JOIN control_policies policy
+			ON policy.project_id = sibling.project_id AND policy.id = ${input.policyId}::bigint
+		WHERE sibling.project_id = ${input.projectId}
+			AND sibling.customer_id = ${input.customerId}
+			AND sibling.control_policy_id <> ${input.policyId}::bigint
+			AND sibling.window_start_at = ${input.windowStartAt}::timestamptz
+			AND sibling.window_end_at IS NOT DISTINCT FROM ${input.windowEndAt}::timestamptz
+			AND sibling_policy.control_kind = policy.control_kind
+			AND sibling_policy.feature_id IS NOT DISTINCT FROM policy.feature_id
+			AND sibling_policy.currency IS NOT DISTINCT FROM policy.currency
+			AND sibling_policy.entity_id IS NOT DISTINCT FROM policy.entity_id
+	), 0)`;
+}
+
+/**
  * Match policy activation and window bounds to their authoritative database clock. A JavaScript
  * date holds milliseconds, so the transaction clock is rounded up to the next one: a row this
  * transaction stamped with now(), such as the plan grant an account's first write starts, is then
@@ -1244,10 +1277,17 @@ export async function resolveEffectiveControls(
 			return executeOne<{ consumed_value: unknown; held_value: unknown }>(
 				executor,
 				drizzleSql`
-			SELECT consumed_value::text AS consumed_value, held_value::text AS held_value
-			FROM control_windows WHERE project_id = ${input.projectId}
-				AND control_policy_id = ${String(row.id)}::bigint AND customer_id = ${input.customerId}
-				AND window_start_at = ${bounds.start.toISOString()} LIMIT 1
+			SELECT GREATEST(COALESCE(own.consumed_value, 0), ${carriedControlConsumptionSql({
+				projectId: input.projectId,
+				policyId: String(row.id),
+				customerId: input.customerId,
+				windowStartAt: bounds.start.toISOString(),
+				windowEndAt: bounds.end?.toISOString() ?? null,
+			})})::text AS consumed_value, COALESCE(own.held_value, 0)::text AS held_value
+			FROM (SELECT 1) AS single
+			LEFT JOIN control_windows own ON own.project_id = ${input.projectId}
+				AND own.control_policy_id = ${String(row.id)}::bigint AND own.customer_id = ${input.customerId}
+				AND own.window_start_at = ${bounds.start.toISOString()}
 		`,
 			);
 		}),

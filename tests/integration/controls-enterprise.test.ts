@@ -197,6 +197,52 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		});
 	});
 
+	it("keeps a window's usage when its control is replaced", async () => {
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "replace-account",
+			featureKey: "ai_credits",
+			quantity: "1000",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:replace-account",
+		});
+		const controls = context.repository.controlsEnterprise;
+		const limit = (limitValue: string) =>
+			controls.upsertControl(project, {
+				billingAccountId: "replace-account",
+				controlKind: "usage_limit",
+				featureKey: "ai_credits",
+				limitValue,
+				interval: "day",
+				actor: "integration-test",
+			});
+		await limit("100");
+		expect(await consume("replace-account", "90", "replace:1")).toMatchObject({ allowed: true });
+
+		// Raising the limit keeps the 90 already counted in today's window.
+		expect(await limit("120")).toMatchObject({ limitValue: "120", consumedValue: "90" });
+		expect(await controls.listEffectiveControls(project, "replace-account")).toMatchObject([
+			{ limitValue: "120", consumedValue: "90", remainingValue: "30" },
+		]);
+		const check = await context.repository.checkUsage(project, {
+			billingAccountId: "replace-account",
+			featureKey: "ai_credits",
+			quantity: "40",
+		});
+		expect(check).toMatchObject({ allowed: false, reason: "control_limit_exceeded" });
+		expect(await consume("replace-account", "40", "replace:2")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+		expect(await consume("replace-account", "30", "replace:3")).toMatchObject({ allowed: true });
+
+		// Replacing it with the same limit starts nothing over either.
+		expect(await limit("120")).toMatchObject({ consumedValue: "120" });
+		expect(await consume("replace-account", "1", "replace:4")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+	});
+
 	it("reserves the safety budget before Stripe and grants the purchased allocation atomically", async () => {
 		await prepareAutoTopupAccount("topup-account");
 		await context.repository.grantAllocation(project, {

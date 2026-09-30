@@ -10,6 +10,7 @@ import {
 import type { BillingProvider } from "../../billing/types";
 import { type ProviderCapabilityLookup, providersImplementing } from "../../providers/capabilities";
 import {
+	carriedControlConsumptionSql,
 	controlWindowBounds,
 	readControlClock,
 	resolveEffectiveControls,
@@ -151,28 +152,49 @@ async function evaluateControls(
 			held_value: unknown;
 		} | null;
 		if (mode === "check") {
+			// A check reads what the window counted, carried over from a replaced control if this one
+			// has no window yet, as a write would record it.
 			window = await executeOne(
 				executor,
 				drizzleSql`
-				SELECT id, consumed_value::text AS consumed_value,
-                    COALESCE((SELECT sum(hold.held_value) FROM reservation_control_holds hold JOIN reservations r ON r.project_id=hold.project_id AND r.id=hold.reservation_id WHERE hold.project_id=control_windows.project_id AND hold.control_window_id=control_windows.id AND r.status='active' AND r.expires_at>clock_timestamp()),0)::text AS held_value
-				FROM control_windows
-				WHERE project_id = ${input.projectId}
-					AND control_policy_id = ${control.policyId}::bigint
-					AND customer_id = ${input.customerId}
-					AND window_start_at = ${bounds.start.toISOString()}
+				SELECT own.id,
+					GREATEST(COALESCE(own.consumed_value, 0), ${carriedControlConsumptionSql({
+						projectId: input.projectId,
+						policyId: control.policyId,
+						customerId: input.customerId,
+						windowStartAt: bounds.start.toISOString(),
+						windowEndAt: bounds.end?.toISOString() ?? null,
+					})})::text AS consumed_value,
+                    COALESCE((SELECT sum(hold.held_value) FROM reservation_control_holds hold JOIN reservations r ON r.project_id=hold.project_id AND r.id=hold.reservation_id WHERE hold.project_id=own.project_id AND hold.control_window_id=own.id AND r.status='active' AND r.expires_at>clock_timestamp()),0)::text AS held_value
+				FROM (SELECT 1) AS single
+				LEFT JOIN control_windows own ON own.project_id = ${input.projectId}
+					AND own.control_policy_id = ${control.policyId}::bigint
+					AND own.customer_id = ${input.customerId}
+					AND own.window_start_at = ${bounds.start.toISOString()}
 			`,
 			);
 		} else {
+			// A new window starts from what a replaced control counted in it; a window that fell
+			// behind a control which counted in its place catches up.
 			await executeRows(
 				executor,
 				drizzleSql`
 				INSERT INTO control_windows (
-					project_id, control_policy_id, customer_id, entity_id, window_start_at, window_end_at
+					project_id, control_policy_id, customer_id, entity_id, window_start_at, window_end_at,
+					consumed_value
 				) VALUES (
 					${input.projectId}, ${control.policyId}::bigint, ${input.customerId},
-					${input.entityId}::bigint, ${bounds.start.toISOString()}, ${bounds.end?.toISOString() ?? null}
-				) ON CONFLICT (project_id, control_policy_id, customer_id, window_start_at) DO NOTHING
+					${input.entityId}::bigint, ${bounds.start.toISOString()}, ${bounds.end?.toISOString() ?? null},
+					${carriedControlConsumptionSql({
+						projectId: input.projectId,
+						policyId: control.policyId,
+						customerId: input.customerId,
+						windowStartAt: bounds.start.toISOString(),
+						windowEndAt: bounds.end?.toISOString() ?? null,
+					})}
+				) ON CONFLICT (project_id, control_policy_id, customer_id, window_start_at) DO UPDATE
+				SET consumed_value = GREATEST(control_windows.consumed_value, EXCLUDED.consumed_value)
+				WHERE EXCLUDED.consumed_value > control_windows.consumed_value
 			`,
 			);
 			window = await executeOne(
@@ -324,11 +346,21 @@ export async function confirmControlHolds(
 			executor,
 			drizzleSql`
 			INSERT INTO control_windows (
-				project_id, control_policy_id, customer_id, entity_id, window_start_at, window_end_at
+				project_id, control_policy_id, customer_id, entity_id, window_start_at, window_end_at,
+				consumed_value
 			) VALUES (
 				${input.projectId}, ${control.policyId}::bigint, ${input.customerId},
-				${input.entityId}::bigint, ${bounds.start.toISOString()}, ${bounds.end?.toISOString() ?? null}
-			) ON CONFLICT (project_id, control_policy_id, customer_id, window_start_at) DO NOTHING
+				${input.entityId}::bigint, ${bounds.start.toISOString()}, ${bounds.end?.toISOString() ?? null},
+				${carriedControlConsumptionSql({
+					projectId: input.projectId,
+					policyId: control.policyId,
+					customerId: input.customerId,
+					windowStartAt: bounds.start.toISOString(),
+					windowEndAt: bounds.end?.toISOString() ?? null,
+				})}
+			) ON CONFLICT (project_id, control_policy_id, customer_id, window_start_at) DO UPDATE
+			SET consumed_value = GREATEST(control_windows.consumed_value, EXCLUDED.consumed_value)
+			WHERE EXCLUDED.consumed_value > control_windows.consumed_value
 		`,
 		);
 		const window = await executeOne<{
