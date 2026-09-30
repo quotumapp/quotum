@@ -200,7 +200,9 @@ An immediate `subscription_change` intent can carry some of that over, per consu
   usage beyond it is forgiven, not charged.
 - The preview reports `carryOver.features[]`, with each feature's current unused balance and usage
   and whether it carries. Those figures are indicative: the switch carries what the allowances hold
-  when Quotum records the provider's update.
+  when Quotum records the provider's update. When the provider reports the new version before the
+  worker has recorded the change as applied, that update performs the switch and the carry-over,
+  once; recording the change later carries nothing again.
 - The choice enters the intent hash. Naming a feature the current plan does not allocate returns
   `400 INVALID_REQUEST`, and a change that takes effect at period end, whether requested or
   resolved, returns `400 CARRY_OVER_REQUIRES_IMMEDIATE_CHANGE`, because the reset does that work.
