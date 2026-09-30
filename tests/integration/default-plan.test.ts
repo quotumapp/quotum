@@ -713,6 +713,41 @@ localDescribe("default plan", () => {
 		});
 	});
 
+	it("keeps counting the default plan's usage limit when the plan is republished", async () => {
+		const limited = (version: number) => ({
+			...freePlan(version, "100"),
+			controls: [
+				{
+					controlKind: "usage_limit" as const,
+					featureKey: "model_tokens",
+					currency: null,
+					limitValue: "300",
+					interval: "day" as const,
+				},
+			],
+		});
+		await publish(catalog(limited(1)));
+		// Start the account on the default plan before counting its usage.
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "steady",
+			featureKey: "ai_credits",
+			quantity: "1",
+			sourceKind: "credit_grant",
+			sourceKey: "steady-start",
+		});
+		expect(await consume("steady", 1, "steady-first")).toMatchObject({ allowed: true });
+		expect(await consume("steady", 1, "steady-second")).toMatchObject({ allowed: false });
+
+		// A republish moves the grant to a version whose control is a new policy.
+		await publish(catalog(limited(2)));
+		await runWorker(25);
+		expect(await grants("steady")).toMatchObject([{ status: "active", plan_version: 2 }]);
+		expect(await consume("steady", 1, "steady-after-republish")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+	});
+
 	it("gives two concurrent first requests one default grant", async () => {
 		await publish(catalog(freePlan(1, "100")));
 

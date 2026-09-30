@@ -136,7 +136,10 @@ each account that uses it. Windows follow the calendar, not the subscription, an
 years. Controls counted in the same window compete however their cadence is spelled: a contract
 `month` × 3 replaces a plan `quarter`. An account or entity holds one limit per kind, feature and
 currency, so a new one replaces the previous one whatever its window; stacked windows, such as a
-daily and a monthly limit, belong on the plan. `GET /controls` reports each limit's `windowStartAt`
+daily and a monthly limit, belong on the plan. A replacing limit keeps counting the window the one
+it replaced counted: a new account limit, a republished plan's limit and a contract limit that takes
+over from a plan default all start from the usage already recorded in the current window, never
+from zero. `GET /controls` reports each limit's `windowStartAt`
 and `windowEndAt` (both `null` for `lifetime`). A percentage alert follows the usage limit counted
 in its own window, and a hold stays in the window it was taken in: confirming after the window rolls
 charges the earlier window.
