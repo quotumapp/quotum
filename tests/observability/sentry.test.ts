@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { NodeClient, Scope, startInactiveSpan, withScope } from "@sentry/bun";
 import { Elysia } from "elysia";
 import { BillingError } from "../../src/billing/errors";
 import type { SentryEnv } from "../../src/env";
@@ -8,6 +9,7 @@ import {
 	createSentryRequestScope,
 	initializeSentry,
 	type SentryClientLike,
+	type SentryInitOptions,
 } from "../../src/observability/sentry";
 import { testRequest } from "../helpers/openapi";
 
@@ -20,6 +22,52 @@ const sentryEnv: SentryEnv = {
 	logLevel: "warn",
 	captureExpectedErrors: false,
 };
+
+function sdkOptions(): SentryInitOptions {
+	let options: SentryInitOptions | undefined;
+	initializeSentry({ init: (value) => (options = value) }, sentryEnv);
+	if (!options) throw new Error("Sentry was not initialized");
+	return options;
+}
+
+async function sendTransactionThroughSdk(
+	options: Omit<SentryInitOptions, "beforeSendTransaction"> & {
+		beforeSendTransaction?: SentryInitOptions["beforeSendTransaction"];
+	},
+): Promise<string> {
+	const envelopes: string[] = [];
+	const client = new NodeClient({
+		...options,
+		dsn: "https://public@sentry.example/123",
+		tracesSampleRate: 1,
+		integrations: [],
+		stackParser: () => [],
+		transport: () => ({
+			send: async (envelope) => {
+				envelopes.push(JSON.stringify(envelope));
+				return { statusCode: 200 };
+			},
+			flush: async () => true,
+		}),
+	});
+	const scope = new Scope();
+	scope.setClient(client);
+	try {
+		withScope(scope, () => {
+			const span = startInactiveSpan({
+				name: "GET /v1/billing-accounts/private-customer",
+				forceTransaction: true,
+				attributes: { "user.email": "secret@example.com" },
+			});
+			span.end();
+		});
+		await client.flush(2000);
+		expect(envelopes).toHaveLength(1);
+		return envelopes[0] ?? "";
+	} finally {
+		await client.close(2000);
+	}
+}
 
 describe("initializeSentry", () => {
 	it("passes billing Sentry config to the SDK", () => {
@@ -37,8 +85,9 @@ describe("initializeSentry", () => {
 			dsn: string;
 			environment: string;
 			release?: string;
-			enableLogs: boolean;
+			traceLifecycle: string;
 			tracesSampleRate: number;
+			tracePropagationTargets: unknown[];
 			dataCollection: Record<string, unknown>;
 			maxValueLength: number;
 			normalizeDepth: number;
@@ -56,8 +105,10 @@ describe("initializeSentry", () => {
 		expect(options.dsn).toBe("https://sentry.example/123");
 		expect(options.environment).toBe("test");
 		expect(options.release).toBe("quotum-api@1.2.3");
-		expect(options.enableLogs).toBe(true);
+		expect(options.traceLifecycle).toBe("static");
+		expect("enableLogs" in options).toBe(false);
 		expect(options.tracesSampleRate).toBe(0.01);
+		expect(options.tracePropagationTargets).toEqual([]);
 		expect(options.dataCollection).toEqual({
 			userInfo: false,
 			cookies: false,
@@ -67,7 +118,9 @@ describe("initializeSentry", () => {
 			graphQL: { document: false, variables: false },
 			genAI: { inputs: false, outputs: false },
 			databaseQueryData: false,
+			queues: false,
 			stackFrameVariables: false,
+			frameContextLines: 5,
 		});
 		expect(options.maxValueLength).toBe(1024);
 		expect(options.normalizeDepth).toBe(5);
@@ -86,6 +139,36 @@ describe("initializeSentry", () => {
 		expect(options.beforeSendLog(noisyInfo)).toBeNull();
 		expect(options.beforeSendLog(workerSummary)).toEqual(workerSummary);
 		expect(options.beforeSendLog(warning)).toEqual(warning);
+	});
+
+	it("sends no Sentry logs when SENTRY_ENABLE_LOGS is false", () => {
+		let options: SentryInitOptions | undefined;
+		initializeSentry({ init: (value) => (options = value) }, { ...sentryEnv, enableLogs: false });
+		if (!options) throw new Error("Sentry was not initialized");
+
+		for (const level of ["info", "warn", "error"] as const) {
+			const log = { level, message: "Provider retry delayed", attributes: {} };
+			expect(options.beforeSendLog(log)).toBeNull();
+		}
+	});
+
+	it("scrubs transactions through the real SDK static lifecycle", async () => {
+		const envelope = await sendTransactionThroughSdk(sdkOptions());
+		expect(envelope).toContain("GET /v1/billing-accounts/:id");
+		expect(envelope).not.toContain("private-customer");
+		expect(envelope).not.toContain("secret@example.com");
+	});
+
+	it("runs the span scrubber under the static lifecycle on its own", async () => {
+		// Without the transaction scrubber, only beforeSendSpan can remove these values; the SDK
+		// ignores a span scrubber that is not marked for the static lifecycle.
+		const envelope = await sendTransactionThroughSdk({
+			...sdkOptions(),
+			beforeSendTransaction: undefined,
+		});
+		expect(envelope).toContain("GET /v1/billing-accounts/:id");
+		expect(envelope).not.toContain("private-customer");
+		expect(envelope).not.toContain("secret@example.com");
 	});
 
 	it("omits release when unset", () => {

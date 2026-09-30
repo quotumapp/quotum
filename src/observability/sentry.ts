@@ -1,3 +1,5 @@
+// From the SDK entrypoint, so the marker comes from the same @sentry/core copy as the client.
+import { withStaticSpan } from "@sentry/bun";
 import type {
 	Breadcrumb,
 	BreadcrumbHint,
@@ -6,7 +8,6 @@ import type {
 	EventHint,
 	Integration,
 	Log,
-	SpanJSON,
 	TransactionEvent,
 } from "@sentry/core";
 import type { Elysia } from "elysia";
@@ -40,22 +41,25 @@ const SENTRY_DATA_COLLECTION: DataCollection = {
 	graphQL: { document: false, variables: false },
 	genAI: { inputs: false, outputs: false },
 	databaseQueryData: false,
+	queues: false,
 	stackFrameVariables: false,
+	frameContextLines: 5,
 };
 
 export interface SentryInitOptions {
 	dsn: string;
 	environment: string;
 	release?: string;
-	enableLogs: boolean;
+	traceLifecycle: "static";
 	tracesSampleRate: number;
+	tracePropagationTargets: string[];
 	dataCollection: DataCollection;
 	maxValueLength: number;
 	normalizeDepth: number;
 	integrations(defaults: Integration[]): Integration[];
 	beforeSend(event: ErrorEvent, hint: EventHint): ErrorEvent | null;
 	beforeSendTransaction(event: TransactionEvent, hint: EventHint): TransactionEvent | null;
-	beforeSendSpan(span: SpanJSON): SpanJSON;
+	beforeSendSpan: ReturnType<typeof withStaticSpan>;
 	beforeBreadcrumb(breadcrumb: Breadcrumb, hint?: BreadcrumbHint): Breadcrumb | null;
 	beforeSendLog(log: Log): Log | null;
 }
@@ -111,8 +115,11 @@ export function initializeSentry(sentry: SentryClientLike, config: SentryEnv): v
 		dsn: config.dsn,
 		environment: config.environment,
 		...(config.release === null ? {} : { release: config.release }),
-		enableLogs: config.enableLogs,
+		traceLifecycle: "static",
 		tracesSampleRate: config.tracesSampleRate,
+		// Outbound requests reach third parties and client-supplied URLs, so no request carries
+		// sentry-trace or baggage headers.
+		tracePropagationTargets: [],
 		dataCollection: SENTRY_DATA_COLLECTION,
 		maxValueLength: 1024,
 		normalizeDepth: 5,
@@ -121,13 +128,13 @@ export function initializeSentry(sentry: SentryClientLike, config: SentryEnv): v
 		beforeSendTransaction: dropOnThrow(scrubEvent),
 		// The SDK cannot drop a span here. beforeSendTransaction scrubs every span again and drops
 		// the transaction if that throws, and a throw from this fallback drops it as well.
-		beforeSendSpan: (span) => {
+		beforeSendSpan: withStaticSpan((span) => {
 			try {
 				return scrubSpan(span);
 			} catch {
 				return { ...span, description: FILTERED, data: {} };
 			}
-		},
+		}),
 		beforeBreadcrumb: dropOnThrow(scrubBreadcrumb),
 		beforeSendLog: dropOnThrow((log) => (shouldSendSentryLog(log, config) ? scrubLog(log) : null)),
 	});
