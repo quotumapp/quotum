@@ -863,6 +863,26 @@ function optionalNonnegativeInteger(value: unknown): number | null {
 	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+/**
+ * How far a live read's order sits before the moment the read began. Stripe stamps events with its
+ * own clock in whole seconds; the margin keeps an event Stripe created after the read from looking
+ * older than it when this host's clock runs ahead of Stripe's.
+ */
+export const STRIPE_LIVE_READ_ORDER_MARGIN_SECONDS = 60;
+
+/**
+ * The event order a live read of a Stripe subscription records. The object Stripe returns already
+ * reflects every change made before the read began, so an event created before then is older than
+ * the read and stale when it arrives late. Events from the last `STRIPE_LIVE_READ_ORDER_MARGIN_SECONDS`
+ * before the read still apply, as they did before the read.
+ */
+export function stripeLiveReadOrder(readStartedAt: Date): number {
+	return Math.max(
+		0,
+		Math.floor(readStartedAt.getTime() / 1000) - STRIPE_LIVE_READ_ORDER_MARGIN_SECONDS,
+	);
+}
+
 function safeStripeEventCreated(value: unknown): number {
 	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }

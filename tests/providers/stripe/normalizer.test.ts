@@ -8,6 +8,8 @@ import {
 	normalizeStripeInvoice,
 	normalizeStripeRefund,
 	normalizeStripeSubscription,
+	STRIPE_LIVE_READ_ORDER_MARGIN_SECONDS,
+	stripeLiveReadOrder,
 } from "../../../src/providers/stripe/normalizer";
 import type { DeepPartial } from "../../helpers/deep-partial";
 
@@ -1420,5 +1422,17 @@ describe("Stripe normalizer", () => {
 		expect(june.projectionIdempotencyKey).toContain("period_end:2026-06-30T00:00:00.000Z");
 		expect(july.projectionIdempotencyKey).toContain("period_end:2026-07-31T00:00:00.000Z");
 		expect(june.projectionIdempotencyKey).not.toBe(july.projectionIdempotencyKey);
+	});
+});
+
+describe("stripeLiveReadOrder", () => {
+	it("orders a live read a margin before the second it began", () => {
+		expect(stripeLiveReadOrder(new Date("2026-09-30T12:00:00.900Z"))).toBe(
+			Date.UTC(2026, 8, 30, 12) / 1000 - STRIPE_LIVE_READ_ORDER_MARGIN_SECONDS,
+		);
+	});
+
+	it("never orders a read before the epoch", () => {
+		expect(stripeLiveReadOrder(new Date(0))).toBe(0);
 	});
 });

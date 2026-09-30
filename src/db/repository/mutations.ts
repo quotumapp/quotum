@@ -156,10 +156,13 @@ export async function upsertSubscription(
 				WHEN ${updateIsMonotonic} THEN EXCLUDED.latest_provider_object_id
 				ELSE subscriptions.latest_provider_object_id
 			END,
-			last_provider_event_created = CASE
-				WHEN ${updateIsMonotonic} THEN EXCLUDED.last_provider_event_created
-				ELSE subscriptions.last_provider_event_created
-			END,
+			-- The newest provider event order seen, whichever write carried it. A live read that
+			-- records no order must not reset it, or a late event older than one already applied
+			-- would stop looking stale.
+			last_provider_event_created = GREATEST(
+				subscriptions.last_provider_event_created,
+				EXCLUDED.last_provider_event_created
+			),
 			raw_state = CASE
 				WHEN ${updateIsMonotonic} THEN EXCLUDED.raw_state
 				ELSE subscriptions.raw_state
