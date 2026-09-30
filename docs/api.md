@@ -239,6 +239,38 @@ An immediate `subscription_change` intent can carry some of that over, per consu
 - Only the previewed commercial action carries over. `POST .../subscriptions/:subscriptionId/changes`
   refuses the field.
 
+### Which plan version a Stripe update applies
+
+Stripe's view of a subscription decides its plan version. When Quotum records a Stripe update:
+
+- The subscription holds the version its Stripe price belongs to. A switch in the customer portal to
+  another plan's price, or to another published version of the same plan that has its own price,
+  moves the subscription to that version with the allowance handling above and no carry-over. A
+  newer version that reuses the same price leaves existing subscriptions on their pinned version.
+  The switch is read from the subscription's first Stripe item, the item whose product the plan
+  binding names. A subscription whose first item is a seat or add-on price stays on its pinned
+  version and records the prices it cannot place as unbound, below, instead of moving.
+- An applied API change or catalog migration takes effect when Stripe reports its target. Quotum's
+  own update stamps the change's id in the subscription's metadata (`billingChangeId`), and Stripe
+  keeps it on every later copy. An update that carries the stamp and shows anything else, for
+  example because the customer switched in the portal after the change, is Stripe's final word: the
+  change is settled without effect and its carry-over is dropped. An update without the stamp was
+  taken before the change reached Stripe, such as a late event or a reconciliation read that raced
+  the change, and leaves the change waiting for its own update. Only an update with no metadata at
+  all falls back to comparing Stripe's timestamp with when the change was applied. Invoices carry
+  the metadata Stripe froze when it finalized them.
+- A queued change staged from a version the subscription no longer holds is cancelled with
+  `The subscription moved to another plan version at the provider`, releasing its promotion use and
+  failing its catalog migration job, as a cancellation does. A change the worker already holds ends
+  the same way before the worker calls Stripe.
+- Updates apply in Stripe's event order, so an older event that arrives late never moves the
+  subscription back.
+- A Stripe price that no published version binds does not fail the update. The subscription's status,
+  period and cancellation are recorded, it keeps its plan version and the items it already tracks,
+  and the store event's `processingError` names the unbound prices, for example
+  `Stripe prices price_x have no published binding on the subscription's plan version; it keeps plan
+  pro version 2`. Bind the price in the catalog and the next update applies it.
+
 ### Cancelling and uncancelling a subscription
 
 `cancel` names `externalSubscriptionId` and an `effectiveMode`; `uncancel` names the subscription

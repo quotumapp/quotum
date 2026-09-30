@@ -346,6 +346,11 @@ export interface RecordStripeSubscriptionProjectionInput {
 	invoiceCurrency?: string | null;
 	invoicePaidAt?: Date | null;
 	autoRenew: boolean | null;
+	/**
+	 * The subscription change whose Stripe update last wrote the subscription's metadata: null when
+	 * the metadata names none, omitted when the snapshot carries no metadata.
+	 */
+	billingChangeId?: string | null;
 	rawPayload: Record<string, unknown>;
 	eventType: string;
 	externalEventId: string | null;

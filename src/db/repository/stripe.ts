@@ -1231,13 +1231,33 @@ export class StripeBillingRepository extends RepositoryModule {
 				status: lifecycle.status,
 				periodStartAt: currentPeriodStart,
 				periodEndAt: currentPeriodEnd,
+				// Stripe's snapshot decides the plan version. The change stamp in its metadata says
+				// whether it was taken after an applied change reached Stripe; only a snapshot without
+				// metadata falls back to its timestamp (none for a live reconciliation read).
+				snapshot: {
+					previousStoreProductId: existingSubscription?.store_product_id ?? null,
+					createdAt:
+						input.externalEventId !== null && incomingProviderOrder > 0
+							? new Date(incomingProviderOrder * 1000)
+							: null,
+					...(input.billingChangeId === undefined
+						? {}
+						: { billingChangeId: input.billingChangeId }),
+				},
 			});
-			await syncSubscriptionPriceItems(tx, {
+			const unboundPrices = await syncSubscriptionPriceItems(tx, {
 				projectId,
 				subscriptionId: subscriptionRecordId,
 				periodStartAt: currentPeriodStart,
 				items: input.items ?? [],
 			});
+			if (unboundPrices.length > 0 && storeEvent.storeEventId !== null) {
+				await recordUnboundSubscriptionPrices(tx, projectId, {
+					storeEventId: storeEvent.storeEventId,
+					subscriptionId: subscriptionRecordId,
+					prices: unboundPrices,
+				});
+			}
 			await executeRows(
 				tx,
 				drizzleSql`
@@ -1694,6 +1714,39 @@ async function recordExistingSubscriptionInvoice(
 		},
 	});
 	return processedStripeRecordingResult(fact.billingAccountId, snapshot);
+}
+
+/**
+ * Notes on the store event which Stripe prices the subscription's plan version does not bind. The
+ * event stays processed: the subscription's status and period are recorded and it keeps its plan
+ * version, and the note tells operators which price to bind.
+ */
+async function recordUnboundSubscriptionPrices(
+	executor: QueryExecutor,
+	projectId: string,
+	input: { storeEventId: string; subscriptionId: string; prices: string[] },
+): Promise<void> {
+	await executeRows(
+		executor,
+		drizzleSql`
+			UPDATE store_events event
+			SET processing_error = concat(
+					'Stripe prices ', ${input.prices.join(", ")}::text,
+					' have no published binding on the subscription''s plan version; it keeps plan ',
+					plan.key, ' version ', version.version
+				),
+				updated_at = now()
+			FROM subscriptions subscription
+			JOIN plan_versions version
+				ON version.project_id = subscription.project_id
+				AND version.id = subscription.plan_version_id
+			JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+			WHERE event.project_id = ${projectId}
+				AND event.id = ${input.storeEventId}
+				AND subscription.project_id = ${projectId}
+				AND subscription.id = ${input.subscriptionId}
+		`,
+	);
 }
 
 async function getStripeOperationSubscription(

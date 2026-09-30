@@ -2434,6 +2434,7 @@ function toStripeSubscriptionRepositoryInput(
 		invoiceCurrency: command.invoiceCurrency,
 		invoicePaidAt: command.invoicePaidAt,
 		autoRenew: command.autoRenew,
+		...(command.billingChangeId === undefined ? {} : { billingChangeId: command.billingChangeId }),
 		rawPayload: command.rawPayload,
 		eventType: command.eventType,
 		externalEventId,

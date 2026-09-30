@@ -25,6 +25,7 @@ function changeFixture(overrides: Partial<SubscriptionChangeOperation> = {}) {
 		providerAccountId: null,
 		status: "processing",
 		subscriptionStatus: "active",
+		sourceSuperseded: false,
 		changeKind: "upgrade",
 		effectiveMode: "immediate",
 		effectiveAt: new Date().toISOString(),
@@ -883,6 +884,44 @@ it("ends a due change whose subscription has already expired without calling the
 	expect(metrics.renderPrometheus()).toContain(
 		'billing_worker_jobs_total{operation="subscription_change",result="cancelled",worker="recurring_billing"} 1',
 	);
+});
+
+// capability: subscription.change.apply
+it("ends a change the provider superseded without calling the provider", async () => {
+	let applyCalls = 0;
+	const { repository, calls } = recordingRepository({
+		changes: [changeFixture({ sourceSuperseded: true })],
+	});
+	const worker = new RecurringBillingWorker({
+		projectContextResolver: workerProjectResolver,
+		workerId: "worker-1",
+		repository,
+		adapterForJob: (): RecurringBillingWorkerAdapter => ({
+			changes: {
+				async apply() {
+					applyCalls += 1;
+					return { outcome: "committed", providerRequestId: "sub_1", timing };
+				},
+			},
+		}),
+		logger: { error() {} },
+	});
+
+	expect(await worker.runOnce()).toMatchObject({
+		subscriptionChangesApplied: 0,
+		subscriptionChangesCancelled: 1,
+		failed: 0,
+	});
+	expect(applyCalls).toBe(0);
+	expect(calls).toEqual([
+		{
+			kind: "change_cancelled",
+			projectInstanceId: projectInstanceContext().projectInstanceId,
+			changeId: "change-1",
+			reason: "The subscription moved to another plan version at the provider",
+			workerId: "worker-1",
+		},
+	]);
 });
 
 // capability: subscription.change.apply

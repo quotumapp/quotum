@@ -4,6 +4,7 @@ import { resetSplitsBillingPeriodSql } from "./cadence-sql";
 import { carryOverAllowances } from "./carry-over";
 import { supersedeBasePlanGrants } from "./plan-grants";
 import { executeOne, executeRows, jsonb } from "./query";
+import { cancelSupersededSubscriptionChanges } from "./recurring-pricing";
 import { materializeSubscriptionResetAllocations } from "./subscription-allocation-periods";
 import type { QueryExecutor } from "./types";
 
@@ -15,14 +16,42 @@ const allocationFundingStatuses = new Set<SubscriptionStatus>([
 ]);
 
 /**
+ * What the provider's snapshot says about the product the subscription is on, for providers whose
+ * snapshot decides the plan version (Stripe). Other providers omit it and keep the rule that only
+ * a product of another plan moves a subscription.
+ */
+export interface ProviderSnapshotContext {
+	/** The store product the subscription held before this sync; null when it had none. */
+	previousStoreProductId: string | null;
+	/** When the provider created the snapshot; null for a snapshot read live from the provider. */
+	createdAt: Date | null;
+	/**
+	 * The subscription change whose provider update last wrote the snapshot's metadata: null when
+	 * the metadata names none, omitted when the snapshot carries no metadata to read.
+	 */
+	billingChangeId?: string | null;
+}
+
+/**
  * Resolves the plan version a synced subscription carries. Publishing a newer version of the same
  * plan retargets the provider binding, but that must not move existing subscriptions: they stay
  * grandfathered on their pinned version until an explicit subscription change or catalog migration
- * has been applied, or the provider reports a product that belongs to another plan.
+ * has been applied, or the provider reports a product that belongs to another version.
+ *
+ * The provider's snapshot wins. An applied change moves the version only when the snapshot shows
+ * its target. A snapshot taken after the change reached the provider that shows anything else
+ * settles it without effect; one taken before leaves it waiting for its own event
+ * (`snapshotPredatesChange`).
  */
 async function resolveSubscriptionPlanVersion(
 	executor: QueryExecutor,
-	input: { projectId: string; customerId: string; storeProductId: string; subscriptionId: string },
+	input: {
+		projectId: string;
+		customerId: string;
+		storeProductId: string;
+		subscriptionId: string;
+		snapshot?: ProviderSnapshotContext;
+	},
 ): Promise<{
 	planVersionId: string;
 	catalogRevisionId: string;
@@ -32,6 +61,8 @@ async function resolveSubscriptionPlanVersion(
 	previousPlanVersionId: string | null;
 	/** What the applied immediate change moving the version carries over; null otherwise. */
 	carryOver: { balances: string[]; usages: string[] } | null;
+	/** Whether the provider moved the subscription to another version without a local change. */
+	providerSwitch: boolean;
 } | null> {
 	const row = await executeOne<{
 		current_version_id: string | number | bigint | null;
@@ -46,6 +77,10 @@ async function resolveSubscriptionPlanVersion(
 		change_revision_id: string | number | bigint | null;
 		change_effective_mode: "immediate" | "period_end" | null;
 		change_carry_over: { balances?: string[]; usages?: string[] } | null;
+		change_applied_at: Date | string | null;
+		change_target_shown: boolean;
+		current_priced: boolean;
+		current_shown: boolean;
 		pending_change_id: string | null;
 		pending_version_id: string | number | bigint | null;
 		pending_revision_id: string | number | bigint | null;
@@ -67,6 +102,51 @@ async function resolveSubscriptionPlanVersion(
 				change_version.catalog_revision_id AS change_revision_id,
 				applied_change.effective_mode AS change_effective_mode,
 				applied_change.carry_over AS change_carry_over,
+				applied_change.applied_at AS change_applied_at,
+				-- Whether the snapshot's product is the applied change's target: the provider product
+				-- is bound to it, or one of its prices is.
+				(
+					binding_version.id = change_version.id
+					OR EXISTS (
+						SELECT 1
+						FROM price_components price
+						JOIN provider_price_bindings price_binding
+							ON price_binding.project_id = price.project_id
+							AND price_binding.price_component_id = price.id
+							AND price_binding.status = 'published'
+						WHERE price.project_id = subscription.project_id
+							AND price.plan_version_id = change_version.id
+							AND price_binding.store_product_id = ${input.storeProductId}
+					)
+				) IS TRUE AS change_target_shown,
+				-- Whether the pinned version sells through this provider's prices, and whether the
+				-- snapshot's product is one of them.
+				EXISTS (
+					SELECT 1
+					FROM price_components price
+					JOIN provider_price_bindings price_binding
+						ON price_binding.project_id = price.project_id
+						AND price_binding.price_component_id = price.id
+						AND price_binding.status = 'published'
+					JOIN store_products snapshot_product
+						ON snapshot_product.project_id = price_binding.project_id
+						AND snapshot_product.id = ${input.storeProductId}
+					WHERE price.project_id = subscription.project_id
+						AND price.plan_version_id = subscription.plan_version_id
+						AND price_binding.provider = snapshot_product.provider
+						AND price_binding.channel = snapshot_product.channel
+				) AS current_priced,
+				EXISTS (
+					SELECT 1
+					FROM price_components price
+					JOIN provider_price_bindings price_binding
+						ON price_binding.project_id = price.project_id
+						AND price_binding.price_component_id = price.id
+						AND price_binding.status = 'published'
+					WHERE price.project_id = subscription.project_id
+						AND price.plan_version_id = subscription.plan_version_id
+						AND price_binding.store_product_id = ${input.storeProductId}
+				) AS current_shown,
 				pending_change.id AS pending_change_id,
 				pending_version.id AS pending_version_id,
 				pending_version.catalog_revision_id AS pending_revision_id,
@@ -86,7 +166,7 @@ async function resolveSubscriptionPlanVersion(
 				AND binding_version.status = 'published'
 			LEFT JOIN LATERAL (
 				SELECT change.id, change.from_plan_version_id, change.to_plan_version_id,
-					change.synchronized_at, change.effective_mode, change.carry_over
+					change.synchronized_at, change.effective_mode, change.carry_over, change.applied_at
 				FROM subscription_changes change
 				WHERE change.project_id = subscription.project_id
 					AND change.subscription_id = subscription.id
@@ -124,7 +204,7 @@ async function resolveSubscriptionPlanVersion(
 		`,
 	);
 	if (row === null) return null;
-	const changeId = row.change_synchronized_at === null ? row.change_id : null;
+	let changeId = row.change_synchronized_at === null ? row.change_id : null;
 	const current =
 		row.current_version_id === null || row.current_revision_id === null
 			? null
@@ -143,24 +223,46 @@ async function resolveSubscriptionPlanVersion(
 	if (current === null) {
 		return binding === null
 			? null
-			: { ...binding, changed: true, changeId, previousPlanVersionId: null, carryOver: null };
+			: {
+					...binding,
+					changed: true,
+					changeId,
+					previousPlanVersionId: null,
+					carryOver: null,
+					providerSwitch: false,
+				};
 	}
 	const previousPlanVersionId = current.planVersionId;
 	// 2. Only the latest applied change can move the pinned version. Filtering by its source
 	// before selecting the latest would replay an old upgrade after a later downgrade returns
 	// to that source, including when a newer quantity-only change supersedes the upgrade.
 	if (row.change_version_id !== null && row.change_revision_id !== null) {
-		return {
-			planVersionId: String(row.change_version_id),
-			catalogRevisionId: String(row.change_revision_id),
-			changed: true,
-			changeId,
-			previousPlanVersionId,
-			carryOver:
-				changeId !== null && row.change_effective_mode === "immediate"
-					? appliedCarryOver(row.change_carry_over)
-					: null,
-		};
+		if (row.change_target_shown || input.snapshot === undefined) {
+			return {
+				planVersionId: String(row.change_version_id),
+				catalogRevisionId: String(row.change_revision_id),
+				changed: true,
+				changeId,
+				previousPlanVersionId,
+				carryOver:
+					changeId !== null && row.change_effective_mode === "immediate"
+						? appliedCarryOver(row.change_carry_over)
+						: null,
+				providerSwitch: false,
+			};
+		}
+		// The snapshot shows something other than the change's target. One taken before the change
+		// reached the provider leaves it waiting for its own event; a later one contradicts it, so
+		// the change settles without effect (and without its carry-over) and the snapshot decides
+		// the version below.
+		if (
+			row.change_id !== null &&
+			snapshotPredatesChange(input.snapshot, {
+				id: String(row.change_id),
+				appliedAt: row.change_applied_at,
+			})
+		)
+			changeId = null;
 	}
 	// 3. The provider reports the target of a change not yet recorded as applied: its worker updated
 	// the provider and has not written it down, or the provider moved first. The change applies now,
@@ -181,24 +283,67 @@ async function resolveSubscriptionPlanVersion(
 				row.pending_effective_mode === "immediate"
 					? appliedCarryOver(row.pending_carry_over)
 					: null,
+			providerSwitch: false,
 		};
 	}
-	// 4. A product of another plan is a provider-side switch, so its bound version applies.
+	// 4. A provider-side switch applies the version the reported product is bound to: a product of
+	// another plan, or, where the provider's snapshot decides, a product the pinned version does
+	// not sell. A retargeted binding alone keeps the subscription on its pinned version: its own
+	// price is still one of that version's, or, for a version without prices, it has not changed.
 	if (
 		binding !== null &&
-		row.binding_plan_id !== null &&
-		String(row.binding_plan_id) !== String(row.current_plan_id)
+		binding.planVersionId !== current.planVersionId &&
+		(String(row.binding_plan_id) !== String(row.current_plan_id) ||
+			(input.snapshot !== undefined &&
+				(row.current_priced
+					? !row.current_shown
+					: input.snapshot.previousStoreProductId !== null &&
+						input.snapshot.previousStoreProductId !== input.storeProductId)))
 	) {
 		return {
 			...binding,
-			changed: binding.planVersionId !== current.planVersionId,
+			changed: true,
 			changeId,
 			previousPlanVersionId,
 			carryOver: null,
+			providerSwitch: true,
 		};
 	}
 	// 5. Otherwise the subscription stays grandfathered on its pinned version.
-	return { ...current, changed: false, changeId, previousPlanVersionId, carryOver: null };
+	return {
+		...current,
+		changed: false,
+		changeId,
+		previousPlanVersionId,
+		carryOver: null,
+		providerSwitch: false,
+	};
+}
+
+/**
+ * Whether a snapshot that does not show an applied change's target was taken before the change
+ * reached the provider. The change's own provider update stamps its id in the subscription's
+ * metadata (`billingChangeId`), and the provider keeps it on every later copy, portal updates and
+ * deletions included. So a snapshot naming the change was taken after it; one naming another
+ * change or none was taken before, or is a stale read. Only a snapshot without metadata falls back
+ * to the clocks (`snapshotPredates`), which compare the provider's timestamp with the database's.
+ */
+export function snapshotPredatesChange(
+	snapshot: ProviderSnapshotContext,
+	change: { id: string; appliedAt: Date | string | null },
+): boolean {
+	if (snapshot.billingChangeId !== undefined) return snapshot.billingChangeId !== change.id;
+	return snapshotPredates(snapshot.createdAt, change.appliedAt);
+}
+
+/**
+ * Whether the provider created a snapshot before a change was recorded as applied. Stripe stamps
+ * events in whole seconds, so a snapshot from the second the change was applied also counts as
+ * earlier: waiting for the next event is safe, while settling the change early loses it.
+ */
+export function snapshotPredates(createdAt: Date | null, appliedAt: Date | string | null): boolean {
+	if (createdAt === null || appliedAt === null) return false;
+	return createdAt.getTime() < new Date(appliedAt).getTime();
 }
 
 function appliedCarryOver(
@@ -219,10 +364,21 @@ export async function materializeSubscriptionAllocations(
 		status: SubscriptionStatus;
 		periodStartAt: Date;
 		periodEndAt: Date | null;
+		snapshot?: ProviderSnapshotContext;
 	},
 ): Promise<number> {
 	const version = await resolveSubscriptionPlanVersion(executor, input);
 	if (version === null) return 0;
+
+	if (version.providerSwitch) {
+		// A change queued from the version the provider moved away from can no longer apply.
+		await cancelSupersededSubscriptionChanges(executor, {
+			projectId: input.projectId,
+			subscriptionId: input.subscriptionId,
+			planVersionId: version.planVersionId,
+			reason: "The subscription moved to another plan version at the provider",
+		});
+	}
 
 	if (version.changeId !== null) {
 		// The provider snapshot has settled the latest applied change, even if another provider
@@ -528,6 +684,13 @@ async function endOutgoingPlanAllowances(
 	);
 }
 
+/**
+ * Records the provider's subscription items against the pinned version's price components. A
+ * price the version does not bind is left out rather than failing the sync, because the provider
+ * has already charged it and every later event would fail the same way: its item keeps the
+ * component it was tracked under, if any, so a later change still addresses it. The unbound
+ * prices are returned for the caller to record.
+ */
 export async function syncSubscriptionPriceItems(
 	executor: QueryExecutor,
 	input: {
@@ -541,8 +704,9 @@ export async function syncSubscriptionPriceItems(
 			quantity: number;
 		}>;
 	},
-): Promise<void> {
-	if (input.items.length === 0) return;
+): Promise<string[]> {
+	const unboundPrices: string[] = [];
+	if (input.items.length === 0) return unboundPrices;
 	const phaseTwoPricing = await executeOne<{ configured: boolean }>(
 		executor,
 		drizzleSql`
@@ -557,7 +721,7 @@ export async function syncSubscriptionPriceItems(
 			) AS configured
 		`,
 	);
-	if (phaseTwoPricing?.configured !== true) return;
+	if (phaseTwoPricing?.configured !== true) return unboundPrices;
 	const activeComponentIds: string[] = [];
 	for (const item of input.items) {
 		const price = await executeOne<{
@@ -586,9 +750,19 @@ export async function syncSubscriptionPriceItems(
 			`,
 		);
 		if (price === null) {
-			throw new Error(
-				`Stripe subscription item ${item.providerSubscriptionItemId} has no published price binding`,
+			unboundPrices.push(item.externalPriceId);
+			const tracked = await executeOne<{ price_component_id: string | number | bigint }>(
+				executor,
+				drizzleSql`
+					SELECT price_component_id FROM subscription_items
+					WHERE project_id = ${input.projectId}
+						AND subscription_id = ${input.subscriptionId}
+						AND provider_subscription_item_id = ${item.providerSubscriptionItemId}
+						AND active = true
+				`,
 			);
+			if (tracked !== null) activeComponentIds.push(String(tracked.price_component_id));
+			continue;
 		}
 		// Stripe keeps an item's id when its price changes. Keep the former component row for
 		// history, but release its live provider identity before attaching it to the new component.
@@ -644,6 +818,7 @@ export async function syncSubscriptionPriceItems(
 				)
 		`,
 	);
+	return unboundPrices;
 }
 
 export async function materializeTopupAllocation(

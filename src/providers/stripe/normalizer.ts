@@ -273,8 +273,11 @@ export function normalizeStripeInvoice(
 	const metadata = optionalRecord(input.invoice.metadata) ?? {};
 	const subscription = optionalRecord(input.invoice.subscription);
 	const subscriptionMetadata = optionalRecord(subscription?.metadata) ?? {};
-	const parentSubscriptionMetadata =
-		optionalRecord(parentSubscriptionDetails(input.invoice)?.metadata) ?? {};
+	// Stripe freezes the subscription's metadata onto the invoice when it finalizes it.
+	const frozenSubscriptionMetadata = optionalRecord(
+		parentSubscriptionDetails(input.invoice)?.metadata,
+	);
+	const parentSubscriptionMetadata = frozenSubscriptionMetadata ?? {};
 	const subscriptionLine = firstInvoiceSubscriptionLine(input.invoice, subscriptionId);
 	const subscriptionLineMetadata = optionalRecord(subscriptionLine?.metadata) ?? {};
 	const invoiceId = requireString(input.invoice.id, "Stripe invoice id");
@@ -335,6 +338,11 @@ export function normalizeStripeInvoice(
 					) ?? dateFromStripeSeconds(input.invoice.created, "Stripe invoice created time"))
 				: null,
 		autoRenew: true,
+		// The change that last updated the subscription before this invoice was finalized.
+		billingChangeId:
+			frozenSubscriptionMetadata === null
+				? undefined
+				: optionalString(frozenSubscriptionMetadata.billingChangeId),
 		rawPayload: input.invoice,
 		eventType: input.eventType,
 		externalEventId: input.eventId,
@@ -349,7 +357,8 @@ export function normalizeStripeSubscription(
 ): NormalizedStripeSubscriptionCommand {
 	const subscriptionId = requireString(input.subscription.id, "Stripe subscription id");
 	const status = requireString(input.subscription.status, "Stripe subscription status");
-	const metadata = optionalRecord(input.subscription.metadata) ?? {};
+	const snapshotMetadata = optionalRecord(input.subscription.metadata);
+	const metadata = snapshotMetadata ?? {};
 	const now = input.now ?? new Date();
 	const subscriptionItem = firstSubscriptionItem(input.subscription);
 	const externalProductId = requireString(
@@ -396,6 +405,10 @@ export function normalizeStripeSubscription(
 		invoiceCurrency: null,
 		invoicePaidAt: null,
 		autoRenew,
+		// Quotum's own subscription updates stamp the change they apply; Stripe keeps the key on
+		// every later copy of the subscription, including portal updates and deletions.
+		billingChangeId:
+			snapshotMetadata === null ? undefined : optionalString(snapshotMetadata.billingChangeId),
 		rawPayload: input.subscription,
 		eventType: input.eventType,
 		externalEventId: input.eventId,

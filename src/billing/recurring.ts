@@ -70,6 +70,11 @@ export interface SubscriptionChangeOperation {
 	status: "pending" | "processing" | "applied" | "failed" | "cancelled";
 	/** Local status of the subscription the change targets; an ended one can no longer be changed. */
 	subscriptionStatus: SubscriptionStatus;
+	/**
+	 * Whether the subscription holds neither the version the change was staged from nor its target:
+	 * the provider moved it elsewhere, so applying the change would undo the customer's choice.
+	 */
+	sourceSuperseded: boolean;
 	changeKind: "upgrade" | "downgrade" | "quantity";
 	effectiveMode: "immediate" | "period_end";
 	effectiveAt: string;

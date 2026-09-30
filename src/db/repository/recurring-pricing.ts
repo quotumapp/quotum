@@ -84,6 +84,7 @@ interface ChangeRow {
 	provider_account_id: string | null;
 	subscription_channel: BillingChannel;
 	subscription_status: SubscriptionStatus;
+	source_superseded: boolean;
 	status: "pending" | "processing" | "applied" | "failed" | "cancelled";
 	change_kind: "upgrade" | "downgrade" | "quantity";
 	effective_mode: "immediate" | "period_end";
@@ -1438,6 +1439,49 @@ export async function supersedePendingSubscriptionChangeInTx(
 	return change.id;
 }
 
+/**
+ * Cancels the subscription's queued changes that a provider-side switch left behind: staged from a
+ * version the subscription no longer holds, towards another one. Each releases its promotion use
+ * and fails its waiting catalog migration job, as a cancellation does. A change a worker holds is
+ * left to that worker, which ends it before calling the provider (`sourceSuperseded`).
+ */
+export async function cancelSupersededSubscriptionChanges(
+	executor: QueryExecutor,
+	input: { projectId: string; subscriptionId: string; planVersionId: string; reason: string },
+): Promise<void> {
+	const cancelled = await executeRows<{ id: string }>(
+		executor,
+		drizzleSql`
+			UPDATE subscription_changes
+			SET status = 'cancelled', last_error = ${input.reason},
+				locked_at = NULL, locked_by = NULL, updated_at = now()
+			WHERE project_id = ${input.projectId}
+				AND subscription_id = ${input.subscriptionId}
+				AND status = 'pending'
+				AND from_plan_version_id <> ${input.planVersionId}::bigint
+				AND to_plan_version_id <> ${input.planVersionId}::bigint
+			RETURNING id
+		`,
+	);
+	for (const change of cancelled) {
+		const redemption = await changeRedemption(executor, input.projectId, change.id);
+		if (redemption !== null) {
+			await releasePromotionRedemptionInTx(executor, input.projectId, redemption.id);
+		}
+		await executeRows(
+			executor,
+			drizzleSql`
+				UPDATE catalog_migration_jobs
+				SET status = 'failed', last_error = ${input.reason}, locked_at = NULL,
+					locked_by = NULL, updated_at = now()
+				WHERE project_id = ${input.projectId}
+					AND subscription_change_id = ${change.id}
+					AND status = 'waiting_provider'
+			`,
+		);
+	}
+}
+
 async function resolveSubscriptionChange(
 	executor: QueryExecutor,
 	projectId: string,
@@ -1629,6 +1673,10 @@ async function buildChangeOperation(
 				changes.id, changes.project_id, project.key AS project_key, changes.provider,
 				changes.provider_account_id, subscription.channel AS subscription_channel,
 				subscription.status AS subscription_status,
+				(
+					subscription.plan_version_id IS DISTINCT FROM changes.from_plan_version_id
+					AND subscription.plan_version_id IS DISTINCT FROM changes.to_plan_version_id
+				) AS source_superseded,
 				changes.status, changes.change_kind,
 				changes.effective_mode, changes.effective_at, changes.proration_behavior,
 				subscription.external_subscription_id, changes.to_plan_version_id,
@@ -1733,6 +1781,7 @@ async function buildChangeOperation(
 		providerAccountId: change.provider_account_id,
 		status: change.status,
 		subscriptionStatus: change.subscription_status,
+		sourceSuperseded: change.source_superseded,
 		changeKind: change.change_kind,
 		effectiveMode: change.effective_mode,
 		effectiveAt: new Date(change.effective_at).toISOString(),

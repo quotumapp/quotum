@@ -165,11 +165,13 @@ export class RecurringBillingWorker {
 							: "subscription.change.apply",
 					);
 				}
-				if (!changeableSubscriptionStatuses.has(change.subscriptionStatus)) {
-					const ended = await this.endUnappliableChange(
-						claimed,
-						`The subscription is ${change.subscriptionStatus} and can no longer be changed`,
-					);
+				const unappliable = !changeableSubscriptionStatuses.has(change.subscriptionStatus)
+					? `The subscription is ${change.subscriptionStatus} and can no longer be changed`
+					: change.sourceSuperseded
+						? "The subscription moved to another plan version at the provider"
+						: null;
+				if (unappliable !== null) {
+					const ended = await this.endUnappliableChange(claimed, unappliable);
 					if (ended) subscriptionChangesCancelled += 1;
 					else failed += 1;
 					continue;
