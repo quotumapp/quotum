@@ -101,6 +101,17 @@ export class ProjectScopedBillingRepository {
 		return await this.repository.hasActiveBasePlan(this.project, billingAccountId);
 	}
 
+	async addOnMeterLimitConflicts(
+		billingAccountId: string,
+		planVersionId: string,
+	): Promise<string[]> {
+		return await this.repository.addOnMeterLimitConflicts(
+			this.project,
+			billingAccountId,
+			planVersionId,
+		);
+	}
+
 	async prepareSubscriptionChange(
 		input: SubscriptionChangeInput,
 	): Promise<SubscriptionChangeOperation> {

@@ -58,6 +58,7 @@ import {
 } from "./controls-runtime";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
+import { queryMeterLimitRows } from "./meter-limit-sources";
 import { storedCadence } from "./meter-limit-windows";
 import type {
 	AllocationRow,
@@ -101,7 +102,6 @@ import {
 	planDeductions,
 	queryAdditiveRateCard,
 	queryMeterLimitConfigured,
-	queryMeterLimitRows,
 	queryPinnedRateCard,
 	queryPurchasedRevision,
 	rateDecision,

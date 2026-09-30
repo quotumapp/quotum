@@ -474,6 +474,14 @@ export class BillingRepository {
 		return await this.stripe.hasActiveBasePlan(project, billingAccountId);
 	}
 
+	async addOnMeterLimitConflicts(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		planVersionId: string,
+	): Promise<string[]> {
+		return await this.stripe.addOnMeterLimitConflicts(project, billingAccountId, planVersionId);
+	}
+
 	async prepareSubscriptionChange(
 		project: ProjectInstanceContext,
 		input: SubscriptionChangeInput,

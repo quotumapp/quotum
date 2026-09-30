@@ -68,6 +68,7 @@ import type {
 import type { SubscriptionReconciliationProvider } from "../../workers/subscription-reconciliation";
 import { commercialPreviewProvider } from "../capabilities";
 import { requireNonBlank } from "../validation";
+import { assertAddOnMeterLimitsCombine } from "./add-on-meter-limits";
 import { stripeCapabilities } from "./capabilities";
 import type { StripeCheckoutSessionCreateParams } from "./client";
 import {
@@ -204,6 +205,7 @@ interface StripeBillingRepositoryDependency extends PaymentSetupRepositoryDepend
 	): Promise<StripeRecurringCheckoutPlan>;
 
 	hasActiveBasePlan?(billingAccountId: string): Promise<boolean>;
+	addOnMeterLimitConflicts?(billingAccountId: string, planVersionId: string): Promise<string[]>;
 
 	prepareSubscriptionChange?(input: SubscriptionChangeInput): Promise<SubscriptionChangeOperation>;
 	previewSubscriptionChange?(
@@ -441,6 +443,9 @@ export class StripeBillingService
 				"ADDON_REQUIRES_BASE_PLAN",
 				409,
 			);
+		}
+		if (plan !== null) {
+			await assertAddOnMeterLimitsCombine(this.dependencies.repository, billingAccountId, plan);
 		}
 		const quantities = normalizedLicensedQuantities(input.quantities ?? {});
 		const mode: StripeCheckoutMode = product === null ? "subscription" : checkoutModeFor(product);
@@ -1079,6 +1084,7 @@ export class StripeBillingService
 				409,
 			);
 		}
+		await assertAddOnMeterLimitsCombine(this.dependencies.repository, billingAccountId, plan);
 		const quantities = normalizedLicensedQuantities(normalized.quantities);
 		const lines = commercialPlanLines(plan, quantities);
 		const promotion = await this.commercialPromotion(billingAccountId, normalized.promotionCode, {

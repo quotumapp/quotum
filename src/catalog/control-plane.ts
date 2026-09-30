@@ -771,6 +771,7 @@ function normalizeCatalog(
 			);
 		}
 	}
+	assertMeterLimitsCombine(plans);
 	const defaultPlan = normalizeDefaultPlan(catalog.defaultPlan);
 	return {
 		features,
@@ -1933,4 +1934,47 @@ function requireMap(map: Map<string, string>, key: string): string {
 	const value = map.get(key);
 	if (value === undefined) throw new Error(`Catalog reference ${key} was not resolved`);
 	return value;
+}
+
+/**
+ * Refuses meter limits that could not add up. An add-on's meter limit adds its quantity to the
+ * account's other limits on the feature within one window, and any base plan can hold any add-on,
+ * so once an add-on limits a feature every meter limit on it must be a hard cap with one reset.
+ * Postpaid overage is invoiced against one item's own quantity and so never sums.
+ */
+function assertMeterLimitsCombine(
+	plans: ReadonlyArray<{
+		key: string;
+		kind: "base" | "addon";
+		items: ReadonlyArray<{
+			featureKey: string;
+			itemKind: string;
+			overagePolicy: "blocked" | "allowed";
+			resetInterval: string | null;
+			resetIntervalCount: number | null;
+		}>;
+	}>,
+): void {
+	const limits = plans.flatMap((plan) =>
+		plan.items.filter((item) => item.itemKind === "meter_limit").map((item) => ({ plan, item })),
+	);
+	for (const featureKey of new Set(limits.map(({ item }) => item.featureKey))) {
+		const onFeature = limits.filter(({ item }) => item.featureKey === featureKey);
+		const [first] = onFeature;
+		if (first === undefined || onFeature.length < 2) continue;
+		if (!onFeature.some(({ plan }) => plan.kind === "addon")) continue;
+		const combinable = onFeature.every(
+			({ item }) =>
+				item.overagePolicy === "blocked" &&
+				item.resetInterval === first.item.resetInterval &&
+				item.resetIntervalCount === first.item.resetIntervalCount,
+		);
+		if (!combinable) {
+			throw new InvalidRequestError(
+				`Meter limits on ${featureKey} must all be blocked caps with the same reset, because add-on ${
+					onFeature.find(({ plan }) => plan.kind === "addon")?.plan.key
+				} adds to them`,
+			);
+		}
+	}
 }
