@@ -6,6 +6,7 @@ import { MerchantScopeSchema } from "../schemas";
 import { MERCHANT_JSON_PARSE, MerchantError } from "../security";
 import type { MerchantStore } from "../store";
 import { McpAuthorizations } from "./authorization";
+import type { McpChanges } from "./changes";
 
 const queryBody = z.strictObject({ oauth_query: z.string().min(1).max(8192) });
 const selectionBody = queryBody.extend({ scope: MerchantScopeSchema });
@@ -23,7 +24,84 @@ const route = (operationId: string, path: string, body: z.ZodType, response: z.Z
 	}),
 });
 
-export function registerMcpRoutes(app: Elysia, store: MerchantStore, auth: MerchantAuth) {
+export function registerMcpRoutes(
+	app: Elysia,
+	store: MerchantStore,
+	auth: MerchantAuth,
+	changes?: McpChanges,
+) {
+	{
+		const enabled = () => {
+			if (!changes) throw new MerchantError("NOT_FOUND", "MCP changes are unavailable.", 404);
+			return changes;
+		};
+		const params = z.object({ id: z.uuid() });
+		const view = z.object({
+			id: z.uuid(),
+			action: z.string(),
+			parameters: z.array(z.string()),
+			reason: z.string(),
+			requestHash: z.string(),
+			scope: MerchantScopeSchema,
+			status: z.string(),
+			before: z.unknown(),
+			after: z.unknown(),
+			result: z.unknown(),
+			expiresAt: z.string(),
+			createdAt: z.string(),
+			approvalUrl: z.string(),
+			stepUp: z.object({ action: z.string(), target: z.string() }).nullable(),
+		});
+		app.get(
+			"/api/platform/mcp/changes/:id",
+			async ({ request, params }) => ({
+				success: true,
+				data: await enabled().browserGet(await store.authenticate(request), params.id),
+			}),
+			{
+				params,
+				detail: operationDetail({
+					operationId: "getMcpBillingChange",
+					tags: ["platform"],
+					path: "/api/platform/mcp/changes/:id",
+					responses: { 200: success(view) },
+				}),
+			},
+		);
+		for (const decision of ["approve", "reject"] as const) {
+			const path = `/api/platform/mcp/changes/:id/${decision}`;
+			const body = z.object({ requestHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+			app.post(
+				path,
+				async ({ request, params, body: raw }) => {
+					const identity = await store.authenticate(request);
+					const input = body.parse(raw);
+					const current = await enabled().browserGet(identity, params.id);
+					if (current.requestHash !== input.requestHash)
+						throw new MerchantError("ACTION_MISMATCH", "The proposal changed.", 409);
+					return {
+						success: true,
+						data: await enabled().decide(
+							identity,
+							params.id,
+							decision === "approve",
+							request.headers.get("x-quotum-step-up-grant"),
+						),
+					};
+				},
+				{
+					...route(
+						decision === "approve" ? "approveMcpBillingChange" : "rejectMcpBillingChange",
+						path,
+						body,
+						view,
+					),
+					params,
+				},
+			);
+		}
+	}
+
 	const grants = new McpAuthorizations(store);
 	const proof = async (request: Request) => {
 		if (!store.config.mcp) throw new MerchantError("NOT_FOUND", "Remote MCP is not enabled.", 404);
@@ -49,6 +127,7 @@ export function registerMcpRoutes(app: Elysia, store: MerchantStore, auth: Merch
 			z.object({
 				principal: z.object({ id: z.uuid(), name: z.string(), email: z.string() }),
 				client: z.object({ id: z.string(), name: z.string() }),
+				scopes: z.array(z.string()),
 				environments: z.array(
 					z.object({
 						scope: MerchantScopeSchema,
@@ -96,6 +175,7 @@ export function registerMcpRoutes(app: Elysia, store: MerchantStore, auth: Merch
 						id: z.uuid(),
 						clientId: z.string(),
 						clientName: z.string(),
+						scopes: z.array(z.string()),
 						createdAt: z.string(),
 						expiresAt: z.string(),
 					}),

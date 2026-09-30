@@ -58,9 +58,11 @@ The policy is deny-by-default:
   `period_end` changes retain the stored subscription period end. Stripe App events are handled
   outside the registry.
 - `src/mcp/`: shared read-only [MCP tools and stdio server](mcp.md), a client of `/v1` through
-  `src/sdk/`. The optional remote transport in `composition/remote-mcp.ts` dispatches the same
-  guarded SDK requests through `MerchantBillingPort`; `platform/mcp/` owns browser authorization,
-  immutable grants and live access checks. The tools never import platform or database code.
+  `src/sdk/`, plus separately enabled remote proposal tools. The remote transport in
+  `composition/remote-mcp.ts` dispatches read tools through guarded SDK requests and
+  `MerchantBillingPort`; proposal tools use an injected change port. `platform/mcp/` owns browser
+  authorization, immutable grants, proposal review and live access checks. Only browser decision
+  routes execute approved billing changes. The tools never import platform or database code.
 - `migrations/`: ordered schema authority.
 - `tests/`: unit, integration, and end-to-end coverage mirroring the source layout.
 - `contracts/v1/`: generated OpenAPI contract, error inventory and provider capability declarations.

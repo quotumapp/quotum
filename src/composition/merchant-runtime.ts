@@ -14,6 +14,7 @@ import type { ConnectionRepository } from "../platform/connections/repository";
 import { MerchantConnections } from "../platform/connections/service";
 import type { MerchantSql } from "../platform/database";
 import { createMerchantMailer, type MerchantMailer } from "../platform/email";
+import { McpChanges } from "../platform/mcp/changes";
 import { MerchantStore } from "../platform/store";
 import { type AppElysia, type ElysiaPluginLike, HTTP_APP_CONFIG } from "../shared/http";
 import { createConnectionEventApp } from "./connection-events";
@@ -89,6 +90,7 @@ export function attachMerchantRuntime(
 		mailer,
 		auth,
 		billing: createMerchantBilling(store, billing),
+		mcpChanges: billing.changes ? new McpChanges(store, billing.changes) : undefined,
 		requestObservabilityMiddleware: options.merchantRequestScope?.plugin,
 		onUnexpectedError: options.onMerchantUnexpectedError,
 	});

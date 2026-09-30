@@ -19,6 +19,7 @@ describe("integration catalog fixtures", () => {
 			"promotion_discount_amounts",
 			"promotions",
 			"commercial_action_previews",
+			"billing_administration_receipts",
 			"license_assignments",
 			"license_pools",
 			"catalog_migration_jobs",

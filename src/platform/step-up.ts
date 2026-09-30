@@ -82,7 +82,7 @@ export class MerchantStepUp {
 					? /^[a-f0-9]{64}$/
 					: credentialActions.has(input.action)
 						? /^[A-Za-z0-9._:-]{8,128}$/
-						: /^(POST|PUT|DELETE) \/api\/billing\/[^ ]+ [a-f0-9]{64}$/;
+						: /^(?:(POST|PUT|DELETE) \/api\/billing\/[^ ]+|POST \/api\/platform\/mcp\/changes\/[0-9a-f-]{36}\/approve) [a-f0-9]{64}$/;
 		if (!setupTarget.test(input.target))
 			throw new MerchantError("ACTION_REJECTED", "Confirm a saved operation identifier.");
 		if (

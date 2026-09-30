@@ -136,6 +136,7 @@ describe("maskPath", () => {
 			"/api/platform/provisioning/:id",
 		],
 		["/api/platform/team/members/abc", "/api/platform/team/members/:id"],
+		["/api/platform/mcp/changes/proposal-1/approve", "/api/platform/mcp/changes/:id/approve"],
 		["/api/platform/step-up/abc/complete", "/api/platform/step-up/:id/complete"],
 		[
 			"/api/billing/admin/billing-accounts/abc/usage/series",

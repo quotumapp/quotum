@@ -12,6 +12,7 @@ import {
 	MCP_GRANT_CLAIM,
 	MCP_INSTANCE_CLAIM,
 	MCP_SCOPES,
+	MCP_WRITE_SCOPE,
 	McpAuthorizations,
 } from "./authorization";
 import { containMcpCodeReplay } from "./code-replay";
@@ -28,7 +29,7 @@ export function createMcpAuthProvider(store: MerchantStore) {
 	const options: OAuthOptions<Scope[]> = {
 		loginPage: "/sign-in",
 		consentPage: "/oauth/consent",
-		scopes: MCP_SCOPES,
+		scopes: config?.writesEnabled ? [...MCP_SCOPES, MCP_WRITE_SCOPE] : MCP_SCOPES,
 		grantTypes: ["authorization_code", "refresh_token"],
 		accessTokenExpiresIn: 900,
 		refreshTokenExpiresIn: 30 * 24 * 60 * 60,

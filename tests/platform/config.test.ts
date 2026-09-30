@@ -49,7 +49,7 @@ describe("merchant deployment URLs", () => {
 				QUOTUM_MCP_ENABLED: "true",
 				QUOTUM_MCP_PUBLIC_ORIGIN: "https://api.example.com",
 			}).mcp,
-		).toEqual({ origin: "https://api.example.com" });
+		).toEqual({ origin: "https://api.example.com", writesEnabled: false });
 		for (const origin of ["http://localhost:3000", "http://127.0.0.1:3000", "http://[::1]:3000"]) {
 			expect(
 				loadMerchantConfig({
@@ -58,7 +58,7 @@ describe("merchant deployment URLs", () => {
 					QUOTUM_MCP_ENABLED: "true",
 					QUOTUM_MCP_PUBLIC_ORIGIN: origin,
 				}).mcp,
-			).toEqual({ origin });
+			).toEqual({ origin, writesEnabled: false });
 		}
 		expect(() =>
 			loadMerchantConfig({
@@ -144,4 +144,17 @@ describe("headless mode", () => {
 			loadOptionalMerchantConfig({ ...headless, MERCHANT_AUTH_SECRET: "old-secret" }),
 		).toThrow("MERCHANT_AUTH_SECRET has been removed; use QUOTUM_AUTH_SECRET instead");
 	});
+});
+
+it("MCP billing writes require an enabled remote transport and explicit opt-in", () => {
+	expect(() => loadMerchantConfig({ ...merchantEnv, QUOTUM_MCP_WRITES_ENABLED: "true" })).toThrow();
+	expect(
+		loadMerchantConfig({
+			...merchantEnv,
+			QUOTUM_MCP_ENABLED: "true",
+			QUOTUM_MCP_PUBLIC_ORIGIN: "https://api.example.com",
+			QUOTUM_MCP_WRITES_ENABLED: "true",
+		}).mcp?.writesEnabled,
+	).toBe(true);
+	expect(() => loadMerchantConfig({ ...merchantEnv, QUOTUM_MCP_WRITES_ENABLED: "yes" })).toThrow();
 });

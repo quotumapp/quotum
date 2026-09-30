@@ -3,6 +3,7 @@ import type { MerchantSql } from "../database";
 import { digest, MerchantError, requireCapability } from "../security";
 import type { MerchantStore } from "../store";
 
+export const MCP_WRITE_SCOPE = "quotum.billing.write";
 export const MCP_SCOPES = ["quotum.read", "offline_access"];
 export const MCP_INSTANCE_CLAIM = "https://quotum.dev/project_instance";
 export const MCP_GRANT_CLAIM = "https://quotum.dev/mcp_authorization";
@@ -15,6 +16,7 @@ export interface McpGrant {
 	project_instance_id: string;
 	client_id: string;
 	client_name: string;
+	scopes: string[];
 	proof_session_id: string | null;
 	code_hash: string | null;
 	created_at: Date;
@@ -114,6 +116,7 @@ export class McpAuthorizations {
 		return {
 			principal,
 			client,
+			scopes: this.requestedScopes(query),
 			environments: environments.map(({ instanceId: _, ...value }) => value),
 			selection:
 				environments.find((e) => e.instanceId === selected?.project_instance_id)?.scope ?? null,
@@ -127,6 +130,17 @@ export class McpAuthorizations {
 		return grant ?? null;
 	}
 
+	requestedScopes(query: string): string[] {
+		const scopes = [
+			...new Set(
+				(new URLSearchParams(query).get("scope") ?? "quotum.read").split(" ").filter(Boolean),
+			),
+		];
+		if (scopes.includes(MCP_WRITE_SCOPE) && !this.store.config.mcp?.writesEnabled)
+			throw new MerchantError("FORBIDDEN", "MCP writes are disabled.", 403);
+		return scopes;
+	}
+
 	async select(sessionId: string, query: string, scope: MerchantScope) {
 		return this.store.sql.begin(async (tx) => {
 			const principal = await this.proof(sessionId, query, tx);
@@ -137,7 +151,7 @@ export class McpAuthorizations {
 			>`SELECT COALESCE(name,client_id) AS name FROM platform_auth_oauth_clients WHERE client_id=${clientId} AND disabled IS NOT TRUE`;
 			if (!client)
 				throw new MerchantError("INVALID_REQUEST", "Restart authorization in your AI client.");
-			await tx`INSERT INTO platform_mcp_authorizations(principal_id,organization_id,project_instance_id,client_id,client_name,proof_session_id,created_at,expires_at) VALUES(${principal.id},${access.organizationId},${access.projectInstanceId},${clientId},${client.name},${sessionId},${this.store.now()},${new Date(this.store.now().getTime() + MCP_GRANT_MS)}) ON CONFLICT(proof_session_id) DO NOTHING`;
+			await tx`INSERT INTO platform_mcp_authorizations(principal_id,organization_id,project_instance_id,client_id,client_name,scopes,proof_session_id,created_at,expires_at) VALUES(${principal.id},${access.organizationId},${access.projectInstanceId},${clientId},${client.name},${JSON.stringify(this.requestedScopes(query))}::jsonb,${sessionId},${this.store.now()},${new Date(this.store.now().getTime() + MCP_GRANT_MS)}) ON CONFLICT(proof_session_id) DO NOTHING`;
 			const [grant] = await tx<
 				McpGrant[]
 			>`SELECT * FROM platform_mcp_authorizations WHERE proof_session_id=${sessionId}`;
@@ -346,6 +360,7 @@ export class McpAuthorizations {
 				id: r.id,
 				clientId: r.client_id,
 				clientName: r.client_name,
+				scopes: r.scopes,
 				createdAt: r.created_at.toISOString(),
 				expiresAt: r.expires_at.toISOString(),
 			})),

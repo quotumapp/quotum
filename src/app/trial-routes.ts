@@ -16,7 +16,7 @@ export interface TrialRoutesDependencies {
 const accountParams = z.object({ billingAccountId: z.string().trim().min(1).max(200) }).strict();
 const trialParams = accountParams.extend({ trialId: z.uuid() }).strict();
 
-const startTrialBodySchema = z
+export const startTrialBodySchema = z
 	.object({
 		planKey: z.string().trim().min(1).max(120),
 		durationDays: z.number().int().min(1).max(trialDurationMaxDays).optional(),
@@ -24,7 +24,7 @@ const startTrialBodySchema = z
 	})
 	.strict();
 
-const endTrialBodySchema = z
+export const endTrialBodySchema = z
 	.object({ reason: z.string().trim().min(1).max(500).optional() })
 	.strict()
 	.optional();

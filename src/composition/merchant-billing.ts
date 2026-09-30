@@ -56,9 +56,12 @@ import type {
 } from "../platform/application/billing-port";
 import { isTenantTrafficEligible, type ProjectInstanceContextResolver } from "../projects/context";
 import type { ProviderCapabilityReads } from "../providers/capability-read-types";
+import { createBillingChangesPort } from "./billing-changes";
+import { dispatchExtendedBilling } from "./merchant-billing-extended";
 
 export function createMerchantBillingPort(input: {
 	repository: BillingRepository;
+	includeChanges?: boolean;
 	reader: AdminBillingReader;
 	resolver: ProjectInstanceContextResolver;
 	providers: ProjectProviderServiceResolver;
@@ -339,7 +342,12 @@ export function createMerchantBillingPort(input: {
 			case "events.replay":
 				return ok(await operations().replayStoreEvent(project, queries.parseEventIdParam(id)));
 			case "projections.retry":
-				return ok(await operations().retryProjectionSyncJob(project, parse(z.uuid(), id)));
+				return ok(
+					await (input.includeChanges === false ? repo : operations()).retryProjectionSyncJob(
+						project,
+						parse(z.uuid(), id),
+					),
+				);
 			case "contracts.preview":
 			case "contracts.publish": {
 				const body = parse(
@@ -521,9 +529,17 @@ export function createMerchantBillingPort(input: {
 				// Mirrors the /v1 route: only a queued subscription change is accepted for later work.
 				return ok(result, result.kind === "subscription_change" ? 202 : 200);
 			}
+			default:
+				return dispatchExtendedBilling(repo, project, command);
 		}
 	};
 	return {
+		changes:
+			input.includeChanges === false
+				? undefined
+				: createBillingChangesPort(repo, (repository) =>
+						createMerchantBillingPort({ ...input, repository, includeChanges: false }),
+					),
 		async dispatch(command) {
 			try {
 				return await run(command);

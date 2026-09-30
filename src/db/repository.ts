@@ -1,3 +1,4 @@
+import { sql as administrationSql } from "drizzle-orm";
 import type {
 	AutoTopupChargeSucceeded,
 	AutoTopupFailureResult,
@@ -10,6 +11,7 @@ import type {
 	CommercialPreviewDraft,
 	StoredCommercialActionPreview,
 } from "../billing/commercial";
+import { BillingError } from "../billing/errors";
 import type {
 	AvailableActionFacts,
 	CustomerBillingSummary,
@@ -65,6 +67,7 @@ import type {
 import type { ProjectInstanceContext } from "../projects/context";
 import type { StripeCatalog } from "../providers/stripe/types";
 import { db as defaultDb } from "./client";
+import { administrationTarget } from "./repository/administration-target";
 import { AppleBillingRepository } from "./repository/apple";
 import { ApplePromotionRepository } from "./repository/apple-promotions";
 import { AutoTopupJobRepository } from "./repository/auto-topup-jobs";
@@ -228,6 +231,85 @@ export class BillingRepository {
 		this.planGrants = new PlanGrantRepository(database);
 		this.balanceAdjustments = new BalanceAdjustmentRepository(database);
 		this.promotionProviders = new PromotionProviderObjectRepository(database);
+	}
+
+	administrationTarget(projectId: string, action: string, parameters: string[], body: unknown) {
+		return administrationTarget(this.database, projectId, action, parameters, body);
+	}
+	/** Validate database-only operations without committing their changes or jobs. */
+	async previewAdministration(
+		work: (repo: BillingRepository) => Promise<{ status: number; body: unknown }>,
+	) {
+		class PreviewRollback extends Error {
+			constructor(readonly result: { status: number; body: unknown }) {
+				super("Rollback administration preview");
+			}
+		}
+		try {
+			await this.database.transaction(async (tx) => {
+				const bound = new BillingRepository({
+					execute: (query) => tx.execute(query),
+					transaction: (callback) => callback(tx),
+				});
+				throw new PreviewRollback(await work(bound));
+			});
+		} catch (error) {
+			if (error instanceof PreviewRollback) return error.result;
+			throw error;
+		}
+		throw new Error("Administration preview did not roll back");
+	}
+	async administrationReceipt(projectId: string, key: string) {
+		const [row] = await this.database.execute<{
+			response: { status: number; body: unknown } | null;
+		}>(
+			administrationSql`SELECT response FROM billing_administration_receipts WHERE project_id=${projectId} AND operation_key=${key}`,
+		);
+		if (row?.response) return row.response;
+		const [commercial] = await this.database.execute<{ execution_result: unknown }>(
+			administrationSql`SELECT execution_result FROM commercial_action_previews WHERE project_id=${projectId} AND execution_idempotency_key=${key} AND status='executed'`,
+		);
+		return commercial
+			? { status: 200, body: { success: true, data: commercial.execution_result } }
+			: null;
+	}
+	async withAdministrationReceipt(
+		projectId: string,
+		key: string,
+		hash: string,
+		work: (repo: BillingRepository) => Promise<{ status: number; body: unknown }>,
+	) {
+		return this.database.transaction(async (tx) => {
+			await tx.execute(administrationSql`SET TRANSACTION ISOLATION LEVEL SERIALIZABLE`);
+			await tx.execute(
+				administrationSql`INSERT INTO billing_administration_receipts(project_id,operation_key,request_hash) VALUES(${projectId},${key},${hash}) ON CONFLICT DO NOTHING`,
+			);
+			const [row] = await tx.execute<{
+				request_hash: string;
+				response: { status: number; body: unknown } | null;
+			}>(
+				administrationSql`SELECT request_hash,response FROM billing_administration_receipts WHERE project_id=${projectId} AND operation_key=${key} FOR UPDATE`,
+			);
+			if (!row || row.request_hash !== hash)
+				throw new BillingError("Operation input changed", "IDEMPOTENCY_CONFLICT", 409);
+			if (row.response) return row.response;
+			const bound = new BillingRepository({
+				execute: (query) => tx.execute(query),
+				transaction: (callback) => callback(tx),
+			});
+			const response = await work(bound);
+			if (response.status >= 400)
+				throw new BillingError(
+					"Billing change was rejected",
+					"BILLING_CHANGE_REJECTED",
+					response.status,
+					{ details: { response } },
+				);
+			await tx.execute(
+				administrationSql`UPDATE billing_administration_receipts SET response=${JSON.stringify(response)}::text::jsonb WHERE project_id=${projectId} AND operation_key=${key}`,
+			);
+			return response;
+		});
 	}
 
 	async claimAutoTopupJobs(

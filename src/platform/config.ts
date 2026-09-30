@@ -43,7 +43,7 @@ function loadEmailConfig(
 }
 
 export interface MerchantConfig {
-	mcp?: { origin: string } | null;
+	mcp?: { origin: string; writesEnabled?: boolean } | null;
 	signupEnabled: boolean;
 	origin: string;
 	publicUrl: string;
@@ -100,7 +100,10 @@ export function loadOptionalMerchantConfig(
 	if (merchantPlatformEnabled(env)) return loadMerchantConfig(env);
 	rejectRetiredSettings(env);
 	// Remote MCP authorizes through merchant sign-in, so a headless process cannot serve it.
-	if (booleanSetting(env, "QUOTUM_MCP_ENABLED", false))
+	if (
+		booleanSetting(env, "QUOTUM_MCP_ENABLED", false) ||
+		booleanSetting(env, "QUOTUM_MCP_WRITES_ENABLED", false)
+	)
 		throw new Error("QUOTUM_MCP_ENABLED=true requires the merchant platform");
 	return null;
 }
@@ -116,6 +119,9 @@ export function loadMerchantConfig(
 		}
 	}
 	const testMode = env.BILLING_ENV === "test";
+	const writesEnabled = booleanSetting(env, "QUOTUM_MCP_WRITES_ENABLED", false);
+	if (writesEnabled && !booleanSetting(env, "QUOTUM_MCP_ENABLED", false))
+		throw new Error("QUOTUM_MCP_WRITES_ENABLED requires QUOTUM_MCP_ENABLED");
 	let mcp: MerchantConfig["mcp"] = null;
 	if (booleanSetting(env, "QUOTUM_MCP_ENABLED", false)) {
 		const value = required(env, "QUOTUM_MCP_PUBLIC_ORIGIN");
@@ -130,7 +136,7 @@ export function loadMerchantConfig(
 				))
 		)
 			throw new Error("QUOTUM_MCP_PUBLIC_ORIGIN must be an HTTPS origin");
-		mcp = { origin: value };
+		mcp = { origin: value, writesEnabled };
 	}
 	const origin = z.url().parse(env.MERCHANT_ORIGIN ?? "https://app.quotum.dev");
 	const originUrl = new URL(origin);

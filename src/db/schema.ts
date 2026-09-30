@@ -5604,3 +5604,17 @@ export const promotionAppleSignatureAttempts = pgTable(
 		),
 	],
 );
+
+export const billingAdministrationReceipts = pgTable(
+	"billing_administration_receipts",
+	{
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id),
+		operationKey: text("operation_key").notNull(),
+		requestHash: text("request_hash").notNull(),
+		response: jsonb("response"),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table) => [primaryKey({ columns: [table.projectId, table.operationKey] })],
+);
