@@ -195,6 +195,27 @@ localDescribe("operator grants and administrative debits", () => {
 		expect(crossProject.status).toBe(404);
 	});
 
+	it("refuses a revocation key reused on another grant of the same account", async () => {
+		const { post, grant } = fixture();
+		const first = (await (await grant("revoke_keys", "grant-a", "10")).json()).data.grant;
+		const second = (await (await grant("revoke_keys", "grant-b", "10")).json()).data.grant;
+		const revoke = (grantId: string) =>
+			post(`/v1/admin/operator-grants/revoke_keys/${grantId}/revoke`, "revoke-key", {
+				reason: "Granted in error",
+			});
+
+		expect((await revoke(first.id)).status).toBe(200);
+		const reused = await revoke(second.id);
+
+		expect(reused.status).toBe(409);
+		expect((await reused.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
+		const [row] = await context.sql<Array<{ revoked_at: Date | null }>>`
+			SELECT revoked_at FROM operator_grants WHERE id = ${second.id}::uuid
+		`;
+		expect(row?.revoked_at).toBeNull();
+		expect((await revoke(first.id)).status).toBe(200);
+	});
+
 	it("debits named allocations all or nothing and never as usage", async () => {
 		const { get, post, grant } = fixture();
 		const operatorGrant = (await (await grant("debit_account", "grant-1", "50")).json()).data.grant;

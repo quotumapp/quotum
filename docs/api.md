@@ -1050,7 +1050,8 @@ GET  /v1/admin/administrative-debits/:billingAccountId
 Every route needs the operator key, including the reads, so a read-only credential is refused.
 Mutations also need `X-Billing-Actor` and an `Idempotency-Key`, and each takes a `reason` (1-500
 characters). A replayed key returns `200` with `duplicate: true`; reusing it for other terms returns
-`IDEMPOTENCY_CONFLICT`. Keys are scoped to the billing account.
+`IDEMPOTENCY_CONFLICT`. Keys are scoped to the billing account, so a revocation key already used on
+one grant conflicts on another.
 
 - **Grant.** `POST .../operator-grants/:billingAccountId` takes `featureKey`, a decimal `quantity`,
   an optional `entityId` and an optional future `expiresAt`. It gives the account one allocation
