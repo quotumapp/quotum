@@ -11,20 +11,13 @@ import type {
 	ProjectionPayload,
 	ProjectionSyncReason,
 } from "../../billing/types";
-import type { CadenceUnit } from "../../shared/cadence";
 import { reconcileDefaultPlanGrant } from "./default-plan-grants";
 import {
 	defaultPlanAllowanceEndingSql,
-	defaultPlanReadGrantSql,
 	defaultPlanReadVersionSql,
 	defaultPlanTargetSql,
 } from "./default-plan-sql";
-import {
-	meterLimitWindowBounds,
-	optionalStoredCadence,
-	planGrantWindowBounds,
-	storedCadence,
-} from "./meter-limit-windows";
+import { combineMeterLimits, meterLimitBounds, queryMeterLimitRows } from "./meter-limit-sources";
 import { type PendingAllowance, readPendingAllowances } from "./plan-grant-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -716,107 +709,8 @@ export async function readProjectionBalances(
 		readPendingAllowances(executor, projectId, customerId, null),
 	]);
 	const allocations = withPendingProjectionBalances(allocationRows, pending);
-	const limits = await executeRows<{
-		feature_id: string | number | bigint;
-		limit_quantity: unknown;
-		reset_interval: CadenceUnit;
-		reset_interval_count: number;
-		billing_interval: CadenceUnit | null;
-		billing_interval_count: number;
-		period_start_at: Date | string;
-		period_end_at: Date | string | null;
-		plan_grant: boolean;
-	}>(
-		executor,
-		// Metering takes a paying subscription's limit before a plan grant's; so does the projection.
-		drizzleSql`
-			SELECT DISTINCT ON (feature_id)
-				feature_id,
-				limit_quantity,
-				reset_interval,
-				reset_interval_count,
-				billing_interval,
-				billing_interval_count,
-				period_start_at,
-				period_end_at,
-				plan_grant
-			FROM (
-				SELECT
-					pi.feature_id,
-					pi.quantity AS limit_quantity,
-					pi.reset_interval,
-					pi.reset_interval_count,
-					pv.billing_interval,
-					pv.billing_interval_count,
-					COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
-					COALESCE(s.current_period_end, s.expires_at) AS period_end_at,
-					false AS plan_grant,
-					s.created_at AS sort_at,
-					s.id::text AS sort_id
-				FROM subscriptions s
-				JOIN plan_items pi
-					ON pi.project_id = s.project_id AND pi.plan_version_id = s.plan_version_id
-				JOIN plan_versions pv
-					ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
-				WHERE s.project_id = ${projectId}
-					AND s.customer_id = ${customerId}
-					AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-					AND (s.expires_at IS NULL OR s.expires_at > now())
-					AND pi.item_kind = 'meter_limit'
-
-				UNION ALL
-
-				SELECT
-					pi.feature_id,
-					pi.quantity AS limit_quantity,
-					pi.reset_interval,
-					pi.reset_interval_count,
-					pv.billing_interval,
-					pv.billing_interval_count,
-					g.starts_at AS period_start_at,
-					g.ends_at AS period_end_at,
-					true AS plan_grant,
-					g.created_at AS sort_at,
-					g.id::text AS sort_id
-				FROM plan_grants g
-				JOIN plan_items pi
-					ON pi.project_id = g.project_id AND pi.plan_version_id = g.plan_version_id
-				JOIN plan_versions pv
-					ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
-				WHERE g.project_id = ${projectId}
-					AND g.customer_id = ${customerId}
-					AND g.status = 'active'
-					AND g.origin <> 'default'
-					AND (g.ends_at IS NULL OR g.ends_at > now())
-					AND pi.item_kind = 'meter_limit'
-
-				UNION ALL
-
-				-- The default plan at the version the account's next write applies, as metering reads it.
-				SELECT
-					pi.feature_id,
-					pi.quantity AS limit_quantity,
-					pi.reset_interval,
-					pi.reset_interval_count,
-					pv.billing_interval,
-					pv.billing_interval_count,
-					d.anchor_at AS period_start_at,
-					NULL::timestamptz AS period_end_at,
-					true AS plan_grant,
-					d.created_at AS sort_at,
-					COALESCE(d.grant_id::text, '') AS sort_id
-				FROM (${defaultPlanReadGrantSql(projectId, drizzleSql`${customerId}::uuid`)}) d
-				JOIN plan_items pi
-					ON pi.project_id = ${projectId} AND pi.plan_version_id = d.plan_version_id
-				JOIN plan_versions pv
-					ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
-				WHERE pi.item_kind = 'meter_limit'
-			) sources
-			ORDER BY feature_id, plan_grant, sort_at, sort_id
-		`,
-	);
+	const limits = await readProjectionMeterLimits(executor, projectId, customerId);
 	// Window bounds come from the same rule metering writes with, so only the current window counts.
-	const now = new Date();
 	const windows =
 		limits.length === 0
 			? []
@@ -835,24 +729,14 @@ export async function readProjectionBalances(
 							limits.window_end_at AS period_ends_at
 						FROM (
 							VALUES ${drizzleSql.join(
-								limits.map((limit) => {
-									const reset = storedCadence(limit.reset_interval, limit.reset_interval_count);
-									const bounds = limit.plan_grant
-										? planGrantWindowBounds(limit.period_start_at, limit.period_end_at, reset, now)
-										: meterLimitWindowBounds(
-												limit.period_start_at,
-												limit.period_end_at,
-												reset,
-												now,
-												optionalStoredCadence(limit.billing_interval, limit.billing_interval_count),
-											);
-									return drizzleSql`(
-										${String(limit.feature_id)}::bigint,
-										${String(limit.limit_quantity)}::numeric,
-										${bounds.start.toISOString()}::timestamptz,
-										${bounds.end.toISOString()}::timestamptz
-									)`;
-								}),
+								limits.map(
+									(limit) => drizzleSql`(
+										${limit.featureId}::bigint,
+										${limit.quantity}::numeric,
+										${limit.start.toISOString()}::timestamptz,
+										${limit.end.toISOString()}::timestamptz
+									)`,
+								),
 								drizzleSql`, `,
 							)}
 						) AS limits(feature_id, limit_quantity, window_start_at, window_end_at)
@@ -887,6 +771,42 @@ export async function readProjectionBalances(
 			held: databaseDecimal(row.held, "projection held", row.credit_scale),
 			periodEndsAt: toIsoStringOrNull(row.period_ends_at),
 		}));
+}
+
+/**
+ * The account's meter limits as metering resolves them (see `combineMeterLimits`): for each feature
+ * a plan limits, the quantity its sources add up to and the window their anchor counts in.
+ */
+async function readProjectionMeterLimits(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string,
+): Promise<Array<{ featureId: string; quantity: string; start: Date; end: Date }>> {
+	const features = await executeRows<{ id: string | number | bigint; credit_scale: number }>(
+		executor,
+		drizzleSql`
+			SELECT DISTINCT f.id, f.credit_scale
+			FROM plan_items pi
+			JOIN features f ON f.project_id = pi.project_id AND f.id = pi.feature_id
+			WHERE pi.project_id = ${projectId} AND pi.item_kind = 'meter_limit'
+			ORDER BY f.id
+		`,
+	);
+	const sources = await Promise.all(
+		features.map((feature) => queryMeterLimitRows(executor, projectId, customerId, feature)),
+	);
+	const now = new Date();
+	return features.flatMap((feature, index) => {
+		const combined = combineMeterLimits(sources[index] ?? [], feature.credit_scale);
+		if (combined === null) return [];
+		return [
+			{
+				featureId: String(feature.id),
+				quantity: combined.quantity,
+				...meterLimitBounds(combined.anchor, now),
+			},
+		];
+	});
 }
 
 interface ProjectionBalanceRow {

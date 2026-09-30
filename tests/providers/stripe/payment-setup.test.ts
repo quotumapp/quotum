@@ -925,7 +925,11 @@ describe("setup that starts a plan", () => {
 	}
 
 	function planSetup(
-		options: { plan?: StripeRecurringCheckoutPlan; hasActiveBasePlan?: boolean } = {},
+		options: {
+			plan?: StripeRecurringCheckoutPlan;
+			hasActiveBasePlan?: boolean;
+			meterLimitConflicts?: string[];
+		} = {},
 	) {
 		const ctx = context({ sessionStatus: "complete" });
 		const subscriptions = subscriptionClient();
@@ -942,6 +946,7 @@ describe("setup that starts a plan", () => {
 							return resolved;
 						},
 						hasActiveBasePlan: async () => options.hasActiveBasePlan ?? false,
+						addOnMeterLimitConflicts: async () => options.meterLimitConflicts ?? [],
 						recordPaymentSetupSubscriptionId: (input) =>
 							ctx.store.recordPaymentSetupSubscriptionId(input),
 						recordPaymentSetupPlanOutcome: (input) =>
@@ -1223,6 +1228,26 @@ describe("setup that starts a plan", () => {
 			plan_status: "not_eligible",
 			plan_failure_code: "BASE_PLAN_ALREADY_ACTIVE",
 		});
+	});
+
+	it("records not_eligible for an add-on whose meter limits cannot add to the account's", async () => {
+		const { ctx, subscriptions } = planSetup({
+			plan: { ...proPlan, kind: "addon" },
+			hasActiveBasePlan: true,
+			meterLimitConflicts: ["api_requests"],
+		});
+		const creation = await create(ctx, { parameters: planRequest });
+		await reconcilePaymentSetup(ctx, {
+			setupId: creation.setupId,
+			workerId: "worker-a",
+			attempts: 0,
+		});
+		expect(ctx.store.only()).toMatchObject({
+			status: "completed",
+			plan_status: "not_eligible",
+			plan_failure_code: "ADDON_METER_LIMIT_CONFLICT",
+		});
+		expect(subscriptions.creates).toHaveLength(0);
 	});
 
 	it.each(["card_declined", "authentication_required"] as const)(

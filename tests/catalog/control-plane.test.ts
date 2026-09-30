@@ -761,6 +761,41 @@ describe("catalog control plane cadences", () => {
 		expect(await messageOf([overage("month")])).toBe("normalized");
 	});
 
+	it("requires every meter limit an add-on adds to to be a hard cap with the same reset", async () => {
+		const addOn = (overrides: Partial<CatalogPlanItemIntent>) =>
+			plan({ key: "boost", name: "Boost", kind: "addon", items: [item(overrides)] });
+		const refused =
+			"Meter limits on credits must all be blocked caps with the same reset, because add-on boost adds to them";
+		expect(await messageOf([plan({ items: [item({})] }), addOn({ quantity: "50" })])).toBe(
+			"normalized",
+		);
+		// Base plans may limit a feature differently while no add-on limits it.
+		expect(
+			await messageOf([
+				plan({ items: [item({ resetInterval: "day" })] }),
+				plan({ key: "team", name: "Team", items: [item({})] }),
+			]),
+		).toBe("normalized");
+		expect(await messageOf([plan({ items: [item({ resetInterval: "day" })] }), addOn({})])).toBe(
+			refused,
+		);
+		expect(
+			await messageOf([
+				plan({ items: [item({ resetInterval: "day" })] }),
+				addOn({ resetInterval: "day", resetIntervalCount: 2 }),
+			]),
+		).toBe(refused);
+		const overage = item({
+			overagePolicy: "allowed",
+			price: { ...flatPrice([stripeBinding]), key: "credits-overage" },
+		});
+		expect(await messageOf([plan({ items: [overage] }), addOn({})])).toBe(refused);
+		// An add-on alone decides its own limit, overage included.
+		expect(
+			await messageOf([plan({}), plan({ key: "boost", kind: "addon", items: [overage] })]),
+		).toBe("normalized");
+	});
+
 	it("normalizes counts and the earlier rollover spelling in a stored catalog", async () => {
 		const stored: CatalogIntent = {
 			features: [feature],

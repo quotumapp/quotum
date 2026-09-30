@@ -146,6 +146,21 @@ month, so Jan 31 to Feb 28 rolls on to Mar 31, and any other period rolls on its
 week and hour windows are exact multiples of 24 hours, 7 days and 1 hour. Usage recorded at the
 exact end of a window counts in the next.
 
+An add-on that caps a feature raises the account's cap: the limits of the account's base plan and
+its add-ons on one feature add up within one window. The base plan's limit anchors it: the window,
+the overage policy and any overage price are the base plan's (the newest base plan's, should an
+account hold several), or the newest add-on's when no base plan caps the feature. An add-on's
+limit adds its quantity when both are hard caps (`overagePolicy: "blocked"`) with the same reset,
+and counts from the moment the add-on is active. Postpaid overage is invoiced against one item's own
+quantity, so a limit that allows it never adds up. Catalog preview and publication therefore refuse
+a catalog with `400 INVALID_REQUEST` once an add-on caps a feature that another plan caps with
+overage allowed or with another reset, and an add-on purchase whose limits cannot add up with the
+ones the account already holds, such as a base plan bought from an earlier revision, is
+`ADDON_METER_LIMIT_CONFLICT` (409) with the features in `details.featureKeys`. An account that
+still reaches such a combination another way, such as a later base-plan change, keeps its anchor's
+limit and the add-on limits that can join it; usage never fails over it. A plan grant, such as a
+trial or the default plan, caps alone, and a paying subscription's limit replaces it.
+
 Spend and usage limits (`PUT /controls`, plan `controls`, contract `controls`) and usage alerts
 count in UTC calendar windows: `interval` is one of `day`, `week`, `month`, `quarter`,
 `semi_annual`, `year`, `hour` or `lifetime`, times an optional `intervalCount` (default 1; none for
@@ -369,7 +384,8 @@ Execution rechecks the previewed plan version before reserving the setup. A cata
 that races with the execution claim also returns `COMMERCIAL_PREVIEW_STALE`, without creating a
 setup link for the replacement version.
 
-An add-on without an active base plan is `ADDON_REQUIRES_BASE_PLAN` (409). A base plan when the
+An add-on without an active base plan is `ADDON_REQUIRES_BASE_PLAN` (409), and one whose meter
+limits cannot add up with the account's is `ADDON_METER_LIMIT_CONFLICT` (409). A base plan when the
 account already has an active one is `BASE_PLAN_ALREADY_ACTIVE` (409): change it with
 `subscription_change`. Checkout can still sell that base plan from a hosted page; this charge cannot.
 
@@ -421,8 +437,9 @@ completes and releases the slot. Quotum creates the subscription on the customer
 authentication (`402`) does not create a subscription: the card stays saved, `plan.status` is
 `payment_failed`, and `plan.failure.code` is Stripe's code. Start the plan afterwards with
 `checkout_plan`. A plan version that changed after the preview was issued leaves `plan_changed`
-and does not start. An add-on that lost its base plan, or a base plan the account gained in the
-meantime, leaves `not_eligible` with that check's code. `started` means the subscription was
+and does not start. An add-on that lost its base plan or whose meter limits no longer add up with
+the account's, or a base plan the account gained in the meantime, leaves `not_eligible` with that
+check's code. `started` means the subscription was
 recorded and a projection was queued; a later webhook for the same subscription is idempotent.
 On retry, Quotum first recovers any subscription already created for this setup, even if the catalog
 or eligibility has since changed. If the subscription id was not persisted, recovery searches all

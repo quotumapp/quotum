@@ -32,6 +32,12 @@
       ]
     },
     {
+      "code": "ADDON_METER_LIMIT_CONFLICT",
+      "sources": [
+        "src/providers/stripe/add-on-meter-limits.ts"
+      ]
+    },
+    {
       "code": "ADDON_REQUIRES_BASE_PLAN",
       "sources": [
         "src/providers/stripe/saved-card-plan.ts",

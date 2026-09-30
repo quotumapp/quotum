@@ -700,6 +700,51 @@ export class StripeBillingRepository extends RepositoryModule {
 		return row?.active === true;
 	}
 
+	/**
+	 * The features whose meter limits in the add-on plan version cannot add up with the limits the
+	 * account's funding subscriptions already hold on them: a limit that allows postpaid overage, or
+	 * one with another reset (see `combineMeterLimits`).
+	 */
+	async addOnMeterLimitConflicts(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		planVersionId: string,
+	): Promise<string[]> {
+		requireNonBlank(billingAccountId, "p_billing_account_id");
+		const projectId = project.projectInstanceId;
+		const rows = await executeRows<{ key: string }>(
+			this.database,
+			drizzleSql`
+				SELECT DISTINCT feature.key
+				FROM plan_items added
+				JOIN features feature
+					ON feature.project_id = added.project_id AND feature.id = added.feature_id
+				JOIN customers c
+					ON c.project_id = added.project_id AND c.billing_account_id = ${billingAccountId}
+				JOIN subscriptions s
+					ON s.project_id = c.project_id AND s.customer_id = c.id
+				JOIN plan_items held
+					ON held.project_id = s.project_id
+					AND held.plan_version_id = s.plan_version_id
+					AND held.feature_id = added.feature_id
+					AND held.item_kind = 'meter_limit'
+				WHERE added.project_id = ${projectId}
+					AND added.plan_version_id = ${planVersionId}::bigint
+					AND added.item_kind = 'meter_limit'
+					AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+					AND (s.expires_at IS NULL OR s.expires_at > now())
+					AND (
+						added.overage_policy <> 'blocked'
+						OR held.overage_policy <> 'blocked'
+						OR added.reset_interval IS DISTINCT FROM held.reset_interval
+						OR added.reset_interval_count <> held.reset_interval_count
+					)
+				ORDER BY feature.key
+			`,
+		);
+		return rows.map((row) => row.key);
+	}
+
 	async getStripeProviderCustomer(
 		project: ProjectInstanceContext,
 		input: GetStripeProviderCustomerInput,

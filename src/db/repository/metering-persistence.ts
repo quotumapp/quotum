@@ -25,7 +25,7 @@ import {
 } from "../../billing/pricing";
 import type { BillingProvider } from "../../billing/types";
 import { purchaseActionFor } from "../../providers/capabilities";
-import { addUtcMonths, type CadenceUnit } from "../../shared/cadence";
+import { addUtcMonths } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import type { AutoTopupPolicyRow, ControlDenial } from "./controls-runtime";
 import {
@@ -34,15 +34,15 @@ import {
 	recordUsageControlEntries,
 	releaseControlHolds,
 } from "./controls-runtime";
-import { defaultPlanAllowanceEndingSql, defaultPlanReadGrantSql } from "./default-plan-sql";
+import { defaultPlanAllowanceEndingSql } from "./default-plan-sql";
 import { enqueueUsageProjection } from "./entitlements";
 import {
-	meterLimitWindowBounds,
-	optionalStoredCadence,
-	planGrantWindowBounds,
-	startOfUtcMonth,
-	storedCadence,
-} from "./meter-limit-windows";
+	combineMeterLimits,
+	type MeterLimitRow,
+	meterLimitBounds,
+	queryMeterLimitRows,
+} from "./meter-limit-sources";
+import { startOfUtcMonth } from "./meter-limit-windows";
 import { readPendingAllowances, type WindowAllocation } from "./plan-grant-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -200,144 +200,6 @@ function meteredFeatureNotFound(key: string): NotFoundBillingError {
 	return new NotFoundBillingError(`Metered feature ${key} was not found`, "FEATURE_NOT_FOUND");
 }
 
-interface MeterLimitRow {
-	plan_item_id: string | number | bigint;
-	/** Exactly one of the subscription and the plan grant is set. */
-	subscription_id: string | null;
-	plan_grant_id: string | null;
-	quantity: unknown;
-	overage_policy: "blocked" | "allowed";
-	reset_interval: CadenceUnit;
-	reset_interval_count: number;
-	billing_interval: CadenceUnit | null;
-	billing_interval_count: number;
-	period_start_at: Date | string;
-	period_end_at: Date | string | null;
-}
-
-/**
- * The meter limits that apply to the account's feature: a paying subscription's, a plan grant's,
- * or the default plan's when the account would start it on its next write. A null account is one
- * Quotum has not recorded yet.
- */
-export function queryMeterLimitRows(
-	executor: QueryExecutor,
-	projectId: string,
-	customerId: string | null,
-	feature: FeatureRow,
-): Promise<MeterLimitRow[]> {
-	const customer = drizzleSql`${customerId}::uuid`;
-	return executeRows<MeterLimitRow>(
-		executor,
-		// A paying subscription's limit comes before a plan grant's, which has no payment method and
-		// so never allows overage.
-		drizzleSql`
-			SELECT
-				plan_item_id,
-				subscription_id,
-				plan_grant_id,
-				quantity,
-				overage_policy,
-				reset_interval,
-				reset_interval_count,
-				billing_interval,
-				billing_interval_count,
-				period_start_at,
-				period_end_at
-			FROM (
-				SELECT
-					pi.id AS plan_item_id,
-					s.id AS subscription_id,
-					NULL::uuid AS plan_grant_id,
-					pi.quantity,
-					pi.overage_policy,
-					pi.reset_interval,
-					pi.reset_interval_count,
-					pv.billing_interval,
-					pv.billing_interval_count,
-					COALESCE(s.current_period_start, s.starts_at) AS period_start_at,
-					COALESCE(s.current_period_end, s.expires_at) AS period_end_at,
-					0 AS source_rank,
-					s.created_at AS sort_at,
-					s.id::text AS sort_id
-				FROM subscriptions s
-				JOIN plan_items pi
-					ON pi.project_id = s.project_id
-					AND pi.plan_version_id = s.plan_version_id
-				JOIN plan_versions pv
-					ON pv.project_id = pi.project_id
-					AND pv.id = pi.plan_version_id
-				WHERE s.project_id = ${projectId}
-					AND s.customer_id = ${customer}
-					AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-					AND (s.expires_at IS NULL OR s.expires_at > now())
-					AND pi.feature_id = ${featureId(feature)}
-					AND pi.item_kind = 'meter_limit'
-
-				UNION ALL
-
-				SELECT
-					pi.id AS plan_item_id,
-					NULL::uuid AS subscription_id,
-					g.id AS plan_grant_id,
-					pi.quantity,
-					'blocked'::text AS overage_policy,
-					pi.reset_interval,
-					pi.reset_interval_count,
-					pv.billing_interval,
-					pv.billing_interval_count,
-					g.starts_at AS period_start_at,
-					g.ends_at AS period_end_at,
-					1 AS source_rank,
-					g.created_at AS sort_at,
-					g.id::text AS sort_id
-				FROM plan_grants g
-				JOIN plan_items pi
-					ON pi.project_id = g.project_id
-					AND pi.plan_version_id = g.plan_version_id
-				JOIN plan_versions pv
-					ON pv.project_id = pi.project_id
-					AND pv.id = pi.plan_version_id
-				WHERE g.project_id = ${projectId}
-					AND g.customer_id = ${customer}
-					AND g.status = 'active'
-					AND g.origin <> 'default'
-					AND (g.ends_at IS NULL OR g.ends_at > now())
-					AND pi.feature_id = ${featureId(feature)}
-					AND pi.item_kind = 'meter_limit'
-
-				UNION ALL
-
-				-- The default plan at the version the account's next write applies (a write has caught
-				-- up first, so it is the grant's own), windowed from where it started, or would start.
-				SELECT
-					pi.id AS plan_item_id,
-					NULL::uuid AS subscription_id,
-					d.grant_id AS plan_grant_id,
-					pi.quantity,
-					'blocked'::text AS overage_policy,
-					pi.reset_interval,
-					pi.reset_interval_count,
-					pv.billing_interval,
-					pv.billing_interval_count,
-					d.anchor_at AS period_start_at,
-					NULL::timestamptz AS period_end_at,
-					CASE WHEN d.grant_id IS NULL THEN 2 ELSE 1 END AS source_rank,
-					d.created_at AS sort_at,
-					COALESCE(d.grant_id::text, '') AS sort_id
-				FROM (${defaultPlanReadGrantSql(projectId, customer)}) d
-				JOIN plan_items pi
-					ON pi.project_id = ${projectId} AND pi.plan_version_id = d.plan_version_id
-				JOIN plan_versions pv ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
-				WHERE pi.feature_id = ${featureId(feature)}
-					AND pi.item_kind = 'meter_limit'
-			) sources
-			ORDER BY source_rank, sort_at, sort_id
-			LIMIT 2
-		`,
-	);
-}
-
 export function queryMeterLimitConfigured(
 	executor: QueryExecutor,
 	projectId: string,
@@ -379,41 +241,20 @@ export async function meterLimitDecision(
 	candidates: readonly MeterLimitRow[],
 	configured: boolean | (() => Promise<boolean>),
 ): Promise<MeterLimitDecision | null> {
-	// A paying subscription takes precedence over a plan grant the moment it starts.
-	const paid = candidates.filter((row) => row.subscription_id !== null);
-	const rows = paid.length > 0 ? paid : candidates;
-	if (rows.length > 1) {
-		throw new BillingError(
-			`Multiple active meter limits apply to feature ${feature.key}`,
-			"METERING_CONFIGURATION_ERROR",
-			409,
-			{ classification: "persistence_conflict" },
-		);
-	}
-	const active = rows[0];
-	if (active !== undefined) {
-		const reset = storedCadence(active.reset_interval, active.reset_interval_count);
-		// A plan grant, or the default plan an unrecorded account would get, windows from its start.
-		const bounds =
-			active.plan_grant_id !== null || active.subscription_id === null
-				? planGrantWindowBounds(active.period_start_at, active.period_end_at, reset, new Date())
-				: meterLimitWindowBounds(
-						active.period_start_at,
-						active.period_end_at,
-						reset,
-						new Date(),
-						optionalStoredCadence(active.billing_interval, active.billing_interval_count),
-					);
+	const combined = combineMeterLimits(candidates, feature.credit_scale);
+	if (combined !== null) {
+		const { anchor } = combined;
+		const bounds = meterLimitBounds(anchor, new Date());
 		const overagePrice =
-			active.overage_policy === "allowed"
-				? await resolveMeteredOveragePrice(executor, projectId, String(active.plan_item_id))
+			anchor.overage_policy === "allowed"
+				? await resolveMeteredOveragePrice(executor, projectId, String(anchor.plan_item_id))
 				: null;
 		return {
 			feature,
-			subscriptionId: active.subscription_id,
-			planItemId: String(active.plan_item_id),
-			limit: databaseDecimal(active.quantity, "meter limit", feature.credit_scale),
-			overagePolicy: active.overage_policy,
+			subscriptionId: anchor.subscription_id,
+			planItemId: String(anchor.plan_item_id),
+			limit: combined.quantity,
+			overagePolicy: anchor.overage_policy,
 			overagePrice,
 			windowStartAt: bounds.start,
 			windowEndAt: bounds.end,
