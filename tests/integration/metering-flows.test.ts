@@ -987,6 +987,35 @@ localDescribe("authoritative metering flows", () => {
 		expect(await countRows(context.sql, "usage_windows")).toBe(1);
 	});
 
+	it("counts a filter value in one window whether it arrives as a number or a string", async () => {
+		await seedMeterLimitSubscription(context.sql, "cap_account", "workspace_1");
+		const project = integrationProjectContext();
+		const subject = {
+			billingAccountId: "cap_account",
+			featureKey: "api_requests",
+			entityId: "workspace_1",
+		};
+
+		const consumed = await context.repository.consumeUsage(project, {
+			...subject,
+			filters: { region: "us", model: 1 },
+			quantity: "150",
+			idempotencyKey: "cap:numeric",
+		});
+		const check = await context.repository.checkUsage(project, {
+			...subject,
+			filters: { model: "1", region: "us" },
+			quantity: "100",
+		});
+
+		expect(consumed).toMatchObject({ allowed: true, balance: { available: "50" } });
+		expect(check).toMatchObject({
+			allowed: false,
+			balance: { granted: "200", consumed: "150", available: "50" },
+		});
+		expect(await countRows(context.sql, "usage_windows")).toBe(1);
+	});
+
 	it("counts only the meter-limit window with the current period bounds", async () => {
 		await seedMeterLimitSubscription(context.sql, "overlap_account", "workspace_overlap");
 		// A window with other bounds that still covers now, as an earlier period anchor leaves behind.

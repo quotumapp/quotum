@@ -1256,12 +1256,19 @@ export function validateFilters(
 	}
 }
 
+/**
+ * The usage window key for a set of filter values. Values are compared as text, so `{ model: 1 }`
+ * and `{ model: "1" }`, or `true` and `"true"`, count in the same window.
+ */
 export function canonicalFilterKey(
 	filters: Record<string, string | number | boolean> | undefined,
 ): string | null {
-	return filters === undefined || Object.keys(filters).length === 0
-		? null
-		: sha256Hex(stableJson(filters));
+	if (filters === undefined || Object.keys(filters).length === 0) return null;
+	return sha256Hex(
+		stableJson(
+			Object.fromEntries(Object.entries(filters).map(([key, value]) => [key, String(value)])),
+		),
+	);
 }
 
 export async function findCustomer(
