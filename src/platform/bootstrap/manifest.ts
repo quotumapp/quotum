@@ -151,7 +151,21 @@ export function parsePlatformBootstrapManifest(value: string): PlatformBootstrap
 
 	const parsed = bootstrapManifestSchema.safeParse(parsedJson);
 	if (!parsed.success) {
-		throw new Error("BILLING_PLATFORM_BOOTSTRAP_JSON is invalid");
+		// Name where the first problem is; Zod's messages never repeat the offending value.
+		const issue = parsed.error.issues[0];
+		const at = issue === undefined || issue.path.length === 0 ? "" : ` at ${issuePath(issue.path)}`;
+		throw new Error(
+			`BILLING_PLATFORM_BOOTSTRAP_JSON is invalid${at}${issue === undefined ? "" : `: ${issue.message}`}`,
+		);
 	}
 	return parsed.data;
+}
+
+/** `organizations[0].projects[1].key` */
+function issuePath(path: readonly PropertyKey[]): string {
+	return path
+		.map((segment, index) =>
+			typeof segment === "number" ? `[${segment}]` : `${index === 0 ? "" : "."}${String(segment)}`,
+		)
+		.join("");
 }

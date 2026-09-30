@@ -479,7 +479,8 @@ bun run catalog push ./billing.catalog.ts
 ```
 
 The image runs the same commands as `quotum catalog status|diff|push`; mount the catalog file into
-the container to diff or push it. The file exports its intent as `catalog` (or the default export)
+the container to diff or push it. `status` needs only the base URL and a project key; `diff` and
+`push` also need the operator key. The file exports its intent as `catalog` (or the default export)
 and may export `expectedRevision`: a revision number to publish only over that revision, or `null`
 to publish only while no catalog is published. Without the export, `diff` and `push` expect the
 current revision.

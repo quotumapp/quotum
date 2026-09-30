@@ -1,4 +1,9 @@
 import { open, unlink } from "node:fs/promises";
+import {
+	CliUsageError,
+	type CommandOutput,
+	reportOperatorFailure,
+} from "./composition/cli/operator-context";
 import { BunPlatformUnitOfWork } from "./composition/project-instance-persistence";
 import { createBillingDatabaseConnection } from "./db/client";
 import {
@@ -12,40 +17,65 @@ import {
 	PlatformBootstrapService,
 } from "./platform/bootstrap/service";
 import { generateProjectApiCredential } from "./platform/credentials/project-api-token";
-import { writeStdout } from "./shared/cli-output";
+import { writeStderr, writeStdout } from "./shared/cli-output";
 import type { CredentialAccess } from "./shared/credential-access";
 
-if (import.meta.main) {
-	await runPlatformBootstrap();
+type Environment = Readonly<Record<string, string | undefined>>;
+
+export interface PlatformBootstrapCommandDependencies {
+	output?: CommandOutput;
+	/** Replaces the database-backed service, for tests. */
+	openService?: (postgresUri: string) => {
+		service: Pick<PlatformBootstrapService, "inspect" | "apply">;
+		close(): Promise<void>;
+	};
 }
 
-async function runPlatformBootstrap(): Promise<void> {
-	const mode = parseMode(process.argv.slice(2));
-	const postgresUri = requireEnvironmentValue("POSTGRES_URI");
-	const manifest = parsePlatformBootstrapManifest(
-		requireEnvironmentValue("BILLING_PLATFORM_BOOTSTRAP_JSON"),
-	);
-	const connection = createBillingDatabaseConnection({ postgresUri });
-	const service = new PlatformBootstrapService(new BunPlatformUnitOfWork(connection.sql));
+const help = "quotum bootstrap --help";
 
+/** Runs `quotum bootstrap`; a failure is one line on stderr, never a stack trace. */
+export async function runPlatformBootstrapCommand(
+	args: readonly string[],
+	env: Environment,
+	dependencies: PlatformBootstrapCommandDependencies = {},
+): Promise<number> {
+	const output = dependencies.output ?? { stdout: writeStdout, stderr: writeStderr };
 	try {
-		const inspection = await service.inspect(manifest);
-		if (mode.kind === "check") {
-			writeStdout(JSON.stringify(inspection, null, 2));
-			process.exitCode = platformBootstrapCheckExitCode(inspection);
-		} else {
+		const mode = parseMode(args);
+		const postgresUri = requireEnvironmentValue(env, "POSTGRES_URI");
+		const manifest = parsePlatformBootstrapManifest(
+			requireEnvironmentValue(env, "BILLING_PLATFORM_BOOTSTRAP_JSON"),
+		);
+		const { service, close } = (dependencies.openService ?? openBootstrapService)(postgresUri);
+		try {
+			const inspection = await service.inspect(manifest);
+			if (mode.kind === "check") {
+				output.stdout(JSON.stringify(inspection, null, 2));
+				return platformBootstrapCheckExitCode(inspection);
+			}
 			await applyPlatformBootstrap(
 				service,
 				manifest,
 				inspection.credentialsToIssue,
 				mode.credentialsOut,
-				writeStdout,
+				output.stdout,
 				inspection.readOnlyCredentialsToIssue,
 			);
+			return 0;
+		} finally {
+			await close();
 		}
-	} finally {
-		await connection.sql.close();
+	} catch (error) {
+		return reportOperatorFailure(error, help, output);
 	}
+}
+
+function openBootstrapService(postgresUri: string) {
+	const connection = createBillingDatabaseConnection({ postgresUri });
+	return {
+		service: new PlatformBootstrapService(new BunPlatformUnitOfWork(connection.sql)),
+		close: () => connection.sql.close(),
+	};
 }
 
 /** 0 once every declared row and credential exists; 2 while `--apply` has something to do. */
@@ -73,7 +103,7 @@ export async function applyPlatformBootstrap(
 		credentialsToIssue.length + readOnlyCredentialsToIssue.length > 0 &&
 		credentialsOut === null
 	) {
-		throw new Error("--credentials-out is required when bootstrap will issue credentials");
+		throw new CliUsageError("--credentials-out is required when bootstrap will issue credentials.");
 	}
 
 	const generate = (keys: readonly string[], access: CredentialAccess) =>
@@ -165,7 +195,9 @@ export async function writePlatformCredentialOutput(
 ): Promise<void> {
 	let output: Awaited<ReturnType<typeof open>> | undefined;
 	try {
-		output = await open(path, "wx", 0o600);
+		output = await open(path, "wx", 0o600).catch((error: unknown) => {
+			throw credentialOutputError(path, error);
+		});
 		await output.writeFile(renderPlatformCredentialOutput(credentials), { encoding: "utf8" });
 		await output.sync();
 	} catch (error) {
@@ -176,23 +208,46 @@ export async function writePlatformCredentialOutput(
 	}
 }
 
+/** Why the credentials file could not be created, keeping the system error's `code`. */
+function credentialOutputError(path: string, error: unknown): Error {
+	const code = (error as { code?: unknown } | null)?.code;
+	const reason =
+		code === "EEXIST"
+			? "already exists; bootstrap never overwrites a credentials file"
+			: code === "ENOENT"
+				? "cannot be created: its directory does not exist"
+				: code === "EACCES" || code === "EPERM"
+					? "cannot be created: permission denied"
+					: `cannot be created: ${error instanceof Error ? error.message : String(error)}`;
+	return Object.assign(new Error(`--credentials-out ${path} ${reason}`, { cause: error }), {
+		code,
+	});
+}
+
 function parseMode(
 	args: readonly string[],
 ): { kind: "check" } | { kind: "apply"; credentialsOut: string | null } {
 	if (args.length === 1 && args[0] === "--check") return { kind: "check" };
-	if (args[0] !== "--apply") {
-		throw new Error("Usage: platform:bootstrap -- --check | --apply [--credentials-out <path>]");
+	if (args[0] === "--apply" && args.length === 1) return { kind: "apply", credentialsOut: null };
+	if (
+		args[0] === "--apply" &&
+		args.length === 3 &&
+		args[1] === "--credentials-out" &&
+		args[2]?.trim() !== ""
+	) {
+		return { kind: "apply", credentialsOut: args[2] ?? null };
 	}
-	if (args.length === 1) return { kind: "apply", credentialsOut: null };
-	if (args.length === 3 && args[1] === "--credentials-out" && args[2]?.trim() !== "") {
-		return { kind: "apply", credentialsOut: args[2] };
-	}
-	throw new Error("Usage: platform:bootstrap -- --check | --apply [--credentials-out <path>]");
+	throw new CliUsageError("Usage: quotum bootstrap --check | --apply [--credentials-out <path>].");
 }
 
-function requireEnvironmentValue(name: string): string {
-	const value = process.env[name]?.trim();
+function requireEnvironmentValue(env: Environment, name: string): string {
+	const value = env[name]?.trim();
 	if (value === undefined || value === "")
 		throw new Error(`${name} environment variable is required`);
 	return value;
+}
+
+// Last, so every declaration above is initialized before the command runs.
+if (import.meta.main) {
+	process.exitCode = await runPlatformBootstrapCommand(process.argv.slice(2), process.env);
 }

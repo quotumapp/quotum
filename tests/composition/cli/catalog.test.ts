@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createSanitizedProcessEnv } from "../../../scripts/lib/sanitized-env";
-import { expectedRevisionFor } from "../../../src/composition/cli/catalog";
+import { expectedRevisionFor, runCatalogCommand } from "../../../src/composition/cli/catalog";
 
 interface RecordedCall {
 	method: string;
@@ -251,3 +251,116 @@ async function runCli(
 	]);
 	return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
 }
+
+describe("catalog command in process", () => {
+	const env = (fixture: { baseUrl: string }, extra: Record<string, string> = {}) => ({
+		BILLING_BASE_URL: fixture.baseUrl,
+		BILLING_PROJECT_API_KEY: "project-secret",
+		...extra,
+	});
+	const captured = () => {
+		const out: string[] = [];
+		const err: string[] = [];
+		return {
+			out,
+			err,
+			output: {
+				stdout: (value: string) => out.push(value),
+				stderr: (value: string) => err.push(value),
+			},
+		};
+	};
+
+	it("reads the status without the operator key", async () => {
+		const fixture = catalogServer();
+		const result = captured();
+		expect(await runCatalogCommand(["status"], env(fixture), result.output)).toBe(0);
+		expect(JSON.parse(result.out.join("\n"))).toMatchObject({ revision: 3 });
+		expect(result.err).toEqual([]);
+		expect(fixture.calls[0]?.headers.has("x-billing-operator-key")).toBe(false);
+	});
+
+	it("requires the operator key for diff and push before calling the API", async () => {
+		const fixture = catalogServer();
+		for (const command of ["diff", "push"]) {
+			const result = captured();
+			expect(await runCatalogCommand([command, "catalog.ts"], env(fixture), result.output)).toBe(1);
+			expect(result.err).toEqual([`BILLING_OPERATOR_API_KEY is required for catalog ${command}`]);
+		}
+		expect(fixture.calls).toEqual([]);
+	});
+
+	it("diffs and pushes with the operator key", async () => {
+		const fixture = catalogServer();
+		const directory = await mkdtemp(join(tmpdir(), "billing-catalog-test-"));
+		temporaryDirectories.push(directory);
+		const catalogPath = join(directory, "catalog.ts");
+		await writeFile(
+			catalogPath,
+			"export const catalog = { features: [], plans: [], topups: [], rateCards: [] };\n",
+			"utf8",
+		);
+		const operatorEnv = env(fixture, { BILLING_OPERATOR_API_KEY: "operator-secret" });
+		const diff = captured();
+		expect(await runCatalogCommand(["diff", catalogPath], operatorEnv, diff.output)).toBe(0);
+		expect(JSON.parse(diff.out.join("\n"))).toEqual({
+			changed: true,
+			currentRevision: 3,
+			nextRevision: 8,
+			intentHash: "next-hash",
+			expiresAt: "2026-08-30T12:15:00.000Z",
+			impact: { plansCreated: 1 },
+		});
+		const push = captured();
+		expect(await runCatalogCommand(["push", catalogPath], operatorEnv, push.output)).toBe(0);
+		expect(JSON.parse(push.out.join("\n"))).toEqual({
+			revision: 8,
+			intentHash: "next-hash",
+			duplicate: false,
+		});
+		expect(fixture.calls.at(-1)?.headers.get("x-billing-actor")).toBe("catalog-cli");
+	});
+
+	it("reports an API refusal on one line with its code", async () => {
+		const fixture = catalogServer({ previewConflict: true });
+		const directory = await mkdtemp(join(tmpdir(), "billing-catalog-test-"));
+		temporaryDirectories.push(directory);
+		const catalogPath = join(directory, "catalog.ts");
+		await writeFile(
+			catalogPath,
+			"export const catalog = { features: [], plans: [], topups: [], rateCards: [] };\n",
+			"utf8",
+		);
+		const result = captured();
+		const code = await runCatalogCommand(
+			["diff", catalogPath],
+			env(fixture, { BILLING_OPERATOR_API_KEY: "operator-secret" }),
+			result.output,
+		);
+		expect(code).toBe(1);
+		expect(result.out).toEqual([]);
+		expect(result.err).toEqual(["CATALOG_REVISION_CONFLICT: Catalog revision 7 is stale"]);
+	});
+
+	it("prints help and refuses unknown commands with exit 64", async () => {
+		const help = captured();
+		expect(await runCatalogCommand([], {}, help.output)).toBe(0);
+		expect(help.out.join("\n")).toContain("diff and push also need BILLING_OPERATOR_API_KEY");
+		const unknown = captured();
+		expect(await runCatalogCommand(["publish"], {}, unknown.output)).toBe(64);
+		expect(unknown.err).toEqual([
+			"Unknown catalog command: publish. Run `quotum catalog --help` for usage.",
+		]);
+		const missingFile = captured();
+		expect(
+			await runCatalogCommand(
+				["diff"],
+				{ BILLING_BASE_URL: "http://127.0.0.1:1", BILLING_OPERATOR_API_KEY: "operator-secret" },
+				missingFile.output,
+			),
+		).toBe(64);
+		expect(missingFile.err).toEqual([
+			"diff requires a catalog TypeScript file. Run `quotum catalog --help` for usage.",
+		]);
+	});
+});
