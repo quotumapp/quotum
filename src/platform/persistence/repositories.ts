@@ -94,6 +94,18 @@ export class PlatformOrganizationRepository {
 		});
 	}
 
+	/**
+	 * Serializes claims of one organization address. Creating and renaming both take it before
+	 * they look the slug up, so the lookup sees a concurrent claim once it commits instead of the
+	 * write failing on the unique index.
+	 */
+	async lockSlug(slug: string): Promise<void> {
+		await this.executor.query({
+			text: "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+			values: [`platform_organizations.slug:${slug}`],
+		});
+	}
+
 	async slugBelongsToAnotherOrganization(slug: string, organizationId: string): Promise<boolean> {
 		const rows = await this.executor.query<{ id: string }>({
 			text: `

@@ -34,19 +34,29 @@ export class MerchantOnboarding {
 		return this.store.idempotent(identity, key, ["onboarding.organization", input], async (tx) => {
 			const draft = await this.lockedDraft(tx, identity.principalId);
 			if (draft?.organization) return this.renameOrganization(tx, identity, draft, input);
-			const existing = await tx`SELECT id FROM platform_organizations WHERE slug=${input.slug}`;
-			if (existing.length)
+			await new PlatformOrganizationRepository(tx).lockSlug(input.slug);
+			// The lock orders this with renames; the conflict clause also covers a writer without it.
+			const [org] = await tx<
+				{ id: string }[]
+			>`INSERT INTO platform_organizations(name,slug) VALUES(${input.name},${input.slug}) ON CONFLICT(slug) DO NOTHING RETURNING id`;
+			if (!org)
 				throw new MerchantError(
 					"SLUG_UNAVAILABLE",
 					"Choose a different organization address.",
 					409,
 				);
-			const [org] = await tx<
-				{ id: string }[]
-			>`INSERT INTO platform_organizations(name,slug) VALUES(${input.name},${input.slug}) RETURNING id`;
-			if (!org) throw new Error("Organization insert failed");
 			await tx`INSERT INTO platform_memberships(organization_id,principal_id,role) VALUES(${org.id},${identity.principalId},'Owner')`;
-			await tx`INSERT INTO platform_onboarding_drafts(principal_id,organization_id,status) VALUES(${identity.principalId},${org.id},'project') ON CONFLICT(principal_id) DO UPDATE SET organization_id=EXCLUDED.organization_id,status='project',revision=platform_onboarding_drafts.revision+1`;
+			// One draft per person: another session that created its organization first keeps it,
+			// and this transaction, with the organization it inserted, rolls back.
+			const created = await tx<
+				{ id: string }[]
+			>`INSERT INTO platform_onboarding_drafts(principal_id,organization_id,status) VALUES(${identity.principalId},${org.id},'project') ON CONFLICT(principal_id) DO NOTHING RETURNING id`;
+			if (!created.length)
+				throw new MerchantError(
+					"DRAFT_CHANGED",
+					"An organization already exists. Continue your saved onboarding.",
+					409,
+				);
 			await this.store.audit(tx, identity.principalId, org.id, "organization.created", org.id);
 			const result = await this.store.draft(identity.principalId, tx);
 			if (!result) throw new Error("Draft insert failed");
@@ -100,6 +110,7 @@ export class MerchantOnboarding {
 				409,
 			);
 		if (organization.name === input.name && organization.slug === input.slug) return draft;
+		await organizations.lockSlug(input.slug);
 		if (await organizations.slugBelongsToAnotherOrganization(input.slug, organization.id))
 			throw new MerchantError("SLUG_UNAVAILABLE", "Choose a different organization address.", 409);
 		// The compare above is the primary guard now that the draft is read under the lock; this
