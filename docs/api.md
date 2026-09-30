@@ -1138,6 +1138,12 @@ A balance counts an allowance no write has recorded in `granted` and `available`
 `breakdown` lists only recorded allocations. Such an allowance has no `allocationId` until the
 account's next write in its window, so an administrative debit cannot target it before then.
 
+A breakdown entry's `sourceKey` names what created the allocation, for a plan grant
+`plan_grant:<grantId>:<planItemId>:<window>`, and never changes: the key is what keeps the
+allocation from being created twice. An allowance that a later grant resumes within its window,
+when an account falls back to the default plan or a newer version adds back a feature an earlier one
+dropped, keeps its key, so its `sourceKey` can name an earlier grant and plan item.
+
 ## Operator grants and administrative debits
 
 Support credit and clawback are audited operator operations. They are not usage corrections or
