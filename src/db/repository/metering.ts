@@ -102,7 +102,7 @@ import {
 	queryAdditiveRateCard,
 	queryMeterLimitConfigured,
 	queryMeterLimitRows,
-	queryPinnedRateCards,
+	queryPinnedRateCard,
 	queryPurchasedRevision,
 	rateDecision,
 	rateFromReservation,
@@ -1810,7 +1810,7 @@ async function resolveMeteringSubject(
 		catchUp,
 		meterLimitRows,
 		meterLimitConfigured,
-		pinnedRates,
+		pinnedRate,
 		additiveRate,
 		purchasedRevision,
 		alerts,
@@ -1820,7 +1820,7 @@ async function resolveMeteringSubject(
 			: planGrantsNeedCatchUp(tx, projectId, customerId),
 		queryMeterLimitRows(tx, projectId, customerId, feature),
 		queryMeterLimitConfigured(tx, projectId, feature),
-		queryPinnedRateCards(tx, projectId, customerId, feature),
+		queryPinnedRateCard(tx, projectId, customerId, feature),
 		queryAdditiveRateCard(tx, projectId, feature),
 		queryPurchasedRevision(tx, projectId, customerId),
 		options.alerts
@@ -1853,7 +1853,7 @@ async function resolveMeteringSubject(
 		alerts,
 		rate: () =>
 			rateDecision(tx, projectId, feature, {
-				pinned: pinnedRates,
+				pinned: pinnedRate,
 				additive: additiveRate,
 				purchased: purchasedRevision,
 			}),
