@@ -373,7 +373,11 @@ consume response and only needs purchase and provider events.
 Receivers must be public HTTPS by default. Quotum resolves the receiver's hostname, refuses the
 delivery unless every resolved address is public, and pins the request to the address it checked,
 so a later lookup cannot redirect it. Loopback, link-local and cloud metadata addresses, private
-ranges and IPv4-mapped or NAT64 forms of them are refused.
+ranges and IPv4-mapped or NAT64 forms of them are refused. Validating a connection whose receiver
+is refused, does not resolve, or does not answer within 10 seconds fails with
+`422 PROJECTION_RECEIVER_UNREACHABLE`. The answer is the same in each case, so validation does not
+reveal which names resolve to private addresses. A receiver that answers without echoing the
+challenge fails with `422 PROJECTION_VERIFICATION_FAILED`.
 
 A [headless](deployment.md#headless-mode) deployment can run its backends on a private network
 next to Quotum. `BILLING_PROJECTION_ALLOWED_NETWORKS` approves private networks for receivers,

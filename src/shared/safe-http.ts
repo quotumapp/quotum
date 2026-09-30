@@ -148,6 +148,14 @@ export async function publicHttpsPost(
 }
 
 /**
+ * The destination could not be used: the policy refused it, its name did not resolve, or the
+ * exchange failed or timed out. Anything else `postToDestination` throws is a local fault.
+ */
+export class DestinationError extends Error {
+	override readonly name = "DestinationError";
+}
+
+/**
  * Posts to a destination the policy allows. HTTPS may reach public addresses and approved private
  * networks; http only approved private networks. Every resolved address must qualify, and the
  * request is pinned to the first one so a second lookup cannot redirect it.
@@ -166,21 +174,28 @@ export async function postToDestination(
 	const url = new URL(urlString);
 	const insecure = url.protocol === "http:" && policy.allowInsecureHttp;
 	if ((url.protocol !== "https:" && !insecure) || url.username || url.password || url.hash)
-		throw new Error("A public HTTPS URL is required");
+		throw new DestinationError("A public HTTPS URL is required");
 	const approved = approvedNetworks(policy);
 	const hostname = url.hostname.replace(/^\[|\]$/g, "");
 	let timeout: ReturnType<typeof setTimeout> | undefined;
 	const addresses = await Promise.race([
-		resolveAddresses(hostname, { all: true }),
+		resolveAddresses(hostname, { all: true }).catch((error: unknown) => {
+			throw new DestinationError(
+				`Destination lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}),
 		new Promise<never>((_, reject) => {
-			timeout = setTimeout(() => reject(new Error("Destination lookup timed out")), 5000);
+			timeout = setTimeout(
+				() => reject(new DestinationError("Destination lookup timed out")),
+				5000,
+			);
 		}),
 	]).finally(() => {
 		if (timeout) clearTimeout(timeout);
 	});
 	const allowed = (address: string) => approved(address) || (!insecure && isPublicAddress(address));
 	if (!addresses.length || addresses.some((a) => !allowed(a.address)))
-		throw new Error(
+		throw new DestinationError(
 			insecure
 				? "An approved private destination is required for http"
 				: policy.allowedNetworks.length > 0
@@ -188,7 +203,7 @@ export async function postToDestination(
 					: "A public HTTPS destination is required",
 		);
 	const target = addresses[0];
-	if (!target) throw new Error("Destination unavailable");
+	if (!target) throw new DestinationError("Destination unavailable");
 	return new Promise((resolve, reject) => {
 		const options = {
 			method: "POST",
@@ -209,7 +224,7 @@ export async function postToDestination(
 				length += chunk.length;
 				if (length > 4096) {
 					res.destroy();
-					reject(new Error("Receiver response too large"));
+					reject(new DestinationError("Receiver response too large"));
 					return;
 				}
 				chunks.push(Buffer.from(chunk));
@@ -217,13 +232,13 @@ export async function postToDestination(
 			res.on("end", () =>
 				resolve({ status: res.statusCode ?? 502, body: Buffer.concat(chunks).toString("utf8") }),
 			);
-			res.on("error", () => reject(new Error("Receiver request failed")));
+			res.on("error", () => reject(new DestinationError("Receiver request failed")));
 		};
 		const req = insecure
 			? sendHttpRequest(url, options, onResponse)
 			: sendRequest(url, options, onResponse);
-		req.on("timeout", () => req.destroy(new Error("Receiver request timed out")));
-		req.on("error", () => reject(new Error("Receiver request failed")));
+		req.on("timeout", () => req.destroy(new DestinationError("Receiver request timed out")));
+		req.on("error", () => reject(new DestinationError("Receiver request failed")));
 		req.end(body);
 	});
 }

@@ -97,7 +97,69 @@ describe("projection connection validation", () => {
 				projection("https://receiver.internal/billing", "receiver-secret"),
 				context,
 			),
-		).rejects.toThrow("A public HTTPS destination is required");
+		).rejects.toMatchObject({ code: "PROJECTION_RECEIVER_UNREACHABLE", status: 422 });
 		expect(requested).toHaveLength(1);
+	});
+
+	it("answers a refused, unresolvable or failing receiver with one 422", async () => {
+		const failing = ((_url: URL, _options: unknown) => {
+			const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+			req.destroy = () => undefined;
+			req.end = () => req.emit("error", new Error("connect ECONNREFUSED"));
+			return req;
+		}) as unknown as typeof httpRequest & typeof httpsRequest;
+		const addresses: Record<string, string> = {
+			"private.example.com": "10.0.0.5",
+			"metadata.example.com": "169.254.169.254",
+			"down.example.com": "93.184.215.14",
+		};
+		const validation = createConnectionValidation({
+			destinationDependencies: {
+				lookup: async (hostname) => {
+					const address = addresses[hostname];
+					if (!address)
+						throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), {
+							code: "ENOTFOUND",
+						});
+					return [{ address, family: 4 }];
+				},
+				request: failing,
+			},
+		});
+		const answers = [];
+		for (const hostname of [...Object.keys(addresses), "missing.example.com"]) {
+			const failure = await validation
+				.validate("projection", "sandbox", projection(`https://${hostname}`, "secret"), context)
+				.catch((error: unknown) => error);
+			expect(failure).toBeInstanceOf(MerchantError);
+			answers.push({
+				code: (failure as MerchantError).code,
+				status: (failure as MerchantError).status,
+				message: (failure as MerchantError).message,
+			});
+		}
+		expect(new Set(answers.map((answer) => JSON.stringify(answer))).size).toBe(1);
+		expect(answers[0]).toMatchObject({ code: "PROJECTION_RECEIVER_UNREACHABLE", status: 422 });
+	});
+
+	it("keeps a local fault out of the receiver answer", async () => {
+		const broken = (() => {
+			throw new TypeError("request is not a function");
+		}) as unknown as typeof httpRequest & typeof httpsRequest;
+		const validation = createConnectionValidation({
+			destinationDependencies: {
+				lookup: async () => [{ address: "93.184.215.14", family: 4 }],
+				request: broken,
+			},
+		});
+		const failure = await validation
+			.validate(
+				"projection",
+				"sandbox",
+				projection("https://receiver.example.com", "secret"),
+				context,
+			)
+			.catch((error: unknown) => error);
+		expect(failure).toBeInstanceOf(TypeError);
 	});
 });
