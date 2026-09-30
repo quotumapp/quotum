@@ -30,7 +30,7 @@ FROM oven/bun:1.4.2-slim AS release
 # hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade \
-        gzip libpcre2-8-0 libsqlite3-0 perl-base \
+        gzip libpcre2-8-0 libsqlite3-0 libssl3t64 openssl openssl-provider-legacy perl-base \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /usr/src/app
 

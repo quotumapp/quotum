@@ -74,7 +74,7 @@
 	"overrides": {
 		"form-data": "4.0.6",
 		"google-auth-library": "11.1.0",
-		"brace-expansion": "2.1.4",
+		"brace-expansion": "2.1.7",
 		"protobufjs": "7.6.6",
 		"qs": "6.16.0"
 	},
