@@ -1221,6 +1221,54 @@ describe("Stripe normalizer", () => {
 		});
 	});
 
+	it("reads the change that last updated a subscription from its metadata", () => {
+		const subscription = (metadata: unknown) =>
+			normalizeStripeSubscription({
+				eventId: "evt_change_stamp",
+				eventType: "customer.subscription.updated",
+				subscription: {
+					...subscriptionFixture({
+						items: {
+							object: "list",
+							data: [
+								{
+									id: "si_123",
+									object: "subscription_item",
+									current_period_end: futurePeriodEnd,
+									price: { id: "price_premium_monthly", product: "prod_premium" },
+								},
+							],
+						},
+					}),
+					metadata,
+				},
+			});
+
+		expect(subscription({ billingAccountId: "user_123", billingChangeId: "42" })).toMatchObject({
+			billingChangeId: "42",
+		});
+		// Metadata without the stamp: no Quotum change has updated the subscription.
+		expect(subscription({ billingAccountId: "user_123" }).billingChangeId).toBeNull();
+		// No metadata at all: nothing to tell, so the stamp is unknown rather than absent.
+		expect(subscription(undefined).billingChangeId).toBeUndefined();
+	});
+
+	it("reads the change stamp Stripe froze onto an invoice", () => {
+		const invoice = (parent: unknown) => {
+			const command = normalizeStripeInvoice({
+				eventId: "evt_invoice_change_stamp",
+				eventType: "invoice.paid",
+				invoice: legacyInvoiceFixture({ parent }),
+			});
+			if (command.kind !== "subscription") throw new Error("Expected a subscription command");
+			return command.billingChangeId;
+		};
+
+		expect(invoice({ subscription_details: { metadata: { billingChangeId: "42" } } })).toBe("42");
+		expect(invoice({ subscription_details: { metadata: {} } })).toBeNull();
+		expect(invoice(undefined)).toBeUndefined();
+	});
+
 	it("uses event-scoped subscription keys for provider webhooks", () => {
 		const active = normalizeStripeSubscription({
 			eventId: "evt_subscription_active",

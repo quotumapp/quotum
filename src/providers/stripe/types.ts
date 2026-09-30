@@ -122,6 +122,12 @@ export interface NormalizedStripeSubscriptionCommand {
 	invoiceCurrency: string | null;
 	invoicePaidAt: Date | null;
 	autoRenew: boolean;
+	/**
+	 * The subscription change whose update last wrote the subscription's metadata
+	 * (`metadata.billingChangeId`): null when the metadata names none, undefined when the snapshot
+	 * carries no metadata at all.
+	 */
+	billingChangeId: string | null | undefined;
 	rawPayload: Record<string, unknown>;
 	eventType: string;
 	externalEventId: string;

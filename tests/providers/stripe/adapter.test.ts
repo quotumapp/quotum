@@ -150,6 +150,7 @@ function subscriptionChange(
 		providerAccountId: null,
 		status: "processing",
 		subscriptionStatus: "active",
+		sourceSuperseded: false,
 		changeKind: "upgrade",
 		effectiveMode: "immediate",
 		effectiveAt: "2026-09-17T00:00:00.000Z",

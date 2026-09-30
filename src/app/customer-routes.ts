@@ -710,6 +710,7 @@ function withoutJobProviderIdentity(change: unknown): unknown {
 	const {
 		provider: _provider,
 		providerAccountId: _providerAccountId,
+		sourceSuperseded: _sourceSuperseded,
 		...data
 	} = change as Record<string, unknown>;
 	return data;
