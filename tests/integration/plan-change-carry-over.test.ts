@@ -371,6 +371,60 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 			}),
 		});
 	});
+
+	it("keeps a non-consumable level through a plan change and shrinks it to the new allowance", async () => {
+		await addProjects(1, "5");
+		await addProjects(2, "3");
+		await addAllowance(1, "100");
+		await addAllowance(2, "300");
+		await sync(1);
+		const events = [];
+		for (const n of [1, 2, 3, 4, 5]) events.push(await addProject(`project-${n}`));
+		await spend(30, "spend-before-level-change");
+
+		await migrate(1, 2);
+		// Five projects stay in use on version 2, which allows three: the excess is kept.
+		expect(await projects()).toMatchObject({ granted: "5", consumed: "5", available: "0" });
+		expect(await projectAllowances()).toEqual([[2, "5.000000000", "5.000000000", false]]);
+		expect(await tryAddProject("project-6")).toBe(false);
+		// A consumable allowance still ends with its version, and nothing is carried.
+		expect(await planAllowances()).toEqual([
+			[2, "5.000000000", "5.000000000", false],
+			[1, "100.000000000", "30.000000000", true],
+			[2, "300.000000000", "0.000000000", false],
+		]);
+		expect(await carriedUsage()).toEqual([]);
+
+		// Removing two projects brings the level down to the new allowance, which then caps it.
+		await removeProject(events[0], "remove-1");
+		await removeProject(events[1], "remove-2");
+		expect(await projects()).toMatchObject({ granted: "3", consumed: "3", available: "0" });
+		expect(await tryAddProject("project-7")).toBe(false);
+		await removeProject(events[2], "remove-3");
+		expect(await projects()).toMatchObject({ granted: "3", consumed: "2", available: "1" });
+		expect(await tryAddProject("project-8")).toBe(true);
+
+		// A later sync of the same period grants version 2's allowance no second time.
+		await sync(2);
+		expect(await projectAllowances()).toEqual([[2, "3.000000000", "3.000000000", false]]);
+	});
+
+	it("keeps a non-consumable level when Stripe reports a switch to another version", async () => {
+		await addProjects(1, "5", "month");
+		await addProjects(2, "8", "month");
+		await sync(1);
+		for (const n of [1, 2, 3, 4]) await addProject(`portal-${n}`);
+
+		// The customer switches in the portal: no change row, Stripe reports version 2's prices.
+		await sync(2);
+		expect(await projects()).toMatchObject({ granted: "8", consumed: "4", available: "4" });
+		expect(await projectAllowances()).toEqual([[2, "8.000000000", "4.000000000", false]]);
+
+		// Switching back keeps it too, on the one allowance, and grants version 1 nothing more.
+		await sync(1);
+		expect(await projects()).toMatchObject({ granted: "5", consumed: "4", available: "1" });
+		expect(await projectAllowances()).toEqual([[1, "5.000000000", "4.000000000", false]]);
+	});
 });
 
 function changeIntent(effectiveMode: "immediate" | "period_end") {
@@ -656,4 +710,88 @@ async function carriedUsage() {
 		FROM carried_usages
 	`;
 	return rows.map((row) => ({ ...row }));
+}
+
+/** A `projects` allowance, a non-consumable level, on one version of the migration plan. */
+async function addProjects(
+	version: number,
+	quantity: string,
+	reset: "month" | null = null,
+): Promise<void> {
+	await context.sql`
+		INSERT INTO features (project_id, key, name, kind, meter_kind, unit, credit_scale)
+		SELECT id, 'projects', 'Projects', 'metered', 'non_consumable', 'project', 0
+		FROM projects WHERE key = 'acme'
+		ON CONFLICT DO NOTHING
+	`;
+	await context.sql`
+		INSERT INTO plan_items (
+			project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval
+		)
+		SELECT version.project_id, version.id, feature.id, 'allocation', ${quantity}::numeric, ${reset}
+		FROM plan_versions version
+		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+		JOIN features feature ON feature.project_id = version.project_id AND feature.key = 'projects'
+		WHERE plan.key = 'migration-plan' AND version.version = ${version}
+	`;
+}
+
+async function tryAddProject(key: string): Promise<boolean> {
+	const result = await context.repository.consumeUsage(project, {
+		billingAccountId: "migration-stripe",
+		featureKey: "projects",
+		quantity: "1",
+		idempotencyKey: key,
+	});
+	return result.allowed;
+}
+
+async function addProject(key: string): Promise<{ id: string; recordedAt: Date }> {
+	const result = await context.repository.consumeUsage(project, {
+		billingAccountId: "migration-stripe",
+		featureKey: "projects",
+		quantity: "1",
+		idempotencyKey: key,
+	});
+	expect(result.allowed).toBe(true);
+	return { id: result.usageEventId ?? "", recordedAt: new Date(result.recordedAt ?? "") };
+}
+
+async function removeProject(
+	event: { id: string; recordedAt: Date } | undefined,
+	key: string,
+): Promise<void> {
+	if (event === undefined) throw new Error("Expected a recorded project event");
+	await context.repository.correctUsage(project, {
+		billingAccountId: "migration-stripe",
+		originalUsageEventId: event.id,
+		originalRecordedAt: event.recordedAt,
+		quantity: "1",
+		idempotencyKey: key,
+		actor: "integration-test",
+		reason: "project deleted",
+	});
+}
+
+async function projects() {
+	return await context.repository.getMeteringBalance(project, "migration-stripe", "projects");
+}
+
+/** Live `projects` plan allowances, as version, quantity, consumed and whether they ended. */
+async function projectAllowances() {
+	const rows = await context.sql<
+		Array<{ version: number; quantity: string; consumed: string; ended: boolean }>
+	>`
+		SELECT version.version, allocation.quantity::text AS quantity,
+			allocation.consumed_quantity::text AS consumed,
+			(allocation.expires_at IS NOT NULL AND allocation.expires_at <= now()) AS ended
+		FROM balance_allocations allocation
+		JOIN features feature ON feature.id = allocation.feature_id AND feature.key = 'projects'
+		JOIN plan_items item ON item.id = allocation.plan_item_id
+		JOIN plan_versions version ON version.id = item.plan_version_id
+		WHERE allocation.source_kind = 'subscription'
+			AND (allocation.expires_at IS NULL OR allocation.expires_at > now())
+		ORDER BY allocation.id
+	`;
+	return rows.map((row) => [row.version, row.quantity, row.consumed, row.ended]);
 }

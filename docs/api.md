@@ -267,6 +267,16 @@ update:
 - Top-ups, promotion rewards, operator grants, plan grants and rolled-over quantity are not
   plan-granted and are untouched.
 - An open reservation still settles from its hold on the ended allowance.
+- A non-consumable meter's usage is a level, such as projects in use, so it is not ended but kept.
+  When the incoming version allocates the feature in the same scope, the allowance holding the
+  level moves to the incoming version's item, with the incoming item's period and expiry, and its
+  quantity becomes the larger of the new allowance and the level. A level above the new allowance
+  therefore stays, and nothing can be added to it; as corrections or released holds lower the
+  level, the allowance shrinks with it until the new allowance caps it again. No carry-over is
+  involved, and none can be requested for a non-consumable. A feature the incoming version does
+  not allocate ends with the outgoing version, and an item granted per reset window inside the
+  billing period keeps its own windows. The default plan keeps a level by the same move: its
+  allowances stay for the rest of their window when the feature is still allocated.
 
 An immediate `subscription_change` intent can carry some of that over, per consumable feature:
 

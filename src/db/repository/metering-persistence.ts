@@ -37,6 +37,7 @@ import {
 } from "./controls-runtime";
 import { defaultPlanAllowanceEndingSql } from "./default-plan-sql";
 import { enqueueUsageProjection } from "./entitlements";
+import { shrinkKeptLevels } from "./kept-levels";
 import {
 	combineMeterLimits,
 	type MeterLimitRow,
@@ -2309,6 +2310,14 @@ export async function applyConfirmation(
 			return statements;
 		}),
 	);
+	// Releasing more than it consumes lowers a level, which a kept allowance follows down.
+	await shrinkKeptLevels(
+		executor,
+		projectId,
+		plan.changes
+			.filter(({ consume, release }) => release > consume)
+			.map(({ allocationId }) => allocationId),
+	);
 }
 
 export async function confirmMeterLimitReservation(
@@ -2665,6 +2674,7 @@ export async function releaseReservationHolds(
 		reservation.project_id,
 		reservation.id,
 	);
+	const released: string[] = [];
 	for (const row of reservationRows) {
 		const remaining =
 			decimalToUnits(
@@ -2685,7 +2695,9 @@ export async function releaseReservationHolds(
 				release: unitsToDecimal(remaining, reservation.wallet_scale),
 			}),
 		);
+		released.push(String(row.allocation_id));
 	}
+	await shrinkKeptLevels(executor, reservation.project_id, released);
 	await executeOne(
 		executor,
 		drizzleSql`

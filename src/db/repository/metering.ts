@@ -58,6 +58,7 @@ import {
 } from "./controls-runtime";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
+import { shrinkKeptLevels } from "./kept-levels";
 import { queryMeterLimitRows } from "./meter-limit-sources";
 import { storedCadence } from "./meter-limit-windows";
 import type {
@@ -1318,6 +1319,7 @@ async function reverseOriginalDeductions(
 			if (updated === null) {
 				throw new Error("Correction receipt exceeds the allocation's consumed quantity");
 			}
+			await shrinkKeptLevels(executor, projectId, [deduction.allocationId]);
 		}
 		receipt.push({ ...deduction, quantity: negativeDecimal(rendered) });
 		remaining -= restored;

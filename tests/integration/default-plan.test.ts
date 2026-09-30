@@ -1142,4 +1142,57 @@ localDescribe("default plan", () => {
 		expect(await grants("catcher")).toMatchObject([{ status: "active", plan_version: 2 }]);
 		expect(await balance("catcher")).toMatchObject({ consumed: "9", available: "91" });
 	});
+
+	it("keeps a non-consumable level when the default plan moves to a new version", async () => {
+		const withProjects = (version: number, projects: string): CatalogIntent => {
+			const base = catalog({
+				...freePlan(version, "100"),
+				items: [
+					...freePlan(version, "100").items,
+					{
+						featureKey: "projects",
+						itemKind: "allocation",
+						quantity: projects,
+						resetInterval: "month",
+						expiresAfterSeconds: null,
+						overagePolicy: "blocked",
+					},
+				],
+			});
+			return {
+				...base,
+				features: [
+					...base.features,
+					{
+						key: "projects",
+						name: "Projects",
+						kind: "metered",
+						meterKind: "non_consumable",
+						unit: "project",
+						creditScale: 0,
+						filterDimensions: [],
+					},
+				],
+			};
+		};
+		const addProject = async (key: string) =>
+			await context.repository.consumeUsage(project, {
+				billingAccountId: "builder",
+				featureKey: "projects",
+				quantity: "1",
+				idempotencyKey: key,
+			});
+		const projects = async () =>
+			await context.repository.getMeteringBalance(project, "builder", "projects");
+
+		await publish(withProjects(1, "5"));
+		for (const n of [1, 2, 3, 4]) expect((await addProject(`project-${n}`)).allowed).toBe(true);
+
+		// Version 2 allows three projects: the four in use stay, before and after the pass.
+		await publish(withProjects(2, "3"));
+		expect(await projects()).toMatchObject({ consumed: "4" });
+		await runWorker(25);
+		expect(await grants("builder")).toMatchObject([{ status: "active", plan_version: 2 }]);
+		expect(await projects()).toMatchObject({ consumed: "4" });
+	});
 });
