@@ -1278,17 +1278,26 @@ async function reverseOriginalDeductions(
 			consumed_quantity: unknown;
 			expires_at: Date | string | null;
 			reversed_at: Date | string | null;
+			source_kind: string;
 			db_now: Date | string;
 		}>(
 			executor,
 			drizzleSql`
-				SELECT consumed_quantity, expires_at, reversed_at, clock_timestamp() AS db_now
+				SELECT consumed_quantity, expires_at, reversed_at, source_kind, clock_timestamp() AS db_now
 				FROM balance_allocations
 				WHERE project_id = ${projectId}
 					AND id = ${deduction.allocationId}::bigint
 				FOR UPDATE
 			`,
 		);
+		// A revoked operator grant gives nothing back, so the correction is refused rather than
+		// recorded as a refund the customer never receives.
+		if (allocation?.source_kind === "operator" && allocation.reversed_at !== null) {
+			throw new PersistenceConflictError(
+				"The usage being corrected was spent from an operator grant that has been revoked",
+				"CORRECTION_TARGETS_REVOKED_GRANT",
+			);
+		}
 		const eligible =
 			allocation !== null &&
 			allocation.reversed_at === null &&

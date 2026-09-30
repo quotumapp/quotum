@@ -1,4 +1,4 @@
-import { sql as drizzleSql } from "drizzle-orm";
+import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import {
 	databaseDecimal,
 	decimalToUnits,
@@ -121,6 +121,11 @@ export interface AllocationRow {
 	rollover_policy_revision: number | null;
 	period_start_at: Date | string | null;
 	period_end_at: Date | string | null;
+	/**
+	 * Set by balance reads on an allocation that no longer funds usage (reversed, expired, or a
+	 * default-plan allowance the next write ends) but still holds an open reservation's quantity.
+	 */
+	closed?: boolean;
 }
 
 export interface ReservationRow {
@@ -1414,13 +1419,15 @@ async function readAllocationRows(
 	feature: FeatureRow,
 	entityId: string | null,
 ): Promise<AllocationRow[]> {
+	// A closed allocation (reversed, expired, or a default-plan allowance the next write ends) is
+	// listed only while an open reservation still holds part of it: the hold settles from it, so it
+	// stays visible until then, though none of the allocation is available.
 	return await executeRows<AllocationRow>(
 		executor,
 		drizzleSql`
 			SELECT allocation.id, allocation.quantity, allocation.reversed_quantity,
-				allocation.consumed_quantity,
-                COALESCE((SELECT sum(holds.held_quantity - holds.consumed_quantity) FROM reservation_allocations holds JOIN reservations r ON r.project_id=holds.project_id AND r.id=holds.reservation_id WHERE holds.project_id=allocation.project_id AND holds.allocation_id=allocation.id AND r.status='active' AND r.expires_at>clock_timestamp()),0) AS held_quantity,
-                allocation.source_kind,
+				allocation.consumed_quantity, holds.held_quantity, state.closed,
+				allocation.source_kind,
 				allocation.source_key, allocation.expires_at, allocation.created_at,
 				allocation.reversed_at, entity.external_id AS entity_external_id,
 				allocation.rollover_origin_allocation_id, allocation.carry_over_origin_allocation_id,
@@ -1429,13 +1436,27 @@ async function readAllocationRows(
 			FROM balance_allocations allocation
 			LEFT JOIN entities entity
 				ON entity.project_id = allocation.project_id AND entity.id = allocation.entity_id
-				WHERE allocation.project_id = ${projectId}
-					AND allocation.customer_id = ${customerId}
-					AND allocation.feature_id = ${featureId(feature)}
-					AND (allocation.entity_id IS NULL OR allocation.entity_id = ${entityId}::bigint)
-				AND allocation.reversed_at IS NULL
-				AND (allocation.expires_at IS NULL OR allocation.expires_at > now())
-				AND NOT ${defaultPlanAllowanceEndingSql(projectId, drizzleSql`allocation`)}
+			CROSS JOIN LATERAL (
+				SELECT COALESCE(sum(held.held_quantity - held.consumed_quantity), 0) AS held_quantity
+				FROM reservation_allocations held
+				JOIN reservations r ON r.project_id = held.project_id AND r.id = held.reservation_id
+				WHERE held.project_id = allocation.project_id
+					AND held.allocation_id = allocation.id
+					AND r.status = 'active'
+					AND r.expires_at > clock_timestamp()
+			) holds
+			CROSS JOIN LATERAL (
+				SELECT (
+					allocation.reversed_at IS NOT NULL
+					OR (allocation.expires_at IS NOT NULL AND allocation.expires_at <= now())
+					OR ${defaultPlanAllowanceEndingSql(projectId, drizzleSql`allocation`)}
+				) AS closed
+			) state
+			WHERE allocation.project_id = ${projectId}
+				AND allocation.customer_id = ${customerId}
+				AND allocation.feature_id = ${featureId(feature)}
+				AND (allocation.entity_id IS NULL OR allocation.entity_id = ${entityId}::bigint)
+				AND (NOT state.closed OR holds.held_quantity > 0)
 			ORDER BY allocation.expires_at ASC NULLS LAST, allocation.created_at, allocation.id
 		`,
 	);
@@ -1542,6 +1563,16 @@ export function balanceFromRows(feature: FeatureRow, rows: AllocationRow[]): Met
 	let consumed = 0n;
 	let held = 0n;
 	for (const row of rows) {
+		const rowHeld = decimalToUnits(
+			databaseDecimal(row.held_quantity, "allocation held", scale),
+			scale,
+		);
+		held += rowHeld;
+		// A closed allocation still backs its open holds and nothing else.
+		if (row.closed === true) {
+			granted += rowHeld;
+			continue;
+		}
 		granted +=
 			decimalToUnits(databaseDecimal(row.quantity, "allocation quantity", scale), scale) -
 			decimalToUnits(databaseDecimal(row.reversed_quantity, "allocation reversed", scale), scale);
@@ -1549,7 +1580,6 @@ export function balanceFromRows(feature: FeatureRow, rows: AllocationRow[]): Met
 			databaseDecimal(row.consumed_quantity, "allocation consumed", scale),
 			scale,
 		);
-		held += decimalToUnits(databaseDecimal(row.held_quantity, "allocation held", scale), scale);
 	}
 	return {
 		featureKey: feature.key,
@@ -1576,7 +1606,7 @@ export function balanceFromRows(feature: FeatureRow, rows: AllocationRow[]): Met
 				databaseDecimal(row.held_quantity, "allocation held", scale),
 				scale,
 			);
-			const available = quantity - reversed - rowConsumed - rowHeld;
+			const available = row.closed === true ? 0n : quantity - reversed - rowConsumed - rowHeld;
 			return {
 				allocationId: String(row.id),
 				entityId: row.entity_external_id,
@@ -2185,6 +2215,52 @@ export function planConfirmation(
 	return plan;
 }
 
+/**
+ * Settles held quantity of one allocation: `release` leaves the hold and `consume` is added to
+ * consumed (on a live allocation it may exceed the hold). What leaves the hold unconsumed is freed.
+ * Quantity freed on a revoked operator grant is revoked as well, onto the allocation's reversed
+ * quantity and the grant's revoked quantity, so it never becomes spendable; freed quantity of an
+ * expired allocation stays expired. The allocation row is already locked by the caller.
+ */
+export function settleHeldQuantitySql(input: {
+	projectId: string;
+	allocationId: string;
+	consume: string;
+	release: string;
+}): DrizzleSQL {
+	return drizzleSql`
+		WITH settled AS (
+			UPDATE balance_allocations
+			SET
+				consumed_quantity = consumed_quantity + ${input.consume}::numeric,
+				held_quantity = held_quantity - ${input.release}::numeric,
+				reversed_quantity = reversed_quantity + CASE
+					WHEN source_kind = 'operator' AND reversed_at IS NOT NULL
+						THEN GREATEST(${input.release}::numeric - ${input.consume}::numeric, 0)
+					ELSE 0
+				END,
+				updated_at = now()
+			WHERE project_id = ${input.projectId} AND id = ${input.allocationId}::bigint
+			RETURNING id, source_kind, reversed_at, operator_grant_id
+		),
+		revoked AS (
+			UPDATE operator_grants grants
+			SET revoked_quantity = grants.revoked_quantity
+					+ GREATEST(${input.release}::numeric - ${input.consume}::numeric, 0),
+				updated_at = now()
+			FROM settled
+			WHERE settled.source_kind = 'operator'
+				AND settled.reversed_at IS NOT NULL
+				AND ${input.release}::numeric > ${input.consume}::numeric
+				AND grants.project_id = ${input.projectId}
+				AND grants.id = settled.operator_grant_id
+				AND grants.revoked_at IS NOT NULL
+			RETURNING grants.id
+		)
+		SELECT id FROM settled
+	`;
+}
+
 /** Writes a confirmation plan; rows are distinct, so the updates are issued together. */
 export async function applyConfirmation(
 	executor: QueryExecutor,
@@ -2198,15 +2274,12 @@ export async function applyConfirmation(
 			const statements = [
 				executeOne(
 					executor,
-					drizzleSql`
-				UPDATE balance_allocations
-				SET
-					consumed_quantity = consumed_quantity + ${unitsToDecimal(consume, scale)}::numeric,
-					held_quantity = held_quantity - ${unitsToDecimal(release, scale)}::numeric,
-					updated_at = now()
-				WHERE id = ${allocationId}::bigint
-				RETURNING id
-			`,
+					settleHeldQuantitySql({
+						projectId,
+						allocationId,
+						consume: unitsToDecimal(consume, scale),
+						release: unitsToDecimal(release, scale),
+					}),
 				),
 			];
 			if (hasHold) {
@@ -2597,15 +2670,12 @@ export async function releaseReservationHolds(
 		if (remaining <= 0n) continue;
 		await executeOne(
 			executor,
-			drizzleSql`
-				UPDATE balance_allocations
-				SET
-					held_quantity = held_quantity - ${unitsToDecimal(remaining, reservation.wallet_scale)}::numeric,
-					updated_at = now()
-				WHERE project_id = ${reservation.project_id}
-					AND id = ${String(row.allocation_id)}::bigint
-				RETURNING id
-			`,
+			settleHeldQuantitySql({
+				projectId: reservation.project_id,
+				allocationId: String(row.allocation_id),
+				consume: "0",
+				release: unitsToDecimal(remaining, reservation.wallet_scale),
+			}),
 		);
 	}
 	await executeOne(

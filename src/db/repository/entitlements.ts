@@ -689,20 +689,28 @@ export async function readProjectionBalances(
 				f.unit,
 				f.credit_scale,
 				SUM(
-					a.quantity - a.reversed_quantity - a.consumed_quantity - a.held_quantity
+					CASE WHEN state.closed THEN 0
+						ELSE a.quantity - a.reversed_quantity - a.consumed_quantity - a.held_quantity END
 				)::text AS available,
 				SUM(a.held_quantity) AS held,
-				MIN(COALESCE(a.expires_at, a.period_end_at)) AS period_ends_at
+				MIN(CASE WHEN state.closed THEN NULL ELSE COALESCE(a.expires_at, a.period_end_at) END)
+					AS period_ends_at
 			FROM balance_allocations a
 			JOIN features f
 				ON f.project_id = a.project_id
 				AND f.id = a.feature_id
+			CROSS JOIN LATERAL (
+				SELECT (
+					a.reversed_at IS NOT NULL
+					OR (a.expires_at IS NOT NULL AND a.expires_at <= now())
+					OR ${defaultPlanAllowanceEndingSql(projectId, drizzleSql`a`)}
+				) AS closed
+			) state
 			WHERE a.project_id = ${projectId}
 				AND a.customer_id = ${customerId}
 				AND a.entity_id IS NULL
-				AND a.reversed_at IS NULL
-				AND (a.expires_at IS NULL OR a.expires_at > now())
-				AND NOT ${defaultPlanAllowanceEndingSql(projectId, drizzleSql`a`)}
+				-- A closed allocation counts only for the open holds it still backs.
+				AND (NOT state.closed OR a.held_quantity > 0)
 			GROUP BY f.id, f.key, f.unit, f.credit_scale
 		`,
 		),
