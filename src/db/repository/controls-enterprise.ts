@@ -38,6 +38,7 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import { type Cadence, cadenceKey, calendarWindow } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
+import { readDefaultPlanTarget } from "./default-plan-grants";
 import { defaultPlanReadVersionSql } from "./default-plan-sql";
 import { ensureCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
@@ -162,6 +163,19 @@ export class ControlsEnterpriseRepository
 		entityId?: string | null,
 	): Promise<EffectiveControl[]> {
 		const projectId = project.projectInstanceId;
+		// An account Quotum has not recorded meets the default plan's controls on its first write,
+		// so it lists them, as a check applies them. Without a default plan it is not found.
+		if (
+			(entityId ?? null) === null &&
+			(await findCustomer(this.database, projectId, billingAccountId)) === null &&
+			(await readDefaultPlanTarget(this.database, projectId)) !== null
+		) {
+			return await resolveEffectiveControls(this.database, {
+				projectId,
+				customerId: null,
+				entityId: null,
+			});
+		}
 		const customer = await requireCustomer(this.database, projectId, billingAccountId);
 		const entity = await resolveEntity(this.database, projectId, customer.id, entityId ?? null);
 		return await resolveEffectiveControls(this.database, {
@@ -1561,15 +1575,23 @@ async function refreshLicensePools(
 	);
 }
 
+async function findCustomer(
+	executor: QueryExecutor,
+	projectId: string,
+	billingAccountId: string,
+): Promise<{ id: string } | null> {
+	return await executeOne<{ id: string }>(
+		executor,
+		drizzleSql`SELECT id FROM customers WHERE project_id = ${projectId} AND billing_account_id = ${requiredText(billingAccountId, "billingAccountId", 200)} LIMIT 1`,
+	);
+}
+
 async function requireCustomer(
 	executor: QueryExecutor,
 	projectId: string,
 	billingAccountId: string,
 ): Promise<{ id: string }> {
-	const row = await executeOne<{ id: string }>(
-		executor,
-		drizzleSql`SELECT id FROM customers WHERE project_id = ${projectId} AND billing_account_id = ${requiredText(billingAccountId, "billingAccountId", 200)} LIMIT 1`,
-	);
+	const row = await findCustomer(executor, projectId, billingAccountId);
 	if (row === null)
 		throw new NotFoundBillingError("Billing account was not found", "BILLING_ACCOUNT_NOT_FOUND");
 	return row;
