@@ -267,6 +267,82 @@ describeLocalPostgres(describe, describe.skip)("Catalog migration synchronizatio
 		]);
 	});
 
+	it("keeps the source version while an event still reports its prices after a change is applied", async () => {
+		await addAllowance(1, "100", false);
+		await addAllowance(2, "300", false);
+		await sync(1);
+		await stageMigration(1, 2);
+
+		// An event created before the provider applied the change still reports version 1's prices.
+		await sync(1);
+		expect(await pinnedVersion()).toBe(1);
+		expect((await itemRows()).filter((row) => row.active).map((row) => row.version)).toEqual([
+			1, 1,
+		]);
+		expect(await allowanceRows()).toEqual([
+			{ version: 1, quantity: "100.000000000", consumed: "0.000000000", ended: false, rolls: true },
+		]);
+		expect(await changeSynchronized()).toBe(false);
+
+		// The event that reports the change's prices applies it.
+		await sync(2);
+		expect(await pinnedVersion()).toBe(2);
+		expect(await allowanceRows()).toEqual([
+			{ version: 1, quantity: "100.000000000", consumed: "0.000000000", ended: true, rolls: false },
+			{ version: 2, quantity: "300.000000000", consumed: "0.000000000", ended: false, rolls: true },
+		]);
+		expect(await changeSynchronized()).toBe(true);
+	});
+
+	it("follows a portal switch that supersedes an applied change, through deletion", async () => {
+		await addVersion(3);
+		await stageMigration(1, 2);
+
+		// Before the change's own event, the customer switches to version 3 in the portal.
+		await sync(3);
+		expect(await pinnedVersion()).toBe(3);
+		expect((await itemRows()).filter((row) => row.active).map((row) => row.version)).toEqual([
+			3, 3,
+		]);
+		// The superseded change is settled, so a later return to version 1 cannot replay it.
+		expect(await changeSynchronized()).toBe(true);
+
+		const deleted = await sync(3, 7, false, "deleted");
+		expect(deleted.processingStatus).toBe("processed");
+		const [subscription] = await context.sql`
+			SELECT status FROM subscriptions WHERE external_subscription_id = 'sub_migrate_stripe'
+		`;
+		expect(subscription?.status).toBe("expired");
+		expect(await pinnedVersion()).toBe(3);
+	});
+
+	it("moves to another version of the same plan when the portal switches to its prices", async () => {
+		await addAllowance(1, "100", false);
+		await addAllowance(2, "300", false);
+		await sync(1);
+
+		// No API change: the customer picks version 2's price in the provider's portal.
+		await sync(2);
+		expect(await pinnedVersion()).toBe(2);
+		expect((await itemRows()).filter((row) => row.active).map((row) => row.version)).toEqual([
+			2, 2,
+		]);
+		expect(await allowanceRows()).toEqual([
+			{ version: 1, quantity: "100.000000000", consumed: "0.000000000", ended: true, rolls: false },
+			{ version: 2, quantity: "300.000000000", consumed: "0.000000000", ended: false, rolls: true },
+		]);
+		await sync(2);
+		expect(await pinnedVersion()).toBe(2);
+
+		// Switching back resumes version 1's allowance for the period.
+		await sync(1);
+		expect(await pinnedVersion()).toBe(1);
+		expect(await allowanceRows()).toEqual([
+			{ version: 1, quantity: "100.000000000", consumed: "0.000000000", ended: false, rolls: true },
+			{ version: 2, quantity: "300.000000000", consumed: "0.000000000", ended: true, rolls: false },
+		]);
+	});
+
 	it("rolls back migration synchronization and item transfers when a provider item is unbound", async () => {
 		const original = await itemRows();
 		await stageMigration(1, 2);
@@ -372,7 +448,12 @@ async function stageMigration(
 	);
 }
 
-async function sync(version: number, seats = 7, unboundSeat = false) {
+async function sync(
+	version: number,
+	seats = 7,
+	unboundSeat = false,
+	event: "updated" | "deleted" = "updated",
+) {
 	const [subscription] = await context.sql`
 		SELECT current_period_start, current_period_end FROM subscriptions
 		WHERE external_subscription_id = 'sub_migrate_stripe'
@@ -386,7 +467,7 @@ async function sync(version: number, seats = 7, unboundSeat = false) {
 		invoiceId: null,
 		externalProductId: `prod_migrate_v${version}_base`,
 		externalPriceId: `price_migrate_v${version}_base`,
-		subscriptionStatus: "active",
+		subscriptionStatus: event === "deleted" ? "expired" : "active",
 		purchasedAt: subscription.current_period_start,
 		startsAt: subscription.current_period_start,
 		expiresAt: subscription.current_period_end,
@@ -408,12 +489,107 @@ async function sync(version: number, seats = 7, unboundSeat = false) {
 			},
 		],
 		rawPayload: {},
-		eventType: "customer.subscription.updated",
+		eventType: `customer.subscription.${event}`,
 		externalEventId: id,
 		projectionReason: "provider_webhook",
 		projectionIdempotencyKey: `${id}:projection`,
 		providerEventCreated: eventOrder,
 	});
+}
+
+/**
+ * Another published version of the migration plan with its own Stripe prices, the way a provider
+ * portal offers it: a base price bound as the version's product and a seat price.
+ */
+async function addVersion(version: number): Promise<void> {
+	await context.sql`
+		INSERT INTO plan_versions (
+			project_id, plan_id, catalog_revision_id, version, status, currency,
+			base_amount_minor, billing_interval, tier_rank
+		)
+		SELECT source.project_id, source.plan_id, source.catalog_revision_id, ${version},
+			'published', 'USD', 2000, 'month', ${version * 10}
+		FROM plan_versions source
+		JOIN plans plan ON plan.project_id = source.project_id AND plan.id = source.plan_id
+		WHERE plan.key = 'migration-plan' AND source.version = 1
+	`;
+	await context.sql`
+		INSERT INTO plan_items (
+			project_id, plan_version_id, feature_id, item_kind, quantity,
+			reset_interval, allocation_scope
+		)
+		SELECT version.project_id, version.id, feature.id, 'licensed_quantity', 1, NULL,
+			'license_pool'
+		FROM plan_versions version
+		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+		JOIN features feature
+			ON feature.project_id = version.project_id AND feature.key = 'licensed_seats'
+		WHERE plan.key = 'migration-plan' AND version.version = ${version}
+	`;
+	await context.sql`
+		INSERT INTO price_components (
+			project_id, plan_version_id, plan_item_id, key, component_kind, charge_timing,
+			currency, unit_amount_minor, billing_units, billing_interval,
+			minimum_quantity, maximum_quantity
+		)
+		SELECT version.project_id, version.id,
+			CASE component.kind WHEN 'seats' THEN item.id END, component.kind,
+			CASE component.kind WHEN 'seats' THEN 'licensed' ELSE 'base' END, 'in_advance',
+			'USD', component.amount, 1, 'month', 1, CASE component.kind WHEN 'seats' THEN 100 ELSE 1 END
+		FROM plan_versions version
+		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+		JOIN plan_items item
+			ON item.project_id = version.project_id AND item.plan_version_id = version.id
+		CROSS JOIN (VALUES ('base', 2000), ('seats', 200)) AS component(kind, amount)
+		WHERE plan.key = 'migration-plan' AND version.version = ${version}
+	`;
+	await context.sql`
+		INSERT INTO store_products (
+			project_id, product_id, provider, channel, external_product_id,
+			external_price_id, billing_period, currency, price_amount
+		)
+		SELECT product.project_id, product.id, 'stripe', 'web',
+			concat('prod_migrate_v', ${version}::integer, '_', component.kind),
+			concat('price_migrate_v', ${version}::integer, '_', component.kind),
+			'month', 'USD', component.amount
+		FROM products product
+		CROSS JOIN (VALUES ('base', 2000), ('seats', 200)) AS component(kind, amount)
+		WHERE product.project_id = ${project.projectInstanceId}::uuid
+			AND product.key = 'premium_monthly'
+	`;
+	await context.sql`
+		INSERT INTO provider_price_bindings (
+			project_id, price_component_id, store_product_id, provider, channel, status
+		)
+		SELECT price.project_id, price.id, store.id, 'stripe', 'web', 'published'
+		FROM price_components price
+		JOIN plan_versions version
+			ON version.project_id = price.project_id AND version.id = price.plan_version_id
+		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+		JOIN store_products store ON store.project_id = price.project_id
+			AND store.external_price_id = concat('price_migrate_v', version.version, '_', price.key)
+		WHERE plan.key = 'migration-plan' AND version.version = ${version}
+	`;
+	await context.sql`
+		INSERT INTO provider_plan_bindings (
+			project_id, plan_version_id, store_product_id, provider, channel, status
+		)
+		SELECT binding.project_id, price.plan_version_id, binding.store_product_id,
+			'stripe', 'web', 'published'
+		FROM price_components price
+		JOIN plan_versions version
+			ON version.project_id = price.project_id AND version.id = price.plan_version_id
+		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+		JOIN provider_price_bindings binding
+			ON binding.project_id = price.project_id AND binding.price_component_id = price.id
+		WHERE plan.key = 'migration-plan' AND version.version = ${version} AND price.key = 'base'
+	`;
+}
+
+async function changeSynchronized(): Promise<boolean> {
+	const [change] = await context.sql`SELECT synchronized_at FROM subscription_changes`;
+	if (change === undefined) throw new Error("Expected one subscription change");
+	return change.synchronized_at !== null;
 }
 
 async function pinnedVersion(): Promise<number> {

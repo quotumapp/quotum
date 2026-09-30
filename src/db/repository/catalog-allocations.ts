@@ -14,15 +14,31 @@ const allocationFundingStatuses = new Set<SubscriptionStatus>([
 	"cancelled",
 ]);
 
+/** A price the provider reports on a subscription, as its snapshot names it. */
+interface SnapshotPrice {
+	externalProductId: string;
+	externalPriceId: string;
+}
+
 /**
  * Resolves the plan version a synced subscription carries. Publishing a newer version of the same
  * plan retargets the provider binding, but that must not move existing subscriptions: they stay
  * grandfathered on their pinned version until an explicit subscription change or catalog migration
- * has been applied, or the provider reports a product that belongs to another plan.
+ * has been applied, or the provider reports a product that belongs to another plan, or prices that
+ * only another version of the plan charges.
+ *
+ * A version with price components must charge every price the provider reports: an applied change
+ * whose target does not waits for a snapshot that does, and the version stays as it is meanwhile.
  */
 async function resolveSubscriptionPlanVersion(
 	executor: QueryExecutor,
-	input: { projectId: string; customerId: string; storeProductId: string; subscriptionId: string },
+	input: {
+		projectId: string;
+		customerId: string;
+		storeProductId: string;
+		subscriptionId: string;
+		prices: SnapshotPrice[];
+	},
 ): Promise<{
 	planVersionId: string;
 	catalogRevisionId: string;
@@ -146,10 +162,25 @@ async function resolveSubscriptionPlanVersion(
 			: { ...binding, changed: true, changeId, previousPlanVersionId: null, carryOver: null };
 	}
 	const previousPlanVersionId = current.planVersionId;
+	const contested =
+		row.change_version_id !== null ||
+		(binding !== null && binding.planVersionId !== current.planVersionId);
+	const charging = contested
+		? await versionsChargingSnapshot(executor, {
+				projectId: input.projectId,
+				versionIds: [row.change_version_id, row.binding_version_id, current.planVersionId],
+				prices: input.prices,
+			})
+		: null;
+	const chargesSnapshot = (versionId: string) => charging === null || charging.has(versionId);
 	// 2. Only the latest applied change can move the pinned version. Filtering by its source
 	// before selecting the latest would replay an old upgrade after a later downgrade returns
 	// to that source, including when a newer quantity-only change supersedes the upgrade.
-	if (row.change_version_id !== null && row.change_revision_id !== null) {
+	// While the provider still reports prices its target does not charge, such as an event
+	// created before the change reached the provider, the change waits and stays unsynchronized.
+	const changeWaits =
+		row.change_version_id !== null && !chargesSnapshot(String(row.change_version_id));
+	if (row.change_version_id !== null && row.change_revision_id !== null && !changeWaits) {
 		return {
 			planVersionId: String(row.change_version_id),
 			catalogRevisionId: String(row.change_revision_id),
@@ -183,11 +214,17 @@ async function resolveSubscriptionPlanVersion(
 					: null,
 		};
 	}
-	// 4. A product of another plan is a provider-side switch, so its bound version applies.
+	// 4. A product of another plan is a provider-side switch, so its bound version applies. So are
+	// prices that the pinned version does not charge and the product's bound version does: a switch
+	// in the provider's portal to another version of the same plan. A switch supersedes a waiting
+	// change, which is then settled so that a later return to its source cannot replay it.
 	if (
 		binding !== null &&
 		row.binding_plan_id !== null &&
-		String(row.binding_plan_id) !== String(row.current_plan_id)
+		(String(row.binding_plan_id) !== String(row.current_plan_id) ||
+			(binding.planVersionId !== current.planVersionId &&
+				!chargesSnapshot(current.planVersionId) &&
+				chargesSnapshot(binding.planVersionId)))
 	) {
 		return {
 			...binding,
@@ -198,7 +235,73 @@ async function resolveSubscriptionPlanVersion(
 		};
 	}
 	// 5. Otherwise the subscription stays grandfathered on its pinned version.
-	return { ...current, changed: false, changeId, previousPlanVersionId, carryOver: null };
+	return {
+		...current,
+		changed: false,
+		changeId: changeWaits ? null : changeId,
+		previousPlanVersionId,
+		carryOver: null,
+	};
+}
+
+/**
+ * The versions among `versionIds` that charge every price the provider reports: each price is
+ * bound to one of the version's price components, which is what synchronizing its price items
+ * requires. A version without price components charges any snapshot. Null when the snapshot
+ * reports no prices, as Apple and Google snapshots do, so that every version qualifies.
+ */
+async function versionsChargingSnapshot(
+	executor: QueryExecutor,
+	input: {
+		projectId: string;
+		versionIds: Array<string | number | bigint | null>;
+		prices: SnapshotPrice[];
+	},
+): Promise<Set<string> | null> {
+	if (input.prices.length === 0) return null;
+	const versionIds = input.versionIds.flatMap((id) => (id === null ? [] : [String(id)]));
+	const prices = input.prices.map((price) => ({
+		product: price.externalProductId,
+		price: price.externalPriceId,
+	}));
+	const rows = await executeRows<{ id: string | number | bigint }>(
+		executor,
+		drizzleSql`
+			SELECT version.id
+			FROM plan_versions version
+			WHERE version.project_id = ${input.projectId}
+				AND version.id IN (SELECT jsonb_array_elements_text(${jsonb(versionIds)})::bigint)
+				AND (
+					NOT EXISTS (
+						SELECT 1 FROM price_components component
+						WHERE component.project_id = version.project_id
+							AND component.plan_version_id = version.id
+					)
+					OR NOT EXISTS (
+						SELECT 1
+						FROM jsonb_to_recordset(${jsonb(prices)}) AS reported(product text, price text)
+						WHERE NOT EXISTS (
+							SELECT 1
+							FROM price_components component
+							JOIN provider_price_bindings binding
+								ON binding.project_id = component.project_id
+								AND binding.price_component_id = component.id
+								AND binding.provider = 'stripe'
+								AND binding.channel = 'web'
+								AND binding.status = 'published'
+							JOIN store_products store
+								ON store.project_id = binding.project_id
+								AND store.id = binding.store_product_id
+							WHERE component.project_id = version.project_id
+								AND component.plan_version_id = version.id
+								AND store.external_product_id = reported.product
+								AND store.external_price_id = reported.price
+						)
+					)
+				)
+		`,
+	);
+	return new Set(rows.map((row) => String(row.id)));
 }
 
 function appliedCarryOver(
@@ -219,9 +322,14 @@ export async function materializeSubscriptionAllocations(
 		status: SubscriptionStatus;
 		periodStartAt: Date;
 		periodEndAt: Date | null;
+		/** The prices the provider snapshot reports; Stripe reports one per subscription item. */
+		prices?: SnapshotPrice[];
 	},
 ): Promise<number> {
-	const version = await resolveSubscriptionPlanVersion(executor, input);
+	const version = await resolveSubscriptionPlanVersion(executor, {
+		...input,
+		prices: input.prices ?? [],
+	});
 	if (version === null) return 0;
 
 	if (version.changeId !== null) {

@@ -496,10 +496,18 @@ is empty or not JSON, such as a proxy's text or HTML 502, raises `BillingApiErro
 
 An applied catalog migration settles once when the subscription is synchronized. Later updates,
 including an explicit downgrade or a provider-side return to an earlier plan, cannot replay that
-historical migration. Stripe subscription-item IDs can remain unchanged across plan versions;
-Quotum transfers their live association to the target price component and retains the inactive
-source component rows and existing license-pool references. Returning to an earlier version reuses
-its component rows.
+historical migration. On Stripe, an update settles an applied change or migration only when every
+price it reports is bound to the target version, or the target declares no prices. An update that
+still reports the source version's prices, such as an event created before the change reached
+Stripe, leaves the subscription on its version, and the change waits for the update that reports
+it. A switch in Stripe's customer portal moves the subscription to the version the reported product
+is bound to when that version belongs to another plan, or is another version of the same plan whose
+prices the pinned version does not charge. That switch supersedes a waiting change, which never
+applies afterwards. Publishing a new version alone moves no subscription, and a reported price that
+no version binds still fails the update. Stripe subscription-item IDs can remain unchanged across
+plan versions; Quotum transfers their live association to the target price component and retains
+the inactive source component rows and existing license-pool references. Returning to an earlier
+version reuses its component rows.
 
 ## Provider capability errors
 

@@ -1231,6 +1231,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				status: lifecycle.status,
 				periodStartAt: currentPeriodStart,
 				periodEndAt: currentPeriodEnd,
+				prices: input.items ?? [],
 			});
 			await syncSubscriptionPriceItems(tx, {
 				projectId,
