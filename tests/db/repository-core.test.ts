@@ -46,6 +46,78 @@ describe("BillingRepository core", () => {
 		);
 	});
 
+	it("never reads an inactive entitlement's status as running", async () => {
+		const database = new FakeDatabase([
+			[{ id: "customer-id" }],
+			[
+				{
+					key: "a",
+					active: false,
+					expires_at: null,
+					metadata: { source: "plan_grant", status: "active" },
+				},
+				{
+					key: "b",
+					active: false,
+					expires_at: null,
+					metadata: { source: "purchase", status: "completed" },
+				},
+				{
+					key: "c",
+					active: false,
+					expires_at: null,
+					metadata: { source: "subscription", status: "refunded" },
+				},
+				{
+					key: "d",
+					active: true,
+					expires_at: null,
+					metadata: { source: "subscription", status: "cancelled" },
+				},
+				{ key: "e", active: false, expires_at: null, metadata: {} },
+			],
+		]);
+		const repository = new BillingRepository(database as never);
+
+		const snapshot = await repository.getEntitlementSnapshot(
+			projectInstanceContext("globex"),
+			"user-1",
+		);
+
+		expect(snapshot.entitlements.map((entry) => [entry.key, entry.metadata.status])).toEqual([
+			["a", "inactive"],
+			["b", "inactive"],
+			["c", "refunded"],
+			["d", "cancelled"],
+			["e", undefined],
+		]);
+	});
+
+	it("records the last source's status when a recompute deactivates an entitlement", async () => {
+		const database = new FakeDatabase([[{ id: "customer-id" }], [], [{ id: "customer-id" }], []]);
+		const repository = new BillingRepository(database as never);
+
+		await repository.recomputeCustomerEntitlements(projectInstanceContext("globex"), "user-1");
+
+		const index = database.queries.findIndex((query) => query.includes("WITH active_sources"));
+		const recompute = database.queries[index] ?? "";
+		const deactivation = recompute.slice(recompute.indexOf("UPDATE entitlements e"));
+		expect(deactivation).toContain("metadata = e.metadata || COALESCE(");
+		expect(deactivation).toContain(
+			"WHERE s.project_id = e.project_id AND s.id = e.source_subscription_id",
+		);
+		expect(deactivation).toContain(
+			"WHERE pu.project_id = e.project_id AND pu.id = e.source_purchase_id",
+		);
+		expect(deactivation).toContain(
+			"WHERE g.project_id = e.project_id AND g.id = e.source_plan_grant_id",
+		);
+		expect(deactivation).toContain("THEN 'inactive'");
+		expect((database.params[index] ?? []).map(String)).toContain(
+			JSON.stringify(["active", "grace_period", "billing_retry", "cancelled", "completed"]),
+		);
+	});
+
 	it("reads null-expiry subscription entitlements as inactive while preserving purchase entitlements", async () => {
 		const database = new FakeDatabase([[{ id: "customer-id" }], []]);
 		const repository = new BillingRepository(database as never);

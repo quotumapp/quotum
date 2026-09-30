@@ -2547,10 +2547,23 @@ localDescribe("Stripe route flows integration", () => {
 			postStripeWebhook(refund, { id: "evt_lifetime_refund" }),
 		);
 		expect(reversal.status).toBe(200);
-		expect((await reversal.json()).data.entitlements).toMatchObject({
+		// The entitlement names why it ended, in the response and in the projection.
+		const refunded = {
 			billingAccountId: "lifetime_user",
-			entitlements: [{ key: "lifetime_access", active: false }],
-		});
+			entitlements: [
+				{
+					key: "lifetime_access",
+					active: false,
+					metadata: { source: "purchase", status: "refunded" },
+				},
+			],
+		};
+		expect((await reversal.json()).data.entitlements).toMatchObject(refunded);
+		const projectionJob = await expectProjectionJobByKey(
+			context.sql,
+			"stripe:refund:re_lifetime:reversal",
+		);
+		expect(projectionJob.payload.entitlements).toMatchObject(refunded);
 		const [row] = await context.sql<
 			Array<{ purchase_kind: string; status: string; reversed_amount: string }>
 		>`

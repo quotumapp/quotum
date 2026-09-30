@@ -56,11 +56,35 @@ export async function getEntitlementSnapshot(
 	};
 }
 
+/**
+ * Source statuses under which a subscription, purchase or plan grant still runs. An entitlement a
+ * running source no longer grants (a key the source dropped, or a period that passed before Quotum
+ * recorded its end) reports `inactive`, so an inactive entitlement never reads as running.
+ */
+const runningSourceStatuses = ["active", "grace_period", "billing_retry", "cancelled", "completed"];
+
+/**
+ * An inactive entitlement's metadata: a running source status reads as `inactive`. Metadata is a
+ * JSON column, so anything without a string `status` passes through unchanged.
+ */
+export function inactiveEntitlementMetadata(
+	metadata: Record<string, unknown>,
+): Record<string, unknown> {
+	const status: unknown = metadata?.status;
+	return typeof status === "string" && runningSourceStatuses.includes(status)
+		? { ...metadata, status: "inactive" }
+		: metadata;
+}
+
 interface PendingDefaultEntitlements {
 	/** The marker's keys, when the account reads as holding the default plan. */
 	held: EntitlementSnapshot["entitlements"];
-	/** Stored keys of the account's default-plan grant that its next write deactivates. */
-	ending: string[];
+	/**
+	 * Stored keys of the account's default-plan grant that its next write deactivates, with the
+	 * status that write leaves: `ended` when it ends the grant, `inactive` when the grant runs on
+	 * without the key.
+	 */
+	ending: Array<{ key: string; status: "ended" | "inactive" }>;
 }
 
 /**
@@ -90,10 +114,12 @@ async function readPendingDefaultEntitlements(
 		),
 		customerId === null
 			? Promise.resolve([])
-			: executeRows<{ key: string }>(
+			: executeRows<{ key: string; still_held: boolean }>(
 					executor,
 					drizzleSql`
-						SELECT e.entitlement_key AS key
+						SELECT
+							e.entitlement_key AS key,
+							${defaultPlanReadVersionSql(projectId, customer)} IS NOT NULL AS still_held
 						FROM entitlements e
 						JOIN plan_grants grant_source
 							ON grant_source.project_id = e.project_id
@@ -123,7 +149,10 @@ async function readPendingDefaultEntitlements(
 				planKey: row.plan_key,
 			},
 		})),
-		ending: ending.map((row) => row.key),
+		ending: ending.map((row) => ({
+			key: row.key,
+			status: row.still_held ? "inactive" : "ended",
+		})),
 	};
 }
 
@@ -137,9 +166,17 @@ function withPendingEntitlements(
 	pending: PendingDefaultEntitlements,
 ): EntitlementSnapshot["entitlements"] {
 	if (pending.held.length === 0 && pending.ending.length === 0) return stored;
-	const ending = new Set(pending.ending);
+	const ending = new Map(pending.ending.map((entry) => [entry.key, entry.status]));
 	const byKey = new Map(
-		stored.map((entry) => [entry.key, ending.has(entry.key) ? { ...entry, active: false } : entry]),
+		stored.map((entry) => {
+			const status = ending.get(entry.key);
+			return [
+				entry.key,
+				status === undefined
+					? entry
+					: { ...entry, active: false, metadata: { ...entry.metadata, status } },
+			];
+		}),
 	);
 	for (const entry of pending.held) {
 		if (byKey.get(entry.key)?.active !== true) byKey.set(entry.key, entry);
@@ -190,7 +227,9 @@ export async function readEntitlementRows(
 		key: row.key,
 		active: row.active,
 		expiresAt: toIsoStringOrNull(row.expires_at),
-		metadata: row.metadata,
+		// A row whose period passed before a recompute, or one deactivated before inactive rows
+		// recorded their source's status, still carries a running status.
+		metadata: row.active ? row.metadata : inactiveEntitlementMetadata(row.metadata),
 	}));
 }
 
@@ -479,6 +518,37 @@ export async function recomputeCustomerEntitlements(
 		UPDATE entitlements e
 		SET
 			active = false,
+			-- The entitlement keeps its last source's metadata with that source's current status:
+			-- why it ended (expired, refunded, ended, superseded, …), or inactive while the source
+			-- still runs without it. SET reads the source ids before this statement clears them.
+			metadata = e.metadata || COALESCE((
+				SELECT jsonb_build_object(
+					'status',
+					CASE
+						WHEN last_source.status IN (SELECT jsonb_array_elements_text(${jsonb(runningSourceStatuses)}))
+							THEN 'inactive'
+						ELSE last_source.status
+					END
+				)
+				FROM (
+					SELECT COALESCE(
+						(
+							SELECT s.status FROM subscriptions s
+							WHERE s.project_id = e.project_id AND s.id = e.source_subscription_id
+						),
+						(
+							SELECT pu.status FROM purchases pu
+							WHERE pu.project_id = e.project_id AND pu.id = e.source_purchase_id
+						),
+						(
+							SELECT g.status FROM plan_grants g
+							WHERE g.project_id = e.project_id AND g.id = e.source_plan_grant_id
+						),
+						e.metadata->>'status'
+					) AS status
+				) last_source
+				WHERE last_source.status IS NOT NULL
+			), '{}'::jsonb),
 			source_subscription_id = NULL,
 			source_purchase_id = NULL,
 			source_plan_grant_id = NULL,

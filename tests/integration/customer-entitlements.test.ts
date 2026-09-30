@@ -141,6 +141,7 @@ localDescribe("customer entitlement route integration", () => {
 			},
 		]);
 		expect((await lifecycleResponse.json()).data.entitlements).toEqual(recomputed.entitlements);
+		// The stored row still says its subscription was active; an inactive entry never reads so.
 		expect((await legacyResponse.json()).data.entitlements).toEqual([
 			{
 				key: "premium",
@@ -148,7 +149,7 @@ localDescribe("customer entitlement route integration", () => {
 				expiresAt: null,
 				metadata: expect.objectContaining({
 					source: "subscription",
-					status: "active",
+					status: "inactive",
 					provider: "google",
 					channel: "android",
 				}),
@@ -164,7 +165,121 @@ localDescribe("customer entitlement route integration", () => {
 			projection_sync_jobs: 0,
 		});
 	});
+
+	it("reports an ended source's status on an inactive entitlement, and inactive while it runs", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const expiring = await seedPremiumSubscription(context.sql, "expiring_user");
+		const lapsing = await seedPremiumSubscription(context.sql, "lapsing_user");
+		for (const billingAccountId of ["expiring_user", "lapsing_user"]) {
+			expect(
+				(
+					await context.repository.recomputeCustomerEntitlements(
+						integrationProjectContext(),
+						billingAccountId,
+					)
+				).entitlements,
+			).toMatchObject([{ key: "premium", active: true, metadata: { status: "active" } }]);
+		}
+		const read = async (billingAccountId: string) => {
+			const response = await testRequest(
+				app,
+				`/v1/billing-accounts/${billingAccountId}/entitlements`,
+				{ headers: authHeaders("acme") },
+			);
+			expect(response.status).toBe(200);
+			return ((await response.json()).data as EntitlementSnapshot).entitlements;
+		};
+		const storedStatus = async (billingAccountId: string) =>
+			(
+				await context.sql<Array<{ status: string }>>`
+					SELECT e.metadata->>'status' AS status
+					FROM entitlements e
+					JOIN customers c ON c.id = e.customer_id AND c.project_id = e.project_id
+					WHERE c.billing_account_id = ${billingAccountId}
+				`
+			).map((row) => row.status);
+
+		// The provider reports the subscription expired: the entitlement carries its status.
+		await context.sql`
+			UPDATE subscriptions SET status = 'expired', expires_at = now() - INTERVAL '1 second'
+			WHERE id = ${expiring}
+		`;
+		await context.repository.recomputeCustomerEntitlements(
+			integrationProjectContext(),
+			"expiring_user",
+		);
+		expect(await read("expiring_user")).toMatchObject([
+			{ key: "premium", active: false, metadata: { source: "subscription", status: "expired" } },
+		]);
+		expect(await storedStatus("expiring_user")).toEqual(["expired"]);
+
+		// Its period passed before Quotum recorded a lapse: the subscription still says active, so
+		// the entitlement reads inactive, before and after a recompute.
+		await context.sql`
+			UPDATE subscriptions SET expires_at = now() - INTERVAL '1 second' WHERE id = ${lapsing}
+		`;
+		await context.sql`
+			UPDATE entitlements SET expires_at = now() - INTERVAL '1 second'
+			WHERE source_subscription_id = ${lapsing}
+		`;
+		expect(await read("lapsing_user")).toMatchObject([
+			{ key: "premium", active: false, metadata: { source: "subscription", status: "inactive" } },
+		]);
+		await context.repository.recomputeCustomerEntitlements(
+			integrationProjectContext(),
+			"lapsing_user",
+		);
+		expect(await read("lapsing_user")).toMatchObject([
+			{ key: "premium", active: false, metadata: { status: "inactive" } },
+		]);
+		expect(await storedStatus("lapsing_user")).toEqual(["inactive"]);
+
+		// A later recompute keeps the recorded status once the source is gone.
+		await context.repository.recomputeCustomerEntitlements(
+			integrationProjectContext(),
+			"expiring_user",
+		);
+		expect(await storedStatus("expiring_user")).toEqual(["expired"]);
+	});
 });
+
+/** An active Google premium subscription for a new account, running for another month. */
+async function seedPremiumSubscription(sql: SQL, billingAccountId: string): Promise<string> {
+	const [row] = await sql<Array<{ id: string }>>`
+		WITH catalog AS (
+			SELECT projects.id AS project_id, products.id AS product_id, store_products.id AS store_product_id
+			FROM projects
+			JOIN products ON products.project_id = projects.id
+				AND products.key = 'premium_monthly'
+			JOIN store_products ON store_products.project_id = projects.id
+				AND store_products.product_id = products.id
+				AND store_products.provider = 'google'
+				AND store_products.external_product_id = 'premium_monthly'
+				AND store_products.external_price_id = 'monthly-base'
+			WHERE projects.key = 'acme'
+		), customer AS (
+			INSERT INTO customers (project_id, billing_account_id)
+			SELECT project_id, ${billingAccountId} FROM catalog
+			RETURNING id, project_id
+		)
+		INSERT INTO subscriptions (
+			project_id, customer_id, product_id, store_product_id, provider, channel,
+			external_subscription_id, external_product_id, external_price_id, status, starts_at,
+			expires_at, auto_renew, raw_state
+		)
+		SELECT
+			catalog.project_id, customer.id, catalog.product_id, catalog.store_product_id, 'google',
+			'android', ${`subscription_${billingAccountId}`}, 'premium_monthly', 'monthly-base', 'active',
+			now() - INTERVAL '1 day', now() + INTERVAL '30 days', true, '{}'::jsonb
+		FROM catalog CROSS JOIN customer
+		RETURNING id
+	`;
+	if (row === undefined) throw new Error(`seeding ${billingAccountId} failed`);
+	return row.id;
+}
 
 function expectEmptySnapshot(snapshot: EntitlementSnapshot, billingAccountId: string): void {
 	expect(snapshot).toEqual({
