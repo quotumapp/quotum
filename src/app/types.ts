@@ -80,6 +80,12 @@ export interface PostAuthGuardInput {
 export interface PostAuthGuard {
 	matches(path: string): boolean;
 	guard(input: PostAuthGuardInput): void | Promise<void>;
+	/**
+	 * `authorize` marks a credential check, such as the operator key. Those run after every other
+	 * matching guard, whatever order route modules register them in, so a request with a wrong
+	 * credential still spends its path group's rate limit.
+	 */
+	stage?: "authorize";
 }
 
 /**

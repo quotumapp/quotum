@@ -200,7 +200,17 @@ export function createApp({
 	};
 	const postAuthGuards: PostAuthGuard[] = [];
 	const registerPostAuthGuard = (guard: PostAuthGuard): void => {
-		postAuthGuards.push(guard);
+		if (guard.stage === "authorize") {
+			postAuthGuards.push(guard);
+			return;
+		}
+		// Limiters go ahead of every credential check registered so far.
+		const firstAuthorizer = postAuthGuards.findIndex((existing) => existing.stage === "authorize");
+		postAuthGuards.splice(
+			firstAuthorizer === -1 ? postAuthGuards.length : firstAuthorizer,
+			0,
+			guard,
+		);
 	};
 	const requestObservers: RequestObserver[] = [];
 	const registerRequestObserver = (observer: RequestObserver): void => {
@@ -413,7 +423,7 @@ export function createApp({
 		if (observers.length > 0) {
 			observedRequests.set(request, { observers, path, startedAt: performance.now() });
 		}
-		// Path-group limiters and operator-key guards run here: after authentication, before request
+		// Path-group limiters, then operator-key guards, run here: after authentication, before request
 		// validation. They match the routed path so they always describe the handler that will run.
 		const rateLimitServer = (server ?? null) as RateLimitServer | null;
 		for (const guard of postAuthGuards) {
