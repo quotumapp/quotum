@@ -129,7 +129,9 @@ quantity, and confirming that quantity or less never charges more than the hold.
 reverses the wallet charge recorded on the original event rather than rating the corrected quantity
 again: a partial correction returns its proportional share, rounded to the wallet scale and capped
 by what remains, and correcting the rest of the usage returns the remainder, so corrections
-together return exactly what was charged.
+together return exactly what was charged. A correction's `quantity` follows the same rule as
+consume: it may carry no more decimal places than the meter's `creditScale`, or it answers
+`400 INVALID_REQUEST`.
 
 A meter limit counts usage in a window of its item's reset cadence: `resetInterval`, one of `hour`,
 `day`, `week`, `month`, `quarter`, `semi_annual` or `year`, times `resetIntervalCount` (default 1),

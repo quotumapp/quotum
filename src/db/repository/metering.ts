@@ -146,6 +146,7 @@ interface OriginalUsageRow {
 	wallet_feature_key: string;
 	wallet_unit: string;
 	wallet_scale: number;
+	meter_scale: number;
 	reservation_id: string | null;
 	quantity: unknown;
 	wallet_quantity: unknown;
@@ -527,7 +528,8 @@ export class MeteringBillingRepository extends RepositoryModule {
 		}
 		const actor = requiredAuditText(input.actor, "actor", 200);
 		const reason = requiredAuditText(input.reason, "reason", 500);
-		const correctionQuantity = positiveDecimal(input.quantity, "quantity");
+		// The meter's decimal places are checked once the original event names the meter.
+		positiveDecimal(input.quantity, "quantity");
 
 		return await this.operationTransaction(
 			project,
@@ -542,6 +544,12 @@ export class MeteringBillingRepository extends RepositoryModule {
 					customer.id,
 					input.originalUsageEventId,
 					input.originalRecordedAt,
+				);
+				// The same rule as consume: a quantity may not be finer than the meter records.
+				const correctionQuantity = positiveDecimal(
+					input.quantity,
+					"quantity",
+					original.meter_scale,
 				);
 				const originalQuantity = databaseDecimal(original.quantity, "original quantity");
 				const originalWalletQuantity = databaseDecimal(
@@ -1130,6 +1138,7 @@ async function lockOriginalUsageEvent(
 				wallet.key AS wallet_feature_key,
 				wallet.unit AS wallet_unit,
 				wallet.credit_scale AS wallet_scale,
+				meter.credit_scale AS meter_scale,
 				ue.reservation_id,
 				ue.quantity,
 				ue.wallet_quantity,
