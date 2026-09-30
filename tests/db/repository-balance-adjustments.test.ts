@@ -424,7 +424,7 @@ describe("administrative debits", () => {
 		database.assertConsumed();
 		const [, , targets, , lines, firstUpdate, secondUpdate] = database.queries;
 		expect(targets).toMatch(
-			/ORDER BY a\.feature_id, a\.expires_at ASC NULLS LAST, a\.created_at, a\.id\s+FOR UPDATE OF a/,
+			/ORDER BY a\.feature_id, a\.expires_at ASC NULLS LAST, \(a\.entity_id IS NULL\) ASC, a\.created_at ASC, a\.id ASC\s+FOR UPDATE OF a/,
 		);
 		expect(lines).toContain("jsonb_to_recordset");
 		for (const update of [firstUpdate, secondUpdate]) {

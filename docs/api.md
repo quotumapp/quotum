@@ -138,6 +138,12 @@ the pool, against what is left in the pool, and what it buys goes to the pool. A
 evaluated after that entity's usage against everything the entity can spend, its own allocations and
 the pool, and what it buys is credited to the entity. One write can trigger both.
 
+Usage spends an account's allocations of a feature in expiry order, the earliest first and
+allocations without an expiry last. Entity usage can spend both the entity's own allocations and the
+account's shared pool; at equal expiry it spends the entity's own first, so one entity's usage does
+not drain credit the others share while its own is still available. Older allocations go first
+after that. Account usage without an entity spends the shared pool only.
+
 Every subscription pins the catalog revision it was bought from, and the rate card of that
 revision prices the account's usage, whatever the catalog publishes later. When an account's
 subscriptions pin several revisions that price a meter, such as a base plan bought before a later

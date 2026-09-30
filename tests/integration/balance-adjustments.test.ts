@@ -188,6 +188,46 @@ localDescribe("operator grants and administrative debits", () => {
 		expect(grants.map((row) => row.feature)).toEqual(["ai_credits"]);
 	});
 
+	it("spends an entity's own credit before the shared pool at the same expiry", async () => {
+		const { usage, grant } = fixture();
+		const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+
+		expect((await grant("support_account", "grant-shared", "100", { expiresAt })).status).toBe(201);
+		await context.repository.controlsEnterprise.createEntity(project, {
+			billingAccountId: "support_account",
+			externalId: "seat-1",
+			kind: "seat",
+		});
+		const own = await grant("support_account", "grant-seat", "100", {
+			entityId: "seat-1",
+			expiresAt,
+		});
+		expect(own.status).toBe(201);
+
+		const entityUsage = await usage("support_account", "consume", "spend-seat", {
+			featureKey: "model_tokens",
+			quantity: "2000",
+			entityId: "seat-1",
+		});
+		const accountUsage = await usage("support_account", "consume", "spend-account", {
+			featureKey: "model_tokens",
+			quantity: "400",
+		});
+
+		expect(entityUsage.status).toBe(200);
+		expect(accountUsage.status).toBe(200);
+		expect(
+			await context.sql<Array<{ entity: boolean; consumed: number }>>`
+				SELECT entity_id IS NOT NULL AS entity, consumed_quantity::float8 AS consumed
+				FROM balance_allocations
+				ORDER BY id
+			`,
+		).toEqual([
+			{ entity: false, consumed: 2 },
+			{ entity: true, consumed: 10 },
+		]);
+	});
+
 	it("revokes only free quantity, lets an open reservation confirm and replays", async () => {
 		const { get, post, usage, grant } = fixture();
 		const created = (await (await grant("revoke_account", "grant-1", "100")).json()).data.grant;
