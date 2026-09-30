@@ -1031,7 +1031,9 @@ A publish that changes the default plan changes the accounts that hold it, in th
 - **The plan is republished with a new version:** each grant moves in place. Its meter limits
   switch to the new version immediately. Allowances already issued for the current window stay,
   and the new quantities apply from the next reset; a feature the new version adds is granted now,
-  and one it drops ends now.
+  and one it drops ends now. A feature an earlier version dropped within the current window and a
+  later one adds back on the same reset resumes what was left of that window's allowance, with its
+  use kept, instead of being granted again.
 - **The declared keys change:** the entitlements follow them.
 - **The marker is removed:** the grants end. Marking it again resumes the windows still running,
   as a fallback does.
