@@ -1181,6 +1181,12 @@
       ]
     },
     {
+      "code": "STORE_EVENT_NOT_REPLAYABLE",
+      "sources": [
+        "src/db/repository/store-event-replay.ts"
+      ]
+    },
+    {
       "code": "STOREKIT_ACCOUNT_TOKEN_MISMATCH",
       "sources": [
         "src/providers/apple/service.ts"

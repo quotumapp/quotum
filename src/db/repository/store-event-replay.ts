@@ -1,4 +1,5 @@
 import { sql as drizzleSql } from "drizzle-orm";
+import { NotFoundBillingError, PersistenceConflictError } from "../../billing/errors";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import { parseStoreEventReplayJobRow } from "./parsers";
@@ -78,7 +79,22 @@ export class StoreEventReplayBillingRepository extends RepositoryModule {
 		`,
 		);
 		if (row === null) {
-			throw new Error(`store event replay job ${eventId} is not claimable`);
+			const existing = await executeOne<{ processing_status: string }>(
+				this.database,
+				drizzleSql`
+				SELECT events.processing_status
+				FROM store_events events
+				WHERE events.id = ${eventId} AND events.project_id = ${projectId}
+			`,
+			);
+			// Another project's event is as unknown to this one as a missing event.
+			if (existing === null) {
+				throw new NotFoundBillingError(`Store event ${eventId} was not found`);
+			}
+			throw new PersistenceConflictError(
+				`Store event ${eventId} is ${existing.processing_status}; only pending, skipped, failed or stalled events can be replayed`,
+				"STORE_EVENT_NOT_REPLAYABLE",
+			);
 		}
 		return parseStoreEventReplayJobRow(row);
 	}

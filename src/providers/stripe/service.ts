@@ -13,7 +13,7 @@ import type {
 } from "../../billing/commercial";
 import { priceCommercialLines, recurringCadenceOf } from "../../billing/commercial-pricing";
 import { sha256Hex, stableJson } from "../../billing/decimal";
-import { BillingError, ProviderUnavailableError } from "../../billing/errors";
+import { BillingError, NotFoundBillingError, ProviderUnavailableError } from "../../billing/errors";
 import {
 	normalizePaymentSetupCurrency,
 	type PaymentSetupSession,
@@ -95,6 +95,7 @@ import {
 	setupPlanCurrency,
 	startPlanOnSavedCard,
 } from "./saved-card-plan";
+import { isStripeResourceMissing } from "./stripe-errors";
 import type {
 	NormalizedStripeCheckoutPromotion,
 	NormalizedStripeCommand,
@@ -1908,7 +1909,14 @@ export class StripeBillingService
 	}): Promise<StripeCheckoutSessionStatus> {
 		const billingAccountId = requireNonBlank(input.billingAccountId, "billingAccountId");
 		const sessionId = requireNonBlank(input.sessionId, "sessionId");
-		const session = await this.dependencies.client.retrieveCheckoutSession(sessionId);
+		const session = await this.dependencies.client
+			.retrieveCheckoutSession(sessionId)
+			.catch((error: unknown) => {
+				if (isStripeResourceMissing(error)) {
+					throw new NotFoundBillingError(`Stripe Checkout session ${sessionId} was not found`);
+				}
+				throw error;
+			});
 		const clientReferenceBillingAccountId = optionalNonBlankString(session.client_reference_id);
 		const metadataBillingAccountId = optionalNonBlankString(session.metadata?.billingAccountId);
 
