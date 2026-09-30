@@ -140,6 +140,14 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		expect(await available()).toBe("0");
 	});
 
+	it("carries over once when Stripe reports the switch while the change is pending", async () => {
+		await carryWhenStripeReportsEarly("pending");
+	});
+
+	it("carries over once when Stripe reports the switch before the worker records it", async () => {
+		await carryWhenStripeReportsEarly("processing");
+	});
+
 	it("caps carried usage at the new allowance and forgives the rest", async () => {
 		await addAllowance(1, "100");
 		await addAllowance(2, "20");
@@ -280,6 +288,59 @@ async function migrate(fromVersion: number, toVersion: number): Promise<void> {
 
 async function migrateBackToVersionOne(): Promise<void> {
 	await migrate(2, 1);
+}
+
+/**
+ * An immediate change carrying balance and usage, whose Stripe update is recorded while the change is
+ * still pending, or claimed by a worker that updated Stripe but has not recorded it yet.
+ */
+async function carryWhenStripeReportsEarly(stage: "pending" | "processing"): Promise<void> {
+	await addAllowance(1, "100");
+	await addAllowance(2, "300");
+	await sync(1);
+	await spend(30, "spend-before-early-switch");
+	const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+	const preview = await previewChange(fixture, {
+		...changeIntent("immediate"),
+		carryOver: { balances: ["ai_credits"], usages: ["ai_credits"] },
+	});
+	const previewToken = (await preview.json()).data.previewToken;
+	const executed = await testRequest(
+		fixture.app,
+		"/v1/billing-accounts/migration-stripe/commercial-actions",
+		{
+			method: "POST",
+			headers: { ...jsonHeaders(fixture), "idempotency-key": "early-switch" },
+			body: JSON.stringify({ previewToken }),
+		},
+	);
+	expect(executed.status).toBe(202);
+	let claimedId: string | null = null;
+	if (stage === "processing") {
+		const [claimed] = await context.repository.claimSubscriptionChanges("carry-worker", 10);
+		if (claimed === undefined) throw new Error("Expected a claimed change");
+		claimedId = claimed.changeId;
+	}
+
+	// Stripe's update for the new version arrives before the change is marked applied.
+	await sync(2);
+	expect(await available()).toBe("340");
+	expect(await carriedUsage()).toEqual([{ requested: "30.000000000", applied: "30.000000000" }]);
+
+	if (claimedId === null) {
+		await applyClaimedChange();
+	} else {
+		await context.repository.markSubscriptionChangeApplied(
+			project.projectInstanceId,
+			claimedId,
+			"sub_migrate_stripe",
+			"carry-worker",
+		);
+	}
+	await sync(2);
+	expect(await available()).toBe("340");
+	expect((await allowances()).filter((row) => row.source_kind === "carry_over")).toHaveLength(1);
+	expect(await carriedUsage()).toHaveLength(1);
 }
 
 async function available(): Promise<string> {

@@ -46,6 +46,11 @@ async function resolveSubscriptionPlanVersion(
 		change_revision_id: string | number | bigint | null;
 		change_effective_mode: "immediate" | "period_end" | null;
 		change_carry_over: { balances?: string[]; usages?: string[] } | null;
+		pending_change_id: string | null;
+		pending_version_id: string | number | bigint | null;
+		pending_revision_id: string | number | bigint | null;
+		pending_effective_mode: "immediate" | "period_end" | null;
+		pending_carry_over: { balances?: string[]; usages?: string[] } | null;
 	}>(
 		executor,
 		drizzleSql`
@@ -61,7 +66,12 @@ async function resolveSubscriptionPlanVersion(
 				change_version.id AS change_version_id,
 				change_version.catalog_revision_id AS change_revision_id,
 				applied_change.effective_mode AS change_effective_mode,
-				applied_change.carry_over AS change_carry_over
+				applied_change.carry_over AS change_carry_over,
+				pending_change.id AS pending_change_id,
+				pending_version.id AS pending_version_id,
+				pending_version.catalog_revision_id AS pending_revision_id,
+				pending_change.effective_mode AS pending_effective_mode,
+				pending_change.carry_over AS pending_carry_over
 			FROM subscriptions subscription
 			LEFT JOIN plan_versions current_version
 				ON current_version.project_id = subscription.project_id
@@ -91,6 +101,23 @@ async function resolveSubscriptionPlanVersion(
 				AND applied_change.from_plan_version_id = subscription.plan_version_id
 				AND applied_change.to_plan_version_id <> subscription.plan_version_id
 				AND change_version.status = 'published'
+			-- A change the provider already reports: its target is the version the snapshot's product
+			-- is bound to, while the change is still pending or its worker has not recorded it.
+			LEFT JOIN LATERAL (
+				SELECT change.id, change.to_plan_version_id, change.effective_mode, change.carry_over
+				FROM subscription_changes change
+				WHERE change.project_id = subscription.project_id
+					AND change.subscription_id = subscription.id
+					AND change.status IN ('pending', 'processing')
+					AND change.synchronized_at IS NULL
+					AND change.from_plan_version_id = subscription.plan_version_id
+					AND change.to_plan_version_id = binding_version.id
+				ORDER BY change.created_at DESC, change.id DESC
+				LIMIT 1
+			) pending_change ON binding_version.id <> subscription.plan_version_id
+			LEFT JOIN plan_versions pending_version
+				ON pending_version.project_id = subscription.project_id
+				AND pending_version.id = pending_change.to_plan_version_id
 			WHERE subscription.project_id = ${input.projectId}
 				AND subscription.customer_id = ${input.customerId}
 				AND subscription.id = ${input.subscriptionId}
@@ -135,7 +162,28 @@ async function resolveSubscriptionPlanVersion(
 					: null,
 		};
 	}
-	// 3. A product of another plan is a provider-side switch, so its bound version applies.
+	// 3. The provider reports the target of a change not yet recorded as applied: its worker updated
+	// the provider and has not written it down, or the provider moved first. The change applies now,
+	// with its carry-over. Once the subscription holds the target, neither this step nor step 2
+	// matches the change again, so recording it as applied later only marks it synchronized.
+	if (
+		row.pending_change_id !== null &&
+		row.pending_version_id !== null &&
+		row.pending_revision_id !== null
+	) {
+		return {
+			planVersionId: String(row.pending_version_id),
+			catalogRevisionId: String(row.pending_revision_id),
+			changed: true,
+			changeId: row.pending_change_id,
+			previousPlanVersionId,
+			carryOver:
+				row.pending_effective_mode === "immediate"
+					? appliedCarryOver(row.pending_carry_over)
+					: null,
+		};
+	}
+	// 4. A product of another plan is a provider-side switch, so its bound version applies.
 	if (
 		binding !== null &&
 		row.binding_plan_id !== null &&
@@ -149,7 +197,7 @@ async function resolveSubscriptionPlanVersion(
 			carryOver: null,
 		};
 	}
-	// 4. Otherwise the subscription stays grandfathered on its pinned version.
+	// 5. Otherwise the subscription stays grandfathered on its pinned version.
 	return { ...current, changed: false, changeId, previousPlanVersionId, carryOver: null };
 }
 
