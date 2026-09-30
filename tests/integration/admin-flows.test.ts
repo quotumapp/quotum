@@ -652,7 +652,18 @@ localDescribe("Admin flows integration", () => {
 				headers: operatorHeaders("acme"),
 			},
 		);
-		expect(crossProjectReplay.status).not.toBe(200);
+		// Another project's event is as unknown as one that does not exist.
+		expect(crossProjectReplay.status).toBe(404);
+		expect(await crossProjectReplay.json()).toMatchObject({
+			success: false,
+			error: { code: "NOT_FOUND" },
+		});
+		const unknownReplay = await testRequest(
+			operationApp,
+			"/v1/admin/store-events/00000000-0000-4000-8000-000000000009/replay",
+			{ method: "POST", headers: operatorHeaders("globex") },
+		);
+		expect(unknownReplay.status).toBe(404);
 		expect(calls).toEqual([]);
 		await expectAdminReplayEventStatus(context.sql, globexEventId, "skipped");
 
@@ -671,6 +682,18 @@ localDescribe("Admin flows integration", () => {
 		});
 		expect(calls).toEqual(["globex:stripe:checkout.session.completed"]);
 		await expectAdminReplayEventStatus(context.sql, globexEventId, "processed");
+
+		const processedReplay = await testRequest(
+			operationApp,
+			`/v1/admin/store-events/${globexEventId}/replay`,
+			{ method: "POST", headers: operatorHeaders("globex") },
+		);
+		expect(processedReplay.status).toBe(409);
+		expect(await processedReplay.json()).toMatchObject({
+			success: false,
+			error: { code: "STORE_EVENT_NOT_REPLAYABLE" },
+		});
+		expect(calls).toEqual(["globex:stripe:checkout.session.completed"]);
 	});
 });
 

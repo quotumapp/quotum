@@ -237,7 +237,13 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	private requireSession(sessionId: string): FakeCheckoutSession {
 		const session = this.sessions.get(sessionId);
 		if (session === undefined) {
-			throw new Error(`Unknown fake Stripe Checkout session: ${sessionId}`);
+			// Shaped like stripe-node's error for an id Stripe does not know.
+			throw Object.assign(new Error(`No such checkout.session: '${sessionId}'`), {
+				type: "StripeInvalidRequestError",
+				rawType: "invalid_request_error",
+				code: "resource_missing",
+				statusCode: 404,
+			});
 		}
 		return session;
 	}

@@ -16,11 +16,20 @@ if (process.env.BILLING_ENV !== "test" || process.env.BILLING_TEST_FAKE_STRIPE !
 }
 
 const env = loadFixtureEnv();
+// One fake per connection, so sessions a checkout creates are still known to later lookups.
+const fakeStripeClients = new Map<string, FakeStripeBillingClient>();
 
 const runtime = createBillingRuntime(env, {
 	connections: fixtureConnections(env.connectionFixtures),
 	projectionFetch: globalThis.fetch,
-	stripeClientFactory: (config) => new FakeStripeBillingClient(config, fakeStripeOptions()),
+	stripeClientFactory: (config) => {
+		const key = `${config.secretKey}:${config.connectedAccountId ?? ""}`;
+		const existing = fakeStripeClients.get(key);
+		if (existing !== undefined) return existing;
+		const client = new FakeStripeBillingClient(config, fakeStripeOptions());
+		fakeStripeClients.set(key, client);
+		return client;
+	},
 	readinessCheck: createBillingReadinessCheck(),
 	merchant: merchantPlatformEnabled() ? { mailer: new MerchantCaptureMailer() } : null,
 });

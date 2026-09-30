@@ -223,7 +223,7 @@ Checkout flow:
 4. Success pages may poll `GET .../providers/stripe/checkout-sessions/:sessionId`, which returns
    `{sessionId,status,paymentStatus,customerEmail,productKey}`; email and product key appear only
    once paid, and the endpoint never grants access. `POST .../checkout-sessions/:sessionId/expire`
-   expires open sessions.
+   expires open sessions. A session id Stripe does not know answers `404 NOT_FOUND` on both.
 
 A plan's `trialDays` becomes the Checkout subscription's trial only for an account that has not had
 a trial of that plan before, through a [Quotum trial](api.md#trials) or a provider subscription

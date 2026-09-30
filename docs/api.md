@@ -1131,7 +1131,9 @@ Operator routes:
 - Operator grants under `/v1/admin/operator-grants` and administrative debits under
   `/v1/admin/administrative-debits`; see
   [Operator grants and administrative debits](#operator-grants-and-administrative-debits).
-- `POST /v1/admin/store-events/:eventId/replay`.
+- `POST /v1/admin/store-events/:eventId/replay`: an event of another project, or none, answers
+  `404 NOT_FOUND`; one already processed, or leased by a worker that is still live, answers
+  `409 STORE_EVENT_NOT_REPLAYABLE`.
 - `POST /v1/admin/reconciliation/subscriptions/run`.
 - `POST /v1/admin/projection-jobs/:jobId/retry`.
 - `GET /v1/admin/metrics`.

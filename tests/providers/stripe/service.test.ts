@@ -70,6 +70,7 @@ function serviceFixture(
 		webhookEvent?: unknown;
 		constructWebhookError?: unknown;
 		paymentIntentError?: Error;
+		retrieveCheckoutSessionError?: unknown;
 		latestCharge?: string | null;
 		expireRace?: boolean;
 		retrievedSubscription?: Record<string, unknown>;
@@ -160,6 +161,9 @@ function serviceFixture(
 			},
 			retrieveCheckoutSession(sessionId) {
 				calls.push({ method: "retrieveCheckoutSession", sessionId });
+				if (overrides.retrieveCheckoutSessionError !== undefined) {
+					return Promise.reject(overrides.retrieveCheckoutSessionError);
+				}
 				return Promise.resolve(statusSession);
 			},
 			expireCheckoutSession(sessionId) {
@@ -1336,6 +1340,36 @@ describe("StripeBillingService", () => {
 			code: "INVALID_REQUEST",
 			status: 403,
 		});
+	});
+
+	it("answers an unknown Checkout Session as not found for status and expiry", async () => {
+		// What stripe-node throws for an id Stripe does not know.
+		const missing = Object.assign(new Error("No such checkout.session: 'cs_missing'"), {
+			type: "StripeInvalidRequestError",
+			rawType: "invalid_request_error",
+			code: "resource_missing",
+			statusCode: 404,
+		});
+		const { service, calls } = serviceFixture({ retrieveCheckoutSessionError: missing });
+		for (const lookup of [
+			() =>
+				service.getCheckoutSessionStatus({ billingAccountId: "user_1", sessionId: "cs_missing" }),
+			() => service.expireCheckoutSession({ billingAccountId: "user_1", sessionId: "cs_missing" }),
+		]) {
+			await expect(lookup()).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
+		}
+		expect(JSON.stringify(calls)).not.toContain('"expireCheckoutSession"');
+
+		// Any other Stripe failure is not turned into a 404.
+		const { service: failing } = serviceFixture({
+			retrieveCheckoutSessionError: Object.assign(new Error("Stripe is down"), {
+				type: "StripeAPIError",
+				statusCode: 500,
+			}),
+		});
+		await expect(
+			failing.getCheckoutSessionStatus({ billingAccountId: "user_1", sessionId: "cs_x" }),
+		).rejects.toThrow("Stripe is down");
 	});
 
 	it("rejects Checkout Session status when client reference belongs to another user", async () => {

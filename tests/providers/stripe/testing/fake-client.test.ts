@@ -84,3 +84,20 @@ describe("fake Stripe subscription creation", () => {
 		expect(await client.listCustomerSubscriptions("cus_1")).toEqual([]);
 	});
 });
+
+describe("fake Stripe Checkout sessions", () => {
+	it("answers an unknown session id the way stripe-node does", async () => {
+		const client = fakeClient();
+		for (const lookup of [
+			() => client.retrieveCheckoutSession("cs_missing"),
+			() => client.retrieveSetupCheckoutSession("cs_missing"),
+		]) {
+			await expect(lookup()).rejects.toMatchObject({
+				type: "StripeInvalidRequestError",
+				code: "resource_missing",
+				statusCode: 404,
+				message: "No such checkout.session: 'cs_missing'",
+			});
+		}
+	});
+});
