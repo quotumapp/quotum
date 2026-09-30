@@ -792,7 +792,7 @@ describe("merchant platform transactions", () => {
 			},
 		]);
 	});
-	it("accepts an invitation once under concurrent requests and immediately revokes a removed member's session", async () => {
+	it("accepts an invitation once under concurrent requests and immediately ends a removed member's access", async () => {
 		const owner = new MerchantBrowser(f);
 		await owner.signup();
 		await onboard(owner);
@@ -836,7 +836,10 @@ describe("merchant platform transactions", () => {
 			organizationSlug: "acme",
 			status: "removed",
 		});
-		expect((await invitee.request("/api/platform/session")).status).toBe(401);
+		// The session is the person's, not the organization's: it stays, and the access is gone.
+		const session = await invitee.json<MerchantSessionView>("/api/platform/session");
+		expect(session.memberships).toEqual([]);
+		expect((await invitee.request("/api/platform/team?organization=acme")).status).toBe(403);
 	});
 	it("rejects replaced, expired, wrong-email, and revoked invitation tokens", async () => {
 		const owner = new MerchantBrowser(f);
