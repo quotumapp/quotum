@@ -356,7 +356,8 @@ include a path value the caller chooses:
   separately), usage and balance routes (`BILLING_METERING_RATE_LIMIT_PER_WINDOW`) and
   `/v1/admin/*` (`BILLING_ADMIN_RATE_LIMIT_PER_WINDOW`) are limited per project, client IP and
   route, after authentication. Identifiers in the path, such as a billing account, share their
-  route's budget.
+  route's budget. On `/v1/admin/*` the limit counts before the operator key is checked, so
+  requests with a wrong `X-Billing-Operator-Key` spend the same budget.
 - Every `/v1` request except provider webhooks also counts, before authentication, against a
   per-client-IP ceiling of the verify, metering and admin limits combined.
 - Provider webhooks are limited per project key in the URL, client IP and provider

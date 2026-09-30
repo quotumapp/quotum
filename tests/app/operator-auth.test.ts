@@ -72,9 +72,9 @@ const unauthorized = {
 	error: { code: "UNAUTHORIZED", message: "Invalid billing operator key" },
 };
 
-function operatorTestApp() {
+function operatorTestApp(appEnv: BillingEnv = env) {
 	return createBillingApp({
-		env,
+		env: appEnv,
 		connections: fixtureConnections(env.connectionFixtures),
 		projectContextResolver: projectContextResolver({
 			contexts: [projectInstanceContext("acme")],
@@ -130,6 +130,31 @@ describe("operator-key contracts", () => {
 				expect(response.status, `${verb} ${requestPath}`).toBe(401);
 				expect(await response.json()).toEqual(unauthorized);
 			}
+		}
+	});
+
+	it("counts wrong operator keys against the admin rate limit on every operator route", async () => {
+		const routes = operatorKeyRoutes(await generateOpenApi("0.0.0-test"));
+		expect(routes.length).toBeGreaterThan(0);
+		const limitedEnv = { ...env, rateLimit: { ...env.rateLimit, adminLimit: 1 } };
+		for (const { path, method } of routes) {
+			// The limiter keys on the route pattern, so each route gets a fresh app and budget.
+			const app = withOpenApiAssertions(operatorTestApp(limitedEnv));
+			const requestPath = fillPath(path);
+			const verb = method.toUpperCase();
+			const send = () =>
+				testRequest(app, requestPath, {
+					method: verb,
+					headers: requestHeaders(verb, "wrong-operator-key"),
+					body: verb === "GET" ? undefined : "{}",
+				});
+			expect((await send()).status, `${verb} ${requestPath}`).toBe(401);
+			const limited = await send();
+			expect(limited.status, `${verb} ${requestPath}`).toBe(429);
+			expect(await limited.json()).toEqual({
+				success: false,
+				error: { code: "RATE_LIMITED", message: "Too many requests" },
+			});
 		}
 	});
 

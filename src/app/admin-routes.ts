@@ -512,6 +512,7 @@ export function operatorApiKeyGuard(
 ): PostAuthGuard {
 	return {
 		matches,
+		stage: "authorize",
 		guard({ request }) {
 			if (operatorApiKey === null) {
 				throw new BillingError(
