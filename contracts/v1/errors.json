@@ -642,6 +642,18 @@
       ]
     },
     {
+      "code": "MEMBER_REMOVED",
+      "sources": [
+        "src/platform/team.ts"
+      ]
+    },
+    {
+      "code": "MEMBER_SUSPENDED",
+      "sources": [
+        "src/platform/team.ts"
+      ]
+    },
+    {
       "code": "METER_RATE_NOT_ACTIVATED",
       "sources": [
         "src/db/repository/metering-persistence.ts"
