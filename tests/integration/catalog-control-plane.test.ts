@@ -251,7 +251,9 @@ localDescribe("catalog control plane", () => {
 
 		const { defaultPlan: _removed, ...unmarked } = marked;
 		const removed = await publish(unmarked, 2);
-		expect(removed.published.impact.defaultPlanAccounts).toBe(0);
+		// Removing the marker reports the accounts that lose the default plan.
+		expect(removed.preview.impact.defaultPlanAccounts).toBe(2);
+		expect(removed.published.impact.defaultPlanAccounts).toBe(2);
 		expect(
 			await context.sql`
 				SELECT 1 FROM catalog_default_plans
@@ -260,6 +262,7 @@ localDescribe("catalog control plane", () => {
 		).toHaveLength(0);
 		const after = await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() });
 		expect((await after.json()).data.catalog).not.toHaveProperty("defaultPlan");
+		expect((await publish(unmarked, 3)).published.impact.defaultPlanAccounts).toBe(0);
 		const [audit] = await context.sql<Array<{ default_plan: unknown }>>`
 			SELECT details->'defaultPlan' AS default_plan FROM catalog_audit_log
 			WHERE catalog_revision_id = ${first.published.revisionId}::bigint
