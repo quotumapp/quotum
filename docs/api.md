@@ -1056,7 +1056,9 @@ one grant conflicts on another.
 - **Grant.** `POST .../operator-grants/:billingAccountId` takes `featureKey`, a decimal `quantity`,
   an optional `entityId` and an optional future `expiresAt`. It gives the account one allocation
   with `sourceKind: "operator"`, spent in the usual order, and never records a payment. The feature
-  must be a consumable meter (`OPERATOR_GRANT_FEATURE_INVALID`), and the quantity must fit its
+  must be a consumable that usage spends: a rate card's wallet, or a feature a plan allocates that
+  no published rate card prices as a meter. A meter a rate card charges to its wallet, or a
+  consumable nothing prices, answers `OPERATOR_GRANT_FEATURE_INVALID`. The quantity must fit its
   credit scale. It creates the customer when needed and returns `201` with the grant. A grant
   carries its allocation's consumed, held, reversed and available quantity, and its `status` is
   `active`, `expired` or `revoked`. A feature that the account's plan caps with a meter limit is

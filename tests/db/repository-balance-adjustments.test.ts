@@ -70,6 +70,7 @@ describe("operator grants", () => {
 				[customer],
 				[],
 				[feature],
+				[{ wallet: true, allocated: false, priced: false }],
 				[{ future: true }],
 				[{ id: "grant-id" }],
 				[{ id: 17 }],
@@ -91,15 +92,17 @@ describe("operator grants", () => {
 		});
 
 		database.assertConsumed();
-		const [upsert, replay, , expiry, insertGrant, insertAllocation, projection] = database.queries;
+		const [upsert, replay, , spentByUsage, expiry, insertGrant, insertAllocation, projection] =
+			database.queries;
 		expect(upsert).toContain("INSERT INTO customers");
 		expect(replay).toMatch(/g\.customer_id = \$\d+ AND g\.idempotency_key = \$\d+/);
+		expect(spentByUsage).toMatch(/rce\.wallet_feature_id = \$\d+/);
 		expect(expiry).toMatch(/::timestamptz > now\(\) AS future/);
 		expect(insertGrant).toContain("INSERT INTO operator_grants");
 		expect(insertAllocation).toContain("'operator'");
 		expect(insertAllocation).toContain("operator_grant_id");
-		expect(database.params[5]).toContain("operator_grant:grant-id");
-		expect(database.params[5]).toContain("20");
+		expect(database.params[6]).toContain("operator_grant:grant-id");
+		expect(database.params[6]).toContain("20");
 		expect(projection).toContain("INSERT INTO projection_sync_jobs");
 		expect(result).toMatchObject({
 			duplicate: false,
@@ -143,7 +146,14 @@ describe("operator grants", () => {
 				strict: true,
 			},
 		);
-		const fine = new FakeDatabase([[customer], [], [feature]], { strict: true });
+		const fine = new FakeDatabase(
+			[[customer], [], [feature], [{ wallet: true, allocated: false, priced: false }]],
+			{ strict: true },
+		);
+		const unspent = new FakeDatabase(
+			[[customer], [], [feature], [{ wallet: false, allocated: true, priced: true }]],
+			{ strict: true },
+		);
 
 		await expect(
 			repository(nonConsumable).grantOperatorBalance(project, input),
@@ -154,12 +164,26 @@ describe("operator grants", () => {
 		await expect(
 			repository(fine).grantOperatorBalance(project, { ...input, quantity: "0.001" }),
 		).rejects.toThrow("quantity supports at most 2 decimal places");
+		// A meter its rate card charges to a wallet: usage never spends an allocation of it.
+		await expect(repository(unspent).grantOperatorBalance(project, input)).rejects.toMatchObject({
+			code: "OPERATOR_GRANT_FEATURE_INVALID",
+			status: 400,
+		});
 	});
 
 	it("refuses an expiry that is not in the future", async () => {
-		const database = new FakeDatabase([[customer], [], [feature], [{ future: false }]], {
-			strict: true,
-		});
+		const database = new FakeDatabase(
+			[
+				[customer],
+				[],
+				[feature],
+				[{ wallet: true, allocated: false, priced: false }],
+				[{ future: false }],
+			],
+			{
+				strict: true,
+			},
+		);
 
 		await expect(
 			repository(database).grantOperatorBalance(project, {

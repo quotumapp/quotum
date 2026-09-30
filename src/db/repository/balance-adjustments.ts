@@ -34,7 +34,11 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
-import { requireMeteredFeature, resolveEntityId } from "./metering-persistence";
+import {
+	featureSpentByUsage,
+	requireMeteredFeature,
+	resolveEntityId,
+} from "./metering-persistence";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import { formatUtcTimestamp, requirePositiveLimit } from "./validation";
@@ -129,7 +133,10 @@ export class BalanceAdjustmentRepository
 				return { duplicate: true, grant: toOperatorGrantRecord(replay) };
 			}
 			const feature = await requireMeteredFeature(tx, projectId, input.featureKey);
-			if (feature.meter_kind !== "consumable") {
+			if (
+				feature.meter_kind !== "consumable" ||
+				!(await featureSpentByUsage(tx, projectId, feature))
+			) {
 				throw balanceAdjustmentError("OPERATOR_GRANT_FEATURE_INVALID", {
 					featureKey: feature.key,
 				});
