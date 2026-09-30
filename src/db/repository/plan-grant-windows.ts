@@ -1,10 +1,6 @@
 import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import type { CadenceUnit } from "../../shared/cadence";
-import {
-	defaultPlanPendingSql,
-	defaultPlanTargetSql,
-	previousDefaultGrantSql,
-} from "./default-plan-sql";
+import { defaultPlanReadGrantSql } from "./default-plan-sql";
 import { planGrantWindowBounds, storedCadence } from "./meter-limit-windows";
 import { executeRows } from "./query";
 import type { QueryExecutor } from "./types";
@@ -74,9 +70,11 @@ interface WindowRow {
 
 /**
  * The current window of every account-wide allocation item of the account's active plan grants,
- * optionally for one feature. With `pendingDefault`, it adds the default plan the account would
- * start on its next write, anchored where its previous default-plan grant was, or now. A null
- * account is one Quotum has not recorded yet.
+ * optionally for one feature. With `pendingDefault`, which reads pass, the default plan counts as
+ * the account's next write will leave it (see `defaultPlanReadVersionSql`): at the version that
+ * write applies, not at all when that write ends it, and, for an account that would start it,
+ * anchored where its previous default-plan grant was, or now. A null account is one Quotum has not
+ * recorded yet.
  */
 export async function readPlanGrantWindows(
 	executor: QueryExecutor,
@@ -96,7 +94,17 @@ export async function readPlanGrantWindows(
 					AND g.customer_id = ${customer}
 					AND g.status = 'active'
 					AND (g.ends_at IS NULL OR g.ends_at > now())
-				${options.pendingDefault ? pendingDefaultSourceSql(projectId, customer) : drizzleSql``}
+					${options.pendingDefault ? drizzleSql`AND g.origin <> 'default'` : drizzleSql``}
+				${
+					options.pendingDefault
+						? drizzleSql`
+							UNION ALL
+							SELECT d.grant_id, d.plan_version_id, d.anchor_at, NULL::timestamptz,
+								d.allocations_grant_id
+							FROM (${defaultPlanReadGrantSql(projectId, customer)}) d
+						`
+						: drizzleSql``
+				}
 			)
 			SELECT source.grant_id, source.anchor_at, source.ends_at, item.id AS plan_item_id,
 				item.feature_id, feature.key AS feature_key, feature.unit, feature.credit_scale,
@@ -137,18 +145,6 @@ export async function readPlanGrantWindows(
 	);
 	const now = new Date(rows[0]?.db_now ?? Date.now());
 	return { windows: rows.map((row) => toWindow(row, now)), now };
-}
-
-/** The default plan as a window source, when the account would start it on its next write. */
-function pendingDefaultSourceSql(projectId: string, customer: DrizzleSQL): DrizzleSQL {
-	return drizzleSql`
-		UNION ALL
-		SELECT NULL::uuid, target.plan_version_id::bigint, COALESCE(previous.starts_at, now()),
-			NULL::timestamptz, previous.id
-		FROM (${defaultPlanTargetSql(projectId)}) target
-		LEFT JOIN LATERAL (${previousDefaultGrantSql(projectId, customer)}) previous ON true
-		WHERE ${defaultPlanPendingSql(projectId, customer)}
-	`;
 }
 
 function toWindow(row: WindowRow, now: Date): PlanGrantWindow {

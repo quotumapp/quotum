@@ -37,7 +37,7 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import { type Cadence, cadenceKey, calendarWindow } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
-import { defaultPlanTargetSql } from "./default-plan-sql";
+import { defaultPlanReadVersionSql } from "./default-plan-sql";
 import { ensureCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -1187,8 +1187,6 @@ export async function resolveEffectiveControls(
 		customerId: string | null;
 		entityId: string | null;
 		now?: Date;
-		/** An account not recorded yet meets the default plan's controls on its first write. */
-		assumeDefaultPlan?: boolean;
 	},
 ): Promise<EffectiveControl[]> {
 	const now = await readControlClock(executor, input.now);
@@ -1227,18 +1225,18 @@ export async function resolveEffectiveControls(
 					WHERE plan_grant.project_id = policy.project_id
 						AND plan_grant.customer_id = ${input.customerId}
 						AND plan_grant.plan_version_id = policy.plan_version_id
+						AND plan_grant.origin <> 'default'
 						AND plan_grant.status = 'active'
 						AND plan_grant.starts_at <= ${now.toISOString()}
 						AND (plan_grant.ends_at IS NULL OR plan_grant.ends_at > ${now.toISOString()})
 				)))
-				${
-					input.assumeDefaultPlan === true
-						? drizzleSql`OR (policy.source_type = 'plan_default' AND policy.plan_version_id = (
-								SELECT default_target.plan_version_id::bigint
-								FROM (${defaultPlanTargetSql(input.projectId)}) default_target
-							))`
-						: drizzleSql``
-				}
+				-- The default plan's, at the version the account's next write applies: a write has
+				-- caught up first, and a check answers as that write will, including for an account
+				-- Quotum has not recorded or the pass has not reached.
+				OR (policy.source_type = 'plan_default' AND policy.plan_version_id = ${defaultPlanReadVersionSql(
+					input.projectId,
+					drizzleSql`${input.customerId}::uuid`,
+				)})
 				OR (policy.source_type = 'contract' AND policy.contract_id = (SELECT id FROM active_contract))
 				OR (policy.source_type = 'account' AND policy.customer_id = ${input.customerId})
 				OR (policy.source_type = 'entity' AND policy.customer_id = ${input.customerId}
