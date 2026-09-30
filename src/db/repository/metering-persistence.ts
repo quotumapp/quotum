@@ -34,11 +34,7 @@ import {
 	recordUsageControlEntries,
 	releaseControlHolds,
 } from "./controls-runtime";
-import {
-	defaultPlanPendingSql,
-	defaultPlanTargetSql,
-	previousDefaultGrantSql,
-} from "./default-plan-sql";
+import { defaultPlanAllowanceEndingSql, defaultPlanReadGrantSql } from "./default-plan-sql";
 import { enqueueUsageProjection } from "./entitlements";
 import {
 	meterLimitWindowBounds,
@@ -295,38 +291,36 @@ export function queryMeterLimitRows(
 				WHERE g.project_id = ${projectId}
 					AND g.customer_id = ${customer}
 					AND g.status = 'active'
+					AND g.origin <> 'default'
 					AND (g.ends_at IS NULL OR g.ends_at > now())
 					AND pi.feature_id = ${featureId(feature)}
 					AND pi.item_kind = 'meter_limit'
 
 				UNION ALL
 
-				-- The default plan the account starts on its next write, windowed from where its
-				-- previous default-plan grant started, or from now.
+				-- The default plan at the version the account's next write applies (a write has caught
+				-- up first, so it is the grant's own), windowed from where it started, or would start.
 				SELECT
 					pi.id AS plan_item_id,
 					NULL::uuid AS subscription_id,
-					NULL::uuid AS plan_grant_id,
+					d.grant_id AS plan_grant_id,
 					pi.quantity,
 					'blocked'::text AS overage_policy,
 					pi.reset_interval,
 					pi.reset_interval_count,
 					pv.billing_interval,
 					pv.billing_interval_count,
-					COALESCE(previous.starts_at, now()) AS period_start_at,
+					d.anchor_at AS period_start_at,
 					NULL::timestamptz AS period_end_at,
-					2 AS source_rank,
-					now() AS sort_at,
-					'' AS sort_id
-				FROM (${defaultPlanTargetSql(projectId)}) target
+					CASE WHEN d.grant_id IS NULL THEN 2 ELSE 1 END AS source_rank,
+					d.created_at AS sort_at,
+					COALESCE(d.grant_id::text, '') AS sort_id
+				FROM (${defaultPlanReadGrantSql(projectId, customer)}) d
 				JOIN plan_items pi
-					ON pi.project_id = ${projectId}
-					AND pi.plan_version_id = target.plan_version_id::bigint
+					ON pi.project_id = ${projectId} AND pi.plan_version_id = d.plan_version_id
 				JOIN plan_versions pv ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
-				LEFT JOIN LATERAL (${previousDefaultGrantSql(projectId, customer)}) previous ON true
 				WHERE pi.feature_id = ${featureId(feature)}
 					AND pi.item_kind = 'meter_limit'
-					AND ${defaultPlanPendingSql(projectId, customer)}
 			) sources
 			ORDER BY source_rank, sort_at, sort_id
 			LIMIT 2
@@ -1510,8 +1504,9 @@ export async function validateOccurredAt(
 
 /**
  * The account's balance of a feature: its live allocations, plus what its plan grants give in
- * windows no write has created yet (see `readPendingAllowances`). A null account is one Quotum has
- * not recorded yet, which holds only the default plan it would start on its first write. The
+ * windows no write has created yet (see `readPendingAllowances`), as the account's next write will
+ * leave them: a default-plan allowance that write ends is left out. A null account is one Quotum
+ * has not recorded yet, which holds only the default plan it would start on its first write. The
  * breakdown lists allocations; a pending allowance counts in the totals only.
  */
 export async function readBalance(
@@ -1587,6 +1582,7 @@ async function readAllocationRows(
 					AND (allocation.entity_id IS NULL OR allocation.entity_id = ${entityId}::bigint)
 				AND allocation.reversed_at IS NULL
 				AND (allocation.expires_at IS NULL OR allocation.expires_at > now())
+				AND NOT ${defaultPlanAllowanceEndingSql(projectId, drizzleSql`allocation`)}
 			ORDER BY allocation.expires_at ASC NULLS LAST, allocation.created_at, allocation.id
 		`,
 	);

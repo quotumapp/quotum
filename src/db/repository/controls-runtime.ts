@@ -68,12 +68,7 @@ export async function checkUnrecordedControls(
 	input: Omit<ControlDeltaInput, "customerId" | "entityId">,
 ): Promise<ControlDenial | null> {
 	return (
-		await evaluateControls(
-			executor,
-			{ ...input, customerId: null, entityId: null, assumeDefaultPlan: true },
-			"check",
-			null,
-		)
+		await evaluateControls(executor, { ...input, customerId: null, entityId: null }, "check", null)
 	).denial;
 }
 
@@ -94,10 +89,7 @@ export async function holdControls(
 
 async function evaluateControls(
 	executor: QueryExecutor,
-	input: Omit<ControlDeltaInput, "customerId"> & {
-		customerId: string | null;
-		assumeDefaultPlan?: boolean;
-	},
+	input: Omit<ControlDeltaInput, "customerId"> & { customerId: string | null },
 	mode: "check" | "consume" | "hold",
 	reservationId: string | null,
 ): Promise<ControlConsumptionResult> {
@@ -116,7 +108,6 @@ async function evaluateControls(
 			customerId,
 			entityId: input.entityId,
 			now,
-			...(input.assumeDefaultPlan === true ? { assumeDefaultPlan: true } : {}),
 		}),
 	]);
 	const controls = effectiveControls

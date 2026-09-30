@@ -230,7 +230,8 @@ describe("BillingRepository Stripe", () => {
 						metadata: { source: "subscription" },
 					},
 				],
-				// No default plan the account would start.
+				// No default plan the account reads as holding, and no default-plan key to deactivate.
+				[],
 				[],
 				[{ project_id: "project-id" }],
 				[{ projection_sequence: 1, billing_account_id: "user-1" }],
@@ -254,7 +255,7 @@ describe("BillingRepository Stripe", () => {
 		});
 
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(20);
+		expect(database.queries).toHaveLength(21);
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("INSERT INTO subscriptions");
 		expect(queries).not.toContain("INSERT INTO purchases");

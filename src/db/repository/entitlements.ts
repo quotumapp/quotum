@@ -13,7 +13,12 @@ import type {
 } from "../../billing/types";
 import type { CadenceUnit } from "../../shared/cadence";
 import { reconcileDefaultPlanGrant } from "./default-plan-grants";
-import { defaultPlanPendingSql, defaultPlanTargetSql } from "./default-plan-sql";
+import {
+	defaultPlanAllowanceEndingSql,
+	defaultPlanReadGrantSql,
+	defaultPlanReadVersionSql,
+	defaultPlanTargetSql,
+} from "./default-plan-sql";
 import {
 	meterLimitWindowBounds,
 	optionalStoredCadence,
@@ -51,44 +56,92 @@ export async function getEntitlementSnapshot(
 	};
 }
 
+interface PendingDefaultEntitlements {
+	/** The marker's keys, when the account reads as holding the default plan. */
+	held: EntitlementSnapshot["entitlements"];
+	/** Stored keys of the account's default-plan grant that its next write deactivates. */
+	ending: string[];
+}
+
 /**
- * The entitlements of the default plan an account would start on its next write, which a read
- * reports as held: the marker's keys, active and without an end. A null account is one Quotum has
- * not recorded yet.
+ * The default plan's entitlements as the account's next write will leave them, which a read
+ * reports (see `defaultPlanReadVersionSql`): the marker's keys, active and without an end, for an
+ * account without a base plan, and the stored keys of its default-plan grant that write
+ * deactivates, because the catalog dropped the marker or the key. A null account is one Quotum
+ * has not recorded yet.
  */
 async function readPendingDefaultEntitlements(
 	executor: QueryExecutor,
 	projectId: string,
 	customerId: string | null,
-): Promise<EntitlementSnapshot["entitlements"]> {
+): Promise<PendingDefaultEntitlements> {
 	const customer = drizzleSql`${customerId}::uuid`;
-	const rows = await executeRows<{ key: string; plan_key: string }>(
-		executor,
-		drizzleSql`
-			SELECT DISTINCT entitlement.key, plan.key AS plan_key
-			FROM (${defaultPlanTargetSql(projectId)}) target
-			JOIN plans plan ON plan.project_id = ${projectId} AND plan.id = target.plan_id::bigint
-			CROSS JOIN LATERAL unnest(target.entitlement_keys) AS entitlement(key)
-			WHERE ${defaultPlanPendingSql(projectId, customer)}
-			ORDER BY entitlement.key
-		`,
-	);
-	return rows.map((row) => ({
-		key: row.key,
-		active: true,
-		expiresAt: null,
-		metadata: { source: "plan_grant", origin: "default", status: "active", planKey: row.plan_key },
-	}));
+	const [held, ending] = await Promise.all([
+		executeRows<{ key: string; plan_key: string }>(
+			executor,
+			drizzleSql`
+				SELECT DISTINCT entitlement.key, plan.key AS plan_key
+				FROM (${defaultPlanTargetSql(projectId)}) target
+				JOIN plans plan ON plan.project_id = ${projectId} AND plan.id = target.plan_id::bigint
+				CROSS JOIN LATERAL unnest(target.entitlement_keys) AS entitlement(key)
+				WHERE ${defaultPlanReadVersionSql(projectId, customer)} IS NOT NULL
+				ORDER BY entitlement.key
+			`,
+		),
+		customerId === null
+			? Promise.resolve([])
+			: executeRows<{ key: string }>(
+					executor,
+					drizzleSql`
+						SELECT e.entitlement_key AS key
+						FROM entitlements e
+						JOIN plan_grants grant_source
+							ON grant_source.project_id = e.project_id
+							AND grant_source.id = e.source_plan_grant_id
+							AND grant_source.origin = 'default'
+							AND grant_source.status = 'active'
+						WHERE e.project_id = ${projectId}
+							AND e.customer_id = ${customer}
+							AND e.active
+							AND NOT EXISTS (
+								SELECT 1 FROM (${defaultPlanTargetSql(projectId)}) target
+								WHERE e.entitlement_key = ANY(target.entitlement_keys)
+									AND ${defaultPlanReadVersionSql(projectId, customer)} IS NOT NULL
+							)
+					`,
+				),
+	]);
+	return {
+		held: held.map((row) => ({
+			key: row.key,
+			active: true,
+			expiresAt: null,
+			metadata: {
+				source: "plan_grant",
+				origin: "default",
+				status: "active",
+				planKey: row.plan_key,
+			},
+		})),
+		ending: ending.map((row) => row.key),
+	};
 }
 
-/** A pending default-plan entitlement stands in for a stored one only where that is inactive. */
+/**
+ * Applies the default plan's pending entitlements to the stored ones: a key the account's next
+ * write deactivates reads inactive, and a held key stands in for a stored one only where that is
+ * inactive or missing.
+ */
 function withPendingEntitlements(
 	stored: EntitlementSnapshot["entitlements"],
-	pending: EntitlementSnapshot["entitlements"],
+	pending: PendingDefaultEntitlements,
 ): EntitlementSnapshot["entitlements"] {
-	if (pending.length === 0) return stored;
-	const byKey = new Map(stored.map((entry) => [entry.key, entry]));
-	for (const entry of pending) {
+	if (pending.held.length === 0 && pending.ending.length === 0) return stored;
+	const ending = new Set(pending.ending);
+	const byKey = new Map(
+		stored.map((entry) => [entry.key, ending.has(entry.key) ? { ...entry, active: false } : entry]),
+	);
+	for (const entry of pending.held) {
 		if (byKey.get(entry.key)?.active !== true) byKey.set(entry.key, entry);
 	}
 	return [...byKey.values()].sort((left, right) =>
@@ -586,6 +639,7 @@ export async function readProjectionBalances(
 				AND a.entity_id IS NULL
 				AND a.reversed_at IS NULL
 				AND (a.expires_at IS NULL OR a.expires_at > now())
+				AND NOT ${defaultPlanAllowanceEndingSql(projectId, drizzleSql`a`)}
 			GROUP BY f.id, f.key, f.unit, f.credit_scale
 		`,
 		),
@@ -662,8 +716,31 @@ export async function readProjectionBalances(
 				WHERE g.project_id = ${projectId}
 					AND g.customer_id = ${customerId}
 					AND g.status = 'active'
+					AND g.origin <> 'default'
 					AND (g.ends_at IS NULL OR g.ends_at > now())
 					AND pi.item_kind = 'meter_limit'
+
+				UNION ALL
+
+				-- The default plan at the version the account's next write applies, as metering reads it.
+				SELECT
+					pi.feature_id,
+					pi.quantity AS limit_quantity,
+					pi.reset_interval,
+					pi.reset_interval_count,
+					pv.billing_interval,
+					pv.billing_interval_count,
+					d.anchor_at AS period_start_at,
+					NULL::timestamptz AS period_end_at,
+					true AS plan_grant,
+					d.created_at AS sort_at,
+					COALESCE(d.grant_id::text, '') AS sort_id
+				FROM (${defaultPlanReadGrantSql(projectId, drizzleSql`${customerId}::uuid`)}) d
+				JOIN plan_items pi
+					ON pi.project_id = ${projectId} AND pi.plan_version_id = d.plan_version_id
+				JOIN plan_versions pv
+					ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
+				WHERE pi.item_kind = 'meter_limit'
 			) sources
 			ORDER BY feature_id, plan_grant, sort_at, sort_id
 		`,

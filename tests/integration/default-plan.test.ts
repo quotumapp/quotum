@@ -473,6 +473,172 @@ localDescribe("default plan", () => {
 		expect(await runWorker(25)).toEqual(idle);
 	});
 
+	it("reads a republished allowance as the account's next write applies it, before the pass", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		await consume("reset_user", 30, "spend-1");
+		// Version 2 resets weekly: the account's next write ends the monthly allowance and grants a
+		// weekly one, so a read answers with the weekly one already.
+		const weekly = freePlan(2, "100");
+		weekly.items = weekly.items.map((item) => ({ ...item, resetInterval: "week" as const }));
+		await publish(catalog(weekly));
+
+		expect(await balance("reset_user")).toMatchObject({
+			granted: "100",
+			consumed: "0",
+			available: "100",
+			breakdown: [],
+		});
+		expect(
+			(await context.repository.getCustomerBillingSummary(project, "reset_user")).balances,
+		).toMatchObject([{ featureKey: "ai_credits", available: "100" }]);
+		const [customer] = await context.sql<Array<{ id: string }>>`
+			SELECT id FROM customers WHERE billing_account_id = 'reset_user'
+		`;
+		expect(
+			await readProjectionBalances(
+				context.db as unknown as QueryExecutor,
+				project.projectInstanceId,
+				customer?.id ?? "",
+			),
+		).toMatchObject([{ featureKey: "ai_credits", available: "100" }]);
+		expect(await grants("reset_user")).toMatchObject([{ status: "active", plan_version: 1 }]);
+
+		expect(await consume("reset_user", 10, "spend-2")).toMatchObject({
+			allowed: true,
+			balance: { granted: "100", available: "90" },
+		});
+		expect(await grants("reset_user")).toMatchObject([{ status: "active", plan_version: 2 }]);
+	});
+
+	it("reads an allowance and keys a republish adds, before the pass reaches the account", async () => {
+		await publish(catalog({ ...freePlan(1, "100"), items: [] }));
+		await seedCustomers(["adding_user"]);
+		await runWorker(25);
+		expect(await balance("adding_user")).toMatchObject({ available: "0" });
+
+		await publish(catalog(freePlan(2, "100"), ["free_tier", "starter"]));
+
+		expect(await balance("adding_user")).toMatchObject({ granted: "100", available: "100" });
+		expect(
+			await context.repository.checkUsage(project, {
+				billingAccountId: "adding_user",
+				featureKey: "model_tokens",
+				quantity: "2000",
+			}),
+		).toMatchObject({ allowed: true });
+		expect(
+			(await entitlements("adding_user")).map((row) => [row.key, row.active, row.metadata.origin]),
+		).toEqual([
+			["free_tier", true, "default"],
+			["starter", true, "default"],
+		]);
+		expect(await grants("adding_user")).toMatchObject([{ plan_version: 1 }]);
+
+		expect(await consume("adding_user", 10, "spend-1")).toMatchObject({
+			allowed: true,
+			balance: { available: "90" },
+		});
+		expect((await entitlements("adding_user")).map((row) => [row.key, row.active])).toEqual([
+			["free_tier", true],
+			["starter", true],
+		]);
+	});
+
+	it("reads a removed default plan as ended before the pass reaches the account", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		await consume("leaving_user", 30, "spend-1");
+
+		await publish(catalog(null));
+
+		expect(await balance("leaving_user")).toMatchObject({ granted: "0", available: "0" });
+		expect(
+			await context.repository.checkUsage(project, {
+				billingAccountId: "leaving_user",
+				featureKey: "model_tokens",
+				quantity: "200",
+			}),
+		).toMatchObject({ allowed: false });
+		expect((await entitlements("leaving_user")).map((row) => [row.key, row.active])).toEqual([
+			["free_tier", false],
+		]);
+		expect(
+			(await context.repository.getCustomerBillingSummary(project, "leaving_user")).balances,
+		).toEqual([]);
+		expect(await grants("leaving_user")).toMatchObject([{ status: "active" }]);
+
+		expect(await consume("leaving_user", 1, "spend-2")).toMatchObject({ allowed: false });
+		expect(await grants("leaving_user")).toMatchObject([{ status: "ended" }]);
+		expect((await entitlements("leaving_user")).map((row) => [row.key, row.active])).toEqual([
+			["free_tier", false],
+		]);
+	});
+
+	it("checks a republished meter limit and usage limit before the pass reaches the account", async () => {
+		const limited = (version: number, meterLimit: string, usageLimit: string) => {
+			const plan = freePlan(version, "100");
+			plan.items.push({
+				featureKey: "model_tokens",
+				itemKind: "meter_limit",
+				quantity: meterLimit,
+				resetInterval: "day",
+				expiresAfterSeconds: null,
+				overagePolicy: "blocked",
+			});
+			return {
+				...plan,
+				controls: [
+					{
+						controlKind: "usage_limit" as const,
+						featureKey: "model_tokens",
+						currency: null,
+						limitValue: usageLimit,
+						interval: "day" as const,
+					},
+				],
+			};
+		};
+		const tokens = (quantity: string) =>
+			context.repository.checkUsage(project, {
+				billingAccountId: "tightened",
+				featureKey: "model_tokens",
+				quantity,
+			});
+		await publish({ ...catalog(limited(1, "1000", "900")), rateCards: [] });
+		expect(
+			await context.repository.consumeUsage(project, {
+				billingAccountId: "tightened",
+				featureKey: "model_tokens",
+				quantity: "400",
+				idempotencyKey: "spend-1",
+			}),
+		).toMatchObject({ allowed: true });
+
+		// Version 2 lowers the meter limit below what the window used.
+		await publish({ ...catalog(limited(2, "300", "900")), rateCards: [] });
+		expect(await tokens("100")).toMatchObject({ allowed: false, reason: "insufficient_balance" });
+		expect(
+			await context.repository.getMeteringBalance(project, "tightened", "model_tokens"),
+		).toMatchObject({ granted: "300", available: "0" });
+
+		// Version 3 lowers the usage limit instead.
+		await publish({ ...catalog(limited(3, "1000", "450")), rateCards: [] });
+		expect(await tokens("100")).toMatchObject({ allowed: false, reason: "control_limit_exceeded" });
+		expect(
+			await context.repository.controlsEnterprise.listEffectiveControls(project, "tightened"),
+		).toMatchObject([{ featureKey: "model_tokens", limitValue: "450", consumedValue: "400" }]);
+		expect(await grants("tightened")).toMatchObject([{ plan_version: 1 }]);
+
+		expect(
+			await context.repository.consumeUsage(project, {
+				billingAccountId: "tightened",
+				featureKey: "model_tokens",
+				quantity: "100",
+				idempotencyKey: "spend-2",
+			}),
+		).toMatchObject({ allowed: false, reason: "control_limit_exceeded" });
+		expect(await tokens("50")).toMatchObject({ allowed: true });
+	});
+
 	it("records an elapsed trial on the next write and resumes the default plan's window", async () => {
 		await publish(catalog(freePlan(1, "100")));
 		await consume("lapsed_user", 1, "spend-1");

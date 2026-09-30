@@ -1036,18 +1036,24 @@ Each changed account gets a stored `usage_changed` projection. `impact.defaultPl
 reports how many accounts the pass covers. An account whose change fails is left behind and
 recorded on the pass (see [operations](operations.md#default-plan)), and the pass moves on.
 
-Reads never write, so they answer an account that would start the default plan on its next write
-as if it already held it. That is an account Quotum has not recorded yet, and a recorded one the
-pass has not reached or whose last base plan ended moments ago, such as a trial the worker has not
-recorded as expired yet. For such an account:
+Reads never write, so they answer an account as its next write will leave it. An account that
+would start the default plan on that write reads as if it already held it. That is an account
+Quotum has not recorded yet, and a recorded one the pass has not reached or whose last base plan
+ended moments ago, such as a trial the worker has not recorded as expired yet. For such an account:
 - `check` and `GET .../balances/:featureKey` report the default version's allowance of the feature
   in the current window, or what the previous default-plan grant left of it, and its meter limit
-  in the window it would count; for an account Quotum has not recorded, `check` also applies the
-  default version's usage limits against windows that hold nothing yet;
+  in the window it would count; `check` also applies the default version's usage limits, against
+  windows that hold nothing yet for an account Quotum has not recorded;
 - `GET .../entitlements` reports the marker's keys, active, with
   `metadata: { source: "plan_grant", origin: "default", status: "active", planKey }` and no
   `planGrantId`;
 - the billing summary of a recorded account counts the same allowance.
+
+An account whose default plan a publish changed reads the same way before the pass reaches it: at
+the version its next write moves it to, with that version's meter limits, usage limits and the
+marker's current keys, without the allowances that move ends, and with the allowance of a feature
+the version adds or resets on another interval. Once the marker is removed, it reads without the
+default plan: none of its allowances, limits or controls, and its keys inactive.
 
 Its next write first records what the read assumed: it starts the default plan, records an elapsed
 trial, or applies a changed default plan, so the write sees what the read reported. The default

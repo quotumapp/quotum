@@ -21,6 +21,7 @@ import type {
 import type { BillingChannel, BillingProvider, SubscriptionStatus } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
+import { defaultPlanAllowanceEndingSql } from "./default-plan-sql";
 import { type PendingAllowance, readPendingAllowances } from "./plan-grant-windows";
 import { executeOne, executeRows } from "./query";
 import type { QueryExecutor } from "./types";
@@ -208,6 +209,7 @@ export class BillingInsightsRepository extends RepositoryModule {
 					WHERE allocation.project_id = ${projectId} AND allocation.customer_id = ${customer.id}
 						AND allocation.reversed_at IS NULL
 						AND (allocation.expires_at IS NULL OR allocation.expires_at > now())
+						AND NOT ${defaultPlanAllowanceEndingSql(projectId, drizzleSql`allocation`)}
 					GROUP BY feature.key, feature.unit
 					ORDER BY feature.key
 				`,
