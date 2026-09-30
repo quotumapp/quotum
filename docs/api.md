@@ -393,8 +393,12 @@ it as `client.usage.getOperation`.
   key.
 
 Outcomes are retained for at least 24 hours and identities for at least seven days. Stored outcomes
-are limited to 64 KiB; `500 OPERATION_OUTCOME_TOO_LARGE` rolls back the whole mutation, and accounts
-with very large allocation breakdowns need investigation rather than retries.
+are limited to 64 KiB. When a result with the full balance breakdown would exceed that, which takes
+about 150 live allocations of the feature, the result's `balance.breakdown` lists only the
+allocations the operation changed. The first response and every replay answer that same result, its
+totals stay exact, and `GET .../balances/:featureKey` still lists every allocation. Only a result
+whose changed allocations alone exceed the bound, such as one consume spread over hundreds of
+allocations, fails with `500 OPERATION_OUTCOME_TOO_LARGE` and rolls back the whole mutation.
 
 ## Catalog publication
 

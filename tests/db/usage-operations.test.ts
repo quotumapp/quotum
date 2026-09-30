@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
+import type { BalanceAllocationBreakdown, UsageCorrectionResult } from "../../src/billing/metering";
 import type { UsageOperationInput } from "../../src/billing/usage-operations";
-import { operationFingerprint } from "../../src/db/repository/usage-operations";
+import {
+	operationFingerprint,
+	withChangedAllocationsOnly,
+} from "../../src/db/repository/usage-operations";
 
 const input = {
 	billingAccountId: "account",
@@ -80,5 +84,64 @@ describe("usage operation fingerprints", () => {
 				operationFingerprint("correct", { ...correction, ...changes } as UsageOperationInput),
 			).not.toBe(operationFingerprint("correct", correction));
 		}
+	});
+});
+
+describe("usage operation outcomes too large to retain", () => {
+	function allocation(allocationId: string): BalanceAllocationBreakdown {
+		return {
+			allocationId,
+			entityId: null,
+			sourceKind: "credit_grant",
+			sourceKey: `grant:${allocationId}`,
+			rolloverOriginAllocationId: null,
+			carryOverOriginAllocationId: null,
+			rolloverPolicyRevision: null,
+			quantity: "10",
+			reversed: "0",
+			consumed: "0",
+			held: "0",
+			available: "10",
+			periodStartAt: null,
+			periodEndAt: null,
+			expiresAt: null,
+			createdAt: "2026-09-01T00:00:00.000Z",
+		};
+	}
+
+	it("keeps only the allocations the operation changed and every total", () => {
+		const result: UsageCorrectionResult = {
+			usageEventId: "event-2",
+			recordedAt: "2026-09-02T00:00:00.000Z",
+			originalUsageEventId: "event-1",
+			originalRecordedAt: "2026-09-01T00:00:00.000Z",
+			quantity: "-3",
+			walletQuantity: "-3",
+			balance: {
+				featureKey: "credits",
+				unit: "credit",
+				scale: 0,
+				granted: "30",
+				consumed: "4",
+				held: "0",
+				available: "26",
+				breakdown: [allocation("1"), allocation("2"), allocation("3")],
+			},
+			deductions: [
+				{
+					allocationId: "3",
+					quantity: "-3",
+					sourceKind: "credit_grant",
+					sourceKey: "grant:3",
+					expiresAt: null,
+				},
+			],
+		};
+		const compact = withChangedAllocationsOnly(result);
+		expect(compact).toEqual({
+			...result,
+			balance: { ...result.balance, breakdown: [allocation("3")] },
+		});
+		expect(result.balance.breakdown).toHaveLength(3);
 	});
 });

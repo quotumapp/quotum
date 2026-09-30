@@ -409,15 +409,47 @@ localDescribe("usage operation recovery", () => {
 		expect((await counts()).events).toBe(1);
 	});
 
-	it("rolls back a result exceeding the durable domain-outcome bound", async () => {
+	it("answers a result too large to retain with the allocations it changed, and replays it", async () => {
 		await context.sql`
    INSERT INTO balance_allocations (project_id, customer_id, feature_id, source_kind, source_key, quantity)
    SELECT project_id, customer_id, feature_id, 'credit_grant', 'bound:' || ordinal, 10
    FROM balance_allocations CROSS JOIN generate_series(1, 400) AS ordinal
   `;
-		await expect(context.repository.consumeUsage(project, input)).rejects.toMatchObject({
-			code: "OPERATION_OUTCOME_TOO_LARGE",
+		const first = await context.repository.consumeUsage(project, input);
+		expect(first).toMatchObject({
+			allowed: true,
+			walletQuantity: "0.5",
+			balance: { granted: "4010", consumed: "0.5", available: "4009.5" },
 		});
+		expect(first.deductions).toHaveLength(1);
+		expect(first.balance.breakdown.map((row) => row.allocationId)).toEqual(
+			first.deductions.map((deduction) => deduction.allocationId),
+		);
+		expect(await context.repository.consumeUsage(project, input)).toEqual(first);
+		expect(await lookup()).toMatchObject({
+			status: "completed",
+			outcome: { usageEventId: first.usageEventId, balance: { available: "4009.5" } },
+		});
+		// The balance read still lists every allocation.
+		expect(
+			(await context.repository.getMeteringBalance(project, "recovery", "ai_credits")).breakdown,
+		).toHaveLength(401);
+		expect(await counts()).toEqual({ events: 1, claims: 1, consumed: "0.500000000" });
+	});
+
+	it("rolls back a result whose changed allocations alone exceed the durable bound", async () => {
+		await context.sql`
+   INSERT INTO balance_allocations (project_id, customer_id, feature_id, source_kind, source_key, quantity)
+   SELECT project_id, customer_id, feature_id, 'credit_grant', 'bound:' || ordinal, 10
+   FROM balance_allocations CROSS JOIN generate_series(1, 400) AS ordinal
+  `;
+		await expect(
+			context.repository.consumeUsage(project, {
+				...input,
+				featureKey: "ai_credits",
+				quantity: "4005",
+			}),
+		).rejects.toMatchObject({ code: "OPERATION_OUTCOME_TOO_LARGE" });
 		expect(await counts()).toEqual({ events: 0, claims: 0, consumed: "0.000000000" });
 	});
 
