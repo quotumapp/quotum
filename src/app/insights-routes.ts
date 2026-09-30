@@ -2,6 +2,7 @@ import { z } from "zod";
 import { BillingError } from "../billing/errors";
 import { decodeUsageCursor, encodeUsageCursor } from "../billing/insights";
 import { operationDetail } from "../shared/http";
+import { storableDateTimeSchema } from "../shared/input-bounds";
 import * as responses from "./contracts/insights-responses";
 import { privateProject } from "./request-context";
 import type { BillingElysia, BillingInsightsServiceLike } from "./types";
@@ -11,8 +12,8 @@ const usageEventsFilterFields = {
 	featureKey: z.string().trim().min(1).optional(),
 	entityId: z.string().trim().min(1).optional(),
 	operation: z.enum(["consume", "confirm", "correction"]).optional(),
-	from: z.iso.datetime({ offset: true }).optional(),
-	to: z.iso.datetime({ offset: true }).optional(),
+	from: storableDateTimeSchema().optional(),
+	to: storableDateTimeSchema().optional(),
 	limit: z.coerce.number().int().min(1).max(200).default(50),
 	cursor: z.string().trim().min(1).optional(),
 };
@@ -26,8 +27,8 @@ export const projectUsageEventsQuerySchema = z
 export const usageSeriesQuerySchema = z
 	.object({
 		featureKey: z.string().trim().min(1).optional(),
-		from: z.iso.datetime({ offset: true }).optional(),
-		to: z.iso.datetime({ offset: true }).optional(),
+		from: storableDateTimeSchema().optional(),
+		to: storableDateTimeSchema().optional(),
 		interval: z.enum(["hour", "day"]).default("day"),
 	})
 	.strict();

@@ -8,6 +8,7 @@ import type {
 } from "../billing/promotions";
 import { projectScopedRateLimitGuard, type RateLimiter } from "../http/rate-limit";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
+import { storableDateTimeSchema } from "../shared/input-bounds";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/promotion-responses";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
@@ -30,7 +31,7 @@ const codeSchema = z
 const channelSchema = z.enum(["web", "ios", "android"]);
 const durationSchema = z.enum(["once", "repeating", "forever"]);
 const durationMonthsSchema = z.number().int().min(1).max(36).nullable().optional();
-const timestampSchema = z.iso.datetime({ offset: true }).nullable().optional();
+const timestampSchema = storableDateTimeSchema().nullable().optional();
 const positiveIntegerSchema = z.number().int().positive();
 
 const discountBodySchema = z.discriminatedUnion("type", [

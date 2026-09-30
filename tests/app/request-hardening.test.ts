@@ -320,6 +320,74 @@ function bodylessServices() {
 	};
 }
 
+describe("input Postgres would refuse", () => {
+	const invalid = { success: false, error: { code: "INVALID_REQUEST" } };
+
+	it("refuses a request body nested deeper than the walk allows", async () => {
+		const metering = recordingMeteringService();
+		const { app } = createApp({ meteringService: metering.service });
+		for (const depth of [100, 100_000]) {
+			const response = await send(app, consumePath, {
+				method: "POST",
+				headers: {
+					...auth,
+					"idempotency-key": `deep-${depth}`,
+					"content-type": "application/json",
+				},
+				body: `{"featureKey":"api_calls","quantity":"1","metadata":{"x":${"[".repeat(depth)}${"]".repeat(depth)}}}`,
+			});
+			expect(response.status).toBe(400);
+			expect(await response.json()).toMatchObject(invalid);
+		}
+		expect(metering.calls).toEqual([]);
+	});
+
+	it("refuses NUL characters and unpaired surrogates in bodies, paths and queries", async () => {
+		const metering = recordingMeteringService();
+		const { app } = createApp({ meteringService: metering.service });
+		for (const body of [
+			'{"featureKey":"api\\u0000calls","quantity":"1"}',
+			'{"featureKey":"api_calls","quantity":"1","metadata":{"note":"a\\u0000b"}}',
+			'{"featureKey":"api_calls","quantity":"1","metadata":{"a\\u0000b":"note"}}',
+			'{"featureKey":"api_calls","quantity":"1","metadata":{"note":"\\ud800"}}',
+		]) {
+			const response = await send(app, consumePath, {
+				method: "POST",
+				headers: { ...auth, "idempotency-key": "unstorable", "content-type": "application/json" },
+				body,
+			});
+			expect(response.status).toBe(400);
+			expect(await response.json()).toMatchObject(invalid);
+		}
+		for (const path of [
+			"/v1/billing-accounts/user%001/balances/api_calls",
+			"/v1/billing-accounts/user_1/usage/events?featureKey=api%00calls",
+		]) {
+			const response = await send(app, path, { headers: auth });
+			expect(response.status).toBe(400);
+			expect(await response.json()).toMatchObject(invalid);
+		}
+		expect(metering.calls).toEqual([]);
+	});
+
+	it("refuses dates a timestamp column cannot hold", async () => {
+		const metering = recordingMeteringService();
+		const { app } = createApp({ meteringService: metering.service });
+		const response = await send(app, consumePath, {
+			method: "POST",
+			headers: { ...auth, "idempotency-key": "year-zero", "content-type": "application/json" },
+			body: JSON.stringify({
+				featureKey: "api_calls",
+				quantity: "1",
+				occurredAt: "0000-01-01T00:00:00Z",
+			}),
+		});
+		expect(response.status).toBe(400);
+		expect(await response.json()).toMatchObject(invalid);
+		expect(metering.calls).toEqual([]);
+	});
+});
+
 describe("operations without a request body", () => {
 	it("never reads the body of an unauthenticated request", async () => {
 		for (const { method, path } of bodylessOperations) {

@@ -135,6 +135,18 @@ describe("admin query parsing", () => {
 		expectInvalidRequest(() => decodeAdminCursor(cursor), "Invalid cursor");
 		const overflowDateCursor = encodeAdminCursor({ createdAt: "2026-02-31", id: customerId });
 		expectInvalidRequest(() => decodeAdminCursor(overflowDateCursor), "Invalid cursor");
+		// JavaScript reads these as dates, Postgres does not: they must never reach SQL.
+		for (const createdAt of [
+			"2026-09-29 (x)",
+			"2026-09-29T00:00:00.000Z (x)",
+			"2026-09-29 00:00:00+00",
+			"0000-01-01T00:00:00.000Z",
+		]) {
+			expectInvalidRequest(
+				() => decodeAdminCursor(encodeAdminCursor({ createdAt, id: customerId })),
+				"Invalid cursor",
+			);
+		}
 	});
 
 	it("parses customer search queries", () => {

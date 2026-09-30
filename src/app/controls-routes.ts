@@ -3,6 +3,7 @@ import type { ControlsEnterpriseRepositoryLike } from "../billing/controls";
 import { billingProviders } from "../billing/types";
 import { cadenceUnits, maxCadenceCount } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
+import { bigintIdSchema, storableDateTimeSchema } from "../shared/input-bounds";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/controls-responses";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
@@ -20,9 +21,9 @@ const entityParams = accountParams.extend({ entityId: z.string().trim().min(1).m
 const licenseCheckParams = entityParams
 	.extend({ featureKey: z.string().trim().min(1).max(120) })
 	.strict();
-const policyParams = accountParams.extend({ policyId: z.string().regex(/^\d+$/) }).strict();
-const assignmentParams = accountParams.extend({ assignmentId: z.string().regex(/^\d+$/) }).strict();
-const contractParams = accountParams.extend({ contractId: z.string().regex(/^\d+$/) }).strict();
+const policyParams = accountParams.extend({ policyId: bigintIdSchema() }).strict();
+const assignmentParams = accountParams.extend({ assignmentId: bigintIdSchema() }).strict();
+const contractParams = accountParams.extend({ contractId: bigintIdSchema() }).strict();
 
 const entityBody = z
 	.object({
@@ -78,8 +79,8 @@ export const contractBody = z
 		contractKey: z.string().trim().min(1).max(120),
 		version: z.number().int().positive(),
 		planKey: z.string().trim().min(1).max(120),
-		effectiveAt: z.iso.datetime({ offset: true }),
-		expiresAt: z.iso.datetime({ offset: true }).nullable().optional(),
+		effectiveAt: storableDateTimeSchema(),
+		expiresAt: storableDateTimeSchema().nullable().optional(),
 		replacesCommercialDefaults: z.boolean().optional(),
 		terms: z.record(z.string(), z.unknown()).optional(),
 		controls: z.array(contractControl).max(50).optional(),
@@ -104,7 +105,7 @@ const postV1AdminCatalogMigrationsPublishBodySchema = migrationBody
 	.strict();
 const postV1BillingAccountsByBillingAccountIdLicenseAssignmentsBodySchema = z
 	.object({
-		poolId: z.string().regex(/^\d+$/),
+		poolId: bigintIdSchema(),
 		entityId: z.string().trim().min(1).max(200),
 		quantity: z.number().int().positive(),
 	})

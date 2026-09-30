@@ -5,6 +5,7 @@ import {
 	type BalanceAdjustmentServiceLike,
 } from "../billing/balance-adjustments";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
+import { isBigintId, storableDateTimeSchema } from "../shared/input-bounds";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/balance-adjustment-responses";
 import { requirePromotionIdempotencyKey } from "./promotion-routes";
@@ -36,7 +37,7 @@ export const operatorGrantBodySchema = z
 		featureKey: z.string().trim().min(1).max(120),
 		quantity,
 		entityId: z.string().trim().min(1).max(200).nullable().optional(),
-		expiresAt: z.iso.datetime({ offset: true }).nullable().optional(),
+		expiresAt: storableDateTimeSchema().nullable().optional(),
 		reason,
 	})
 	.strict();
@@ -47,7 +48,17 @@ export const administrativeDebitBodySchema = z
 	.object({
 		reason,
 		allocations: z
-			.array(z.object({ allocationId: z.string().regex(/^[1-9]\d{0,18}$/), quantity }).strict())
+			.array(
+				z
+					.object({
+						allocationId: z
+							.string()
+							.regex(/^[1-9]\d{0,18}$/)
+							.refine(isBigintId),
+						quantity,
+					})
+					.strict(),
+			)
 			.min(1)
 			.max(administrativeDebitMaxAllocations),
 	})

@@ -10,6 +10,15 @@ describe("usage insight cursors", () => {
 		expect(decodeUsageCursor(encodeUsageCursor(cursor))).toEqual(cursor);
 	});
 
+	it("rejects a timestamp a timestamptz column cannot hold", () => {
+		for (const recordedAt of ["0000-01-01T00:00:00.000Z", "-000001-01-01T00:00:00.000Z"]) {
+			const cursor = Buffer.from(
+				JSON.stringify({ recordedAt, id: "11111111-1111-4111-8111-111111111111" }),
+			).toString("base64url");
+			expect(decodeUsageCursor(cursor)).toBeNull();
+		}
+	});
+
 	it("rejects malformed base64, timestamps, and UUID-shaped database hazards", () => {
 		const valid = encodeUsageCursor({
 			recordedAt: "2026-08-28T12:00:00.000Z",

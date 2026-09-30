@@ -11,6 +11,11 @@ Error codes are extensible, so handle unknown codes and ignore `details` keys yo
 Health/metrics and authentication/provider callback surfaces have their own response shapes;
 consult the generated contract rather than applying the billing envelope to every route.
 
+`/v1` refuses, with `400 INVALID_REQUEST`, input the database could not store: a body nested more
+than 64 levels deep; a NUL character or an unpaired surrogate in any body key or string, path
+segment or query value; a numeric id beyond the signed 64-bit range; a date-time outside years 1 to
+9999; and a decimal with more than 19 digits before the decimal point.
+
 Regenerate and validate after changing a route:
 
 ```sh

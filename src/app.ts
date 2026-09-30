@@ -11,7 +11,11 @@ import { registerInsightsRoutes } from "./app/insights-routes";
 import { registerMeteringRoutes } from "./app/metering-routes";
 import { registerPromotionRoutes } from "./app/promotion-routes";
 import { projectProviderServiceResolver } from "./app/provider-services";
-import { projectSelectorRejectedError, queryHasCallerProjectSelector } from "./app/request-context";
+import {
+	projectSelectorRejectedError,
+	queryHasCallerProjectSelector,
+	urlHasEncodedNul,
+} from "./app/request-context";
 import { registerTrialRoutes } from "./app/trial-routes";
 import type {
 	AppDependencies as CreateAppDependencies,
@@ -243,6 +247,13 @@ export function createApp({
 			return billingJsonResponse(413, {
 				success: false,
 				error: { code: "REQUEST_BODY_TOO_LARGE", message: "Request body is too large" },
+			});
+		}
+		// A path segment or query value decoding to NUL would reach SQL, which cannot store it.
+		if (path.startsWith("/v1/") && urlHasEncodedNul(request.url)) {
+			return billingJsonResponse(400, {
+				success: false,
+				error: { code: "INVALID_REQUEST", message: "Request URL must not contain NUL characters" },
 			});
 		}
 
