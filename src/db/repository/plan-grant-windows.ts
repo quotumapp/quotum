@@ -19,6 +19,12 @@ export interface PlanGrantWindow {
 	scale: number;
 	planItemId: string;
 	quantity: string;
+	/**
+	 * Where the window's allowance starts: the reset window's start, or, when the grant holds an
+	 * allowance of the feature from another reset that ends inside this window, where that one
+	 * ends. Changing a reset never refills a window: the allowance it already gave runs to its end
+	 * and the new reset's quantity starts there. A start after now is a window not open yet.
+	 */
 	start: Date;
 	end: Date | null;
 	expiresAt: Date | null;
@@ -77,6 +83,7 @@ interface WindowRow {
 	latest_reversed: string | null;
 	latest_consumed: string | null;
 	latest_held: string | null;
+	other_reset_ends_at: Date | string | null;
 	db_now: Date | string;
 }
 
@@ -130,6 +137,7 @@ export async function readPlanGrantWindows(
 				latest.reversed_quantity::text AS latest_reversed,
 				latest.consumed_quantity::text AS latest_consumed,
 				latest.held_quantity::text AS latest_held,
+				other_reset.ends_at AS other_reset_ends_at,
 				now() AS db_now
 			FROM sources source
 			JOIN plan_items item
@@ -156,6 +164,22 @@ export async function readPlanGrantWindows(
 				ORDER BY allocation.period_start_at DESC
 				LIMIT 1
 			) latest ON true
+			-- When the grant's allowances of the feature on another reset end: a version move that
+			-- changes the reset keeps the allowance the window already gave, and the new reset's
+			-- quantity starts where it ends. An account that has not started its grant yet holds none.
+			LEFT JOIN LATERAL (
+				SELECT max(allocation.expires_at) AS ends_at
+				FROM balance_allocations allocation
+				JOIN plan_items allocated
+					ON allocated.project_id = allocation.project_id AND allocated.id = allocation.plan_item_id
+				WHERE allocation.project_id = ${projectId}
+					AND allocation.plan_grant_id = source.grant_id
+					AND allocation.feature_id = item.feature_id
+					AND (
+						allocated.reset_interval IS DISTINCT FROM item.reset_interval
+						OR allocated.reset_interval_count <> item.reset_interval_count
+					)
+			) other_reset ON true
 			ORDER BY source.grant_id NULLS LAST, item.id
 		`,
 	);
@@ -166,7 +190,7 @@ export async function readPlanGrantWindows(
 function toWindow(row: WindowRow, now: Date): PlanGrantWindow {
 	const anchor = new Date(row.anchor_at);
 	const endsAt = row.ends_at === null ? null : new Date(row.ends_at);
-	const window: { start: Date; end: Date | null } =
+	const reset: { start: Date; end: Date | null } =
 		row.reset_interval === null
 			? { start: anchor, end: endsAt }
 			: planGrantWindowBounds(
@@ -175,6 +199,13 @@ function toWindow(row: WindowRow, now: Date): PlanGrantWindow {
 					storedCadence(row.reset_interval, row.reset_interval_count),
 					now,
 				);
+	const otherResetEndsAt =
+		row.other_reset_ends_at === null ? null : new Date(row.other_reset_ends_at);
+	const window = {
+		start:
+			otherResetEndsAt !== null && otherResetEndsAt > reset.start ? otherResetEndsAt : reset.start,
+		end: reset.end,
+	};
 	const expiresAt =
 		row.expires_after_seconds === null
 			? window.end
@@ -223,7 +254,8 @@ function toWindow(row: WindowRow, now: Date): PlanGrantWindow {
  * What reads add to the account's allocations: each current window of its plan grants that no
  * write has created yet, in full, what is left of an allowance a write will reopen, and the default
  * plan it would start, with what its previous default-plan grant left in the same window. A window
- * whose allowance would have expired adds nothing.
+ * whose allowance would have expired, or that opens later (see `PlanGrantWindow.start`), adds
+ * nothing.
  */
 export async function readPendingAllowances(
 	executor: QueryExecutor,
@@ -236,6 +268,7 @@ export async function readPendingAllowances(
 		pendingDefault: true,
 	});
 	return windows.flatMap((window) => {
+		if (window.start > now) return [];
 		if (window.expiresAt !== null && window.expiresAt <= now) return [];
 		if (window.grantId !== null && window.allocation !== null && !window.resumes) return [];
 		const allocation = window.allocation ?? {
@@ -275,6 +308,7 @@ export async function openPlanGrantWindows(
 		candidates.filter(
 			(window) =>
 				window.grantId !== null &&
+				window.start <= now &&
 				(window.allocation === null || window.resumes) &&
 				(window.expiresAt === null || window.expiresAt > now),
 		);
