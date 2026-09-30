@@ -624,6 +624,104 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		});
 	});
 
+	it("tops up the shared pool for entity usage spent from it and credits an entity's own policy to the entity", async () => {
+		await prepareAutoTopupAccount("entity-topup");
+		const controls = context.repository.controlsEnterprise;
+		for (const externalId of ["team-a", "team-b"]) {
+			await controls.createEntity(project, {
+				billingAccountId: "entity-topup",
+				externalId,
+				kind: "team",
+			});
+		}
+		// team-b's own credit is older than the pool's, so team-b spends it first.
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "entity-topup",
+			entityId: "team-b",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:entity-topup:team-b",
+		});
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "entity-topup",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:entity-topup:pool",
+		});
+		const policy = async (entityId?: string) =>
+			await controls.upsertAutoTopupPolicy(project, {
+				billingAccountId: "entity-topup",
+				...(entityId === undefined ? {} : { entityId }),
+				featureKey: "ai_credits",
+				topupKey: "credits_10",
+				provider: "stripe",
+				thresholdQuantity: "5",
+				maxSpendMinor: 1_000,
+				actor: "integration-test",
+			});
+		const account = await policy();
+		expect(account).toMatchObject({ entityId: null, thresholdQuantity: "5" });
+		const teamB = await policy("team-b");
+		expect(teamB).toMatchObject({ entityId: "team-b", thresholdQuantity: "5" });
+		const consumeAs = async (entityId: string, quantity: string, idempotencyKey: string) =>
+			await context.repository.consumeUsage(project, {
+				billingAccountId: "entity-topup",
+				entityId,
+				featureKey: "ai_credits",
+				quantity,
+				idempotencyKey,
+			});
+		const scheduled = async () =>
+			await context.sql<Array<{ policy_id: string }>>`
+				SELECT policy_id::text FROM auto_topup_jobs ORDER BY created_at, policy_id
+			`;
+
+		// team-a has nothing of its own: its usage leaves the pool at 4, under the account's threshold.
+		expect(await consumeAs("team-a", "6", "entity-topup:a")).toMatchObject({ allowed: true });
+		expect(await scheduled()).toEqual([{ policy_id: account.id }]);
+
+		// team-b spends only its own credit and leaves the pool alone; with the pool it can spend 4.
+		expect(await consumeAs("team-b", "10", "entity-topup:b")).toMatchObject({ allowed: true });
+		expect(await scheduled()).toEqual([{ policy_id: account.id }, { policy_id: teamB.id }]);
+
+		const jobs = await context.repository.claimAutoTopupJobs(
+			"auto-worker",
+			10,
+			new Date(Date.now() - 300_000),
+		);
+		expect(jobs.map((job) => job.policyId).sort()).toEqual([account.id, teamB.id].sort());
+		for (const job of jobs) {
+			await context.repository.markAutoTopupSucceeded(job.projectId, job.jobId, "auto-worker", {
+				status: "succeeded",
+				externalInvoiceId: `in_entity_${job.policyId}`,
+				externalPaymentId: `pi_entity_${job.policyId}`,
+				amountPaidMinor: 499,
+				currency: "USD",
+			});
+		}
+
+		// The account's top-up lands in the pool, team-b's on team-b.
+		const topups = await context.sql<Array<{ entity: string | null; quantity: string }>>`
+			SELECT entity.external_id AS entity, allocation.quantity::text AS quantity
+			FROM balance_allocations allocation
+			LEFT JOIN entities entity ON entity.id = allocation.entity_id
+			WHERE allocation.source_kind = 'topup'
+			ORDER BY entity.external_id NULLS FIRST
+		`;
+		expect(topups).toEqual([
+			{ entity: null, quantity: "10.000000000" },
+			{ entity: "team-b", quantity: "10.000000000" },
+		]);
+		expect(
+			await context.repository.getMeteringBalance(project, "entity-topup", "ai_credits"),
+		).toMatchObject({ granted: "20", consumed: "6", available: "14" });
+		expect(
+			await context.repository.getMeteringBalance(project, "entity-topup", "ai_credits", "team-b"),
+		).toMatchObject({ granted: "40", consumed: "16", available: "24" });
+	});
+
 	it("grandfathers subscriptions until an approved migration stages a provider-safe change", async () => {
 		await seedCatalogMigration(context.sql);
 		const before = await context.sql<Array<{ provider: string; version: number }>>`

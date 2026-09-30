@@ -27,7 +27,7 @@ import type { BillingProvider } from "../../billing/types";
 import { purchaseActionFor } from "../../providers/capabilities";
 import { addUtcMonths, type CadenceUnit } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
-import type { ControlDenial } from "./controls-runtime";
+import type { AutoTopupPolicyRow, ControlDenial } from "./controls-runtime";
 import {
 	confirmControlHolds,
 	holdControls,
@@ -1754,6 +1754,38 @@ export function balanceFromRows(feature: FeatureRow, rows: AllocationRow[]): Met
 			};
 		}),
 	};
+}
+
+/**
+ * The automatic top-up policies a usage write triggers, each with the balance it compares with its
+ * threshold. `rows` are the wallet rows the write could spend (the shared pool and, for entity
+ * usage, the entity's own allocations) as they stand after it. An entity's policy covers that
+ * entity's usage against everything the entity can spend. The account's policy covers the shared
+ * pool: account usage, and entity usage only when some of it was spent from the pool, compared with
+ * the pool alone.
+ */
+export function autoTopupTriggers(input: {
+	policies: readonly AutoTopupPolicyRow[];
+	entityId: string | null;
+	wallet: FeatureRow;
+	rows: readonly AllocationRow[];
+	deductions: readonly AllocationDeduction[];
+}): Array<{ policy: AutoTopupPolicyRow; availableQuantity: string }> {
+	const pool = input.rows.filter((row) => row.entity_external_id === null);
+	const poolIds = new Set(pool.map((row) => String(row.id)));
+	const spentFromPool =
+		input.entityId === null ||
+		input.deductions.some((deduction) => poolIds.has(deduction.allocationId));
+	return input.policies.flatMap((policy) => {
+		if (policy.entity_id !== null) {
+			return [
+				{ policy, availableQuantity: balanceFromRows(input.wallet, [...input.rows]).available },
+			];
+		}
+		return spentFromPool
+			? [{ policy, availableQuantity: balanceFromRows(input.wallet, pool).available }]
+			: [];
+	});
 }
 
 /** Chooses which allocations cover the quantity, oldest expiry first, without writing. */

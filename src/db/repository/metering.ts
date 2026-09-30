@@ -50,11 +50,11 @@ import {
 	consumeControls,
 	correctControlConsumption,
 	holdControls,
-	queryAutoTopupPolicy,
+	queryAutoTopupPolicies,
 	queryUsageAlerts,
 	recordUsageAlertDelta,
 	recordUsageControlEntries,
-	scheduleAutoTopupIfNeeded,
+	scheduleAutoTopups,
 } from "./controls-runtime";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
@@ -70,6 +70,7 @@ import {
 	applyConfirmation,
 	applyDeductions,
 	applyMeterLimitConsumption,
+	autoTopupTriggers,
 	balanceFromRows,
 	buildDecision,
 	calculateMeteredOverageCharge,
@@ -1669,7 +1670,7 @@ async function consumeWithinTransaction(
 	const deductions = planDeductions(rows, scale, walletQuantity);
 	const recordedAt = new Date();
 	// Deductions are issued first; the reads behind them observe the deduction.
-	const [, event, , topupPolicy] = await Promise.all([
+	const [, event, , topupPolicies] = await Promise.all([
 		applyDeductions(tx, deductions, "consumed_quantity"),
 		insertUsageEvent(tx, {
 			projectId,
@@ -1695,7 +1696,7 @@ async function consumeWithinTransaction(
 			walletQuantity,
 			recordedAt,
 		}),
-		queryAutoTopupPolicy(tx, {
+		queryAutoTopupPolicies(tx, {
 			projectId,
 			customerId: customer.id,
 			entityId,
@@ -1720,20 +1721,21 @@ async function consumeWithinTransaction(
 			alerts,
 		});
 	}
-	const balance = balanceFromRows(
-		rate.wallet,
-		deductedRows(rows, deductions, scale, "consumed_quantity"),
-	);
+	const spentRows = deductedRows(rows, deductions, scale, "consumed_quantity");
+	const balance = balanceFromRows(rate.wallet, spentRows);
 	await Promise.all([
 		enqueueUsageProjection(tx, { projectId, customerId: customer.id }),
-		scheduleAutoTopupIfNeeded(tx, {
+		scheduleAutoTopups(tx, {
 			projectId,
 			customerId: customer.id,
-			entityId,
-			featureId: featureId(rate.wallet),
-			availableQuantity: balance.available,
 			triggerKey: `usage:${event.id}`,
-			policy: topupPolicy,
+			triggers: autoTopupTriggers({
+				policies: topupPolicies,
+				entityId,
+				wallet: rate.wallet,
+				rows: spentRows,
+				deductions,
+			}),
 		}),
 	]);
 	return {
@@ -2067,7 +2069,7 @@ async function confirmWithinTransaction(
 	]);
 	const scale = rate.wallet.credit_scale;
 	// Allocation rows are locked first, then the reservation's holds; the config reads follow.
-	const [rows, reservationRows, alerts, topupPolicy] = await Promise.all([
+	const [rows, reservationRows, alerts, topupPolicies] = await Promise.all([
 		lockAllAllocationRows(tx, projectId, customer.id, rate.wallet, entityId),
 		lockReservationAllocations(tx, projectId, reservation.id),
 		queryUsageAlerts(tx, {
@@ -2076,7 +2078,7 @@ async function confirmWithinTransaction(
 			entityId,
 			featureId: featureId(rate.meter),
 		}),
-		queryAutoTopupPolicy(tx, {
+		queryAutoTopupPolicies(tx, {
 			projectId,
 			customerId: customer.id,
 			entityId,
@@ -2182,17 +2184,21 @@ async function confirmWithinTransaction(
 			alerts,
 		});
 	}
-	const balance = balanceFromRows(rate.wallet, confirmedRows(rows, plan, scale, now));
+	const spentRows = confirmedRows(rows, plan, scale, now);
+	const balance = balanceFromRows(rate.wallet, spentRows);
 	await Promise.all([
 		enqueueUsageProjection(tx, { projectId, customerId: customer.id }),
-		scheduleAutoTopupIfNeeded(tx, {
+		scheduleAutoTopups(tx, {
 			projectId,
 			customerId: customer.id,
-			entityId,
-			featureId: featureId(rate.wallet),
-			availableQuantity: balance.available,
 			triggerKey: `usage:${event.id}`,
-			policy: topupPolicy,
+			triggers: autoTopupTriggers({
+				policies: topupPolicies,
+				entityId,
+				wallet: rate.wallet,
+				rows: spentRows,
+				deductions: plan.deductions,
+			}),
 		}),
 	]);
 	return {

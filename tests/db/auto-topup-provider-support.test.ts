@@ -48,6 +48,7 @@ const unsupported: OperationSupport = {
 function policyRow(overrides: Partial<AutoTopupPolicyRow> = {}): AutoTopupPolicyRow {
 	return {
 		id: "11",
+		entity_id: null,
 		provider: "stripe",
 		provider_account_id: "cus_fixture",
 		threshold_quantity: "10",
@@ -83,8 +84,6 @@ async function schedule(
 	await scheduleAutoTopupIfNeeded(database as never, {
 		projectId: "project-1",
 		customerId: "customer-1",
-		entityId: null,
-		featureId: "5",
 		availableQuantity: "1",
 		triggerKey: "wallet:low",
 		policy,
