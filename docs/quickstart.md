@@ -138,5 +138,6 @@ rm quickstart-credentials.json
 
 - [Deployment and configuration](deployment.md) for a real environment.
 - [Provider integrations](providers.md) for Apple, Google, and Stripe.
-- [API guide](api.md) for the metering, catalog, and admin surfaces.
+- [API guide](api.md) for request rules and admin routes, with [metering](metering.md) and
+  [catalog publication](catalog.md) for the calls this quickstart made.
 - [Operations](operations.md) for backup, upgrade, and rollback.

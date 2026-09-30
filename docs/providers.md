@@ -28,7 +28,7 @@ stale.
 Catalog preview and publish check every binding of a new intent against these declarations after
 its structural checks, and reject all incompatible bindings together with one
 `400 PROVIDER_CAPABILITY_UNSUPPORTED`; see
-[Provider capability errors](api.md#provider-capability-errors).
+[Provider capability errors](provider-capabilities.md#provider-capability-errors).
 
 The table shows the declarations alone. The capability reads and environment readiness also require
 a validated connection for every operation and, outside recovery work such as webhook ingestion, an
@@ -39,7 +39,7 @@ declarations against an environment's persisted connections, and
 `GET /v1/billing-accounts/:billingAccountId/available-actions` against one billing account and its
 live subscriptions. Environment readiness adds non-gating `blockerDetails` for catalog bindings the
 connections cannot serve. See
-[Provider capabilities and available actions](api.md#provider-capabilities-and-available-actions).
+[Provider capabilities and available actions](provider-capabilities.md#provider-capabilities-and-available-actions).
 
 <!-- provider-capabilities:start -->
 <!-- Generated from contracts/v1/provider-capabilities.json by bun run openapi:generate; do not edit. -->
@@ -226,7 +226,7 @@ Checkout flow:
    expires open sessions. A session id Stripe does not know answers `404 NOT_FOUND` on both.
 
 A plan's `trialDays` becomes the Checkout subscription's trial only for an account that has not had
-a trial of that plan before, through a [Quotum trial](api.md#trials) or a provider subscription
+a trial of that plan before, through a [Quotum trial](grants.md#trials) or a provider subscription
 that recorded trial bounds; otherwise the subscription starts paid and the `checkout_plan` preview
 warns about it. A trial started between preview and execution makes the preview stale.
 
@@ -246,7 +246,7 @@ Paying an older invoice or a proration credit therefore cannot undo an upgrade. 
 retains its own event order, including invoices delivered after newer subscription events.
 
 Hosted payment-method setup uses the commercial preview and execution pair with a `setup_payment`
-intent; see [Saving a payment method](api.md#saving-a-payment-method). Quotum creates a Checkout
+intent; see [Saving a payment method](subscriptions.md#saving-a-payment-method). Quotum creates a Checkout
 Session in `setup` mode, card-only for the requested currency, with a 23-hour lifetime, and on the
 verified completion updates only `customer.invoice_settings.default_payment_method` — Stripe's
 [hosted setup flow](https://docs.stripe.com/payments/checkout/subscriptions/update-payment-details).
@@ -356,7 +356,7 @@ announced again for the new end. The fact names the subscription with `source: "
 plan, `planKey`, and carries `trialStartsAt`, `trialEndsAt` and `autoRenew`, which says whether the
 subscription continues as a paid one unless cancelled. A Stripe trial without a payment method whose
 end behavior cancels or pauses it still reports `autoRenew: true`; Stripe decides at the trial end.
-A [trial Quotum runs itself](api.md#trials) is a plan grant: its entitlements carry
+A [trial Quotum runs itself](grants.md#trials) is a plan grant: its entitlements carry
 `source: "plan_grant"`, `origin: "trial"`, `status`, `planKey`, `planGrantId` and the trial bounds,
 and its facts carry `source: "plan_grant"`, `planGrantId`, `planKey` and `autoRenew: false`. It gets
 the same `ending` notice (key `trial_ending:plan_grant:<id>:<trialEndsAt>`) and an `ended` fact when

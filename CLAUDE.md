@@ -128,7 +128,8 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
 - `src/migrate.ts` takes a Postgres advisory lock, verifies SHA-256 checksums of already-applied
   files, and runs `CREATE INDEX CONCURRENTLY` files outside a transaction. Before 1.0 the domain
   baselines evolve in place and disposable databases are recreated; incremental migrations start
-  at 1.0. Follow `docs/operations.md` for compatibility and populated-database transitions.
+  at 1.0. Follow `docs/operations.md` for compatibility and `docs/upgrade-transitions.md` for
+  populated-database transitions.
 - Unit tests under `tests/db` assert rendered SQL via `tests/helpers/drizzle-sql.ts` without a
   database; real behavior lives in `tests/integration`.
 
