@@ -169,6 +169,7 @@ describe("Stripe method guards", () => {
 					code: "BILLING_PROVIDER_NOT_CONFIGURED",
 					message: route.message,
 					details: { provider: "stripe", adapterMethod: route.adapterMethod },
+					requestId: expect.any(String),
 				},
 			});
 		}
@@ -198,7 +199,7 @@ describe("Stripe method guards", () => {
 			expect(response.status, path).toBe(400);
 			expect(await response.json(), path).toEqual({
 				success: false,
-				error: { code: "INVALID_REQUEST", message },
+				error: { code: "INVALID_REQUEST", message, requestId: expect.any(String) },
 			});
 		}
 	});
@@ -227,7 +228,7 @@ describe("Stripe method guards", () => {
 			expect(response.status, path).toBe(400);
 			expect(await response.json(), path).toEqual({
 				success: false,
-				error: { code: "INVALID_REQUEST", message },
+				error: { code: "INVALID_REQUEST", message, requestId: expect.any(String) },
 			});
 		}
 	});

@@ -353,6 +353,7 @@ localDescribe("catalog control plane", () => {
 				details: {
 					providerCompatibility: [storeTrial("apple", "ios"), storeTrial("google", "android")],
 				},
+				requestId: expect.any(String),
 			},
 		};
 

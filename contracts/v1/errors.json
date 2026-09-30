@@ -1068,8 +1068,6 @@
     {
       "code": "RATE_LIMITED",
       "sources": [
-        "src/app.ts",
-        "src/composition/ingress-http.ts",
         "src/http/rate-limit.ts",
         "src/platform/store.ts"
       ]

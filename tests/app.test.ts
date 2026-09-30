@@ -609,7 +609,11 @@ describe("billing app", () => {
 		expect(response.headers.get("x-request-id")).toBe("request-123");
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "INTERNAL_ERROR", message: "Billing request failed" },
+			error: {
+				code: "INTERNAL_ERROR",
+				message: "Billing request failed",
+				requestId: expect.any(String),
+			},
 		});
 		expect(metrics.renderPrometheus()).toContain(
 			'billing_http_errors_total{classification="internal",code="INTERNAL_ERROR",route_group="customer",status="500"} 1',
@@ -698,7 +702,12 @@ describe("billing app", () => {
 		expect(limited.headers.get("ratelimit-remaining")).toBe("0");
 		expect(await limited.json()).toEqual({
 			success: false,
-			error: { code: "RATE_LIMITED", message: "Too many requests" },
+			error: {
+				code: "RATE_LIMITED",
+				message: "Too many requests",
+				requestId: expect.any(String),
+				retryAfter: expect.any(Number),
+			},
 		});
 		expect(otherIp.status).toBe(401);
 		expect(credentialResolutionCalls).toBe(4);
@@ -823,6 +832,7 @@ describe("billing app", () => {
 				error: {
 					code: "UNAUTHORIZED",
 					message: "Invalid billing operator key",
+					requestId: expect.any(String),
 				},
 			});
 			const sameLengthWrong = await testRequest(app, path, {
@@ -838,6 +848,7 @@ describe("billing app", () => {
 				error: {
 					code: "UNAUTHORIZED",
 					message: "Invalid billing operator key",
+					requestId: expect.any(String),
 				},
 			});
 		}
@@ -866,6 +877,7 @@ describe("billing app", () => {
 			error: {
 				code: "BILLING_PROJECT_REQUIRED",
 				message: "Billing project context is required",
+				requestId: expect.any(String),
 			},
 		});
 	});
@@ -988,7 +1000,11 @@ describe("billing app", () => {
 		expect(privateRoute.status).toBe(401);
 		expect(await privateRoute.json()).toEqual({
 			success: false,
-			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+			error: {
+				code: "UNAUTHORIZED",
+				message: "Invalid billing API key",
+				requestId: expect.any(String),
+			},
 		});
 		expect(webhook.status).toBe(403);
 		expect(entitlementCalls).toEqual([]);
@@ -1025,6 +1041,7 @@ describe("billing app", () => {
 				error: {
 					code: "BILLING_PROJECT_CONTEXT_UNAVAILABLE",
 					message: "Billing project context is unavailable",
+					requestId: expect.any(String),
 				},
 			});
 		}
@@ -1178,7 +1195,11 @@ describe("billing app", () => {
 		expect(calls).toEqual([]);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "INVALID_REQUEST", message: "Invalid store event id" },
+			error: {
+				code: "INVALID_REQUEST",
+				message: "Invalid store event id",
+				requestId: expect.any(String),
+			},
 		});
 	});
 
@@ -1303,6 +1324,7 @@ describe("billing app", () => {
 				error: {
 					code: "BILLING_ADMIN_NOT_CONFIGURED",
 					message: "Billing admin operations are not configured",
+					requestId: expect.any(String),
 				},
 			});
 		}
@@ -1588,11 +1610,15 @@ describe("billing app", () => {
 		expect(calls).toEqual([]);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "INVALID_REQUEST", message: "Invalid purchase filters" },
+			error: {
+				code: "INVALID_REQUEST",
+				message: "Invalid purchase filters",
+				requestId: expect.any(String),
+			},
 		});
 		expect(await cursorResponse.json()).toEqual({
 			success: false,
-			error: { code: "INVALID_REQUEST", message: "Invalid cursor" },
+			error: { code: "INVALID_REQUEST", message: "Invalid cursor", requestId: expect.any(String) },
 		});
 	});
 
@@ -1626,6 +1652,7 @@ describe("billing app", () => {
 			error: {
 				code: "BILLING_ADMIN_NOT_CONFIGURED",
 				message: "Billing admin reader is not configured",
+				requestId: expect.any(String),
 			},
 		});
 	});
@@ -2016,7 +2043,11 @@ describe("billing app", () => {
 			expect(response.status).toBe(400);
 			expect(await response.json()).toEqual({
 				success: false,
-				error: { code: "INVALID_REQUEST", message: "Request validation failed" },
+				error: {
+					code: "INVALID_REQUEST",
+					message: "Request validation failed",
+					requestId: expect.any(String),
+				},
 			});
 		}
 	});
@@ -2216,6 +2247,7 @@ describe("billing app", () => {
 			error: {
 				code: "STRIPE_WEBHOOK_SIGNATURE_INVALID",
 				message: "Stripe webhook signature is invalid",
+				requestId: expect.any(String),
 			},
 		});
 	});
@@ -2444,6 +2476,7 @@ describe("billing app", () => {
 			error: {
 				code: "STRIPE_WEBHOOK_SIGNATURE_INVALID",
 				message: "Stripe webhook signature is invalid",
+				requestId: expect.any(String),
 			},
 		});
 		expect(metrics.renderPrometheus()).toContain(
@@ -2501,6 +2534,7 @@ describe("billing app", () => {
 				error: {
 					code: "BILLING_PROVIDER_NOT_CONFIGURED",
 					message: "Stripe provider is not configured",
+					requestId: expect.any(String),
 				},
 			});
 		}
@@ -2539,7 +2573,11 @@ describe("billing app", () => {
 		expect(called).toBe(false);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "INVALID_REQUEST", message: "Request validation failed" },
+			error: {
+				code: "INVALID_REQUEST",
+				message: "Request validation failed",
+				requestId: expect.any(String),
+			},
 		});
 	});
 
@@ -2658,6 +2696,7 @@ describe("billing app", () => {
 				error: {
 					code: "INVALID_REQUEST",
 					message: "Project is resolved from billing credentials",
+					requestId: expect.any(String),
 				},
 			});
 		}
@@ -2768,7 +2807,11 @@ describe("billing app", () => {
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "INVALID_REQUEST", message: "Invalid purchase verification body" },
+			error: {
+				code: "INVALID_REQUEST",
+				message: "Invalid purchase verification body",
+				requestId: expect.any(String),
+			},
 		});
 	});
 
@@ -2794,6 +2837,7 @@ describe("billing app", () => {
 			error: {
 				code: "BILLING_PROVIDER_NOT_CONFIGURED",
 				message: "Google Play provider is not configured",
+				requestId: expect.any(String),
 			},
 		});
 	});
@@ -2819,6 +2863,7 @@ describe("billing app", () => {
 			error: {
 				code: "BILLING_PROVIDER_NOT_CONFIGURED",
 				message: "Apple StoreKit provider is not configured",
+				requestId: expect.any(String),
 			},
 		});
 	});
@@ -2858,7 +2903,11 @@ describe("billing app", () => {
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "APPLE_TRANSACTION_INVALID", message: "Apple transaction was rejected" },
+			error: {
+				code: "APPLE_TRANSACTION_INVALID",
+				message: "Apple transaction was rejected",
+				requestId: expect.any(String),
+			},
 		});
 		expect(metrics.renderPrometheus()).toContain(
 			'billing_verification_failures_total{code="APPLE_TRANSACTION_INVALID",provider="apple"} 1',
@@ -2908,7 +2957,11 @@ describe("billing app", () => {
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "APPLE_TRANSACTION_INVALID", message: "Apple transaction was rejected" },
+			error: {
+				code: "APPLE_TRANSACTION_INVALID",
+				message: "Apple transaction was rejected",
+				requestId: expect.any(String),
+			},
 		});
 	});
 
@@ -2999,7 +3052,11 @@ describe("billing app", () => {
 		expect(called).toBe(false);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "INVALID_REQUEST", message: "Invalid Google webhook body" },
+			error: {
+				code: "INVALID_REQUEST",
+				message: "Invalid Google webhook body",
+				requestId: expect.any(String),
+			},
 		});
 		expect(metrics.renderPrometheus()).toContain(
 			'billing_webhook_failures_total{code="INVALID_REQUEST",provider="google"} 1',
@@ -3044,6 +3101,7 @@ describe("billing app", () => {
 			error: {
 				code: "GOOGLE_PLAY_RTDN_UNAUTHORIZED",
 				message: "Google Pub/Sub push token is required",
+				requestId: expect.any(String),
 			},
 		});
 	});
@@ -3062,7 +3120,11 @@ describe("billing app", () => {
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "INVALID_REQUEST", message: "Invalid Apple webhook body" },
+			error: {
+				code: "INVALID_REQUEST",
+				message: "Invalid Apple webhook body",
+				requestId: expect.any(String),
+			},
 		});
 		expect(metrics.renderPrometheus()).toContain(
 			'billing_webhook_failures_total{code="INVALID_REQUEST",provider="apple"} 1',
@@ -3182,6 +3244,7 @@ describe("billing app", () => {
 			error: {
 				code: "GOOGLE_PLAY_RTDN_UNAUTHORIZED",
 				message: "Google Pub/Sub push token is invalid",
+				requestId: expect.any(String),
 			},
 		});
 	});
@@ -3200,7 +3263,11 @@ describe("billing app", () => {
 		expect(response.status).toBe(413);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "REQUEST_BODY_TOO_LARGE", message: "Request body is too large" },
+			error: {
+				code: "REQUEST_BODY_TOO_LARGE",
+				message: "Request body is too large",
+				requestId: expect.any(String),
+			},
 		});
 	});
 
@@ -3227,7 +3294,11 @@ describe("billing app", () => {
 		expect(called).toBe(false);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "INVALID_REQUEST", message: "Invalid Apple webhook body" },
+			error: {
+				code: "INVALID_REQUEST",
+				message: "Invalid Apple webhook body",
+				requestId: expect.any(String),
+			},
 		});
 	});
 
@@ -3285,6 +3356,7 @@ describe("billing app", () => {
 				error: {
 					code: "APPLE_SIGNED_DATA_INVALID",
 					message: "Apple signed data failed verification",
+					requestId: expect.any(String),
 				},
 			});
 		}
@@ -3332,6 +3404,7 @@ describe("billing app", () => {
 			error: {
 				code: "APPLE_SIGNED_DATA_INVALID",
 				message: "Apple notification belongs to another environment",
+				requestId: expect.any(String),
 			},
 		});
 	});
@@ -3363,7 +3436,12 @@ describe("billing app", () => {
 		expect(limited.headers.get("ratelimit-remaining")).toBe("0");
 		expect(await limited.json()).toEqual({
 			success: false,
-			error: { code: "RATE_LIMITED", message: "Too many requests" },
+			error: {
+				code: "RATE_LIMITED",
+				message: "Too many requests",
+				requestId: expect.any(String),
+				retryAfter: expect.any(Number),
+			},
 		});
 	});
 
@@ -3401,7 +3479,11 @@ describe("billing app", () => {
 		expect(called).toBe(false);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "REQUEST_BODY_TOO_LARGE", message: "Request body is too large" },
+			error: {
+				code: "REQUEST_BODY_TOO_LARGE",
+				message: "Request body is too large",
+				requestId: expect.any(String),
+			},
 		});
 	});
 
@@ -3482,11 +3564,21 @@ describe("billing app", () => {
 		expect(projectResolutionCalls).toBe(3);
 		expect(await appleLimited.json()).toEqual({
 			success: false,
-			error: { code: "RATE_LIMITED", message: "Too many requests" },
+			error: {
+				code: "RATE_LIMITED",
+				message: "Too many requests",
+				requestId: expect.any(String),
+				retryAfter: expect.any(Number),
+			},
 		});
 		expect(await stripeLimited.json()).toEqual({
 			success: false,
-			error: { code: "RATE_LIMITED", message: "Too many requests" },
+			error: {
+				code: "RATE_LIMITED",
+				message: "Too many requests",
+				requestId: expect.any(String),
+				retryAfter: expect.any(Number),
+			},
 		});
 	});
 
@@ -3560,7 +3652,12 @@ describe("billing app", () => {
 		expect(limited.status).toBe(429);
 		expect(await limited.json()).toEqual({
 			success: false,
-			error: { code: "RATE_LIMITED", message: "Too many requests" },
+			error: {
+				code: "RATE_LIMITED",
+				message: "Too many requests",
+				requestId: expect.any(String),
+				retryAfter: expect.any(Number),
+			},
 		});
 	});
 
@@ -3575,7 +3672,7 @@ describe("billing app", () => {
 		expect(response.status).toBe(404);
 		expect(await response.json()).toEqual({
 			success: false,
-			error: { code: "NOT_FOUND", message: "Route not found" },
+			error: { code: "NOT_FOUND", message: "Route not found", requestId: expect.any(String) },
 		});
 	});
 });

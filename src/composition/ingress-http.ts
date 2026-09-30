@@ -1,11 +1,20 @@
-import { type RateLimiter, rateLimitHeaders, requestIpAndPath } from "../http/rate-limit";
+import {
+	type RateLimiter,
+	rateLimitedBody,
+	rateLimitHeaders,
+	requestIpAndPath,
+} from "../http/rate-limit";
 import { bodyTooLargeError, isBodyTooLarge, readCappedText } from "../shared/body-limit";
 
 /** Plain JSON response for the setup-only ingresses, which do not use the billing envelope. */
 export function rawJsonResponse(status: number, payload: unknown): Response {
 	return new Response(JSON.stringify(payload), {
 		status,
-		headers: { "content-type": "application/json" },
+		headers: {
+			"content-type": "application/json",
+			"cache-control": "no-store",
+			"x-content-type-options": "nosniff",
+		},
 	});
 }
 
@@ -52,10 +61,7 @@ export function ipRateLimitGate(
 		);
 		if (!result.allowed) {
 			Object.assign(set.headers, rateLimitHeaders(result));
-			return rawJsonResponse(429, {
-				success: false,
-				error: { code: "RATE_LIMITED", message: "Too many requests" },
-			});
+			return rawJsonResponse(429, rateLimitedBody(result));
 		}
 		Object.assign(set.headers, rateLimitHeaders(result));
 		return undefined;

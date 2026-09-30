@@ -536,6 +536,7 @@ export class BillingClient {
 				response.status,
 				envelopeDetails(error?.details),
 				rateLimitReset(response),
+				retryAfter(response),
 			);
 		}
 		return payload.data;
@@ -557,6 +558,7 @@ export class BillingClient {
 				response.status,
 				envelopeDetails(error?.details),
 				rateLimitReset(response),
+				retryAfter(response),
 			);
 		}
 		return { data: payload.data, nextCursor: payload.pagination.nextCursor };
@@ -604,8 +606,10 @@ export class BillingClient {
 export class BillingApiError extends Error {
 	/** Structured context from the error envelope; absent when the response carried none. */
 	declare readonly details?: Record<string, unknown>;
-	/** ISO timestamp from `ratelimit-reset` on a 429; the API sends no `retry-after`. */
+	/** ISO timestamp from `ratelimit-reset` on a 429. */
 	declare readonly rateLimitResetAt?: string;
+	/** Whole seconds from `retry-after` on a 429: how long to wait before retrying. */
+	declare readonly retryAfterSeconds?: number;
 
 	constructor(
 		message: string,
@@ -613,6 +617,7 @@ export class BillingApiError extends Error {
 		readonly status: number,
 		details?: Record<string, unknown>,
 		rateLimitResetAt?: string,
+		retryAfterSeconds?: number,
 	) {
 		super(message);
 		this.name = "BillingApiError";
@@ -622,6 +627,9 @@ export class BillingApiError extends Error {
 		if (rateLimitResetAt !== undefined) {
 			this.rateLimitResetAt = rateLimitResetAt;
 		}
+		if (retryAfterSeconds !== undefined) {
+			this.retryAfterSeconds = retryAfterSeconds;
+		}
 	}
 }
 
@@ -629,6 +637,11 @@ function rateLimitReset(response: Response): string | undefined {
 	return response.status === 429
 		? (response.headers.get("ratelimit-reset") ?? undefined)
 		: undefined;
+}
+
+function retryAfter(response: Response): number | undefined {
+	const value = response.status === 429 ? response.headers.get("retry-after")?.trim() : undefined;
+	return value !== undefined && /^\d{1,9}$/.test(value) ? Number(value) : undefined;
 }
 
 function envelopeDetails(value: unknown): Record<string, unknown> | undefined {

@@ -702,7 +702,7 @@ describe("BillingClient", () => {
 		}
 	});
 
-	it("carries the rate-limit reset time on a 429 and nowhere else", async () => {
+	it("carries the rate-limit reset time and retry delay on a 429 and nowhere else", async () => {
 		const responses = [
 			new Response(
 				JSON.stringify({
@@ -714,6 +714,7 @@ describe("BillingClient", () => {
 					headers: {
 						"content-type": "application/json",
 						"ratelimit-reset": "2026-09-21T10:00:30.000Z",
+						"retry-after": "30",
 					},
 				},
 			),
@@ -724,6 +725,7 @@ describe("BillingClient", () => {
 					headers: {
 						"content-type": "application/json",
 						"ratelimit-reset": "2026-09-21T10:00:30.000Z",
+						"retry-after": "30",
 					},
 				},
 			),
@@ -738,9 +740,11 @@ describe("BillingClient", () => {
 		expect(limited).toBeInstanceOf(BillingApiError);
 		expect((limited as BillingApiError).code).toBe("RATE_LIMITED");
 		expect((limited as BillingApiError).rateLimitResetAt).toBe("2026-09-21T10:00:30.000Z");
+		expect((limited as BillingApiError).retryAfterSeconds).toBe(30);
 
 		const missing = await client.admin.customer("unknown").catch((error: unknown) => error);
 		expect(missing).toBeInstanceOf(BillingApiError);
 		expect("rateLimitResetAt" in (missing as BillingApiError)).toBe(false);
+		expect("retryAfterSeconds" in (missing as BillingApiError)).toBe(false);
 	});
 });

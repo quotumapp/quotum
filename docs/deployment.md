@@ -354,8 +354,11 @@ connections owned by the merchant platform.
 ### Rate limits
 
 Limits count requests in fixed windows of `BILLING_RATE_LIMIT_WINDOW_MS`, aligned to the Unix epoch,
-and answer `429 RATE_LIMITED` with `ratelimit-remaining` and `ratelimit-reset` headers. Buckets never
-include a path value the caller chooses:
+and answer `429 RATE_LIMITED` with `ratelimit-remaining`, `ratelimit-reset` and `Retry-After`
+headers. `Retry-After` is the whole number of seconds, at least one, until the window ends, and the
+error body repeats it as `retryAfter`. `ratelimit-reset` is the window's end as an absolute ISO
+timestamp, not the delta seconds of the IETF RateLimit header draft; the SDK and existing clients
+read it that way. Buckets never include a path value the caller chooses:
 
 - Purchase verification, promotion code entry (`BILLING_VERIFY_RATE_LIMIT_PER_WINDOW`, counted
   separately), usage and balance routes (`BILLING_METERING_RATE_LIMIT_PER_WINDOW`) and

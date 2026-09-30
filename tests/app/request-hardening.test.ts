@@ -140,7 +140,11 @@ describe("private request bodies", () => {
 			expect(response.status).toBe(400);
 			expect(await response.json()).toEqual({
 				success: false,
-				error: { code: "INVALID_REQUEST", message: "Request validation failed" },
+				error: {
+					code: "INVALID_REQUEST",
+					message: "Request validation failed",
+					requestId: expect.any(String),
+				},
 			});
 		}
 		expect(metering.calls).toEqual([]);
@@ -434,7 +438,11 @@ describe("operations without a request body", () => {
 				expect(response.status, label).toBe(401);
 				expect(await response.json(), label).toEqual({
 					success: false,
-					error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+					error: {
+						code: "UNAUTHORIZED",
+						message: "Invalid billing API key",
+						requestId: expect.any(String),
+					},
 				});
 				expect(credentialLookups(), label).toBe(1);
 				expect(body.pulled(), label).toBe(0);

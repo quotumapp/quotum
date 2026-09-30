@@ -12,6 +12,8 @@ export interface RateLimitResult {
 	allowed: boolean;
 	remaining: number;
 	resetAt: Date;
+	/** Whole seconds, at least one, until the window resets; set when the check is rejected. */
+	retryAfterSeconds?: number;
 }
 
 export type RateLimiter = { check(key: string): RateLimitResult };
@@ -79,7 +81,12 @@ export function createFixedWindowRateLimiter(options: {
 			buckets.set(key, bucket);
 
 			if (bucket.count >= limit) {
-				return { allowed: false, remaining: 0, resetAt };
+				return {
+					allowed: false,
+					remaining: 0,
+					resetAt,
+					retryAfterSeconds: Math.max(1, Math.ceil((resetAt.getTime() - currentTime) / 1000)),
+				};
 			}
 
 			bucket.count += 1;
@@ -111,21 +118,45 @@ export class RateLimitExceeded extends Error {
 	}
 }
 
+/**
+ * Limiter headers for a checked request. `ratelimit-reset` stays an absolute ISO timestamp, which
+ * the SDK and existing clients read; a rejection also carries `retry-after` in whole seconds.
+ */
 export function rateLimitHeaders(result: RateLimitResult): Record<string, string> {
 	return {
 		"ratelimit-remaining": String(result.remaining),
 		"ratelimit-reset": result.resetAt.toISOString(),
+		...(result.allowed ? {} : { "retry-after": String(retryAfterSeconds(result)) }),
 	};
 }
 
-export function rateLimitResponse(result: RateLimitResult): Response {
-	return new Response(
-		JSON.stringify({
-			success: false,
-			error: { code: "RATE_LIMITED", message: "Too many requests" },
-		}),
-		{ status: 429, headers: { "content-type": "application/json", ...rateLimitHeaders(result) } },
+/** The 429 envelope, with the same wait as the `retry-after` header. */
+export function rateLimitedBody(result: RateLimitResult): {
+	success: false;
+	error: { code: "RATE_LIMITED"; message: string; retryAfter: number };
+} {
+	return {
+		success: false,
+		error: {
+			code: "RATE_LIMITED",
+			message: "Too many requests",
+			retryAfter: retryAfterSeconds(result),
+		},
+	};
+}
+
+function retryAfterSeconds(result: RateLimitResult): number {
+	return (
+		result.retryAfterSeconds ??
+		Math.max(1, Math.ceil((result.resetAt.getTime() - Date.now()) / 1000))
 	);
+}
+
+export function rateLimitResponse(result: RateLimitResult): Response {
+	return new Response(JSON.stringify(rateLimitedBody(result)), {
+		status: 429,
+		headers: { "content-type": "application/json", ...rateLimitHeaders(result) },
+	});
 }
 
 export interface RateLimitTarget {

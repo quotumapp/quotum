@@ -107,7 +107,11 @@ describe("api key authentication", () => {
 		expect(missing.status).toBe(401);
 		expect(await missing.json()).toEqual({
 			success: false,
-			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+			error: {
+				code: "UNAUTHORIZED",
+				message: "Invalid billing API key",
+				requestId: expect.any(String),
+			},
 		});
 		expect(calls).toBe(0);
 
@@ -117,7 +121,11 @@ describe("api key authentication", () => {
 		expect(wrong.status).toBe(401);
 		expect(await wrong.json()).toEqual({
 			success: false,
-			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+			error: {
+				code: "UNAUTHORIZED",
+				message: "Invalid billing API key",
+				requestId: expect.any(String),
+			},
 		});
 		expect(calls).toBe(1);
 
@@ -204,6 +212,7 @@ describe("api key authentication", () => {
 			error: {
 				code: "BILLING_PROJECT_CONTEXT_UNAVAILABLE",
 				message: "Billing project context is unavailable",
+				requestId: expect.any(String),
 			},
 		});
 	});
@@ -225,7 +234,11 @@ describe("api key authentication", () => {
 			expect(response.status).toBe(401);
 			expect(await response.json()).toEqual({
 				success: false,
-				error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+				error: {
+					code: "UNAUTHORIZED",
+					message: "Invalid billing API key",
+					requestId: expect.any(String),
+				},
 			});
 		}
 	});
@@ -296,7 +309,11 @@ describe("api key authentication", () => {
 			expect(response.status).toBe(401);
 			expect(await response.json()).toEqual({
 				success: false,
-				error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+				error: {
+					code: "UNAUTHORIZED",
+					message: "Invalid billing API key",
+					requestId: expect.any(String),
+				},
 			});
 		}
 		expect(lookups).toHaveLength(11);
@@ -305,7 +322,11 @@ describe("api key authentication", () => {
 		expect(legacy.status).toBe(401);
 		expect(await legacy.json()).toEqual({
 			success: false,
-			error: { code: "UNAUTHORIZED", message: "Invalid billing API key" },
+			error: {
+				code: "UNAUTHORIZED",
+				message: "Invalid billing API key",
+				requestId: expect.any(String),
+			},
 		});
 		expect(lookups).toHaveLength(11);
 		expect(projects).toEqual(["acme-sandbox", "acme"]);

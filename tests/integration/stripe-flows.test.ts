@@ -1787,6 +1787,7 @@ localDescribe("Stripe route flows integration", () => {
 			error: {
 				code: "BILLING_PRODUCT_NOT_FOUND",
 				message: "Active Stripe web product missing_product was not found",
+				requestId: expect.any(String),
 			},
 		});
 		expect(stripe.calls).toEqual([]);
@@ -2993,6 +2994,7 @@ localDescribe("Stripe route flows integration", () => {
 			error: {
 				code: "INVALID_REQUEST",
 				message: "Stripe signature must not be blank",
+				requestId: expect.any(String),
 			},
 		});
 		expect(fixture.stripe.calls).toEqual([]);
@@ -3015,6 +3017,7 @@ localDescribe("Stripe route flows integration", () => {
 			error: {
 				code: "STRIPE_WEBHOOK_SIGNATURE_INVALID",
 				message: "Stripe webhook signature is invalid",
+				requestId: expect.any(String),
 			},
 		});
 		expect(fixture.stripe.calls).toEqual([

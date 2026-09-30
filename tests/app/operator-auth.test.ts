@@ -69,7 +69,11 @@ const env: BillingEnv = {
 
 const unauthorized = {
 	success: false,
-	error: { code: "UNAUTHORIZED", message: "Invalid billing operator key" },
+	error: {
+		code: "UNAUTHORIZED",
+		message: "Invalid billing operator key",
+		requestId: expect.any(String),
+	},
 };
 
 function operatorTestApp(appEnv: BillingEnv = env) {
@@ -153,7 +157,12 @@ describe("operator-key contracts", () => {
 			expect(limited.status, `${verb} ${requestPath}`).toBe(429);
 			expect(await limited.json()).toEqual({
 				success: false,
-				error: { code: "RATE_LIMITED", message: "Too many requests" },
+				error: {
+					code: "RATE_LIMITED",
+					message: "Too many requests",
+					requestId: expect.any(String),
+					retryAfter: expect.any(Number),
+				},
 			});
 		}
 	});
