@@ -233,6 +233,39 @@ describe("balance adjustment routes", () => {
 		expect(calls).toEqual([]);
 	});
 
+	it("counts a reason in characters, not UTF-16 units", async () => {
+		const { calls, service } = recordingService();
+		const app = adjustmentApp(service);
+		const post = (reason: string, key: string) =>
+			testRequest(app, "/v1/admin/operator-grants/acct_1", {
+				method: "POST",
+				headers: { ...operatorHeaders, "idempotency-key": key },
+				body: JSON.stringify({ featureKey: "ai_credits", quantity: "1", reason }),
+			});
+
+		// 500 emoji are 1,000 UTF-16 units; the limit is 500 characters, as the column counts them.
+		expect((await post("🎁".repeat(500), "grant-emoji")).status).toBe(201);
+		const tooLong = await post("🎁".repeat(501), "grant-emoji-long");
+		expect(tooLong.status).toBe(400);
+		expect((await tooLong.json()).error.code).toBe("INVALID_REQUEST");
+		expect(calls).toHaveLength(1);
+	});
+
+	it("accepts a list limit written in decimal digits only", async () => {
+		const { calls, service } = recordingService();
+		const app = adjustmentApp(service);
+		for (const path of ["operator-grants", "administrative-debits"])
+			for (const limit of ["0x2", "1e1", "2.0", " 2", "+2", "0", "101"]) {
+				const response = await testRequest(
+					app,
+					`/v1/admin/${path}/acct_1?limit=${encodeURIComponent(limit)}`,
+					{ headers: operatorHeaders },
+				);
+				expect(response.status, `${path} limit=${limit}`).toBe(400);
+			}
+		expect(calls).toEqual([]);
+	});
+
 	it("revokes a grant by account and grant id", async () => {
 		const { calls, service } = recordingService();
 		const response = await testRequest(

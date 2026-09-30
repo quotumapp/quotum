@@ -11,7 +11,7 @@ import {
 	storeEventProcessingStatuses,
 	subscriptionStatuses,
 } from "../billing/types";
-import { isStorableInstant } from "../shared/input-bounds";
+import { decimalDigitsQuery, isStorableInstant } from "../shared/input-bounds";
 import type {
 	AdminCatalogProductListInput,
 	AdminCatalogStoreProductListInput,
@@ -72,7 +72,7 @@ const cursorDateSchema = z
 		return value;
 	});
 export const paginationSchema = z.object({
-	limit: z.coerce.number().int().positive().max(100).default(25),
+	limit: decimalDigitsQuery(z.coerce.number().int().positive().max(100).default(25)),
 	cursor: z.string().trim().min(1).nullable().optional(),
 });
 const cursorSchema = z.object({

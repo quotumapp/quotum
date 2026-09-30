@@ -171,6 +171,36 @@ describe("operator grants", () => {
 		});
 	});
 
+	it("refuses a boolean feature as invalid and an unknown one as not found", async () => {
+		const input = {
+			billingAccountId: "acct_1",
+			featureKey: "sso",
+			quantity: "1",
+			entityId: null,
+			expiresAt: null,
+			reason: "Outage goodwill",
+			actor: "support@example.com",
+			idempotencyKey: "grant-1",
+		};
+		const boolean = new FakeDatabase(
+			[[customer], [], [{ ...feature, key: "sso", kind: "boolean", meter_kind: null }]],
+			{ strict: true },
+		);
+		await expect(repository(boolean).grantOperatorBalance(project, input)).rejects.toMatchObject({
+			code: "OPERATOR_GRANT_FEATURE_INVALID",
+			status: 400,
+			details: { featureKey: "sso" },
+		});
+		boolean.assertConsumed();
+
+		const unknown = new FakeDatabase([[customer], [], []], { strict: true });
+		await expect(repository(unknown).grantOperatorBalance(project, input)).rejects.toMatchObject({
+			code: "FEATURE_NOT_FOUND",
+			status: 404,
+		});
+		unknown.assertConsumed();
+	});
+
 	it("refuses an expiry that is not in the future", async () => {
 		const database = new FakeDatabase(
 			[

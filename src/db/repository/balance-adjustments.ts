@@ -34,11 +34,7 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
-import {
-	featureSpentByUsage,
-	requireMeteredFeature,
-	resolveEntityId,
-} from "./metering-persistence";
+import { featureSpentByUsage, requireActiveFeature, resolveEntityId } from "./metering-persistence";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import { formatUtcTimestamp, requirePositiveLimit } from "./validation";
@@ -132,8 +128,11 @@ export class BalanceAdjustmentRepository
 				}
 				return { duplicate: true, grant: toOperatorGrantRecord(replay) };
 			}
-			const feature = await requireMeteredFeature(tx, projectId, input.featureKey);
+			// A known feature that is not a spendable consumable, a boolean one included, is invalid
+			// for a grant; only a key that names no active feature is not found.
+			const feature = await requireActiveFeature(tx, projectId, input.featureKey);
 			if (
+				feature.kind !== "metered" ||
 				feature.meter_kind !== "consumable" ||
 				!(await featureSpentByUsage(tx, projectId, feature))
 			) {

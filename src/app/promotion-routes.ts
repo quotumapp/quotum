@@ -8,7 +8,7 @@ import type {
 } from "../billing/promotions";
 import { projectScopedRateLimitGuard, type RateLimiter } from "../http/rate-limit";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
-import { storableDateTimeSchema } from "../shared/input-bounds";
+import { decimalDigitsQuery, storableDateTimeSchema } from "../shared/input-bounds";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/promotion-responses";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
@@ -129,7 +129,7 @@ export const addPromotionCodesBodySchema = z
 
 export const listPromotionsQuerySchema = z
 	.object({
-		limit: z.coerce.number().int().positive().max(100).default(25),
+		limit: decimalDigitsQuery(z.coerce.number().int().positive().max(100).default(25)),
 		cursor: z.string().trim().min(1).optional(),
 		status: z.enum(["active", "archived"]).optional(),
 	})
@@ -137,7 +137,7 @@ export const listPromotionsQuerySchema = z
 
 export const listPromotionCodesQuerySchema = z
 	.object({
-		limit: z.coerce.number().int().positive().max(100).default(25),
+		limit: decimalDigitsQuery(z.coerce.number().int().positive().max(100).default(25)),
 		cursor: z.string().trim().min(1).optional(),
 		active: z.enum(["true", "false"]).optional(),
 	})
@@ -145,7 +145,7 @@ export const listPromotionCodesQuerySchema = z
 
 export const listPromotionRedemptionsQuerySchema = z
 	.object({
-		limit: z.coerce.number().int().positive().max(100).default(25),
+		limit: decimalDigitsQuery(z.coerce.number().int().positive().max(100).default(25)),
 		cursor: z.string().trim().min(1).optional(),
 		status: z.enum(["reserved", "applied", "released", "reversed"]).optional(),
 		billingAccountId: z.string().trim().min(1).max(200).optional(),
@@ -173,7 +173,7 @@ export const revokePromotionRedemptionBodySchema = z
 
 export const listAccountRedemptionsQuerySchema = z
 	.object({
-		limit: z.coerce.number().int().positive().max(100).default(25),
+		limit: decimalDigitsQuery(z.coerce.number().int().positive().max(100).default(25)),
 		cursor: z.string().trim().min(1).optional(),
 	})
 	.strict();

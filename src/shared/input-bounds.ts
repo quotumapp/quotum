@@ -96,3 +96,15 @@ export function toDisplayName(value: string, max: number): string {
 	}
 	return result.trimEnd();
 }
+
+/**
+ * A query-string integer written in decimal digits. `z.coerce.number()` alone also reads `0x2`,
+ * `1e1`, `2.0` and ` 2` as numbers; those now fail `schema` instead. The contract still renders
+ * `schema` itself.
+ */
+export function decimalDigitsQuery<T extends z.ZodType>(schema: T) {
+	return z.preprocess(
+		(value) => (typeof value === "string" && !/^\d+$/.test(value) ? Number.NaN : value),
+		schema,
+	);
+}
