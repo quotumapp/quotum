@@ -227,8 +227,12 @@ export class MerchantOnboarding {
 		const [row] = await tx<
 			OperationRow[]
 		>`SELECT op.*,p.key AS project_key,p.name AS project_name,o.slug,o.id AS organization_id FROM platform_provisioning_operations op JOIN platform_projects p ON p.id=op.logical_project_id JOIN platform_organizations o ON o.id=p.organization_id WHERE op.id=${id}`;
-		if (!row) throw new MerchantError("NOT_FOUND", "Provisioning operation not found.", 404);
-		await this.store.membership(tx, identity.principalId, row.slug);
+		const notFound = new MerchantError("NOT_FOUND", "Provisioning operation not found.", 404);
+		if (!row) throw notFound;
+		// Another organization's operation answers like an unknown one, so ids reveal nothing.
+		await this.store.membership(tx, identity.principalId, row.slug).catch((error: unknown) => {
+			throw error instanceof MerchantError && error.status === 403 ? notFound : error;
+		});
 		return row;
 	}
 	async view(identity: MerchantIdentity, id: string): Promise<ProvisioningOperationView> {

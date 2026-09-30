@@ -157,6 +157,30 @@ describe("merchant platform transactions", () => {
 		await f.sql`UPDATE platform_organizations SET status='suspended' WHERE slug='acme'`;
 		expect(await projects()).toEqual([]);
 	});
+	it("answers another organization's provisioning operation as not found", async () => {
+		const owner = new MerchantBrowser(f);
+		await owner.signup();
+		const { operation } = await onboard(owner);
+		const other = new MerchantBrowser(f);
+		await other.signup("other@example.com");
+		const unknown = crypto.randomUUID();
+		for (const id of [operation.id, unknown]) {
+			for (const [path, body] of [
+				[`/api/platform/provisioning/${id}`, undefined],
+				[`/api/platform/provisioning/${id}/retry`, {}],
+				[`/api/platform/provisioning/${id}/credential`, {}],
+				[`/api/platform/provisioning/${id}/rotate`, {}],
+			] as const) {
+				const response = await other.request(path, body);
+				expect([path, response.status, (await response.json()).error?.code]).toEqual([
+					path,
+					404,
+					"NOT_FOUND",
+				]);
+			}
+		}
+		expect(await f.sql`SELECT id FROM platform_project_api_credentials`).toHaveLength(0);
+	});
 	it("resumes partial provisioning without duplicating environments or exposing credentials", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();
@@ -876,6 +900,38 @@ describe("merchant platform transactions", () => {
 			(await owner.json<InvitationView>("/api/platform/invitations/preview", { token: current }))
 				.status,
 		).toBe("revoked");
+		// Revoking it again answers the same and records nothing new.
+		const again = await owner.json<{ status: string }>(
+			`/api/platform/team/invitations/${newInvite.id}/revoke`,
+			{ organizationSlug: "acme" },
+		);
+		expect(again.status).toBe("revoked");
+		expect(
+			await f.sql`SELECT target FROM platform_audit_events WHERE action='invitation.revoked'`,
+		).toEqual([{ target: newInvite.id }]);
+	});
+	it("limits invitation previews that register a link", async () => {
+		const owner = new MerchantBrowser(f);
+		await owner.signup();
+		await onboard(owner);
+		await owner.json("/api/platform/team/invitations", {
+			organizationSlug: "acme",
+			email: "invitee@example.com",
+			role: "Viewer",
+		});
+		const token = f.mailer.link("invitation", "invitee@example.com");
+		const anon = new MerchantBrowser(f);
+		await anon.json("/api/platform/config");
+		const statuses = [];
+		for (let attempt = 0; attempt < 21; attempt++)
+			statuses.push((await anon.request("/api/platform/invitations/preview", { token })).status);
+		expect(statuses.slice(0, 20).every((status) => status === 200)).toBe(true);
+		expect(statuses[20]).toBe(429);
+		expect(
+			await f.sql`SELECT count(*)::int AS links FROM platform_auth_links WHERE kind='invitation'`,
+		).toEqual([{ links: 20 }]);
+		// Reading the invitation back through its cookie registers nothing and stays available.
+		expect((await anon.request("/api/platform/invitations/preview", {})).status).toBe(200);
 	});
 	it("checks current inviter authority and seat capacity transactionally", async () => {
 		const owner = new MerchantBrowser(f);
