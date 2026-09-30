@@ -29,6 +29,15 @@ export interface PlanGrantWindow {
 	 * started yet, the allowance the grant it will replace left in this same window.
 	 */
 	allocation: WindowAllocation | null;
+	/** The allowance's row, when a write created it. */
+	allocationId: string | null;
+	/**
+	 * Whether the grant's allowance ended before its window did, because a version the grant moved
+	 * to dropped the feature, and the version it holds now has the feature again on the same reset.
+	 * The window already gave that allowance, so reads count what was left of it and the account's
+	 * next write in the window reopens it with its use kept, instead of granting it again.
+	 */
+	resumes: boolean;
 }
 
 export interface WindowAllocation {
@@ -60,7 +69,10 @@ interface WindowRow {
 	reset_interval: CadenceUnit | null;
 	reset_interval_count: number;
 	expires_after_seconds: number | null;
+	latest_id: string | number | bigint | null;
 	latest_period_start_at: Date | string | null;
+	latest_expires_at: Date | string | null;
+	latest_reversed_at: Date | string | null;
 	latest_quantity: string | null;
 	latest_reversed: string | null;
 	latest_consumed: string | null;
@@ -110,7 +122,10 @@ export async function readPlanGrantWindows(
 				item.feature_id, feature.key AS feature_key, feature.unit, feature.credit_scale,
 				item.quantity::text AS quantity, item.reset_interval,
 				item.reset_interval_count, item.expires_after_seconds,
+				latest.id AS latest_id,
 				latest.period_start_at AS latest_period_start_at,
+				latest.expires_at AS latest_expires_at,
+				latest.reversed_at AS latest_reversed_at,
 				latest.quantity::text AS latest_quantity,
 				latest.reversed_quantity::text AS latest_reversed,
 				latest.consumed_quantity::text AS latest_consumed,
@@ -127,7 +142,8 @@ export async function readPlanGrantWindows(
 			-- The grant's latest allowance of the feature on the same reset. A version move keeps an
 			-- allowance only when the reset stays, so one on another reset never stands in for it.
 			LEFT JOIN LATERAL (
-				SELECT allocation.period_start_at, allocation.quantity, allocation.reversed_quantity,
+				SELECT allocation.id, allocation.period_start_at, allocation.expires_at,
+					allocation.reversed_at, allocation.quantity, allocation.reversed_quantity,
 					allocation.consumed_quantity, allocation.held_quantity
 				FROM balance_allocations allocation
 				JOIN plan_items allocated
@@ -171,6 +187,13 @@ function toWindow(row: WindowRow, now: Date): PlanGrantWindow {
 	const created =
 		row.latest_period_start_at !== null &&
 		new Date(row.latest_period_start_at).getTime() === window.start.getTime();
+	const resumes =
+		created &&
+		row.grant_id !== null &&
+		row.latest_reversed_at === null &&
+		row.latest_expires_at !== null &&
+		new Date(row.latest_expires_at) <= now &&
+		(expiresAt === null || expiresAt > now);
 	return {
 		grantId: row.grant_id,
 		featureId: String(row.feature_id),
@@ -191,14 +214,16 @@ function toWindow(row: WindowRow, now: Date): PlanGrantWindow {
 					held: row.latest_held ?? "0",
 				}
 			: null,
+		allocationId: created && row.latest_id !== null ? String(row.latest_id) : null,
+		resumes,
 	};
 }
 
 /**
  * What reads add to the account's allocations: each current window of its plan grants that no
- * write has created yet, in full, and the default plan it would start, with what its previous
- * default-plan grant left in the same window. A window whose allowance would have expired adds
- * nothing.
+ * write has created yet, in full, what is left of an allowance a write will reopen, and the default
+ * plan it would start, with what its previous default-plan grant left in the same window. A window
+ * whose allowance would have expired adds nothing.
  */
 export async function readPendingAllowances(
 	executor: QueryExecutor,
@@ -212,7 +237,7 @@ export async function readPendingAllowances(
 	});
 	return windows.flatMap((window) => {
 		if (window.expiresAt !== null && window.expiresAt <= now) return [];
-		if (window.grantId !== null && window.allocation !== null) return [];
+		if (window.grantId !== null && window.allocation !== null && !window.resumes) return [];
 		const allocation = window.allocation ?? {
 			quantity: window.quantity,
 			reversed: "0",
@@ -234,9 +259,11 @@ export async function readPendingAllowances(
 
 /**
  * Creates the allowances of the account's plan grants for the windows they are in now, for one
- * feature, before a write locks its allocations. Every change to a grant locks the customer first,
- * so sharing that lock here orders this after a supersede, end or version move that began first,
- * and before one that begins later, which then sees these rows. Returns how many it created.
+ * feature, before a write locks its allocations, and reopens one a version move ended early when
+ * the grant's version holds the feature again (see `PlanGrantWindow.resumes`). Every change to a
+ * grant locks the customer first, so sharing that lock here orders this after a supersede, end or
+ * version move that began first, and before one that begins later, which then sees these rows.
+ * Returns how many it created or reopened.
  */
 export async function openPlanGrantWindows(
 	executor: QueryExecutor,
@@ -248,7 +275,7 @@ export async function openPlanGrantWindows(
 		candidates.filter(
 			(window) =>
 				window.grantId !== null &&
-				window.allocation === null &&
+				(window.allocation === null || window.resumes) &&
 				(window.expiresAt === null || window.expiresAt > now),
 		);
 	const first = await readPlanGrantWindows(executor, projectId, customerId, {
@@ -267,8 +294,14 @@ export async function openPlanGrantWindows(
 		featureId,
 		pendingDefault: false,
 	});
-	const open = missing(locked.windows, locked.now);
-	if (open.length === 0) return 0;
+	const dueNow = missing(locked.windows, locked.now);
+	const open = dueNow.filter((window) => !window.resumes);
+	const reopened = await reopenPlanGrantAllowances(
+		executor,
+		projectId,
+		dueNow.filter((window) => window.resumes),
+	);
+	if (open.length === 0) return reopened;
 	const inserted = await executeRows<{ id: string }>(
 		executor,
 		drizzleSql`
@@ -295,7 +328,46 @@ export async function openPlanGrantWindows(
 			RETURNING id
 		`,
 	);
-	return inserted.length;
+	return inserted.length + reopened;
+}
+
+/**
+ * Reopens allowances a version move ended before their window did, now that the grant's version
+ * holds the feature again: each keeps its quantity and use, moves to the version's item and expires
+ * when that item's allowance for the window would. A concurrent write that reopened it first leaves
+ * nothing to do here.
+ */
+async function reopenPlanGrantAllowances(
+	executor: QueryExecutor,
+	projectId: string,
+	windows: PlanGrantWindow[],
+): Promise<number> {
+	if (windows.length === 0) return 0;
+	const reopened = await executeRows<{ id: string }>(
+		executor,
+		drizzleSql`
+			UPDATE balance_allocations allocation
+			SET plan_item_id = candidate.plan_item_id,
+				expires_at = candidate.expires_at,
+				updated_at = now()
+			FROM (VALUES ${drizzleSql.join(
+				windows.map(
+					(window) => drizzleSql`(
+						${window.allocationId}::bigint,
+						${window.planItemId}::bigint,
+						${window.expiresAt?.toISOString() ?? null}::timestamptz
+					)`,
+				),
+				drizzleSql`, `,
+			)}) AS candidate (id, plan_item_id, expires_at)
+			WHERE allocation.project_id = ${projectId}
+				AND allocation.id = candidate.id
+				AND allocation.reversed_at IS NULL
+				AND allocation.expires_at <= now()
+			RETURNING allocation.id
+		`,
+	);
+	return reopened.length;
 }
 
 function windowValues(projectId: string, customerId: string, window: PlanGrantWindow): DrizzleSQL {

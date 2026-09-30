@@ -396,6 +396,31 @@ localDescribe("default plan", () => {
 		expect(await balance("mover")).toMatchObject({ granted: "100", available: "70" });
 	});
 
+	it("resumes a feature's allowance within its window when a later version adds it back", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		await consume("returner", 30, "spend-1");
+
+		await publish(catalog({ ...freePlan(2, "100"), items: [] }));
+		// A read answers as the account's next write will, before and after the pass reaches it.
+		expect(await balance("returner")).toMatchObject({ available: "0" });
+		await runWorker(25);
+		expect(await balance("returner")).toMatchObject({ available: "0" });
+
+		// The window already gave its allowance, so adding the feature back resumes what was left of
+		// it with the use kept; version 3's quantity applies from the next reset.
+		await publish(catalog(freePlan(3, "500")));
+		const resumed = { granted: "100", consumed: "30", available: "70" };
+		expect(await balance("returner")).toMatchObject(resumed);
+		await runWorker(25);
+		expect(await balance("returner")).toMatchObject(resumed);
+		expect(await consume("returner", 10, "spend-2")).toMatchObject({
+			allowed: true,
+			balance: { available: "60" },
+		});
+		const rows = await allowanceRows("returner");
+		expect(rows.map((row) => [Number(row.consumed), row.live])).toEqual([[40, true]]);
+	});
+
 	it("creates no allowance until the account spends, however many resets pass", async () => {
 		await publish(catalog(null));
 		await seedCustomers(["idle_user"]);
