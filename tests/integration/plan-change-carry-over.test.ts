@@ -140,6 +140,104 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		expect(await available()).toBe("0");
 	});
 
+	it("grants an allowance without a reset once per subscription, however often it renews", async () => {
+		await addAllowance(1, "100", null);
+		await sync(1);
+		await spend(30, "lifetime-spend");
+		await renew();
+		await sync(1);
+		await renew();
+		await sync(1);
+
+		expect(await planAllowances()).toEqual([[1, "100.000000000", "30.000000000", false]]);
+		expect(await available()).toBe("70");
+	});
+
+	it("grants no lifetime allowance to a subscription that holds one granted per period", async () => {
+		await addAllowance(1, "100", null);
+		// What a sync before lifetime allowances left: the quantity granted under a period's key.
+		await context.sql`
+			INSERT INTO balance_allocations (
+				project_id, customer_id, feature_id, plan_item_id, subscription_id, source_kind,
+				source_key, quantity, period_start_at, period_end_at
+			)
+			SELECT subscription.project_id, subscription.customer_id, item.feature_id, item.id,
+				subscription.id, 'subscription', concat('subscription:', subscription.id, ':', item.id, ':p1'),
+				item.quantity, subscription.current_period_start, subscription.current_period_end
+			FROM subscriptions subscription
+			JOIN plan_versions version ON version.project_id = subscription.project_id
+			JOIN plans plan ON plan.id = version.plan_id AND plan.key = 'migration-plan'
+			JOIN features feature ON feature.project_id = version.project_id AND feature.key = 'ai_credits'
+			JOIN plan_items item
+				ON item.plan_version_id = version.id
+				AND item.feature_id = feature.id
+				AND item.item_kind = 'allocation'
+			WHERE subscription.external_subscription_id = 'sub_migrate_stripe' AND version.version = 1
+		`;
+		await sync(1);
+		await renew();
+		await sync(1);
+
+		expect(await planAllowances()).toEqual([[1, "100.000000000", "0.000000000", false]]);
+		expect(await available()).toBe("100");
+	});
+
+	it("ends a lifetime allowance at a switch and resumes it on a return in a later period", async () => {
+		await addAllowance(1, "100", null);
+		await addAllowance(2, "300", null);
+		await sync(1);
+		await spend(30, "lifetime-before-switch");
+
+		await migrate(1, 2);
+		expect(await planAllowances()).toEqual([
+			[1, "100.000000000", "30.000000000", true],
+			[2, "300.000000000", "0.000000000", false],
+		]);
+		expect(await available()).toBe("300");
+
+		await renew();
+		await sync(2);
+		expect(await planAllowances()).toHaveLength(2);
+
+		// The version gave its lifetime allowance once, so returning to it resumes what was left.
+		await migrateBackToVersionOne();
+		expect(await planAllowances()).toEqual([
+			[1, "100.000000000", "30.000000000", false],
+			[2, "300.000000000", "0.000000000", true],
+		]);
+		expect(await available()).toBe("70");
+	});
+
+	it("carries the unused part of a lifetime allowance as credit that never expires", async () => {
+		await addAllowance(1, "100", null);
+		await addAllowance(2, "300");
+		await sync(1);
+		await spend(30, "lifetime-before-carry");
+		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+		const preview = await previewChange(fixture, {
+			...changeIntent("immediate"),
+			carryOver: { balances: ["ai_credits"] },
+		});
+		const executed = await testRequest(
+			fixture.app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...jsonHeaders(fixture), "idempotency-key": "lifetime-carry" },
+				body: JSON.stringify({ previewToken: (await preview.json()).data.previewToken }),
+			},
+		);
+		expect(executed.status).toBe(202);
+		await applyClaimedChange();
+		await sync(2);
+
+		expect((await allowances()).find((row) => row.source_kind === "carry_over")).toMatchObject({
+			quantity: "70.000000000",
+			never_expires: true,
+		});
+		expect(await available()).toBe("370");
+	});
+
 	it("carries over once when Stripe reports the switch while the change is pending", async () => {
 		await carryWhenStripeReportsEarly("pending");
 	});
@@ -405,18 +503,42 @@ async function carryWhenStripeReportsEarly(stage: "pending" | "processing"): Pro
 	expect(await carriedUsage()).toHaveLength(1);
 }
 
+/** Stripe renews the subscription: the next monthly period starts where the current one ends. */
+async function renew(): Promise<void> {
+	await context.sql`
+		UPDATE subscriptions
+		SET current_period_start = current_period_end,
+			current_period_end = current_period_end + interval '1 month'
+		WHERE external_subscription_id = 'sub_migrate_stripe'
+	`;
+}
+
+/** The subscription's plan allowances, as version, quantity, consumed and whether they ended. */
+async function planAllowances() {
+	return (await allowances())
+		.filter((row) => row.source_kind === "subscription")
+		.map((row) => [row.version, row.quantity, row.consumed, row.ended]);
+}
+
 async function available(): Promise<string> {
 	return (await context.repository.getMeteringBalance(project, "migration-stripe", "ai_credits"))
 		.available;
 }
 
-/** An `ai_credits` allowance on one version of the migration plan, for the whole monthly period. */
-async function addAllowance(version: number, quantity: string): Promise<void> {
+/**
+ * An `ai_credits` allowance on one version of the migration plan: for the whole monthly period, or,
+ * without a reset, for the subscription's lifetime.
+ */
+async function addAllowance(
+	version: number,
+	quantity: string,
+	reset: "month" | null = "month",
+): Promise<void> {
 	await context.sql`
 		INSERT INTO plan_items (
 			project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval
 		)
-		SELECT version.project_id, version.id, feature.id, 'allocation', ${quantity}::numeric, 'month'
+		SELECT version.project_id, version.id, feature.id, 'allocation', ${quantity}::numeric, ${reset}
 		FROM plan_versions version
 		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
 		JOIN features feature ON feature.project_id = version.project_id AND feature.key = 'ai_credits'
@@ -508,6 +630,7 @@ async function allowances() {
 			rolls: boolean;
 			origin: string | null;
 			expires_at_period_end: boolean;
+			never_expires: boolean;
 		}>
 	>`
 		SELECT allocation.id::text, allocation.source_kind, version.version,
@@ -515,7 +638,8 @@ async function allowances() {
 			(allocation.expires_at IS NOT NULL AND allocation.expires_at <= now()) AS ended,
 			allocation.rollover_processed_at IS NULL AS rolls,
 			allocation.carry_over_origin_allocation_id::text AS origin,
-			allocation.expires_at = subscription.current_period_end AS expires_at_period_end
+			allocation.expires_at = subscription.current_period_end AS expires_at_period_end,
+			allocation.expires_at IS NULL AS never_expires
 		FROM balance_allocations allocation
 		JOIN subscriptions subscription ON subscription.id = allocation.subscription_id
 		LEFT JOIN plan_items item ON item.id = allocation.plan_item_id

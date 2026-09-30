@@ -1,6 +1,7 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { databaseDecimal, decimalToUnits, unitsToDecimal } from "../../billing/decimal";
 import type { CadenceUnit } from "../../shared/cadence";
+import { lifetimeItemSql } from "./cadence-sql";
 import { planGrantWindowBounds, storedCadence } from "./meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -36,8 +37,9 @@ export async function carryOverAllowances(
 /**
  * Unused quantity of each live outgoing allowance becomes a one-off `carry_over` allocation. It
  * expires at the end of the incoming item's first reset window, or at the billing period's end when
- * that item does not reset or the incoming version lacks the feature. Held quantity stays on the
- * outgoing allowance, where its reservation settles.
+ * that item does not reset or the incoming version lacks the feature. What a lifetime allowance
+ * (no reset, no expiry) left never expires: the carry keeps the lifetime the outgoing version
+ * granted. Held quantity stays on the outgoing allowance, where its reservation settles.
  */
 async function carryOverBalances(executor: QueryExecutor, input: CarryOverInput): Promise<void> {
 	const origins = await executeRows<{
@@ -47,6 +49,7 @@ async function carryOverBalances(executor: QueryExecutor, input: CarryOverInput)
 		unused: string;
 		reset_interval: CadenceUnit | null;
 		reset_interval_count: number | null;
+		lifetime: boolean;
 		db_now: Date | string;
 	}>(
 		executor,
@@ -54,7 +57,8 @@ async function carryOverBalances(executor: QueryExecutor, input: CarryOverInput)
 			SELECT allocation.id, allocation.feature_id, allocation.entity_id,
 				(allocation.quantity - allocation.reversed_quantity - allocation.consumed_quantity
 					- allocation.held_quantity)::text AS unused,
-				incoming.reset_interval, incoming.reset_interval_count, now() AS db_now
+				incoming.reset_interval, incoming.reset_interval_count,
+				${lifetimeItemSql("outgoing")} AS lifetime, now() AS db_now
 			FROM balance_allocations allocation
 			JOIN plan_items outgoing
 				ON outgoing.project_id = allocation.project_id
@@ -107,10 +111,11 @@ function carriedExpiry(
 	origin: {
 		reset_interval: CadenceUnit | null;
 		reset_interval_count: number | null;
+		lifetime: boolean;
 		db_now: Date | string;
 	},
 ): string | null {
-	if (input.periodEndAt === null) return null;
+	if (origin.lifetime || input.periodEndAt === null) return null;
 	if (origin.reset_interval === null) return input.periodEndAt.toISOString();
 	return planGrantWindowBounds(
 		input.periodStartAt,
@@ -122,8 +127,9 @@ function carriedExpiry(
 
 /**
  * Usage of the outgoing allowances whose window covers now, the current reset window or, without a
- * reset, the period, is written as consumed quantity on the incoming allowance for the current
- * window, so a mid-period change does not reset consumption.
+ * reset, the period, and for a lifetime allowance its whole lifetime, is written as consumed
+ * quantity on the incoming allowance for the current window, so a mid-period change does not reset
+ * consumption.
  * It is capped at what the incoming allowance can still hold; the rest is forgiven, not charged,
  * and each carry is recorded in `carried_usages`.
  */
