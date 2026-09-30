@@ -13,7 +13,12 @@ import type {
 } from "../../billing/commercial";
 import { priceCommercialLines, recurringCadenceOf } from "../../billing/commercial-pricing";
 import { sha256Hex, stableJson } from "../../billing/decimal";
-import { BillingError, NotFoundBillingError, ProviderUnavailableError } from "../../billing/errors";
+import {
+	BillingError,
+	InvalidRequestError,
+	NotFoundBillingError,
+	ProviderUnavailableError,
+} from "../../billing/errors";
 import {
 	normalizePaymentSetupCurrency,
 	type PaymentSetupSession,
@@ -212,6 +217,7 @@ interface StripeBillingRepositoryDependency extends PaymentSetupRepositoryDepend
 		billingAccountId: string;
 		externalSubscriptionId: string;
 		fromPlanVersionId: string;
+		toPlanVersionId: string;
 		carryOver: Required<CommercialCarryOver>;
 	}): Promise<CommercialPreviewCarryOver>;
 	createCommercialActionPreview?(draft: CommercialPreviewDraft): Promise<CommercialActionPreview>;
@@ -851,7 +857,8 @@ export class StripeBillingService
 
 	/**
 	 * What an immediate change would carry, named per feature. A period-end change never carries:
-	 * the reset does that work, so naming features on one is refused.
+	 * the reset does that work, so naming features on one is refused. Nor does a change that keeps
+	 * the plan version, such as one of quantities alone, since no allowance ends.
 	 */
 	private async carryOverPreview(
 		billingAccountId: string,
@@ -866,6 +873,11 @@ export class StripeBillingService
 				400,
 			);
 		}
+		if (change.fromPlanVersionId === change.toPlanVersionId) {
+			throw new InvalidRequestError(
+				"Allowances carry over only when the change moves to another plan version",
+			);
+		}
 		const repository = this.dependencies.repository;
 		if (repository.previewSubscriptionCarryOver === undefined) {
 			throw new BillingError(
@@ -878,6 +890,7 @@ export class StripeBillingService
 			billingAccountId,
 			externalSubscriptionId: intent.externalSubscriptionId,
 			fromPlanVersionId: change.fromPlanVersionId,
+			toPlanVersionId: change.toPlanVersionId,
 			carryOver: canonicalCarryOver(intent.carryOver),
 		});
 	}

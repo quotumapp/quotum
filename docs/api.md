@@ -213,17 +213,22 @@ An immediate `subscription_change` intent can carry some of that over, per consu
   that feature, or at the end of the billing period when the new item does not reset or the new
   plan lacks the feature. It is never rolled over, and the balance breakdown names its origin in
   `carryOverOriginAllocationId`.
-- **`usages`:** the feature's usage in the current period is written as consumed quantity on the new
-  allowance, so an upgrade does not reset consumption. It is capped at what the new allowance holds;
-  usage beyond it is forgiven, not charged.
+- **`usages`:** the feature's usage in the outgoing allowance's current reset window, or its
+  period when it does not reset, is written as consumed quantity on the new allowance, so an
+  upgrade does not reset consumption. Usage in earlier windows of the period has reset already and
+  does not carry. It is capped at what the new allowance holds; usage beyond it is forgiven, not
+  charged.
 - The preview reports `carryOver.features[]`, with each feature's current unused balance and usage
   and whether it carries. Those figures are indicative: the switch carries what the allowances hold
   when Quotum records the provider's update. When the provider reports the new version before the
   worker has recorded the change as applied, that update performs the switch and the carry-over,
   once; recording the change later carries nothing again.
-- The choice enters the intent hash. Naming a feature the current plan does not allocate returns
-  `400 INVALID_REQUEST`, and a change that takes effect at period end, whether requested or
-  resolved, returns `400 CARRY_OVER_REQUIRES_IMMEDIATE_CHANGE`, because the reset does that work.
+- The choice enters the intent hash. These return `400 INVALID_REQUEST`, because the change would
+  carry nothing: a feature that is not a consumable meter, one the current plan does not allocate,
+  `usages` naming a feature the new plan does not allocate, since there is no allowance to write
+  the usage onto, and a change that keeps the plan version, such as one of quantities alone, since
+  no allowance ends. A change that takes effect at period end, whether requested or resolved,
+  returns `400 CARRY_OVER_REQUIRES_IMMEDIATE_CHANGE`, because the reset does that work.
 - Only the previewed commercial action carries over. `POST .../subscriptions/:subscriptionId/changes`
   refuses the field.
 

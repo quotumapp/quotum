@@ -121,8 +121,9 @@ function carriedExpiry(
 }
 
 /**
- * Usage of the outgoing allowances in the current period is written as consumed quantity on the
- * incoming allowance for the current window, so a mid-period change does not reset consumption.
+ * Usage of the outgoing allowances whose window covers now, the current reset window or, without a
+ * reset, the period, is written as consumed quantity on the incoming allowance for the current
+ * window, so a mid-period change does not reset consumption.
  * It is capped at what the incoming allowance can still hold; the rest is forgiven, not charged,
  * and each carry is recorded in `carried_usages`.
  */

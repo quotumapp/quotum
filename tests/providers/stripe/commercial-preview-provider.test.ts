@@ -242,6 +242,28 @@ describe("subscription change carry-over", () => {
 			change.effectiveMode = "immediate";
 		}
 	});
+
+	it("refuses a carry-over on a change that keeps the plan version", async () => {
+		const { service } = previewService();
+		change.changeKind = "quantity";
+		change.toPlanVersionId = change.fromPlanVersionId;
+		try {
+			const refused = await service
+				.previewCommercialAction({
+					billingAccountId,
+					intent: { ...base, carryOver: { balances: ["credits"] } },
+				})
+				.catch((error: unknown) => error);
+			expect(refused).toMatchObject({
+				code: "INVALID_REQUEST",
+				status: 400,
+				message: "Allowances carry over only when the change moves to another plan version",
+			});
+		} finally {
+			change.changeKind = "upgrade";
+			change.toPlanVersionId = "42";
+		}
+	});
 });
 
 describe("commercial preview provider", () => {

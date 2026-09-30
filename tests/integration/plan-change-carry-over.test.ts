@@ -211,6 +211,68 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		);
 		expect(direct.status).toBe(400);
 	});
+
+	it("refuses a non-consumable, usage without a new allowance and a quantity-only change", async () => {
+		await addAllowance(1, "100");
+		await addAllowance(2, "300");
+		// Version 1 also allocates model tokens, which version 2 does not, and holds seats, a
+		// non-consumable meter.
+		await context.sql`
+			INSERT INTO plan_items (
+				project_id, plan_version_id, feature_id, item_kind, quantity, reset_interval
+			)
+			SELECT version.project_id, version.id, feature.id, 'allocation', 5000, 'month'
+			FROM plan_versions version
+			JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+			JOIN features feature
+				ON feature.project_id = version.project_id AND feature.key = 'model_tokens'
+			WHERE plan.key = 'migration-plan' AND version.version = 1
+		`;
+		await sync(1);
+		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+		const refusal = async (carryOver: unknown, quantities = { licensed_seats: 7 }) => {
+			const response = await previewChange(fixture, {
+				...changeIntent("immediate"),
+				quantities,
+				carryOver,
+			});
+			return { status: response.status, error: (await response.json()).error };
+		};
+
+		expect(await refusal({ balances: ["licensed_seats"] })).toEqual({
+			status: 400,
+			error: expect.objectContaining({
+				code: "INVALID_REQUEST",
+				message: "Feature licensed_seats is not a consumable meter, so it cannot carry over",
+			}),
+		});
+		expect(await refusal({ usages: ["model_tokens"] })).toEqual({
+			status: 400,
+			error: expect.objectContaining({
+				code: "INVALID_REQUEST",
+				message: "Feature model_tokens has no allowance in the new plan to carry its usage into",
+			}),
+		});
+		// A balance of a feature the new plan lacks still carries, until the period ends.
+		const balanceOnly = await previewChange(fixture, {
+			...changeIntent("immediate"),
+			carryOver: { balances: ["model_tokens"] },
+		});
+		expect(balanceOnly.status).toBe(200);
+		expect((await balanceOnly.json()).data.carryOver).toMatchObject({
+			features: [{ featureKey: "model_tokens", balance: { carried: true } }],
+		});
+
+		// On version 2, a change of seats alone keeps the version, so nothing ends or carries.
+		await migrate(1, 2);
+		expect(await refusal({ balances: ["ai_credits"] }, { licensed_seats: 8 })).toEqual({
+			status: 400,
+			error: expect.objectContaining({
+				code: "INVALID_REQUEST",
+				message: "Allowances carry over only when the change moves to another plan version",
+			}),
+		});
+	});
 });
 
 function changeIntent(effectiveMode: "immediate" | "period_end") {

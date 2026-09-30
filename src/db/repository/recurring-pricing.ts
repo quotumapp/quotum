@@ -172,7 +172,9 @@ export class RecurringPricingRepository extends RepositoryModule {
 
 	/**
 	 * The live figures an immediate change would carry per named feature. Each must be a consumable
-	 * meter the outgoing version allocates; the switch carries what its allowances hold then.
+	 * meter the outgoing version allocates, and one whose usage carries must be allocated by the
+	 * incoming version too, since usage carries onto its allowance; the switch carries what the
+	 * allowances hold then.
 	 */
 	async previewSubscriptionCarryOver(
 		project: ProjectInstanceContext,
@@ -180,6 +182,7 @@ export class RecurringPricingRepository extends RepositoryModule {
 			billingAccountId: string;
 			externalSubscriptionId: string;
 			fromPlanVersionId: string;
+			toPlanVersionId: string;
 			carryOver: Required<CommercialCarryOver>;
 		},
 	): Promise<CommercialPreviewCarryOver> {
@@ -187,7 +190,9 @@ export class RecurringPricingRepository extends RepositoryModule {
 		const keys = [...new Set([...input.carryOver.balances, ...input.carryOver.usages])].sort();
 		const rows = await executeRows<{
 			key: string;
+			consumable: boolean;
 			allocated: boolean;
+			allocated_after: boolean;
 			unused: string;
 			used: string;
 		}>(
@@ -224,6 +229,7 @@ export class RecurringPricingRepository extends RepositoryModule {
 				)
 				SELECT
 					f.key,
+					f.kind = 'metered' AND f.meter_kind = 'consumable' AS consumable,
 					EXISTS (
 						SELECT 1 FROM plan_items item
 						WHERE item.project_id = f.project_id
@@ -231,6 +237,13 @@ export class RecurringPricingRepository extends RepositoryModule {
 							AND item.feature_id = f.id
 							AND item.item_kind = 'allocation'
 					) AS allocated,
+					EXISTS (
+						SELECT 1 FROM plan_items item
+						WHERE item.project_id = f.project_id
+							AND item.plan_version_id = ${input.toPlanVersionId}::bigint
+							AND item.feature_id = f.id
+							AND item.item_kind = 'allocation'
+					) AS allocated_after,
 					COALESCE((SELECT sum(unused) FROM outgoing WHERE outgoing.feature_id = f.id), 0)::text
 						AS unused,
 					COALESCE((SELECT sum(used) FROM outgoing WHERE outgoing.feature_id = f.id), 0)::text
@@ -239,17 +252,26 @@ export class RecurringPricingRepository extends RepositoryModule {
 				WHERE f.project_id = ${projectId}
 					AND f.key IN (SELECT jsonb_array_elements_text(${jsonb(keys)}))
 					AND f.active
-					AND f.kind = 'metered'
-					AND f.meter_kind = 'consumable'
 			`,
 		);
 		const byKey = new Map(rows.map((row) => [row.key, row]));
 		return {
 			features: keys.map((featureKey) => {
 				const row = byKey.get(featureKey);
+				const usageCarried = input.carryOver.usages.includes(featureKey);
+				if (row !== undefined && !row.consumable) {
+					throw new InvalidRequestError(
+						`Feature ${featureKey} is not a consumable meter, so it cannot carry over`,
+					);
+				}
 				if (row === undefined || !row.allocated) {
 					throw new InvalidRequestError(
 						`Feature ${featureKey} has no allowance in the current plan to carry over`,
+					);
+				}
+				if (usageCarried && !row.allocated_after) {
+					throw new InvalidRequestError(
+						`Feature ${featureKey} has no allowance in the new plan to carry its usage into`,
 					);
 				}
 				return {
@@ -259,7 +281,7 @@ export class RecurringPricingRepository extends RepositoryModule {
 						quantity: databaseDecimal(row.unused, "carried balance"),
 					},
 					usage: {
-						carried: input.carryOver.usages.includes(featureKey),
+						carried: usageCarried,
 						quantity: databaseDecimal(row.used, "carried usage"),
 					},
 				};
