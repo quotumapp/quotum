@@ -1,8 +1,25 @@
 import { InvalidRequestError } from "./errors";
 
 const unsignedDecimalPattern = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
+/**
+ * Digits a caller's decimal may carry before the point: the smallest numeric column,
+ * NUMERIC(28, 9), holds 19. A larger value would reach SQL and fail there as a 500.
+ */
+const maxInputIntegerDigits = 19;
 
+/** A caller's non-negative decimal in canonical form, bounded to what every column can hold. */
 export function canonicalDecimal(value: string, field: string, maxScale = 9): string {
+	const canonical = unboundedDecimal(value, field, maxScale);
+	if ((canonical.split(".")[0] ?? "").length > maxInputIntegerDigits) {
+		throw new InvalidRequestError(
+			`${field} supports at most ${maxInputIntegerDigits} digits before the decimal point`,
+		);
+	}
+	return canonical;
+}
+
+/** Canonical form without the input bound, for stored values and internal arithmetic. */
+function unboundedDecimal(value: string, field: string, maxScale: number): string {
 	const trimmed = value.trim();
 	if (!unsignedDecimalPattern.test(trimmed)) {
 		throw new InvalidRequestError(`${field} must be a non-negative decimal string`);
@@ -38,7 +55,7 @@ export function positiveDecimal(value: string, field: string, maxScale = 9): str
 }
 
 export function decimalToUnits(value: string, scale: number): bigint {
-	const canonical = canonicalDecimal(value, "decimal", scale);
+	const canonical = unboundedDecimal(value, "decimal", scale);
 	const [whole = "0", fraction = ""] = canonical.split(".");
 	return BigInt(whole) * 10n ** BigInt(scale) + BigInt(fraction.padEnd(scale, "0") || "0");
 }
@@ -59,7 +76,7 @@ export function unitsToDecimal(value: bigint, scale: number): string {
 
 export function databaseDecimal(value: unknown, field: string, maxScale = 9): string {
 	if (typeof value === "string") {
-		return canonicalDecimal(value, field, maxScale);
+		return unboundedDecimal(value, field, maxScale);
 	}
 	if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
 		return String(value);

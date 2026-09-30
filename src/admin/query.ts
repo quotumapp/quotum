@@ -11,6 +11,7 @@ import {
 	storeEventProcessingStatuses,
 	subscriptionStatuses,
 } from "../billing/types";
+import { isStorableInstant } from "../shared/input-bounds";
 import type {
 	AdminCatalogProductListInput,
 	AdminCatalogStoreProductListInput,
@@ -33,18 +34,21 @@ const dateSchema = z
 	.min(1)
 	.transform((value, context) => {
 		const date = new Date(value);
-		if (!Number.isFinite(date.getTime())) {
+		if (!isStorableInstant(date)) {
 			context.addIssue({ code: "custom", message: "Invalid date" });
 			return z.NEVER;
 		}
 		return date.toISOString();
 	});
+/** The form list queries write into cursors: `YYYY-MM-DDTHH:MM:SS.ffffffZ`, exactly. */
+const cursorTimestampPattern = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
 const cursorDateSchema = z
 	.string()
 	.trim()
 	.min(1)
 	.transform((value, context) => {
-		const datePrefix = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/.exec(value);
+		// Anything looser, such as JavaScript accepting "2026-09-29 (x)", reaches SQL unparsed.
+		const datePrefix = cursorTimestampPattern.exec(value);
 		if (datePrefix === null) {
 			context.addIssue({ code: "custom", message: "Invalid date" });
 			return z.NEVER;
@@ -61,8 +65,7 @@ const cursorDateSchema = z
 			context.addIssue({ code: "custom", message: "Invalid date" });
 			return z.NEVER;
 		}
-		const date = new Date(value);
-		if (!Number.isFinite(date.getTime())) {
+		if (!isStorableInstant(new Date(value))) {
 			context.addIssue({ code: "custom", message: "Invalid date" });
 			return z.NEVER;
 		}

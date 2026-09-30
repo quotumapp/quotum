@@ -1,4 +1,5 @@
 import type { ProjectInstanceContext } from "../projects/context";
+import { isBigintId } from "../shared/input-bounds";
 import { canonicalDecimal, sha256Hex, stableJson } from "./decimal";
 import { BillingError, InvalidRequestError } from "./errors";
 
@@ -215,7 +216,7 @@ export function normalizeAdministrativeDebitInput(
 		}))
 		.sort((left, right) => compareAllocationIds(left.allocationId, right.allocationId));
 	for (const [index, line] of allocations.entries()) {
-		if (!/^[1-9]\d{0,18}$/.test(line.allocationId)) {
+		if (!/^[1-9]\d{0,18}$/.test(line.allocationId) || !isBigintId(line.allocationId)) {
 			throw new InvalidRequestError("allocationId must be a positive integer string");
 		}
 		if (index > 0 && allocations[index - 1]?.allocationId === line.allocationId) {

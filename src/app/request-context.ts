@@ -1,7 +1,10 @@
 import { BillingError, InvalidRequestError } from "../billing/errors";
 import type { ProjectInstanceContext } from "../projects/context";
+import { isStorableText } from "../shared/input-bounds";
 
 const forbiddenProjectSelectorKeys = new Set(["projectId", "project_id"]);
+/** Deeper than any intent or metadata a caller needs; deeper still would exhaust the stack later. */
+const maxRequestBodyDepth = 64;
 
 export function privateProject(
 	project: ProjectInstanceContext | undefined,
@@ -32,9 +35,7 @@ export function rejectCallerProjectSelectorBody(
 	// biome-ignore lint/suspicious/noExplicitAny: Elysia infers hook context per route; a shared hook cannot name it.
 	context: any,
 ): void {
-	if (hasCallerProjectSelector(context.body)) {
-		throw projectSelectorRejectedError();
-	}
+	inspectRequestBody(context.body);
 }
 
 export function queryHasCallerProjectSelector(params: URLSearchParams): boolean {
@@ -47,29 +48,50 @@ export function queryHasCallerProjectSelector(params: URLSearchParams): boolean 
 	return false;
 }
 
+/** A request URL whose path or query decodes to a NUL character, which Postgres cannot store. */
+export function urlHasEncodedNul(url: string): boolean {
+	return /%00/i.test(url);
+}
+
 export function projectSelectorRejectedError(): BillingError {
 	return new BillingError("Project is resolved from billing credentials", "INVALID_REQUEST", 400);
 }
 
-function hasCallerProjectSelector(value: unknown, seen = new Set<object>()): boolean {
-	if (typeof value !== "object" || value === null) {
-		return false;
-	}
-
-	if (seen.has(value)) {
-		return false;
-	}
-	seen.add(value);
-
-	if (Array.isArray(value)) {
-		return value.some((item) => hasCallerProjectSelector(item, seen));
-	}
-
-	for (const [key, child] of Object.entries(value)) {
-		if (forbiddenProjectSelectorKeys.has(key) || hasCallerProjectSelector(child, seen)) {
-			return true;
+/**
+ * One iterative pass over a parsed body: it refuses a project selector key, nesting deeper than
+ * the limit, and any key or string Postgres cannot store (NUL, unpaired surrogates), before any
+ * of them reach validation, a handler or SQL.
+ */
+function inspectRequestBody(body: unknown): void {
+	const pending: Array<{ value: unknown; depth: number }> = [{ value: body, depth: 0 }];
+	const seen = new Set<object>();
+	for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+		const { value, depth } = next;
+		if (typeof value === "string") {
+			if (!isStorableText(value)) throw unstorableTextError();
+			continue;
+		}
+		if (typeof value !== "object" || value === null || seen.has(value)) continue;
+		if (depth >= maxRequestBodyDepth) {
+			throw new InvalidRequestError(
+				`Request body must not nest more than ${maxRequestBodyDepth} levels`,
+			);
+		}
+		seen.add(value);
+		if (Array.isArray(value)) {
+			for (const item of value) pending.push({ value: item, depth: depth + 1 });
+			continue;
+		}
+		for (const [key, child] of Object.entries(value)) {
+			if (forbiddenProjectSelectorKeys.has(key)) throw projectSelectorRejectedError();
+			if (!isStorableText(key)) throw unstorableTextError();
+			pending.push({ value: child, depth: depth + 1 });
 		}
 	}
+}
 
-	return false;
+function unstorableTextError(): InvalidRequestError {
+	return new InvalidRequestError(
+		"Request text must not contain NUL characters or unpaired surrogates",
+	);
 }

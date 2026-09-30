@@ -1,4 +1,5 @@
 import type { SubscriptionPendingChange } from "../providers/capability-read-types";
+import { isStorableInstant } from "../shared/input-bounds";
 import type { BillingChannel, BillingProvider, SubscriptionStatus } from "./types";
 
 export interface UsageEventCursor {
@@ -164,7 +165,8 @@ export function decodeUsageCursor(value: string): UsageEventCursor | null {
 
 function canonicalDate(value: string): boolean {
 	try {
-		return new Date(value).toISOString() === value;
+		const date = new Date(value);
+		return isStorableInstant(date) && date.toISOString() === value;
 	} catch {
 		return false;
 	}

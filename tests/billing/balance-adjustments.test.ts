@@ -125,6 +125,12 @@ describe("administrative debit input", () => {
 				allocations: [{ allocationId: "09", quantity: "1" }],
 			}),
 		).toThrow("allocationId must be a positive integer string");
+		expect(() =>
+			normalizeAdministrativeDebitInput({
+				...debitInput,
+				allocations: [{ allocationId: "9223372036854775808", quantity: "1" }],
+			}),
+		).toThrow("allocationId must be a positive integer string");
 		expect(() => normalizeAdministrativeDebitInput({ ...debitInput, allocations: [] })).toThrow(
 			"allocations must name between 1 and 20 allocations",
 		);

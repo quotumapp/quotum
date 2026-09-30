@@ -9,6 +9,7 @@ import {
 	safelyObserveBillingMetric,
 } from "../observability/metrics";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
+import { storableDateTimeSchema } from "../shared/input-bounds";
 import * as responses from "./contracts/metering-responses";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
 import type { BillingElysia, PostAuthGuard, RequestObserver } from "./types";
@@ -55,7 +56,7 @@ export const usageBodySchema = z
 		quantity: z.string().trim().min(1).max(80),
 		entityId: z.string().trim().min(1).max(256).nullable().optional(),
 		filters: filtersSchema.optional(),
-		occurredAt: z.iso.datetime({ offset: true }).nullable().optional(),
+		occurredAt: storableDateTimeSchema().nullable().optional(),
 		metadata: z.record(z.string(), z.unknown()).optional(),
 	})
 	.strict();
@@ -67,7 +68,7 @@ const reserveBodySchema = usageBodySchema.extend({
 const confirmBodySchema = z
 	.object({
 		quantity: z.string().trim().min(1).max(80),
-		occurredAt: z.iso.datetime({ offset: true }).nullable().optional(),
+		occurredAt: storableDateTimeSchema().nullable().optional(),
 		metadata: z.record(z.string(), z.unknown()).optional(),
 	})
 	.strict();
@@ -77,10 +78,10 @@ const emptyBodySchema = z.object({}).strict().optional();
 
 export const correctionBodySchema = z
 	.object({
-		originalRecordedAt: z.iso.datetime({ offset: true }),
+		originalRecordedAt: storableDateTimeSchema(),
 		quantity: z.string().trim().min(1).max(80),
 		reason: z.string().trim().min(1).max(500),
-		occurredAt: z.iso.datetime({ offset: true }).nullable().optional(),
+		occurredAt: storableDateTimeSchema().nullable().optional(),
 		metadata: z.record(z.string(), z.unknown()).optional(),
 	})
 	.strict();

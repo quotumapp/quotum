@@ -339,10 +339,17 @@ describe("balance adjustment routes", () => {
 			reason: "x",
 			allocations: [{ allocationId: "abc", quantity: "1" }],
 		});
+		// Above the bigint range an id would fail in SQL instead of in validation.
+		const beyondBigint = await post({
+			reason: "x",
+			allocations: [{ allocationId: "9223372036854775808", quantity: "1" }],
+		});
 
 		expect(debited.status).toBe(201);
 		expect((await debited.json()).data).toEqual({ duplicate: false, debit });
-		expect([empty.status, tooMany.status, notAnId.status]).toEqual([400, 400, 400]);
+		expect([empty.status, tooMany.status, notAnId.status, beyondBigint.status]).toEqual([
+			400, 400, 400, 400,
+		]);
 		expect(calls).toHaveLength(1);
 		expect(calls[0]?.args[1]).toEqual({
 			billingAccountId: "acct_1",

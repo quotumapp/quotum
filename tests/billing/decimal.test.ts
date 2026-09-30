@@ -222,3 +222,17 @@ describe("decimal properties", () => {
 		);
 	});
 });
+
+describe("input decimal bound", () => {
+	it("refuses a caller decimal with more integer digits than every column holds", () => {
+		expect(canonicalDecimal("9999999999999999999.5", "quantity")).toBe("9999999999999999999.5");
+		for (const parse of [canonicalDecimal, positiveDecimal]) {
+			expect(() => parse("10000000000000000000", "quantity")).toThrow(
+				"quantity supports at most 19 digits before the decimal point",
+			);
+		}
+		// Stored values and internal arithmetic are not caller input.
+		expect(databaseDecimal("100000000000000000000", "stored")).toBe("100000000000000000000");
+		expect(decimalToUnits("100000000000000000000", 0)).toBe(100000000000000000000n);
+	});
+});
