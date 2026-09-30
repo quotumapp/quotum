@@ -367,6 +367,12 @@
       ]
     },
     {
+      "code": "CORRECTION_TARGETS_REVOKED_GRANT",
+      "sources": [
+        "src/db/repository/metering.ts"
+      ]
+    },
+    {
       "code": "CSRF_REJECTED",
       "sources": [
         "src/platform/security.ts",

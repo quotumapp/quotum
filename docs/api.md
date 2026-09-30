@@ -119,7 +119,14 @@ confirmation returns `RESERVATION_ALREADY_CONFIRMED`, and using a newly publishe
 the account's purchased catalog returns `METER_RATE_NOT_ACTIVATED`. Omitted `expiresInSeconds` on a
 reservation defaults to 300. A reservation's expiry, and whether a correction or confirmation may
 still use an allocation, are decided on the database clock, so an application host whose clock
-drifts never expires a live hold or refuses a valid refund. License pools follow the purchased subscription-item quantity: an
+drifts never expires a live hold or refuses a valid refund. An open reservation keeps its hold on
+an allocation that ends while it waits (revoked, expired, or a plan allowance that ended): balance
+reads, the billing summary and projections keep counting that hold as `held`, and list the
+allocation in the breakdown with nothing `available`, until the reservation settles. A confirmation
+still consumes from the hold. What a release or a smaller confirmation frees never becomes
+spendable again: on an expired allocation it stays expired (and follows the allowance's rollover
+rules), and on a revoked operator grant it is revoked too (see [Operator grants](#operator-grants-and-administrative-debits)).
+License pools follow the purchased subscription-item quantity: an
 entity license check honors active assignments in assignment order up to that capacity, so a seat
 downgrade stops authorizing the assignments beyond it until they are revoked.
 
@@ -1208,9 +1215,14 @@ one grant conflicts on another.
   metered against that limit's window, so a grant of it has no effect while the limit applies.
 - **Revoke.** `POST .../:grantId/revoke` takes back what the grant still gives: quantity that is
   unconsumed, unheld and unexpired. Consumed usage stays consumed, and an open reservation still
-  confirms from its hold. `revocation.revokedQuantity` reports what this revocation took, which
-  leaves out anything an earlier debit already took; an expired grant reports `0`. A second
-  revocation with another key returns `OPERATOR_GRANT_ALREADY_REVOKED`.
+  confirms from its hold, which balance reads keep showing as `held` until it settles. Whatever a
+  release, an expiry or a smaller confirmation later frees from that hold is revoked as well: it
+  is added to the grant's `reversedQuantity` and `revocation.revokedQuantity`, and never becomes
+  available. `revocation.revokedQuantity` reports what the revocation took, which leaves out
+  anything an earlier debit already took; an expired grant reports `0`. A usage correction whose
+  refund would go back to a revoked grant answers `409 CORRECTION_TARGETS_REVOKED_GRANT`, since the
+  customer would get nothing back. A second revocation with another key returns
+  `OPERATOR_GRANT_ALREADY_REVOKED`.
 - **Debit.** `POST .../administrative-debits/:billingAccountId` takes `allocations`, 1-20 of
   `{allocationId, quantity}` (ids from a balance breakdown), all applied or none. A debit raises
   each allocation's reversed quantity and writes no usage event, so the balance breakdown shows

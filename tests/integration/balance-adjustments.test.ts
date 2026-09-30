@@ -62,7 +62,31 @@ localDescribe("operator grants and administrative debits", () => {
 				reason: "Outage goodwill",
 				...extra,
 			});
-		return { get, post, usage, grant };
+		const correct = (
+			billingAccountId: string,
+			key: string,
+			original: { usageEventId: string; recordedAt: string },
+			quantity: string,
+		) =>
+			testRequest(
+				app,
+				`/v1/billing-accounts/${billingAccountId}/usage/events/${original.usageEventId}/corrections`,
+				{
+					method: "POST",
+					headers: {
+						...authHeaders(),
+						"content-type": "application/json",
+						"idempotency-key": key,
+						"x-billing-actor": "product-worker",
+					},
+					body: JSON.stringify({
+						originalRecordedAt: original.recordedAt,
+						quantity,
+						reason: "generation returned fewer tokens",
+					}),
+				},
+			);
+		return { get, post, usage, grant, correct };
 	}
 
 	it("grants an allocation that usage spends and replays or conflicts by key", async () => {
@@ -219,6 +243,137 @@ localDescribe("operator grants and administrative debits", () => {
 			"globex",
 		);
 		expect(crossProject.status).toBe(404);
+	});
+
+	it("shows a revoked grant's open holds until they settle and revokes what they free", async () => {
+		const { get, post, usage, grant, correct } = fixture();
+		const created = (await (await grant("hold_account", "grant-1", "100")).json()).data.grant;
+		const spent = (
+			await (
+				await usage("hold_account", "consume", "spend-1", {
+					featureKey: "model_tokens",
+					quantity: "6000",
+				})
+			).json()
+		).data;
+		const reserve = async (key: string) =>
+			(
+				await (
+					await usage("hold_account", "reservations", key, {
+						featureKey: "model_tokens",
+						quantity: "2000",
+						expiresInSeconds: 300,
+					})
+				).json()
+			).data;
+		const released = await reserve("hold-1");
+		const confirmed = await reserve("hold-2");
+		const path = `/v1/admin/operator-grants/hold_account/${created.id}`;
+
+		const revoked = await post(`${path}/revoke`, "revoke-1", { reason: "Granted in error" });
+		expect((await revoked.json()).data.grant).toMatchObject({
+			heldQuantity: "20",
+			reversedQuantity: "50",
+			revocation: { revokedQuantity: "50" },
+		});
+		// The hold stays visible, and nothing of the revoked grant becomes available.
+		expect(
+			await context.repository.getMeteringBalance(project, "hold_account", "ai_credits"),
+		).toMatchObject({
+			held: "20",
+			available: "0",
+			breakdown: [{ allocationId: created.allocationId, held: "20", available: "0" }],
+		});
+		expect(
+			(await context.repository.getCustomerBillingSummary(project, "hold_account")).balances,
+		).toMatchObject([{ featureKey: "ai_credits", held: "20", available: "0" }]);
+
+		const release = await usage(
+			"hold_account",
+			`reservations/${released.reservationId}/release`,
+			"release-1",
+			{},
+		);
+		expect(release.status).toBe(200);
+		// A confirm still settles from its hold; what it does not use is revoked like a release.
+		const confirm = await usage(
+			"hold_account",
+			`reservations/${confirmed.reservationId}/confirm`,
+			"confirm-1",
+			{ quantity: "1000" },
+		);
+		expect((await confirm.json()).data).toMatchObject({ status: "confirmed" });
+
+		expect((await (await get(path)).json()).data).toMatchObject({
+			consumedQuantity: "35",
+			heldQuantity: "0",
+			reversedQuantity: "65",
+			availableQuantity: "0",
+			revocation: { revokedQuantity: "65" },
+		});
+		expect(
+			await context.repository.getMeteringBalance(project, "hold_account", "ai_credits"),
+		).toMatchObject({ held: "0", available: "0", breakdown: [] });
+
+		const correction = await correct("hold_account", "correct-1", spent, "2000");
+		expect(correction.status).toBe(409);
+		expect((await correction.json()).error.code).toBe("CORRECTION_TARGETS_REVOKED_GRANT");
+		const [allocation] = await context.sql<Array<{ consumed_quantity: string }>>`
+			SELECT consumed_quantity::text FROM balance_allocations
+			WHERE id = ${created.allocationId}::bigint
+		`;
+		expect(Number(allocation?.consumed_quantity)).toBe(35);
+	});
+
+	it("shows an expired grant's open hold until it settles and forfeits its release", async () => {
+		const { get, usage, grant } = fixture();
+		const created = (
+			await (
+				await grant("expiry_account", "grant-1", "100", {
+					expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+				})
+			).json()
+		).data.grant;
+		const reservation = (
+			await (
+				await usage("expiry_account", "reservations", "hold-1", {
+					featureKey: "model_tokens",
+					quantity: "2000",
+					expiresInSeconds: 300,
+				})
+			).json()
+		).data;
+		await context.sql`
+			UPDATE balance_allocations SET expires_at = now() - interval '1 second'
+			WHERE id = ${created.allocationId}::bigint
+		`;
+
+		expect(
+			await context.repository.getMeteringBalance(project, "expiry_account", "ai_credits"),
+		).toMatchObject({
+			held: "10",
+			available: "0",
+			breakdown: [{ allocationId: created.allocationId, held: "10", available: "0" }],
+		});
+
+		const release = await usage(
+			"expiry_account",
+			`reservations/${reservation.reservationId}/release`,
+			"release-1",
+			{},
+		);
+		expect(release.status).toBe(200);
+		expect(
+			await context.repository.getMeteringBalance(project, "expiry_account", "ai_credits"),
+		).toMatchObject({ held: "0", available: "0", breakdown: [] });
+		expect(
+			(await (await get(`/v1/admin/operator-grants/expiry_account/${created.id}`)).json()).data,
+		).toMatchObject({
+			status: "expired",
+			heldQuantity: "0",
+			reversedQuantity: "0",
+			availableQuantity: "0",
+		});
 	});
 
 	it("refuses a revocation key reused on another grant of the same account", async () => {

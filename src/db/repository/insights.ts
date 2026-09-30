@@ -200,16 +200,25 @@ export class BillingInsightsRepository extends RepositoryModule {
 				this.database,
 				drizzleSql`
 					SELECT feature.key AS feature_key, feature.unit,
-						sum(allocation.quantity - allocation.reversed_quantity
-							- allocation.consumed_quantity - allocation.held_quantity)::text AS available,
-						sum(allocation.held_quantity)::text AS held, max(allocation.expires_at) AS expires_at
+						sum(
+							CASE WHEN state.closed THEN 0 ELSE allocation.quantity - allocation.reversed_quantity
+								- allocation.consumed_quantity - allocation.held_quantity END
+						)::text AS available,
+						sum(allocation.held_quantity)::text AS held,
+						max(CASE WHEN state.closed THEN NULL ELSE allocation.expires_at END) AS expires_at
 					FROM balance_allocations allocation
 					JOIN features feature
 						ON feature.project_id = allocation.project_id AND feature.id = allocation.feature_id
+					CROSS JOIN LATERAL (
+						SELECT (
+							allocation.reversed_at IS NOT NULL
+							OR (allocation.expires_at IS NOT NULL AND allocation.expires_at <= now())
+							OR ${defaultPlanAllowanceEndingSql(projectId, drizzleSql`allocation`)}
+						) AS closed
+					) state
 					WHERE allocation.project_id = ${projectId} AND allocation.customer_id = ${customer.id}
-						AND allocation.reversed_at IS NULL
-						AND (allocation.expires_at IS NULL OR allocation.expires_at > now())
-						AND NOT ${defaultPlanAllowanceEndingSql(projectId, drizzleSql`allocation`)}
+						-- A closed allocation counts only for the open holds it still backs.
+						AND (NOT state.closed OR allocation.held_quantity > 0)
 					GROUP BY feature.key, feature.unit
 					ORDER BY feature.key
 				`,
