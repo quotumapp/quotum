@@ -1243,6 +1243,58 @@ export function carriedControlConsumptionSql(input: {
 }
 
 /**
+ * The windows that count one window of usage for a control: its own and those of every control of
+ * the same kind, feature, currency and entity scope with the same bounds, such as the control it
+ * replaced or a republished plan's earlier control. Holds and corrections recorded in any of them
+ * belong to the same usage.
+ */
+export function controlIdentityWindowsSql(input: {
+	projectId: string;
+	policyId: string;
+	customerId: string | null;
+	windowStartAt: string;
+	windowEndAt: string | null;
+}): DrizzleSQL {
+	return drizzleSql`(
+		SELECT sibling.id
+		FROM control_windows sibling
+		JOIN control_policies sibling_policy
+			ON sibling_policy.project_id = sibling.project_id
+			AND sibling_policy.id = sibling.control_policy_id
+		JOIN control_policies policy
+			ON policy.project_id = sibling.project_id AND policy.id = ${input.policyId}::bigint
+		WHERE sibling.project_id = ${input.projectId}
+			AND sibling.customer_id = ${input.customerId}
+			AND sibling.window_start_at = ${input.windowStartAt}::timestamptz
+			AND sibling.window_end_at IS NOT DISTINCT FROM ${input.windowEndAt}::timestamptz
+			AND sibling_policy.control_kind = policy.control_kind
+			AND sibling_policy.feature_id IS NOT DISTINCT FROM policy.feature_id
+			AND sibling_policy.currency IS NOT DISTINCT FROM policy.currency
+			AND sibling_policy.entity_id IS NOT DISTINCT FROM policy.entity_id
+	)`;
+}
+
+/**
+ * What open holds expose in a control's window, wherever they were placed: a hold taken under a
+ * control that was since replaced still holds capacity until it settles. Each hold is recorded in
+ * one window, so the windows' held values add up without counting a hold twice.
+ */
+export function controlIdentityHeldSql(input: {
+	projectId: string;
+	policyId: string;
+	customerId: string | null;
+	windowStartAt: string;
+	windowEndAt: string | null;
+}): DrizzleSQL {
+	return drizzleSql`COALESCE((
+		SELECT sum(identity_window.held_value)
+		FROM control_windows identity_window
+		WHERE identity_window.project_id = ${input.projectId}
+			AND identity_window.id IN ${controlIdentityWindowsSql(input)}
+	), 0)`;
+}
+
+/**
  * Match policy activation and window bounds to their authoritative database clock. A JavaScript
  * date holds milliseconds, so the transaction clock is rounded up to the next one: a row this
  * transaction stamped with now(), such as the plan grant an account's first write starts, is then
@@ -1354,16 +1406,18 @@ export async function resolveEffectiveControls(
 	const windows = await Promise.all(
 		winnerRows.map((row) => {
 			const bounds = controlWindowBounds(row.interval, row.interval_count, now);
-			return executeOne<{ consumed_value: unknown; held_value: unknown }>(
-				executor,
-				drizzleSql`
-			SELECT GREATEST(COALESCE(own.consumed_value, 0), ${carriedControlConsumptionSql({
+			const scope = {
 				projectId: input.projectId,
 				policyId: String(row.id),
 				customerId: input.customerId,
 				windowStartAt: bounds.start.toISOString(),
 				windowEndAt: bounds.end?.toISOString() ?? null,
-			})})::text AS consumed_value, COALESCE(own.held_value, 0)::text AS held_value
+			};
+			return executeOne<{ consumed_value: unknown; held_value: unknown }>(
+				executor,
+				drizzleSql`
+			SELECT GREATEST(COALESCE(own.consumed_value, 0), ${carriedControlConsumptionSql(scope)})::text
+				AS consumed_value, ${controlIdentityHeldSql(scope)}::text AS held_value
 			FROM (SELECT 1) AS single
 			LEFT JOIN control_windows own ON own.project_id = ${input.projectId}
 				AND own.control_policy_id = ${String(row.id)}::bigint AND own.customer_id = ${input.customerId}
