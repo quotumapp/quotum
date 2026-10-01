@@ -1,6 +1,12 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type { CommercialCarryOver, CommercialPreviewCarryOver } from "../../billing/commercial";
-import { databaseDecimal, sha256Hex, stableJson } from "../../billing/decimal";
+import {
+	databaseDecimal,
+	decimalToUnits,
+	sha256Hex,
+	stableJson,
+	unitsToDecimal,
+} from "../../billing/decimal";
 import {
 	InvalidRequestError,
 	NotFoundBillingError,
@@ -22,6 +28,7 @@ import type { BillingChannel, BillingProvider, SubscriptionStatus } from "../../
 import type { ProjectInstanceContext } from "../../projects/context";
 import type { BillingCadenceUnit } from "../../shared/cadence";
 import { RepositoryModule } from "./base";
+import { usageHeldByIncomingAllowances } from "./carry-over";
 import {
 	applyPromotionRedemptionInTx,
 	releasePromotionRedemptionInTx,
@@ -191,6 +198,8 @@ export class RecurringPricingRepository extends RepositoryModule {
 		const keys = [...new Set([...input.carryOver.balances, ...input.carryOver.usages])].sort();
 		const rows = await executeRows<{
 			key: string;
+			feature_id: string | number;
+			subscription_id: string | null;
 			consumable: boolean;
 			allocated: boolean;
 			allocated_after: boolean;
@@ -230,6 +239,8 @@ export class RecurringPricingRepository extends RepositoryModule {
 				)
 				SELECT
 					f.key,
+					f.id AS feature_id,
+					(SELECT id::text FROM subscription) AS subscription_id,
 					f.kind = 'metered' AND f.meter_kind = 'consumable' AS consumable,
 					EXISTS (
 						SELECT 1 FROM plan_items item
@@ -256,6 +267,17 @@ export class RecurringPricingRepository extends RepositoryModule {
 			`,
 		);
 		const byKey = new Map(rows.map((row) => [row.key, row]));
+		const subscriptionId = rows.find((row) => row.subscription_id !== null)?.subscription_id;
+		// Usage the allowance a return resumes already holds is not carried again.
+		const held =
+			subscriptionId === undefined || subscriptionId === null || input.carryOver.usages.length === 0
+				? new Map<string, bigint>()
+				: await usageHeldByIncomingAllowances(this.database, {
+						projectId,
+						subscriptionId,
+						outgoingPlanVersionId: input.fromPlanVersionId,
+						incomingPlanVersionId: input.toPlanVersionId,
+					});
 		return {
 			features: keys.map((featureKey) => {
 				const row = byKey.get(featureKey);
@@ -283,7 +305,7 @@ export class RecurringPricingRepository extends RepositoryModule {
 					},
 					usage: {
 						carried: usageCarried,
-						quantity: databaseDecimal(row.used, "carried usage"),
+						quantity: carriedUsageQuantity(row.used, held.get(String(row.feature_id)) ?? 0n),
 					},
 				};
 			}),
@@ -1543,6 +1565,15 @@ async function resolveSubscriptionChange(
 		stateFingerprint,
 		prices,
 	};
+}
+
+/** Allocation quantities are NUMERIC(28, 9). */
+const carriedUsageScale = 9;
+
+/** The usage a carry would write: the outgoing usage less what the target already holds. */
+export function carriedUsageQuantity(used: string, held: bigint): string {
+	const units = decimalToUnits(databaseDecimal(used, "carried usage"), carriedUsageScale);
+	return unitsToDecimal(units > held ? units - held : 0n, carriedUsageScale);
 }
 
 function normalizeQuantities(value: Record<string, number>): Record<string, number> {
