@@ -409,6 +409,47 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		expect(await projectAllowances()).toEqual([[2, "3.000000000", "3.000000000", false]]);
 	});
 
+	it("keeps a level held by stacked allowances blocked until it falls below the new allowance", async () => {
+		await addProjects(1, "3");
+		await addProjects(2, "3");
+		await sync(1);
+		const events = [];
+		for (const n of [1, 2, 3]) events.push(await addProject(`stack-${n}`));
+		// Before lifetime grants, every renewal stacked another allowance of the item, keyed and
+		// bounded by its period.
+		await context.sql`
+			INSERT INTO balance_allocations (
+				project_id, customer_id, feature_id, plan_item_id, subscription_id,
+				source_kind, source_key, quantity, period_start_at, period_end_at
+			)
+			SELECT allocation.project_id, allocation.customer_id, allocation.feature_id,
+				allocation.plan_item_id, allocation.subscription_id, 'subscription',
+				concat('subscription:', subscription.id::text, ':', allocation.plan_item_id::text,
+					':legacy-period'),
+				allocation.quantity, subscription.current_period_start, subscription.current_period_end
+			FROM balance_allocations allocation
+			JOIN subscriptions subscription ON subscription.id = allocation.subscription_id
+			JOIN features feature ON feature.id = allocation.feature_id AND feature.key = 'projects'
+			WHERE allocation.source_kind = 'subscription'
+		`;
+		// The stacked allowances grant 6 on version 1, and a correction there leaves that room.
+		for (const n of [4, 5, 6]) events.push(await addProject(`stack-${n}`));
+		await removeProject(events[0], "stack-remove-on-1");
+		expect(await projects()).toMatchObject({ granted: "6", consumed: "5", available: "1" });
+		await addProject("stack-refill");
+
+		await migrate(1, 2);
+		expect(await projects()).toMatchObject({ granted: "6", consumed: "6", available: "0" });
+		// A level of 5 is still above version 2's 3, so the group's room does not come back.
+		await removeProject(events[1], "stack-remove-on-2");
+		expect(await projects()).toMatchObject({ granted: "5", consumed: "5", available: "0" });
+		expect(await tryAddProject("stack-over-limit")).toBe(false);
+		// Once the level falls below the new allowance, that allowance caps it.
+		for (const n of [2, 3, 4]) await removeProject(events[n], `stack-remove-more-${n}`);
+		expect(await projects()).toMatchObject({ granted: "3", consumed: "2", available: "1" });
+		expect(await tryAddProject("stack-under-limit")).toBe(true);
+	});
+
 	it("keeps a non-consumable level when Stripe reports a switch to another version", async () => {
 		await addProjects(1, "5", "month");
 		await addProjects(2, "8", "month");
