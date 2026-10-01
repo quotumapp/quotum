@@ -38,7 +38,9 @@ update:
   level moves to the incoming version's item, with the incoming item's period and expiry, and its
   quantity becomes the larger of the new allowance and the level. A level above the new allowance
   therefore stays, and nothing can be added to it; as corrections or released holds lower the
-  level, the allowance shrinks with it until the new allowance caps it again. No carry-over is
+  level, the allowance shrinks with it until the new allowance caps it again. Several allowances
+  that hold one level, such as allowances stacked by renewals before lifetime grants, shrink as one:
+  no room appears while their total level is at or above the new allowance. No carry-over is
   involved, and none can be requested for a non-consumable. A feature the incoming version does
   not allocate ends with the outgoing version, and an item granted per reset window inside the
   billing period keeps its own windows. The default plan keeps a level by the same move: its
