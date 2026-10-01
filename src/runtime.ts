@@ -45,6 +45,7 @@ import type { ApiProjectProjectionFetch } from "./projections/http-types";
 import type { RuntimeConnectionResolver } from "./projects/connections";
 import type { ProjectInstanceContextResolver } from "./projects/context";
 import { createProviderCapabilityReads } from "./providers/capability-reads";
+import type { ProviderClientFactories } from "./providers/contract";
 import { createProviderRegistry } from "./providers/registry";
 import type { StripeBillingConfig } from "./providers/stripe/client";
 import type { StripeBillingClientDependency } from "./providers/stripe/service";
@@ -68,6 +69,7 @@ export interface BillingRuntimeDependencies {
 	sentry?: SentryClientLike;
 	readinessCheck?: () => boolean | Promise<boolean>;
 	projectContextResolver?: ProjectInstanceContextResolver;
+	providerClientFactories?: ProviderClientFactories;
 	stripeClientFactory?: (
 		config: StripeBillingConfig,
 		projectInstanceKey: string,
@@ -101,7 +103,12 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const persistence = merchantSql(sql);
 	const connectionRepository = createConnectionRepository(persistence);
 	const connections =
-		dependencies.connections ?? createRuntimeConnectionResolver(connectionRepository, persistence);
+		dependencies.connections ??
+		createRuntimeConnectionResolver(
+			connectionRepository,
+			persistence,
+			dependencies.merchant?.stripeOAuth,
+		);
 	// Checked even when a fetch is injected, so a merchant runtime never starts with private receivers.
 	const projectionPolicy = projectionDestinationPolicy(env, merchantConfig !== null);
 	const projectionDelivery = new ProjectionHttpClient({
@@ -122,10 +129,12 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		connections,
 		getRepository: () => billingRepository,
 		overrides: dependencies.projectProviderServices,
-		clientFactories:
-			dependencies.stripeClientFactory === undefined
+		clientFactories: {
+			...dependencies.providerClientFactories,
+			...(dependencies.stripeClientFactory === undefined
 				? {}
-				: { stripe: dependencies.stripeClientFactory },
+				: { stripe: dependencies.stripeClientFactory }),
+		},
 	});
 	const workerProviders = createWorkerProviderSelectors(providerRegistry);
 	const capabilityReads = createProviderCapabilityReads({

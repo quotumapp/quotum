@@ -1,6 +1,7 @@
 import { BillingError } from "../billing/errors";
 import { sql } from "../db/client";
 import { loadConnectionCipher } from "../platform/connections/cipher";
+import type { StripeOAuthPort } from "../platform/connections/oauth-port";
 import { resolveStripeOAuth } from "../platform/connections/oauth-runtime";
 import { ConnectionRepository } from "../platform/connections/repository";
 import type { MerchantSql } from "../platform/database";
@@ -58,6 +59,7 @@ function connectionUnavailable(): BillingError {
 export function createRuntimeConnectionResolver(
 	repository: ConnectionRepository,
 	persistence?: MerchantSql,
+	stripeOAuth?: StripeOAuthPort | null,
 ): RuntimeConnectionResolver {
 	return {
 		async resolve<K extends RuntimeConnectionKind>(
@@ -79,7 +81,7 @@ export function createRuntimeConnectionResolver(
 					if (current.version.settings.authMethod === "oauth") {
 						if (project.environment === "internal")
 							throw new Error("Merchant OAuth is unavailable internally");
-						const oauth = createStripeOAuthPort();
+						const oauth = stripeOAuth === undefined ? createStripeOAuthPort() : stripeOAuth;
 						if (!oauth) throw new Error("Stripe app unavailable");
 						const { authMethod: _, ...settings } = current.version.settings;
 						if (!persistence) throw new Error("Merchant persistence is unavailable");

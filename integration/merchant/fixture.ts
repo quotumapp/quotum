@@ -159,7 +159,11 @@ export function merchantFixture(
 export type MerchantFixture = ReturnType<typeof merchantFixture>;
 export class MerchantBrowser {
 	cookies = new Map<string, string>();
-	constructor(readonly fixture: MerchantFixture) {}
+	constructor(
+		readonly fixture: MerchantFixture,
+		private readonly dispatch: (request: Request) => Promise<Response> = (request) =>
+			fixture.app.handle(request),
+	) {}
 	async request(
 		path: string,
 		body?: unknown,
@@ -176,7 +180,7 @@ export class MerchantBrowser {
 			"idempotency-key": options.key ?? crypto.randomUUID(),
 			...options.headers,
 		});
-		const response = await this.fixture.app.handle(
+		const response = await this.dispatch(
 			new Request(new URL(path, "http://localhost"), {
 				method,
 				headers,
