@@ -44,6 +44,47 @@ localDescribe("Usage invoice period materialization", () => {
 		await context.sql.close();
 	});
 
+	it("never bills a price stored on a meter limit that blocks overage", async () => {
+		// Preview now refuses this shape; a catalog published before that keeps its price component,
+		// and only an `allowed` limit ever reads it.
+		await context.sql`
+			UPDATE plan_items SET overage_policy = 'blocked'
+			WHERE project_id = ${project.projectInstanceId}::uuid AND overage_policy = 'allowed'
+		`;
+		expect(
+			await context.sql`
+				SELECT id FROM price_components
+				WHERE project_id = ${project.projectInstanceId}::uuid
+					AND component_kind = 'metered_overage'
+			`,
+		).toHaveLength(1);
+		const usage = {
+			billingAccountId: account,
+			featureKey: overageFeatureKey(account),
+			filters: { region: "us" },
+		};
+		expect(
+			await context.repository.consumeUsage(project, {
+				...usage,
+				quantity: "25",
+				idempotencyKey: `${account}:within`,
+			}),
+		).toMatchObject({ allowed: true });
+		expect(
+			await context.repository.consumeUsage(project, {
+				...usage,
+				quantity: "1",
+				idempotencyKey: `${account}:above`,
+			}),
+		).toMatchObject({ allowed: false });
+		await closeUsageWindows(context.sql);
+
+		expect(
+			(await context.repository.materializeAndClaimUsageInvoicePeriods("worker", 10)).materialized,
+		).toBe(0);
+		expect(await periodRows()).toEqual([]);
+	});
+
 	it("invoices every filter window when a correction materializes the period first", async () => {
 		const original = await consumeRegion("us");
 		await consumeRegion("eu");

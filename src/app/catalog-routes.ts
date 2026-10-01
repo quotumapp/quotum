@@ -127,7 +127,7 @@ const planSchema = z
 		visibility: z.enum(["public", "customer_specific"]).optional(),
 		customerBillingAccountId: z.string().trim().min(1).max(200).nullable().optional(),
 		basePrice: priceSchema.nullable().optional(),
-		items: z.array(planItemSchema).min(1).max(100),
+		items: z.array(planItemSchema).max(100),
 		controls: z.array(controlSchema).max(50).optional(),
 		providerBindings: z.array(providerBindingSchema).max(20),
 	})

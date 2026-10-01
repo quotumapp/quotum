@@ -16,8 +16,10 @@ import type { CatalogProviderCompatibility } from "../../src/providers/catalog-c
 
 /**
  * Pins the order in which catalog validation rejects an intent: every structural check of
- * `normalizeCatalog` in its own order first, then one capability assert that reports every binding
- * its provider's declaration cannot build. The oracle encodes what the declarations say today:
+ * `normalizeCatalog` in its own order first, then the new-intent price rules (a plan-level binding
+ * naming a second product on a channel the base price binds), then one capability assert that
+ * reports every binding its provider's declaration cannot build. The oracle encodes what the
+ * declarations say today:
  * Stripe builds every catalog construct, while Apple and Google build top-ups but no trial, add-on
  * or explicit price component, each blocked at the provider layer.
  */
@@ -239,7 +241,8 @@ function itemIntent(item: ItemSpec, slot: string): CatalogPlanItemIntent {
 		quantity: item.kind === "access" ? null : item.kind === "licensed" ? "5" : "100",
 		resetInterval: item.kind === "meter_limit" ? "month" : null,
 		expiresAfterSeconds: null,
-		overagePolicy: "blocked",
+		// A priced meter limit is postpaid overage: only an `allowed` limit bills its price.
+		overagePolicy: item.kind === "meter_limit" && price !== null ? "allowed" : "blocked",
 		price: price === null ? null : priceIntent(price, slot),
 	};
 }
@@ -355,6 +358,30 @@ function oracleOutcome(plans: PlanSpec[], topup: TopupSpec | null): RecordedOutc
 			"Feature api_requests cannot use both a usage window and an allocation stack",
 		);
 	}
+	// Structural, phase 4: once an add-on limits a feature, every limit on it must be a blocked cap.
+	const limits = plans.flatMap((plan, index) =>
+		plan.items
+			.filter((item) => item.kind === "meter_limit")
+			.map((item) => ({ plan, index, priced: itemPriceSpec(item) !== null })),
+	);
+	const addon = limits.find(({ plan }) => plan.kind === "addon");
+	if (limits.length > 1 && addon !== undefined && limits.some(({ priced }) => priced)) {
+		return invalidRequest(
+			`Meter limits on api_requests must all be blocked caps with the same reset, because add-on plan_${addon.index} adds to them`,
+		);
+	}
+	// New intents: a plan-level binding on a channel the base price binds names a second product.
+	for (const [index, plan] of plans.entries()) {
+		if (plan.basePrice === null || plan.legacy.length === 0) continue;
+		const conflicting = sortedProviders(plan.basePrice.providers).find((provider) =>
+			plan.legacy.includes(provider),
+		);
+		if (conflicting === undefined) continue;
+		const channel = `${conflicting}/${declaredChannel[conflicting]}`;
+		return invalidRequest(
+			`Plan plan_${index} providerBindings ${channel} p${index}-plan-${conflicting} conflict with basePrice providerBindings ${channel} p${index}-base-${conflicting}`,
+		);
+	}
 	// The capability assert: every incompatible binding, plan by plan, then top-ups (all built).
 	const entries: RecordedEntry[] = [];
 	for (const [index, plan] of plans.entries()) {
@@ -412,7 +439,15 @@ function planProviders(plan: PlanSpec): GatedProvider[] {
 function branches(plans: PlanSpec[], outcome: RecordedOutcome | "normalized"): string[] {
 	if (outcome === "normalized") return ["normalized"];
 	const entries = outcome.providerCompatibility;
-	if (entries === null) return [outcome.message];
+	if (entries === null) {
+		if (outcome.message.includes("conflict with basePrice providerBindings")) {
+			return ["price spellings: plan binding names a second product"];
+		}
+		if (outcome.message.startsWith("Meter limits on api_requests must all be blocked caps")) {
+			return ["meter limits: postpaid limit beside an add-on limit"];
+		}
+		return [outcome.message];
+	}
 	const [first] = entries;
 	if (first === undefined) throw new Error("A capability rejection needs an entry");
 	const reached = [
@@ -507,9 +542,11 @@ describe("catalog validation order", () => {
 			"capability: plan through base-price bindings",
 			"capability: several bindings",
 			"capability: several operations",
+			"meter limits: postpaid limit beside an add-on limit",
 			"normalized",
 			"price for api_requests requires at least one provider binding",
 			"price for seats requires at least one provider binding",
+			"price spellings: plan binding names a second product",
 		]);
 	});
 
@@ -734,7 +771,7 @@ describe("catalog validation order", () => {
 		const outcome = await firstOutcome(
 			catalogOf([
 				{
-					legacy: ["stripe"],
+					legacy: [],
 					kind: "addon",
 					trialDays: 7,
 					basePrice: { model: "graduated", providers: ["stripe"] },

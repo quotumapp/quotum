@@ -1172,6 +1172,48 @@ localDescribe("catalog control plane", () => {
 			topupsRetired: 0,
 		});
 	});
+
+	it("refuses two spellings of one plan price and accepts a priced plan with no items", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = operatorHeaders(authHeaders());
+		const base = catalogIntent(1, "0.005");
+		const premium = {
+			...base.plans[0],
+			basePrice: {
+				key: "premium-base",
+				currency: "USD",
+				unitAmountMinor: 999,
+				billingUnits: "1",
+				billingInterval: "month",
+				minimumQuantity: 1,
+				maximumQuantity: null,
+				taxBehavior: "exclusive",
+				providerBindings: [{ productKey: "premium_monthly", provider: "stripe", channel: "web" }],
+			},
+		};
+		const preview = async (plan: unknown) =>
+			await testRequest(app, "/v1/admin/catalog/preview", {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ expectedRevision: null, catalog: { ...base, plans: [plan] } }),
+			});
+
+		// QA v0.17.8 PC-09: both spellings were accepted and only basePrice's amount was published.
+		const conflicting = await preview({ ...premium, baseAmountMinor: 1000 });
+		expect(conflicting.status).toBe(400);
+		expect((await conflicting.json()).error).toMatchObject({
+			code: "INVALID_REQUEST",
+			message: "Plan premium baseAmountMinor 1000 conflicts with basePrice unitAmountMinor 999",
+		});
+		expect(await context.sql`SELECT id FROM catalog_drafts`).toHaveLength(0);
+
+		const empty = await preview({ ...premium, items: [] });
+		expect(empty.status).toBe(200);
+		expect(await context.sql`SELECT id FROM catalog_drafts`).toHaveLength(1);
+	});
 });
 
 async function seedPhaseTwoStripePrices(period = { unit: "month", count: 1 }) {
