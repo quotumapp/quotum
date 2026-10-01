@@ -49,6 +49,20 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		accepts: (args) => args[0] === "status" || args[0] === "ensure",
 	},
 	{
+		path: ["usage", "scopes"],
+		file: "composition/cli/usage-scopes.ts",
+		usage: "usage scopes report [--project <instance>] [--limit <n>] [--json]",
+		summary: "Report what the declared meter-limit scope will change, read-only",
+		environment: "POSTGRES_URI, optional BILLING_POSTGRES_PREPARED_STATEMENTS",
+		details: [
+			"  usage scopes report [--project <instance>] [--limit <n>] [--json]",
+			"Lists, per meter-limited feature, the scope each published or pinned plan version declares,",
+			"the accounts whose open windows the declared scope will sum, and what blocks the upgrade.",
+			"Lists at most <n> account groups per project (default 50). Exits 2 when blocking items exist.",
+		],
+		accepts: (args) => args[0] === "report",
+	},
+	{
 		path: ["bootstrap"],
 		file: "platform-bootstrap.ts",
 		usage: "bootstrap --check | --apply [--credentials-out <path>]",
