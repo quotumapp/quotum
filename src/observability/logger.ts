@@ -1,6 +1,6 @@
 import pino, { type DestinationStream } from "pino";
+import { DEFAULT_MAX_STRING, describeError, scrubString, scrubValue } from "./diagnostic-scrub";
 import { type BillingLogLevel, loadBillingLogLevel } from "./log-level";
-import { stringifyUnknown } from "./stringify-unknown";
 
 export interface BillingLogger {
 	info(message: string, context?: Record<string, unknown>): void;
@@ -26,19 +26,21 @@ export function createPinoBillingLogger({
 			level,
 			timestamp:
 				now === undefined ? pino.stdTimeFunctions.epochTime : () => `,"time":${safeTimestamp(now)}`,
-			serializers: { context: normalizeContext, err: normalizeLoggerError },
+			serializers: { context: normalizeContext, err: describeError },
 		},
 		stream,
 	);
 	return {
 		info(message, context) {
-			writeSafely(() => logger.info({ context }, message));
+			writeSafely(() => logger.info({ context }, scrubString(message, DEFAULT_MAX_STRING)));
 		},
 		warn(message, context) {
-			writeSafely(() => logger.warn({ context }, message));
+			writeSafely(() => logger.warn({ context }, scrubString(message, DEFAULT_MAX_STRING)));
 		},
 		error(message, error, context) {
-			writeSafely(() => logger.error({ err: error, context }, message));
+			writeSafely(() =>
+				logger.error({ err: error, context }, scrubString(message, DEFAULT_MAX_STRING)),
+			);
 		},
 	};
 }
@@ -93,19 +95,6 @@ export function createNoopBillingLogger(): BillingLogger {
 	};
 }
 
-function normalizeLoggerError(error: unknown): { type: string; message: string; stack?: string } {
-	try {
-		if (error instanceof Error) {
-			return typeof error.stack === "string" && error.stack.length > 0
-				? { type: error.name || "Error", message: error.message, stack: error.stack }
-				: { type: error.name || "Error", message: error.message };
-		}
-		return { type: "Error", message: stringifyUnknown(error) };
-	} catch {
-		return { type: "Error", message: "[Unserializable]" };
-	}
-}
-
 function safeTimestamp(now: () => Date): number {
 	try {
 		const timestamp = now().getTime();
@@ -118,31 +107,10 @@ function safeTimestamp(now: () => Date): number {
 function normalizeContext(context: unknown): unknown {
 	if (context === undefined) return undefined;
 	try {
-		return JSON.parse(JSON.stringify(context, createSafeJsonReplacer()));
+		return scrubValue(context);
 	} catch {
 		return "[Unserializable]";
 	}
-}
-
-function createSafeJsonReplacer(): (key: string, value: unknown) => unknown {
-	const seen = new WeakSet<object>();
-
-	return (_key, value) => {
-		if (typeof value === "bigint") {
-			return value.toString();
-		}
-
-		if (typeof value !== "object" || value === null) {
-			return value;
-		}
-
-		if (seen.has(value)) {
-			return "[Circular]";
-		}
-
-		seen.add(value);
-		return value;
-	};
 }
 
 function writeSafely(write: () => void): void {

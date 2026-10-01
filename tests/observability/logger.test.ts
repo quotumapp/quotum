@@ -1,10 +1,17 @@
 import { describe, expect, it } from "bun:test";
+import { SQL } from "bun";
+import { DrizzleQueryError } from "drizzle-orm/errors";
 import { createSanitizedProcessEnv } from "../../scripts/lib/sanitized-env";
 import { loadBillingLogLevel } from "../../src/observability/log-level";
 import {
 	createPinoBillingLogger,
 	type PinoBillingLoggerOptions,
 } from "../../src/observability/logger";
+import {
+	databaseFailure,
+	diagnosticParameters,
+	diagnosticQuery,
+} from "../helpers/database-diagnostic";
 
 const instant = new Date("2026-05-31T12:00:00.000Z");
 
@@ -62,11 +69,8 @@ describe("createPinoBillingLogger", () => {
 		const { logger, events } = capture();
 		logger.error("Webhook failed", "invalid signature");
 		logger.error("Unexpected failure", {
-			toJSON() {
-				throw new Error("cannot serialize");
-			},
-			toString() {
-				throw new Error("cannot stringify");
+			get message() {
+				throw new Error("cannot inspect");
 			},
 		});
 		expect(events().map((event) => event.err)).toEqual([
@@ -88,11 +92,223 @@ describe("createPinoBillingLogger", () => {
 	it("retains a diagnostic when context serialization fails", () => {
 		const { logger, events } = capture();
 		logger.info("Metric rendered", {
-			toJSON() {
+			get count() {
 				throw new Error("bad context");
 			},
 		});
 		expect(events()[0]).toMatchObject({ msg: "Metric rendered", context: "[Unserializable]" });
+	});
+
+	it.each(["40P01", "23505"])(
+		"keeps SQLSTATE %s without SQL, values or driver messages",
+		(sqlState) => {
+			const { logger, events, lines } = capture();
+			const original = databaseFailure(sqlState);
+			const stack = original.stack;
+			const outer = new Error(`wrapped: ${original.message}`, { cause: original });
+			logger.error("Billing request failed", outer, { requestId: "request-1", jobId: "job-1" });
+			expect(events()[0].err).toEqual({
+				type: "DatabaseError",
+				message: "Database operation failed",
+				sqlState,
+				constraint: "customers_project_id_id_unique",
+			});
+			for (const marker of [diagnosticQuery, ...diagnosticParameters])
+				expect(lines.join("")).not.toContain(marker);
+			expect(events()[0].context).toEqual({ requestId: "request-1", jobId: "job-1" });
+			expect(original.stack).toBe(stack);
+			expect(original.params).toBe(diagnosticParameters);
+			expect(outer.cause).toBe(original);
+		},
+	);
+
+	it("recognizes database failures without a SQLSTATE, including flattened Drizzle messages", () => {
+		const { logger, events } = capture();
+		const drizzle = new DrizzleQueryError(
+			diagnosticQuery,
+			diagnosticParameters,
+			new Error("offline"),
+		);
+		for (const error of [
+			drizzle,
+			drizzle.message,
+			new SQL.PostgresError(diagnosticParameters[2] ?? "", {
+				code: "ERR_POSTGRES_CONNECTION_CLOSED",
+			}),
+		]) {
+			logger.error("Database failed", error);
+		}
+		expect(events().map((event) => event.err)).toEqual(
+			Array.from({ length: 3 }, () => ({
+				type: "DatabaseError",
+				message: "Database operation failed",
+			})),
+		);
+	});
+
+	it("accepts SQLSTATE on code and drops unsafe constraint names", () => {
+		const { logger, events, lines } = capture();
+		for (const constraint of ["bad constraint", "x".repeat(64), diagnosticParameters[0]]) {
+			logger.error(
+				"Database failed",
+				Object.assign(new Error(diagnosticParameters[2]), { code: "23505", constraint }),
+			);
+		}
+		expect(events().map((event) => event.err)).toEqual(
+			Array.from({ length: 3 }, () => ({
+				type: "DatabaseError",
+				message: "Database operation failed",
+				sqlState: "23505",
+			})),
+		);
+		expect(lines.join("")).not.toContain("private customer note");
+	});
+
+	it("handles aggregate and cyclic causes and fails closed on excessive or unreadable causes", () => {
+		const { logger, events } = capture();
+		const cycle = databaseFailure();
+		cycle.cause = cycle;
+		logger.error("Database failed", cycle);
+		logger.error("Database failed", new AggregateError([new Error("other"), databaseFailure()]));
+		let deep: Error = databaseFailure();
+		for (let i = 0; i < 10; i++) deep = new Error("wrapper", { cause: deep });
+		logger.error("Database failed", deep);
+		logger.error(
+			"Database failed",
+			new AggregateError(Array.from({ length: 9 }, () => new Error("secret"))),
+		);
+		logger.error("Database failed", {
+			get cause() {
+				throw new Error("secret");
+			},
+		});
+		expect(
+			events()
+				.slice(0, 2)
+				.map((event) => event.err.type),
+		).toEqual(["DatabaseError", "DatabaseError"]);
+		expect(
+			events()
+				.slice(2)
+				.map((event) => event.err),
+		).toEqual(
+			Array.from({ length: 3 }, () => ({
+				type: "Error",
+				message: "[Unserializable]",
+			})),
+		);
+	});
+
+	it("scrubs every log level, ordinary errors and nested context using the shared privacy policy", () => {
+		const { logger, events, lines } = capture();
+		const context = {
+			projectKey: "acme",
+			requestId: "request-1",
+			workerId: "worker-a",
+			jobId: "job-1",
+			customerId: "private-customer",
+			authorization: "Bearer private-bearer",
+			url: "https://api.example.com/v1/billing-accounts/private-customer?secret=query#fragment",
+			nested: {
+				email: diagnosticParameters[0],
+				message: `Bearer private-bearer ${diagnosticParameters[0]}`,
+			},
+			query: diagnosticQuery,
+			params: diagnosticParameters,
+			error: databaseFailure(),
+		};
+		const message = `Request for ${diagnosticParameters[0]} with ${diagnosticParameters[1]}`;
+		logger.info(message, context);
+		logger.warn(message, context);
+		logger.error(message, new Error(message), context);
+		for (const marker of [
+			...diagnosticParameters,
+			diagnosticQuery,
+			"private-customer",
+			"private-bearer",
+			"secret=query",
+		]) {
+			expect(lines.join("")).not.toContain(marker);
+		}
+		expect(events().map((event) => event.level)).toEqual([30, 40, 50]);
+		expect(events()[0].context).toEqual({
+			projectKey: "acme",
+			requestId: "request-1",
+			workerId: "worker-a",
+			jobId: "job-1",
+			url: "https://api.example.com/v1/billing-accounts/:id",
+			nested: { message: "Bearer [Filtered] [email]" },
+			error: {
+				type: "DatabaseError",
+				message: "Database operation failed",
+				sqlState: "40P01",
+				constraint: "customers_project_id_id_unique",
+			},
+		});
+		expect(context.customerId).toBe("private-customer");
+	});
+
+	it("keeps account, usage-receipt and declared-scope failures free of identifiers and SQL", () => {
+		const { logger, events, lines } = capture();
+		// v0.19.0 routes: explicit accounts and immutable usage receipts carry the account and receipt
+		// ids in the path; a failed lookup must log neither them nor the query's parameters.
+		for (const path of [
+			"/v1/billing-accounts/private-customer",
+			"/v1/billing-accounts/private-customer/usage/receipts/private-receipt-0001",
+		]) {
+			logger.error("Billing request failed", databaseFailure(), { requestId: "request-1", path });
+		}
+		// The declared-scope safety net logs the plans that mix scopes; it carries no SQL.
+		logger.error(
+			"Meter limits mix declared scopes",
+			new Error("Meter limits on tokens mix scopes"),
+			{
+				requestId: "request-2",
+				path: "/v1/billing-accounts/private-customer/usage/consume",
+				featureKey: "tokens",
+			},
+		);
+		for (const marker of [
+			...diagnosticParameters,
+			diagnosticQuery,
+			"private-customer",
+			"private-receipt-0001",
+		]) {
+			expect(lines.join("")).not.toContain(marker);
+		}
+		expect(events().map((event) => event.context.path)).toEqual([
+			"/v1/billing-accounts/:id",
+			"/v1/billing-accounts/:id/usage/receipts/:id",
+			"/v1/billing-accounts/:id/usage/consume",
+		]);
+		expect(events()[0].err).toMatchObject({
+			message: "Database operation failed",
+			sqlState: "40P01",
+		});
+	});
+
+	it("bounds diagnostics and never invokes context serialization hooks or redacted getters", () => {
+		const { logger, events } = capture();
+		logger.error(
+			"x".repeat(2000),
+			{ token: "private-token", safe: "y".repeat(2000) },
+			{
+				toJSON() {
+					throw new Error("should not run");
+				},
+				get authorization() {
+					throw new Error("should not read");
+				},
+				message: "z".repeat(2000),
+				items: Array.from({ length: 100 }, (_, i) => i),
+			},
+		);
+		expect(events()[0].msg).toHaveLength(1024);
+		expect(events()[0].err.message.length).toBeLessThanOrEqual(1024);
+		expect(events()[0].err.message).not.toContain("private-token");
+		expect(events()[0].context.message).toHaveLength(1024);
+		expect(events()[0].context.items).toHaveLength(50);
+		expect(events()[0].context).not.toHaveProperty("toJSON");
 	});
 
 	it.each([

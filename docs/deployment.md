@@ -396,7 +396,7 @@ With a DSN, the service reports staff and merchant 5xx responses and worker fail
   `SENTRY_TRACES_SAMPLE_RATE` (`0.01`; `0` disables tracing),
   `SENTRY_CAPTURE_EXPECTED_ERRORS` (`false`).
 
-Sent: scrubbed error messages and stack frames with five source lines around each frame, route
+Sent: scrubbed error messages and stack frames with five source lines around each non-database frame, route
 patterns, method, status, error codes, project key, provider, worker names, hostname, runtime, OS
 and module versions, breadcrumbs of outbound HTTP requests (method, masked URL and status), and
 sampled transactions. Sentry 11 uses the static transaction lifecycle so the transaction and span
@@ -412,8 +412,16 @@ patterns. Bearer and Basic credentials, JWTs, project API keys, Stripe-style ids
 IPv4 addresses, runs of 14 or more digits and opaque tokens of 32 or more characters are
 replaced. Keys named like secrets, tokens, sessions, emails or customer ids are dropped. Path
 identifiers become `:id`. An identifier that looks like an ordinary word inside a message is not
-recognized, so avoid putting customer data into error messages. Local Pino log lines are never
-scrubbed.
+recognized, so avoid putting customer data into error messages. Local Pino logs use the same
+privacy rules; see [diagnostic logs](operations.md#diagnostic-logs-and-command-output) for field
+changes and collector guidance.
+
+Database exception messages and linked causes use `Database operation failed`, removing SQL and
+parameter values entirely rather than trying to mask them with patterns. Safe SQLSTATE and
+constraint diagnostics appear as `error.sql_state` / `error.constraint` log attributes and in the
+error event's `database` context (`sqlState`, `constraint`). File/function/line information remains;
+source snippets and local variables are omitted for database failures. An unreadable original
+exception causes the event to be dropped. No raw exception object is changed by the scrubber.
 
 ## Encryption-key rotation
 
