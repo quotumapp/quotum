@@ -62,9 +62,13 @@ An immediate `subscription_change` intent can carry some of that over, per consu
   when it does not reset, or everything a lifetime allowance consumed, is written as consumed
   quantity on the new allowance, so an upgrade does not reset consumption. Usage in earlier windows of the period has reset already and
   does not carry. It is capped at what the new allowance holds; usage beyond it is forgiven, not
-  charged.
-- The preview reports `carryOver.features[]`, with each feature's current unused balance and usage
-  and whether it carries. Those figures are indicative: the switch carries what the allowances hold
+  charged. Usage is counted once: when a return resumes an allowance that already holds some of
+  the outgoing allowance's usage, because that usage was carried from it, or onto it on an earlier
+  switch, only the rest is carried. Switching from plan A to B and back with `usages` each time
+  leaves A with its own use plus what was used on B, not A's use twice. A carry of nothing is not
+  recorded in `carried_usages`.
+- The preview reports `carryOver.features[]`, with each feature's current unused balance and the
+  usage the switch would carry, and whether it carries. Those figures are indicative: the switch carries what the allowances hold
   when Quotum records the provider's update. When the provider reports the new version before the
   worker has recorded the change as applied, that update performs the switch and the carry-over,
   once; recording the change later carries nothing again.

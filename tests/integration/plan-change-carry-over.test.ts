@@ -273,6 +273,63 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		expect((await allowances()).some((row) => row.source_kind === "carry_over")).toBe(false);
 	});
 
+	it("does not count usage again when it is carried back to the allowance it came from", async () => {
+		await addAllowance(1, "100");
+		await addAllowance(2, "300");
+		await separatePlans();
+		await sync(1);
+		await spend(30, "spend-before-round-trip");
+		await commercialSwitch("other-plan", "round-trip-out", { usages: ["ai_credits"] });
+		await sync(2);
+		expect(await available()).toBe("270");
+
+		// The returning allowance resumes with its own 30; version 2 holds only that same usage, so
+		// the preview carries nothing and the change carries nothing.
+		const back = await commercialSwitch("migration-plan", "round-trip-back", {
+			usages: ["ai_credits"],
+		});
+		expect(back).toEqual({
+			features: [
+				{
+					featureKey: "ai_credits",
+					balance: { carried: false, quantity: "270" },
+					usage: { carried: true, quantity: "0" },
+				},
+			],
+		});
+		await sync(1);
+		expect(await available()).toBe("70");
+		// Nothing new was carried back, so nothing is recorded as carried or forgiven.
+		expect(await carriedUsage()).toEqual([{ requested: "30.000000000", applied: "30.000000000" }]);
+	});
+
+	it("carries only usage the returning allowance does not hold, however often the plan changes", async () => {
+		await addAllowance(1, "100");
+		await addAllowance(2, "300");
+		await separatePlans();
+		await sync(1);
+		await spend(30, "spend-on-one");
+		await commercialSwitch("other-plan", "cycle-out", { usages: ["ai_credits"] });
+		await sync(2);
+		await spend(10, "spend-on-two");
+		expect(await available()).toBe("260");
+
+		// Back on version 1: its own 30 plus version 2's own 10.
+		const back = await commercialSwitch("migration-plan", "cycle-back", { usages: ["ai_credits"] });
+		expect(back).toMatchObject({ features: [{ usage: { carried: true, quantity: "10" } }] });
+		await sync(1);
+		expect(await available()).toBe("60");
+
+		// Version 2 resumes with the 30 it was carried and its own 10; version 1 holds nothing else.
+		await commercialSwitch("other-plan", "cycle-out-again", { usages: ["ai_credits"] });
+		await sync(2);
+		expect(await available()).toBe("260");
+		expect((await carriedUsage()).map((row) => row.applied)).toEqual([
+			"30.000000000",
+			"10.000000000",
+		]);
+	});
+
 	it("refuses carry-over on a period-end change, for an unallocated feature and on the direct route", async () => {
 		await addAllowance(1, "100");
 		await addAllowance(2, "300");
@@ -450,6 +507,58 @@ async function previewChange(fixture: ReturnType<typeof createIntegrationApp>, i
 		"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
 		{ method: "POST", headers: jsonHeaders(fixture), body: JSON.stringify({ intent }) },
 	);
+}
+
+/**
+ * Moves version 2 of the migration plan to a plan of its own, so a commercial change can target
+ * either version by plan key and switch back and forth.
+ */
+async function separatePlans(): Promise<void> {
+	await context.sql`
+		INSERT INTO plans (project_id, key, name, active)
+		SELECT project_id, 'other-plan', 'Other plan', true FROM plans WHERE key = 'migration-plan'
+	`;
+	await context.sql`
+		UPDATE plan_versions version SET plan_id = other.id
+		FROM plans original, plans other
+		WHERE original.key = 'migration-plan' AND other.key = 'other-plan'
+			AND version.plan_id = original.id AND version.version = 2
+	`;
+	await context.sql`
+		UPDATE plans plan SET active_version_id = version.id
+		FROM plan_versions version WHERE version.plan_id = plan.id
+	`;
+}
+
+/**
+ * An immediate commercial change to a plan's active version, previewed, executed and applied. It
+ * returns what the preview said the change would carry.
+ */
+async function commercialSwitch(
+	targetPlanKey: string,
+	idempotencyKey: string,
+	carryOver: { balances?: string[]; usages?: string[] },
+): Promise<unknown> {
+	const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+	const preview = await previewChange(fixture, {
+		...changeIntent("immediate"),
+		targetPlanKey,
+		carryOver,
+	});
+	expect(preview.status).toBe(200);
+	const previewBody = (await preview.json()).data;
+	const executed = await testRequest(
+		fixture.app,
+		"/v1/billing-accounts/migration-stripe/commercial-actions",
+		{
+			method: "POST",
+			headers: { ...jsonHeaders(fixture), "idempotency-key": idempotencyKey },
+			body: JSON.stringify({ previewToken: previewBody.previewToken }),
+		},
+	);
+	expect(executed.status).toBe(202);
+	await applyClaimedChange();
+	return previewBody.carryOver;
 }
 
 /** Version 1 with 30 of 100 spent, then an immediate change to version 2 carrying the other 70. */
@@ -708,6 +817,7 @@ async function carriedUsage() {
 	const rows = await context.sql<Array<{ requested: string; applied: string }>>`
 		SELECT requested_quantity::text AS requested, applied_quantity::text AS applied
 		FROM carried_usages
+		ORDER BY created_at, from_allocation_id
 	`;
 	return rows.map((row) => ({ ...row }));
 }
