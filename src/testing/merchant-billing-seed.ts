@@ -16,6 +16,7 @@ export async function seedMerchantBilling(
 	env: BillingEnv,
 	services: NonNullable<AppDependencies["projectProviderServices"]>,
 	scope: { organizationSlug: string; projectKey: string; environment: "sandbox" | "production" },
+	options: { configureFixtures?: boolean } = {},
 ) {
 	const [instance] = await database<
 		{ id: string; key: string; name: string }[]
@@ -68,7 +69,10 @@ export async function seedMerchantBilling(
 		await database`INSERT INTO store_events(project_id,provider,channel,external_event_id,event_type,processing_status,processing_error,raw_payload) VALUES(${instance.id},'stripe','web','evt_merchant_synthetic','customer.created','failed','Synthetic processing failure',${JSON.stringify(payload)}::text::jsonb)`;
 	}
 	// Reuse only the runner's fake Stripe/loopback projection configuration. No provider secrets leave this process.
-	if (!env.connectionFixtures.some((project) => project.projectInstanceKey === instance.key)) {
+	if (
+		options.configureFixtures !== false &&
+		!env.connectionFixtures.some((project) => project.projectInstanceKey === instance.key)
+	) {
 		env.connectionFixtures.push({
 			...template,
 			projectInstanceKey: instance.key,
