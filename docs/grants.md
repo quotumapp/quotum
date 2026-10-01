@@ -107,7 +107,8 @@ A publish that changes the default plan changes the accounts that hold it, in th
   applies until the monthly window ends, and every later window is a whole month. A feature an
   earlier version dropped within the current window and a later one adds back on the same reset
   resumes what was left of that window's allowance, with its use kept, instead of being granted
-  again.
+  again. An open reservation on it counts once: until the account's next usage write reopens the
+  allowance, reads already show it reopened, with that hold, rather than the ended row beside it.
 - **The declared keys change:** the entitlements follow them.
 - **The marker is removed:** the grants end. Marking it again resumes the windows still running,
   as a fallback does.

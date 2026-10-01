@@ -45,7 +45,11 @@ import {
 	queryMeterLimitRows,
 } from "./meter-limit-sources";
 import { startOfUtcMonth } from "./meter-limit-windows";
-import { readPendingAllowances, type WindowAllocation } from "./plan-grant-windows";
+import {
+	type PendingAllowance,
+	readPendingAllowances,
+	type WindowAllocation,
+} from "./plan-grant-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import {
@@ -1383,14 +1387,45 @@ export async function readBalance(
 	feature: FeatureRow,
 	entityId: string | null = null,
 ): Promise<MeteringBalance> {
-	const [rows, pending] = await Promise.all([
+	const [listed, pending] = await Promise.all([
 		customerId === null
 			? Promise.resolve<AllocationRow[]>([])
 			: readAllocationRows(executor, projectId, customerId, feature, entityId),
 		readPendingAllowances(executor, projectId, customerId, featureId(feature)),
 	]);
+	const { rows, remaining } = reopenListedAllowances(listed, pending);
 	const balance = rows.length === 0 ? emptyBalance(feature) : balanceFromRows(feature, rows);
-	return withPendingAllowances(balance, feature.credit_scale, pending);
+	return withPendingAllowances(balance, feature.credit_scale, remaining);
+}
+
+/**
+ * Counts an ended allowance the account's next write reopens (see `PendingAllowance.reopens`) as
+ * that write leaves it: when the row is listed because it still backs an open hold, it reads as
+ * open again, with its use and hold kept and its window's expiry, instead of a second allowance
+ * beside it. The pending allowances left over still add to the totals.
+ */
+export function reopenListedAllowances(
+	listed: readonly AllocationRow[],
+	pending: readonly PendingAllowance[],
+): { rows: AllocationRow[]; remaining: PendingAllowance[] } {
+	const reopening = new Map(
+		pending.flatMap((allowance) =>
+			allowance.reopens === null ? [] : [[allowance.reopens, allowance] as const],
+		),
+	);
+	const reopened = new Set<string>();
+	const rows = listed.map((row) => {
+		const allowance = reopening.get(String(row.id));
+		if (allowance === undefined) return row;
+		reopened.add(String(row.id));
+		return { ...row, closed: false, expires_at: allowance.expiresAt };
+	});
+	return {
+		rows,
+		remaining: pending.filter(
+			(allowance) => allowance.reopens === null || !reopened.has(allowance.reopens),
+		),
+	};
 }
 
 /** Adds allowances no write has created yet to a balance's totals. */

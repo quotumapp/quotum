@@ -422,6 +422,67 @@ localDescribe("default plan", () => {
 		expect(rows.map((row) => [Number(row.consumed), row.live])).toEqual([[40, true]]);
 	});
 
+	it("counts an open hold once when a later version adds its feature back", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		await consume("holder", 20, "spend-1");
+		const hold = await context.repository.reserveUsage(project, {
+			billingAccountId: "holder",
+			featureKey: "model_tokens",
+			quantity: "6000",
+			idempotencyKey: "hold-1",
+			expiresInSeconds: 300,
+		});
+		expect(hold.allowed).toBe(true);
+
+		await publish(catalog({ ...freePlan(2, "100"), items: [] }));
+		await runWorker(25);
+		expect(await balance("holder")).toMatchObject({ held: "30", available: "0" });
+
+		// The re-added allowance is the ended row holding the reservation, resumed with its use and
+		// hold kept: the read counts it once, as the next write will.
+		await publish(catalog(freePlan(3, "100")));
+		const resumed = { granted: "100", consumed: "20", held: "30", available: "50" };
+		const [customer] = await context.sql<Array<{ id: string }>>`
+			SELECT id FROM customers WHERE billing_account_id = 'holder'
+		`;
+		const reads = async () => ({
+			balance: await balance("holder"),
+			summary: (await context.repository.getCustomerBillingSummary(project, "holder")).balances,
+			projection: await readProjectionBalances(
+				context.db as unknown as QueryExecutor,
+				project.projectInstanceId,
+				customer?.id ?? "",
+			),
+		});
+		const expected = {
+			balance: resumed,
+			summary: [{ featureKey: "ai_credits", held: "30", available: "50" }],
+			projection: [{ featureKey: "ai_credits", held: "30", available: "50" }],
+		};
+		expect(await reads()).toMatchObject(expected);
+		await runWorker(25);
+		expect(await reads()).toMatchObject(expected);
+
+		await context.repository.releaseUsageReservation(project, {
+			billingAccountId: "holder",
+			reservationId: hold.reservationId ?? "",
+			idempotencyKey: "release-1",
+		});
+		expect(await balance("holder")).toMatchObject({
+			granted: "100",
+			consumed: "20",
+			held: "0",
+			available: "80",
+		});
+		// The next usage write reopens that same row with its use kept.
+		expect(await consume("holder", 10, "spend-2")).toMatchObject({
+			allowed: true,
+			balance: { available: "70" },
+		});
+		const rows = await allowanceRows("holder");
+		expect(rows.map((row) => [Number(row.consumed), row.live])).toEqual([[30, true]]);
+	});
+
 	it("creates no allowance until the account spends, however many resets pass", async () => {
 		await publish(catalog(null));
 		await seedCustomers(["idle_user"]);

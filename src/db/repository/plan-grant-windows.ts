@@ -60,6 +60,12 @@ export interface PendingAllowance extends WindowAllocation {
 	unit: string;
 	scale: number;
 	expiresAt: Date | null;
+	/**
+	 * The ended allowance row the account's next write reopens (see `PlanGrantWindow.resumes`), or
+	 * null for one no write has created. Readers list an ended row while it still backs an open
+	 * hold, so they count this allowance as that row reopened, never beside it.
+	 */
+	reopens: string | null;
 }
 
 interface WindowRow {
@@ -285,6 +291,7 @@ export async function readPendingAllowances(
 				unit: window.unit,
 				scale: window.scale,
 				expiresAt: window.expiresAt,
+				reopens: window.resumes ? window.allocationId : null,
 			},
 		];
 	});

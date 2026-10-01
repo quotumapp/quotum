@@ -862,7 +862,8 @@ function withPendingProjectionBalances(
 			units(allowance.reversed) -
 			units(allowance.consumed) -
 			units(allowance.held);
-		current.held += units(allowance.held);
+		// An ended row the next write reopens already counts its open hold with the allocations.
+		if (allowance.reopens === null) current.held += units(allowance.held);
 		if (
 			allowance.expiresAt !== null &&
 			(current.endsAt === null || allowance.expiresAt < current.endsAt)
