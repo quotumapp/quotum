@@ -11,12 +11,14 @@ import type { BillingProvider } from "../../billing/types";
 import { type ProviderCapabilityLookup, providersImplementing } from "../../providers/capabilities";
 import {
 	carriedControlConsumptionSql,
+	controlIdentityHeldSql,
+	controlIdentityWindowsSql,
 	controlWindowBounds,
 	readControlClock,
 	resolveEffectiveControls,
 	sameControlWindow,
 } from "./controls-enterprise";
-import { executeOne, executeRows } from "./query";
+import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
 export interface ControlDenial {
@@ -142,21 +144,32 @@ async function evaluateControls(
 			consumed_value: unknown;
 			held_value: unknown;
 		} | null;
+		const scope = {
+			projectId: input.projectId,
+			policyId: control.policyId,
+			customerId: input.customerId,
+			windowStartAt: bounds.start.toISOString(),
+			windowEndAt: bounds.end?.toISOString() ?? null,
+		};
 		if (mode === "check") {
 			// A check reads what the window counted, carried over from a replaced control if this one
-			// has no window yet, as a write would record it.
+			// has no window yet, as a write would record it, and the open holds in the window
+			// wherever they were placed.
 			window = await executeOne(
 				executor,
 				drizzleSql`
 				SELECT own.id,
-					GREATEST(COALESCE(own.consumed_value, 0), ${carriedControlConsumptionSql({
-						projectId: input.projectId,
-						policyId: control.policyId,
-						customerId: input.customerId,
-						windowStartAt: bounds.start.toISOString(),
-						windowEndAt: bounds.end?.toISOString() ?? null,
-					})})::text AS consumed_value,
-                    COALESCE((SELECT sum(hold.held_value) FROM reservation_control_holds hold JOIN reservations r ON r.project_id=hold.project_id AND r.id=hold.reservation_id WHERE hold.project_id=own.project_id AND hold.control_window_id=own.id AND r.status='active' AND r.expires_at>clock_timestamp()),0)::text AS held_value
+					GREATEST(COALESCE(own.consumed_value, 0), ${carriedControlConsumptionSql(scope)})::text
+						AS consumed_value,
+					COALESCE((
+						SELECT sum(hold.held_value)
+						FROM reservation_control_holds hold
+						JOIN reservations r ON r.project_id = hold.project_id AND r.id = hold.reservation_id
+						WHERE hold.project_id = ${input.projectId}
+							AND hold.control_window_id IN ${controlIdentityWindowsSql(scope)}
+							AND r.status = 'active'
+							AND r.expires_at > clock_timestamp()
+					), 0)::text AS held_value
 				FROM (SELECT 1) AS single
 				LEFT JOIN control_windows own ON own.project_id = ${input.projectId}
 					AND own.control_policy_id = ${control.policyId}::bigint
@@ -176,13 +189,7 @@ async function evaluateControls(
 				) VALUES (
 					${input.projectId}, ${control.policyId}::bigint, ${input.customerId},
 					${input.entityId}::bigint, ${bounds.start.toISOString()}, ${bounds.end?.toISOString() ?? null},
-					${carriedControlConsumptionSql({
-						projectId: input.projectId,
-						policyId: control.policyId,
-						customerId: input.customerId,
-						windowStartAt: bounds.start.toISOString(),
-						windowEndAt: bounds.end?.toISOString() ?? null,
-					})}
+					${carriedControlConsumptionSql(scope)}
 				) ON CONFLICT (project_id, control_policy_id, customer_id, window_start_at) DO UPDATE
 				SET consumed_value = GREATEST(control_windows.consumed_value, EXCLUDED.consumed_value)
 				WHERE EXCLUDED.consumed_value > control_windows.consumed_value
@@ -191,7 +198,8 @@ async function evaluateControls(
 			window = await executeOne(
 				executor,
 				drizzleSql`
-				SELECT id, consumed_value::text AS consumed_value, held_value::text AS held_value
+				SELECT id, consumed_value::text AS consumed_value,
+					${controlIdentityHeldSql(scope)}::text AS held_value
 				FROM control_windows
 				WHERE project_id = ${input.projectId}
 					AND control_policy_id = ${control.policyId}::bigint
@@ -279,6 +287,59 @@ async function evaluateControls(
 	return { denial: null, entries };
 }
 
+interface ConfirmedHoldRow {
+	control_window_id: string | number | bigint;
+	control_policy_id: string | number | bigint;
+	held_value: unknown;
+	window_start_at: Date | string;
+	window_end_at: Date | string | null;
+	control_kind: "spend_limit" | "usage_limit";
+	feature_id: string | number | bigint | null;
+	currency: string | null;
+	entity_id: string | number | bigint | null;
+	limit_value: unknown;
+	source_type: EffectiveControl["source"];
+	revision: number;
+}
+
+interface ControlIdentityRow {
+	control_kind: "spend_limit" | "usage_limit";
+	feature_id: string | number | bigint | null;
+	currency: string | null;
+	entity_id: string | number | bigint | null;
+}
+
+/** Controls of one kind, feature, currency and entity scope count the same usage. */
+function controlIdentityKey(row: ControlIdentityRow): string {
+	return [
+		row.control_kind,
+		String(row.feature_id ?? ""),
+		row.currency ?? "",
+		String(row.entity_id ?? ""),
+	].join(":");
+}
+
+function sameInstant(left: Date | string | null, right: Date | null): boolean {
+	if (left === null || right === null) return left === null && right === null;
+	return new Date(left).getTime() === right.getTime();
+}
+
+/**
+ * One settlement of a confirmation: the window the confirmed value is counted in, the holds it
+ * settles and the control whose limit it must fit.
+ */
+interface ConfirmationGroup {
+	windowId: string;
+	policyId: string;
+	windowStartAt: string;
+	windowEndAt: string | null;
+	kind: "spend_limit" | "usage_limit";
+	source: EffectiveControl["source"];
+	revision: number;
+	limitValue: string;
+	holds: ConfirmedHoldRow[];
+}
+
 export async function confirmControlHolds(
 	executor: QueryExecutor,
 	input: ControlDeltaInput & { reservationId: string },
@@ -287,24 +348,13 @@ export async function confirmControlHolds(
 	// The customer lock is issued first; the hold and control reads behind it are pipelined.
 	const [, existingHolds, resolvedControls] = await Promise.all([
 		lockCustomerControls(executor, input.projectId, input.customerId),
-		executeRows<{
-			control_window_id: string | number | bigint;
-			control_policy_id: string | number | bigint;
-			held_value: unknown;
-			consumed_value: unknown;
-			window_held_value: unknown;
-			control_kind: "spend_limit" | "usage_limit";
-			currency: string | null;
-			limit_value: unknown;
-			source_type: EffectiveControl["source"];
-			revision: number;
-		}>(
+		executeRows<ConfirmedHoldRow>(
 			executor,
 			drizzleSql`
 		SELECT hold.control_window_id, control_window.control_policy_id,
-			hold.held_value::text AS held_value, hold.consumed_value::text AS consumed_value,
-			control_window.held_value::text AS window_held_value, policy.control_kind, policy.currency,
-			policy.limit_value::text AS limit_value, policy.source_type, policy.revision
+			hold.held_value::text AS held_value, control_window.window_start_at,
+			control_window.window_end_at, policy.control_kind, policy.feature_id, policy.currency,
+			policy.entity_id, policy.limit_value::text AS limit_value, policy.source_type, policy.revision
 		FROM reservation_control_holds hold
 		JOIN control_windows control_window
 			ON control_window.project_id = hold.project_id AND control_window.id = hold.control_window_id
@@ -321,18 +371,51 @@ export async function confirmControlHolds(
 			now: now,
 		}),
 	]);
-	const activeControls = resolvedControls.filter(
-		(control) =>
-			(control.controlKind === "usage_limit" && control.featureKey === input.featureKey) ||
-			(control.controlKind === "spend_limit" &&
-				input.currency !== undefined &&
-				input.currency !== null &&
-				control.currency === input.currency.toUpperCase()),
+	const activeControls = resolvedControls
+		.filter(
+			(control) =>
+				(control.controlKind === "usage_limit" && control.featureKey === input.featureKey) ||
+				(control.controlKind === "spend_limit" &&
+					input.currency !== undefined &&
+					input.currency !== null &&
+					control.currency === input.currency.toUpperCase()),
+		)
+		.sort((left, right) => (BigInt(left.policyId) < BigInt(right.policyId) ? -1 : 1));
+	const activeIdentities =
+		activeControls.length === 0
+			? []
+			: await executeRows<ControlIdentityRow & { id: string | number | bigint }>(
+					executor,
+					drizzleSql`
+			SELECT id, control_kind, feature_id, currency, entity_id FROM control_policies
+			WHERE project_id = ${input.projectId}
+				AND id IN (SELECT jsonb_array_elements_text(${jsonb(
+					activeControls.map((control) => control.policyId),
+				)})::bigint)
+		`,
+				);
+	const identityOf = new Map(
+		activeIdentities.map((row) => [String(row.id), controlIdentityKey(row)] as const),
 	);
-	const existingPolicyIds = new Set(existingHolds.map((hold) => String(hold.control_policy_id)));
+	// Whatever window a hold was placed in, the active control of its kind, feature, currency and
+	// scope settles it once: in that control's current window when the hold is in the same window
+	// of usage, or else in the window that held it. A control the reservation holds nothing under
+	// still counts the confirmed value.
+	const heldIdentities = new Set(existingHolds.map((hold) => controlIdentityKey(hold)));
+	const adopted = new Set<ConfirmedHoldRow>();
+	const groups: ConfirmationGroup[] = [];
 	for (const control of activeControls) {
-		if (existingPolicyIds.has(control.policyId)) continue;
+		const identity = identityOf.get(control.policyId);
 		const bounds = controlWindowBounds(control.interval, control.intervalCount, now);
+		const holds = existingHolds.filter(
+			(hold) =>
+				controlIdentityKey(hold) === identity &&
+				sameInstant(hold.window_start_at, bounds.start) &&
+				sameInstant(hold.window_end_at, bounds.end),
+		);
+		if (holds.length === 0 && identity !== undefined && heldIdentities.has(identity)) continue;
+		const windowStartAt = bounds.start.toISOString();
+		const windowEndAt = bounds.end?.toISOString() ?? null;
 		await executeRows(
 			executor,
 			drizzleSql`
@@ -341,86 +424,102 @@ export async function confirmControlHolds(
 				consumed_value
 			) VALUES (
 				${input.projectId}, ${control.policyId}::bigint, ${input.customerId},
-				${input.entityId}::bigint, ${bounds.start.toISOString()}, ${bounds.end?.toISOString() ?? null},
+				${input.entityId}::bigint, ${windowStartAt}, ${windowEndAt},
 				${carriedControlConsumptionSql({
 					projectId: input.projectId,
 					policyId: control.policyId,
 					customerId: input.customerId,
-					windowStartAt: bounds.start.toISOString(),
-					windowEndAt: bounds.end?.toISOString() ?? null,
+					windowStartAt,
+					windowEndAt,
 				})}
 			) ON CONFLICT (project_id, control_policy_id, customer_id, window_start_at) DO UPDATE
 			SET consumed_value = GREATEST(control_windows.consumed_value, EXCLUDED.consumed_value)
 			WHERE EXCLUDED.consumed_value > control_windows.consumed_value
 		`,
 		);
-		const window = await executeOne<{
-			id: string | number | bigint;
-			held_value: unknown;
-		}>(
+		const window = await executeOne<{ id: string | number | bigint }>(
 			executor,
 			drizzleSql`
-			SELECT id, held_value::text AS held_value FROM control_windows
+			SELECT id FROM control_windows
 			WHERE project_id = ${input.projectId} AND control_policy_id = ${control.policyId}::bigint
-				AND customer_id = ${input.customerId} AND window_start_at = ${bounds.start.toISOString()}
+				AND customer_id = ${input.customerId} AND window_start_at = ${windowStartAt}
 			FOR UPDATE
 		`,
 		);
 		if (window === null) throw new Error("Control window could not be locked for confirmation");
-		existingHolds.push({
-			control_window_id: window.id,
-			control_policy_id: control.policyId,
-			held_value: "0",
-			consumed_value: "0",
-			window_held_value: window.held_value,
-			control_kind: control.controlKind,
-			currency: control.currency,
-			limit_value: control.limitValue,
-			source_type: control.source,
+		for (const hold of holds) adopted.add(hold);
+		groups.push({
+			windowId: String(window.id),
+			policyId: control.policyId,
+			windowStartAt,
+			windowEndAt,
+			kind: control.controlKind,
+			source: control.source,
 			revision: control.revision,
+			limitValue: control.limitValue,
+			holds,
+		});
+	}
+	for (const hold of existingHolds) {
+		if (adopted.has(hold)) continue;
+		groups.push({
+			windowId: String(hold.control_window_id),
+			policyId: String(hold.control_policy_id),
+			windowStartAt: new Date(hold.window_start_at).toISOString(),
+			windowEndAt: hold.window_end_at === null ? null : new Date(hold.window_end_at).toISOString(),
+			kind: hold.control_kind,
+			source: hold.source_type,
+			revision: hold.revision,
+			limitValue: canonicalDecimal(String(hold.limit_value), "control limit", 9),
+			holds: [hold],
 		});
 	}
 	const changes: Array<{
-		windowId: string;
-		held: string;
+		group: ConfirmationGroup;
 		target: string;
-		hasHold: boolean;
-		spend: boolean;
 		consumed: bigint;
 	}> = [];
-	for (const hold of existingHolds.sort((left, right) =>
-		BigInt(left.control_policy_id) < BigInt(right.control_policy_id) ? -1 : 1,
+	for (const group of groups.sort((left, right) =>
+		BigInt(left.policyId) < BigInt(right.policyId) ? -1 : 1,
 	)) {
 		// A confirmed spend target is signed for the same reason as a consume delta.
 		const target =
-			hold.control_kind === "usage_limit"
+			group.kind === "usage_limit"
 				? canonicalDecimal(input.usageDelta, "confirmed control value", 9)
 				: canonicalSignedDecimal(input.spendMinorDelta ?? "0", "confirmed control value", 9);
-		const ownHeld = decimalToUnits(String(hold.held_value), 9);
-		const totalHeld = decimalToUnits(String(hold.window_held_value), 9);
+		const ownHeld = group.holds.reduce(
+			(sum, hold) => sum + decimalToUnits(String(hold.held_value), 9),
+			0n,
+		);
 		const targetUnits = signedDecimalToUnits(target, 9);
-		const consumed = await executeOne<{ consumed_value: unknown }>(
+		const exposure = await executeOne<{ consumed_value: unknown; held_value: unknown }>(
 			executor,
 			drizzleSql`
-			SELECT consumed_value::text AS consumed_value FROM control_windows
-			WHERE project_id = ${input.projectId} AND id = ${String(hold.control_window_id)}::bigint
+			SELECT consumed_value::text AS consumed_value, ${controlIdentityHeldSql({
+				projectId: input.projectId,
+				policyId: group.policyId,
+				customerId: input.customerId,
+				windowStartAt: group.windowStartAt,
+				windowEndAt: group.windowEndAt,
+			})}::text AS held_value
+			FROM control_windows
+			WHERE project_id = ${input.projectId} AND id = ${group.windowId}::bigint
 		`,
 		);
-		if (consumed === null) throw new Error("Control window disappeared during confirmation");
-		const consumedUnits = decimalToUnits(String(consumed.consumed_value), 9);
-		const limitUnits = decimalToUnits(String(hold.limit_value), 9);
-		const nextExposure =
-			consumedUnits + (totalHeld > ownHeld ? totalHeld - ownHeld : 0n) + targetUnits;
-		if (targetUnits > 0n && nextExposure > limitUnits) {
-			const remaining =
-				limitUnits - consumedUnits - (totalHeld > ownHeld ? totalHeld - ownHeld : 0n);
+		if (exposure === null) throw new Error("Control window disappeared during confirmation");
+		const consumedUnits = decimalToUnits(String(exposure.consumed_value), 9);
+		const totalHeld = decimalToUnits(String(exposure.held_value), 9);
+		const otherHeld = totalHeld > ownHeld ? totalHeld - ownHeld : 0n;
+		const limitUnits = decimalToUnits(group.limitValue, 9);
+		if (targetUnits > 0n && consumedUnits + otherHeld + targetUnits > limitUnits) {
+			const remaining = limitUnits - consumedUnits - otherHeld;
 			return {
 				denial: {
-					kind: hold.control_kind,
-					source: hold.source_type,
-					revision: hold.revision,
-					policyId: String(hold.control_policy_id),
-					limitValue: canonicalDecimal(String(hold.limit_value), "control limit", 9),
+					kind: group.kind,
+					source: group.source,
+					revision: group.revision,
+					policyId: group.policyId,
+					limitValue: group.limitValue,
 					currentValue: unitsToDecimal(consumedUnits + totalHeld, 9),
 					requestedValue: target,
 					remainingValue: unitsToDecimal(remaining > 0n ? remaining : 0n, 9),
@@ -428,46 +527,50 @@ export async function confirmControlHolds(
 				entries: [],
 			};
 		}
-		changes.push({
-			windowId: String(hold.control_window_id),
-			held: canonicalDecimal(String(hold.held_value), "held control value", 9),
-			target,
-			hasHold: ownHeld > 0n,
-			spend: hold.control_kind === "spend_limit",
-			consumed: consumedUnits,
-		});
+		changes.push({ group, target, consumed: consumedUnits });
 	}
 	const entries: ControlConsumptionEntry[] = [];
-	for (const change of changes) {
+	for (const { group, target, consumed } of changes) {
+		for (const hold of group.holds) {
+			await executeOne(
+				executor,
+				drizzleSql`
+				UPDATE control_windows
+				SET held_value = GREATEST(held_value - ${String(hold.held_value)}::numeric, 0),
+					updated_at = now()
+				WHERE project_id = ${input.projectId} AND id = ${String(hold.control_window_id)}::bigint
+				RETURNING id
+			`,
+			);
+		}
 		const updated = await executeOne<{ consumed_value: unknown }>(
 			executor,
 			drizzleSql`
 			UPDATE control_windows control_window SET
-				held_value = GREATEST(control_window.held_value - ${change.held}::numeric, 0),
-				consumed_value = GREATEST(control_window.consumed_value + ${change.target}::numeric, 0),
+				consumed_value = GREATEST(control_window.consumed_value + ${target}::numeric, 0),
 				updated_at = now()
 			WHERE control_window.project_id = ${input.projectId}
-				AND control_window.id = ${change.windowId}::bigint
+				AND control_window.id = ${group.windowId}::bigint
 			RETURNING consumed_value::text AS consumed_value
 		`,
 		);
 		if (updated === null) throw new Error("Control window disappeared during confirmation");
-		const applied = decimalToUnits(String(updated.consumed_value), 9) - change.consumed;
-		if (change.hasHold) {
-			// The hold row records what the hold turned into; a falling charge converts nothing.
+		const applied = decimalToUnits(String(updated.consumed_value), 9) - consumed;
+		// Each hold row records what it turned into; a falling charge converts nothing.
+		for (const [index, hold] of group.holds.entries()) {
 			await executeOne(
 				executor,
 				drizzleSql`
 				UPDATE reservation_control_holds
-				SET consumed_value = ${unitsToDecimal(applied > 0n ? applied : 0n, 9)}::numeric
+				SET consumed_value = ${unitsToDecimal(index === 0 && applied > 0n ? applied : 0n, 9)}::numeric
 				WHERE project_id = ${input.projectId} AND reservation_id = ${input.reservationId}
-					AND control_window_id = ${change.windowId}::bigint
+					AND control_window_id = ${String(hold.control_window_id)}::bigint
 				RETURNING reservation_id
 			`,
 			);
 		}
-		if (applied !== 0n || change.spend) {
-			entries.push({ controlWindowId: change.windowId, value: unitsToDecimal(applied, 9) });
+		if (applied !== 0n || group.kind === "spend_limit") {
+			entries.push({ controlWindowId: group.windowId, value: unitsToDecimal(applied, 9) });
 		}
 	}
 	return { denial: null, entries };
@@ -571,17 +674,20 @@ export async function correctControlConsumption(
 	for (const customer of customers) {
 		await lockCustomerControls(executor, input.projectId, customer.customer_id);
 	}
-	const entries = await executeRows<{
+	// A replaced control's window and its replacement's count the same usage: the replacement
+	// carried what the replaced one had counted. A correction lowers every window that counts it, so
+	// the highest of them stays the window's usage. Each set of such windows is corrected once.
+	const windows = await executeRows<{
+		entry_window_id: string | number | bigint;
 		control_window_id: string | number | bigint;
-		value: unknown;
 		consumed_value: unknown;
 		control_kind: "usage_limit" | "spend_limit";
 		currency: string | null;
 	}>(
 		executor,
 		drizzleSql`
-		SELECT entry.control_window_id, entry.value::text AS value,
-			control_window.consumed_value::text AS consumed_value, policy.control_kind, policy.currency
+		SELECT entry.control_window_id AS entry_window_id, identity_window.id AS control_window_id,
+			identity_window.consumed_value::text AS consumed_value, policy.control_kind, policy.currency
 		FROM usage_event_control_entries entry
 		JOIN control_windows control_window
 			ON control_window.project_id = entry.project_id
@@ -589,22 +695,38 @@ export async function correctControlConsumption(
 		JOIN control_policies policy
 			ON policy.project_id = control_window.project_id
 			AND policy.id = control_window.control_policy_id
+		JOIN control_policies identity_policy
+			ON identity_policy.project_id = policy.project_id
+			AND identity_policy.control_kind = policy.control_kind
+			AND identity_policy.feature_id IS NOT DISTINCT FROM policy.feature_id
+			AND identity_policy.currency IS NOT DISTINCT FROM policy.currency
+			AND identity_policy.entity_id IS NOT DISTINCT FROM policy.entity_id
+		JOIN control_windows identity_window
+			ON identity_window.project_id = identity_policy.project_id
+			AND identity_window.control_policy_id = identity_policy.id
+			AND identity_window.customer_id = control_window.customer_id
+			AND identity_window.window_start_at = control_window.window_start_at
+			AND identity_window.window_end_at IS NOT DISTINCT FROM control_window.window_end_at
 		WHERE entry.project_id = ${input.projectId}
 			AND entry.usage_event_id = ${input.originalUsageEventId}
 			AND entry.usage_event_recorded_at = ${new Date(input.originalUsageEventRecordedAt).toISOString()}
-		ORDER BY entry.control_window_id
-		FOR UPDATE OF control_window
+		ORDER BY identity_window.id, entry.control_window_id
+		FOR UPDATE OF identity_window
 	`,
 	);
-	for (const entry of entries) {
+	const corrected = new Set<string>();
+	for (const window of windows) {
+		const windowId = String(window.control_window_id);
+		if (corrected.has(windowId)) continue;
+		corrected.add(windowId);
 		const reductionUnits =
-			entry.control_kind === "usage_limit"
+			window.control_kind === "usage_limit"
 				? decimalToUnits(input.usageReduction, 9)
-				: entry.currency === input.currency
+				: window.currency === input.currency
 					? signedDecimalToUnits(input.spendMinorReduction, 9)
 					: 0n;
 		if (reductionUnits === 0n) continue;
-		const currentUnits = decimalToUnits(String(entry.consumed_value), 9);
+		const currentUnits = decimalToUnits(String(window.consumed_value), 9);
 		const desiredNext = currentUnits - reductionUnits;
 		const nextUnits = desiredNext > 0n ? desiredNext : 0n;
 		const appliedDelta = nextUnits - currentUnits;
@@ -615,8 +737,7 @@ export async function correctControlConsumption(
 			executor,
 			drizzleSql`
 			UPDATE control_windows SET consumed_value = ${renderedNext}::numeric, updated_at = now()
-			WHERE project_id = ${input.projectId}
-				AND id = ${String(entry.control_window_id)}::bigint
+			WHERE project_id = ${input.projectId} AND id = ${windowId}::bigint
 			RETURNING id
 		`,
 		);
@@ -627,8 +748,7 @@ export async function correctControlConsumption(
 				project_id, usage_event_recorded_at, usage_event_id, control_window_id, value
 			) VALUES (
 				${input.projectId}, ${new Date(input.correctionUsageEventRecordedAt).toISOString()},
-				${input.correctionUsageEventId}, ${String(entry.control_window_id)}::bigint,
-				${renderedDelta}::numeric
+				${input.correctionUsageEventId}, ${windowId}::bigint, ${renderedDelta}::numeric
 			) ON CONFLICT (project_id, usage_event_recorded_at, usage_event_id, control_window_id)
 			DO NOTHING
 		`,

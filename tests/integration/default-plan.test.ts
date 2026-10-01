@@ -1085,6 +1085,120 @@ localDescribe("default plan", () => {
 		});
 	});
 
+	it("keeps an open reservation's exposure when an unchanged default control is republished", async () => {
+		const limited = (version: number) => ({
+			...freePlan(version, "100"),
+			controls: [
+				{
+					controlKind: "usage_limit" as const,
+					featureKey: "model_tokens",
+					currency: null,
+					limitValue: "100",
+					interval: "day" as const,
+				},
+			],
+		});
+		await publish(catalog(limited(1)));
+		const hold = await context.repository.reserveUsage(project, {
+			billingAccountId: "republish-hold",
+			featureKey: "model_tokens",
+			quantity: "90",
+			idempotencyKey: "republish-hold:reserve",
+			expiresInSeconds: 300,
+		});
+		expect(hold.allowed).toBe(true);
+		const extra = {
+			billingAccountId: "republish-hold",
+			featureKey: "model_tokens",
+			quantity: "20",
+		};
+		expect(await context.repository.checkUsage(project, extra)).toMatchObject({ allowed: false });
+
+		await publish(catalog(limited(2)));
+		expect(await context.repository.checkUsage(project, extra)).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+		expect(
+			await context.repository.consumeUsage(project, {
+				...extra,
+				idempotencyKey: "republish-hold:extra",
+			}),
+		).toMatchObject({ allowed: false, reason: "control_limit_exceeded" });
+		expect(
+			await context.repository.confirmUsageReservation(project, {
+				billingAccountId: "republish-hold",
+				reservationId: hold.reservationId ?? "",
+				quantity: "90",
+				idempotencyKey: "republish-hold:confirm",
+			}),
+		).toMatchObject({ allowed: true });
+		expect(
+			await context.repository.consumeUsage(project, {
+				...extra,
+				quantity: "10",
+				idempotencyKey: "republish-hold:rest",
+			}),
+		).toMatchObject({ allowed: true });
+		expect(await context.repository.checkUsage(project, { ...extra, quantity: "1" })).toMatchObject(
+			{ allowed: false, reason: "control_limit_exceeded" },
+		);
+	});
+
+	it("frees corrected usage after its default control is republished", async () => {
+		const limited = (version: number) => ({
+			...freePlan(version, "100"),
+			controls: [
+				{
+					controlKind: "usage_limit" as const,
+					featureKey: "model_tokens",
+					currency: null,
+					limitValue: "100",
+					interval: "day" as const,
+				},
+			],
+		});
+		await publish(catalog(limited(1)));
+		const original = await context.repository.consumeUsage(project, {
+			billingAccountId: "republish-correct",
+			featureKey: "model_tokens",
+			quantity: "90",
+			idempotencyKey: "republish-correct:before",
+		});
+		expect(original.allowed).toBe(true);
+		await publish(catalog(limited(2)));
+		expect(
+			await context.repository.consumeUsage(project, {
+				billingAccountId: "republish-correct",
+				featureKey: "model_tokens",
+				quantity: "10",
+				idempotencyKey: "republish-correct:after",
+			}),
+		).toMatchObject({ allowed: true });
+
+		await context.repository.correctUsage(project, {
+			billingAccountId: "republish-correct",
+			originalUsageEventId: original.usageEventId ?? "",
+			originalRecordedAt: new Date(original.recordedAt ?? ""),
+			quantity: "90",
+			idempotencyKey: "republish-correct:refund",
+			actor: "default-plan-test",
+			reason: "full refund",
+		});
+		const freed = { billingAccountId: "republish-correct", featureKey: "model_tokens" };
+		expect(
+			await context.repository.checkUsage(project, { ...freed, quantity: "90" }),
+		).toMatchObject({
+			allowed: true,
+		});
+		expect(
+			await context.repository.checkUsage(project, { ...freed, quantity: "91" }),
+		).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+	});
+
 	it("gives two concurrent first requests one default grant", async () => {
 		await publish(catalog(freePlan(1, "100")));
 

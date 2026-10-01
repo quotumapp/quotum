@@ -343,6 +343,152 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		});
 	});
 
+	it("keeps an open hold's exposure through a control replacement and settles it once", async () => {
+		const limit = await replaceableLimit("replace-hold");
+		await limit("100");
+		const hold = await context.repository.reserveUsage(project, {
+			billingAccountId: "replace-hold",
+			featureKey: "ai_credits",
+			quantity: "90",
+			idempotencyKey: "replace-hold:reserve",
+			expiresInSeconds: 300,
+		});
+		expect(hold.allowed).toBe(true);
+
+		// The replacement inherits the hold: the window still holds 90 of its 100.
+		expect(await limit("100")).toMatchObject({ consumedValue: "0", heldValue: "90" });
+		const extra = { billingAccountId: "replace-hold", featureKey: "ai_credits", quantity: "20" };
+		expect(await context.repository.checkUsage(project, extra)).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+		expect(await consume("replace-hold", "20", "replace-hold:extra")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+
+		// Settling the hold counts it once, in the replacement's window.
+		const confirmed = await context.repository.confirmUsageReservation(project, {
+			billingAccountId: "replace-hold",
+			reservationId: hold.reservationId ?? "",
+			quantity: "90",
+			idempotencyKey: "replace-hold:confirm",
+		});
+		expect(confirmed).toMatchObject({ allowed: true });
+		expect(
+			await context.repository.controlsEnterprise.listEffectiveControls(project, "replace-hold"),
+		).toMatchObject([
+			{ limitValue: "100", consumedValue: "90", heldValue: "0", remainingValue: "10" },
+		]);
+		expect(await consume("replace-hold", "10", "replace-hold:rest")).toMatchObject({
+			allowed: true,
+		});
+		expect(await consume("replace-hold", "1", "replace-hold:over")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+	});
+
+	it("settles a hold in the window it was taken in after the window rolls", async () => {
+		const limit = await replaceableLimit("rolled-hold");
+		await limit("100");
+		const hold = await context.repository.reserveUsage(project, {
+			billingAccountId: "rolled-hold",
+			featureKey: "ai_credits",
+			quantity: "90",
+			idempotencyKey: "rolled-hold:reserve",
+			expiresInSeconds: 300,
+		});
+		expect(hold.allowed).toBe(true);
+		// The hold was taken in yesterday's window; today the limit counts a new one.
+		await context.sql`
+			UPDATE control_windows
+			SET window_start_at = window_start_at - interval '1 day',
+				window_end_at = window_end_at - interval '1 day'
+			WHERE customer_id = (SELECT id FROM customers WHERE billing_account_id = 'rolled-hold')
+		`;
+		await limit("100");
+
+		expect(
+			await context.repository.confirmUsageReservation(project, {
+				billingAccountId: "rolled-hold",
+				reservationId: hold.reservationId ?? "",
+				quantity: "90",
+				idempotencyKey: "rolled-hold:confirm",
+			}),
+		).toMatchObject({ allowed: true });
+		const windows = await context.sql<Array<{ consumed: string; held: string }>>`
+			SELECT consumed_value::text AS consumed, held_value::text AS held
+			FROM control_windows
+			WHERE customer_id = (SELECT id FROM customers WHERE billing_account_id = 'rolled-hold')
+			ORDER BY window_start_at, id
+		`;
+		expect(windows.map((row) => ({ ...row }))[0]).toEqual({
+			consumed: "90.000000000",
+			held: "0.000000000",
+		});
+		expect(await consume("rolled-hold", "100", "rolled-hold:today")).toMatchObject({
+			allowed: true,
+		});
+	});
+
+	it("frees a released hold's exposure after its control is replaced", async () => {
+		const limit = await replaceableLimit("replace-release");
+		await limit("100");
+		const hold = await context.repository.reserveUsage(project, {
+			billingAccountId: "replace-release",
+			featureKey: "ai_credits",
+			quantity: "90",
+			idempotencyKey: "replace-release:reserve",
+			expiresInSeconds: 300,
+		});
+		expect(hold.allowed).toBe(true);
+		await limit("100");
+		await context.repository.releaseUsageReservation(project, {
+			billingAccountId: "replace-release",
+			reservationId: hold.reservationId ?? "",
+			idempotencyKey: "replace-release:release",
+		});
+		expect(
+			await context.repository.controlsEnterprise.listEffectiveControls(project, "replace-release"),
+		).toMatchObject([{ consumedValue: "0", heldValue: "0", remainingValue: "100" }]);
+		expect(await consume("replace-release", "100", "replace-release:all")).toMatchObject({
+			allowed: true,
+		});
+	});
+
+	it("frees corrected usage that a replaced control counted", async () => {
+		const limit = await replaceableLimit("replace-correct");
+		await limit("100");
+		const original = await consume("replace-correct", "90", "replace-correct:original");
+		expect(original).toMatchObject({ allowed: true });
+		await limit("100");
+		expect(await consume("replace-correct", "10", "replace-correct:after")).toMatchObject({
+			allowed: true,
+		});
+
+		await context.repository.correctUsage(project, {
+			billingAccountId: "replace-correct",
+			originalUsageEventId: original.usageEventId ?? "",
+			originalRecordedAt: new Date(original.recordedAt ?? ""),
+			quantity: "90",
+			idempotencyKey: "replace-correct:refund",
+			actor: "integration-test",
+			reason: "full refund",
+		});
+
+		expect(
+			await context.repository.controlsEnterprise.listEffectiveControls(project, "replace-correct"),
+		).toMatchObject([{ consumedValue: "10", remainingValue: "90" }]);
+		expect(await consume("replace-correct", "90", "replace-correct:freed")).toMatchObject({
+			allowed: true,
+		});
+		expect(await consume("replace-correct", "1", "replace-correct:over")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+	});
+
 	it("reserves the safety budget before Stripe and grants the purchased allocation atomically", async () => {
 		await prepareAutoTopupAccount("topup-account");
 		await context.repository.grantAllocation(project, {
@@ -1315,6 +1461,26 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			quantity,
 			idempotencyKey,
 		});
+	}
+
+	/** An account with credit and a daily usage limit that each call replaces with a new policy. */
+	async function replaceableLimit(billingAccountId: string) {
+		await context.repository.grantAllocation(project, {
+			billingAccountId,
+			featureKey: "ai_credits",
+			quantity: "1000",
+			sourceKind: "credit_grant",
+			sourceKey: `fixture:${billingAccountId}`,
+		});
+		return (limitValue: string) =>
+			context.repository.controlsEnterprise.upsertControl(project, {
+				billingAccountId,
+				controlKind: "usage_limit",
+				featureKey: "ai_credits",
+				limitValue,
+				interval: "day",
+				actor: "integration-test",
+			});
 	}
 
 	async function prepareAutoTopupAccount(billingAccountId: string): Promise<void> {
