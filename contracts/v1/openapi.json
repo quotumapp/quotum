@@ -8437,7 +8437,10 @@
                 "items": {
                   "properties": {
                     "available": {
-                      "type": "string"
+                      "type": [
+                        "null",
+                        "string"
+                      ]
                     },
                     "expiresAt": {
                       "type": [
@@ -8451,7 +8454,26 @@
                     "held": {
                       "type": "string"
                     },
+                    "scope": {
+                      "enum": [
+                        "account",
+                        "entity"
+                      ],
+                      "type": "string"
+                    },
                     "unit": {
+                      "type": "string"
+                    },
+                    "unlimited": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    },
+                    "windowEndAt": {
+                      "type": "string"
+                    },
+                    "windowStartAt": {
                       "type": "string"
                     }
                   },

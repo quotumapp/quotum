@@ -24,9 +24,15 @@ export const getV1BillingAccountsByBillingAccountIdBillingSummaryResponse200Sche
 			z.object({
 				featureKey: z.string(),
 				unit: z.string(),
-				available: z.string(),
+				/** Null only when an unlimited usage source lifts the feature's cap. */
+				available: z.union([z.null(), z.string()]),
 				held: z.string(),
 				expiresAt: z.union([z.null(), z.string()]),
+				unlimited: z.literal(true).optional(),
+				/** A meter limit's scope and current window (PC-12); absent on wallet balances. */
+				scope: z.enum(["account", "entity"]).optional(),
+				windowStartAt: z.string().optional(),
+				windowEndAt: z.string().optional(),
 			}),
 		),
 		usage: z.array(

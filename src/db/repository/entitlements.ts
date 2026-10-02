@@ -730,51 +730,17 @@ export async function readProjectionBalances(
 		readPendingAllowances(executor, projectId, customerId, null),
 	]);
 	const allocations = withPendingProjectionBalances(allocationRows, pending);
-	const limits = await readProjectionMeterLimits(executor, projectId, customerId);
-	// Window bounds come from the same rule metering writes with, so only the current window counts.
-	// The projection is the account's own view: an account-scoped limit counts every entity's usage,
-	// an entity-scoped one the usage sent without an entity.
-	const windows = await Promise.all(
-		limits.map(async (limit) => {
-			const row = await executeOne<ProjectionBalanceRow>(
-				executor,
-				drizzleSql`
-					SELECT
-						f.key AS feature_key,
-						f.unit,
-						f.credit_scale,
-						GREATEST(
-							${limit.quantity}::numeric - COALESCE(scoped.usage, 0) - COALESCE(scoped.held, 0),
-							0::numeric
-						) AS available,
-						COALESCE(scoped.held, 0) AS held,
-						${limit.end.toISOString()}::timestamptz AS period_ends_at,
-						${limit.unlimited}::boolean AS unlimited
-					FROM features f
-					LEFT JOIN LATERAL (
-						SELECT sum(windows.usage) AS usage, sum(holds.held) AS held
-						FROM usage_windows windows
-						LEFT JOIN LATERAL (
-							SELECT sum(reservations.held_quantity) AS held
-							FROM reservations
-							WHERE reservations.project_id = windows.project_id
-								AND reservations.usage_window_id = windows.id
-								AND reservations.status = 'active'
-								AND reservations.expires_at > now()
-						) holds ON true
-						WHERE windows.project_id = ${projectId}
-							AND windows.customer_id = ${customerId}
-							AND windows.feature_id = f.id
-							AND windows.window_start_at = ${limit.start.toISOString()}::timestamptz
-							AND windows.window_end_at = ${limit.end.toISOString()}::timestamptz
-							AND ${scopeSetSql(drizzleSql`windows`, meterLimitScopeSelector(limit.scope, null))}
-					) scoped ON true
-					WHERE f.project_id = ${projectId} AND f.id = ${limit.featureId}::bigint
-				`,
-			);
-			return row === null ? [] : [row];
+	const windows = (await readMeterLimitWindowBalances(executor, projectId, customerId)).map(
+		(window): ProjectionBalanceRow => ({
+			feature_key: window.featureKey,
+			unit: window.unit,
+			credit_scale: window.creditScale,
+			available: window.available,
+			held: window.held,
+			period_ends_at: window.windowEndAt,
+			unlimited: window.unlimited,
 		}),
-	).then((rows) => rows.flat());
+	);
 
 	return [...allocations, ...windows]
 		.sort((left, right) =>
@@ -791,6 +757,95 @@ export async function readProjectionBalances(
 		}));
 }
 
+/** A meter limit's current window, counted the way the account's own view counts it. */
+export interface MeterLimitWindowBalance {
+	featureKey: string;
+	unit: string;
+	creditScale: number;
+	/** The limit less the window's usage and holds, at least zero; finite even when unlimited. */
+	available: unknown;
+	held: unknown;
+	windowStartAt: Date;
+	windowEndAt: Date;
+	unlimited: boolean;
+	scope: MeterLimitScope;
+}
+
+/**
+ * Each meter-limited feature's current window for the account, as the projection and the billing
+ * summary report it. Window bounds come from the same rule metering writes with, so only the
+ * current window counts. This is the account's own view: an account-scoped limit counts every
+ * entity's usage, an entity-scoped one the usage sent without an entity. An account Quotum has not
+ * recorded yet (`customerId` null) reads its default plan's limits with no usage.
+ */
+export async function readMeterLimitWindowBalances(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string | null,
+): Promise<MeterLimitWindowBalance[]> {
+	const limits = await readProjectionMeterLimits(executor, projectId, customerId);
+	const rows = await Promise.all(
+		limits.map(async (limit) => {
+			const row = await executeOne<{
+				feature_key: string;
+				unit: string;
+				credit_scale: number;
+				available: unknown;
+				held: unknown;
+			}>(
+				executor,
+				drizzleSql`
+					SELECT
+						f.key AS feature_key,
+						f.unit,
+						f.credit_scale,
+						GREATEST(
+							${limit.quantity}::numeric - COALESCE(scoped.usage, 0) - COALESCE(scoped.held, 0),
+							0::numeric
+						) AS available,
+						COALESCE(scoped.held, 0) AS held
+					FROM features f
+					LEFT JOIN LATERAL (
+						SELECT sum(windows.usage) AS usage, sum(holds.held) AS held
+						FROM usage_windows windows
+						LEFT JOIN LATERAL (
+							SELECT sum(reservations.held_quantity) AS held
+							FROM reservations
+							WHERE reservations.project_id = windows.project_id
+								AND reservations.usage_window_id = windows.id
+								AND reservations.status = 'active'
+								AND reservations.expires_at > now()
+						) holds ON true
+						WHERE windows.project_id = ${projectId}
+							AND windows.customer_id = ${customerId}::uuid
+							AND windows.feature_id = f.id
+							AND windows.window_start_at = ${limit.start.toISOString()}::timestamptz
+							AND windows.window_end_at = ${limit.end.toISOString()}::timestamptz
+							AND ${scopeSetSql(drizzleSql`windows`, meterLimitScopeSelector(limit.scope, null))}
+					) scoped ON true
+					WHERE f.project_id = ${projectId} AND f.id = ${limit.featureId}::bigint
+				`,
+			);
+			return row === null
+				? []
+				: [
+						{
+							featureKey: row.feature_key,
+							unit: row.unit,
+							creditScale: Number(row.credit_scale),
+							available: row.available,
+							held: row.held,
+							windowStartAt: limit.start,
+							windowEndAt: limit.end,
+							unlimited: limit.unlimited,
+							scope: limit.scope,
+						},
+					];
+		}),
+	);
+	return rows.flat();
+}
+
 /**
  * The account's meter limits as metering resolves them (see `combineMeterLimits` and
  * `unlimitedLiftsCap`): for each feature a plan limits, the quantity its sources add up to, the
@@ -800,7 +855,7 @@ export async function readProjectionBalances(
 async function readProjectionMeterLimits(
 	executor: QueryExecutor,
 	projectId: string,
-	customerId: string,
+	customerId: string | null,
 ): Promise<
 	Array<{
 		featureId: string;
@@ -857,17 +912,21 @@ async function readProjectionMeterLimits(
 	return await Promise.all(
 		limits.map(async ({ declared, ...limit }) => ({
 			...limit,
-			scope: await governingMeterLimitScope(
-				executor,
-				{
-					projectId,
-					customerId,
-					featureId: limit.featureId,
-					windowStartAt: limit.start,
-					windowEndAt: limit.end,
-				},
-				declared,
-			),
+			// An account with no usage holds no rows to govern by, so its declared scope applies.
+			scope:
+				customerId === null
+					? declared
+					: await governingMeterLimitScope(
+							executor,
+							{
+								projectId,
+								customerId,
+								featureId: limit.featureId,
+								windowStartAt: limit.start,
+								windowEndAt: limit.end,
+							},
+							declared,
+						),
 		})),
 	);
 }
