@@ -4,11 +4,13 @@ import {
 	type MeterLimitRow,
 	meterLimitBounds,
 	meterLimitsJoin,
+	unlimitedLiftsCap,
 } from "../../src/db/repository/meter-limit-sources";
 
 function row(overrides: Partial<MeterLimitRow>): MeterLimitRow {
 	return {
 		plan_item_id: "1",
+		item_kind: "meter_limit",
 		subscription_id: "sub-base",
 		plan_grant_id: null,
 		quantity: "100.000000000",
@@ -110,5 +112,37 @@ describe("combined meter limits", () => {
 			start: new Date("2026-09-15T06:00:00Z"),
 			end: new Date("2026-09-16T06:00:00Z"),
 		});
+	});
+});
+
+describe("unlimited usage sources", () => {
+	const unlimited = row({
+		plan_item_id: "9",
+		item_kind: "unlimited_usage",
+		subscription_id: "sub-unlimited",
+		quantity: null,
+		plan_kind: "addon",
+	});
+
+	it("leaves an unlimited item out of the finite sum and lets it lift a hard cap", () => {
+		expect(combineMeterLimits([base, unlimited], 0)).toMatchObject({
+			anchor: base,
+			quantity: "100",
+		});
+		expect(combineMeterLimits([unlimited], 0)).toBeNull();
+		expect(unlimitedLiftsCap([base, unlimited], base)).toBe(true);
+		expect(unlimitedLiftsCap([unlimited], null)).toBe(true);
+		expect(unlimitedLiftsCap([base], base)).toBe(false);
+	});
+
+	it("never lifts a postpaid limit, which has no cap to lift", () => {
+		const postpaid = row({ overage_policy: "allowed" });
+		expect(unlimitedLiftsCap([postpaid, unlimited], postpaid)).toBe(false);
+	});
+
+	it("counts a plan grant's unlimited item only while no subscription is paying", () => {
+		const granted = { ...unlimited, subscription_id: null, plan_grant_id: "grant-1" };
+		expect(unlimitedLiftsCap([granted], null)).toBe(true);
+		expect(unlimitedLiftsCap([base, granted], base)).toBe(false);
 	});
 });

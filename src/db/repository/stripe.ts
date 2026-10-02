@@ -703,7 +703,8 @@ export class StripeBillingRepository extends RepositoryModule {
 	/**
 	 * The features whose meter limits in the add-on plan version cannot add up with the limits the
 	 * account's funding subscriptions already hold on them: a limit that allows postpaid overage, or
-	 * one with another reset (see `combineMeterLimits`).
+	 * one with another reset (see `combineMeterLimits`). Unlimited usage lifts hard caps only, so an
+	 * unlimited item and a postpaid limit on one feature conflict too, whichever side brings it.
 	 */
 	async addOnMeterLimitConflicts(
 		project: ProjectInstanceContext,
@@ -727,17 +728,33 @@ export class StripeBillingRepository extends RepositoryModule {
 					ON held.project_id = s.project_id
 					AND held.plan_version_id = s.plan_version_id
 					AND held.feature_id = added.feature_id
-					AND held.item_kind = 'meter_limit'
+					AND held.item_kind IN ('meter_limit', 'unlimited_usage')
 				WHERE added.project_id = ${projectId}
 					AND added.plan_version_id = ${planVersionId}::bigint
-					AND added.item_kind = 'meter_limit'
+					AND added.item_kind IN ('meter_limit', 'unlimited_usage')
 					AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
 					AND (s.expires_at IS NULL OR s.expires_at > now())
 					AND (
-						added.overage_policy <> 'blocked'
-						OR held.overage_policy <> 'blocked'
-						OR added.reset_interval IS DISTINCT FROM held.reset_interval
-						OR added.reset_interval_count <> held.reset_interval_count
+						(
+							added.item_kind = 'meter_limit'
+							AND held.item_kind = 'meter_limit'
+							AND (
+								added.overage_policy <> 'blocked'
+								OR held.overage_policy <> 'blocked'
+								OR added.reset_interval IS DISTINCT FROM held.reset_interval
+								OR added.reset_interval_count <> held.reset_interval_count
+							)
+						)
+						OR (
+							added.item_kind = 'unlimited_usage'
+							AND held.item_kind = 'meter_limit'
+							AND held.overage_policy <> 'blocked'
+						)
+						OR (
+							added.item_kind = 'meter_limit'
+							AND held.item_kind = 'unlimited_usage'
+							AND added.overage_policy <> 'blocked'
+						)
 					)
 				ORDER BY feature.key
 			`,

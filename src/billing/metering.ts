@@ -73,12 +73,22 @@ export interface MeteringBalance {
 	featureKey: string;
 	unit: string;
 	scale: number;
-	granted: string;
+	/** Null with `unlimited`: an unlimited quota grants no quantity. */
+	granted: string | null;
 	consumed: string;
 	held: string;
-	available: string;
+	/** Null with `unlimited`: nothing caps what the account may use. */
+	available: string | null;
+	/**
+	 * Present, and true, when an active unlimited usage source lifts the feature's quota cap. Usage
+	 * is still counted in `consumed` and `held`, and controls still apply.
+	 */
+	unlimited?: true;
 	breakdown: BalanceAllocationBreakdown[];
 }
+
+/** An allocation balance: allocations always grant a finite quantity, so it is never unlimited. */
+export type FiniteMeteringBalance = MeteringBalance & { granted: string; available: string };
 
 export interface BalanceAllocationBreakdown {
 	allocationId: string;

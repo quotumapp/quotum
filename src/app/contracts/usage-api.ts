@@ -35,10 +35,12 @@ const quantitySchema = z.object({ featureId: z.string(), unit: z.string(), value
 const balanceSchema = z.object({
 	featureId: z.string(),
 	unit: z.string(),
-	granted: z.string(),
+	// An unlimited quota grants no finite amount, so granted and available are null.
+	granted: z.string().nullable(),
 	consumed: z.string(),
 	held: z.string(),
-	available: z.string(),
+	available: z.string().nullable(),
+	unlimited: z.literal(true).optional(),
 });
 const scopeShape = { featureId: z.string(), entityId: z.string().nullable() };
 const meteredShape = {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { MeteringBalance } from "../../src/billing/metering";
+import type { FiniteMeteringBalance } from "../../src/billing/metering";
 import {
 	buildDecision,
 	type FeatureRow,
@@ -37,7 +37,7 @@ const rate: RateDecision = {
 	tiers: [],
 };
 
-const emptyBalance: MeteringBalance = {
+const emptyBalance: FiniteMeteringBalance = {
 	featureKey: "credits",
 	unit: "credit",
 	scale: 0,

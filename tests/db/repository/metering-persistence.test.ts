@@ -26,6 +26,7 @@ const meter: MeterLimitDecision = {
 	planItemId: "1",
 	limit: "25",
 	overagePolicy: "allowed",
+	unlimited: false,
 	windowStartAt: new Date("2026-09-01"),
 	windowEndAt: new Date("2026-10-01"),
 	overagePrice: {

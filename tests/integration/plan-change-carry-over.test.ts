@@ -724,7 +724,7 @@ async function planAllowances() {
 		.map((row) => [row.version, row.quantity, row.consumed, row.ended]);
 }
 
-async function available(): Promise<string> {
+async function available(): Promise<string | null> {
 	return (await context.repository.getMeteringBalance(project, "migration-stripe", "ai_credits"))
 		.available;
 }

@@ -83,6 +83,7 @@ const canonicalPlanItemSchema = z.discriminatedUnion("itemKind", [
 		price: priceSchema,
 		allocationScope: z.enum(["account", "license_pool"]),
 	}),
+	z.object({ itemKind: z.literal("unlimited_usage"), featureKey: z.string() }),
 ]);
 
 /** The published catalog read back in its canonical spelling, every default spelled out. */

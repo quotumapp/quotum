@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import fc from "fast-check";
 import { decimalToUnits, unitsToDecimal } from "../../src/billing/decimal";
-import type { MeteringBalance } from "../../src/billing/metering";
+import type { FiniteMeteringBalance, MeteringBalance } from "../../src/billing/metering";
 import {
 	calculateRateCardQuantity,
 	calculateTieredUsageCharge,
@@ -208,7 +208,7 @@ describe("rate-card conversion properties", () => {
 			ratePerUnit: "0.001",
 			tiers: [],
 		};
-		const empty: MeteringBalance = {
+		const empty: FiniteMeteringBalance = {
 			featureKey: "credits",
 			unit: "credits",
 			scale: 0,
@@ -332,6 +332,7 @@ describe("overage charge properties", () => {
 						planItemId: "1",
 						limit: unitsToDecimal(limit, meterScale),
 						overagePolicy: "allowed",
+						unlimited: false,
 						windowStartAt: new Date("2026-09-01"),
 						windowEndAt: new Date("2026-10-01"),
 						overagePrice: {

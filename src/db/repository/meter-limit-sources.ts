@@ -13,6 +13,8 @@ import type { QueryExecutor } from "./types";
 
 export interface MeterLimitRow {
 	plan_item_id: string | number | bigint;
+	/** A finite `meter_limit`, or an `unlimited_usage` item that lifts the feature's hard caps. */
+	item_kind: "meter_limit" | "unlimited_usage";
 	/** Exactly one of the subscription and the plan grant is set. */
 	subscription_id: string | null;
 	plan_grant_id: string | null;
@@ -31,8 +33,8 @@ export interface MeterLimitRow {
 
 /**
  * The meter limits that apply to the account's feature: a paying subscription's, a plan grant's,
- * or the default plan's when the account would start it on its next write. A null account is one
- * Quotum has not recorded yet.
+ * or the default plan's when the account would start it on its next write, with the unlimited usage
+ * items of the same sources. A null account is one Quotum has not recorded yet.
  */
 export function queryMeterLimitRows(
 	executor: QueryExecutor,
@@ -48,6 +50,7 @@ export function queryMeterLimitRows(
 		drizzleSql`
 			SELECT
 				plan_item_id,
+				item_kind,
 				subscription_id,
 				plan_grant_id,
 				quantity,
@@ -69,6 +72,7 @@ export function queryMeterLimitRows(
 			FROM (
 				SELECT
 					pi.id AS plan_item_id,
+					pi.item_kind,
 					s.id AS subscription_id,
 					NULL::uuid AS plan_grant_id,
 					pi.quantity,
@@ -94,12 +98,13 @@ export function queryMeterLimitRows(
 					AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
 					AND (s.expires_at IS NULL OR s.expires_at > now())
 					AND pi.feature_id = ${String(feature.id)}
-					AND pi.item_kind = 'meter_limit'
+					AND pi.item_kind IN ('meter_limit', 'unlimited_usage')
 
 				UNION ALL
 
 				SELECT
 					pi.id AS plan_item_id,
+					pi.item_kind,
 					NULL::uuid AS subscription_id,
 					g.id AS plan_grant_id,
 					pi.quantity,
@@ -126,7 +131,7 @@ export function queryMeterLimitRows(
 					AND g.origin <> 'default'
 					AND (g.ends_at IS NULL OR g.ends_at > now())
 					AND pi.feature_id = ${String(feature.id)}
-					AND pi.item_kind = 'meter_limit'
+					AND pi.item_kind IN ('meter_limit', 'unlimited_usage')
 
 				UNION ALL
 
@@ -134,6 +139,7 @@ export function queryMeterLimitRows(
 				-- up first, so it is the grant's own), windowed from where it started, or would start.
 				SELECT
 					pi.id AS plan_item_id,
+					pi.item_kind,
 					NULL::uuid AS subscription_id,
 					d.grant_id AS plan_grant_id,
 					pi.quantity,
@@ -152,7 +158,7 @@ export function queryMeterLimitRows(
 					ON pi.project_id = ${projectId} AND pi.plan_version_id = d.plan_version_id
 				JOIN plan_versions pv ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
 				WHERE pi.feature_id = ${String(feature.id)}
-					AND pi.item_kind = 'meter_limit'
+					AND pi.item_kind IN ('meter_limit', 'unlimited_usage')
 			) sources
 			ORDER BY source_rank, sort_at, sort_id
 		`,
@@ -172,9 +178,10 @@ export function queryMeterLimitRows(
  * account another way, such as a later plan change, is left out rather than failing usage.
  */
 export function combineMeterLimits(
-	candidates: readonly MeterLimitRow[],
+	sources: readonly MeterLimitRow[],
 	scale: number,
 ): { anchor: MeterLimitRow; quantity: string } | null {
+	const candidates = sources.filter((row) => row.item_kind === "meter_limit");
 	const paid = candidates.filter((row) => row.subscription_id !== null);
 	if (paid.length === 0) {
 		const first = candidates[0];
@@ -194,6 +201,24 @@ export function combineMeterLimits(
 		}
 	}
 	return { anchor, quantity: unitsToDecimal(units, scale) };
+}
+
+/**
+ * Whether an active unlimited usage source lifts the feature's quota cap. Sources rank as finite
+ * limits do: once the account holds a paying subscription, only a subscription's unlimited item
+ * counts, and a plan grant's counts otherwise. It lifts hard caps only: when the limit `anchor`
+ * allows postpaid overage there is no cap to lift, and the overage stays billed as before.
+ * Publication and add-on purchases refuse that combination; one that reaches an account another
+ * way is left out rather than changing what the account is billed.
+ */
+export function unlimitedLiftsCap(
+	sources: readonly MeterLimitRow[],
+	anchor: MeterLimitRow | null,
+): boolean {
+	const unlimited = sources.filter((row) => row.item_kind === "unlimited_usage");
+	const paying = sources.some((row) => row.subscription_id !== null);
+	const counted = paying ? unlimited.filter((row) => row.subscription_id !== null) : unlimited;
+	return counted.length > 0 && (anchor === null || anchor.overage_policy === "blocked");
 }
 
 /** Whether two meter limits can share one window: hard caps with the same reset cadence. */

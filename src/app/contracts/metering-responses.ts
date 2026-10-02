@@ -10,10 +10,11 @@ export const getV1BillingAccountsByBillingAccountIdBalancesByFeatureKeyResponse2
 			featureKey: z.string(),
 			unit: z.string(),
 			scale: z.number(),
-			granted: z.string(),
+			granted: z.union([z.null(), z.string()]),
 			consumed: z.string(),
 			held: z.string(),
-			available: z.string(),
+			available: z.union([z.null(), z.string()]),
+			unlimited: z.literal(true).optional(),
 			breakdown: z.array(
 				z.object({
 					allocationId: z.string(),
@@ -66,9 +67,10 @@ const legacyOperationResponseSchema = z.object({
 				originalRecordedAt: z.union([z.null(), z.string()]),
 				balance: z.object({
 					featureKey: z.string(),
-					available: z.string(),
+					available: z.union([z.null(), z.string()]),
 					consumed: z.string(),
 					held: z.string(),
+					unlimited: z.literal(true).optional(),
 				}),
 			}),
 			completedAt: z.string(),
@@ -128,10 +130,11 @@ export const postV1BillingAccountsByBillingAccountIdUsageReservationsResponse200
 			featureKey: z.string(),
 			unit: z.string(),
 			scale: z.number(),
-			granted: z.string(),
+			granted: z.union([z.null(), z.string()]),
 			consumed: z.string(),
 			held: z.string(),
-			available: z.string(),
+			available: z.union([z.null(), z.string()]),
+			unlimited: z.literal(true).optional(),
 			breakdown: z.array(
 				z.object({
 					allocationId: z.string(),
@@ -207,10 +210,11 @@ export const postV1BillingAccountsByBillingAccountIdUsageReservationsByReservati
 				featureKey: z.string(),
 				unit: z.string(),
 				scale: z.number(),
-				granted: z.string(),
+				granted: z.union([z.null(), z.string()]),
 				consumed: z.string(),
 				held: z.string(),
-				available: z.string(),
+				available: z.union([z.null(), z.string()]),
+				unlimited: z.literal(true).optional(),
 				breakdown: z.array(
 					z.object({
 						allocationId: z.string(),
@@ -278,10 +282,11 @@ export const postV1BillingAccountsByBillingAccountIdUsageReservationsByReservati
 				featureKey: z.string(),
 				unit: z.string(),
 				scale: z.number(),
-				granted: z.string(),
+				granted: z.union([z.null(), z.string()]),
 				consumed: z.string(),
 				held: z.string(),
-				available: z.string(),
+				available: z.union([z.null(), z.string()]),
+				unlimited: z.literal(true).optional(),
 				breakdown: z.array(
 					z.object({
 						allocationId: z.string(),
@@ -344,10 +349,11 @@ export const postV1BillingAccountsByBillingAccountIdUsageEventsByUsageEventIdCor
 				featureKey: z.string(),
 				unit: z.string(),
 				scale: z.number(),
-				granted: z.string(),
+				granted: z.union([z.null(), z.string()]),
 				consumed: z.string(),
 				held: z.string(),
-				available: z.string(),
+				available: z.union([z.null(), z.string()]),
+				unlimited: z.literal(true).optional(),
 				breakdown: z.array(
 					z.object({
 						allocationId: z.string(),
