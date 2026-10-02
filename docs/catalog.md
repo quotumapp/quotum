@@ -42,11 +42,24 @@ reason `BILLING_INTERVAL` names the interval. All incompatible bindings are repo
 `400 PROVIDER_CAPABILITY_UNSUPPORTED` whose `details.providerCompatibility` lists them in catalog
 order; see [Provider capability errors](provider-capabilities.md#provider-capability-errors). The whole submitted intent is
 checked, including the plans it keeps unchanged. The published catalog is never re-validated
-against the declarations or the reset-interval rule: it stays readable, and preview still compares
-a new intent against it. Publish checks reset intervals and capabilities after it finds the preview
-token, so retrying a publish that already succeeded returns its stored result with
-`duplicate: true`. A successful preview also reports `providerCompatibility`; see
-[Catalog preview compatibility](provider-capabilities.md#catalog-preview-compatibility).
+against the declarations, the reset-interval rule or the price rules below: it stays readable, and
+preview still compares a new intent against it. Publish checks reset intervals, prices and
+capabilities after it finds the preview token, so retrying a publish that already succeeded returns
+its stored result with `duplicate: true`. A successful preview also reports `providerCompatibility`;
+see [Catalog preview compatibility](provider-capabilities.md#catalog-preview-compatibility).
+
+A plan can spell its price twice: the plan-level `currency`, `baseAmountMinor`, `billingInterval`,
+`billingIntervalCount` and `providerBindings`, and the `basePrice` object. When a plan has a
+`basePrice`, every plan-level value it also sends must agree with it, or preview and publish answer
+`400 INVALID_REQUEST` naming both values, such as `Plan pro baseAmountMinor 1000 conflicts with
+basePrice unitAmountMinor 2000`. A plan-level binding conflicts when it binds a provider channel
+that `basePrice` also binds to a different product; App Store and Google Play products whose price
+the store owns, on channels the `basePrice` does not bind, are not a second spelling. A price on an
+`allocation`, or on a `meter_limit` with `overagePolicy: "blocked"`, is refused too: Checkout leaves
+metered prices out, and usage invoicing and metering read an overage price only for an `allowed`
+limit, so such a price would show in the plan's pricing and never be billed. A plan may have no
+items. A catalog published before these rules keeps working as it was published; previewing it
+unchanged is refused until the conflicting value or the unbilled price is removed.
 
 ## Allowance windows
 

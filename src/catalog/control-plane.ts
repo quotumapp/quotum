@@ -33,6 +33,7 @@ import {
 	rolloverExpiryCadence,
 } from "./cadence-rules";
 import { assertDefaultPlan } from "./default-plan-rules";
+import { assertItemPricesCharge, assertPriceSpellingsAgree } from "./price-rules";
 import {
 	assertCatalogProviderCompatibility,
 	catalogProviderCompatibility,
@@ -124,7 +125,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		input: CatalogPreviewInput,
 	): Promise<CatalogPreview> {
 		const catalog = normalizeCatalog(input.catalog, this.capabilities);
-		assertNewCatalogIntent(catalog, this.capabilities);
+		assertNewCatalogIntent(input.catalog, catalog, this.capabilities);
 		const providerCompatibility = catalogProviderCompatibility(catalog, {
 			capabilities: this.capabilities,
 			includeUnbound: true,
@@ -228,7 +229,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 			}
 			// After the retry branch: a published draft replays its result even if a declaration or
 			// rule narrowed since, while every new publish is still checked before any write.
-			assertNewCatalogIntent(catalog, this.capabilities);
+			assertNewCatalogIntent(input.catalog, catalog, this.capabilities);
 			if (draft.status !== "previewed" || new Date(draft.expires_at).getTime() <= Date.now()) {
 				throw new PersistenceConflictError(
 					"Catalog preview has expired",
@@ -438,12 +439,16 @@ function assertExpectedRevision(expected: number | null, actual: number | null):
 
 /**
  * Checks a new intent in preview and publish, never a stored catalog: a published intent that
- * predates a rule stays readable, and preview still compares its replacement against it.
+ * predates a rule stays readable, and preview still compares its replacement against it. A rule
+ * that normalization would erase, such as two spellings of one price, reads the intent as submitted.
  */
 function assertNewCatalogIntent(
+	submitted: CatalogIntent,
 	catalog: CatalogIntent,
 	capabilities: ProviderCapabilityLookup,
 ): void {
+	assertPriceSpellingsAgree(submitted, catalog);
+	assertItemPricesCharge(catalog);
 	// Usage windows and plan allocations reset within the provider period, so an item that resets
 	// less often than its plan bills would silently reset every period: a yearly limit on a monthly
 	// plan would become a monthly one.

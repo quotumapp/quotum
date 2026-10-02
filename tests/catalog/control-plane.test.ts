@@ -1102,3 +1102,127 @@ describe("catalog control plane default plan", () => {
 		});
 	});
 });
+
+describe("catalog control plane price spellings", () => {
+	const basePrice = (overrides: Partial<CatalogPriceIntent> = {}): CatalogPriceIntent => ({
+		...flatPrice([stripeBinding]),
+		...overrides,
+	});
+	const outcome = async (candidate: CatalogPlanIntent): Promise<string> => {
+		const result = await previewWith(providerCapabilityCatalog, [candidate]);
+		return result === "normalized" ? result : result.message;
+	};
+	const pricedItem = (
+		itemKind: "meter_limit" | "allocation",
+		overagePolicy: "blocked" | "allowed",
+	): CatalogPlanIntent =>
+		plan({
+			items: [
+				{
+					...resettingItem(itemKind, "month"),
+					overagePolicy,
+					price: { ...flatPrice([stripeBinding]), key: "credits-overage" },
+				},
+			],
+		});
+
+	it("refuses a legacy price field that disagrees with basePrice", async () => {
+		// Normalization keeps basePrice, so each of these published one value and dropped the other.
+		expect(
+			await outcome(
+				plan({ baseAmountMinor: 1000, basePrice: basePrice({ unitAmountMinor: 2000 }) }),
+			),
+		).toBe("Plan pro baseAmountMinor 1000 conflicts with basePrice unitAmountMinor 2000");
+		expect(await outcome(plan({ currency: " eur ", basePrice: basePrice() }))).toBe(
+			"Plan pro currency EUR conflicts with basePrice currency USD",
+		);
+		expect(await outcome(plan({ billingInterval: "year", basePrice: basePrice() }))).toBe(
+			"Plan pro billingInterval year conflicts with basePrice billingInterval month",
+		);
+		expect(await outcome(plan({ billingIntervalCount: 3, basePrice: basePrice() }))).toBe(
+			"Plan pro billingIntervalCount 3 conflicts with basePrice billingIntervalCount 1",
+		);
+		expect(
+			await outcome(
+				plan({
+					providerBindings: [{ ...stripeBinding, productKey: "pro_legacy" }, appleBinding],
+					basePrice: basePrice(),
+				}),
+			),
+		).toBe(
+			"Plan pro providerBindings stripe/web pro_legacy conflict with basePrice providerBindings stripe/web pro",
+		);
+	});
+
+	it("accepts agreeing, absent and store-only legacy spellings", async () => {
+		for (const accepted of [
+			plan({
+				currency: " usd ",
+				baseAmountMinor: 1000,
+				billingIntervalCount: 1,
+				basePrice: basePrice(),
+				providerBindings: [stripeBinding, appleBinding],
+			}),
+			plan({ currency: null, billingInterval: null, basePrice: basePrice() }),
+			// App Store products carry no Quotum price; their binding is not a second spelling.
+			plan({ basePrice: basePrice(), providerBindings: [appleBinding] }),
+			plan({ baseAmountMinor: 1000, providerBindings: [stripeBinding] }),
+		]) {
+			expect(await outcome(accepted)).toBe("normalized");
+		}
+	});
+
+	it("refuses a price on an allocation or on a meter limit that blocks overage", async () => {
+		expect(await outcome(pricedItem("allocation", "blocked"))).toBe(
+			"Plan pro allocation credits cannot declare a price: allowances are not billed",
+		);
+		expect(await outcome(pricedItem("meter_limit", "blocked"))).toBe(
+			"Plan pro meter limit credits cannot declare a price while it blocks overage: only allowed overage is billed",
+		);
+		expect(await outcome(pricedItem("meter_limit", "allowed"))).toBe("normalized");
+	});
+
+	it("keeps a catalog stored with a never-billed price readable and refuses it unchanged", async () => {
+		const stored: CatalogIntent = {
+			features: [feature],
+			plans: [pricedItem("meter_limit", "blocked")],
+			topups: [],
+			rateCards: [],
+		};
+		const controlPlane = new CatalogControlPlane(new StoredCatalogDatabase(stored));
+		const current = await controlPlane.getPublished(projectInstanceContext());
+		expect(current.catalog?.plans[0]?.items[0]?.price?.key).toBe("credits-overage");
+		const unchanged = await controlPlane
+			.preview(projectInstanceContext(), { expectedRevision: 1, actor: "test", catalog: stored })
+			.then(() => null)
+			.catch((error: unknown) => error);
+		expect(unchanged).toBeInstanceOf(InvalidRequestError);
+		expect((unchanged as InvalidRequestError).message).toBe(
+			"Plan pro meter limit credits cannot declare a price while it blocks overage: only allowed overage is billed",
+		);
+	});
+
+	it("rejects publishing a draft whose submitted spellings disagree, before writing anything", async () => {
+		const submitted: CatalogIntent = {
+			features: [feature],
+			plans: [plan({ baseAmountMinor: 1000, basePrice: basePrice({ unitAmountMinor: 2000 }) })],
+			topups: [],
+			rateCards: [],
+		};
+		const database = new StoredCatalogDatabase(submitted);
+		const rejection = await new CatalogControlPlane(database)
+			.publish(projectInstanceContext(), {
+				expectedRevision: 1,
+				actor: "test",
+				previewToken: "c".repeat(64),
+				catalog: submitted,
+			})
+			.then(() => null)
+			.catch((error: unknown) => error);
+		expect(rejection).toBeInstanceOf(InvalidRequestError);
+		expect((rejection as InvalidRequestError).message).toBe(
+			"Plan pro baseAmountMinor 1000 conflicts with basePrice unitAmountMinor 2000",
+		);
+		expect(database.writes).toEqual([]);
+	});
+});
