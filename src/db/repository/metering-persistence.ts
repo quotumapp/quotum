@@ -1008,10 +1008,9 @@ function meterLimitBalance(
 			available: null,
 			unlimited: true,
 			breakdown: [],
-			// The window usage still counts in, as for a finite limit (PC-12).
+			// An unlimited quota never resets, so it reports the scope its source covers but no
+			// window: there is no point at which capacity returns.
 			scope,
-			windowStartAt: meterLimit.windowStartAt.toISOString(),
-			windowEndAt: meterLimit.windowEndAt.toISOString(),
 		};
 	}
 	const balance: MeteringBalance = {

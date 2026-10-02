@@ -175,12 +175,14 @@ account's for an account scope, the entity's (or the no-entity window) for an en
 meter-limit balance, in a balance read and in every check, consume, reserve, confirm and
 correction result, also carries `scope` (the scope that window counts in), `windowStartAt` and
 `windowEndAt`; capacity returns at `windowEndAt`. An unlimited balance (`unlimited: true`, null
-`granted` and `available`) carries them too, for the window its usage still counts in. Wallet
-balances carry none of the three. The billing summary lists, after the account's wallet balances,
-each meter-limited feature's current window the same way: `available` is the limit less the window's
-usage and holds (null with `unlimited: true` for an unlimited quota), `expiresAt` is null, and
-`scope`, `windowStartAt` and `windowEndAt` are set; an account Quotum has not recorded reads its
-default plan's limits with no usage.
+`granted` and `available`) carries `scope`, the scope its unlimited source covers, but no
+`windowStartAt` or `windowEndAt`: an unlimited quota never resets, so there is no point at which
+capacity returns, and the account projection reports its `periodEndsAt` as null. Wallet balances
+carry none of the three. The billing summary lists, after the account's wallet balances, each
+meter-limited feature's current window the same way: `available` is the limit less the window's
+usage and holds (null with `unlimited: true` for an unlimited quota), `expiresAt` is null, `scope`
+is set, and `windowStartAt` and `windowEndAt` are set except for an unlimited quota; an account
+Quotum has not recorded reads its default plan's limits with no usage.
 
 Windows written before declared scopes kept one row per entity and filter. They count where their
 entity places them: in the account's window for an account scope, in that entity's window (or the

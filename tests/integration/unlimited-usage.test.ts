@@ -80,9 +80,10 @@ localDescribe("unlimited usage items", () => {
 					await customerId("lifted"),
 				)
 			).filter((balance) => balance.featureKey === "api_requests");
-		// Additive: the projection keeps the window's finite figures and marks the lifted cap.
+		// Additive: the projection keeps the window's finite figures and marks the lifted cap; an
+		// unlimited quota never resets, so it reports no period end.
 		expect(await projected()).toEqual([
-			expect.objectContaining({ available: "0", held: "0", unlimited: true }),
+			expect.objectContaining({ available: "0", held: "0", unlimited: true, periodEndsAt: null }),
 		]);
 
 		// The add-on ends: the finite cap applies to the usage the window already holds.
@@ -125,11 +126,15 @@ localDescribe("unlimited usage items", () => {
 			body: JSON.stringify({ featureId: "api_requests", value: "500" }),
 		});
 		expect(checked.status).toBe(200);
-		expect((await checked.json()).data).toMatchObject({
+		const checkedData = (await checked.json()).data;
+		expect(checkedData).toMatchObject({
 			kind: "metered",
 			allowed: true,
-			balance: unlimitedBalance,
+			balance: { ...unlimitedBalance, scope: "account" },
 		});
+		// An unlimited quota never resets: no window bounds on any compact surface.
+		expect(checkedData.balance).not.toHaveProperty("windowStartAt");
+		expect(checkedData.balance).not.toHaveProperty("windowEndAt");
 
 		const consumed = await testRequest(app, "/v1/billing-accounts/compact/usage/consume", {
 			method: "POST",
@@ -140,8 +145,10 @@ localDescribe("unlimited usage items", () => {
 		const result = (await consumed.json()).data;
 		expect(result).toMatchObject({
 			allowed: true,
-			balance: { ...unlimitedBalance, consumed: "500" },
+			balance: { ...unlimitedBalance, consumed: "500", scope: "account" },
 		});
+		expect(result.balance).not.toHaveProperty("windowStartAt");
+		expect(result.balance).not.toHaveProperty("windowEndAt");
 
 		const receipt = await testRequest(
 			app,
@@ -149,7 +156,10 @@ localDescribe("unlimited usage items", () => {
 			{ headers: authHeaders() },
 		);
 		expect(receipt.status).toBe(200);
-		expect((await receipt.json()).data.balance).toMatchObject(unlimitedBalance);
+		const receiptBalance = (await receipt.json()).data.balance;
+		expect(receiptBalance).toMatchObject(unlimitedBalance);
+		expect(receiptBalance).not.toHaveProperty("windowStartAt");
+		expect(receiptBalance).not.toHaveProperty("windowEndAt");
 	});
 
 	it("still counts usage against a usage limit control and fires its alerts", async () => {
@@ -238,7 +248,7 @@ localDescribe("unlimited usage items", () => {
 			status: "confirmed",
 			balance: { unlimited: true, held: "0", consumed: "1000010" },
 		});
-		// Without a finite limit the projection reports the lifted cap in a calendar-month window.
+		// Without a finite limit the projection reports the lifted cap with no period end.
 		expect(
 			(
 				await readProjectionBalances(
@@ -247,7 +257,7 @@ localDescribe("unlimited usage items", () => {
 					await customerId("unlimited-plan"),
 				)
 			).filter((balance) => balance.featureKey === "api_requests"),
-		).toEqual([expect.objectContaining({ available: "0", unlimited: true })]);
+		).toEqual([expect.objectContaining({ available: "0", unlimited: true, periodEndsAt: null })]);
 		// Absence still means no quota entitlement.
 		expect(
 			await context.repository.checkUsage(project, {
@@ -367,7 +377,7 @@ localDescribe("unlimited usage items", () => {
 		expect(balance).not.toHaveProperty("unlimited");
 	});
 
-	it("reports the scope and window of an unlimited quota beside its null figures", async () => {
+	it("reports the scope of an unlimited quota beside its null figures, with no window", async () => {
 		await publish(
 			catalog([
 				plan("pro", "base", [cap("100", "blocked")]),
@@ -384,12 +394,10 @@ localDescribe("unlimited usage items", () => {
 			available: null,
 			unlimited: true,
 			scope: "account",
-			windowStartAt: expect.any(String),
-			windowEndAt: expect.any(String),
 		});
-		expect(new Date(balance.windowEndAt ?? "").getTime()).toBeGreaterThan(
-			new Date(balance.windowStartAt ?? "").getTime(),
-		);
+		// An unlimited quota never resets, so there is no window to report.
+		expect(balance).not.toHaveProperty("windowStartAt");
+		expect(balance).not.toHaveProperty("windowEndAt");
 		const decision = await context.repository.checkUsage(project, {
 			billingAccountId: "bounded",
 			featureKey: "api_requests",
@@ -397,8 +405,10 @@ localDescribe("unlimited usage items", () => {
 		});
 		expect(decision).toMatchObject({
 			allowed: true,
-			balance: { unlimited: true, scope: "account", windowStartAt: balance.windowStartAt },
+			balance: { unlimited: true, scope: "account" },
 		});
+		expect(decision.balance).not.toHaveProperty("windowStartAt");
+		expect(decision.balance).not.toHaveProperty("windowEndAt");
 	});
 
 	it("reports unlimited quotas, meter-limit scopes and windows in the billing summary", async () => {
@@ -488,7 +498,7 @@ localDescribe("unlimited usage items", () => {
 		]);
 
 		const lifted = await context.repository.getCustomerBillingSummary(project, "summary_lifted");
-		// Each account's window anchors at its own subscription's period start.
+		// The lifted account's unlimited quota reports its scope but no window, as its balance does.
 		const liftedBalance = await context.repository.getMeteringBalance(
 			project,
 			"summary_lifted",
@@ -503,10 +513,9 @@ localDescribe("unlimited usage items", () => {
 				expiresAt: null,
 				unlimited: true,
 				scope: "account",
-				windowStartAt: liftedBalance.windowStartAt as string,
-				windowEndAt: liftedBalance.windowEndAt as string,
 			},
 		]);
+		expect(liftedBalance).not.toHaveProperty("windowStartAt");
 
 		// An account Quotum has not recorded reads no limit: none of these plans is its default.
 		expect(
