@@ -27,9 +27,17 @@ export interface MeterLimitRow {
 	period_start_at: Date | string;
 	period_end_at: Date | string | null;
 	plan_kind: "base" | "addon";
+	/** The declared scope of the limit: one window for the account, or one per entity. */
+	allocation_scope: MeterLimitScope;
+	/** The plan and version the limit belongs to, for naming conflicting sources. */
+	plan_key: string;
+	plan_version: number;
 	/** When the subscription or grant was recorded, which orders sources of one kind. */
 	sort_at: Date | string;
 }
+
+/** The declared scope a meter limit counts usage in (PC-04). */
+export type MeterLimitScope = "account" | "entity";
 
 /**
  * The meter limits that apply to the account's feature: a paying subscription's, a plan grant's,
@@ -61,13 +69,11 @@ export function queryMeterLimitRows(
 				billing_interval_count,
 				period_start_at,
 				period_end_at,
-				(
-					SELECT version.plan_kind
-					FROM plan_items item
-					JOIN plan_versions version
-						ON version.project_id = item.project_id AND version.id = item.plan_version_id
-					WHERE item.project_id = ${projectId} AND item.id = sources.plan_item_id
-				) AS plan_kind,
+				source_plan.plan_kind,
+				CASE WHEN source_plan.allocation_scope = 'entity' THEN 'entity' ELSE 'account' END
+					AS allocation_scope,
+				source_plan.plan_key,
+				source_plan.plan_version,
 				sort_at
 			FROM (
 				SELECT
@@ -160,6 +166,15 @@ export function queryMeterLimitRows(
 				WHERE pi.feature_id = ${String(feature.id)}
 					AND pi.item_kind IN ('meter_limit', 'unlimited_usage')
 			) sources
+			CROSS JOIN LATERAL (
+				SELECT version.plan_kind, item.allocation_scope, plan.key AS plan_key,
+					version.version AS plan_version
+				FROM plan_items item
+				JOIN plan_versions version
+					ON version.project_id = item.project_id AND version.id = item.plan_version_id
+				JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+				WHERE item.project_id = ${projectId} AND item.id = sources.plan_item_id
+			) source_plan
 			ORDER BY source_rank, sort_at, sort_id
 		`,
 	);
@@ -209,29 +224,59 @@ export function combineMeterLimits(
  * counts, and a plan grant's counts otherwise. It lifts hard caps only: when the limit `anchor`
  * allows postpaid overage there is no cap to lift, and the overage stays billed as before.
  * Publication and add-on purchases refuse that combination; one that reaches an account another
- * way is left out rather than changing what the account is billed.
+ * way is left out rather than changing what the account is billed. It lifts only a cap of its own
+ * declared scope; one of another scope is a mixed scope (`mixedScopeSources`) and is refused.
  */
 export function unlimitedLiftsCap(
 	sources: readonly MeterLimitRow[],
 	anchor: MeterLimitRow | null,
 ): boolean {
-	const unlimited = sources.filter((row) => row.item_kind === "unlimited_usage");
+	const unlimited = sources.filter(
+		(row) =>
+			row.item_kind === "unlimited_usage" &&
+			(anchor === null || row.allocation_scope === anchor.allocation_scope),
+	);
 	const paying = sources.some((row) => row.subscription_id !== null);
 	const counted = paying ? unlimited.filter((row) => row.subscription_id !== null) : unlimited;
 	return counted.length > 0 && (anchor === null || anchor.overage_policy === "blocked");
 }
 
-/** Whether two meter limits can share one window: hard caps with the same reset cadence. */
+/**
+ * Whether two meter limits can share one window: hard caps with the same reset cadence and the same
+ * declared scope. Limits only sum within one scope (PC-04).
+ */
 export function meterLimitsJoin(
-	left: Pick<MeterLimitRow, "overage_policy" | "reset_interval" | "reset_interval_count">,
-	right: Pick<MeterLimitRow, "overage_policy" | "reset_interval" | "reset_interval_count">,
+	left: Pick<
+		MeterLimitRow,
+		"overage_policy" | "reset_interval" | "reset_interval_count" | "allocation_scope"
+	>,
+	right: Pick<
+		MeterLimitRow,
+		"overage_policy" | "reset_interval" | "reset_interval_count" | "allocation_scope"
+	>,
 ): boolean {
 	return (
 		left.overage_policy === "blocked" &&
 		right.overage_policy === "blocked" &&
 		left.reset_interval === right.reset_interval &&
-		left.reset_interval_count === right.reset_interval_count
+		left.reset_interval_count === right.reset_interval_count &&
+		left.allocation_scope === right.allocation_scope
 	);
+}
+
+/**
+ * The paying sources that cap the feature with a different declared scope than the anchor. An
+ * account could hold such a mix only through a catalog published before declared scopes were
+ * enforced, or a path the guards missed; metering then refuses the feature rather than silently
+ * enforcing one cap (PC-04).
+ */
+export function mixedScopeSources(
+	candidates: readonly MeterLimitRow[],
+	anchor: MeterLimitRow,
+): MeterLimitRow[] {
+	const paid = candidates.filter((row) => row.subscription_id !== null);
+	if (paid.every((row) => row.allocation_scope === anchor.allocation_scope)) return [];
+	return paid;
 }
 
 /** The window the anchor source counts its limit in right now; see `meterLimitWindowBounds`. */

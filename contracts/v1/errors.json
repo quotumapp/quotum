@@ -34,6 +34,7 @@
     {
       "code": "ADDON_METER_LIMIT_CONFLICT",
       "sources": [
+        "src/db/repository/meter-limit-scope-guards.ts",
         "src/providers/stripe/add-on-meter-limits.ts"
       ]
     },

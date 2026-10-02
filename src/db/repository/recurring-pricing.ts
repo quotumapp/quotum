@@ -29,6 +29,7 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import type { BillingCadenceUnit } from "../../shared/cadence";
 import { RepositoryModule } from "./base";
 import { usageHeldByIncomingAllowances } from "./carry-over";
+import { meterLimitScopeConflictError, meterLimitScopeConflicts } from "./meter-limit-scope-guards";
 import {
 	applyPromotionRedemptionInTx,
 	releasePromotionRedemptionInTx,
@@ -1017,6 +1018,23 @@ async function stageCatalogMigrationChanges(
 			continue;
 		}
 
+		const scopeConflicts = await meterLimitScopeConflicts(executor, {
+			projectId: String(job.project_id),
+			customer: { customerId: String(job.customer_id) },
+			planVersionId: toPlanVersionId,
+			excludeSubscriptionId: String(job.subscription_id),
+		});
+		if (scopeConflicts.length > 0) {
+			await finishCatalogMigrationJob(
+				executor,
+				jobId,
+				workerId,
+				"failed",
+				`Target plan's meter limits on ${scopeConflicts.join(", ")} declare a different scope than the account's other subscriptions`,
+			);
+			continue;
+		}
+
 		const recurring = await executeOne<{ total: string; published: string }>(
 			executor,
 			drizzleSql`
@@ -1510,6 +1528,17 @@ async function resolveSubscriptionChange(
 	input: Omit<SubscriptionChangeInput, "idempotencyKey" | "expectedStateFingerprint">,
 ): Promise<ResolvedSubscriptionChange> {
 	const context = await changeContext(executor, projectId, input as SubscriptionChangeInput);
+	if (String(context.to_plan_version_id) !== String(context.from_plan_version_id)) {
+		// A target whose meter limits declare another scope than the account's add-ons (or base)
+		// would leave it holding an account cap and an entity cap on one feature (PC-04).
+		const conflicts = await meterLimitScopeConflicts(executor, {
+			projectId,
+			customer: { customerId: String(context.customer_id) },
+			planVersionId: String(context.to_plan_version_id),
+			excludeSubscriptionId: String(context.subscription_id),
+		});
+		if (conflicts.length > 0) throw meterLimitScopeConflictError(conflicts);
+	}
 	const quantities = normalizeQuantities(input.quantities);
 	const currentQuantities = await currentLicensedQuantities(executor, context.subscription_id);
 	const changeKind = classifySubscriptionChange({

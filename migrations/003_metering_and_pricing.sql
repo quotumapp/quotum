@@ -570,6 +570,9 @@ CREATE TABLE IF NOT EXISTS usage_windows (
 	entity_id BIGINT REFERENCES entities(id) ON DELETE CASCADE,
 	feature_id BIGINT NOT NULL REFERENCES features(id) ON DELETE RESTRICT,
 	filter_key TEXT COLLATE "C",
+	-- The declared meter-limit scope the row was written under; NULL for a row written before
+	-- declared scopes, which belongs where its entity places it.
+	scope TEXT,
 	anchor_plan_item_id BIGINT REFERENCES plan_items(id) ON DELETE SET NULL,
 	window_start_at TIMESTAMPTZ NOT NULL,
 	window_end_at TIMESTAMPTZ NOT NULL,
@@ -590,6 +593,7 @@ CREATE TABLE IF NOT EXISTS usage_windows (
 		ON DELETE SET NULL,
 	CONSTRAINT usage_windows_bounds_check CHECK (window_start_at < window_end_at),
 	CONSTRAINT usage_windows_filter_key_check CHECK (filter_key IS NULL OR filter_key <> ''),
+	CONSTRAINT usage_windows_scope_check CHECK (scope IS NULL OR scope IN ('account', 'entity')),
 	CONSTRAINT usage_windows_project_subscription_fk
 		FOREIGN KEY (project_id, subscription_id)
 		REFERENCES subscriptions(project_id, id) ON DELETE RESTRICT
@@ -603,6 +607,9 @@ CREATE TABLE IF NOT EXISTS reservations (
 	usage_window_id BIGINT REFERENCES usage_windows(id) ON DELETE SET NULL,
 	usage_window_start_at TIMESTAMPTZ,
 	usage_window_end_at TIMESTAMPTZ,
+	-- The caller's canonical filter, kept for the confirmation's usage event: windows written under
+	-- a declared scope carry no filter.
+	filter_key TEXT COLLATE "C",
 	meter_feature_id BIGINT NOT NULL REFERENCES features(id) ON DELETE RESTRICT,
 	wallet_feature_id BIGINT NOT NULL REFERENCES features(id) ON DELETE RESTRICT,
 	rate_card_entry_id BIGINT REFERENCES rate_card_entries(id) ON DELETE RESTRICT,
@@ -618,6 +625,7 @@ CREATE TABLE IF NOT EXISTS reservations (
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	CONSTRAINT reservations_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT reservations_filter_key_check CHECK (filter_key IS NULL OR filter_key <> ''),
 	CONSTRAINT reservations_project_customer_fk FOREIGN KEY (project_id, customer_id)
 		REFERENCES customers(project_id, id)
 		ON DELETE CASCADE,
@@ -1115,6 +1123,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_usage_windows_scope_period
 		feature_id,
 		COALESCE(entity_id, 0::bigint),
 		COALESCE(filter_key, '' COLLATE "C"),
+		COALESCE(scope, ''),
 		window_start_at,
 		window_end_at
 	);

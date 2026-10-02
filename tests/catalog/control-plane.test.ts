@@ -799,6 +799,41 @@ describe("catalog control plane cadences", () => {
 		).toBe("normalized");
 	});
 
+	it("requires one declared scope on every meter limit an add-on can be held with", async () => {
+		const entity = (overrides: Partial<CatalogPlanItemIntent>) =>
+			item({ ...overrides, allocationScope: "entity" });
+		const addOn = plan({ key: "boost", name: "Boost", kind: "addon", items: [entity({})] });
+		expect(await messageOf([plan({ items: [item({})] }), addOn])).toBe(
+			"Meter limits on credits must all declare the same allocationScope, because add-on boost can be held together with them",
+		);
+		expect(await messageOf([plan({ items: [entity({})] }), addOn])).toBe("normalized");
+		// Base plans are exclusive, so they may differ while no add-on limits the feature.
+		expect(
+			await messageOf([
+				plan({ items: [item({})] }),
+				plan({ key: "team", name: "Team", items: [entity({})] }),
+			]),
+		).toBe("normalized");
+	});
+
+	it("keeps entity scope to hard caps, since postpaid overage applies its allowance once", async () => {
+		const postpaid = (allocationScope: "account" | "entity") =>
+			plan({
+				items: [
+					item({
+						resetInterval: "month",
+						overagePolicy: "allowed",
+						allocationScope,
+						price: { ...flatPrice([stripeBinding]), key: "credits-overage" },
+					}),
+				],
+			});
+		expect(await messageOf([postpaid("entity")])).toBe(
+			"Meter limit credits on plan pro allows postpaid overage, so it must cap the account: entity scope is only available to blocked limits",
+		);
+		expect(await messageOf([postpaid("account")])).toBe("normalized");
+	});
+
 	it("normalizes counts and the earlier rollover spelling in a stored catalog", async () => {
 		const stored: CatalogIntent = {
 			features: [feature],

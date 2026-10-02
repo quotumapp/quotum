@@ -29,6 +29,7 @@ import {
 	parseStripeAmountForComparison,
 	proratedReversedCreditAmount,
 } from "./invalidations";
+import { meterLimitScopeConflicts } from "./meter-limit-scope-guards";
 import { upsertPurchase, upsertSubscription } from "./mutations";
 import { parseNullableNonnegativeInteger, parseStripeWebStoreProductRow } from "./parsers";
 import { planTrialUsedSql } from "./plan-grants";
@@ -760,6 +761,23 @@ export class StripeBillingRepository extends RepositoryModule {
 			`,
 		);
 		return rows.map((row) => row.key);
+	}
+
+	/**
+	 * The features on which the plan version's meter limits declare another scope than the limits
+	 * the account's other live subscriptions hold (PC-04); see `meterLimitScopeConflicts`.
+	 */
+	async meterLimitScopeConflicts(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		planVersionId: string,
+	): Promise<string[]> {
+		requireNonBlank(billingAccountId, "p_billing_account_id");
+		return await meterLimitScopeConflicts(this.database, {
+			projectId: project.projectInstanceId,
+			customer: { billingAccountId },
+			planVersionId,
+		});
 	}
 
 	async getStripeProviderCustomer(

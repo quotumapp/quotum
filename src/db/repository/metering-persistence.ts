@@ -40,9 +40,18 @@ import { defaultPlanAllowanceEndingSql } from "./default-plan-sql";
 import { enqueueUsageProjection } from "./entitlements";
 import { shrinkKeptLevels } from "./kept-levels";
 import {
+	governingMeterLimitScope,
+	type MeterLimitScopeSelector,
+	type MeterLimitWindowBounds,
+	meterLimitScopeSelector,
+	readScopeSetExposure,
+} from "./meter-limit-scope";
+import {
 	combineMeterLimits,
 	type MeterLimitRow,
+	type MeterLimitScope,
 	meterLimitBounds,
+	mixedScopeSources,
 	queryMeterLimitRows,
 	unlimitedLiftsCap,
 } from "./meter-limit-sources";
@@ -95,6 +104,21 @@ export interface MeterLimitDecision {
 	unlimited: boolean;
 	windowStartAt: Date;
 	windowEndAt: Date;
+	/** The declared scope the limit counts usage in (PC-04): the anchor source's. */
+	scope: MeterLimitScope;
+	/**
+	 * Paying sources that cap the feature with different declared scopes, or null. Metering refuses
+	 * check, consume, reserve and confirm on such a feature; reads use the anchor's scope.
+	 */
+	mixedScope: MixedScopeSource[] | null;
+}
+
+/** One source of a mixed-scope combination, named for the refusal and the log. */
+export interface MixedScopeSource {
+	plan: string;
+	version: number;
+	scope: MeterLimitScope;
+	subscriptionId: string | null;
 }
 
 interface MeteredOveragePrice {
@@ -152,6 +176,8 @@ export interface ReservationRow {
 	usage_window_id: string | number | bigint | null;
 	usage_window_start_at: Date | string | null;
 	usage_window_end_at: Date | string | null;
+	/** The caller's canonical filter on a meter-limit hold; null on older holds and wallets. */
+	filter_key: string | null;
 	meter_feature_id: string | number | bigint;
 	wallet_feature_id: string | number | bigint;
 	meter_feature_key: string;
@@ -268,6 +294,7 @@ export async function meterLimitDecision(
 			anchor.overage_policy === "allowed"
 				? await resolveMeteredOveragePrice(executor, projectId, String(anchor.plan_item_id))
 				: null;
+		const mixed = mixedScopeSources(candidates, anchor);
 		return {
 			feature,
 			subscriptionId: anchor.subscription_id,
@@ -278,6 +305,16 @@ export async function meterLimitDecision(
 			unlimited,
 			windowStartAt: bounds.start,
 			windowEndAt: bounds.end,
+			scope: anchor.allocation_scope,
+			mixedScope:
+				mixed.length === 0
+					? null
+					: mixed.map((row) => ({
+							plan: row.plan_key,
+							version: Number(row.plan_version),
+							scope: row.allocation_scope,
+							subscriptionId: row.subscription_id,
+						})),
 		};
 	}
 
@@ -297,7 +334,54 @@ export async function meterLimitDecision(
 		unlimited,
 		windowStartAt: start,
 		windowEndAt: addUtcMonths(start, 1),
+		scope: "account",
+		mixedScope: null,
 	};
+}
+
+/**
+ * Refuses metering a feature whose paying sources cap it with different declared scopes. Nothing
+ * defines how an account cap and an entity cap would combine, so neither is silently picked; the
+ * operator migrates or cancels one of the subscriptions. Releases and corrections do not call this,
+ * so recovery stays possible.
+ */
+export function assertMeterLimitScopeResolved(meterLimit: MeterLimitDecision): void {
+	if (meterLimit.mixedScope === null) return;
+	const named = meterLimit.mixedScope
+		.map((source) => `${source.plan} v${source.version} (${source.scope})`)
+		.join(", ");
+	throw new BillingError(
+		`Meter limits on ${meterLimit.feature.key} mix account and entity scopes: ${named}`,
+		"METERING_CONFIGURATION_ERROR",
+		409,
+		{
+			classification: "persistence_conflict",
+			details: {
+				reason: "mixed_scope",
+				featureKey: meterLimit.feature.key,
+				sources: meterLimit.mixedScope,
+			},
+		},
+	);
+}
+
+/** The window and scope set a limit counts in for usage of `entityId`. */
+async function meterLimitScope(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string,
+	entityId: string | null,
+	meterLimit: MeterLimitDecision,
+): Promise<{ window: MeterLimitWindowBounds; selector: MeterLimitScopeSelector }> {
+	const window = {
+		projectId,
+		customerId,
+		featureId: featureId(meterLimit.feature),
+		windowStartAt: meterLimit.windowStartAt,
+		windowEndAt: meterLimit.windowEndAt,
+	};
+	const scope = await governingMeterLimitScope(executor, window, meterLimit.scope);
+	return { window, selector: meterLimitScopeSelector(scope, entityId) };
 }
 
 async function resolveMeteredOveragePrice(
@@ -475,16 +559,15 @@ export async function checkMeterLimit(
 	projectId: string,
 	customerId: string | null,
 	entityId: string | null,
-	filterKey: string | null,
 	meterLimit: MeterLimitDecision,
 	quantity: string,
 ): Promise<MeteringDecision> {
+	assertMeterLimitScopeResolved(meterLimit);
 	const balance = await readMeterLimitBalance(
 		executor,
 		projectId,
 		customerId,
 		entityId,
-		filterKey,
 		meterLimit,
 	);
 	const allowed = meterLimitAllows(meterLimit, balance, quantity);
@@ -501,7 +584,10 @@ export async function checkMeterLimit(
 }
 
 export interface LockedMeterLimitWindow {
+	/** The scope set's write row, which this write increments or reserves on. */
 	window: UsageWindowRow;
+	/** The usage and active holds the whole scope set counts. */
+	usage: string;
 	held: string;
 	balance: MeteringBalance;
 	spendBalance: MeteringBalance;
@@ -517,20 +603,32 @@ interface MeterLimitWindowInput {
 	quantity: string;
 }
 
-/** Serializes invoice-group spend before locking the selected scoped usage window. */
+/**
+ * Serializes the account's spend on the feature, then finds or creates the write row of the scope
+ * set the declared scope gives this write. The spend lock covers every row of the feature, so the
+ * scope set's sum read under it stays exact until the write commits.
+ */
 export async function lockMeterLimitWindow(
 	executor: QueryExecutor,
 	input: MeterLimitWindowInput,
 ): Promise<LockedMeterLimitWindow> {
+	assertMeterLimitScopeResolved(input.meterLimit);
 	await lockMeterLimitSpend(
 		executor,
 		input.projectId,
 		input.customerId,
 		featureId(input.meterLimit.feature),
 	);
-	const window = await upsertUsageWindow(executor, input);
-	const held = await readActiveWindowHolds(executor, input.projectId, String(window.id), null);
-	const balance = meterLimitBalance(input.meterLimit, window.usage, held);
+	const scoped = await meterLimitScope(
+		executor,
+		input.projectId,
+		input.customerId,
+		input.entityId,
+		input.meterLimit,
+	);
+	const window = await upsertUsageWindow(executor, { ...input, selector: scoped.selector });
+	const { usage, held } = await readScopeSetExposure(executor, scoped.window, scoped.selector);
+	const balance = meterLimitBalance(input.meterLimit, usage, held);
 	const decision = await checkMeterLimitFromBalance(
 		executor,
 		input.projectId,
@@ -544,7 +642,7 @@ export async function lockMeterLimitWindow(
 		input.customerId,
 		input.meterLimit,
 	);
-	return { window, held, balance, spendBalance, decision };
+	return { window, usage, held, balance, spendBalance, decision };
 }
 
 /** Applies an allowed, control-cleared consume to the window locked by `lockMeterLimitWindow`. */
@@ -579,6 +677,11 @@ export async function applyMeterLimitConsumption(
 	if (updated === null) {
 		throw new Error("Usage-window deduction lost its scope lock");
 	}
+	const scale = input.meterLimit.feature.credit_scale;
+	const usageAfter = unitsToDecimal(
+		decimalToUnits(locked.usage, scale) + decimalToUnits(input.quantity, scale),
+		scale,
+	);
 	const rate = directRate(input.meterLimit.feature);
 	const event = await insertUsageEvent(executor, {
 		projectId: input.projectId,
@@ -611,7 +714,7 @@ export async function applyMeterLimitConsumption(
 	await enqueueMeteringProjection(executor, input.projectId, input.customerId, input.projectionKey);
 	return {
 		...locked.decision,
-		balance: meterLimitBalance(input.meterLimit, updated.usage),
+		balance: meterLimitBalance(input.meterLimit, usageAfter, locked.held),
 		usageEventId: event.id,
 		recordedAt: toIso(event.recorded_at),
 		recordedAtExact: event.recorded_at_exact,
@@ -632,7 +735,10 @@ export async function reserveMeterLimit(
 		projectionKey: string;
 	},
 ): Promise<ReservationResult> {
-	const { window, held, spendBalance, decision } = await lockMeterLimitWindow(executor, input);
+	const { window, usage, held, spendBalance, decision } = await lockMeterLimitWindow(
+		executor,
+		input,
+	);
 	if (!decision.allowed) {
 		return {
 			...decision,
@@ -654,6 +760,7 @@ export async function reserveMeterLimit(
 				usage_window_id,
 				usage_window_start_at,
 				usage_window_end_at,
+				filter_key,
 				meter_feature_id,
 				wallet_feature_id,
 				rate_card_path,
@@ -669,6 +776,7 @@ export async function reserveMeterLimit(
 				${String(window.id)}::bigint,
 				${toIso(window.window_start_at)},
 				${toIso(window.window_end_at)},
+				${input.filterKey},
 				${featureId(input.meterLimit.feature)},
 				${featureId(input.meterLimit.feature)},
 				'direct',
@@ -717,7 +825,7 @@ export async function reserveMeterLimit(
 		...decision,
 		balance: meterLimitBalance(
 			input.meterLimit,
-			window.usage,
+			usage,
 			unitsToDecimal(
 				decimalToUnits(held, input.meterLimit.feature.credit_scale) +
 					decimalToUnits(input.quantity, input.meterLimit.feature.credit_scale),
@@ -751,38 +859,21 @@ async function checkMeterLimitFromBalance(
 	};
 }
 
+/**
+ * The limit's balance for usage of `entityId`: what its scope set counts, whatever filters callers
+ * send. Filters never create capacity; they stay on usage events for reporting.
+ */
 export async function readMeterLimitBalance(
 	executor: QueryExecutor,
 	projectId: string,
 	customerId: string | null,
 	entityId: string | null,
-	filterKey: string | null,
 	meterLimit: MeterLimitDecision,
 ): Promise<MeteringBalance> {
 	if (customerId === null) return meterLimitBalance(meterLimit, "0");
-	const row = await executeOne<{ usage: unknown; held: unknown }>(
-		executor,
-		drizzleSql`
-			SELECT
-				windows.usage,
-				COALESCE(sum(reservations.held_quantity), 0)::text AS held
-			FROM usage_windows windows
-			LEFT JOIN reservations
-				ON reservations.project_id = windows.project_id
-				AND reservations.usage_window_id = windows.id
-				AND reservations.status = 'active'
-				AND reservations.expires_at > now()
-			WHERE windows.project_id = ${projectId}
-				AND windows.customer_id = ${customerId}
-				AND windows.feature_id = ${featureId(meterLimit.feature)}
-				AND windows.entity_id IS NOT DISTINCT FROM ${entityId}::bigint
-				AND windows.filter_key IS NOT DISTINCT FROM ${filterKey}
-				AND windows.window_start_at = ${meterLimit.windowStartAt.toISOString()}::timestamptz
-				AND windows.window_end_at = ${meterLimit.windowEndAt.toISOString()}::timestamptz
-			GROUP BY windows.id, windows.usage
-		`,
-	);
-	return meterLimitBalance(meterLimit, row?.usage ?? "0", row?.held ?? "0");
+	const scoped = await meterLimitScope(executor, projectId, customerId, entityId, meterLimit);
+	const { usage, held } = await readScopeSetExposure(executor, scoped.window, scoped.selector);
+	return meterLimitBalance(meterLimit, usage, held);
 }
 
 /** Matches invoice rating: one allowance across every entity/filter in the purchased period. */
@@ -834,35 +925,17 @@ export async function lockMeterLimitSpend(
 	);
 }
 
-async function readActiveWindowHolds(
-	executor: QueryExecutor,
-	projectId: string,
-	windowId: string,
-	excludeReservationId: string | null,
-): Promise<string> {
-	const row = await executeOne<{ held: unknown }>(
-		executor,
-		drizzleSql`
-			SELECT COALESCE(sum(held_quantity), 0)::text AS held
-			FROM reservations
-			WHERE project_id = ${projectId}
-				AND usage_window_id = ${windowId}::bigint
-				AND status = 'active'
-				AND expires_at > now()
-				AND (${excludeReservationId}::uuid IS NULL OR id <> ${excludeReservationId}::uuid)
-		`,
-	);
-	return databaseDecimal(row?.held ?? "0", "window holds");
-}
-
+/**
+ * Finds or creates the scope set's write row: the account row, the entity's row or the no-entity
+ * bucket, written with no filter and the scope it counts for.
+ */
 async function upsertUsageWindow(
 	executor: QueryExecutor,
 	input: {
 		projectId: string;
 		customerId: string;
-		entityId: string | null;
-		filterKey: string | null;
 		meterLimit: MeterLimitDecision;
+		selector: MeterLimitScopeSelector;
 	},
 ): Promise<UsageWindowRow> {
 	const row = await executeOne<UsageWindowRow>(
@@ -874,6 +947,7 @@ async function upsertUsageWindow(
 				entity_id,
 				feature_id,
 				filter_key,
+				scope,
 				subscription_id,
 				anchor_plan_item_id,
 				window_start_at,
@@ -883,9 +957,10 @@ async function upsertUsageWindow(
 			VALUES (
 				${input.projectId},
 				${input.customerId},
-				${input.entityId}::bigint,
+				${input.selector.entityId}::bigint,
 				${featureId(input.meterLimit.feature)},
-				${input.filterKey},
+				NULL,
+				${input.selector.scope},
 				${input.meterLimit.subscriptionId}::uuid,
 				${input.meterLimit.planItemId}::bigint,
 				${input.meterLimit.windowStartAt.toISOString()},
@@ -898,6 +973,7 @@ async function upsertUsageWindow(
 				feature_id,
 				(COALESCE(entity_id, 0::bigint)),
 				(COALESCE(filter_key, '' COLLATE "C")),
+				(COALESCE(scope, '')),
 				window_start_at,
 				window_end_at
 			)
@@ -2457,8 +2533,13 @@ export async function confirmMeterLimitReservation(
 		unlimited: false,
 		windowStartAt: new Date(window.window_start_at),
 		windowEndAt: new Date(window.window_end_at),
+		scope: "account" as const,
+		mixedScope: null,
 	};
+	// A denied confirmation keeps its reservation active, as any refused confirmation does.
+	assertMeterLimitScopeResolved(meterLimit);
 	const scale = feature.credit_scale;
+	const reservationEntityId = reservation.entity_id === null ? null : String(reservation.entity_id);
 	const reserved = decimalToUnits(
 		databaseDecimal(reservation.held_quantity, "reservation held", scale),
 		scale,
@@ -2467,22 +2548,31 @@ export async function confirmMeterLimitReservation(
 	const sameWindow =
 		toIso(window.window_start_at) === toIso(reservation.usage_window_start_at) &&
 		toIso(window.window_end_at) === toIso(reservation.usage_window_end_at);
-	const otherHolds = await readActiveWindowHolds(
-		executor,
-		reservation.project_id,
-		String(window.id),
-		reservation.id,
-	);
+	// A confirmation up to its hold always settles: that capacity was reserved when the hold was
+	// admitted, even if the scope's aggregate has since gone over the cap. Only a confirmation
+	// beyond the hold is checked against everything else the scope set counts.
+	const otherExposure = sameWindow
+		? await (async () => {
+				const scoped = await meterLimitScope(
+					executor,
+					reservation.project_id,
+					reservation.customer_id,
+					reservationEntityId,
+					{
+						...meterLimit,
+						windowStartAt: new Date(window.window_start_at),
+						windowEndAt: new Date(window.window_end_at),
+					},
+				);
+				return await readScopeSetExposure(executor, scoped.window, scoped.selector, reservation.id);
+			})()
+		: { usage: databaseDecimal(window.usage, "window usage", scale), held: "0" };
+	const otherHolds = otherExposure.held;
 	if (confirmed > reserved) {
 		if (!sameWindow) {
-			return await insufficientMeterLimitConfirmation(
-				executor,
-				reservation,
-				meterLimit,
-				window.filter_key,
-			);
+			return await insufficientMeterLimitConfirmation(executor, reservation, meterLimit);
 		}
-		const used = decimalToUnits(databaseDecimal(window.usage, "window usage", scale), scale);
+		const used = decimalToUnits(otherExposure.usage, scale);
 		const held = decimalToUnits(otherHolds, scale);
 		const limit = decimalToUnits(meterLimit.limit, scale);
 		if (
@@ -2490,12 +2580,7 @@ export async function confirmMeterLimitReservation(
 			!meterLimit.unlimited &&
 			used + held + confirmed > limit
 		) {
-			return await insufficientMeterLimitConfirmation(
-				executor,
-				reservation,
-				meterLimit,
-				window.filter_key,
-			);
+			return await insufficientMeterLimitConfirmation(executor, reservation, meterLimit);
 		}
 	}
 	const spendBalance =
@@ -2538,7 +2623,6 @@ export async function confirmMeterLimitReservation(
 				reservation.project_id,
 				reservation.customer_id,
 				reservation.entity_id === null ? null : String(reservation.entity_id),
-				window.filter_key,
 				meterLimit,
 			),
 			deductions: [],
@@ -2568,7 +2652,8 @@ export async function confirmMeterLimitReservation(
 		walletQuantity: quantity,
 		occurredAt: context.occurredAt,
 		reservationId: reservation.id,
-		filterKey: window.filter_key,
+		// A hold taken before declared scopes kept its filter on its window row.
+		filterKey: reservation.filter_key ?? window.filter_key,
 		deductions: [],
 		metadata: {
 			...context.metadata,
@@ -2630,7 +2715,6 @@ export async function confirmMeterLimitReservation(
 			reservation.project_id,
 			reservation.customer_id,
 			reservation.entity_id === null ? null : String(reservation.entity_id),
-			window.filter_key,
 			meterLimit,
 		),
 		deductions: [],
@@ -2687,7 +2771,6 @@ async function insufficientMeterLimitConfirmation(
 	executor: QueryExecutor,
 	reservation: ReservationRow,
 	meterLimit: MeterLimitDecision,
-	filterKey: string | null,
 ): Promise<FinalizeReservationResult> {
 	return {
 		allowed: false,
@@ -2701,7 +2784,6 @@ async function insufficientMeterLimitConfirmation(
 			reservation.project_id,
 			reservation.customer_id,
 			reservation.entity_id === null ? null : String(reservation.entity_id),
-			filterKey,
 			meterLimit,
 		),
 		deductions: [],
@@ -2826,15 +2908,6 @@ export async function finalizedReservationResult(
 			: null;
 	let balance: MeteringBalance;
 	if (reservation.usage_window_id !== null) {
-		const window = await executeOne<{ filter_key: string | null }>(
-			executor,
-			drizzleSql`
-				SELECT filter_key
-				FROM usage_windows
-				WHERE project_id = ${reservation.project_id}
-					AND id = ${String(reservation.usage_window_id)}::bigint
-			`,
-		);
 		const feature: FeatureRow = {
 			id: reservation.meter_feature_id,
 			key: reservation.meter_feature_key,
@@ -2859,13 +2932,14 @@ export async function finalizedReservationResult(
 			unlimited: false,
 			windowStartAt: new Date(reservation.usage_window_start_at ?? reservation.expires_at),
 			windowEndAt: new Date(reservation.usage_window_end_at ?? reservation.expires_at),
+			scope: "account" as const,
+			mixedScope: null,
 		};
 		balance = await readMeterLimitBalance(
 			executor,
 			reservation.project_id,
 			reservation.customer_id,
 			reservation.entity_id === null ? null : String(reservation.entity_id),
-			window?.filter_key ?? null,
 			meterLimit,
 		);
 	} else {

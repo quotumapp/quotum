@@ -143,7 +143,8 @@ localDescribe("Usage invoice period materialization", () => {
 				WHERE id = ${original.usageEventId}::uuid
 			)
 		`;
-		expect(window?.usage).toBe("90.000000000");
+		// Both regions count in the account's one window; the correction lowers it while it is open.
+		expect(window?.usage).toBe("190.000000000");
 	});
 
 	it("waits for an outstanding reservation before invoicing the period", async () => {

@@ -10,6 +10,7 @@ export type BillingMetricName =
 	| "billing_metering_maintenance_runs_total"
 	| "billing_usage_partition_upkeep_runs_total"
 	| "billing_metering_operations_total"
+	| "billing_metering_mixed_scope_total"
 	| "billing_worker_jobs_total";
 
 export type BillingHistogramName = "billing_metering_operation_duration_ms";

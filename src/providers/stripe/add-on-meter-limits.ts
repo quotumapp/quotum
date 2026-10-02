@@ -2,6 +2,31 @@ import { BillingError } from "../../billing/errors";
 
 export interface AddOnMeterLimitRepository {
 	addOnMeterLimitConflicts?(billingAccountId: string, planVersionId: string): Promise<string[]>;
+	meterLimitScopeConflicts?(billingAccountId: string, planVersionId: string): Promise<string[]>;
+}
+
+/**
+ * Refuses a plan whose meter limits declare another scope than the limits the account already
+ * holds on the same features (PC-04): an account cap and an entity cap on one feature have no
+ * agreed combination. Base plans never conflict with each other, because an account holds one.
+ */
+export async function assertMeterLimitScopesAgree(
+	repository: AddOnMeterLimitRepository,
+	billingAccountId: string,
+	plan: { planVersionId: string },
+): Promise<void> {
+	if (repository.meterLimitScopeConflicts === undefined) return;
+	const featureKeys = await repository.meterLimitScopeConflicts(
+		billingAccountId,
+		plan.planVersionId,
+	);
+	if (featureKeys.length === 0) return;
+	throw new BillingError(
+		`The plan's meter limits on ${featureKeys.join(", ")} declare a different scope than the limits this billing account already holds`,
+		"ADDON_METER_LIMIT_CONFLICT",
+		409,
+		{ details: { reason: "scope", featureKeys } },
+	);
 }
 
 /**

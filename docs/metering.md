@@ -146,15 +146,45 @@ consume: it may carry no more decimal places than the meter's `creditScale`, or 
 
 ## Meter limits
 
-Meter-limit balances and capped usage remain scoped to the requested entity. Internal and deferred
-reservation paths also retain their canonical filter scope; public checks/consumption have no filters.
-The canonical filter compares values as text in any key order, so `{ "model": 1 }` and
-`{ "model": "1" }`, or `true` and `"true"`, count in one window.
-Monetary spend for postpaid overage is rated across every scoped window belonging to the same
+A meter limit counts usage in the scope its plan item declares with `allocationScope`:
+
+- `account` (the default): one window for the account. Usage of every entity, and usage sent
+  without an entity, counts against the one limit.
+- `entity`: one window per entity, each with the whole limit, so entity A and entity B each get 50
+  of a 50 limit. Usage sent without an entity counts in a separate no-entity window of its own,
+  which is not the account's total. Only hard caps (`overagePolicy: "blocked"`) can declare it;
+  see below.
+
+Filters never create capacity. Public checks and consumes take no `filters` (a body with them
+answers `400 INVALID_REQUEST`); a reservation with `filters` counts against the same window as one
+without, and its canonical filter is kept on the hold for its confirmation and on the usage event
+for reporting. The canonical filter compares values as text in any key order, so `{ "model": 1 }`
+and `{ "model": "1" }`, or `true` and `"true"`, are the same filter.
+
+Balance reads, checks and the account projection report the window the request counts in: the
+account's for an account scope, the entity's (or the no-entity window) for an entity scope.
+
+Windows written before declared scopes kept one row per entity and filter. They count where their
+entity places them: in the account's window for an account scope, in that entity's window (or the
+no-entity window) for an entity scope. Their usage is never moved, so each row keeps the
+subscription and plan item it was recorded against and invoices, corrections and holds read it as
+before; a correction of such usage frees capacity in the window that now counts it. An account
+whose usage plus active holds already exceeds the cap is refused further usage until a correction,
+a released hold or a higher limit leaves room. A hold admitted earlier still confirms up to its held
+quantity, and no reservation is cancelled.
+
+When a plan change moves a limit from the entity scope to the account scope inside a window, the
+account's window counts every entity's usage at once. A change from the account scope to the entity
+scope cannot split usage recorded for the whole account, so while the current window holds account
+usage or an active hold the account's total keeps governing, and the entity scope starts with the
+next window.
+
+Monetary spend for postpaid overage is rated across every window belonging to the same
 subscription, purchased plan item, and billing period, exactly as the usage invoice is rated.
-The included allowance and price tiers apply once to that combined quantity. Checks, consumes,
-reservations, confirmations, and corrections use this shared monetary scope; selecting another
-filter or entity does not create another included monetary allowance.
+The included allowance and price tiers apply once to that combined quantity, which is why a limit
+that allows postpaid overage must cap the account: catalog preview and publication refuse
+`allocationScope: "entity"` with `overagePolicy: "allowed"` with `400 INVALID_REQUEST`. Checks,
+consumes, reservations, confirmations, and corrections use this shared monetary scope.
 
 A meter limit counts usage in a window of its item's reset cadence: `resetInterval`, one of `hour`,
 `day`, `week`, `month`, `quarter`, `semi_annual` or `year`, times `resetIntervalCount` (default 1),
@@ -200,8 +230,30 @@ that allows postpaid overage has no cap to lift, so catalog preview and publicat
 unlimited item and a postpaid limit on one feature that an account could hold together (either on an
 add-on) with `400 INVALID_REQUEST`, and an add-on purchase that would bring them together is
 `ADDON_METER_LIMIT_CONFLICT` (409). An account that reaches the combination another way keeps its
-postpaid limit, and its overage is billed as before. Until declared scope is enforced, an unlimited
-item applies across the account, as meter limits do.
+postpaid limit, and its overage is billed as before. An unlimited item lifts only a cap of its own
+declared scope: an unlimited item and a meter limit on one feature that an account could hold
+together with different declared scopes are a mixed scope, refused and denied like two meter limits
+below.
+
+Limits only add up within one declared scope, and an account cap and an entity cap on one feature
+have no agreed combination, so an account never holds both:
+
+- Catalog preview and publication refuse, with `400 INVALID_REQUEST`, an add-on that caps a feature
+  (with a meter limit, or lifts its cap with an `unlimited_usage` item) with another scope than any
+  other plan that caps it, and a limit an account could hold together
+  with a plan version that live subscriptions are still pinned to with another scope (an add-on with
+  any plan, or add-ons of two plans). Base plans exclude each other, so two base plans may differ.
+- A purchase (Checkout, the commercial action and the saved-card plan), a plan change (direct or
+  commercial, including its preview) and a catalog migration to a version whose limits declare
+  another scope than the account's other subscriptions answer `409 ADDON_METER_LIMIT_CONFLICT` with
+  `details.reason: "scope"` and `details.featureKeys`; a migration job fails that subscription with
+  the reason and continues with the others.
+- If a mix still reaches metering, for example through a catalog published before declared scopes
+  were checked, `check`, `consume`, `reserve` and `confirm` on the feature answer
+  `409 METERING_CONFIGURATION_ERROR` with `details.reason: "mixed_scope"` and the conflicting plan
+  versions in `details.sources`, log an error and count `billing_metering_mixed_scope_total`.
+  Neither cap is silently enforced. Releasing a reservation and correcting usage keep working, and
+  a refused confirmation keeps its reservation active. Migrate or cancel one of the subscriptions.
 
 ## Spend and usage limits
 

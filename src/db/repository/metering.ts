@@ -304,7 +304,6 @@ export class MeteringBillingRepository extends RepositoryModule {
 				projectId,
 				customer?.id ?? null,
 				entityId,
-				null,
 				meterLimit,
 			);
 		}
@@ -334,12 +333,12 @@ export class MeteringBillingRepository extends RepositoryModule {
 			feature,
 		);
 		if (meterLimit !== null) {
+			// Filters never create capacity under a declared scope; they matter only on usage events.
 			const decision = await checkMeterLimit(
 				this.database,
 				projectId,
 				customer?.id ?? null,
 				entityId,
-				canonicalFilterKey(input.filters),
 				meterLimit,
 				requestedQuantity,
 			);
@@ -1467,7 +1466,6 @@ async function reverseMeterLimitUsageIfEligible(
 			projectId,
 			customerId,
 			original.entity_id === null ? null : String(original.entity_id),
-			original.filter_key,
 			meterLimit,
 		),
 		spendMinorReduction: (before.amountMinor - after.amountMinor).toString(),

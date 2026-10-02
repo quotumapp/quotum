@@ -112,6 +112,17 @@ export class ProjectScopedBillingRepository {
 		);
 	}
 
+	async meterLimitScopeConflicts(
+		billingAccountId: string,
+		planVersionId: string,
+	): Promise<string[]> {
+		return await this.repository.meterLimitScopeConflicts(
+			this.project,
+			billingAccountId,
+			planVersionId,
+		);
+	}
+
 	async prepareSubscriptionChange(
 		input: SubscriptionChangeInput,
 	): Promise<SubscriptionChangeOperation> {

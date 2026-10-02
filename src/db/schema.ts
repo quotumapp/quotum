@@ -2763,6 +2763,7 @@ export const usageWindows = pgTable(
 			.notNull()
 			.references(() => features.id, { onDelete: "restrict" }),
 		filterKey: text("filter_key"),
+		scope: text("scope"),
 		subscriptionId: uuid("subscription_id").references(() => subscriptions.id, {
 			onDelete: "restrict",
 		}),
@@ -2781,6 +2782,10 @@ export const usageWindows = pgTable(
 		check(
 			"usage_windows_filter_key_check",
 			sql`(((filter_key IS NULL) OR (filter_key <> ''::text)))`,
+		),
+		check(
+			"usage_windows_scope_check",
+			sql`(((scope IS NULL) OR (scope = ANY (ARRAY['account'::text, 'entity'::text]))))`,
 		),
 		foreignKey({
 			name: "usage_windows_project_customer_fk",
@@ -2825,6 +2830,7 @@ export const usageWindows = pgTable(
 			table.featureId,
 			sql`COALESCE(${table.entityId}, 0::bigint)`,
 			sql`COALESCE(${table.filterKey}, '' COLLATE "C")`,
+			sql`COALESCE(${table.scope}, ''::text)`,
 			table.windowStartAt,
 			table.windowEndAt,
 		),
@@ -2852,6 +2858,7 @@ export const reservations = pgTable(
 		}),
 		usageWindowStartAt: timestamp("usage_window_start_at", { withTimezone: true }),
 		usageWindowEndAt: timestamp("usage_window_end_at", { withTimezone: true }),
+		filterKey: text("filter_key"),
 		meterFeatureId: bigint("meter_feature_id", { mode: "number" })
 			.notNull()
 			.references(() => features.id, { onDelete: "restrict" }),
@@ -2891,6 +2898,10 @@ export const reservations = pgTable(
 			sql`((status = ANY (ARRAY['active'::text, 'confirmed'::text, 'released'::text, 'expired'::text])))`,
 		),
 		check("reservations_expiry_check", sql`((expires_at > effective_at))`),
+		check(
+			"reservations_filter_key_check",
+			sql`(((filter_key IS NULL) OR (filter_key <> ''::text)))`,
+		),
 		check(
 			"reservations_usage_window_check",
 			sql`((((usage_window_id IS NULL) AND (usage_window_start_at IS NULL) AND (usage_window_end_at IS NULL)) OR ((usage_window_id IS NOT NULL) AND (usage_window_start_at IS NOT NULL) AND (usage_window_end_at IS NOT NULL) AND (usage_window_start_at < usage_window_end_at))))`,

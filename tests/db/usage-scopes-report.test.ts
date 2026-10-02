@@ -43,6 +43,9 @@ function source(overrides: Partial<MeterLimitRow>): MeterLimitRow {
 		period_start_at: "2026-10-01T00:00:00.000Z",
 		period_end_at: "2026-11-01T00:00:00.000Z",
 		plan_kind: "base",
+		allocation_scope: "account",
+		plan_key: "pro",
+		plan_version: 1,
 		sort_at: "2026-10-01T00:00:00.000Z",
 		...overrides,
 	};

@@ -29,32 +29,32 @@ localDescribe("declared meter-limit scope report", () => {
 	});
 
 	it("reports scopes, the windows they will sum, and what blocks the upgrade, writing nothing", async () => {
+		// Publication refuses scopes an account could hold together, so the entity-scoped plans are
+		// published with the account scope and rewritten below, as a catalog published before PC-04
+		// could hold them.
 		await publish(
 			catalog([
 				plan("pro", "base", "api_requests", "100", "account"),
-				plan("teams", "base", "api_requests", "50", "entity"),
-				plan("boost", "addon", "api_requests", "50", "entity"),
+				plan("teams", "base", "api_requests", "50", "account"),
+				plan("boost", "addon", "api_requests", "50", "account"),
 				plan("metered", "base", "tokens", "100", "account"),
 			]),
 		);
+		await context.sql`
+			UPDATE plan_items SET allocation_scope = 'entity'
+			FROM plan_versions version
+			JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+			WHERE version.project_id = plan_items.project_id AND version.id = plan_items.plan_version_id
+				AND plan.key IN ('boost', 'teams')
+		`;
 		const project = integrationProjectContext();
 		const api = { featureKey: "api_requests" };
 
-		// Today each entity and filter gets its own window; the account scope will sum them.
+		// Before declared scopes, each entity and filter got its own window; the account scope sums
+		// them. The hold is taken first, then its window and the others are written the old way.
 		await subscribe("wide", "pro");
 		await entity("wide", "workspace-a");
 		await entity("wide", "workspace-b");
-		await consume({ ...api, billingAccountId: "wide", quantity: "60", entityId: "workspace-a" }, 1);
-		await consume(
-			{
-				...api,
-				billingAccountId: "wide",
-				quantity: "45",
-				entityId: "workspace-b",
-				filters: { region: "west" },
-			},
-			2,
-		);
 		const hold = await context.repository.reserveUsage(project, {
 			...api,
 			billingAccountId: "wide",
@@ -63,21 +63,26 @@ localDescribe("declared meter-limit scope report", () => {
 			expiresInSeconds: 300,
 		});
 		expect(hold.reservationId).not.toBeNull();
+		const [bounds] = await context.sql<Array<{ start: Date; end: Date }>>`
+			UPDATE usage_windows SET scope = NULL
+			WHERE id = (SELECT usage_window_id FROM reservations WHERE id = ${hold.reservationId}::uuid)
+			RETURNING window_start_at AS start, window_end_at AS end
+		`;
+		if (bounds === undefined) throw new Error("Expected the hold's window");
+		const legacy = (
+			billingAccountId: string,
+			entityId: string | null,
+			region: string | null,
+			usage: string,
+		) => legacyWindow({ billingAccountId, entityId, region, usage, ...bounds });
+		await legacy("wide", "workspace-a", null, "60");
+		await legacy("wide", "workspace-b", "west", "45");
 
 		// An entity scope sums one entity's filters.
 		await subscribe("teamsacct", "teams");
 		await entity("teamsacct", "workspace-a");
-		for (const [index, region] of ["west", "east"].entries()) {
-			await consume(
-				{
-					...api,
-					billingAccountId: "teamsacct",
-					quantity: "20",
-					entityId: "workspace-a",
-					filters: { region },
-				},
-				index,
-			);
+		for (const region of ["west", "east"]) {
+			await legacy("teamsacct", "workspace-a", region, "20");
 		}
 
 		// A base plan and an add-on that cap one feature with different scopes.
@@ -86,7 +91,7 @@ localDescribe("declared meter-limit scope report", () => {
 
 		// An open window nothing caps any more.
 		await subscribe("lapsed", "pro");
-		await consume({ ...api, billingAccountId: "lapsed", quantity: "5" }, 1);
+		await legacy("lapsed", null, null, "5");
 		await context.sql`
 			UPDATE subscriptions SET status = 'expired', expires_at = now() - INTERVAL '1 minute'
 			WHERE external_subscription_id = 'lapsed:pro'
@@ -240,21 +245,33 @@ async function stateFingerprint() {
 	`;
 }
 
-async function consume(
-	input: {
-		billingAccountId: string;
-		featureKey: string;
-		quantity: string;
-		entityId?: string;
-		filters?: Record<string, string>;
-	},
-	sequence: number,
-): Promise<void> {
-	const result = await context.repository.consumeUsage(integrationProjectContext(), {
-		...input,
-		idempotencyKey: `${input.billingAccountId}:${input.entityId ?? "none"}:${sequence}`,
-	});
-	expect(result).toMatchObject({ allowed: true });
+/** An `api_requests` window the way a release before declared scopes wrote it. */
+async function legacyWindow(input: {
+	billingAccountId: string;
+	entityId: string | null;
+	region: string | null;
+	usage: string;
+	start: Date;
+	end: Date;
+}): Promise<void> {
+	await context.sql`
+		INSERT INTO usage_windows (
+			project_id, customer_id, entity_id, feature_id, filter_key, window_start_at, window_end_at,
+			usage
+		)
+		SELECT customer.project_id, customer.id,
+			(
+				SELECT entity.id FROM entities entity
+				WHERE entity.customer_id = customer.id AND entity.external_id = ${input.entityId}
+			),
+			feature.id, ${input.region === null ? null : `region=${input.region}`}, ${input.start},
+			${input.end}, ${input.usage}::numeric
+		FROM customers customer
+		JOIN projects project ON project.id = customer.project_id AND project.key = 'acme'
+		JOIN features feature ON feature.project_id = customer.project_id
+			AND feature.key = 'api_requests'
+		WHERE customer.billing_account_id = ${input.billingAccountId}
+	`;
 }
 
 function plan(

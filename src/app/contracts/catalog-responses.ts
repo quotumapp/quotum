@@ -209,6 +209,21 @@ export const postV1AdminCatalogPreviewResponse200Schema = z.object({
 		),
 		/** Valid shapes the operator may want to reconsider; an advisory never implies removal. */
 		advisories: z.array(z.object({ path: z.string(), message: z.string() })),
+		/** Per meter-limited feature: declared scopes, and pinned versions with another scope. */
+		scopeImpact: z.array(
+			z.object({
+				featureKey: z.string(),
+				scopes: z.array(z.object({ plan: z.string(), scope: z.enum(["account", "entity"]) })),
+				pinnedVersions: z.array(
+					z.object({
+						plan: z.string(),
+						version: z.number(),
+						scope: z.enum(["account", "entity"]),
+						subscriptions: z.number(),
+					}),
+				),
+			}),
+		),
 	}),
 });
 
