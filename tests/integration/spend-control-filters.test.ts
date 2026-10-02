@@ -33,7 +33,8 @@ describeLocalPostgres(describe, describe.skip)("spend controls across invoice fi
 		await context.sql.close();
 	});
 
-	it("shares the included allowance while retaining scoped balances and read-only checks", async () => {
+	// The limit declares the account scope, so filters share one balance as they share one allowance.
+	it("shares the included allowance and one balance across filters, with read-only checks", async () => {
 		expect(await consume("us", "75", "first")).toMatchObject({
 			allowed: true,
 			balance: { consumed: "75" },
@@ -47,7 +48,7 @@ describeLocalPostgres(describe, describe.skip)("spend controls across invoice fi
 		expect(await context.repository.checkUsage(project, input)).toMatchObject({
 			allowed: false,
 			reason: "control_limit_exceeded",
-			balance: { consumed: "0" },
+			balance: { consumed: "75" },
 		});
 		expect(await consume("eu", "75", "second")).toMatchObject({
 			allowed: false,
@@ -56,7 +57,7 @@ describeLocalPostgres(describe, describe.skip)("spend controls across invoice fi
 		expect(await spent()).toBe(25);
 		expect(await consume("eu", "70", "fits")).toMatchObject({
 			allowed: true,
-			balance: { consumed: "70" },
+			balance: { consumed: "145" },
 		});
 		expect(await spent()).toBe(60);
 		await closeUsageWindows(context.sql);
@@ -153,7 +154,7 @@ describeLocalPostgres(describe, describe.skip)("spend controls across invoice fi
 		},
 	);
 
-	it("rerates a correction using total usage while restoring only its original filter", async () => {
+	it("rerates a correction using total usage in the account's one window", async () => {
 		await setCap("1000");
 		const first = await consume("us", "75", "us");
 		await consume("eu", "75", "eu");
@@ -171,7 +172,8 @@ describeLocalPostgres(describe, describe.skip)("spend controls across invoice fi
 		const rows = await context.sql<
 			Array<{ usage: string }>
 		>`SELECT usage::text FROM usage_windows ORDER BY usage`;
-		expect(rows.map((r) => Number(r.usage))).toEqual([50, 75]);
+		// Both filters count in the account's window; the events keep their filters for reporting.
+		expect(rows.map((r) => Number(r.usage))).toEqual([125]);
 		await closeUsageWindows(context.sql);
 		await context.repository.materializeAndClaimUsageInvoicePeriods("filter-test", 10);
 		const [invoice] = await context.sql`SELECT amount_minor FROM usage_invoice_periods`;

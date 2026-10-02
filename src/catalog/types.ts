@@ -431,6 +431,23 @@ export interface CatalogPreview {
 	deprecations: CatalogDeprecation[];
 	/** Valid shapes the operator may want to reconsider. */
 	advisories: CatalogAdvisory[];
+	/**
+	 * For each feature the intent caps with a meter limit, the scope each plan declares and the plan
+	 * versions live subscriptions stay pinned to with a different scope: a publish does not move
+	 * them, a catalog migration does (PC-04).
+	 */
+	scopeImpact: CatalogScopeImpact[];
+}
+
+export interface CatalogScopeImpact {
+	featureKey: string;
+	scopes: Array<{ plan: string; scope: "account" | "entity" }>;
+	pinnedVersions: Array<{
+		plan: string;
+		version: number;
+		scope: "account" | "entity";
+		subscriptions: number;
+	}>;
 }
 
 export interface CatalogPublishResult {

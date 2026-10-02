@@ -4,6 +4,7 @@ import {
 	type MeterLimitRow,
 	meterLimitBounds,
 	meterLimitsJoin,
+	mixedScopeSources,
 	unlimitedLiftsCap,
 } from "../../src/db/repository/meter-limit-sources";
 
@@ -22,6 +23,9 @@ function row(overrides: Partial<MeterLimitRow>): MeterLimitRow {
 		period_start_at: "2026-09-01T00:00:00Z",
 		period_end_at: "2026-10-01T00:00:00Z",
 		plan_kind: "base",
+		allocation_scope: "account",
+		plan_key: "pro",
+		plan_version: 1,
 		sort_at: "2026-09-01T00:00:00Z",
 		...overrides,
 	};
@@ -90,9 +94,23 @@ describe("combined meter limits", () => {
 		).toMatchObject({ quantity: "0.75" });
 	});
 
-	it("joins only hard caps with the same reset", () => {
+	it("joins only hard caps with the same reset and declared scope", () => {
 		expect(meterLimitsJoin(base, addOn)).toBe(true);
 		expect(meterLimitsJoin(base, { ...addOn, reset_interval: "week" })).toBe(false);
+		expect(meterLimitsJoin(base, { ...addOn, allocation_scope: "entity" })).toBe(false);
+		// An add-on with another scope leaves the anchor's quantity alone.
+		expect(combineMeterLimits([base, { ...addOn, allocation_scope: "entity" }], 0)).toEqual({
+			anchor: base,
+			quantity: "100",
+		});
+	});
+
+	it("names paying sources that mix scopes, but not a plan grant", () => {
+		const entityAddOn = { ...addOn, allocation_scope: "entity" as const };
+		expect(mixedScopeSources([base, addOn], base)).toEqual([]);
+		expect(mixedScopeSources([base, entityAddOn], base)).toEqual([base, entityAddOn]);
+		const grant = { ...entityAddOn, subscription_id: null, plan_grant_id: "grant-1" };
+		expect(mixedScopeSources([base, grant], base)).toEqual([]);
 	});
 
 	it("windows a subscription within its period and a grant from its start", () => {
@@ -144,5 +162,33 @@ describe("unlimited usage sources", () => {
 		const granted = { ...unlimited, subscription_id: null, plan_grant_id: "grant-1" };
 		expect(unlimitedLiftsCap([granted], null)).toBe(true);
 		expect(unlimitedLiftsCap([base, granted], base)).toBe(false);
+	});
+});
+
+describe("unlimited usage and declared scope", () => {
+	const unlimitedAddOn = row({
+		plan_item_id: "4",
+		item_kind: "unlimited_usage",
+		subscription_id: "sub-unlimited",
+		plan_kind: "addon",
+		quantity: "0",
+		allocation_scope: "account",
+	});
+
+	it("lifts only a cap of the unlimited source's own scope", () => {
+		expect(unlimitedLiftsCap([base, unlimitedAddOn], base)).toBe(true);
+		const entityCap = row({ allocation_scope: "entity" });
+		expect(unlimitedLiftsCap([entityCap, unlimitedAddOn], entityCap)).toBe(false);
+		// With no finite cap there is nothing of another scope to conflict with.
+		expect(unlimitedLiftsCap([unlimitedAddOn], null)).toBe(true);
+	});
+
+	it("reports an unlimited source of another scope than the cap as a mixed scope", () => {
+		const entityCap = row({ allocation_scope: "entity" });
+		expect(mixedScopeSources([entityCap, unlimitedAddOn], entityCap)).toEqual([
+			entityCap,
+			unlimitedAddOn,
+		]);
+		expect(mixedScopeSources([base, unlimitedAddOn], base)).toEqual([]);
 	});
 });

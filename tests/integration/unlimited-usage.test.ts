@@ -297,6 +297,75 @@ localDescribe("unlimited usage items", () => {
 		expect(decision).toMatchObject({ allowed: true, balance: { granted: "100" } });
 		expect(decision.balance).not.toHaveProperty("unlimited");
 	});
+
+	it("lifts an account-scoped cap and treats one beside an entity-scoped cap as a mixed scope", async () => {
+		// An unlimited usage item declares no scope: it covers the account. It lifts an account cap.
+		await publish(
+			catalog([
+				plan("pro", "base", [
+					{ ...cap("100", "blocked"), allocationScope: "account" } as AuthoredPlanItemIntent,
+				]),
+				plan("unlimited_requests", "addon", [unlimited]),
+			]),
+			null,
+		);
+		await subscribe("scoped", "pro", 1);
+		await subscribe("scoped", "unlimited_requests", 1);
+		const usage = { billingAccountId: "scoped", featureKey: "api_requests" };
+		expect(
+			await context.repository.checkUsage(project, { ...usage, quantity: "500" }),
+		).toMatchObject({
+			allowed: true,
+			balance: { granted: null, available: null, unlimited: true },
+		});
+
+		// Beside an entity-scoped cap an account could hold it with, it is a mixed scope: refused at
+		// publication, at purchase, and, if it still reaches metering, by the mixed-scope refusal.
+		await expect(
+			context.repository.previewCatalog(project, {
+				expectedRevision: 1,
+				actor: "integration-test",
+				catalog: catalog([
+					plan(
+						"pro",
+						"base",
+						[{ ...cap("100", "blocked"), allocationScope: "entity" } as AuthoredPlanItemIntent],
+						2,
+					),
+					plan("unlimited_requests", "addon", [unlimited]),
+				]),
+			}),
+		).rejects.toThrow(
+			new InvalidRequestError(
+				"Unlimited usage of api_requests on plan unlimited_requests declares account scope, but plan pro caps it with entity scope and can be held together with it; declare the same allocationScope",
+			),
+		);
+		await context.sql`
+			UPDATE plan_items item SET allocation_scope = 'entity'
+			FROM plan_versions version
+			JOIN plans ON plans.project_id = version.project_id AND plans.id = version.plan_id
+			WHERE version.project_id = item.project_id AND version.id = item.plan_version_id
+				AND plans.key = 'pro' AND item.item_kind = 'meter_limit'
+		`;
+		const { versionId } = await versionOf("unlimited_requests", 1);
+		await subscribe("other", "pro", 1);
+		expect(await context.repository.meterLimitScopeConflicts(project, "other", versionId)).toEqual([
+			"api_requests",
+		]);
+		const refused = await context.repository.checkUsage(project, { ...usage, quantity: "1" }).then(
+			() => null,
+			(caught: unknown) => caught,
+		);
+		expect(refused).toMatchObject({
+			code: "METERING_CONFIGURATION_ERROR",
+			status: 409,
+			details: { reason: "mixed_scope", featureKey: "api_requests" },
+		});
+		// Reads report the anchor's own scope and do not claim the entity cap is lifted.
+		const balance = await context.repository.getMeteringBalance(project, "scoped", "api_requests");
+		expect(balance).toMatchObject({ granted: "100" });
+		expect(balance).not.toHaveProperty("unlimited");
+	});
 });
 
 const unlimited: AuthoredPlanItemIntent = {

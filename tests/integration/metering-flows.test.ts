@@ -982,18 +982,28 @@ localDescribe("authoritative metering flows", () => {
 			balance: { granted: "200", consumed: "140", held: "0", available: "60" },
 		});
 
+		// The limit declares the account scope: one account row counts every entity and filter, and
+		// the entity and filter stay on the usage events for reporting.
 		const windows = await context.sql<
-			Array<{ usage: string; external_id: string; filter_key: string | null }>
+			Array<{ usage: string; entity_id: string | null; filter_key: string | null; scope: string }>
 		>`
-			SELECT windows.usage::text, entities.external_id, windows.filter_key
-			FROM usage_windows windows
-			JOIN entities ON entities.project_id = windows.project_id AND entities.id = windows.entity_id
-			WHERE entities.external_id = 'workspace_1'
+			SELECT usage::text, entity_id::text, filter_key, scope FROM usage_windows
 		`;
 		expect(windows).toEqual([
-			{ usage: "140.000000000", external_id: "workspace_1", filter_key: expect.any(String) },
+			{ usage: "140.000000000", entity_id: null, filter_key: null, scope: "account" },
 		]);
-		expect(await countRows(context.sql, "usage_windows")).toBe(1);
+		const events = await context.sql<Array<{ operation: string; external_id: string | null }>>`
+			SELECT events.operation, entities.external_id
+			FROM usage_events events
+			LEFT JOIN entities ON entities.project_id = events.project_id AND entities.id = events.entity_id
+			WHERE events.filter_key IS NOT NULL
+			ORDER BY events.recorded_at, events.id
+		`;
+		expect(events).toEqual([
+			{ operation: "consume", external_id: "workspace_1" },
+			{ operation: "confirm", external_id: "workspace_1" },
+			{ operation: "correction", external_id: "workspace_1" },
+		]);
 	});
 
 	it("counts a filter value in one window whether it arrives as a number or a string", async () => {

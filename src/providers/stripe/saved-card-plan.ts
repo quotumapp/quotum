@@ -16,7 +16,7 @@ import type {
 	RecordPaymentSetupPlanOutcomeInput,
 	StripeRecurringCheckoutPlan,
 } from "../../db/repository";
-import { assertAddOnMeterLimitsCombine } from "./add-on-meter-limits";
+import { assertAddOnMeterLimitsCombine, assertMeterLimitScopesAgree } from "./add-on-meter-limits";
 
 /** Codes an eligibility or catalog check may leave on the setup instead of retrying. */
 const PLAN_OUTCOME_CODES = new Set([
@@ -47,6 +47,7 @@ export interface SavedCardPlanRepository {
 	): Promise<StripeRecurringCheckoutPlan>;
 	hasActiveBasePlan(billingAccountId: string): Promise<boolean>;
 	addOnMeterLimitConflicts?(billingAccountId: string, planVersionId: string): Promise<string[]>;
+	meterLimitScopeConflicts?(billingAccountId: string, planVersionId: string): Promise<string[]>;
 	recordPaymentSetupSubscriptionId(input: {
 		setupId: string;
 		workerId: string;
@@ -176,6 +177,7 @@ export async function startPlanOnSavedCard(
 		}
 		const hasActiveBasePlan = await context.repository.hasActiveBasePlan(setup.billing_account_id);
 		assertSetupPlanEligible(plan, hasActiveBasePlan);
+		await assertMeterLimitScopesAgree(context.repository, setup.billing_account_id, plan);
 		await assertAddOnMeterLimitsCombine(context.repository, setup.billing_account_id, plan);
 		const params = context.subscriptionCreateParams(plan, quantities, setup);
 		subscription = await context.client.createSubscription(

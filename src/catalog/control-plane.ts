@@ -72,6 +72,7 @@ import type {
 	CatalogProviderBindingIntent,
 	CatalogPublishInput,
 	CatalogPublishResult,
+	CatalogScopeImpact,
 	PublishedCatalog,
 } from "./types";
 
@@ -223,6 +224,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 			);
 			const expiresAt = new Date(Date.now() + 30 * 60_000);
 			const impact = await calculateImpact(tx, projectState.id, parsed, this.capabilities);
+			const scopeImpact = await calculateScopeImpact(tx, projectState.id, parsed.canonical);
 			await executeOne(
 				tx,
 				drizzleSql`
@@ -259,6 +261,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				providerCompatibility,
 				deprecations: parsed.deprecations,
 				advisories: parsed.advisories,
+				scopeImpact,
 			};
 		});
 	}
@@ -746,6 +749,17 @@ function normalizeCatalog(
 			}
 			if (item.overagePolicy === "allowed" && item.price === null) {
 				throw new InvalidRequestError(`Meter limit ${item.featureKey} requires an overage price`);
+			}
+			if (
+				item.itemKind === "meter_limit" &&
+				item.overagePolicy === "allowed" &&
+				item.allocationScope === "entity"
+			) {
+				// Postpaid overage is invoiced with the included quantity applied once across entities, so
+				// a limit per entity would promise an allowance rating does not give (PC-04, option A).
+				throw new InvalidRequestError(
+					`Meter limit ${item.featureKey} on plan ${plan.key} allows postpaid overage, so it must cap the account: entity scope is only available to blocked limits`,
+				);
 			}
 			if (item.price !== null && item.itemKind === "access") {
 				throw new InvalidRequestError(`Access item ${item.featureKey} cannot declare a price`);
@@ -1283,6 +1297,124 @@ async function validateCatalogLifecycle(
 			);
 		}
 	}
+	assertScopesAgreeWithPinnedVersions(catalog, await readPinnedMeterLimits(executor, projectId));
+}
+
+interface PinnedMeterLimit {
+	plan_key: string;
+	version: number;
+	plan_kind: "base" | "addon";
+	feature_key: string;
+	scope: "account" | "entity";
+	item_kind: "meter_limit" | "unlimited_usage";
+	subscriptions: number | string;
+}
+
+/** The meter limits of every plan version live subscriptions are pinned to. */
+function readPinnedMeterLimits(
+	executor: QueryExecutor,
+	projectId: string,
+): Promise<PinnedMeterLimit[]> {
+	return executeRows<PinnedMeterLimit>(
+		executor,
+		drizzleSql`
+			SELECT
+				plan.key AS plan_key,
+				version.version,
+				version.plan_kind,
+				feature.key AS feature_key,
+				CASE WHEN item.allocation_scope = 'entity' THEN 'entity' ELSE 'account' END AS scope,
+				item.item_kind,
+				pinned.subscriptions
+			FROM plan_items item
+			JOIN plan_versions version
+				ON version.project_id = item.project_id AND version.id = item.plan_version_id
+			JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+			JOIN features feature ON feature.project_id = item.project_id AND feature.id = item.feature_id
+			CROSS JOIN LATERAL (
+				SELECT count(*)::integer AS subscriptions
+				FROM subscriptions subscription
+				WHERE subscription.project_id = version.project_id
+					AND subscription.plan_version_id = version.id
+					AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+					AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
+			) pinned
+			WHERE item.project_id = ${projectId}
+				AND item.item_kind IN ('meter_limit', 'unlimited_usage')
+				AND pinned.subscriptions > 0
+			ORDER BY feature.key, plan.key, version.version
+		`,
+	);
+}
+
+/**
+ * Refuses a meter limit that an account could hold together with a pinned plan version that caps
+ * the same feature with another declared scope: an add-on with any other plan, or two add-ons of
+ * different plans. Base plans are mutually exclusive, so two base plans may differ; and publishing
+ * does not move pinned subscriptions, so their versions count until a catalog migration moves them
+ * (PC-04).
+ */
+function assertScopesAgreeWithPinnedVersions(
+	catalog: CanonicalCatalog,
+	pinned: readonly PinnedMeterLimit[],
+): void {
+	for (const plan of catalog.plans) {
+		for (const item of plan.items) {
+			if (item.itemKind !== "meter_limit" && item.itemKind !== "unlimited_usage") continue;
+			// An unlimited usage item declares no scope: it covers the account.
+			const scope = item.itemKind === "unlimited_usage" ? "account" : meterLimitScopeOf(item);
+			// Two unlimited sources have no cap to combine; any pair with a meter limit does.
+			const conflict = pinned.find(
+				(row) =>
+					row.feature_key === item.featureKey &&
+					row.plan_key !== plan.key &&
+					row.scope !== scope &&
+					!(item.itemKind === "unlimited_usage" && row.item_kind === "unlimited_usage") &&
+					!(plan.kind === "base" && row.plan_kind === "base"),
+			);
+			if (conflict !== undefined) {
+				throw new InvalidRequestError(
+					`Meter limit ${item.featureKey} on plan ${plan.key} declares ${scope} scope, but ${conflict.subscriptions} subscriptions still use plan ${conflict.plan_key} version ${conflict.version}, which caps it with ${conflict.scope} scope and can be held together with it; migrate them or declare the same allocationScope`,
+				);
+			}
+		}
+	}
+}
+
+/** The preview's `scopeImpact`: declared scopes, and pinned versions left on another scope. */
+async function calculateScopeImpact(
+	executor: QueryExecutor,
+	projectId: string,
+	catalog: CanonicalCatalog,
+): Promise<CatalogScopeImpact[]> {
+	const pinned = await readPinnedMeterLimits(executor, projectId);
+	const impact = new Map<string, CatalogScopeImpact>();
+	for (const plan of catalog.plans) {
+		for (const item of plan.items) {
+			if (item.itemKind !== "meter_limit") continue;
+			const entry = impact.get(item.featureKey) ?? {
+				featureKey: item.featureKey,
+				scopes: [],
+				pinnedVersions: [],
+			};
+			entry.scopes.push({ plan: plan.key, scope: meterLimitScopeOf(item) });
+			impact.set(item.featureKey, entry);
+		}
+	}
+	for (const entry of impact.values()) {
+		const declared = new Map(entry.scopes.map(({ plan, scope }) => [plan, scope]));
+		entry.pinnedVersions = pinned
+			.filter(
+				(row) => row.feature_key === entry.featureKey && declared.get(row.plan_key) !== row.scope,
+			)
+			.map((row) => ({
+				plan: row.plan_key,
+				version: Number(row.version),
+				scope: row.scope,
+				subscriptions: Number(row.subscriptions),
+			}));
+	}
+	return [...impact.values()];
 }
 
 function assertKnownRetirements(
@@ -2079,6 +2211,11 @@ function assertUnique(values: string[], field: string): void {
 	}
 }
 
+/** A meter limit's declared scope: `entity`, or the account by default. */
+function meterLimitScopeOf(item: { allocationScope?: string | null }): "account" | "entity" {
+	return item.allocationScope === "entity" ? "entity" : "account";
+}
+
 function requireMap(map: Map<string, string>, key: string): string {
 	const value = map.get(key);
 	if (value === undefined) throw new Error(`Catalog reference ${key} was not resolved`);
@@ -2088,12 +2225,14 @@ function requireMap(map: Map<string, string>, key: string): string {
 /**
  * Refuses meter limits that could not add up. An add-on's meter limit adds its quantity to the
  * account's other limits on the feature within one window, and any base plan can hold any add-on,
- * so once an add-on limits a feature every meter limit on it must be a hard cap with one reset.
- * Postpaid overage is invoiced against one item's own quantity and so never sums.
+ * so once an add-on limits a feature every meter limit on it must be a hard cap with one reset and
+ * one declared scope. Postpaid overage is invoiced against one item's own quantity and so never
+ * sums, and an account cap and an entity cap have no agreed combination (PC-04).
  *
- * Unlimited usage lifts hard caps only: a postpaid limit has no cap to lift, and whether its overage
- * would still be billed is not decided, so an unlimited item and a postpaid limit that an account
- * could hold together, because one of them is on an add-on, are refused.
+ * Unlimited usage lifts hard caps only: a postpaid limit has no cap to lift, so an unlimited item and
+ * a postpaid limit that an account could hold together, because one of them is on an add-on, are
+ * refused. An unlimited item lifts only a cap of its own declared scope, so one that an account could
+ * hold together with a meter limit of another scope is a mixed scope and is refused too.
  */
 function assertMeterLimitsCombine(
 	plans: ReadonlyArray<{
@@ -2105,6 +2244,7 @@ function assertMeterLimitsCombine(
 			overagePolicy: "blocked" | "allowed";
 			resetInterval: string | null;
 			resetIntervalCount: number | null;
+			allocationScope?: string | null;
 		}>;
 	}>,
 ): void {
@@ -2128,12 +2268,31 @@ function assertMeterLimitsCombine(
 				`Plan ${postpaid.plan.key} cannot allow postpaid overage on ${item.featureKey}, because plan ${plan.key} grants unlimited usage of it; unlimited usage lifts hard caps only`,
 			);
 		}
+		const otherScope = limits.find(
+			(limit) =>
+				limit.item.featureKey === item.featureKey &&
+				meterLimitScopeOf(limit.item) !== meterLimitScopeOf(item) &&
+				(plan.kind === "addon" || limit.plan.kind === "addon"),
+		);
+		if (otherScope !== undefined) {
+			throw new InvalidRequestError(
+				`Unlimited usage of ${item.featureKey} on plan ${plan.key} declares ${meterLimitScopeOf(item)} scope, but plan ${otherScope.plan.key} caps it with ${meterLimitScopeOf(otherScope.item)} scope and can be held together with it; declare the same allocationScope`,
+			);
+		}
 	}
 	for (const featureKey of new Set(limits.map(({ item }) => item.featureKey))) {
 		const onFeature = limits.filter(({ item }) => item.featureKey === featureKey);
 		const [first] = onFeature;
 		if (first === undefined || onFeature.length < 2) continue;
 		if (!onFeature.some(({ plan }) => plan.kind === "addon")) continue;
+		const scopes = new Set(onFeature.map(({ item }) => meterLimitScopeOf(item)));
+		if (scopes.size > 1) {
+			throw new InvalidRequestError(
+				`Meter limits on ${featureKey} must all declare the same allocationScope, because add-on ${
+					onFeature.find(({ plan }) => plan.kind === "addon")?.plan.key
+				} can be held together with them`,
+			);
+		}
 		const combinable = onFeature.every(
 			({ item }) =>
 				item.overagePolicy === "blocked" &&

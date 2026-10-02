@@ -68,7 +68,7 @@ import type {
 import type { SubscriptionReconciliationProvider } from "../../workers/subscription-reconciliation";
 import { commercialPreviewProvider } from "../capabilities";
 import { requireNonBlank } from "../validation";
-import { assertAddOnMeterLimitsCombine } from "./add-on-meter-limits";
+import { assertAddOnMeterLimitsCombine, assertMeterLimitScopesAgree } from "./add-on-meter-limits";
 import { stripeCapabilities } from "./capabilities";
 import type { StripeCheckoutSessionCreateParams } from "./client";
 import {
@@ -207,6 +207,7 @@ interface StripeBillingRepositoryDependency extends PaymentSetupRepositoryDepend
 
 	hasActiveBasePlan?(billingAccountId: string): Promise<boolean>;
 	addOnMeterLimitConflicts?(billingAccountId: string, planVersionId: string): Promise<string[]>;
+	meterLimitScopeConflicts?(billingAccountId: string, planVersionId: string): Promise<string[]>;
 
 	prepareSubscriptionChange?(input: SubscriptionChangeInput): Promise<SubscriptionChangeOperation>;
 	previewSubscriptionChange?(
@@ -446,6 +447,7 @@ export class StripeBillingService
 			);
 		}
 		if (plan !== null) {
+			await assertMeterLimitScopesAgree(this.dependencies.repository, billingAccountId, plan);
 			await assertAddOnMeterLimitsCombine(this.dependencies.repository, billingAccountId, plan);
 		}
 		const quantities = normalizedLicensedQuantities(input.quantities ?? {});
@@ -1085,6 +1087,7 @@ export class StripeBillingService
 				409,
 			);
 		}
+		await assertMeterLimitScopesAgree(this.dependencies.repository, billingAccountId, plan);
 		await assertAddOnMeterLimitsCombine(this.dependencies.repository, billingAccountId, plan);
 		const quantities = normalizedLicensedQuantities(normalized.quantities);
 		const lines = commercialPlanLines(plan, quantities);

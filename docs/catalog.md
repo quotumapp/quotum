@@ -75,6 +75,14 @@ and a `message`. It reports `advisories` separately: valid shapes worth reconsid
 imply removal. The one advisory is a Stripe binding in `providerPriced`: "Use `basePrice` when
 Quotum should model the price." Provider-owned Stripe pricing has no retirement plan.
 
+A preview also reports `scopeImpact`: for each feature a meter limit caps, the `allocationScope`
+each plan in the intent declares (`scopes`), and the plan versions live subscriptions stay pinned to
+with a different scope (`pinnedVersions`, with their subscription counts). Publishing does not move
+those subscriptions; a [catalog migration](#catalog-migrations) does. Preview and publication refuse
+a meter limit that an account could hold together with a limit of another scope, whether in the
+intent or on a pinned version, and an entity-scoped limit that allows postpaid overage; see
+[declared meter-limit scope](metering.md#meter-limits).
+
 The SDK's `defineCatalog`, the CLI's catalog files and `client.catalog.preview` and `publish` take
 either spelling; `client.catalog.status` and the MCP `get_catalog` tool return the canonical intent.
 

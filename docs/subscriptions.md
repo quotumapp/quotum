@@ -211,7 +211,11 @@ that races with the execution claim also returns `COMMERCIAL_PREVIEW_STALE`, wit
 setup link for the replacement version.
 
 An add-on without an active base plan is `ADDON_REQUIRES_BASE_PLAN` (409), and one whose meter
-limits cannot add up with the account's is `ADDON_METER_LIMIT_CONFLICT` (409). A base plan when the
+limits cannot add up with the account's is `ADDON_METER_LIMIT_CONFLICT` (409). A plan, base or
+add-on, whose meter limits declare another `allocationScope` than limits the account's other
+subscriptions hold on the same feature is `ADDON_METER_LIMIT_CONFLICT` (409) with
+`details.reason: "scope"`; so is a plan change or catalog migration to such a version (see
+[declared meter-limit scope](metering.md#meter-limits)). A base plan when the
 account already has an active one is `BASE_PLAN_ALREADY_ACTIVE` (409): change it with
 `subscription_change`. Checkout can still sell that base plan from a hosted page; this charge cannot.
 

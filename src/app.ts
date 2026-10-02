@@ -379,6 +379,24 @@ export function createApp({
 		// The error handler must never throw itself, whatever URL the request carried.
 		const pathname = URL.parse(request.url, "http://unknown.invalid")?.pathname ?? "/";
 		const routeGroup = routeGroupForPath(pathname);
+		if (
+			classified.code === "METERING_CONFIGURATION_ERROR" &&
+			classified.details?.reason === "mixed_scope"
+		) {
+			// A declared-scope mix reached metering despite the publication and purchase guards: the
+			// operator has to migrate or cancel one of the account's subscriptions.
+			safelyIncrementBillingMetric(billingMetrics, "billing_metering_mixed_scope_total", {
+				route_group: routeGroup,
+			});
+			safelyLogError(billingLogger, "Meter limits mix declared scopes", error, {
+				requestId,
+				method: request.method,
+				path: pathname,
+				routeGroup,
+				featureKey: String(classified.details.featureKey ?? ""),
+				sources: JSON.stringify(classified.details.sources ?? []),
+			});
+		}
 		if (classified.status >= 500) {
 			safelyIncrementBillingMetric(billingMetrics, "billing_http_errors_total", {
 				route_group: routeGroup,

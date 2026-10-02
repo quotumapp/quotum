@@ -12027,6 +12027,74 @@
                   "$ref": "#/components/schemas/CatalogProviderCompatibility"
                 },
                 "type": "array"
+              },
+              "scopeImpact": {
+                "items": {
+                  "properties": {
+                    "featureKey": {
+                      "type": "string"
+                    },
+                    "pinnedVersions": {
+                      "items": {
+                        "properties": {
+                          "plan": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "enum": [
+                              "account",
+                              "entity"
+                            ],
+                            "type": "string"
+                          },
+                          "subscriptions": {
+                            "type": "number"
+                          },
+                          "version": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "plan",
+                          "version",
+                          "scope",
+                          "subscriptions"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "scopes": {
+                      "items": {
+                        "properties": {
+                          "plan": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "enum": [
+                              "account",
+                              "entity"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "plan",
+                          "scope"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "featureKey",
+                    "scopes",
+                    "pinnedVersions"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
               }
             },
             "required": [
@@ -12038,7 +12106,8 @@
               "impact",
               "providerCompatibility",
               "deprecations",
-              "advisories"
+              "advisories",
+              "scopeImpact"
             ],
             "type": "object"
           },

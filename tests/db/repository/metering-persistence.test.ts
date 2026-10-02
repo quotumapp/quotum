@@ -27,6 +27,8 @@ const meter: MeterLimitDecision = {
 	limit: "25",
 	overagePolicy: "allowed",
 	unlimited: false,
+	scope: "account",
+	mixedScope: null,
 	windowStartAt: new Date("2026-09-01"),
 	windowEndAt: new Date("2026-10-01"),
 	overagePrice: {
