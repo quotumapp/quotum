@@ -15,6 +15,62 @@
 				"externalProductId": "prod_quickstart_credits_10",
 				"externalPriceId": "price_quickstart_credits_10",
 				"active": true
+			},
+			{
+				"key": "credits_1000",
+				"name": "1,000 credits",
+				"kind": "topup",
+				"plan": null,
+				"currency": "USD",
+				"amountCents": 3999,
+				"credits": 1000,
+				"interval": null,
+				"entitlementKey": "credits",
+				"externalProductId": "prod_quickstart_credits_1000",
+				"externalPriceId": "price_quickstart_credits_1000",
+				"active": true
+			},
+			{
+				"key": "pro_monthly",
+				"name": "Pro",
+				"kind": "subscription",
+				"plan": "pro",
+				"currency": "USD",
+				"amountCents": 2000,
+				"credits": 1000,
+				"interval": "month",
+				"entitlementKey": "pro",
+				"externalProductId": "prod_quickstart_pro",
+				"externalPriceId": "price_quickstart_pro_monthly",
+				"active": true
+			},
+			{
+				"key": "team_seat",
+				"name": "Team seat",
+				"kind": "subscription",
+				"plan": "team",
+				"currency": "USD",
+				"amountCents": 800,
+				"credits": 1,
+				"interval": "month",
+				"entitlementKey": "team",
+				"externalProductId": "prod_quickstart_team_seat",
+				"externalPriceId": "price_quickstart_team_seat",
+				"active": true
+			},
+			{
+				"key": "unlimited_exports",
+				"name": "Unlimited exports",
+				"kind": "subscription",
+				"plan": "unlimited_exports",
+				"currency": "USD",
+				"amountCents": 1500,
+				"credits": 1,
+				"interval": "month",
+				"entitlementKey": "unlimited_exports",
+				"externalProductId": "prod_quickstart_unlimited_exports",
+				"externalPriceId": "price_quickstart_unlimited_exports",
+				"active": true
 			}
 		]
 	}

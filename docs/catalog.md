@@ -15,7 +15,10 @@ unchanged, and previewing it reports the same `intentHash` with no features, pla
 created. A revision keeps the hash recorded when it was published; the read-back hash is
 recomputed from the stored intent, so it can differ from the recorded one for a catalog published
 before the canonical intent. See [`examples/quickstart/catalog.json`](../examples/quickstart/catalog.json)
-for a minimal intent.
+for a minimal intent, and
+[`examples/quickstart/catalog-plans.json`](../examples/quickstart/catalog-plans.json) for one plan of
+each kind in the canonical spelling: an unpriced default plan, a base plan with a `basePrice`, a plan
+priced only through its seats, an `unlimited_usage` add-on and a calendar-expiry top-up.
 
 ## Canonical intent
 

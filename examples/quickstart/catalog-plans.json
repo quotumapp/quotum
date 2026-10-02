@@ -1,0 +1,252 @@
+{
+	"features": [
+		{
+			"key": "ai_credits",
+			"name": "AI credits",
+			"kind": "metered",
+			"meterKind": "consumable",
+			"unit": "credit",
+			"creditScale": 0,
+			"filterDimensions": []
+		},
+		{
+			"key": "api_calls",
+			"name": "API calls",
+			"kind": "metered",
+			"meterKind": "consumable",
+			"unit": "call",
+			"creditScale": 0,
+			"filterDimensions": []
+		},
+		{
+			"key": "exports",
+			"name": "Exports",
+			"kind": "metered",
+			"meterKind": "consumable",
+			"unit": "export",
+			"creditScale": 0,
+			"filterDimensions": []
+		},
+		{
+			"key": "seats",
+			"name": "Seats",
+			"kind": "metered",
+			"meterKind": "non_consumable",
+			"unit": "seat",
+			"creditScale": 0,
+			"filterDimensions": []
+		}
+	],
+	"plans": [
+		{
+			"key": "free",
+			"name": "Free",
+			"version": 1,
+			"kind": "base",
+			"tierRank": 0,
+			"basePrice": null,
+			"providerPriced": null,
+			"items": [
+				{
+					"itemKind": "allocation",
+					"featureKey": "ai_credits",
+					"quantity": "100",
+					"reset": {
+						"interval": "month",
+						"intervalCount": 1
+					}
+				},
+				{
+					"itemKind": "meter_limit",
+					"featureKey": "exports",
+					"quantity": "10",
+					"reset": {
+						"interval": "day",
+						"intervalCount": 1
+					},
+					"overage": {
+						"policy": "blocked"
+					}
+				}
+			]
+		},
+		{
+			"key": "pro",
+			"name": "Pro",
+			"version": 1,
+			"kind": "base",
+			"tierRank": 20,
+			"basePrice": {
+				"key": "pro_monthly",
+				"currency": "USD",
+				"unitAmountMinor": 2000,
+				"billingUnits": "1",
+				"billingInterval": "month",
+				"minimumQuantity": 1,
+				"maximumQuantity": 1,
+				"taxBehavior": "exclusive",
+				"providerBindings": [
+					{
+						"productKey": "pro_monthly",
+						"provider": "stripe",
+						"channel": "web"
+					}
+				]
+			},
+			"providerPriced": null,
+			"items": [
+				{
+					"itemKind": "allocation",
+					"featureKey": "ai_credits",
+					"quantity": "1000",
+					"reset": {
+						"interval": "month",
+						"intervalCount": 1
+					}
+				},
+				{
+					"itemKind": "meter_limit",
+					"featureKey": "exports",
+					"quantity": "1000",
+					"reset": {
+						"interval": "day",
+						"intervalCount": 1
+					},
+					"overage": {
+						"policy": "blocked"
+					}
+				}
+			]
+		},
+		{
+			"key": "team",
+			"name": "Team",
+			"version": 1,
+			"kind": "base",
+			"tierRank": 30,
+			"basePrice": null,
+			"providerPriced": null,
+			"items": [
+				{
+					"itemKind": "licensed_quantity",
+					"featureKey": "seats",
+					"quantity": "5",
+					"allocationScope": "license_pool",
+					"price": {
+						"key": "team_seat",
+						"currency": "USD",
+						"unitAmountMinor": 800,
+						"billingUnits": "1",
+						"billingInterval": "month",
+						"minimumQuantity": 1,
+						"maximumQuantity": null,
+						"taxBehavior": "exclusive",
+						"providerBindings": [
+							{
+								"productKey": "team_seat",
+								"provider": "stripe",
+								"channel": "web"
+							}
+						]
+					}
+				},
+				{
+					"itemKind": "allocation",
+					"featureKey": "ai_credits",
+					"quantity": "5000",
+					"reset": {
+						"interval": "month",
+						"intervalCount": 1
+					}
+				},
+				{
+					"itemKind": "meter_limit",
+					"featureKey": "exports",
+					"quantity": "5000",
+					"reset": {
+						"interval": "day",
+						"intervalCount": 1
+					},
+					"overage": {
+						"policy": "blocked"
+					}
+				}
+			]
+		},
+		{
+			"key": "unlimited_exports",
+			"name": "Unlimited exports",
+			"version": 1,
+			"kind": "addon",
+			"basePrice": {
+				"key": "unlimited_exports_monthly",
+				"currency": "USD",
+				"unitAmountMinor": 1500,
+				"billingUnits": "1",
+				"billingInterval": "month",
+				"minimumQuantity": 1,
+				"maximumQuantity": 1,
+				"taxBehavior": "exclusive",
+				"providerBindings": [
+					{
+						"productKey": "unlimited_exports",
+						"provider": "stripe",
+						"channel": "web"
+					}
+				]
+			},
+			"providerPriced": null,
+			"items": [
+				{
+					"itemKind": "unlimited_usage",
+					"featureKey": "exports"
+				}
+			]
+		}
+	],
+	"topups": [
+		{
+			"key": "credits_10",
+			"featureKey": "ai_credits",
+			"quantity": "10",
+			"expiry": {
+				"mode": "forever"
+			},
+			"providerBindings": [
+				{
+					"productKey": "credits_10",
+					"provider": "stripe",
+					"channel": "web"
+				}
+			]
+		},
+		{
+			"key": "credits_1000",
+			"featureKey": "ai_credits",
+			"quantity": "1000",
+			"expiry": {
+				"mode": "after",
+				"interval": "year",
+				"intervalCount": 1
+			},
+			"providerBindings": [
+				{
+					"productKey": "credits_1000",
+					"provider": "stripe",
+					"channel": "web"
+				}
+			]
+		}
+	],
+	"rateCards": [
+		{
+			"meterFeatureKey": "api_calls",
+			"walletFeatureKey": "ai_credits",
+			"ratePerUnit": "1"
+		}
+	],
+	"defaultPlan": {
+		"planKey": "free",
+		"entitlementKeys": ["free_tier"]
+	}
+}
