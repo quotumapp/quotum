@@ -1,5 +1,6 @@
 import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import type { CadenceUnit } from "../../shared/cadence";
+import { expiresAtSql, expiresSql, storedExpiresAt } from "./cadence-sql";
 import { defaultPlanReadGrantSql } from "./default-plan-sql";
 import { planGrantWindowBounds, storedCadence } from "./meter-limit-windows";
 import { executeRows } from "./query";
@@ -80,7 +81,9 @@ interface WindowRow {
 	quantity: string;
 	reset_interval: CadenceUnit | null;
 	reset_interval_count: number;
-	expires_after_seconds: number | null;
+	expires_after_seconds: number | string | null;
+	expiry_interval: CadenceUnit | null;
+	expiry_interval_count: number | null;
 	latest_id: string | number | bigint | null;
 	latest_period_start_at: Date | string | null;
 	latest_expires_at: Date | string | null;
@@ -134,7 +137,8 @@ export async function readPlanGrantWindows(
 			SELECT source.grant_id, source.anchor_at, source.ends_at, item.id AS plan_item_id,
 				item.feature_id, feature.key AS feature_key, feature.unit, feature.credit_scale,
 				item.quantity::text AS quantity, item.reset_interval,
-				item.reset_interval_count, item.expires_after_seconds,
+				item.reset_interval_count, item.expires_after_seconds, item.expiry_interval,
+				item.expiry_interval_count,
 				latest.id AS latest_id,
 				latest.period_start_at AS latest_period_start_at,
 				latest.expires_at AS latest_expires_at,
@@ -212,15 +216,10 @@ function toWindow(row: WindowRow, now: Date): PlanGrantWindow {
 			otherResetEndsAt !== null && otherResetEndsAt > reset.start ? otherResetEndsAt : reset.start,
 		end: reset.end,
 	};
+	// An expiry counts from the window start and never outlives the window.
+	const expiry = storedExpiresAt(window.start, row);
 	const expiresAt =
-		row.expires_after_seconds === null
-			? window.end
-			: new Date(
-					Math.min(
-						window.end?.getTime() ?? Number.POSITIVE_INFINITY,
-						window.start.getTime() + row.expires_after_seconds * 1000,
-					),
-				);
+		expiry === null || (window.end !== null && window.end < expiry) ? window.end : expiry;
 	const created =
 		row.latest_period_start_at !== null &&
 		new Date(row.latest_period_start_at).getTime() === window.start.getTime();
@@ -447,10 +446,10 @@ export async function resumeDefaultPlanAllowances(
 			SET plan_grant_id = ${toGrantId}::uuid,
 				plan_item_id = item.id,
 				expires_at = CASE
-					WHEN item.expires_after_seconds IS NULL THEN allocation.period_end_at
+					WHEN NOT ${expiresSql("item")} THEN allocation.period_end_at
 					ELSE LEAST(
 						allocation.period_end_at,
-						allocation.period_start_at + item.expires_after_seconds * interval '1 second'
+						${expiresAtSql(drizzleSql`allocation.period_start_at`, "item")}
 					)
 				END,
 				updated_at = now()

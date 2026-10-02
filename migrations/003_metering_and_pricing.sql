@@ -237,6 +237,11 @@ CREATE TABLE IF NOT EXISTS plan_items (
 	),
 	reset_interval_count INTEGER NOT NULL DEFAULT 1,
 	expires_after_seconds BIGINT CHECK (expires_after_seconds IS NULL OR expires_after_seconds > 0),
+	expiry_interval TEXT CHECK (
+		expiry_interval IS NULL
+		OR expiry_interval IN ('hour', 'day', 'week', 'month', 'quarter', 'semi_annual', 'year')
+	),
+	expiry_interval_count INTEGER NOT NULL DEFAULT 1,
 	overage_policy TEXT NOT NULL DEFAULT 'blocked' CHECK (overage_policy IN ('blocked', 'allowed')),
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	allocation_scope TEXT NOT NULL DEFAULT 'account',
@@ -264,6 +269,12 @@ CREATE TABLE IF NOT EXISTS plan_items (
 	),
 	CONSTRAINT plan_items_licensed_reset_check CHECK (
 		item_kind <> 'licensed_quantity' OR reset_interval IS NULL
+	),
+	-- An expiry is an exact duration or a calendar cadence, never both.
+	CONSTRAINT plan_items_expiry_check CHECK (
+		expiry_interval_count BETWEEN 1 AND 1000
+		AND (expiry_interval IS NOT NULL OR expiry_interval_count = 1)
+		AND (expires_after_seconds IS NULL OR expiry_interval IS NULL)
 	),
 	CONSTRAINT plan_items_reset_interval_count_check CHECK (
 		reset_interval_count BETWEEN 1 AND 1000
@@ -362,8 +373,19 @@ CREATE TABLE IF NOT EXISTS topup_options (
 	feature_id BIGINT NOT NULL REFERENCES features(id) ON DELETE RESTRICT,
 	quantity NUMERIC(28, 9) NOT NULL CHECK (quantity > 0),
 	expires_after_seconds BIGINT CHECK (expires_after_seconds IS NULL OR expires_after_seconds > 0),
+	expiry_interval TEXT CHECK (
+		expiry_interval IS NULL
+		OR expiry_interval IN ('hour', 'day', 'week', 'month', 'quarter', 'semi_annual', 'year')
+	),
+	expiry_interval_count INTEGER NOT NULL DEFAULT 1,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	CONSTRAINT topup_options_project_id_id_unique UNIQUE (project_id, id),
+	-- An expiry is an exact duration or a calendar cadence, never both.
+	CONSTRAINT topup_options_expiry_check CHECK (
+		expiry_interval_count BETWEEN 1 AND 1000
+		AND (expiry_interval IS NOT NULL OR expiry_interval_count = 1)
+		AND (expires_after_seconds IS NULL OR expiry_interval IS NULL)
+	),
 	CONSTRAINT topup_options_project_revision_key_unique UNIQUE (project_id, catalog_revision_id, key),
 	CONSTRAINT topup_options_project_revision_fk FOREIGN KEY (project_id, catalog_revision_id)
 		REFERENCES catalog_revisions(project_id, id),

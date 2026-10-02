@@ -1701,6 +1701,8 @@ export const planItems = pgTable(
 		resetInterval: text("reset_interval").$type<CadenceUnit | null>(),
 		resetIntervalCount: integer("reset_interval_count").notNull().default(1),
 		expiresAfterSeconds: bigint("expires_after_seconds", { mode: "number" }),
+		expiryInterval: text("expiry_interval").$type<CadenceUnit | null>(),
+		expiryIntervalCount: integer("expiry_interval_count").notNull().default(1),
 		overagePolicy: text("overage_policy")
 			.$type<"blocked" | "allowed">()
 			.notNull()
@@ -1727,6 +1729,14 @@ export const planItems = pgTable(
 		check(
 			"plan_items_expires_after_seconds_check",
 			sql`(((expires_after_seconds IS NULL) OR (expires_after_seconds > 0)))`,
+		),
+		check(
+			"plan_items_expiry_interval_check",
+			sql`(((expiry_interval IS NULL) OR (expiry_interval = ANY (ARRAY['hour'::text, 'day'::text, 'week'::text, 'month'::text, 'quarter'::text, 'semi_annual'::text, 'year'::text]))))`,
+		),
+		check(
+			"plan_items_expiry_check",
+			sql`((((expiry_interval_count >= 1) AND (expiry_interval_count <= 1000)) AND ((expiry_interval IS NOT NULL) OR (expiry_interval_count = 1)) AND ((expires_after_seconds IS NULL) OR (expiry_interval IS NULL))))`,
 		),
 		check(
 			"plan_items_overage_policy_check",
@@ -2334,6 +2344,8 @@ export const topupOptions = pgTable(
 			.references(() => features.id, { onDelete: "restrict" }),
 		quantity: quantityColumn("quantity").notNull(),
 		expiresAfterSeconds: bigint("expires_after_seconds", { mode: "number" }),
+		expiryInterval: text("expiry_interval").$type<CadenceUnit | null>(),
+		expiryIntervalCount: integer("expiry_interval_count").notNull().default(1),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(table): PgTableExtraConfigValue[] => [
@@ -2346,6 +2358,14 @@ export const topupOptions = pgTable(
 		check(
 			"topup_options_expires_after_seconds_check",
 			sql`(((expires_after_seconds IS NULL) OR (expires_after_seconds > 0)))`,
+		),
+		check(
+			"topup_options_expiry_interval_check",
+			sql`(((expiry_interval IS NULL) OR (expiry_interval = ANY (ARRAY['hour'::text, 'day'::text, 'week'::text, 'month'::text, 'quarter'::text, 'semi_annual'::text, 'year'::text]))))`,
+		),
+		check(
+			"topup_options_expiry_check",
+			sql`((((expiry_interval_count >= 1) AND (expiry_interval_count <= 1000)) AND ((expiry_interval IS NOT NULL) OR (expiry_interval_count = 1)) AND ((expires_after_seconds IS NULL) OR (expiry_interval IS NULL))))`,
 		),
 		foreignKey({
 			name: "topup_options_project_feature_fk",

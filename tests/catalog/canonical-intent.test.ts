@@ -11,6 +11,7 @@ import {
 import type {
 	AuthoredCatalogIntent,
 	AuthoredPlanIntent,
+	CatalogExpiryIntent,
 	CatalogFeatureIntent,
 	CatalogPlanIntent,
 	CatalogPriceIntent,
@@ -739,5 +740,115 @@ describe("canonical catalog intent", () => {
 				}),
 			),
 		).toBe("Top-up credits_1000 sets both expiry and expiresAfterSeconds; use expiry");
+	});
+});
+
+describe("calendar expiry", () => {
+	/** A monthly plan with one allocation and a top-up, each expiring as given. */
+	function expiringCatalog(
+		allocationExpiry: CatalogExpiryIntent,
+		topupExpiry: CatalogExpiryIntent,
+	): AuthoredCatalogIntent {
+		return catalog(
+			[
+				{
+					key: "pro",
+					name: "Pro",
+					version: 1,
+					basePrice: price("pro-base", [stripe("pro")]),
+					items: [
+						{
+							itemKind: "allocation",
+							featureKey: "credits",
+							quantity: "1000",
+							reset: { interval: "month", intervalCount: 1 },
+							expiry: allocationExpiry,
+						},
+					],
+				},
+			],
+			{
+				topups: [
+					{
+						key: "credits_1000",
+						featureKey: "credits",
+						quantity: "1000",
+						expiry: topupExpiry,
+						providerBindings: [stripe("credits_1000")],
+					},
+				],
+			},
+		);
+	}
+
+	it("keeps a calendar expiry through the working model and reads it back unchanged", () => {
+		const twoWeeks = { mode: "after", interval: "week", intervalCount: 2 } as const;
+		const oneYear = { mode: "after", interval: "year", intervalCount: 1 } as const;
+		const parsed = parseAuthoredIntent(expiringCatalog(twoWeeks, oneYear));
+		expect(parsed.canonical.plans[0]?.items[0]).toMatchObject({ expiry: twoWeeks });
+		expect(parsed.canonical.topups[0]?.expiry).toEqual(oneYear);
+		// The working model publishes the cadence and no seconds.
+		expect(parsed.working.plans[0]?.items[0]).toMatchObject({
+			expiresAfterSeconds: null,
+			expiryInterval: "week",
+			expiryIntervalCount: 2,
+		});
+		expect(parsed.working.topups[0]).toMatchObject({
+			expiresAfterSeconds: null,
+			expiryInterval: "year",
+			expiryIntervalCount: 1,
+		});
+		expect(CanonicalCatalogSchema.safeParse(parsed.canonical).success).toBe(true);
+		expect(parseAuthoredIntent(parsed.canonical as AuthoredCatalogIntent).canonical).toEqual(
+			parsed.canonical,
+		);
+		expect(decodeStoredIntent(parsed.canonical)).toEqual(parsed.canonical);
+	});
+
+	it("keeps an exact duration apart from the calendar cadence it approximates", () => {
+		const calendar = parseAuthoredIntent(
+			expiringCatalog({ mode: "forever" }, { mode: "after", interval: "year", intervalCount: 1 }),
+		);
+		const exact = parseAuthoredIntent(
+			expiringCatalog({ mode: "forever" }, { mode: "after_seconds", seconds: 31_536_000 }),
+		);
+		expect(exact.canonical.topups[0]?.expiry).toEqual({
+			mode: "after_seconds",
+			seconds: 31_536_000,
+		});
+		expect(exact.working.topups[0]).toMatchObject({
+			expiresAfterSeconds: 31_536_000,
+			expiryInterval: null,
+			expiryIntervalCount: null,
+		});
+		expect(sha256Hex(stableJson(calendar.canonical))).not.toBe(
+			sha256Hex(stableJson(exact.canonical)),
+		);
+	});
+
+	it("bounds a calendar expiry at ten years and accepts an hourly one", async () => {
+		const forever = { mode: "forever" } as const;
+		expect(
+			await previewOutcome(
+				expiringCatalog({ mode: "after", interval: "year", intervalCount: 11 }, forever),
+			),
+		).toBe("Plan pro item credits expiry cannot span more than 10 × year");
+		expect(
+			await previewOutcome(
+				expiringCatalog(forever, { mode: "after", interval: "month", intervalCount: 121 }),
+			),
+		).toBe("Top-up credits_1000 expiry cannot span more than 10 × year");
+		expect(
+			await previewOutcome(
+				expiringCatalog(
+					{ mode: "after", interval: "hour", intervalCount: 12 },
+					{
+						mode: "after",
+						interval: "year",
+						intervalCount: 10,
+					},
+				),
+			),
+		).toBe("normalized");
 	});
 });

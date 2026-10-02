@@ -1,5 +1,11 @@
 import { sql as drizzleSql, type SQL } from "drizzle-orm";
-import { type CadenceUnit, cadenceUnits, unitHours, unitMonths } from "../../shared/cadence";
+import {
+	addCadence,
+	type CadenceUnit,
+	cadenceUnits,
+	unitHours,
+	unitMonths,
+} from "../../shared/cadence";
 
 /**
  * SQL over stored cadence columns, generated from the unit table in `shared/cadence` so the
@@ -55,18 +61,66 @@ export function resetSplitsBillingPeriodSql(
  */
 export function lifetimeItemSql(itemAlias: string): SQL {
 	return drizzleSql.raw(
-		`(${itemAlias}.reset_interval IS NULL AND ${itemAlias}.expires_after_seconds IS NULL)`,
+		`(${itemAlias}.reset_interval IS NULL AND ${itemAlias}.expires_after_seconds IS NULL AND ${itemAlias}.expiry_interval IS NULL)`,
 	);
+}
+
+/** A stored cadence (a unit column and its count column) as a Postgres interval, or NULL. */
+function cadenceIntervalSql(unitColumn: string, countColumn: string): SQL {
+	const branches = cadenceUnits.map((unit) => {
+		const months = unitMonths(unit);
+		return months === null
+			? `WHEN '${unit}' THEN make_interval(hours => ${unitHours(unit)} * ${countColumn})`
+			: `WHEN '${unit}' THEN make_interval(months => ${months} * ${countColumn})`;
+	});
+	return drizzleSql.raw(`(CASE ${unitColumn} ${branches.join(" ")} END)`);
 }
 
 /** A plan item's reset cadence as a Postgres interval, or NULL when the item does not reset. */
 export function resetIntervalSql(itemAlias: string): SQL {
-	const count = `${itemAlias}.reset_interval_count`;
-	const branches = cadenceUnits.map((unit) => {
-		const months = unitMonths(unit);
-		return months === null
-			? `WHEN '${unit}' THEN make_interval(hours => ${unitHours(unit)} * ${count})`
-			: `WHEN '${unit}' THEN make_interval(months => ${months} * ${count})`;
-	});
-	return drizzleSql.raw(`(CASE ${itemAlias}.reset_interval ${branches.join(" ")} END)`);
+	return cadenceIntervalSql(`${itemAlias}.reset_interval`, `${itemAlias}.reset_interval_count`);
+}
+
+/** Whether a plan item or top-up option expires, after an exact duration or a calendar cadence. */
+export function expiresSql(alias: string): SQL {
+	return drizzleSql.raw(
+		`(${alias}.expires_after_seconds IS NOT NULL OR ${alias}.expiry_interval IS NOT NULL)`,
+	);
+}
+
+/**
+ * When something anchored at `anchor` expires under the expiry columns at `alias`, or NULL when it
+ * never does. A calendar expiry adds its cadence in UTC: month units add whole months to the anchor,
+ * so a month-end anchor clamps to a shorter month's last day as reset windows do (`addUtcMonths`),
+ * and fixed units add exact hours. An exact expiry adds its seconds.
+ */
+export function expiresAtSql(anchor: SQL, alias: string): SQL {
+	const interval = cadenceIntervalSql(`${alias}.expiry_interval`, `${alias}.expiry_interval_count`);
+	return drizzleSql`(CASE
+		WHEN ${drizzleSql.raw(`${alias}.expiry_interval`)} IS NOT NULL
+			THEN ((${anchor} AT TIME ZONE 'UTC') + ${interval}) AT TIME ZONE 'UTC'
+		WHEN ${drizzleSql.raw(`${alias}.expires_after_seconds`)} IS NOT NULL
+			THEN ${anchor} + ${drizzleSql.raw(`${alias}.expires_after_seconds`)} * interval '1 second'
+	END)`;
+}
+
+/** A plan item's or top-up option's stored expiry. */
+export interface StoredExpiry {
+	expires_after_seconds: number | string | null;
+	expiry_interval: CadenceUnit | null;
+	expiry_interval_count: number | null;
+}
+
+/** The application form of `expiresAtSql`: when something anchored at `anchor` expires, or null. */
+export function storedExpiresAt(anchor: Date, expiry: StoredExpiry): Date | null {
+	if (expiry.expiry_interval !== null) {
+		return addCadence(anchor, {
+			unit: expiry.expiry_interval,
+			count: expiry.expiry_interval_count ?? 1,
+		});
+	}
+	if (expiry.expires_after_seconds !== null) {
+		return new Date(anchor.getTime() + Number(expiry.expires_after_seconds) * 1000);
+	}
+	return null;
 }

@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import type { CatalogIntent, CatalogPlanIntent } from "../../src/catalog/types";
+import type {
+	AuthoredCatalogIntent,
+	CatalogIntent,
+	CatalogPlanIntent,
+} from "../../src/catalog/types";
 import { readProjectionBalances } from "../../src/db/repository/entitlements";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -51,7 +55,7 @@ function catalog(
 	};
 }
 
-async function publish(intent: CatalogIntent): Promise<void> {
+async function publish(intent: AuthoredCatalogIntent): Promise<void> {
 	const preview = await context.repository.previewCatalog(project, {
 		expectedRevision: revision,
 		actor: "default-plan-test",
@@ -193,6 +197,43 @@ localDescribe("default plan", () => {
 
 	afterAll(async () => {
 		await context.sql.close();
+	});
+
+	it("expires a default-plan allowance a calendar week after its window start", async () => {
+		await publish({
+			...catalog(null),
+			plans: [
+				...aiCreditsCatalog.plans,
+				{
+					key: "free",
+					name: "Free",
+					version: 1,
+					items: [
+						{
+							itemKind: "allocation",
+							featureKey: "ai_credits",
+							quantity: "100",
+							reset: { interval: "month", intervalCount: 1 },
+							expiry: { mode: "after", interval: "week", intervalCount: 1 },
+						},
+					],
+				},
+			],
+			defaultPlan: { planKey: "free", entitlementKeys: ["free_tier"] },
+			retiredPlanKeys: [],
+		});
+		expect(await consume("weekly_expiry", 1, "weekly-expiry-1")).toMatchObject({ allowed: true });
+		const rows = await context.sql<Array<{ period_start_at: Date; expires_at: Date }>>`
+			SELECT period_start_at, expires_at FROM balance_allocations WHERE plan_grant_id IS NOT NULL
+		`;
+		expect(rows).toHaveLength(1);
+		const [row] = rows;
+		if (row === undefined) throw new Error("the default-plan allowance was not granted");
+		const start = new Date(row.period_start_at).getTime();
+		expect(new Date(row.expires_at).getTime() - start).toBe(7 * 86_400_000);
+		expect((await balance("weekly_expiry")).breakdown.map(({ expiresAt }) => expiresAt)).toEqual([
+			new Date(row.expires_at).toISOString(),
+		]);
 	});
 
 	it("starts a new account on the default plan with its keys, allowance and a stored projection", async () => {

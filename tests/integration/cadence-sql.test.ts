@@ -1,6 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { sql as drizzleSql } from "drizzle-orm";
-import { resetIntervalSql, resetSplitsBillingPeriodSql } from "../../src/db/repository/cadence-sql";
+import {
+	expiresAtSql,
+	resetIntervalSql,
+	resetSplitsBillingPeriodSql,
+	storedExpiresAt,
+} from "../../src/db/repository/cadence-sql";
 import { periodSplits } from "../../src/db/repository/meter-limit-windows";
 import { executeRows } from "../../src/db/repository/query";
 import type { QueryExecutor } from "../../src/db/repository/types";
@@ -140,5 +145,81 @@ localDescribe("cadence SQL", () => {
 				endsAt: addCadence(start, reset).toISOString(),
 			});
 		}
+	});
+
+	it("expires a calendar cadence the way the application does, at month ends and leap days", async () => {
+		const anchors = [
+			"2026-01-15T09:30:00.000Z",
+			"2028-01-31T23:30:00.000Z",
+			"2028-02-29T12:00:00.000Z",
+			"2027-03-01T00:00:00.000Z",
+			"2026-08-31T06:00:00.000Z",
+		];
+		const expiries = cadenceUnits.flatMap((unit) =>
+			counts.map((count) => ({ seconds: null, unit, count })),
+		);
+		const rows = await executeRows<{
+			anchor: Date | string;
+			expires_after_seconds: string | null;
+			expiry_interval: CadenceUnit | null;
+			expiry_interval_count: number;
+			expires_at: Date | string | null;
+		}>(
+			context.db as unknown as QueryExecutor,
+			drizzleSql`
+				SELECT anchors.anchor, item.expires_after_seconds, item.expiry_interval,
+					item.expiry_interval_count, ${expiresAtSql(drizzleSql`anchors.anchor`, "item")} AS expires_at
+				FROM (VALUES ${drizzleSql.join(
+					anchors.map((anchor) => drizzleSql`(${anchor}::timestamptz)`),
+					drizzleSql`, `,
+				)}) AS anchors(anchor)
+				CROSS JOIN (VALUES ${drizzleSql.join(
+					[
+						...expiries,
+						{ seconds: 31_536_000, unit: null, count: 1 },
+						{ seconds: null, unit: null, count: 1 },
+					].map(
+						({ seconds, unit, count }) =>
+							drizzleSql`(${seconds}::bigint, ${unit}::text, ${count}::integer)`,
+					),
+					drizzleSql`, `,
+				)}) AS item(expires_after_seconds, expiry_interval, expiry_interval_count)
+			`,
+		);
+		expect(rows).toHaveLength(anchors.length * (expiries.length + 2));
+		for (const row of rows) {
+			const anchor = new Date(row.anchor);
+			const expected = storedExpiresAt(anchor, row);
+			expect({
+				anchor: anchor.toISOString(),
+				interval: row.expiry_interval,
+				count: row.expiry_interval_count,
+				seconds: row.expires_after_seconds,
+				expiresAt: row.expires_at === null ? null : new Date(row.expires_at).toISOString(),
+			}).toEqual({
+				anchor: anchor.toISOString(),
+				interval: row.expiry_interval,
+				count: row.expiry_interval_count,
+				seconds: row.expires_after_seconds,
+				expiresAt: expected?.toISOString() ?? null,
+			});
+		}
+		const at = (anchor: string, unit: CadenceUnit | null, count: number, seconds?: number) =>
+			storedExpiresAt(new Date(anchor), {
+				expires_after_seconds: seconds ?? null,
+				expiry_interval: unit,
+				expiry_interval_count: count,
+			})?.toISOString();
+		// A year after a leap day ends on the last day of February; a year after March 1 keeps the
+		// date across a leap year, where 365 days of seconds fall a day short.
+		expect(at("2028-02-29T12:00:00.000Z", "year", 1)).toBe("2029-02-28T12:00:00.000Z");
+		expect(at("2027-03-01T00:00:00.000Z", "year", 1)).toBe("2028-03-01T00:00:00.000Z");
+		expect(at("2027-03-01T00:00:00.000Z", null, 1, 31_536_000)).toBe("2028-02-29T00:00:00.000Z");
+		// A month-end anchor clamps to a shorter month and recovers its day afterwards.
+		expect(at("2028-01-31T23:30:00.000Z", "month", 1)).toBe("2028-02-29T23:30:00.000Z");
+		expect(at("2028-01-31T23:30:00.000Z", "month", 2)).toBe("2028-03-31T23:30:00.000Z");
+		expect(at("2026-08-31T06:00:00.000Z", "quarter", 1)).toBe("2026-11-30T06:00:00.000Z");
+		expect(at("2026-01-15T09:30:00.000Z", "week", 2)).toBe("2026-01-29T09:30:00.000Z");
+		expect(at("2026-01-15T09:30:00.000Z", null, 1)).toBeUndefined();
 	});
 });

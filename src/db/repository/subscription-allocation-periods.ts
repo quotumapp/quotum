@@ -1,6 +1,6 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type { CadenceUnit } from "../../shared/cadence";
-import { resetIntervalSql, resetSplitsBillingPeriodSql } from "./cadence-sql";
+import { resetIntervalSql, resetSplitsBillingPeriodSql, storedExpiresAt } from "./cadence-sql";
 import { planGrantWindowBounds, storedCadence } from "./meter-limit-windows";
 import { executeOne, executeRows } from "./query";
 import type { QueryExecutor } from "./types";
@@ -55,14 +55,17 @@ export async function materializeSubscriptionResetAllocations(
 		feature_id: string | number | bigint;
 		quantity: string;
 		allocation_scope: string;
-		expires_after_seconds: number | null;
+		expires_after_seconds: number | string | null;
+		expiry_interval: CadenceUnit | null;
+		expiry_interval_count: number | null;
 		reset_interval: CadenceUnit;
 		reset_interval_count: number;
 	}>(
 		executor,
 		drizzleSql`
 		SELECT pi.id, pi.feature_id, pi.quantity::text AS quantity, pi.allocation_scope,
-			pi.expires_after_seconds, pi.reset_interval, pi.reset_interval_count
+			pi.expires_after_seconds, pi.expiry_interval, pi.expiry_interval_count, pi.reset_interval,
+			pi.reset_interval_count
 		FROM plan_items pi
 		JOIN plan_versions pv ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
 		WHERE pi.project_id = ${projectId}
@@ -100,15 +103,9 @@ export async function materializeSubscriptionResetAllocations(
 		`,
 		);
 		result.transitioned += transitioned.length;
-		const expiresAt =
-			item.expires_after_seconds === null
-				? end
-				: new Date(
-						Math.min(
-							window.end.getTime(),
-							window.start.getTime() + item.expires_after_seconds * 1000,
-						),
-					).toISOString();
+		// An expiry counts from the window start and never outlives the window.
+		const expiry = storedExpiresAt(window.start, item);
+		const expiresAt = expiry === null || window.end < expiry ? end : expiry.toISOString();
 		const inserted = await executeOne(
 			executor,
 			drizzleSql`

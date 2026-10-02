@@ -108,9 +108,16 @@ const cadenceSchema = z
 	})
 	.strict();
 
-/** An allowance or top-up expiry: never, or an exact duration. */
+/** An allowance or top-up expiry: never, a calendar cadence, or an exact duration. */
 const expirySchema = z.discriminatedUnion("mode", [
 	z.object({ mode: z.literal("forever") }).strict(),
+	z
+		.object({
+			mode: z.literal("after"),
+			interval: z.enum(cadenceUnits),
+			intervalCount: z.number().int().min(1).max(maxCadenceCount),
+		})
+		.strict(),
 	z.object({ mode: z.literal("after_seconds"), seconds: z.number().int().positive() }).strict(),
 ]);
 

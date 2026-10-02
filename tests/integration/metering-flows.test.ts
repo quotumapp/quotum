@@ -6,7 +6,7 @@ import { readProjectionBalances } from "../../src/db/repository/entitlements";
 import { planGrantWindowBounds } from "../../src/db/repository/meter-limit-windows";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import { parseReceiptId } from "../../src/db/repository/usage-receipts";
-import { addUtcMonths, type Cadence } from "../../src/shared/cadence";
+import { addCadence, addUtcMonths, type Cadence } from "../../src/shared/cadence";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -1424,6 +1424,69 @@ localDescribe("authoritative metering flows", () => {
 				expiresAt: seeded.window.end.toISOString(),
 			},
 		]);
+	});
+
+	it.each([
+		["two weeks after its window start", { unit: "week", count: 2 }, false],
+		["at its window end when the cadence outlasts the window", { unit: "month", count: 2 }, true],
+	] as const)(
+		"expires a monthly allowance on a calendar cadence %s",
+		async (_label, expiry, capped) => {
+			const seeded = await seedMonthlyAllocation();
+			await context.sql`
+			UPDATE plan_items SET expiry_interval = ${expiry.unit}, expiry_interval_count = ${expiry.count}
+			WHERE id = ${seeded.item_id}
+		`;
+			expect(
+				(await context.repository.runMeteringMaintenance(1)).grantedSubscriptionAllocations,
+			).toBe(1);
+			const rows = await context.sql<Array<{ expires_at: Date }>>`
+			SELECT expires_at FROM balance_allocations
+		`;
+			expect(rows.map(({ expires_at }) => new Date(expires_at).toISOString())).toEqual([
+				(capped ? seeded.window.end : addCadence(seeded.window.start, expiry)).toISOString(),
+			]);
+		},
+	);
+
+	it("expires a whole-period allowance a calendar month after a month-end period start", async () => {
+		const periodStart = new Date("2028-01-31T10:00:00.000Z");
+		const periodEnd = new Date("2029-01-31T10:00:00.000Z");
+		await seedAnnualMeterLimitSubscription(context.sql, "calendar_expiry", periodStart, periodEnd);
+		await context.sql`
+			INSERT INTO plan_items (
+				project_id, plan_version_id, feature_id, item_kind, quantity, expiry_interval,
+				expiry_interval_count
+			)
+			SELECT s.project_id, s.plan_version_id, f.id, 'allocation', 100, 'month', 1
+			FROM subscriptions s JOIN features f ON f.project_id = s.project_id AND f.key = 'ai_credits'
+		`;
+		const [subscription] = await context.sql<
+			Array<{ id: string; project_id: string; customer_id: string; store_product_id: string }>
+		>`SELECT id, project_id, customer_id, store_product_id::text FROM subscriptions`;
+		if (subscription === undefined) throw new Error("subscription was not seeded");
+		const materialize = () =>
+			materializeSubscriptionAllocations(context.db as unknown as QueryExecutor, {
+				projectId: subscription.project_id,
+				customerId: subscription.customer_id,
+				storeProductId: subscription.store_product_id,
+				subscriptionId: subscription.id,
+				status: "active",
+				periodStartAt: periodStart,
+				periodEndAt: periodEnd,
+			});
+		expect(await materialize()).toBe(1);
+		// An expiring item is no lifetime allowance: it is the period's, ending a calendar month in,
+		// on the last day of February rather than 31 days later.
+		const rows = await context.sql<Array<{ source_key: string; expires_at: Date }>>`
+			SELECT source_key, expires_at FROM balance_allocations
+		`;
+		expect(
+			rows.map(({ source_key, expires_at }) => ({
+				lifetime: source_key.endsWith(":lifetime"),
+				expiresAt: new Date(expires_at).toISOString(),
+			})),
+		).toEqual([{ lifetime: false, expiresAt: "2028-02-29T10:00:00.000Z" }]);
 	});
 
 	it("does not refill an early-expired monthly allocation before its reset", async () => {
