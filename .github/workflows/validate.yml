@@ -210,12 +210,17 @@ jobs:
           mkdir -p security-reports
           trivy image --config ci/security/trivy-image.yaml --image-src docker \
             --format json --output security-reports/trivy-image.json quotum-api:ci
+      - name: Show container findings
+        if: ${{ !cancelled() && hashFiles('security-reports/trivy-image.json') != '' }}
+        run: sh ci/security/report-trivy.sh security-reports/trivy-image.json vuln
       - name: Upload container findings
         if: ${{ !cancelled() && hashFiles('security-reports/trivy-image.json') != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: trivy-ci-image
-          path: security-reports/trivy-image.json
+          path: |
+            security-reports/trivy-image.json
+            security-reports/trivy-image.txt
           retention-days: 30
       - name: Lint the compose smoke test
         run: shellcheck deploy/compose/smoke.sh
