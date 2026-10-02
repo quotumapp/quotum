@@ -1002,7 +1002,7 @@ localDescribe("default plan", () => {
 		expect(await grants("b_user")).toMatchObject([{ origin: "default", status: "active" }]);
 	});
 
-	it("answers an unknown account from the default plan without recording it", async () => {
+	it("reads an unknown account from the default plan and checks it once it is created", async () => {
 		const check = (quantity: string) =>
 			context.repository.checkUsage(project, {
 				billingAccountId: "stranger",
@@ -1018,22 +1018,25 @@ localDescribe("default plan", () => {
 				`
 			)[0];
 
-		await publish(catalog(null));
-		expect(await check("2000")).toMatchObject({ allowed: false, balance: { available: "0" } });
 		await publish(catalog(freePlan(1, "100")));
-
-		expect(await check("2000")).toMatchObject({
-			allowed: true,
-			walletQuantity: "10",
-			balance: { granted: "100", available: "100" },
-		});
-		expect(await check("40000")).toMatchObject({ allowed: false, reason: "insufficient_balance" });
+		// Usage needs a created account; reads answer from the default plan without recording one.
+		await expect(check("2000")).rejects.toMatchObject({ code: "BILLING_ACCOUNT_NOT_FOUND" });
 		expect(await balance("stranger")).toMatchObject({
 			granted: "100",
 			consumed: "0",
 			available: "100",
 		});
 		expect(await counts()).toEqual({ customers: 0, grants: 0 });
+
+		await context.repository.usageApi.createAccount(project, "stranger");
+		expect(await check("2000")).toMatchObject({
+			allowed: true,
+			walletQuantity: "10",
+			balance: { granted: "100", available: "100" },
+		});
+		expect(await check("40000")).toMatchObject({ allowed: false, reason: "insufficient_balance" });
+		// Creating the account records it with its default-plan grant.
+		expect(await counts()).toEqual({ customers: 1, grants: 1 });
 
 		await consume("stranger", 10, "first-write");
 		expect(await balance("stranger")).toMatchObject({ granted: "100", available: "90" });
@@ -1094,7 +1097,7 @@ localDescribe("default plan", () => {
 		).toHaveLength(0);
 	});
 
-	it("applies the default plan's meter limit to an unknown account in a window starting now", async () => {
+	it("reads the default plan's meter limit for an unknown account and applies it once created", async () => {
 		const limited = freePlan(1, "100");
 		limited.items.push({
 			featureKey: "model_tokens",
@@ -1106,6 +1109,27 @@ localDescribe("default plan", () => {
 		});
 		await publish({ ...catalog(limited), rateCards: [] });
 
+		// The billing summary reads the limit for an account the service has not recorded, with no
+		// usage yet, in a day-long window that starts at the read, and records nothing.
+		const summary = await context.repository.getCustomerBillingSummary(project, "stranger");
+		const limit = summary.balances.find((row) => row.featureKey === "model_tokens");
+		expect({ ...limit, windowStartAt: undefined, windowEndAt: undefined }).toEqual({
+			featureKey: "model_tokens",
+			unit: "token",
+			available: "1000",
+			held: "0",
+			expiresAt: null,
+			scope: "account",
+			windowStartAt: undefined,
+			windowEndAt: undefined,
+		});
+		const start = Date.parse(limit?.windowStartAt ?? "");
+		expect(Date.parse(limit?.windowEndAt ?? "") - start).toBe(24 * 60 * 60 * 1000);
+		expect(
+			await context.sql`SELECT id FROM customers WHERE billing_account_id = 'stranger'`,
+		).toHaveLength(0);
+
+		await context.repository.usageApi.createAccount(project, "stranger");
 		const within = await context.repository.checkUsage(project, {
 			billingAccountId: "stranger",
 			featureKey: "model_tokens",
@@ -1122,29 +1146,15 @@ localDescribe("default plan", () => {
 			balance: { granted: "1000", available: "1000" },
 		});
 		expect(beyond).toMatchObject({ allowed: false, reason: "insufficient_balance" });
-		// The billing summary reads the same limit with no usage yet, in a day-long window that, for
-		// an account with no usage, starts at the read.
-		const summary = await context.repository.getCustomerBillingSummary(project, "stranger");
-		const limit = summary.balances.find((row) => row.featureKey === "model_tokens");
-		expect({ ...limit, windowStartAt: undefined, windowEndAt: undefined }).toEqual({
-			featureKey: "model_tokens",
-			unit: "token",
-			available: "1000",
-			held: "0",
-			expiresAt: null,
-			scope: "account",
-			windowStartAt: undefined,
-			windowEndAt: undefined,
-		});
-		const start = Date.parse(limit?.windowStartAt ?? "");
-		expect(start).toBeGreaterThanOrEqual(Date.parse(within.balance.windowStartAt as string));
-		expect(Date.parse(limit?.windowEndAt ?? "") - start).toBe(24 * 60 * 60 * 1000);
-		expect(
-			await context.sql`SELECT id FROM customers WHERE billing_account_id = 'stranger'`,
-		).toHaveLength(0);
+		// The created account's window is a day long, like the one the read reported.
+		const windowStart = Date.parse(within.balance.windowStartAt as string);
+		expect(windowStart).toBeGreaterThanOrEqual(start);
+		expect(Date.parse(within.balance.windowEndAt as string) - windowStart).toBe(
+			24 * 60 * 60 * 1000,
+		);
 	});
 
-	it("applies the default plan's usage limit from an account's first write, and to a check before it", async () => {
+	it("applies the default plan's usage limit to a created account's check and first write", async () => {
 		await publish(
 			catalog({
 				...freePlan(1, "100"),
@@ -1160,6 +1170,7 @@ localDescribe("default plan", () => {
 			}),
 		);
 
+		await context.repository.usageApi.createAccount(project, "limited");
 		const checked = await context.repository.checkUsage(project, {
 			billingAccountId: "limited",
 			featureKey: "model_tokens",
