@@ -30,6 +30,7 @@ import type {
 	StoreEventProcessingStatus,
 	SubscriptionStatus,
 } from "../billing/types";
+import type { UsageReceipt } from "../billing/usage-api";
 import type { ProjectEnvironment, ProjectLifecycleStatus } from "../projects/context";
 import type { BillingCadenceUnit, CadenceUnit } from "../shared/cadence";
 
@@ -2661,7 +2662,7 @@ export const clientIdempotencyClaims = pgTable(
 		),
 		check(
 			"client_idempotency_claims_recovery_version_check",
-			sql`((recovery_version = ANY (ARRAY[0, 1])))`,
+			sql`((recovery_version = ANY (ARRAY[0, 1, 2])))`,
 		),
 		check(
 			"client_idempotency_claims_retention_policy_version_check",
@@ -2994,6 +2995,7 @@ export const usageEvents = pgTable(
 		originalEventId: uuid("original_event_id"),
 		originalEventRecordedAt: timestamp("original_event_recorded_at", { withTimezone: true }),
 		operation: text("operation").$type<"consume" | "confirm" | "correction">().notNull(),
+		receipt: jsonb("receipt").$type<UsageReceipt>(),
 		quantity: quantityColumn("quantity").notNull(),
 		walletQuantity: quantityColumn("wallet_quantity").notNull(),
 		occurredAt: timestamp("occurred_at", { withTimezone: true }),
@@ -3029,6 +3031,10 @@ export const usageEvents = pgTable(
 			sql`((((operation = 'correction'::text) AND (original_event_id IS NOT NULL) AND (original_event_recorded_at IS NOT NULL)) OR ((operation <> 'correction'::text) AND (original_event_id IS NULL) AND (original_event_recorded_at IS NULL))))`,
 		),
 		check("usage_events_deductions_check", sql`((jsonb_typeof(deductions) = 'array'::text))`),
+		check(
+			"usage_events_receipt_check",
+			sql`(receipt IS NULL OR (jsonb_typeof(receipt) = 'object' AND octet_length(receipt::text) <= 16384))`,
+		),
 		foreignKey({
 			name: "usage_events_rate_card_entry_id_fkey",
 			columns: [table.rateCardEntryId],

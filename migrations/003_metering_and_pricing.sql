@@ -498,7 +498,7 @@ CREATE TABLE IF NOT EXISTS client_idempotency_claims (
 	request_fingerprint TEXT NOT NULL CHECK (char_length(request_fingerprint) = 64),
 	expires_at TIMESTAMPTZ NOT NULL,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-	recovery_version SMALLINT NOT NULL DEFAULT 0 CHECK (recovery_version IN (0, 1)),
+	recovery_version SMALLINT NOT NULL DEFAULT 0 CHECK (recovery_version IN (0, 1, 2)),
 	retention_policy_version TEXT NOT NULL DEFAULT 'usage-recovery-v1'
   CHECK (retention_policy_version = 'usage-recovery-v1'),
 	completed_at TIMESTAMPTZ,
@@ -655,6 +655,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
 	original_event_id UUID,
 	original_event_recorded_at TIMESTAMPTZ,
 	operation TEXT NOT NULL CHECK (operation IN ('consume', 'confirm', 'correction')),
+	receipt JSONB CHECK (receipt IS NULL OR (jsonb_typeof(receipt) = 'object' AND octet_length(receipt::text) <= 16384)),
 	quantity NUMERIC(28, 9) NOT NULL,
 	wallet_quantity NUMERIC(28, 9) NOT NULL,
 	occurred_at TIMESTAMPTZ,

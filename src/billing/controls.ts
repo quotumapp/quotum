@@ -216,6 +216,11 @@ export interface ControlsEnterpriseRepositoryLike {
 		},
 	): Promise<EntityRecord>;
 	listEntities(project: ProjectInstanceContext, billingAccountId: string): Promise<EntityRecord[]>;
+	getEntity(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		externalId: string,
+	): Promise<EntityRecord>;
 	createUsageAlert(
 		project: ProjectInstanceContext,
 		input: UsageAlertInput,
@@ -321,6 +326,9 @@ export class ControlsEnterpriseService {
 	}
 	listEntities(project: ProjectInstanceContext, billingAccountId: string) {
 		return this.repository.listEntities(project, billingAccountId);
+	}
+	getEntity(project: ProjectInstanceContext, billingAccountId: string, externalId: string) {
+		return this.repository.getEntity(project, billingAccountId, externalId);
 	}
 	createUsageAlert(project: ProjectInstanceContext, input: UsageAlertInput) {
 		return this.repository.createUsageAlert(project, input);

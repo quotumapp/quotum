@@ -128,6 +128,7 @@ import type {
 	TransactionalQueryExecutor,
 	TrialEndingNoticeResult,
 } from "./repository/types";
+import { UsageApiRepository } from "./repository/usage-api";
 import {
 	ensureUsageEventPartitions,
 	type UsagePartitionUpkeepOptions,
@@ -192,6 +193,7 @@ export class BillingRepository {
 	private readonly metering: MeteringBillingRepository;
 	private readonly catalog: CatalogControlPlane;
 	readonly controlsEnterprise: ControlsEnterpriseRepository;
+	readonly usageApi: UsageApiRepository;
 	readonly promotions: PromotionRepository;
 	readonly planGrants: PlanGrantRepository;
 	readonly balanceAdjustments: BalanceAdjustmentRepository;
@@ -218,6 +220,7 @@ export class BillingRepository {
 		this.metering = new MeteringBillingRepository(database);
 		this.catalog = new CatalogControlPlane(database);
 		this.controlsEnterprise = new ControlsEnterpriseRepository(database);
+		this.usageApi = new UsageApiRepository(database);
 		this.promotions = new PromotionRepository(database);
 		this.planGrants = new PlanGrantRepository(database);
 		this.balanceAdjustments = new BalanceAdjustmentRepository(database);

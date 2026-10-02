@@ -2,6 +2,7 @@ import { z } from "zod";
 import * as queries from "../admin/query";
 import type { AdminBillingReader, AdminListResult } from "../admin/types";
 import { previewSchema, publishSchema } from "../app/catalog-routes";
+import { checkBodySchema, operationLookupQuerySchema } from "../app/contracts/usage-api";
 import { contractBody, controlBody, migrationBody } from "../app/controls-routes";
 import {
 	commercialActionExecuteBodySchema,
@@ -18,8 +19,7 @@ import {
 	balanceParamsSchema,
 	correctionBodySchema,
 	operationParamsSchema,
-	usageBodySchema,
-	usageInput,
+	publicUsageInput,
 } from "../app/metering-routes";
 import {
 	addPromotionCodesBodySchema,
@@ -42,6 +42,7 @@ import {
 } from "../billing/errors";
 import { encodeUsageCursor } from "../billing/insights";
 import { MeteringService } from "../billing/metering";
+import { publicOperationLookup } from "../billing/usage-api";
 import type { BillingRepository } from "../db/repository";
 import type { BillingAdminOperations } from "../operations/admin";
 import type {
@@ -125,20 +126,22 @@ export function createMerchantBillingPort(input: {
 			}
 			case "usage.operation":
 				return ok(
-					await meter.getOperation(
-						project,
-						parse(operationParamsSchema, {
-							billingAccountId: id,
-							operation: event,
-							operationId: command.parameters[2],
+					publicOperationLookup(
+						await meter.getOperation(project, {
+							...parse(operationParamsSchema, {
+								billingAccountId: id,
+								operation: event,
+								operationId: command.parameters[2],
+							}),
+							...parse(operationLookupQuerySchema, command.query),
 						}),
 					),
 				);
 			case "usage.check":
 				return ok(
-					await meter.check(project, {
+					await repo.usageApi.check(project, {
 						billingAccountId: account(),
-						...usageInput(parse(usageBodySchema, command.body)),
+						...publicUsageInput(parse(checkBodySchema, command.body)),
 					}),
 				);
 			case "stats":

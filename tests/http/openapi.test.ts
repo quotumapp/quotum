@@ -130,7 +130,7 @@ test("documents request bodies, required headers and the named schemas clients i
 			.map((parameter) => `${parameter.name}${parameter.required ? "!" : "?"}`);
 
 	const consume = operation("/v1/billing-accounts/{billingAccountId}/usage/consume", "post");
-	expect(jsonBody(consume)).toMatchObject({ required: ["featureKey", "quantity"] });
+	expect(jsonBody(consume)).toMatchObject({ required: ["featureId", "value"] });
 	expect(headers(consume)).toEqual(["Idempotency-Key!"]);
 	const publish = operation("/v1/admin/catalog/publish", "post");
 	expect(jsonBody(publish)).toMatchObject({

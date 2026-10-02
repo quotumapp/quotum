@@ -72,13 +72,13 @@ e2eDescribe("E2E usage operation recovery", () => {
 						"Content-Type": "application/json",
 						"Idempotency-Key": operationId,
 					},
-					body: JSON.stringify({ featureKey: "model_tokens", quantity: "100" }),
+					body: JSON.stringify({ featureId: "model_tokens", value: "100" }),
 				}),
 			).rejects.toMatchObject({ name: "AbortError" });
 		} finally {
 			proxy.stop(true);
 		}
-		expect(committedOutcome).toMatchObject({ allowed: true, walletQuantity: "0.5" });
+		expect(committedOutcome).toMatchObject({ allowed: true, rated: { value: "0.5" } });
 		await service.stop();
 		service = await startBillingService(e2eServiceEnv({ postgresUri }));
 		const client = new BillingClient({ baseUrl: service.baseUrl, apiKey: e2eApiKey });
@@ -90,16 +90,16 @@ e2eDescribe("E2E usage operation recovery", () => {
 		expect(recovered).toMatchObject({
 			status: "completed",
 			operationId,
-			outcome: { allowed: true, walletQuantity: "0.5" },
+			outcome: { allowed: true, rated: { value: "0.5" } },
 		});
 		const replay = await client.usage.consume(
-			{ billingAccountId: "http-recovery", featureKey: "model_tokens", quantity: "100.00" },
+			{ billingAccountId: "http-recovery", featureId: "model_tokens", value: "100.00" },
 			operationId,
 		);
 		expect(committedOutcome).toEqual(replay);
 		await expect(
 			client.usage.consume(
-				{ billingAccountId: "http-recovery", featureKey: "model_tokens", quantity: "101" },
+				{ billingAccountId: "http-recovery", featureId: "model_tokens", value: "101" },
 				operationId,
 			),
 		).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT", status: 409 });

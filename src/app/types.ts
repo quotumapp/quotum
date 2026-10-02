@@ -20,6 +20,7 @@ import type { MeteringServiceLike } from "../billing/metering";
 import type { PaymentSetupSession } from "../billing/payment-setup";
 import type { TrialServiceLike } from "../billing/plan-grants";
 import type { PromotionServiceLike } from "../billing/promotions";
+import type { UsageApiServiceLike } from "../billing/usage-api";
 import type { CatalogControlPlaneLike } from "../catalog/types";
 import type { BillingEnv } from "../env";
 import type { BillingLogger } from "../observability/logger";
@@ -215,6 +216,7 @@ export interface AppDependencies {
 	projectAuthentication?: ElysiaPluginLike;
 	entitlementService?: EntitlementService;
 	meteringService?: MeteringServiceLike;
+	usageApiService?: UsageApiServiceLike;
 	controlsEnterpriseService?: ControlsEnterpriseRepositoryLike;
 	promotionService?: PromotionServiceLike;
 	trialService?: TrialServiceLike;

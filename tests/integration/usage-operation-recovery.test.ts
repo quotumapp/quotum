@@ -93,9 +93,10 @@ localDescribe("usage operation recovery", () => {
 				"X-Request-Id": "different-trace",
 				"User-Agent": "new-client",
 			},
-			body: JSON.stringify({ featureKey: input.featureKey, quantity: input.quantity }),
+			body: JSON.stringify({ featureId: input.featureKey, value: input.quantity }),
 		});
-		expect(response.status).toBe(200);
+		expect(response.status).toBe(409);
+		expect((await response.json()).error.code).toBe("OPERATION_RESULT_EXPIRED");
 		expect(await counts()).toEqual({ events: 1, claims: 1, consumed: "0.500000000" });
 	});
 
@@ -463,7 +464,12 @@ localDescribe("usage operation recovery", () => {
 	});
 
 	it("scopes replay and lookup by account, operation and authenticated project", async () => {
-		await context.repository.consumeUsage(project, input);
+		await context.repository.usageApi.consume(project, {
+			billingAccountId: input.billingAccountId,
+			featureId: input.featureKey,
+			value: input.quantity,
+			operationId: input.idempotencyKey,
+		});
 		await grant("other");
 		const other = await context.repository.consumeUsage(project, {
 			...input,
@@ -486,10 +492,15 @@ localDescribe("usage operation recovery", () => {
 	});
 
 	it("keeps identical account and operation identities independent across environments and organizations", async () => {
-		const first = await context.repository.consumeUsage(project, input);
+		const first = await context.repository.usageApi.consume(project, {
+			billingAccountId: input.billingAccountId,
+			featureId: input.featureKey,
+			value: input.quantity,
+			operationId: input.idempotencyKey,
+		});
 		const { app, authHeaders } = createIntegrationApp(context);
 		const path = `/v1/billing-accounts/recovery/usage/operations/consume/${encodeURIComponent(input.idempotencyKey)}`;
-		const eventIds = new Set([first.usageEventId]);
+		const eventIds = new Set([first.allowed ? first.receiptId : null]);
 		for (const key of ["acme-sandbox", "globex"]) {
 			const otherProject = integrationProjectContext(key);
 			await seedIntegrationProjectsAndCatalog(context.sql, [
@@ -509,19 +520,28 @@ localDescribe("usage operation recovery", () => {
 				sourceKey: input.billingAccountId,
 			});
 			expect((await testRequest(app, path, { headers: authHeaders(key) })).status).toBe(404);
-			const result = await context.repository.consumeUsage(otherProject, {
-				...input,
-				quantity: "200",
+			const result = await context.repository.usageApi.consume(otherProject, {
+				billingAccountId: input.billingAccountId,
+				featureId: input.featureKey,
+				value: "200",
+				operationId: input.idempotencyKey,
 			});
-			eventIds.add(result.usageEventId);
+			eventIds.add(result.allowed ? result.receiptId : null);
 			const response = await testRequest(app, path, { headers: authHeaders(key) });
 			expect(response.status).toBe(200);
 			expect((await response.json()).data.outcome).toMatchObject({
-				usageEventId: result.usageEventId,
-				walletQuantity: "1",
+				receiptId: result.allowed ? result.receiptId : null,
+				rated: { value: "1" },
 				balance: { available: "19" },
 			});
-			expect(await context.repository.consumeUsage(project, input)).toEqual(first);
+			expect(
+				await context.repository.usageApi.consume(project, {
+					billingAccountId: input.billingAccountId,
+					featureId: input.featureKey,
+					value: input.quantity,
+					operationId: input.idempotencyKey,
+				}),
+			).toEqual(first);
 		}
 		expect(eventIds.size).toBe(3);
 		expect(await counts()).toEqual({ events: 3, claims: 3, consumed: "2.500000000" });

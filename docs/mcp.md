@@ -135,8 +135,8 @@ the server never follows a cursor on its own.
 | `get_customer_overview` | Customer detail, billing summary and effective controls; each section is data or an error; `email` only with `includeEmail` |
 | `get_controls` | Effective spend and usage limits for an account or entity |
 | `get_balance` | One feature's balance; allocation rows with `includeBreakdown` |
-| `check_usage` | Whether a quantity would be allowed now, with reason, control and rate card. Records nothing |
-| `get_usage_operation` | What an idempotency key resolved to; tries every operation kind when none is given |
+| `check_usage` | Boolean entitlement or metered `featureId`/`value` check for an existing account, with compact denial/control context. Records nothing |
+| `get_usage_operation` | What an idempotency key resolved to; pass `entityId` for entity-scoped usage; tries every operation kind when none is given |
 | `list_usage_events` | Accepted consumes, confirmations and corrections; `metadata` only with `includeMetadata` |
 | `list_projection_jobs` | Projection delivery state with `lastError` and `nextAttemptAt`; never the snapshot payload |
 | `list_store_events`, `get_store_event` | Provider events and their processing state; never the raw payload |

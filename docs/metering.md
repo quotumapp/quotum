@@ -5,6 +5,11 @@
 Trusted backends authorize work through these routes:
 
 ```http
+PUT    /v1/billing-accounts/:billingAccountId
+GET    /v1/billing-accounts/:billingAccountId
+GET    /v1/billing-accounts/:billingAccountId/usage/receipts/:receiptId
+GET    /v1/billing-accounts/:billingAccountId/usage/receipts/:receiptId/deductions
+GET    /v1/billing-accounts/:billingAccountId/entities/:entityId
 GET    /v1/billing-accounts/:billingAccountId/balances/:featureKey
 GET    /v1/billing-accounts/:billingAccountId/billing-summary
 GET    /v1/billing-accounts/:billingAccountId/usage/events
@@ -33,6 +38,53 @@ POST   /v1/billing-accounts/:billingAccountId/commercial-actions
 GET    /v1/billing-accounts/:billingAccountId/payment-setup-sessions/:sessionId
 GET    /v1/billing-accounts/:billingAccountId/entitlements
 ```
+
+## Accounts, checks and consumption
+
+Create an account explicitly with `PUT /v1/billing-accounts/:billingAccountId` and an empty body.
+It returns `{ id, createdAt }`; repeated creation preserves the record and applies a default plan
+only when inserting the account. `GET` retrieves it or returns `BILLING_ACCOUNT_NOT_FOUND`.
+Identifiers are exact, case-sensitive strings of 1–200 characters without surrounding whitespace.
+Usage mutations and entity creation require an existing account. The `/billing-account` child
+resource remains the provider-specific Stripe summary, separate from this account record.
+
+`POST /usage/check` and `POST /usage/consume` use `featureId` and decimal-string `value`:
+
+```json
+{"featureId":"model_tokens","value":"150","entityId":"workspace-1"}
+```
+
+`entityId` and ISO `occurredAt` are optional. Filters, arbitrary metadata, and the former
+`featureKey`/`quantity` names are rejected on these two routes. Boolean checks omit `value` and
+`occurredAt`; metered checks and consumption require a positive value. Checks write nothing and
+include `checkedAt`. Expected denials are HTTP 200 with `allowed: false` and `reason`; allowed
+results omit `reason`. Configuration failures are typed errors, including `USAGE_NOT_CONFIGURED`.
+Plain decimal strings normalize redundant leading and trailing zeroes before fingerprinting.
+Signs, exponent notation, whitespace and zero usage are rejected; feature scale and storage bounds
+still apply. Public responses contain canonical decimal strings.
+
+Metered results contain `featureId`, exact `entityId` (null for account scope), `usage` and `rated`
+quantities (`featureId`, `unit`, `value`), and a bounded `balance` with `featureId`, `unit`, `granted`,
+`consumed`, `held` and `available`. Boolean checks omit those quantities and balance. Consume also
+returns `operation: "consume"` and the caller's `operationId` from `Idempotency-Key`. Successful
+consumption includes `receiptId` and `recordedAt`; denial includes neither field. Allocation rows,
+rate-card tiers, purchase actions, internal event IDs and deduction arrays are absent.
+
+Receipt detail is immutable, with operation and caller identity, account/entity scope, exact
+quantities, occurred/recorded times, balance after usage, catalog-rating reference and deduction
+count. Its deductions are a separate cursor-paginated child collection, default 50 and maximum 100.
+An entity receipt requires `?entityId=<external entity ID>` on both reads. Cursors are bound to their
+receipt; receipt IDs and cursors are opaque. These reads require project authentication and admit
+read-only credentials. The snapshot, event, deductions, billing effect and recovery result commit
+in one transaction.
+
+The independently versioned [`@quotum/sdk`](https://github.com/quotumapp/quotum-js) preview uses these
+account/entity handles. Its release must pin the exact public API revision containing this contract.
+It is distinct from the internal `quotum-api/sdk` client. Reserve/confirm/release, correction and
+balance endpoints retain their existing field names and detailed responses until their next
+coordinated pre-1.0 increment; the public SDK does not expose placeholder methods for them.
+
+## Reservations and related operations
 
 Quantities are decimal strings. A check is side-effect-free, consume records an immutable receipt,
 and reservation finalization is atomic. Usage mutations require `Idempotency-Key`; corrections,
@@ -94,7 +146,8 @@ consume: it may carry no more decimal places than the meter's `creditScale`, or 
 
 ## Meter limits
 
-Meter-limit balances and capped usage remain scoped to the requested entity and canonical filter.
+Meter-limit balances and capped usage remain scoped to the requested entity. Internal and deferred
+reservation paths also retain their canonical filter scope; public checks/consumption have no filters.
 The canonical filter compares values as text in any key order, so `{ "model": 1 }` and
 `{ "model": "1" }`, or `true` and `"true"`, count in one window.
 Monetary spend for postpaid overage is rated across every scoped window belonging to the same
@@ -192,14 +245,18 @@ Consume, reserve, confirm, release, and correction are recoverable under the cal
 `Idempotency-Key`, scoped to `(projectInstanceId, billingAccountId, operation kind, key)`. After a
 timeout, lost response, `5xx`, or restart, retry with the same key and input: same-input replay
 returns the original result, including a denial; different input returns `409 IDEMPOTENCY_CONFLICT`.
-Keep `occurredAt` and semantic metadata stable across retries and put per-attempt tracing in headers.
+Keep `occurredAt` stable across retries and put per-attempt tracing in headers. Deferred reservation
+and correction inputs still accept metadata, which also participates in their fingerprint.
 
 ```http
 GET /v1/billing-accounts/:billingAccountId/usage/operations/:operation/:operationId
 ```
 
 returns `operation`, `operationId`, `status`, `completedAt`, and a compact `outcome`. The SDK exposes
-it as `client.usage.getOperation`.
+it as `account.getOperation` or `entity.getOperation`; the bundled client uses `client.usage.getOperation`.
+For new consume operations, `outcome` is exactly the original compact command result. Entity-scoped
+lookup requires `?entityId=...`. Retained consumes from the older response contract return
+`OPERATION_RESULT_EXPIRED` through the new HTTP contract; do not replace their operation key.
 
 - `409 OPERATION_IN_PROGRESS`: another transaction owns the operation; retry the same input.
 - `409 OPERATION_RESULT_EXPIRED`: the identity is retained but its result is gone; do not mint a new
@@ -208,7 +265,9 @@ it as `client.usage.getOperation`.
   key.
 
 Outcomes are retained for at least 24 hours and identities for at least seven days. Stored outcomes
-are limited to 64 KiB. When a result with the full balance breakdown would exceed that, which takes
+are limited to 64 KiB. New consume results are constant-size and omit allocation provenance.
+For deferred operations and internal callers still returning detailed results, when a result with
+the full balance breakdown would exceed that, which takes
 about 150 live allocations of the feature, the result's `balance.breakdown` lists only the
 allocations the operation changed. The first response and every replay answer that same result, its
 totals stay exact, and `GET .../balances/:featureKey` still lists every allocation. Only a result

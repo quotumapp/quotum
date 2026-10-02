@@ -96,12 +96,12 @@ e2eDescribe("E2E MCP server", () => {
 
 		const allowed = await client.callTool({
 			name: "check_usage",
-			arguments: { billingAccountId: "mcp-account", featureKey: "ai_credits", quantity: "10" },
+			arguments: { billingAccountId: "mcp-account", featureId: "ai_credits", value: "10" },
 		});
 		expect(toolJson(allowed)).toMatchObject({ allowed: true });
 		const denied = await client.callTool({
 			name: "check_usage",
-			arguments: { billingAccountId: "mcp-account", featureKey: "ai_credits", quantity: "11" },
+			arguments: { billingAccountId: "mcp-account", featureId: "ai_credits", value: "11" },
 		});
 		expect(denied.isError).toBeUndefined();
 		expect(toolJson(denied)).toMatchObject({ allowed: false, reason: expect.any(String) });
@@ -157,7 +157,7 @@ e2eDescribe("E2E MCP server", () => {
 
 		const denied = await client.callTool({
 			name: "check_usage",
-			arguments: { billingAccountId: "mcp-account", featureKey: "ai_credits", quantity: "11" },
+			arguments: { billingAccountId: "mcp-account", featureId: "ai_credits", value: "11" },
 		});
 		expect(toolJson(denied)).toMatchObject({ allowed: false });
 
@@ -177,7 +177,7 @@ e2eDescribe("E2E MCP server", () => {
 		// Every tool works with the read-only key, so none reaches a route that has not opted in.
 		const { tools } = await client.listTools();
 		const samples: Record<string, Record<string, unknown>> = {
-			check_usage: { billingAccountId: "mcp-account", featureKey: "ai_credits", quantity: "1" },
+			check_usage: { billingAccountId: "mcp-account", featureId: "ai_credits", value: "1" },
 			find_customer: { query: "mcp" },
 			get_balance: { billingAccountId: "mcp-account", featureKey: "ai_credits" },
 			get_store_event: { eventId: "00000000-0000-4000-8000-000000000001" },
@@ -202,7 +202,7 @@ e2eDescribe("E2E MCP server", () => {
 					"content-type": "application/json",
 					"idempotency-key": "read-only-consume",
 				},
-				body: JSON.stringify({ featureKey: "ai_credits", quantity: "1" }),
+				body: JSON.stringify({ featureId: "ai_credits", value: "1" }),
 			},
 		);
 		expect(consume.status).toBe(403);

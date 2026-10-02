@@ -24,6 +24,7 @@ import type {
 	PreAuthGateInput,
 	RequestObserver,
 } from "./app/types";
+import { registerUsageReceiptRoutes } from "./app/usage-receipt-routes";
 import { registerWebhookRoutes } from "./app/webhook-routes";
 import { EntitlementService } from "./billing/entitlements";
 import {
@@ -103,6 +104,7 @@ export function createApp({
 	connections,
 	entitlementService,
 	meteringService,
+	usageApiService,
 	controlsEnterpriseService,
 	promotionService,
 	trialService,
@@ -507,9 +509,12 @@ export function createApp({
 		},
 	});
 	registerCapabilityRoutes({ app, reads: capabilityReads });
+	const usageApi = usageApiService ?? getRepository().usageApi;
+	registerUsageReceiptRoutes(app, usageApi);
 	registerMeteringRoutes({
 		app,
 		meteringLimiter: createMeteringLimiter(),
+		usageApi,
 		rateLimitKeyOptions,
 		meteringService: {
 			getOperation: (...args) => getMeteringService().getOperation(...args),

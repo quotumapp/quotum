@@ -127,13 +127,16 @@ localDescribe("Cross-tenant identifiers", () => {
 				"content-type": "application/json",
 				"idempotency-key": "consume:shared",
 			},
-			body: JSON.stringify({ featureKey: "model_tokens", quantity: "400" }),
+			body: JSON.stringify({ featureId: "model_tokens", value: "400" }),
 		});
 		expect(consumed.status).toBe(200);
 		const original = (await consumed.json()).data;
+		const usageEventId = JSON.parse(
+			Buffer.from(original.receiptId.slice(3), "base64url").toString(),
+		)[0];
 		const correction = await testRequest(
 			app,
-			`/v1/billing-accounts/${sharedAccount}/usage/events/${original.usageEventId}/corrections`,
+			`/v1/billing-accounts/${sharedAccount}/usage/events/${usageEventId}/corrections`,
 			{
 				method: "POST",
 				headers: {

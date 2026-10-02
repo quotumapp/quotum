@@ -5,6 +5,7 @@ import { materializeSubscriptionAllocations } from "../../src/db/repository/cata
 import { readProjectionBalances } from "../../src/db/repository/entitlements";
 import { planGrantWindowBounds } from "../../src/db/repository/meter-limit-windows";
 import type { QueryExecutor } from "../../src/db/repository/types";
+import { parseReceiptId } from "../../src/db/repository/usage-receipts";
 import { addUtcMonths, type Cadence } from "../../src/shared/cadence";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
@@ -228,7 +229,7 @@ localDescribe("authoritative metering flows", () => {
 		expect(await countRows(context.sql, "reservations")).toBe(0);
 		expect(await countRows(context.sql, "client_idempotency_claims")).toBe(0);
 	});
-	it("converts raw usage exactly, records an inline deduction receipt, and replays duplicate keys", async () => {
+	it("converts raw usage exactly, records an immutable paginated receipt, and replays duplicate keys", async () => {
 		await context.repository.grantAllocation(integrationProjectContext(), {
 			billingAccountId: "account_1",
 			featureKey: "ai_credits",
@@ -249,15 +250,15 @@ localDescribe("authoritative metering flows", () => {
 		).toMatchObject({ allowed: true, walletQuantity: "0.625" });
 
 		const check = await usageRequest(app, authHeaders(), "account_1", "check", {
-			featureKey: "model_tokens",
-			quantity: "125",
+			featureId: "model_tokens",
+			value: "125",
 		});
 		const consumed = await usageRequest(
 			app,
 			authHeaders(),
 			"account_1",
 			"consume",
-			{ featureKey: "model_tokens", quantity: "125" },
+			{ featureId: "model_tokens", value: "125" },
 			"generation:1",
 		);
 		const duplicate = await usageRequest(
@@ -265,28 +266,36 @@ localDescribe("authoritative metering flows", () => {
 			authHeaders(),
 			"account_1",
 			"consume",
-			{ featureKey: "model_tokens", quantity: "125" },
+			{ featureId: "model_tokens", value: "125" },
 			"generation:1",
 		);
 
 		expect(check.status).toBe(200);
 		expect((await check.json()).data).toMatchObject({
 			allowed: true,
-			walletQuantity: "0.625",
-			rateCard: { path: "additive", revision: 1, ratePerUnit: "0.005" },
+			rated: { value: "0.625" },
 			balance: { available: "10" },
 		});
 		expect(consumed.status).toBe(200);
 		const consumedData = (await consumed.json()).data;
 		expect(consumedData).toMatchObject({
 			allowed: true,
-			walletQuantity: "0.625",
+			rated: { value: "0.625" },
 			balance: { consumed: "0.625", available: "9.375" },
 		});
-		expect(consumedData.usageEventId).toEqual(expect.any(String));
-		expect(consumedData.deductions).toEqual([
-			expect.objectContaining({ quantity: "0.625", sourceKey: "fixture:account_1" }),
-		]);
+		expect(consumedData.receiptId).toEqual(expect.any(String));
+		const receiptScope = { billingAccountId: "account_1", receiptId: consumedData.receiptId };
+		expect(
+			await context.repository.usageApi.getReceipt(integrationProjectContext(), receiptScope),
+		).toMatchObject({ rating: { path: "additive", revision: 1 } });
+		expect(
+			(
+				await context.repository.usageApi.listReceiptDeductions(
+					integrationProjectContext(),
+					receiptScope,
+				)
+			).items,
+		).toEqual([expect.objectContaining({ value: "0.625", sourceKey: "fixture:account_1" })]);
 		expect(duplicate.status).toBe(200);
 		expect((await duplicate.json()).data).toEqual(consumedData);
 
@@ -300,7 +309,7 @@ localDescribe("authoritative metering flows", () => {
 		>`
 			SELECT quantity::text, wallet_quantity::text, rate_card_path, deductions
 			FROM usage_events
-			WHERE id = ${consumedData.usageEventId}
+			WHERE id = ${parseReceiptId(consumedData.receiptId).id}
 		`;
 		expect(events).toEqual([
 			{
@@ -631,13 +640,13 @@ localDescribe("authoritative metering flows", () => {
 			authHeaders(),
 			"correction_account",
 			"consume",
-			{ featureKey: "model_tokens", quantity: "400" },
+			{ featureId: "model_tokens", value: "400" },
 			"correction:consume",
 		);
 		const original = (await consumed.json()).data;
 		const correction = await testRequest(
 			app,
-			`/v1/billing-accounts/correction_account/usage/events/${original.usageEventId}/corrections`,
+			`/v1/billing-accounts/correction_account/usage/events/${parseReceiptId(original.receiptId).id}/corrections`,
 			{
 				method: "POST",
 				headers: {
@@ -655,7 +664,7 @@ localDescribe("authoritative metering flows", () => {
 		expect(correction.status).toBe(200);
 		const correctionData = (await correction.json()).data;
 		expect(correctionData).toMatchObject({
-			originalUsageEventId: original.usageEventId,
+			originalUsageEventId: parseReceiptId(original.receiptId).id,
 			quantity: "-100",
 			walletQuantity: "-0.5",
 			balance: { consumed: "1.5", available: "8.5" },
@@ -664,7 +673,7 @@ localDescribe("authoritative metering flows", () => {
 
 		const finalCorrection = await context.repository.correctUsage(integrationProjectContext(), {
 			billingAccountId: "correction_account",
-			originalUsageEventId: original.usageEventId,
+			originalUsageEventId: parseReceiptId(original.receiptId).id,
 			originalRecordedAt: new Date(original.recordedAt),
 			quantity: "300",
 			idempotencyKey: "correction:final",
@@ -710,7 +719,7 @@ localDescribe("authoritative metering flows", () => {
 			{ operation: "correction", quantity: "-300.000000000", wallet_quantity: "-1.500000000" },
 		]);
 		expect(events[1]).toMatchObject({
-			original_event_id: original.usageEventId,
+			original_event_id: parseReceiptId(original.receiptId).id,
 			metadata: { actor: "product-worker", reason: "generation returned fewer tokens" },
 		});
 	});
@@ -732,7 +741,7 @@ localDescribe("authoritative metering flows", () => {
 			authHeaders(),
 			"correction_scale",
 			"consume",
-			{ featureKey: "model_tokens", quantity: "100.5" },
+			{ featureId: "model_tokens", value: "100.5" },
 			"correction-scale:fractional-consume",
 		);
 		expect(fractionalConsume.status).toBe(400);
@@ -742,14 +751,14 @@ localDescribe("authoritative metering flows", () => {
 			authHeaders(),
 			"correction_scale",
 			"consume",
-			{ featureKey: "model_tokens", quantity: "400" },
+			{ featureId: "model_tokens", value: "400" },
 			"correction-scale:consume",
 		);
 		const original = (await consumed.json()).data;
 
 		const correction = await testRequest(
 			app,
-			`/v1/billing-accounts/correction_scale/usage/events/${original.usageEventId}/corrections`,
+			`/v1/billing-accounts/correction_scale/usage/events/${parseReceiptId(original.receiptId).id}/corrections`,
 			{
 				method: "POST",
 				headers: {
@@ -1670,6 +1679,7 @@ localDescribe("authoritative metering flows", () => {
 			{ provider: "stripe", action: "purchase_required" },
 		];
 
+		await context.repository.usageApi.createAccount(project, consume.billingAccountId);
 		const denied = await context.repository.consumeUsage(project, consume);
 		expect(denied.allowed).toBe(false);
 		expect(denied.reason).toBe("insufficient_balance");

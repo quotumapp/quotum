@@ -45,7 +45,8 @@ segment or query value; a numeric id beyond the signed 64-bit range; a date-time
 9999; and a decimal with more than 19 digits before the decimal point.
 
 Where a `/v1` operation requires an `Idempotency-Key`, the key holds 1 to 200 characters after
-surrounding whitespace is trimmed; anything else answers `400 INVALID_REQUEST`. The contract lists
+surrounding whitespace is trimmed; usage operations additionally reject surrounding whitespace
+instead of changing the caller's identity. Invalid keys answer `400 INVALID_REQUEST`. The contract lists
 every query parameter an operation reads, including the admin list filters.
 
 A `/v1` path that exists answers another method with `405 METHOD_NOT_ALLOWED` and an `Allow`
@@ -93,6 +94,12 @@ alert: a read-only key used for writes is either a misconfigured tool or a leake
 
 ## Backend SDK
 
+The separate public [`@quotum/sdk`](https://github.com/quotumapp/quotum-js) is developed in the
+`quotum-js` repository. Its first preview covers explicit account/entity handles, feature-aware
+checks, known-cost consumption, operation recovery and receipts. See [metering](metering.md) for
+the matching server contract; a public SDK release must pin the API revision and pass packed
+conformance. A local development artifact is not an npm publication or a frozen `/v1` contract.
+
 The backend SDK (`quotum-api/sdk`) wraps catalog, commercial, usage, provider capability, and
 selected admin calls and keeps credentials server-side. Its admin reads (`admin.customer`,
 `admin.searchCustomers`, `admin.storeEvents`, `admin.storeEvent`, `admin.projectionJobs`,
@@ -106,6 +113,11 @@ On a 429, `BillingApiError.rateLimitResetAt` carries the `ratelimit-reset` times
 JSON, such as a proxy's text or HTML 502, raises `BillingApiError` with code `HTTP_ERROR` and the
 HTTP status, so callers can retry on 5xx. The read-only
 [MCP server](mcp.md) for coding agents is built on these reads.
+
+Its `usage.check` and `usage.consume` methods now accept `featureId` and `value`, returning the
+compact public results. Other usage methods retain their existing fields until their coordinated
+cutover. The bundled client remains distinct from the standalone SDK's automatic retry and recovery
+transport.
 
 ## Admin operations
 

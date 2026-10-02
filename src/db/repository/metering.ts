@@ -31,6 +31,11 @@ import type {
 	WorkerConsumeUsageResult,
 	WorkerMeteringMutationInput,
 } from "../../billing/metering";
+import {
+	publicUsageValue,
+	type UsageConsumeInput,
+	type UsageConsumeResult,
+} from "../../billing/usage-api";
 import type {
 	UsageOperationInput,
 	UsageOperationKind,
@@ -42,6 +47,7 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import { addCadence, type CadenceUnit } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
+import { requireBillingAccount } from "./billing-accounts";
 import type { ControlDenial, UsageAlertRow } from "./controls-runtime";
 import {
 	checkControls,
@@ -134,6 +140,7 @@ import {
 	lookupUsageOperation,
 	runUsageOperation,
 } from "./usage-operations";
+import { persistUsageReceipt } from "./usage-receipts";
 
 interface OriginalUsageRow {
 	id: string;
@@ -182,6 +189,45 @@ export interface GrantAllocationInput {
 }
 
 export class MeteringBillingRepository extends RepositoryModule {
+	async consumePublic(
+		project: ProjectInstanceContext,
+		input: UsageConsumeInput,
+	): Promise<UsageConsumeResult> {
+		const projectId = project.projectInstanceId;
+		const mutation: MeteringMutationInput = {
+			billingAccountId: input.billingAccountId,
+			featureKey: input.featureId,
+			quantity: publicUsageValue(input.value),
+			entityId: input.entityId,
+			occurredAt: input.occurredAt,
+			idempotencyKey: input.operationId,
+		};
+		return this.transaction(async (tx) => {
+			await requireBillingAccount(tx, projectId, input.billingAccountId);
+			return runUsageOperation<UsageConsumeResult, { feature: FeatureRow }>(
+				tx,
+				project,
+				"consume",
+				mutation,
+				async (customer, prefetched) => {
+					const result = await consumeWithinTransaction(tx, projectId, customer, {
+						...mutation,
+						occurredAt: input.occurredAt ?? null,
+						metadata: {},
+						projectionKey: `usage:consume:${customer.id}:${input.operationId}`,
+						feature: prefetched.feature,
+					});
+					return persistUsageReceipt(tx, projectId, input, prefetched.feature.unit, result);
+				},
+				{
+					recoveryVersion: 2,
+					prefetch: (executor) => prefetchMeteringSubject(executor, projectId, mutation),
+					prepare: (executor) =>
+						expireSubjectReservations(executor, projectId, input.billingAccountId),
+				},
+			);
+		});
+	}
 	/**
 	 * Runs a usage operation. The prefetch holds non-blocking reads pipelined with the operation
 	 * lock and claim read; the expired-reservation sweep runs with the customer row once the lock
@@ -1764,6 +1810,7 @@ async function consumeWithinTransaction(
 		balance,
 		usageEventId: event.id,
 		recordedAt: toIso(event.recorded_at),
+		recordedAtExact: event.recorded_at_exact,
 		deductions,
 	};
 }

@@ -7,6 +7,7 @@ import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { bigintIdSchema, storableDateTimeSchema } from "../shared/input-bounds";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/controls-responses";
+import { publicIdSchema } from "./contracts/usage-api";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
 import type { BillingElysia, PostAuthGuard } from "./types";
 
@@ -17,8 +18,8 @@ export interface ControlsRoutesDependencies {
 	registerPostAuthGuard: (guard: PostAuthGuard) => void;
 }
 
-const accountParams = z.object({ billingAccountId: z.string().trim().min(1).max(200) }).strict();
-const entityParams = accountParams.extend({ entityId: z.string().trim().min(1).max(200) }).strict();
+const accountParams = z.object({ billingAccountId: publicIdSchema }).strict();
+const entityParams = accountParams.extend({ entityId: publicIdSchema }).strict();
 const licenseCheckParams = entityParams
 	.extend({ featureKey: z.string().trim().min(1).max(120) })
 	.strict();
@@ -28,7 +29,7 @@ const contractParams = accountParams.extend({ contractId: bigintIdSchema() }).st
 
 const entityBody = z
 	.object({
-		externalId: z.string().trim().min(1).max(200),
+		externalId: publicIdSchema,
 		kind: z.string().trim().min(1).max(120),
 		metadata: z.record(z.string(), z.unknown()).optional(),
 	})
@@ -154,6 +155,30 @@ export function registerControlsRoutes({
 				path: "/v1/billing-accounts/:billingAccountId/entities",
 				responses: {
 					201: responses.postV1BillingAccountsByBillingAccountIdEntitiesResponse201Schema,
+				},
+			}),
+		},
+	);
+
+	app.get(
+		"/v1/billing-accounts/:billingAccountId/entities/:entityId",
+		async ({ params, project }) => ({
+			success: true,
+			data: await service.getEntity(
+				privateProject(project),
+				params.billingAccountId,
+				params.entityId,
+			),
+		}),
+		{
+			params: entityParams,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdEntitiesByEntityId",
+				credentialAccess: "read_only",
+				tags: ["controls"],
+				path: "/v1/billing-accounts/:billingAccountId/entities/:entityId",
+				responses: {
+					200: responses.postV1BillingAccountsByBillingAccountIdEntitiesResponse201Schema,
 				},
 			}),
 		},

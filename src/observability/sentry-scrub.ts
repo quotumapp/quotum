@@ -56,6 +56,7 @@ const COLLECTIONS = new Set([
 	"promotions",
 	"provisioning",
 	"reservations",
+	"receipts",
 	"step-up",
 	"store-events",
 	"subscriptions",

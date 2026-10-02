@@ -53,11 +53,11 @@ export async function seedMerchantBilling(
 			actor: "merchant-synthetic-seed",
 			idempotencyKey: "merchant:synthetic:grant",
 		});
-		await repository.consumeUsage(context, {
+		await repository.usageApi.consume(context, {
 			billingAccountId,
-			featureKey: "model_tokens",
-			quantity: "400",
-			idempotencyKey: "merchant:synthetic:consume",
+			featureId: "model_tokens",
+			value: "400",
+			operationId: "merchant:synthetic:consume",
 		});
 		await database`UPDATE projection_sync_jobs SET status='failed',attempts=10,last_error='Synthetic receiver unavailable' WHERE project_id=${instance.id}`;
 		const payload = {

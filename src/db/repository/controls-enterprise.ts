@@ -195,7 +195,7 @@ export class ControlsEnterpriseRepository
 		},
 	): Promise<EntityRecord> {
 		const projectId = project.projectInstanceId;
-		const customer = await ensureCustomer(
+		const customer = await requireCustomer(
 			this.database,
 			projectId,
 			requiredText(input.billingAccountId, "billingAccountId", 200),
@@ -233,6 +233,24 @@ export class ControlsEnterpriseRepository
 			`,
 		);
 		return rows.map(entityRecord);
+	}
+
+	async getEntity(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		externalId: string,
+	): Promise<EntityRecord> {
+		const projectId = project.projectInstanceId;
+		const customer = await requireCustomer(this.database, projectId, billingAccountId);
+		const row = await executeOne<EntityDbRow>(
+			this.database,
+			drizzleSql`
+			SELECT id, external_id, kind, metadata, created_at, updated_at FROM entities
+			WHERE project_id = ${projectId} AND customer_id = ${customer.id} AND external_id = ${externalId}
+		`,
+		);
+		if (row === null) throw new NotFoundBillingError("Entity was not found", "ENTITY_NOT_FOUND");
+		return entityRecord(row);
 	}
 
 	async createUsageAlert(

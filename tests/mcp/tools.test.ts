@@ -36,7 +36,7 @@ describe("MCP tools", () => {
 		const { client, calls } = await connect(() => ok(decision));
 		const result = await client.callTool({
 			name: "check_usage",
-			arguments: { billingAccountId: "account/one", featureKey: "tokens", quantity: "11" },
+			arguments: { billingAccountId: "account/one", featureId: "tokens", value: "11" },
 		});
 		expect(result.isError).toBeUndefined();
 		expect(toolJson(result)).toEqual(decision);
@@ -44,7 +44,7 @@ describe("MCP tools", () => {
 		expect(`${calls[0]?.method} ${calls[0]?.url}`).toBe(
 			"POST https://billing.example.com/v1/billing-accounts/account%2Fone/usage/check",
 		);
-		expect(await calls[0]?.json()).toEqual({ featureKey: "tokens", quantity: "11" });
+		expect(await calls[0]?.json()).toEqual({ featureId: "tokens", value: "11" });
 		expect(calls[0]?.headers.get("authorization")).toBe(`Bearer ${mcpTestApiKey}`);
 		expect(calls[0]?.headers.has("idempotency-key")).toBe(false);
 	});
@@ -195,6 +195,26 @@ describe("MCP tools", () => {
 		expect(calls).toHaveLength(3);
 	});
 
+	it("preserves entity scope when looking up a consume operation", async () => {
+		const { client, calls } = await connect(() =>
+			ok({ operation: "consume", operationId: "job-1", status: "processing" }),
+		);
+		const result = await client.callTool({
+			name: "get_usage_operation",
+			arguments: {
+				billingAccountId: "account-1",
+				operationId: "job-1",
+				operation: "consume",
+				entityId: "workspace/1",
+			},
+		});
+		expect(result.isError).toBeUndefined();
+		expect(calls).toHaveLength(1);
+		expect(calls.map((call) => new URL(call.url).searchParams.get("entityId"))).toEqual([
+			"workspace/1",
+		]);
+	});
+
 	it("tries every operation kind when none is given", async () => {
 		const { client, calls } = await connect((request) =>
 			request.url.includes("/operations/reserve/")
@@ -203,13 +223,16 @@ describe("MCP tools", () => {
 		);
 		const result = await client.callTool({
 			name: "get_usage_operation",
-			arguments: { billingAccountId: "account-1", operationId: "key-1" },
+			arguments: { billingAccountId: "account-1", operationId: "key-1", entityId: "workspace/1" },
 		});
 		const body = toolJson(result) as { operations: unknown[]; notFound: unknown[] };
 		expect(body.operations).toEqual([
 			{ operation: "reserve", operationId: "key-1", status: "processing" },
 		]);
 		expect(body.notFound).toHaveLength(4);
+		expect(
+			calls.every((call) => new URL(call.url).searchParams.get("entityId") === "workspace/1"),
+		).toBe(true);
 		expect(calls.map((call) => new URL(call.url).pathname.split("/").at(-2))).toEqual([
 			"consume",
 			"reserve",
