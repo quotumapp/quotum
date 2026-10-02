@@ -146,6 +146,9 @@ describe("Paddle capability declaration", () => {
 						resolution: { kind: "none" },
 					},
 				]);
+			} else if (entry.level === "unsupported") {
+				expect(verdict.blockingLayer).toBe("provider");
+				expect(verdict.reasons.map((reason) => reason.code)).toEqual(["PROVIDER_UNSUPPORTED"]);
 			} else {
 				expect(entry.level).toBe("not_evaluated");
 				expect(verdict.blockingLayer).toBe("provider");

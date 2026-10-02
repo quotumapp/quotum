@@ -26,6 +26,7 @@ interface SeededStoreProduct {
 }
 
 export const publicBillingTableResetOrder = [
+	"promotion_apple_signature_attempts",
 	"default_plan_reconciliations",
 	"promotion_audit_events",
 	"promotion_redemptions",

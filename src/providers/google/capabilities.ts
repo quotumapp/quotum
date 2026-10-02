@@ -169,6 +169,16 @@ export const googleCapabilities: ProviderCapabilityDeclaration = {
 		"promotion.code_entry": notEvaluated(
 			"Quotum passes no discount to Google Play; Android code redemption executes feature grants in Quotum only.",
 		),
+		"promotion.signed_offer": {
+			level: "unsupported",
+			verification: { status: "not_applicable" },
+			conditions: [],
+		},
+		"promotion.store_offer_code": {
+			level: "unsupported",
+			verification: { status: "not_applicable" },
+			conditions: [],
+		},
 		"promotion.hosted_code": notEvaluated(),
 	},
 };

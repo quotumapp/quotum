@@ -5,6 +5,7 @@ import type {
 	AdminStatsSummary,
 	AdminStoreEvent,
 } from "../admin/types";
+import type { AppleOfferInput, ApplePromotionAction } from "../billing/apple-promotions";
 import type {
 	AdministrativeDebitMutationResult,
 	AdministrativeDebitRecord,
@@ -341,6 +342,25 @@ export class BillingClient {
 				),
 		};
 		this.promotions = {
+			linkAppleOffer: (promotionKey: string, input: AppleOfferInput) =>
+				this.request<PromotionRecord>(
+					`/v1/admin/promotions/${segment(promotionKey)}/apple-offers`,
+					{ method: "POST", body: input, operator: true },
+				),
+			retireAppleOffer: (promotionKey: string, offerId: string) =>
+				this.request<PromotionRecord>(
+					`/v1/admin/promotions/${segment(promotionKey)}/apple-offers/${segment(offerId)}/retire`,
+					{ method: "POST", operator: true },
+				),
+			refreshAppleSignature: (
+				billingAccountId: string,
+				redemptionId: string,
+				idempotencyKey: string,
+			) =>
+				this.request<ApplePromotionAction>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/promotion-redemptions/${segment(redemptionId)}/apple-signatures`,
+					{ method: "POST", idempotencyKey },
+				),
 			create: (input: Omit<CreatePromotionInput, "actor">) =>
 				this.request<PromotionRecord>("/v1/admin/promotions", {
 					method: "POST",
@@ -398,7 +418,12 @@ export class BillingClient {
 				),
 			redeem: (
 				billingAccountId: string,
-				input: { code: string; channel: PromotionChannel },
+				input: {
+					code: string;
+					channel: PromotionChannel;
+					appleOfferId?: string;
+					subscriptionId?: string;
+				},
 				idempotencyKey: string,
 			) =>
 				this.request<PromotionRedeemResult>(

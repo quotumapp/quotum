@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ApplePromotionSigner } from "../billing/apple-promotions";
 import { InvalidRequestError } from "../billing/errors";
 import type {
 	CreatePromotionInput,
@@ -6,7 +7,9 @@ import type {
 	PromotionEffect,
 	PromotionServiceLike,
 } from "../billing/promotions";
+import type { ApplePromotionRepository } from "../db/repository/apple-promotions";
 import { projectScopedRateLimitGuard, type RateLimiter } from "../http/rate-limit";
+import type { ProjectInstanceContext } from "../projects/context";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { decimalDigitsQuery, storableDateTimeSchema } from "../shared/input-bounds";
 import { operatorApiKeyGuard } from "./admin-routes";
@@ -15,6 +18,10 @@ import { privateProject, rejectCallerProjectSelectorBody, requireActor } from ".
 import type { BillingElysia, PostAuthGuard } from "./types";
 
 export interface PromotionRoutesDependencies {
+	apple?: {
+		repository: () => ApplePromotionRepository;
+		signer: (project: ProjectInstanceContext) => Promise<ApplePromotionSigner>;
+	};
 	app: BillingElysia;
 	operatorApiKey: string | null;
 	service: PromotionServiceLike;
@@ -108,8 +115,17 @@ export const promotionCodeBodySchema = z
 	})
 	.strict();
 
+export const appleOfferBodySchema = z
+	.object({
+		objectKind: z.enum(["apple_promotional_offer", "apple_offer_code"]),
+		productExternalId: z.string().trim().min(1).max(255),
+		offerIdentifier: z.string().trim().min(1).max(255),
+	})
+	.strict();
+
 export const createPromotionBodySchema = z
 	.object({
+		appleOffers: z.array(appleOfferBodySchema).max(50).optional(),
 		key: keySchema,
 		name: z.string().trim().min(1).max(200),
 		effect: effectBodySchema,
@@ -164,7 +180,12 @@ export const validatePromotionCodeBodySchema = z
 	.strict();
 
 export const redeemPromotionCodeBodySchema = z
-	.object({ code: codeSchema, channel: channelSchema })
+	.object({
+		code: codeSchema,
+		channel: channelSchema,
+		appleOfferId: z.uuid().optional(),
+		subscriptionId: z.uuid().optional(),
+	})
 	.strict();
 
 export const revokePromotionRedemptionBodySchema = z
@@ -251,6 +272,7 @@ export function createPromotionInput(
 }
 
 export function registerPromotionRoutes({
+	apple,
 	app,
 	operatorApiKey,
 	service,
@@ -265,7 +287,9 @@ export function registerPromotionRoutes({
 	const codeEntryLimit = projectScopedRateLimitGuard({
 		limiter: validationLimiter,
 		matches: (path) =>
-			/^\/v1\/billing-accounts\/[^/]+\/promotion-(?:codes\/validate|redemptions)$/.test(path),
+			/^\/v1\/billing-accounts\/[^/]+\/promotion-(?:codes\/validate|redemptions(?:\/[^/]+\/apple-signatures)?)$/.test(
+				path,
+			),
 		trustProxyHeaders: rateLimitKeyOptions.trustProxyHeaders,
 	});
 	registerPostAuthGuard({
@@ -275,12 +299,100 @@ export function registerPromotionRoutes({
 		},
 	});
 
+	const appleRepository = () => {
+		if (!apple) throw new InvalidRequestError("Apple promotions are unavailable");
+		return apple.repository();
+	};
+	const signer = (project: ProjectInstanceContext) => {
+		if (!apple) throw new InvalidRequestError("Apple promotions are unavailable");
+		return apple.signer(project);
+	};
+	app.post(
+		"/v1/admin/promotions/:promotionKey/apple-offers",
+		async ({ body, params, request, project }) => {
+			const context = privateProject(project);
+			return {
+				success: true,
+				data: await appleRepository().link(
+					context,
+					params.promotionKey,
+					body,
+					await signer(context),
+					requireActor(request.headers),
+				),
+			};
+		},
+		{
+			parse: [LENIENT_JSON_PARSE],
+			params: promotionParams,
+			body: appleOfferBodySchema,
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1AdminPromotionsAppleOffers",
+				tags: ["promotions"],
+				path: "/v1/admin/promotions/:promotionKey/apple-offers",
+				responses: { 200: responses.getV1AdminPromotionsByPromotionKeyResponse200Schema },
+			}),
+		},
+	);
+	app.post(
+		"/v1/admin/promotions/:promotionKey/apple-offers/:offerId/retire",
+		async ({ params, request, project }) => ({
+			success: true,
+			data: await appleRepository().retire(
+				privateProject(project),
+				params.promotionKey,
+				params.offerId,
+				requireActor(request.headers),
+			),
+		}),
+		{
+			parse: "none",
+			params: promotionParams.extend({ offerId: z.uuid() }),
+			detail: operationDetail({
+				operationId: "postV1AdminPromotionsAppleOffersRetire",
+				tags: ["promotions"],
+				path: "/v1/admin/promotions/:promotionKey/apple-offers/:offerId/retire",
+				responses: { 200: responses.getV1AdminPromotionsByPromotionKeyResponse200Schema },
+			}),
+		},
+	);
+	app.post(
+		"/v1/billing-accounts/:billingAccountId/promotion-redemptions/:redemptionId/apple-signatures",
+		async ({ params, request, project }) => {
+			const context = privateProject(project);
+			return {
+				success: true,
+				data: await appleRepository().refresh(
+					context,
+					params.billingAccountId,
+					params.redemptionId,
+					requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+					await signer(context),
+				),
+			};
+		},
+		{
+			parse: "none",
+			params: accountRedemptionParams,
+			detail: operationDetail({
+				operationId: "postV1BillingAccountsApplePromotionSignatures",
+				tags: ["promotions"],
+				path: "/v1/billing-accounts/:billingAccountId/promotion-redemptions/:redemptionId/apple-signatures",
+				responses: { 200: responses.applePromotionActionResponseSchema },
+			}),
+		},
+	);
+
 	app.post(
 		"/v1/admin/promotions",
 		async ({ body, request, project, set }) => {
 			const result = await service.createPromotion(
 				privateProject(project),
 				createPromotionInput(body, requireActor(request.headers)),
+				body.appleOffers?.length
+					? (await apple?.signer(privateProject(project)))?.bundleId
+					: undefined,
 			);
 			set.status = result.created ? 201 : 200;
 			return { success: true, data: result.promotion };
@@ -523,13 +635,29 @@ export function registerPromotionRoutes({
 		"/v1/billing-accounts/:billingAccountId/promotion-redemptions",
 		async ({ body, params, request, project }) => ({
 			success: true,
-			data: await service.redeemPromotionCode(privateProject(project), {
-				billingAccountId: params.billingAccountId,
-				code: body.code,
-				channel: body.channel,
-				idempotencyKey: requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
-				actor: optionalActor(request.headers),
-			}),
+			data: await (body.channel === "ios" && body.appleOfferId && body.subscriptionId
+				? (async () => {
+						const context = privateProject(project);
+						return appleRepository().redeem(
+							context,
+							{
+								...body,
+								billingAccountId: params.billingAccountId,
+								actor: optionalActor(request.headers),
+								idempotencyKey: requirePromotionIdempotencyKey(
+									request.headers.get("idempotency-key"),
+								),
+							},
+							await signer(context),
+						);
+					})()
+				: service.redeemPromotionCode(privateProject(project), {
+						billingAccountId: params.billingAccountId,
+						code: body.code,
+						channel: body.channel,
+						idempotencyKey: requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+						actor: optionalActor(request.headers),
+					})),
 		}),
 		{
 			parse: [LENIENT_JSON_PARSE],

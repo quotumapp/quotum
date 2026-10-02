@@ -101,6 +101,7 @@ export interface ProviderPurchaseGroups {
 	apple: {
 		verify: AppleStoreKitServiceLike["verifyPurchase"];
 		accountLink: AppleStoreKitServiceLike["getOrCreateAppAccountToken"];
+		promotionSigner?: AppleStoreKitServiceLike["getPromotionSigner"];
 	};
 	google: {
 		verify: GooglePlayBillingServiceLike["verifyPurchase"];
@@ -240,7 +241,9 @@ export const providerOperationMethods: Record<ProviderOperation, readonly Provid
 		"refund.sync": ["webhooks.ingest"],
 		"topup.customer_initiated": ["checkout.createHosted", "purchases.verify"],
 		"topup.automatic": ["topups.chargeAutomatic"],
-		"promotion.code_entry": ["commercial.execute"],
+		"promotion.code_entry": ["commercial.execute", "purchases.promotionSigner"],
+		"promotion.signed_offer": ["purchases.promotionSigner"],
+		"promotion.store_offer_code": ["purchases.verify"],
 		"promotion.hosted_code": ["promotions.syncObject"],
 	};
 

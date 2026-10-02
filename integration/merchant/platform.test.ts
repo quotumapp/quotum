@@ -628,6 +628,64 @@ describe("merchant platform transactions", () => {
 		expect((await listed.json()).data.map((item: { key: string }) => item.key)).toEqual(["launch"]);
 		expect((await deactivated.json()).data).toMatchObject({ code: "LAUNCH", active: false });
 	});
+	it.each([
+		["/api/billing/admin/promotions/launch/apple-offers", "promotions.apple-offers.link"],
+		[
+			"/api/billing/admin/promotions/launch/apple-offers/90000000-0000-4000-8000-0000000000a2/retire",
+			"promotions.apple-offers.retire",
+		],
+	])(
+		"guards the Apple mapping operation %s by merchant scope and production step-up",
+		async (path, operation) => {
+			const browser = new MerchantBrowser(f);
+			await browser.signup();
+			await onboard(browser);
+			await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
+			const body = path.endsWith("retire")
+				? {}
+				: {
+						objectKind: "apple_promotional_offer",
+						productExternalId: "monthly",
+						offerIdentifier: "spring20",
+					};
+			const created = await (
+				await browser.request(
+					"/api/billing/admin/promotions",
+					{ ...promotionBody, key: "launch" },
+					{
+						key: "seed-promotion",
+						headers: sandbox,
+					},
+				)
+			).json();
+			const dispatch = spyOn(f.billingPort, "dispatch").mockResolvedValue({
+				status: 200,
+				body: created,
+			});
+			try {
+				const linked = await browser.request(path, body, {
+					key: "apple-mapping",
+					headers: sandbox,
+				});
+				expect(linked.status).toBe(200);
+				expect(dispatch.mock.calls[0]?.[0]).toMatchObject({ operation });
+				const production = await browser.request(path, body, {
+					key: "apple-production",
+					headers: { ...sandbox, "x-quotum-environment": "production" },
+				});
+				expect(production.status).toBe(403);
+				expect((await production.json()).error.code).toBe("STEP_UP_REQUIRED");
+				await f.sql`UPDATE platform_memberships SET role='Viewer'`;
+				expect(
+					(await browser.request(path, body, { key: "apple-viewer", headers: sandbox })).status,
+				).toBe(403);
+				expect(dispatch).toHaveBeenCalledTimes(1);
+			} finally {
+				dispatch.mockRestore();
+			}
+		},
+	);
+
 	it("answers a repeated billing write from its stored response without dispatching again", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();

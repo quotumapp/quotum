@@ -82,6 +82,19 @@
       ]
     },
     {
+      "code": "APPLE_PROMOTION_NOT_APPLICABLE",
+      "sources": [
+        "src/db/repository/apple-promotions.ts"
+      ]
+    },
+    {
+      "code": "APPLE_PROMOTION_SIGNING_UNAVAILABLE",
+      "sources": [
+        "src/app/provider-services.ts",
+        "src/providers/apple/service.ts"
+      ]
+    },
+    {
       "code": "APPLE_SIGNED_DATA_INVALID",
       "sources": [
         "src/providers/apple/signed-data-errors.ts"
@@ -514,6 +527,7 @@
     {
       "code": "IDEMPOTENCY_CONFLICT",
       "sources": [
+        "src/db/repository/apple-promotions.ts",
         "src/db/repository/balance-adjustments.ts",
         "src/db/repository/commercial-actions.ts",
         "src/db/repository/plan-grants.ts",
@@ -1244,6 +1258,7 @@
     {
       "code": "STOREKIT_ACCOUNT_TOKEN_MISMATCH",
       "sources": [
+        "src/db/repository/apple.ts",
         "src/providers/apple/service.ts"
       ]
     },

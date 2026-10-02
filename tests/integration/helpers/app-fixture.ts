@@ -1,4 +1,5 @@
 import { createApp } from "../../../src/app";
+import type { ApplePromotionSigner } from "../../../src/billing/apple-promotions";
 import { EntitlementService } from "../../../src/billing/entitlements";
 import { MeteringService } from "../../../src/billing/metering";
 import type { BillingRepository } from "../../../src/db/repository";
@@ -27,6 +28,7 @@ export const integrationGoogleRtdnAudience =
 type StripeEventFixture = ReturnType<typeof import("./fake-provider-clients").stripeEvent>;
 
 export interface CreateIntegrationAppOptions {
+	applePromotionSigner?: ApplePromotionSigner;
 	env: BillingEnv;
 	repository: BillingRepository;
 	stripeEvent?: StripeEventFixture;
@@ -45,6 +47,7 @@ export interface CreateIntegrationAppOptions {
 }
 
 export function createIntegrationApp({
+	applePromotionSigner,
 	env,
 	repository,
 	stripeEvent,
@@ -93,6 +96,7 @@ export function createIntegrationApp({
 
 		projectProviderServices[project.projectInstanceKey] = {
 			appleStoreKitService: new AppleStoreKitService({
+				promotionSigner: applePromotionSigner,
 				bundleId: "com.acme.app",
 				environment: "sandbox",
 				client: apple.client,

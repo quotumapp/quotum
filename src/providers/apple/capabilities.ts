@@ -22,7 +22,11 @@ function verified(tests: string[], notes?: string): OperationSupport {
 	};
 }
 
-function providerManaged(notes: string, tests: string[] = []): OperationSupport {
+function providerManaged(
+	notes: string,
+	tests: string[] = [],
+	verificationDate = verifiedOn,
+): OperationSupport {
 	return {
 		level: "provider_managed",
 		verification:
@@ -30,7 +34,7 @@ function providerManaged(notes: string, tests: string[] = []): OperationSupport 
 				? { status: "not_applicable" }
 				: {
 						status: "verified",
-						verifiedOn,
+						verifiedOn: verificationDate,
 						evidence: { tests, scenarios: [], questions: [] },
 					},
 		conditions: [],
@@ -38,13 +42,18 @@ function providerManaged(notes: string, tests: string[] = []): OperationSupport 
 	};
 }
 
-function composed(composedVia: string, tests: string[], notes: string): OperationSupport {
+function composed(
+	composedVia: string,
+	tests: string[],
+	notes: string,
+	verificationDate = verifiedOn,
+): OperationSupport {
 	return {
 		level: "quotum_composed",
 		composedVia,
 		verification: {
 			status: "verified",
-			verifiedOn,
+			verifiedOn: verificationDate,
 			evidence: { tests, scenarios: [], questions: [] },
 		},
 		conditions: [],
@@ -164,8 +173,22 @@ export const appleCapabilities: ProviderCapabilityDeclaration = {
 		"topup.automatic": unsupported(
 			"Silent automatic purchases are unavailable; Apple automatic top-up jobs end as provider_action_required.",
 		),
-		"promotion.code_entry": notEvaluated(
-			"Quotum rejects iOS promotion-code redemption because App Store rules forbid unlocking digital content with a developer's own codes.",
+		"promotion.code_entry": composed(
+			"Apple subscription promotional offers",
+			["tests/integration/apple-promotions.test.ts"],
+			"Mapped iOS discount codes return a signed StoreKit action. Direct feature and plan grants remain unsupported.",
+			"2026-10-01",
+		),
+		"promotion.signed_offer": composed(
+			"Apple subscription promotional offers",
+			["tests/integration/apple-promotions.test.ts"],
+			"Requires an active mapping and an existing linked subscription; a signature reserves one use for 24 hours, and StoreKit confirms the purchase.",
+			"2026-10-01",
+		),
+		"promotion.store_offer_code": providerManaged(
+			"App Store Connect owns offer codes; Quotum records one mapped use per linked subscription.",
+			["tests/integration/apple-promotions.test.ts"],
+			"2026-10-01",
 		),
 		"promotion.hosted_code": notEvaluated(),
 	},

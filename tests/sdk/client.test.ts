@@ -747,4 +747,32 @@ describe("BillingClient", () => {
 		expect("rateLimitResetAt" in (missing as BillingApiError)).toBe(false);
 		expect("retryAfterSeconds" in (missing as BillingApiError)).toBe(false);
 	});
+	it("links Apple offers with operator identity and refreshes account signatures with idempotency", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project",
+			operatorKey: "operator",
+			actor: "merchant",
+			fetch: async (input, init) => {
+				calls.push(new Request(input, init));
+				return Response.json({ success: true, data: {} });
+			},
+		});
+		await client.promotions.linkAppleOffer("spring sale", {
+			objectKind: "apple_promotional_offer",
+			productExternalId: "monthly",
+			offerIdentifier: "spring",
+		});
+		await client.promotions.retireAppleOffer("spring sale", "offer-id");
+		await client.promotions.refreshAppleSignature("account 1", "redemption-id", "refresh-1");
+		expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+			"/v1/admin/promotions/spring%20sale/apple-offers",
+			"/v1/admin/promotions/spring%20sale/apple-offers/offer-id/retire",
+			"/v1/billing-accounts/account%201/promotion-redemptions/redemption-id/apple-signatures",
+		]);
+		expect(calls[0]?.headers.has("x-billing-operator-key")).toBe(true);
+		expect(calls[2]?.headers.has("x-billing-operator-key")).toBe(false);
+		expect(calls[2]?.headers.get("idempotency-key")).toBe("refresh-1");
+	});
 });

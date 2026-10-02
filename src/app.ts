@@ -10,7 +10,10 @@ import { registerCustomerRoutes } from "./app/customer-routes";
 import { registerInsightsRoutes } from "./app/insights-routes";
 import { registerMeteringRoutes } from "./app/metering-routes";
 import { registerPromotionRoutes } from "./app/promotion-routes";
-import { projectProviderServiceResolver } from "./app/provider-services";
+import {
+	projectProviderServiceResolver,
+	requireApplePromotionSigner,
+} from "./app/provider-services";
 import {
 	projectSelectorRejectedError,
 	queryHasCallerProjectSelector,
@@ -573,6 +576,11 @@ export function createApp({
 	});
 	registerPromotionRoutes({
 		app,
+		apple: {
+			repository: () => getRepository().applePromotions,
+			signer: async (project) =>
+				requireApplePromotionSigner(await providerServices.appleStoreKitService(project)),
+		},
 		operatorApiKey: env.operatorApiKey,
 		service: promotionService ?? getRepository().promotions,
 		validationLimiter: createVerifyLimiter(),

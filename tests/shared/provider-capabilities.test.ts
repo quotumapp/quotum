@@ -138,7 +138,7 @@ describe("provider capability vocabulary", () => {
 		expect(isProviderOperation("checkout")).toBe(false);
 	});
 
-	it("lists exactly the 33 provider operations in contract order", () => {
+	it("lists exactly the 35 provider operations in contract order", () => {
 		expect([...providerOperations]).toEqual([
 			"catalog.product.subscription",
 			"catalog.product.consumable",
@@ -173,8 +173,10 @@ describe("provider capability vocabulary", () => {
 			"topup.automatic",
 			"promotion.code_entry",
 			"promotion.hosted_code",
+			"promotion.signed_offer",
+			"promotion.store_offer_code",
 		]);
-		expect(new Set(providerOperations).size).toBe(33);
+		expect(new Set(providerOperations).size).toBe(35);
 	});
 
 	it("defines every operation with a domain, a unique title and a provider-neutral sentence", () => {

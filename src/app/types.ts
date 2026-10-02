@@ -1,4 +1,5 @@
 import type { AdminBillingReader } from "../admin/types";
+import type { ApplePromotionSigner } from "../billing/apple-promotions";
 import type { BalanceAdjustmentServiceLike } from "../billing/balance-adjustments";
 import type {
 	CommercialActionExecutionResult,
@@ -100,6 +101,7 @@ export interface RequestObserver {
 }
 
 export interface AppleStoreKitServiceLike {
+	getPromotionSigner?(): ApplePromotionSigner;
 	getOrCreateAppAccountToken(billingAccountId: string): Promise<string>;
 	verifyPurchase(input: { billingAccountId: string; transactionId: string }): Promise<unknown>;
 	handleNotification(input: {

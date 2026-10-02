@@ -1,3 +1,4 @@
+import { PromotionalOfferSignatureCreator } from "@apple/app-store-server-library";
 import type { ProviderRegistryEntry, ProviderServiceSource } from "../contract";
 import { adapterGroup, type ProviderAdapter } from "../contract";
 import { appleCapabilities } from "./capabilities";
@@ -21,6 +22,7 @@ export function wrapAppleService(
 		purchases: {
 			verify: service.verifyPurchase.bind(service),
 			accountLink: service.getOrCreateAppAccountToken.bind(service),
+			promotionSigner: service.getPromotionSigner?.bind(service),
 		},
 	};
 }
@@ -35,7 +37,26 @@ export const appleRegistryEntry: ProviderRegistryEntry<"apple"> = {
 	accountIdentity: (config) => config.accountIdentity ?? null,
 	build({ project, config, repository, clientFactories }) {
 		const clientConfig = buildAppleStoreKitConfig(config);
+		let signer: PromotionalOfferSignatureCreator | undefined;
 		return new AppleStoreKitService({
+			promotionSigner: {
+				bundleId: clientConfig.bundleId,
+				keyId: clientConfig.keyId,
+				sign: (input) => {
+					signer ??= new PromotionalOfferSignatureCreator(
+						clientConfig.privateKey,
+						clientConfig.keyId,
+						clientConfig.bundleId,
+					);
+					return signer.createSignature(
+						input.productId,
+						input.offerIdentifier,
+						input.appAccountToken,
+						input.nonce,
+						input.timestamp,
+					);
+				},
+			},
 			bundleId: config.bundleId,
 			environment: config.environment,
 			client:

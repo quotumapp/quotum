@@ -101,3 +101,14 @@ export function requireProviderMethod<M extends StripeGuardedAdapterMethod>(
 		StripeBillingServiceLike[(typeof stripeGuardedMethods)[M]]
 	>;
 }
+
+export function requireApplePromotionSigner(service: AppleStoreKitServiceLike | null) {
+	const apple = requireAppleStoreKitService(service);
+	if (!apple.getPromotionSigner)
+		throw new NotConfiguredError(
+			"Apple offer signing is unavailable",
+			"APPLE_PROMOTION_SIGNING_UNAVAILABLE",
+			503,
+		);
+	return apple.getPromotionSigner();
+}

@@ -1,6 +1,7 @@
-import { NotFoundBillingError } from "../../billing/errors";
+import { BillingError, NotFoundBillingError } from "../../billing/errors";
 import type { ProjectionPayload } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
+import { recordApplePromotionInTx } from "./apple-promotions";
 import { RepositoryModule } from "./base";
 import {
 	materializeSubscriptionAllocations,
@@ -46,6 +47,23 @@ export class AppleBillingRepository extends RepositoryModule {
 
 			if (input.billingAccountId !== null) {
 				customer = await ensureCustomer(tx, projectId, input.billingAccountId);
+				if (input.appleOffer && input.appAccountToken === null) {
+					const owner =
+						input.originalTransactionId === null
+							? null
+							: await findCustomerBySubscription(
+									tx,
+									projectId,
+									"apple",
+									input.originalTransactionId,
+								);
+					if (owner?.id !== customer.id)
+						throw new BillingError(
+							"Apple offer purchase is not linked to this account",
+							"STOREKIT_ACCOUNT_TOKEN_MISMATCH",
+							403,
+						);
+				}
 			} else if (input.appAccountToken !== null) {
 				customer = await findCustomerByProviderCustomer(
 					tx,
@@ -246,6 +264,7 @@ export class AppleBillingRepository extends RepositoryModule {
 				}
 			}
 
+			await recordApplePromotionInTx(tx, projectId, customer.id, purchaseId, input);
 			const snapshot = await recomputeCustomerEntitlements(
 				tx,
 				projectId,

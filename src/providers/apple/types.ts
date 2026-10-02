@@ -67,6 +67,7 @@ export interface AppleDecodedNotificationPayload {
 }
 
 export interface NormalizedStoreKitTransaction {
+	appleOffer?: { type: 2 | 3; identifier: string; bundleId: string };
 	billingAccountId: string | null;
 	appAccountToken: string | null;
 	externalProductId: string;

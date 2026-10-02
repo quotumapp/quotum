@@ -1,5 +1,6 @@
 import type { ProjectInstanceContext } from "../projects/context";
 import { type Cadence, canonicalCadence, minCalendarSpanHours } from "../shared/cadence";
+import type { AppleOfferInput, ApplePromotionAction } from "./apple-promotions";
 import { canonicalDecimal, positiveDecimal, sha256Hex, stableJson } from "./decimal";
 import { BillingError } from "./errors";
 import type { BillingProvider } from "./types";
@@ -76,6 +77,7 @@ export interface PromotionCodeInput {
 }
 
 export interface CreatePromotionInput {
+	appleOffers?: AppleOfferInput[];
 	key: string;
 	name: string;
 	effect: PromotionEffect;
@@ -139,6 +141,8 @@ export type PromotionProviderObjectKind =
 export type PromotionProviderObjectStatus = "pending" | "ready" | "failed" | "retired";
 
 export interface PromotionProviderObjectRecord {
+	productExternalId?: string | null;
+	providerAccountId?: string | null;
 	id: string;
 	provider: BillingProvider;
 	objectKind: PromotionProviderObjectKind;
@@ -209,6 +213,11 @@ export interface PromotionCodeRecord {
 }
 
 export interface PromotionRedemptionRecord {
+	providerObjectId?: string | null;
+	providerOfferType?: string | null;
+	providerTransactionId?: string | null;
+	lastObservedTransactionId?: string | null;
+
 	id: string;
 	promotionKey: string;
 	promotionCodeId: string | null;
@@ -247,6 +256,7 @@ export interface PromotionValidationInput {
 }
 
 export interface PromotionValidation {
+	appleOffers?: PromotionProviderObjectRecord[];
 	valid: boolean;
 	reason: PromotionErrorCode | null;
 	promotion: {
@@ -268,6 +278,7 @@ export interface PromotionServiceLike {
 	createPromotion(
 		project: ProjectInstanceContext,
 		input: CreatePromotionInput,
+		appleBundleId?: string,
 	): Promise<{ promotion: PromotionRecord; created: boolean }>;
 	getPromotion(project: ProjectInstanceContext, key: string): Promise<PromotionRecord>;
 	listPromotions(
@@ -336,6 +347,8 @@ export interface PromotionServiceLike {
 }
 
 export interface PromotionRedeemInput {
+	appleOfferId?: string;
+	subscriptionId?: string;
 	billingAccountId: string;
 	code: string;
 	channel: PromotionChannel;
@@ -351,6 +364,7 @@ export interface PromotionGrantedFeature {
 }
 
 export type PromotionRedeemResult =
+	| ApplePromotionAction
 	| {
 			kind: "granted";
 			duplicate: boolean;

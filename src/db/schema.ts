@@ -4652,6 +4652,7 @@ export const promotionProviderObjects = pgTable(
 		promotionId: uuid("promotion_id").notNull(),
 		promotionCodeId: uuid("promotion_code_id"),
 		parentObjectId: uuid("parent_object_id"),
+		providerAccountId: text("provider_account_id"),
 		provider: text("provider").$type<"stripe" | "apple" | "google">().notNull(),
 		objectKind: text("object_kind")
 			.$type<
@@ -4757,7 +4758,7 @@ export const promotionProviderObjects = pgTable(
 		}).onDelete("restrict"),
 		check(
 			"promotion_provider_objects_shape_check",
-			sql`(${table.objectKind} = 'coupon' AND ${table.provider} = 'stripe' AND ${table.promotionCodeId} IS NULL AND ${table.parentObjectId} IS NULL AND ${table.appliesToHash} IS NOT NULL) OR (${table.objectKind} = 'promotion_code' AND ${table.provider} = 'stripe' AND ${table.promotionCodeId} IS NOT NULL AND ${table.parentObjectId} IS NOT NULL) OR (${table.objectKind} IN ('apple_promotional_offer', 'apple_offer_code') AND ${table.provider} = 'apple' AND ${table.parentObjectId} IS NULL AND ${table.externalId} IS NOT NULL AND ${table.productExternalId} IS NOT NULL) OR (${table.objectKind} IN ('google_developer_offer', 'google_promo_code') AND ${table.provider} = 'google' AND ${table.parentObjectId} IS NULL AND ${table.productExternalId} IS NOT NULL AND (${table.externalId} IS NOT NULL OR ${table.redemptionCode} IS NOT NULL))`,
+			sql`(${table.objectKind} = 'coupon' AND ${table.provider} = 'stripe' AND ${table.promotionCodeId} IS NULL AND ${table.parentObjectId} IS NULL AND ${table.appliesToHash} IS NOT NULL) OR (${table.objectKind} = 'promotion_code' AND ${table.provider} = 'stripe' AND ${table.promotionCodeId} IS NOT NULL AND ${table.parentObjectId} IS NOT NULL) OR (${table.objectKind} IN ('apple_promotional_offer', 'apple_offer_code') AND ${table.provider} = 'apple' AND ${table.parentObjectId} IS NULL AND ${table.externalId} IS NOT NULL AND ${table.productExternalId} IS NOT NULL AND ${table.providerAccountId} IS NOT NULL) OR (${table.objectKind} IN ('google_developer_offer', 'google_promo_code') AND ${table.provider} = 'google' AND ${table.parentObjectId} IS NULL AND ${table.productExternalId} IS NOT NULL AND (${table.externalId} IS NOT NULL OR ${table.redemptionCode} IS NOT NULL))`,
 		),
 		check(
 			"promotion_provider_objects_state_check",
@@ -4771,7 +4772,16 @@ export const promotionProviderObjects = pgTable(
 			.where(sql`${table.objectKind} = 'promotion_code' AND ${table.status} <> 'retired'`),
 		uniqueIndex("idx_billing_promotion_provider_objects_external")
 			.on(table.projectId, table.provider, table.objectKind, table.externalId)
-			.where(sql`${table.externalId} IS NOT NULL`),
+			.where(sql`${table.externalId} IS NOT NULL AND ${table.provider} <> 'apple'`),
+		uniqueIndex("idx_billing_promotion_provider_objects_apple")
+			.on(
+				table.projectId,
+				table.providerAccountId,
+				table.productExternalId,
+				table.objectKind,
+				table.externalId,
+			)
+			.where(sql`${table.provider} = 'apple'`),
 		index("idx_billing_promotion_provider_objects_promotion").on(
 			table.projectId,
 			table.promotionId,
@@ -4996,6 +5006,9 @@ export const promotionRedemptions = pgTable(
 		uniqueIndex("idx_billing_promotion_redemptions_subscription_change")
 			.on(table.projectId, table.subscriptionChangeId)
 			.where(sql`${table.subscriptionChangeId} IS NOT NULL`),
+		uniqueIndex("idx_billing_promotion_redemptions_apple_offer")
+			.on(table.projectId, table.providerObjectId, table.externalSubscriptionId)
+			.where(sql`${table.provider} = 'apple'`),
 		index("idx_billing_promotion_redemptions_purchase")
 			.on(table.projectId, table.purchaseId)
 			.where(sql`${table.purchaseId} IS NOT NULL`),
@@ -5018,6 +5031,7 @@ export const promotionAuditEvents = pgTable(
 				| "codes_added"
 				| "code_deactivated"
 				| "provider_mapping_added"
+				| "provider_mapping_retired"
 				| "provider_sync_requested"
 			>()
 			.notNull(),
@@ -5028,7 +5042,7 @@ export const promotionAuditEvents = pgTable(
 	(table): PgTableExtraConfigValue[] => [
 		check(
 			"promotion_audit_events_action_check",
-			sql`((action = ANY (ARRAY['promotion_created'::text, 'promotion_archived'::text, 'codes_added'::text, 'code_deactivated'::text, 'provider_mapping_added'::text, 'provider_sync_requested'::text])))`,
+			sql`((action = ANY (ARRAY['promotion_created'::text, 'promotion_archived'::text, 'codes_added'::text, 'code_deactivated'::text, 'provider_mapping_added'::text, 'provider_mapping_retired'::text, 'provider_sync_requested'::text])))`,
 		),
 		check(
 			"promotion_audit_events_actor_check",
@@ -5545,3 +5559,48 @@ export type PromotionCodeRecordRow = typeof promotionCodes.$inferSelect;
 export type PromotionProviderObjectRow = typeof promotionProviderObjects.$inferSelect;
 export type PromotionRedemptionRow = typeof promotionRedemptions.$inferSelect;
 export type PlanGrantRow = typeof planGrants.$inferSelect;
+
+export const promotionAppleSignatureAttempts = pgTable(
+	"promotion_apple_signature_attempts",
+	{
+		id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		customerId: uuid("customer_id").notNull(),
+		redemptionId: uuid("redemption_id").notNull(),
+		idempotencyKey: text("idempotency_key").notNull(),
+		requestHash: text("request_hash").notNull(),
+		result: jsonb("result").notNull().$type<Record<string, unknown>>(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		unique("promotion_apple_signature_attempts_key_unique").on(
+			table.projectId,
+			table.customerId,
+			table.idempotencyKey,
+		),
+		foreignKey({
+			name: "promotion_apple_signature_attempts_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "promotion_apple_signature_attempts_redemption_fk",
+			columns: [table.projectId, table.redemptionId],
+			foreignColumns: [promotionRedemptions.projectId, promotionRedemptions.id],
+		}).onDelete("restrict"),
+		check(
+			"promotion_apple_signature_attempts_key_check",
+			sql`char_length(${table.idempotencyKey}) BETWEEN 1 AND 255`,
+		),
+		check(
+			"promotion_apple_signature_attempts_hash_check",
+			sql`char_length(${table.requestHash}) = 64`,
+		),
+		check(
+			"promotion_apple_signature_attempts_result_check",
+			sql`jsonb_typeof(${table.result}) = 'object' AND octet_length(${table.result}::text) <= 16384`,
+		),
+	],
+);
