@@ -446,9 +446,9 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		expect(await tryAddProject("project-6")).toBe(false);
 		// A consumable allowance still ends with its version, and nothing is carried.
 		expect(await planAllowances()).toEqual([
-			[2, "5.000000000", "5.000000000", false],
 			[1, "100.000000000", "30.000000000", true],
 			[2, "300.000000000", "0.000000000", false],
+			[2, "5.000000000", "5.000000000", false],
 		]);
 		expect(await carriedUsage()).toEqual([]);
 
@@ -846,10 +846,13 @@ async function allowances() {
 			allocation.expires_at IS NULL AS never_expires
 		FROM balance_allocations allocation
 		JOIN subscriptions subscription ON subscription.id = allocation.subscription_id
+		JOIN features feature ON feature.id = allocation.feature_id
 		LEFT JOIN plan_items item ON item.id = allocation.plan_item_id
 		LEFT JOIN plan_versions version ON version.id = item.plan_version_id
 		WHERE subscription.external_subscription_id = 'sub_migrate_stripe'
-		ORDER BY allocation.id
+		-- One sync inserts several features' allocations in no fixed order, so their ids alone do
+		-- not order them; sort by feature first.
+		ORDER BY feature.key, allocation.id
 	`;
 	return rows.map((row) => ({ ...row }));
 }
