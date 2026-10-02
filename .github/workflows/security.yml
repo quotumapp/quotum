@@ -70,8 +70,16 @@ jobs:
       - name: Scan lockfile and repository secrets
         run: |
           mkdir -p security-reports
-          trivy fs --config ci/security/trivy.yaml --format sarif \
-            --output security-reports/trivy.sarif .
+          trivy fs --config ci/security/trivy.yaml --format json \
+            --output security-reports/trivy.json .
+      - name: Show Trivy findings
+        if: ${{ !cancelled() && hashFiles('security-reports/trivy.json') != '' }}
+        run: sh ci/security/report-trivy.sh security-reports/trivy.json vuln,secret,misconfig
+      - name: Convert Trivy findings to SARIF
+        if: ${{ !cancelled() && hashFiles('security-reports/trivy.json') != '' }}
+        run: |
+          trivy convert --format sarif --exit-code 0 \
+            --output security-reports/trivy.sarif security-reports/trivy.json
       - name: Upload Trivy findings
         if: ${{ !cancelled() && github.event_name == 'pull_request' && hashFiles('security-reports/trivy.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
@@ -79,7 +87,7 @@ jobs:
           sarif_file: security-reports/trivy.sarif
           category: trivy-filesystem
       - name: Retain Trivy report
-        if: ${{ !cancelled() && github.event_name != 'pull_request' && hashFiles('security-reports/trivy.sarif') != '' }}
+        if: ${{ !cancelled() && hashFiles('security-reports/trivy.json') != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: security-sarif-trivy

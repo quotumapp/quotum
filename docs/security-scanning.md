@@ -18,8 +18,9 @@ including fork contributions, with read-only tokens and without repository secre
 upload mechanism accepts SARIF with these restricted tokens. All scanner jobs remain read-only
 on other events too: they retain SARIF artifacts for a separate publishing job. Only that job,
 which never runs for pull requests or executes repository scripts, requests `security-events: write`.
-It publishes available reports even when a scanner fails on findings. Image scans use read-only
-jobs and retain JSON reports as workflow artifacts.
+It publishes available reports even when a scanner fails on findings. Trivy filesystem scans
+retain JSON, text and SARIF reports on every event, including pull requests. Image scans use
+read-only jobs and retain JSON and text reports as workflow artifacts.
 Schedules use UTC and become active when the workflow reaches the default branch.
 
 Successful CodeQL execution does not mean there are no findings. Configure GitHub's repository
@@ -57,7 +58,10 @@ idempotency, money arithmetic or concurrent worker correctness.
 Trivy downloads public advisory/check databases and scans locally. Repository scans omit
 dependencies on disk, generated output and scanner fixtures; dependencies are read from the
 committed lockfile. Image scans inspect installed production packages and OS packages. Source
-SARIF reports go to GitHub's Security tab even when findings fail the scan step.
+SARIF reports go to GitHub's Security tab even when findings fail the scan step. Every Trivy job
+also prints a findings table in the log and job summary, including vulnerable packages, CVE IDs,
+severities and fixed versions. Reporting converts the original JSON result without another scan
+or database download; a failed scan stays failed even when report generation succeeds.
 
 ## Triage and updates
 
