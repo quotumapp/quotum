@@ -61,7 +61,7 @@ import type {
 	UsageOperationLookupResult,
 } from "../billing/usage-operations";
 import type {
-	CatalogIntent,
+	AuthoredCatalogIntent,
 	CatalogPreview,
 	CatalogPublishResult,
 	PublishedCatalog,
@@ -151,7 +151,7 @@ export class BillingClient {
 			get: () => this.request<StripeCatalog>("/v1/catalog"),
 			/** The versioned catalog. Project authentication only; publishing still needs the operator key. */
 			status: () => this.request<PublishedCatalog>("/v1/admin/catalog"),
-			preview: (input: { expectedRevision: number | null; catalog: CatalogIntent }) =>
+			preview: (input: { expectedRevision: number | null; catalog: AuthoredCatalogIntent }) =>
 				this.request<CatalogPreview>("/v1/admin/catalog/preview", {
 					method: "POST",
 					body: input,
@@ -160,7 +160,7 @@ export class BillingClient {
 			publish: (input: {
 				expectedRevision: number | null;
 				previewToken: string;
-				catalog: CatalogIntent;
+				catalog: AuthoredCatalogIntent;
 			}) =>
 				this.request<CatalogPublishResult>("/v1/admin/catalog/publish", {
 					method: "POST",

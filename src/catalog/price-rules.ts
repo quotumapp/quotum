@@ -51,14 +51,21 @@ export function assertPriceSpellingsAgree(
 		if (legacyCount !== null && legacyCount !== priceCount) {
 			throw conflict("billingIntervalCount", legacyCount, "billingIntervalCount", priceCount);
 		}
-		// Normalization keeps the legacy list whenever one was submitted.
-		if (legacy.providerBindings.length > 0) assertBindingsAgree(plan);
+		// The legacy list as submitted: normalization merges it with basePrice's bindings.
+		const listed = (legacy.providerBindings ?? []).map((binding) => ({
+			...binding,
+			productKey: binding.productKey.trim(),
+		}));
+		if (listed.length > 0) assertBindingsAgree(plan, listed);
 	}
 }
 
-function assertBindingsAgree(plan: CatalogPlanIntent): void {
+function assertBindingsAgree(
+	plan: CatalogPlanIntent,
+	legacyBindings: CatalogProviderBindingIntent[],
+): void {
 	const priced = groupByChannel(plan.basePrice?.providerBindings ?? []);
-	const listed = groupByChannel(plan.providerBindings);
+	const listed = groupByChannel(legacyBindings);
 	for (const [channel, products] of priced) {
 		const legacy = listed.get(channel);
 		if (legacy === undefined || sameKeys(legacy, products)) continue;

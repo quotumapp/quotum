@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { CatalogIntent } from "../../catalog/types";
+import type { AuthoredCatalogIntent } from "../../catalog/types";
 import { BillingClient } from "../../sdk/client";
 import { writeStderr, writeStdout } from "../../shared/cli-output";
 import { CliUsageError, type CommandOutput, runOperatorCommand } from "./operator-context";
@@ -79,7 +79,7 @@ export function expectedRevisionFor(
 
 async function loadCatalog(
 	file: string,
-): Promise<{ catalog: CatalogIntent; expectedRevision?: number | null }> {
+): Promise<{ catalog: AuthoredCatalogIntent; expectedRevision?: number | null }> {
 	const url = pathToFileURL(resolve(file));
 	url.searchParams.set("loadedAt", String(Date.now()));
 	const module = (await import(url.href)) as {
@@ -88,8 +88,8 @@ async function loadCatalog(
 		expectedRevision?: unknown;
 	};
 	const catalog = module.catalog ?? module.default;
-	if (!isCatalogIntent(catalog)) {
-		throw new Error("Catalog file must export a CatalogIntent as `catalog` or default");
+	if (!isAuthoredCatalogIntent(catalog)) {
+		throw new Error("Catalog file must export a catalog intent as `catalog` or default");
 	}
 	if (
 		module.expectedRevision !== undefined &&
@@ -106,7 +106,7 @@ async function loadCatalog(
 	};
 }
 
-function isCatalogIntent(value: unknown): value is CatalogIntent {
+function isAuthoredCatalogIntent(value: unknown): value is AuthoredCatalogIntent {
 	return (
 		typeof value === "object" &&
 		value !== null &&

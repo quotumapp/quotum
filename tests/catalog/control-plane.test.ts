@@ -621,7 +621,10 @@ describe("catalog control plane reset intervals", () => {
 		};
 		const controlPlane = new CatalogControlPlane(new StoredCatalogDatabase(stored));
 		const current = await controlPlane.getPublished(projectInstanceContext());
-		expect(current.catalog?.plans[0]?.items[0]?.resetInterval).toBe("year");
+		expect(current.catalog?.plans[0]?.items[0]).toMatchObject({
+			itemKind: "meter_limit",
+			reset: { interval: "year", intervalCount: 1 },
+		});
 		const replacement = await controlPlane.preview(projectInstanceContext(), {
 			expectedRevision: 1,
 			actor: "test",
@@ -816,8 +819,7 @@ describe("catalog control plane cadences", () => {
 			projectInstanceContext(),
 		);
 		expect(published.catalog?.plans[0]?.items[0]).toMatchObject({
-			resetInterval: "month",
-			resetIntervalCount: 1,
+			reset: { interval: "month", intervalCount: 1 },
 			rollover: {
 				maxQuantity: null,
 				expiry: { mode: "after", interval: "month", intervalCount: 3 },
@@ -1046,12 +1048,15 @@ describe("catalog control plane default plan", () => {
 				customerBillingAccountId: "acct_1",
 			}),
 		).toBe("Default plan free must be public");
-		expect(await refusal({ ...freePlan, currency: "USD", baseAmountMinor: 0 })).toBe(
-			"Default plan free must have no price or provider binding",
+		// A plan-level amount with neither a price nor a binding charges nothing: it is dropped as
+		// legacy syntax, and the plan stays unpriced.
+		expect(await previewDefault({ ...freePlan, currency: "USD", baseAmountMinor: 0 })).toBe(
+			"normalized",
 		);
 		expect(
 			await refusal({
 				...freePlan,
+				billingInterval: "month",
 				providerBindings: [{ productKey: "free", provider: "stripe", channel: "web" }],
 			}),
 		).toBe("Default plan free must have no price or provider binding");
@@ -1191,7 +1196,12 @@ describe("catalog control plane price spellings", () => {
 		};
 		const controlPlane = new CatalogControlPlane(new StoredCatalogDatabase(stored));
 		const current = await controlPlane.getPublished(projectInstanceContext());
-		expect(current.catalog?.plans[0]?.items[0]?.price?.key).toBe("credits-overage");
+		// The canonical read-back has no place for a price that never charges; preview of the stored
+		// intent as submitted still refuses it.
+		expect(current.catalog?.plans[0]?.items[0]).toMatchObject({
+			itemKind: "meter_limit",
+			overage: { policy: "blocked" },
+		});
 		const unchanged = await controlPlane
 			.preview(projectInstanceContext(), { expectedRevision: 1, actor: "test", catalog: stored })
 			.then(() => null)

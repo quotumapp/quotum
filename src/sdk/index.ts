@@ -45,9 +45,22 @@ export type {
 	UsageOperationReceipt,
 } from "../billing/usage-operations";
 export type {
+	AuthoredCatalogIntent,
+	AuthoredPlanIntent,
+	AuthoredPlanItemIntent,
+	AuthoredTopupIntent,
+	CanonicalCatalog,
+	CanonicalPlan,
+	CanonicalPlanItem,
+	CanonicalTopup,
+	CatalogAdvisory,
 	CatalogDefaultPlanIntent,
+	CatalogDeprecation,
+	CatalogExpiryIntent,
 	CatalogIntent,
 	CatalogPreview,
+	CatalogProviderPricedIntent,
+	PublishedCatalog,
 } from "../catalog/types";
 export type {
 	BillingAccountAvailableActions,

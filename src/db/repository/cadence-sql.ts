@@ -17,22 +17,35 @@ function unitCase(unitColumn: string, measure: (unit: CadenceUnit) => number | n
 
 /**
  * Whether a plan item's reset splits its plan version's billing period into several windows; the
- * SQL form of `cadenceSplits`. A fixed reset on a calendar billing interval always splits; otherwise
- * the reset splits when it is strictly shorter than the billing interval in the same measure.
+ * SQL form of `periodSplits`. A fixed reset on a calendar billing interval always splits; otherwise
+ * the reset splits when it is strictly shorter than the billing interval in the same measure. A
+ * version without a billing cadence (an unpriced plan) bills by the subscription's recorded period,
+ * so the reset splits that period, given as `period`, when it is shorter than it.
  */
-export function resetSplitsBillingPeriodSql(itemAlias: string, versionAlias: string): SQL {
+export function resetSplitsBillingPeriodSql(
+	itemAlias: string,
+	versionAlias: string,
+	period?: { start: SQL; end: SQL },
+): SQL {
 	const resetCount = drizzleSql.raw(`${itemAlias}.reset_interval_count`);
 	const billingCount = drizzleSql.raw(`${versionAlias}.billing_interval_count`);
 	const resetMonths = unitCase(`${itemAlias}.reset_interval`, unitMonths);
 	const resetHours = unitCase(`${itemAlias}.reset_interval`, unitHours);
 	const billingMonths = unitCase(`${versionAlias}.billing_interval`, unitMonths);
 	const billingHours = unitCase(`${versionAlias}.billing_interval`, unitHours);
-	return drizzleSql`COALESCE(
+	const byBillingCadence = drizzleSql`COALESCE(
 		(${resetHours} IS NOT NULL AND ${billingMonths} IS NOT NULL)
 		OR ${resetMonths} * ${resetCount} < ${billingMonths} * ${billingCount}
 		OR ${resetHours} * ${resetCount} < ${billingHours} * ${billingCount},
 		false
 	)`;
+	if (period === undefined) return byBillingCadence;
+	const billingInterval = drizzleSql.raw(`${versionAlias}.billing_interval`);
+	return drizzleSql`(CASE WHEN ${billingInterval} IS NULL THEN COALESCE(
+		((${period.start} AT TIME ZONE 'UTC') + ${resetIntervalSql(itemAlias)}) AT TIME ZONE 'UTC'
+			< ${period.end},
+		false
+	) ELSE ${byBillingCadence} END)`;
 }
 
 /**

@@ -9,10 +9,66 @@ products and must all be ready before the active pointer advances. Previously ac
 plans, and top-ups must be retained or listed explicitly for retirement; omission is not deletion.
 Retiring a plan removes it from new selection without rewriting pinned subscriptions.
 `GET /v1/admin/catalog` returns the active intent and needs project authentication only. It
-returns the intent as publish normalized it, with defaults filled in and `tiers: []` on a flat price
-or rate card; preview accepts that output unchanged, and previewing it reports the published
-`intentHash` with no features, plans or versions created. See
-[`examples/quickstart/catalog.json`](../examples/quickstart/catalog.json) for a minimal intent.
+returns the [canonical intent](#canonical-intent), with every default spelled out and `tiers: []`
+on a flat price or rate card, and the hash of that canonical intent. Preview accepts that output
+unchanged, and previewing it reports the same `intentHash` with no features, plans or versions
+created. A revision keeps the hash recorded when it was published; the read-back hash is
+recomputed from the stored intent, so it can differ from the recorded one for a catalog published
+before the canonical intent. See [`examples/quickstart/catalog.json`](../examples/quickstart/catalog.json)
+for a minimal intent.
+
+## Canonical intent
+
+Preview stores and hashes the canonical intent, and publish compares the canonical intent of what
+it is sent with the preview's. A plan has two price blocks, and a plan with neither, whose items
+carry no price either, is unpriced:
+
+- `basePrice` is a price Quotum models and charges through a Stripe price component.
+- `providerPriced` holds the products whose price their provider owns: App Store and Google Play
+  products, and Stripe products priced in the Stripe dashboard. It has a `billingInterval`
+  (required), a `billingIntervalCount` and its `providerBindings`, and no amount. When a plan has
+  both blocks they bill on the same cadence, and a binding appears in only one of them. The plan's
+  products are both blocks' bindings together, so a subscription to any of them finds the plan.
+- A plan's currency is its `basePrice`'s. A plan priced only by its items, such as a seat-only plan
+  or a meter limit with priced overage, records no plan currency or amount; each item price keeps
+  its own currency, which is what Checkout and invoicing charge. Its billing cadence is the one its
+  item prices share.
+
+A plan item takes only the fields of its `itemKind`:
+
+| Kind | Fields |
+| --- | --- |
+| `access` | `featureKey` |
+| `allocation` | `featureKey`, `quantity`, `reset` (`{ interval, intervalCount }` or null), `expiry`, `allocationScope` (`account` or `entity`), `rollover` |
+| `meter_limit` | `featureKey`, `quantity`, `reset` (required), `overage` (`{ "policy": "blocked" }` or `{ "policy": "allowed", "price": … }`), `allocationScope` (`account` or `entity`) |
+| `licensed_quantity` | `featureKey`, `quantity`, `price` (required), `allocationScope` (`account` or `license_pool`) |
+
+An allocation or top-up `expiry` is `{ "mode": "forever" }` or
+`{ "mode": "after_seconds", "seconds": 86400 }`. In what preview accepts, `reset` on an
+allocation, `expiry`, `allocationScope`, `rollover` and `overage` may be left out and default to
+null, `forever`, `account`, null and `blocked`; plan defaults such as `kind`, `visibility` and
+`controls` are optional too.
+
+Until the 1.0 release candidate preview and publish also accept the legacy spelling: the
+plan-level `currency`, `baseAmountMinor`, `billingInterval`, `billingIntervalCount` and
+`providerBindings`; item `resetInterval`, `resetIntervalCount`, `expiresAfterSeconds` and
+`overagePolicy`; and a top-up's `expiresAfterSeconds`. A legacy plan with a `basePrice` keeps it
+as its `basePrice`, and its plan-level bindings that `basePrice` does not hold become its
+`providerPriced` products, on the plan's cadence. A legacy plan without a `basePrice` whose
+plan-level bindings name products is provider-priced, and must then have a `billingInterval`; its
+`baseAmountMinor` and `currency` are dropped, because the provider owns that price. On a plan with
+neither a price nor a binding, `baseAmountMinor`, `currency` and `billingInterval` charge nothing
+and are dropped too. A legacy access item must have a null quantity, reset and expiry and a blocked
+overage. Spelling a catalog either way yields the same canonical intent and hash.
+
+A preview reports what it accepted in the legacy spelling in `deprecations`, one entry per plan,
+item or top-up: its `path`, the `legacy` fields it used, the `canonical` fields that replace them
+and a `message`. It reports `advisories` separately: valid shapes worth reconsidering, which never
+imply removal. The one advisory is a Stripe binding in `providerPriced`: "Use `basePrice` when
+Quotum should model the price." Provider-owned Stripe pricing has no retirement plan.
+
+The SDK's `defineCatalog`, the CLI's catalog files and `client.catalog.preview` and `publish` take
+either spelling; `client.catalog.status` and the MCP `get_catalog` tool return the canonical intent.
 
 ## Validation
 
@@ -48,18 +104,21 @@ capabilities after it finds the preview token, so retrying a publish that alread
 its stored result with `duplicate: true`. A successful preview also reports `providerCompatibility`;
 see [Catalog preview compatibility](provider-capabilities.md#catalog-preview-compatibility).
 
-A plan can spell its price twice: the plan-level `currency`, `baseAmountMinor`, `billingInterval`,
-`billingIntervalCount` and `providerBindings`, and the `basePrice` object. When a plan has a
-`basePrice`, every plan-level value it also sends must agree with it, or preview and publish answer
-`400 INVALID_REQUEST` naming both values, such as `Plan pro baseAmountMinor 1000 conflicts with
-basePrice unitAmountMinor 2000`. A plan-level binding conflicts when it binds a provider channel
-that `basePrice` also binds to a different product; App Store and Google Play products whose price
-the store owns, on channels the `basePrice` does not bind, are not a second spelling. A price on an
-`allocation`, or on a `meter_limit` with `overagePolicy: "blocked"`, is refused too: Checkout leaves
-metered prices out, and usage invoicing and metering read an overage price only for an `allowed`
-limit, so such a price would show in the plan's pricing and never be billed. A plan may have no
-items. A catalog published before these rules keeps working as it was published; previewing it
-unchanged is refused until the conflicting value or the unbilled price is removed.
+A legacy plan can spell its price twice: the plan-level `currency`, `baseAmountMinor`,
+`billingInterval`, `billingIntervalCount` and `providerBindings`, and the `basePrice` object. When
+a plan has a `basePrice`, every plan-level value it also sends must agree with it, or preview and
+publish answer `400 INVALID_REQUEST` naming both values, such as `Plan pro baseAmountMinor 1000
+conflicts with basePrice unitAmountMinor 2000`. A plan-level binding conflicts when it binds a
+provider channel that `basePrice` also binds to a different product; App Store and Google Play
+products whose price the store owns, on channels the `basePrice` does not bind, are its
+`providerPriced` products. A plan sending `providerPriced` cannot also send the plan-level fields.
+A price on an `allocation`, or on a `meter_limit` whose overage is blocked, is refused too:
+Checkout leaves metered prices out, and usage invoicing and metering read an overage price only for
+an `allowed` limit, so such a price would show in the plan's pricing and never be billed. A plan
+may have no items. A catalog published before these rules keeps working as it was published, and
+reads back in the canonical spelling, which has no place for a price that never charges; previewing
+the stored legacy intent unchanged is refused until the conflicting value or the unbilled price is
+removed.
 
 A plan's base price is its amount and currency together: a plan version records a currency only
 with a `baseAmountMinor` or a `basePrice`. A plan priced only by its items, such as a seat-only plan
@@ -72,7 +131,9 @@ with `400 INVALID_REQUEST` (`Plan team baseAmountMinor requires a currency`).
 
 An allocation that resets more often than its plan bills, such as `resetInterval: "month"` on an
 annual plan or `"week"` on a monthly one, grants its quantity once per reset window, anchored at the
-provider period start in UTC. Month-end anchors clamp to the shorter month and recover their
+provider period start in UTC. A plan version with no billing cadence, such as an unpriced plan,
+bills by the period the subscription recorded: a reset shorter than that period splits it the same
+way, for allowances and meter limits alike. Month-end anchors clamp to the shorter month and recover their
 original day afterwards; the last window stops at the provider period end and grants the whole
 quantity. Its expiry is the earlier of that boundary and `expiresAfterSeconds` after the window
 start. Provider synchronization grants the current window and metering maintenance grants later
@@ -95,8 +156,8 @@ existed, keeps what it has and is not granted another.
 A catalog may mark one plan as its default with
 `"defaultPlan": { "planKey": "free", "entitlementKeys": ["free_tier"] }`. An account that has no
 paid base plan holds the default plan's published version with no provider involved, the way it
-holds a trial. The marked plan must be an active, public base plan with no price, `basePrice`,
-billing interval or provider binding and no trial days. It cannot hold licensed quantities,
+holds a trial. The marked plan must be an active, public base plan that is unpriced (no
+`basePrice`, no `providerPriced` products and no item price) and has no trial days. It cannot hold licensed quantities,
 entity-scoped allocations or rollover, and each of its allocations must reset. A violation returns
 `400 INVALID_REQUEST`. An unpriced plan has no provider product, so its entitlement keys are
 declared on the marker (at most 100). A marker key may also be one a paid plan grants, such as a
@@ -129,7 +190,8 @@ the container to diff or push it. `status` needs only the base URL and a project
 `push` also need the operator key. The file exports its intent as `catalog` (or the default export)
 and may export `expectedRevision`: a revision number to publish only over that revision, or `null`
 to publish only while no catalog is published. Without the export, `diff` and `push` expect the
-current revision.
+current revision. `diff` compares canonical intents, so a file that spells the published catalog the
+legacy way still reports `changed: false`.
 
 ## Catalog migrations
 

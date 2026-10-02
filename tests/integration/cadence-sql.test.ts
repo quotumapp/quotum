@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { sql as drizzleSql } from "drizzle-orm";
 import { resetIntervalSql, resetSplitsBillingPeriodSql } from "../../src/db/repository/cadence-sql";
+import { periodSplits } from "../../src/db/repository/meter-limit-windows";
 import { executeRows } from "../../src/db/repository/query";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import {
@@ -70,6 +71,45 @@ localDescribe("cadence SQL", () => {
 				billing,
 				splits: cadenceSplits(reset, billing),
 			});
+		}
+	});
+
+	it("splits a recorded period exactly when the application does for a version without a cadence", async () => {
+		const periods = [
+			{ start: new Date("2026-01-31T09:30:00.000Z"), end: new Date("2026-02-28T09:30:00.000Z") },
+			{ start: new Date("2026-03-10T00:00:00.000Z"), end: new Date("2027-03-10T00:00:00.000Z") },
+			{ start: new Date("2026-03-10T00:00:00.000Z"), end: new Date("2026-03-11T00:00:00.000Z") },
+		];
+		const resets = cadenceUnits.flatMap((unit) => counts.map((count) => ({ unit, count })));
+		for (const period of periods) {
+			const rows = await executeRows<{
+				reset_interval: CadenceUnit;
+				reset_interval_count: number;
+				splits: boolean;
+			}>(
+				context.db as unknown as QueryExecutor,
+				drizzleSql`
+					SELECT pi.reset_interval, pi.reset_interval_count,
+						${resetSplitsBillingPeriodSql("pi", "pv", {
+							start: drizzleSql`${period.start.toISOString()}::timestamptz`,
+							end: drizzleSql`${period.end.toISOString()}::timestamptz`,
+						})} AS splits
+					FROM (VALUES ${drizzleSql.join(
+						resets.map(({ unit, count }) => drizzleSql`(${unit}::text, ${count}::integer)`),
+						drizzleSql`, `,
+					)}) AS pi(reset_interval, reset_interval_count)
+					CROSS JOIN (VALUES (NULL::text, 1::integer)) AS pv(billing_interval, billing_interval_count)
+				`,
+			);
+			expect(rows).toHaveLength(resets.length);
+			for (const row of rows) {
+				const reset: Cadence = { unit: row.reset_interval, count: row.reset_interval_count };
+				expect({ reset, period, splits: row.splits }).toEqual({
+					reset,
+					period,
+					splits: periodSplits(reset, null, period.start, period.end),
+				});
+			}
 		}
 	});
 

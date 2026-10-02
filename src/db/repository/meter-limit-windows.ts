@@ -29,7 +29,7 @@ export function meterLimitWindowBounds(
 ): { start: Date; end: Date } {
 	const start = new Date(periodStartAt);
 	const end = periodEndAt === null ? addCadence(start, reset) : new Date(periodEndAt);
-	if (periodEndAt !== null && cadenceSplits(reset, billing)) {
+	if (periodEndAt !== null && periodSplits(reset, billing, start, end)) {
 		if (now < end) {
 			return resetSubWindowBounds(start, end, reset, now);
 		}
@@ -40,6 +40,20 @@ export function meterLimitWindowBounds(
 		return rollWindowBounds(end, addCadence(end, reset), reset, now);
 	}
 	return rollWindowBounds(start, end, reset, now);
+}
+
+/**
+ * Whether a reset splits a recorded period into several windows. A plan version without a billing
+ * cadence (an unpriced plan) bills by the period the subscription recorded, so the reset splits that
+ * period when it is shorter than it; `resetSplitsBillingPeriodSql` applies the same rule.
+ */
+export function periodSplits(
+	reset: Cadence,
+	billing: Cadence | null,
+	start: Date,
+	end: Date,
+): boolean {
+	return billing === null ? addCadence(start, reset) < end : cadenceSplits(reset, billing);
 }
 
 /** The latest instant a Date holds; a grant without an end is windowed as if it ended there. */
