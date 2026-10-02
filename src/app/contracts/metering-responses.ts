@@ -15,6 +15,10 @@ export const getV1BillingAccountsByBillingAccountIdBalancesByFeatureKeyResponse2
 			held: z.string(),
 			available: z.union([z.null(), z.string()]),
 			unlimited: z.literal(true).optional(),
+			/** A meter limit's scope and current window (PC-12); absent on wallet balances. */
+			scope: z.enum(["account", "entity"]).optional(),
+			windowStartAt: z.string().optional(),
+			windowEndAt: z.string().optional(),
 			breakdown: z.array(
 				z.object({
 					allocationId: z.string(),
@@ -135,6 +139,10 @@ export const postV1BillingAccountsByBillingAccountIdUsageReservationsResponse200
 			held: z.string(),
 			available: z.union([z.null(), z.string()]),
 			unlimited: z.literal(true).optional(),
+			/** A meter limit's scope and current window (PC-12); absent on wallet balances. */
+			scope: z.enum(["account", "entity"]).optional(),
+			windowStartAt: z.string().optional(),
+			windowEndAt: z.string().optional(),
 			breakdown: z.array(
 				z.object({
 					allocationId: z.string(),
@@ -215,6 +223,10 @@ export const postV1BillingAccountsByBillingAccountIdUsageReservationsByReservati
 				held: z.string(),
 				available: z.union([z.null(), z.string()]),
 				unlimited: z.literal(true).optional(),
+				/** A meter limit's scope and current window (PC-12); absent on wallet balances. */
+				scope: z.enum(["account", "entity"]).optional(),
+				windowStartAt: z.string().optional(),
+				windowEndAt: z.string().optional(),
 				breakdown: z.array(
 					z.object({
 						allocationId: z.string(),
@@ -287,6 +299,10 @@ export const postV1BillingAccountsByBillingAccountIdUsageReservationsByReservati
 				held: z.string(),
 				available: z.union([z.null(), z.string()]),
 				unlimited: z.literal(true).optional(),
+				/** A meter limit's scope and current window (PC-12); absent on wallet balances. */
+				scope: z.enum(["account", "entity"]).optional(),
+				windowStartAt: z.string().optional(),
+				windowEndAt: z.string().optional(),
 				breakdown: z.array(
 					z.object({
 						allocationId: z.string(),
@@ -354,6 +370,10 @@ export const postV1BillingAccountsByBillingAccountIdUsageEventsByUsageEventIdCor
 				held: z.string(),
 				available: z.union([z.null(), z.string()]),
 				unlimited: z.literal(true).optional(),
+				/** A meter limit's scope and current window (PC-12); absent on wallet balances. */
+				scope: z.enum(["account", "entity"]).optional(),
+				windowStartAt: z.string().optional(),
+				windowEndAt: z.string().optional(),
 				breakdown: z.array(
 					z.object({
 						allocationId: z.string(),

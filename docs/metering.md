@@ -162,7 +162,12 @@ for reporting. The canonical filter compares values as text in any key order, so
 and `{ "model": "1" }`, or `true` and `"true"`, are the same filter.
 
 Balance reads, checks and the account projection report the window the request counts in: the
-account's for an account scope, the entity's (or the no-entity window) for an entity scope.
+account's for an account scope, the entity's (or the no-entity window) for an entity scope. A
+meter-limit balance, in a balance read and in every check, consume, reserve, confirm and
+correction result, also carries `scope` (the scope that window counts in), `windowStartAt` and
+`windowEndAt`; capacity returns at `windowEndAt`. An unlimited balance (`unlimited: true`, null
+`granted` and `available`) carries them too, for the window its usage still counts in. Wallet
+balances carry none of the three.
 
 Windows written before declared scopes kept one row per entity and filter. They count where their
 entity places them: in the account's window for an account scope, in that entity's window (or the
