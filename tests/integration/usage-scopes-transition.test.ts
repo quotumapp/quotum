@@ -51,8 +51,18 @@ localDescribe("declared meter-limit scope transition", () => {
 		]);
 		// The entity's legacy filter windows sum over its cap: refused until room is left, not a failure.
 		expect(verification.overCap).toMatchObject([
-			{ scope: "entity", usage: "60", held: "0", limit: "50" },
+			{
+				projectKey: "acme",
+				billingAccountId: expect.any(String),
+				featureKey: expect.any(String),
+				scope: "entity",
+				usage: "60",
+				held: "0",
+				limit: "50",
+			},
 		]);
+		const [overCap] = verification.overCap;
+		expect(overCap?.entityExternalId).toEqual(expect.any(String));
 		const text = await run(["verify", "--baseline", baseline()]);
 		expect(text.code).toBe(0);
 		expect(text.stdout).toContain("PASS correction routing");

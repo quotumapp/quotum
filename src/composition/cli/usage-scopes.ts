@@ -177,7 +177,7 @@ export function renderUsageScopesVerification(
 		);
 		for (const set of verification.overCap)
 			lines.push(
-				`  - customer ${set.customerId} feature ${set.featureId} [${set.scope}${set.entityId === null ? "" : ` entity ${set.entityId}`}] ${set.windowStartAt} to ${set.windowEndAt}: ${set.usage} used + ${set.held} held of ${set.limit}`,
+				`  - ${set.projectKey} ${set.billingAccountId} ${set.featureKey} [${set.scope}${set.entityId === null ? "" : ` entity ${set.entityExternalId ?? set.entityId}`}] ${set.windowStartAt} to ${set.windowEndAt}: ${set.usage} used + ${set.held} held of ${set.limit}`,
 			);
 	}
 	lines.push(verification.passed ? "Verified: start the service." : "Not verified.");

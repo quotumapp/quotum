@@ -328,6 +328,25 @@ localDescribe("declared meter-limit scope", () => {
 		).toMatchObject({ allowed: true, balance: { consumed: "0", available: "50" } });
 	});
 
+	it("reports no scope or window to an account no limit applies to", async () => {
+		await publish(
+			catalog([
+				plan("pro", "base", 1, cap("50", "day", "account")),
+				plan("basic", "base", 1, null),
+			]),
+			null,
+		);
+		await subscribe("nolimit", "basic", 1);
+		const balance = await context.repository.getMeteringBalance(
+			integrationProjectContext(),
+			"nolimit",
+			"api_requests",
+		);
+		expect(balance).toMatchObject({ granted: "0", available: "0" });
+		for (const field of ["scope", "windowStartAt", "windowEndAt"])
+			expect(balance).not.toHaveProperty(field);
+	});
+
 	it("reports a meter limit's scope and window through the compact check and consume", async () => {
 		await publish(catalog([plan("pro", "base", 1, cap("50", "day", "account"))]), null);
 		await subscribe("compact", "pro", 1);

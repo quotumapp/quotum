@@ -109,6 +109,10 @@ describe("usage scopes snapshot and verify commands", () => {
 					{
 						customerId: "c1",
 						featureId: "7",
+						projectKey: "acme",
+						billingAccountId: "user_1",
+						featureKey: "api_requests",
+						entityExternalId: "workspace-a",
 						scope: "entity",
 						entityId: "3",
 						windowStartAt: "2026-10-02T00:00:00.000000Z",
@@ -126,7 +130,7 @@ describe("usage scopes snapshot and verify commands", () => {
 			"FAIL active holds\n  - Hold h1 changed from 10 to 5.\n  … 2 more; use --json.",
 		);
 		expect(text).toContain("1 scope set is over the cap");
-		expect(text).toContain("[entity entity 3]");
+		expect(text).toContain("  - acme user_1 api_requests [entity entity workspace-a]");
 		expect(text).toEndWith("Not verified.");
 	});
 
