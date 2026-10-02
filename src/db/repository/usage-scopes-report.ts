@@ -440,7 +440,7 @@ export function resolveAccountScope(
  * Accounts whose live subscriptions cap one feature with different declared scopes, whether or not
  * they have used it yet. The declared-scope release refuses these, so they block its upgrade.
  */
-async function readMixedScopeAccounts(
+export async function readMixedScopeAccounts(
 	executor: QueryExecutor,
 	projectId: string,
 ): Promise<MixedScopeAccount[]> {

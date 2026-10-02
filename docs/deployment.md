@@ -42,7 +42,9 @@ usage and the settings it reads without running it; an unknown command or unexpe
 | --- | --- |
 | `quotum migrate` / `quotum migrate status` | Apply pending migrations, or verify the applied checksums. |
 | `quotum partitions status` / `ensure [--months <n>]` | Report or extend the monthly [usage partitions](operations.md#usage-partitions). |
-| `quotum usage scopes report [--project <instance>] [--limit <n>] [--json]` | Read-only report of what [declared meter-limit scope](upgrade-transitions.md#preparing-for-declared-meter-limit-scope) will change; exits `2` while blocking items remain. |
+| `quotum usage scopes report [--project <instance>] [--limit <n>] [--json]` | Read-only report of what [declared meter-limit scope](upgrade-transitions.md#declared-meter-limit-scope) will change; exits `2` while blocking items remain. |
+| `quotum usage scopes snapshot --out <file>` | Records usage windows, active holds and unbilled usage before `quotum migrate` in the [declared-scope transition](upgrade-transitions.md#move-with-a-verified-transition); never overwrites a file. |
+| `quotum usage scopes verify --baseline <file> [--json]` | Checks the migrated database against the snapshot; exits `2` when a check fails, and the service must not start until it passes. |
 | `quotum bootstrap --check` / `--apply [--credentials-out <path>]` | The [platform bootstrap](#first-start). |
 | `quotum catalog provision` | Import the store products in `BILLING_CATALOG_IMPORT_JSON`. |
 | `quotum catalog status` / `diff <file>` / `push <file>` | [Catalog automation](catalog.md) over HTTP. |
