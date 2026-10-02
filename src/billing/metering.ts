@@ -141,6 +141,8 @@ export interface MeteringDecision {
 export interface ConsumeUsageResult extends MeteringDecision {
 	usageEventId: string | null;
 	recordedAt: string | null;
+	/** Internal event locator; public callers use the opaque receipt identity. */
+	recordedAtExact?: string;
 	deductions: AllocationDeduction[];
 }
 

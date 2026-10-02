@@ -20,10 +20,8 @@ import type { EffectiveControl } from "../billing/controls";
 import type { CustomerBillingSummary, UsageEventItem, UsageSeriesPoint } from "../billing/insights";
 import type {
 	ConfirmReservationInput,
-	ConsumeUsageResult,
 	FinalizeReservationResult,
 	MeteringBalance,
-	MeteringDecision,
 	MeteringSubjectInput,
 	ReleaseReservationInput,
 	ReservationResult,
@@ -52,6 +50,12 @@ import type {
 	ProjectionSyncStatus,
 	StoreEventProcessingStatus,
 } from "../billing/types";
+import type {
+	UsageCheckInput,
+	UsageCheckResult,
+	UsageConsumeInput,
+	UsageConsumeResult,
+} from "../billing/usage-api";
 import type {
 	UsageOperationLookupInput,
 	UsageOperationLookupResult,
@@ -204,22 +208,22 @@ export class BillingClient {
 						{ entityId },
 					),
 				),
-			check: (input: MeteringSubjectInput) =>
-				this.request<MeteringDecision>(
+			check: (input: UsageCheckInput) =>
+				this.request<UsageCheckResult>(
 					`/v1/billing-accounts/${segment(input.billingAccountId)}/usage/check`,
-					{ method: "POST", body: meteringBody(input) },
+					{ method: "POST", body: publicUsageBody(input) },
 				),
 			getOperation: (input: UsageOperationLookupInput) =>
 				this.request<UsageOperationLookupResult>(
-					`/v1/billing-accounts/${segment(input.billingAccountId)}/usage/operations/${segment(input.operation)}/${segment(input.operationId)}`,
+					pathWithQuery(
+						`/v1/billing-accounts/${segment(input.billingAccountId)}/usage/operations/${segment(input.operation)}/${segment(input.operationId)}`,
+						{ entityId: input.entityId },
+					),
 				),
-			consume: (
-				input: MeteringSubjectInput & { metadata?: Record<string, unknown> },
-				key: string,
-			) =>
-				this.request<ConsumeUsageResult>(
+			consume: (input: Omit<UsageConsumeInput, "operationId">, key: string) =>
+				this.request<UsageConsumeResult>(
 					`/v1/billing-accounts/${segment(input.billingAccountId)}/usage/consume`,
-					{ method: "POST", body: meteringBody(input), idempotencyKey: key },
+					{ method: "POST", body: publicUsageBody(input), idempotencyKey: key },
 				),
 			reserve: (input: Omit<ReserveUsageInput, "idempotencyKey">, key: string) =>
 				this.request<ReservationResult>(
@@ -699,4 +703,13 @@ async function readEnvelope<T>(response: Response): Promise<T | null> {
 	} catch {
 		return null;
 	}
+}
+
+function publicUsageBody(input: UsageCheckInput) {
+	return {
+		featureId: input.featureId,
+		value: input.value,
+		entityId: input.entityId,
+		occurredAt: input.occurredAt?.toISOString(),
+	};
 }

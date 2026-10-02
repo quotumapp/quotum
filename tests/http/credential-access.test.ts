@@ -33,6 +33,10 @@ function documentedRoutes(): DocumentedRoute[] {
 // Reviewed list. A read-only credential reaches exactly these operations; adding one is a decision
 // that the route writes nothing, calls no provider and returns nothing bearer-like.
 const readOnlyOperations = [
+	"getV1BillingAccountsByBillingAccountId",
+	"getV1BillingAccountsByBillingAccountIdEntitiesByEntityId",
+	"getV1BillingAccountsByBillingAccountIdUsageReceiptsByReceiptId",
+	"getV1BillingAccountsByBillingAccountIdUsageReceiptsByReceiptIdDeductions",
 	"getV1AdminCatalog",
 	"getV1AdminCustomersByBillingAccountByBillingAccountId",
 	"getV1AdminCustomersByCustomerId",

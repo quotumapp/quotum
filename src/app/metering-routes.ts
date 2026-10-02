@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { InvalidRequestError } from "../billing/errors";
 import type { MeteringServiceLike } from "../billing/metering";
+import { publicOperationLookup, type UsageApiServiceLike } from "../billing/usage-api";
 import { usageOperationKinds } from "../billing/usage-operations";
 import { projectScopedRateLimitGuard } from "../http/rate-limit";
 import {
@@ -11,6 +12,13 @@ import {
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { storableDateTimeSchema } from "../shared/input-bounds";
 import * as responses from "./contracts/metering-responses";
+import {
+	accountParamsSchema,
+	checkBodySchema,
+	consumeBodySchema,
+	operationLookupQuerySchema,
+	publicIdSchema,
+} from "./contracts/usage-api";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
 import type { BillingElysia, PostAuthGuard, RequestObserver } from "./types";
 
@@ -19,18 +27,17 @@ export interface MeteringRoutesDependencies {
 	meteringLimiter: { check(key: string): { allowed: boolean; remaining: number; resetAt: Date } };
 	rateLimitKeyOptions: { trustProxyHeaders?: boolean };
 	meteringService: MeteringServiceLike;
+	usageApi: UsageApiServiceLike;
 	billingMetrics: BillingMetrics;
 	registerPostAuthGuard: (guard: PostAuthGuard) => void;
 	registerRequestObserver: (observer: RequestObserver) => void;
 }
 
-const subjectParamsSchema = z.object({
-	billingAccountId: z.string().trim().min(1).max(256),
-});
+const subjectParamsSchema = accountParamsSchema;
 
 export const operationParamsSchema = subjectParamsSchema.extend({
 	operation: z.enum(usageOperationKinds),
-	operationId: z.string().trim().min(1).max(200),
+	operationId: publicIdSchema,
 });
 
 export const balanceParamsSchema = subjectParamsSchema.extend({
@@ -94,6 +101,7 @@ export function registerMeteringRoutes({
 	meteringLimiter,
 	rateLimitKeyOptions,
 	meteringService,
+	usageApi,
 	billingMetrics,
 	registerPostAuthGuard,
 	registerRequestObserver,
@@ -149,12 +157,16 @@ export function registerMeteringRoutes({
 
 	app.get(
 		"/v1/billing-accounts/:billingAccountId/usage/operations/:operation/:operationId",
-		async ({ params, project }) => {
-			const result = await meteringService.getOperation(privateProject(project), params);
-			return { success: true, data: result };
+		async ({ params, query, project }) => {
+			const result = await meteringService.getOperation(privateProject(project), {
+				...params,
+				...query,
+			});
+			return { success: true, data: publicOperationLookup(result) };
 		},
 		{
 			params: operationParamsSchema,
+			query: operationLookupQuerySchema,
 			detail: operationDetail({
 				operationId:
 					"getV1BillingAccountsByBillingAccountIdUsageOperationsByOperationByOperationId",
@@ -171,16 +183,16 @@ export function registerMeteringRoutes({
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/usage/check",
 		async ({ params, body, project }) => {
-			const result = await meteringService.check(privateProject(project), {
+			const result = await usageApi.check(privateProject(project), {
 				billingAccountId: params.billingAccountId,
-				...usageInput(body),
+				...publicUsageInput(body),
 			});
 			return { success: true, data: result };
 		},
 		{
 			parse: [LENIENT_JSON_PARSE],
 			params: subjectParamsSchema,
-			body: usageBodySchema,
+			body: checkBodySchema,
 			transform: rejectCallerProjectSelectorBody,
 			detail: operationDetail({
 				operationId: "postV1BillingAccountsByBillingAccountIdUsageCheck",
@@ -198,17 +210,18 @@ export function registerMeteringRoutes({
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/usage/consume",
 		async ({ params, body, request, project }) => {
-			const result = await meteringService.consume(privateProject(project), {
+			const result = await usageApi.consume(privateProject(project), {
 				billingAccountId: params.billingAccountId,
-				idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
-				...usageInput(body),
+				operationId: requireIdempotencyKey(request.headers.get("idempotency-key")),
+				...publicUsageInput(body),
+				value: body.value,
 			});
 			return { success: true, data: result };
 		},
 		{
 			parse: [LENIENT_JSON_PARSE],
 			params: subjectParamsSchema,
-			body: usageBodySchema,
+			body: consumeBodySchema,
 			transform: rejectCallerProjectSelectorBody,
 			detail: operationDetail({
 				operationId: "postV1BillingAccountsByBillingAccountIdUsageConsume",
@@ -366,10 +379,17 @@ function dateOrNull(value: string | null): Date | null {
 
 function requireIdempotencyKey(value: string | null): string {
 	const key = value?.trim();
-	if (key === undefined || key === "" || key.length > 200) {
+	if (key === undefined || key === "" || key.length > 200 || key !== value) {
 		throw new InvalidRequestError(
 			"Idempotency-Key header must contain between 1 and 200 characters",
 		);
 	}
 	return key;
+}
+
+export function publicUsageInput(body: z.infer<typeof checkBodySchema>) {
+	return {
+		...body,
+		occurredAt: body.occurredAt === undefined ? undefined : new Date(body.occurredAt),
+	};
 }

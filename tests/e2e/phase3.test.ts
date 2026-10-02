@@ -313,7 +313,7 @@ async function consume(billingAccountId: string, quantity: string, idempotencyKe
 	const response = await postJson(
 		`/v1/billing-accounts/${billingAccountId}/usage/consume`,
 		{ ...authHeaders(), "idempotency-key": idempotencyKey },
-		{ featureKey: "ai_credits", quantity },
+		{ featureId: "ai_credits", value: quantity },
 	);
 	expect(response.status).toBe(200);
 	return (await response.json()).data as { allowed: boolean; reason: string | null };

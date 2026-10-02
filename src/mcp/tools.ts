@@ -144,16 +144,16 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 		{
 			title: "Would this usage be allowed?",
 			description:
-				"Asks Quotum whether consuming a quantity would be allowed right now, without recording anything. The answer carries the reason, the limiting control and the rate card, which is the way to explain a denial. It never consumes.",
+				"Checks an existing account's boolean entitlement or metered usage without recording anything. Returns a compact decision with the limiting control when denied. Metered features require value; boolean features omit it.",
 			inputSchema: z.object({
 				billingAccountId,
-				featureKey: z.string().min(1),
-				quantity: z
+				featureId: z.string().min(1),
+				value: z
 					.string()
 					.regex(/^\d+(\.\d+)?$/u)
-					.describe('Decimal string, for example "1" or "0.25"'),
+					.describe('Decimal string, for example "1" or "0.25"')
+					.optional(),
 				entityId: z.string().min(1).optional(),
-				filters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
 			}),
 			annotations: readOnly,
 		},
@@ -170,13 +170,24 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 				billingAccountId,
 				operationId: z.string().min(1).describe("The Idempotency-Key the backend sent"),
 				operation: z.enum(operationKinds).optional(),
+				entityId: z
+					.string()
+					.min(1)
+					.max(200)
+					.regex(/^\S(?:[\s\S]*\S)?$/u)
+					.optional(),
 			}),
 			annotations: readOnly,
 		},
-		({ billingAccountId: account, operationId, operation }) =>
+		({ billingAccountId: account, operationId, operation, entityId }) =>
 			runTool(async () => {
 				const lookup = (kind: UsageOperationKind) =>
-					client.usage.getOperation({ billingAccountId: account, operation: kind, operationId });
+					client.usage.getOperation({
+						billingAccountId: account,
+						operation: kind,
+						operationId,
+						entityId,
+					});
 				if (operation !== undefined) return lookup(operation);
 				const results = await Promise.allSettled(operationKinds.map(lookup));
 				return {

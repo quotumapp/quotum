@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
+import { parseReceiptId } from "../../src/db/repository/usage-receipts";
 import { wrapStripeService } from "../../src/providers/stripe/adapter";
 import { STRIPE_API_VERSION, type StripeBillingConfig } from "../../src/providers/stripe/client";
 import { StripeBillingService } from "../../src/providers/stripe/service";
@@ -102,7 +103,7 @@ localDescribe("Phase 3 release journeys", () => {
 
 		const correction = await postJson(
 			fixture.app,
-			`/v1/billing-accounts/${account}/usage/events/${crossing.usageEventId}/corrections`,
+			`/v1/billing-accounts/${account}/usage/events/${parseReceiptId(crossing.receiptId).id}/corrections`,
 			{ ...headers, "idempotency-key": "http-controls:correction" },
 			{
 				originalRecordedAt: crossing.recordedAt,
@@ -628,13 +629,13 @@ async function consume(
 		fixture.app,
 		`/v1/billing-accounts/${billingAccountId}/usage/consume`,
 		{ ...fixture.authHeaders(), "idempotency-key": idempotencyKey },
-		{ featureKey: "ai_credits", quantity },
+		{ featureId: "ai_credits", value: quantity },
 	);
 	expect(response.status).toBe(200);
 	return (await response.json()).data as {
 		allowed: boolean;
 		reason: string | null;
-		usageEventId: string | null;
+		receiptId: string;
 		recordedAt: string | null;
 	};
 }

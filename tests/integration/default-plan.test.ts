@@ -93,8 +93,17 @@ async function grants(billingAccountId: string) {
 	return rows.map((row) => ({ ...row }));
 }
 
+async function consumeForAccount(input: Parameters<typeof context.repository.consumeUsage>[1]) {
+	await context.repository.usageApi.createAccount(project, input.billingAccountId);
+	return context.repository.consumeUsage(project, input);
+}
+async function reserveForAccount(input: Parameters<typeof context.repository.reserveUsage>[1]) {
+	await context.repository.usageApi.createAccount(project, input.billingAccountId);
+	return context.repository.reserveUsage(project, input);
+}
+
 async function consume(billingAccountId: string, credits: number, key: string) {
-	return await context.repository.consumeUsage(project, {
+	return await consumeForAccount({
 		billingAccountId,
 		featureKey: "model_tokens",
 		quantity: String(credits * 200),
@@ -295,7 +304,7 @@ localDescribe("default plan", () => {
 	it("opens the current window on a confirmation, so its balance counts what the account holds", async () => {
 		await publish(catalog(freePlan(1, "100")));
 		await consume("confirmer", 1, "confirm-start");
-		const hold = await context.repository.reserveUsage(project, {
+		const hold = await reserveForAccount({
 			billingAccountId: "confirmer",
 			featureKey: "model_tokens",
 			quantity: "200",
@@ -425,7 +434,7 @@ localDescribe("default plan", () => {
 	it("counts an open hold once when a later version adds its feature back", async () => {
 		await publish(catalog(freePlan(1, "100")));
 		await consume("holder", 20, "spend-1");
-		const hold = await context.repository.reserveUsage(project, {
+		const hold = await reserveForAccount({
 			billingAccountId: "holder",
 			featureKey: "model_tokens",
 			quantity: "6000",
@@ -782,7 +791,7 @@ localDescribe("default plan", () => {
 			});
 		await publish({ ...catalog(limited(1, "1000", "900")), rateCards: [] });
 		expect(
-			await context.repository.consumeUsage(project, {
+			await consumeForAccount({
 				billingAccountId: "tightened",
 				featureKey: "model_tokens",
 				quantity: "400",
@@ -806,7 +815,7 @@ localDescribe("default plan", () => {
 		expect(await grants("tightened")).toMatchObject([{ plan_version: 1 }]);
 
 		expect(
-			await context.repository.consumeUsage(project, {
+			await consumeForAccount({
 				billingAccountId: "tightened",
 				featureKey: "model_tokens",
 				quantity: "100",
@@ -864,7 +873,7 @@ localDescribe("default plan", () => {
 				quantity,
 			});
 		expect(
-			await context.repository.consumeUsage(project, {
+			await consumeForAccount({
 				billingAccountId: "metered_user",
 				featureKey: "model_tokens",
 				quantity: "600",
@@ -1160,7 +1169,7 @@ localDescribe("default plan", () => {
 			],
 		});
 		await publish(catalog(limited(1)));
-		const hold = await context.repository.reserveUsage(project, {
+		const hold = await reserveForAccount({
 			billingAccountId: "republish-hold",
 			featureKey: "model_tokens",
 			quantity: "90",
@@ -1181,7 +1190,7 @@ localDescribe("default plan", () => {
 			reason: "control_limit_exceeded",
 		});
 		expect(
-			await context.repository.consumeUsage(project, {
+			await consumeForAccount({
 				...extra,
 				idempotencyKey: "republish-hold:extra",
 			}),
@@ -1195,7 +1204,7 @@ localDescribe("default plan", () => {
 			}),
 		).toMatchObject({ allowed: true });
 		expect(
-			await context.repository.consumeUsage(project, {
+			await consumeForAccount({
 				...extra,
 				quantity: "10",
 				idempotencyKey: "republish-hold:rest",
@@ -1220,7 +1229,7 @@ localDescribe("default plan", () => {
 			],
 		});
 		await publish(catalog(limited(1)));
-		const original = await context.repository.consumeUsage(project, {
+		const original = await consumeForAccount({
 			billingAccountId: "republish-correct",
 			featureKey: "model_tokens",
 			quantity: "90",
@@ -1229,7 +1238,7 @@ localDescribe("default plan", () => {
 		expect(original.allowed).toBe(true);
 		await publish(catalog(limited(2)));
 		expect(
-			await context.repository.consumeUsage(project, {
+			await consumeForAccount({
 				billingAccountId: "republish-correct",
 				featureKey: "model_tokens",
 				quantity: "10",
@@ -1260,7 +1269,7 @@ localDescribe("default plan", () => {
 		});
 	});
 
-	it("gives two concurrent first requests one default grant", async () => {
+	it("gives concurrent explicit account creations and usage one default grant", async () => {
 		await publish(catalog(freePlan(1, "100")));
 
 		const results = await Promise.all([
@@ -1351,7 +1360,7 @@ localDescribe("default plan", () => {
 			};
 		};
 		const addProject = async (key: string) =>
-			await context.repository.consumeUsage(project, {
+			await consumeForAccount({
 				billingAccountId: "builder",
 				featureKey: "projects",
 				quantity: "1",

@@ -6,6 +6,7 @@ import {
 	NotFoundBillingError,
 	PersistenceConflictError,
 } from "../../billing/errors";
+import type { UsageConsumeResult } from "../../billing/usage-api";
 import {
 	type UsageOperationInput,
 	type UsageOperationKind,
@@ -20,6 +21,8 @@ import { resolveUsageCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
+type StoredOutcome = UsageOperationResult | UsageConsumeResult;
+
 interface Claim {
 	id: string;
 	request_fingerprint: string;
@@ -27,7 +30,7 @@ interface Claim {
 	completed_at: Date | string | null;
 	identity_expired: boolean;
 	result_expired: boolean;
-	outcome: UsageOperationResult | null;
+	outcome: StoredOutcome | null;
 }
 
 export function operationFingerprint(
@@ -120,14 +123,14 @@ async function readClaim(
 	);
 }
 
-function retainedResult(claim: Claim): UsageOperationResult {
+function retainedResult(claim: Claim): StoredOutcome {
 	if (claim.completed_at === null) {
 		throw new PersistenceConflictError(
 			"Usage operation is still unresolved",
 			"OPERATION_IN_PROGRESS",
 		);
 	}
-	if (claim.result_expired || claim.outcome === null || claim.recovery_version !== 1) {
+	if (claim.result_expired || claim.outcome === null || ![1, 2].includes(claim.recovery_version)) {
 		throw new PersistenceConflictError(
 			"Usage operation result has expired; do not reuse its identity",
 			"OPERATION_RESULT_EXPIRED",
@@ -136,13 +139,14 @@ function retainedResult(claim: Claim): UsageOperationResult {
 	return claim.outcome;
 }
 
-export async function runUsageOperation<T extends UsageOperationResult, P = undefined>(
+export async function runUsageOperation<T extends StoredOutcome, P = undefined>(
 	executor: QueryExecutor,
 	project: ProjectInstanceContext,
 	operation: UsageOperationKind,
 	input: UsageOperationInput,
 	mutation: (customer: { id: string; billingAccountId: string }, prefetched: P) => Promise<T>,
 	options: {
+		recoveryVersion?: 1 | 2;
 		/** Non-blocking reads pipelined with the operation lock and claim read. */
 		prefetch?: (executor: QueryExecutor) => Promise<P>;
 		/** Work that may take row locks; pipelined with the customer row once the lock is held. */
@@ -162,7 +166,13 @@ export async function runUsageOperation<T extends UsageOperationResult, P = unde
 	const [locked, existing, prefetched] = await Promise.all([
 		tryLock(executor, projectId, scope),
 		readClaim(executor, projectId, scope),
-		options.prefetch === undefined ? Promise.resolve(undefined as P) : options.prefetch(executor),
+		(options.prefetch === undefined
+			? Promise.resolve(undefined as P)
+			: options.prefetch(executor)
+		).then(
+			(value) => ({ ok: true as const, value }),
+			(error: unknown) => ({ ok: false as const, error }),
+		),
 	]);
 	if (!locked) {
 		throw new PersistenceConflictError(
@@ -172,7 +182,13 @@ export async function runUsageOperation<T extends UsageOperationResult, P = unde
 	}
 	if (existing !== null && !existing.identity_expired) {
 		// Legacy fingerprints did not bind all semantics, and cannot safely reconstruct an outcome.
-		if (existing.recovery_version === 1 && existing.request_fingerprint !== fingerprint) {
+		if (existing.recovery_version !== (options.recoveryVersion ?? 1)) {
+			throw new PersistenceConflictError(
+				"Operation belongs to an earlier response contract; do not reuse its identity",
+				"OPERATION_RESULT_EXPIRED",
+			);
+		}
+		if (existing.recovery_version > 0 && existing.request_fingerprint !== fingerprint) {
 			throw new PersistenceConflictError(
 				"Operation identity is bound to different input",
 				"IDEMPOTENCY_CONFLICT",
@@ -180,6 +196,8 @@ export async function runUsageOperation<T extends UsageOperationResult, P = unde
 		}
 		return retainedResult(existing) as T;
 	}
+	// Replays depend on the immutable claim, not on today's catalog, policy or timestamp window.
+	if (!prefetched.ok) throw prefetched.error;
 	if (existing !== null) {
 		await executeRows(
 			executor,
@@ -209,7 +227,7 @@ export async function runUsageOperation<T extends UsageOperationResult, P = unde
   INSERT INTO client_idempotency_claims
    (project_id, customer_id, operation, idempotency_key, request_fingerprint, expires_at, recovery_version)
   VALUES (${projectId}, ${customer.id}, ${operation}, ${scope.operationId}, ${fingerprint},
-   clock_timestamp() + INTERVAL '168 hours', 1)
+   clock_timestamp() + INTERVAL '168 hours', ${options.recoveryVersion ?? 1})
   RETURNING id::text
  `,
 	);
@@ -217,7 +235,7 @@ export async function runUsageOperation<T extends UsageOperationResult, P = unde
 	// No catch-and-delete: an uncertain commit is recovered from this same identity on a new connection.
 	const [claim, result] = await Promise.all([
 		claimInsert,
-		mutation({ id: customer.id, billingAccountId: scope.billingAccountId }, prefetched),
+		mutation({ id: customer.id, billingAccountId: scope.billingAccountId }, prefetched.value),
 	]);
 	if (claim === null) throw new Error("Usage operation claim was not persisted");
 	// A result too large for the bounded recovery snapshot is answered, and replayed, with only the
@@ -235,7 +253,8 @@ export async function runUsageOperation<T extends UsageOperationResult, P = unde
  * The result with its balance breakdown narrowed to the allocations the operation changed. Totals
  * stay exact; the balance read still lists every allocation.
  */
-export function withChangedAllocationsOnly<T extends UsageOperationResult>(result: T): T {
+export function withChangedAllocationsOnly<T extends StoredOutcome>(result: T): T {
+	if (!("deductions" in result)) return result;
 	const changed = new Set(result.deductions.map((deduction) => deduction.allocationId));
 	return {
 		...result,
@@ -251,7 +270,7 @@ async function completeClaim(
 	executor: QueryExecutor,
 	projectId: string,
 	claimId: string,
-	outcome: UsageOperationResult,
+	outcome: StoredOutcome,
 ): Promise<boolean> {
 	const completed = await executeOne<{ id: string }>(
 		executor,
@@ -295,10 +314,17 @@ export async function lookupUsageOperation(
 	}
 	if (claim.completed_at === null)
 		return { ...identity, status: "processing", outcome: null, completedAt: null };
+	const outcome = retainedResult(claim);
+	if ("operationId" in outcome && outcome.entityId !== (input.entityId ?? null)) {
+		throw new NotFoundBillingError(
+			"Usage operation was not found in this entity scope",
+			"OPERATION_NOT_FOUND",
+		);
+	}
 	return {
 		...identity,
 		status: "completed",
-		outcome: compactReceipt(retainedResult(claim)),
+		outcome: "operationId" in outcome ? outcome : compactReceipt(outcome),
 		completedAt: new Date(claim.completed_at).toISOString(),
 	};
 }

@@ -9540,106 +9540,396 @@
                     "type": "string"
                   },
                   "outcome": {
-                    "properties": {
-                      "allowed": {
-                        "type": "boolean"
+                    "anyOf": [
+                      {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "allowed": {
+                                "enum": [
+                                  true
+                                ],
+                                "type": "boolean"
+                              },
+                              "balance": {
+                                "properties": {
+                                  "available": {
+                                    "type": "string"
+                                  },
+                                  "consumed": {
+                                    "type": "string"
+                                  },
+                                  "featureId": {
+                                    "type": "string"
+                                  },
+                                  "granted": {
+                                    "type": "string"
+                                  },
+                                  "held": {
+                                    "type": "string"
+                                  },
+                                  "unit": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "featureId",
+                                  "unit",
+                                  "granted",
+                                  "consumed",
+                                  "held",
+                                  "available"
+                                ],
+                                "type": "object"
+                              },
+                              "entityId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "featureId": {
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "consume"
+                                ],
+                                "type": "string"
+                              },
+                              "operationId": {
+                                "type": "string"
+                              },
+                              "rated": {
+                                "properties": {
+                                  "featureId": {
+                                    "type": "string"
+                                  },
+                                  "unit": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "featureId",
+                                  "unit",
+                                  "value"
+                                ],
+                                "type": "object"
+                              },
+                              "receiptId": {
+                                "type": "string"
+                              },
+                              "recordedAt": {
+                                "type": "string"
+                              },
+                              "usage": {
+                                "properties": {
+                                  "featureId": {
+                                    "type": "string"
+                                  },
+                                  "unit": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "featureId",
+                                  "unit",
+                                  "value"
+                                ],
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "featureId",
+                              "entityId",
+                              "usage",
+                              "rated",
+                              "balance",
+                              "operation",
+                              "operationId",
+                              "allowed",
+                              "receiptId",
+                              "recordedAt"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "allowed": {
+                                "enum": [
+                                  false
+                                ],
+                                "type": "boolean"
+                              },
+                              "balance": {
+                                "properties": {
+                                  "available": {
+                                    "type": "string"
+                                  },
+                                  "consumed": {
+                                    "type": "string"
+                                  },
+                                  "featureId": {
+                                    "type": "string"
+                                  },
+                                  "granted": {
+                                    "type": "string"
+                                  },
+                                  "held": {
+                                    "type": "string"
+                                  },
+                                  "unit": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "featureId",
+                                  "unit",
+                                  "granted",
+                                  "consumed",
+                                  "held",
+                                  "available"
+                                ],
+                                "type": "object"
+                              },
+                              "control": {
+                                "properties": {
+                                  "currentValue": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "spend_limit",
+                                      "usage_limit"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "limitValue": {
+                                    "type": "string"
+                                  },
+                                  "policyId": {
+                                    "type": "string"
+                                  },
+                                  "remainingValue": {
+                                    "type": "string"
+                                  },
+                                  "requestedValue": {
+                                    "type": "string"
+                                  },
+                                  "revision": {
+                                    "type": "number"
+                                  },
+                                  "source": {
+                                    "enum": [
+                                      "account",
+                                      "entity",
+                                      "plan_default",
+                                      "contract"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "source",
+                                  "revision",
+                                  "policyId",
+                                  "limitValue",
+                                  "currentValue",
+                                  "requestedValue",
+                                  "remainingValue"
+                                ],
+                                "type": "object"
+                              },
+                              "entityId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "featureId": {
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "consume"
+                                ],
+                                "type": "string"
+                              },
+                              "operationId": {
+                                "type": "string"
+                              },
+                              "rated": {
+                                "properties": {
+                                  "featureId": {
+                                    "type": "string"
+                                  },
+                                  "unit": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "featureId",
+                                  "unit",
+                                  "value"
+                                ],
+                                "type": "object"
+                              },
+                              "reason": {
+                                "enum": [
+                                  "not_entitled",
+                                  "insufficient_balance",
+                                  "control_limit_exceeded"
+                                ],
+                                "type": "string"
+                              },
+                              "usage": {
+                                "properties": {
+                                  "featureId": {
+                                    "type": "string"
+                                  },
+                                  "unit": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "featureId",
+                                  "unit",
+                                  "value"
+                                ],
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "featureId",
+                              "entityId",
+                              "usage",
+                              "rated",
+                              "balance",
+                              "operation",
+                              "operationId",
+                              "allowed",
+                              "reason"
+                            ],
+                            "type": "object"
+                          }
+                        ]
                       },
-                      "balance": {
+                      {
                         "properties": {
-                          "available": {
+                          "allowed": {
+                            "type": "boolean"
+                          },
+                          "balance": {
+                            "properties": {
+                              "available": {
+                                "type": "string"
+                              },
+                              "consumed": {
+                                "type": "string"
+                              },
+                              "featureKey": {
+                                "type": "string"
+                              },
+                              "held": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "featureKey",
+                              "available",
+                              "consumed",
+                              "held"
+                            ],
+                            "type": "object"
+                          },
+                          "expiresAt": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "originalRecordedAt": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "originalUsageEventId": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "quantity": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "reason": {
                             "type": "string"
                           },
-                          "consumed": {
-                            "type": "string"
+                          "recordedAt": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
                           },
-                          "featureKey": {
-                            "type": "string"
+                          "reservationId": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
                           },
-                          "held": {
-                            "type": "string"
+                          "reservationStatus": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "usageEventId": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "walletQuantity": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
                           }
                         },
                         "required": [
-                          "featureKey",
-                          "available",
-                          "consumed",
-                          "held"
+                          "allowed",
+                          "reason",
+                          "usageEventId",
+                          "recordedAt",
+                          "reservationId",
+                          "reservationStatus",
+                          "expiresAt",
+                          "quantity",
+                          "walletQuantity",
+                          "originalUsageEventId",
+                          "originalRecordedAt",
+                          "balance"
                         ],
                         "type": "object"
-                      },
-                      "expiresAt": {
-                        "type": [
-                          "null",
-                          "string"
-                        ]
-                      },
-                      "originalRecordedAt": {
-                        "type": [
-                          "null",
-                          "string"
-                        ]
-                      },
-                      "originalUsageEventId": {
-                        "type": [
-                          "null",
-                          "string"
-                        ]
-                      },
-                      "quantity": {
-                        "type": [
-                          "null",
-                          "string"
-                        ]
-                      },
-                      "reason": {
-                        "type": "string"
-                      },
-                      "recordedAt": {
-                        "type": [
-                          "null",
-                          "string"
-                        ]
-                      },
-                      "reservationId": {
-                        "type": [
-                          "null",
-                          "string"
-                        ]
-                      },
-                      "reservationStatus": {
-                        "type": [
-                          "null",
-                          "string"
-                        ]
-                      },
-                      "usageEventId": {
-                        "type": [
-                          "null",
-                          "string"
-                        ]
-                      },
-                      "walletQuantity": {
-                        "type": [
-                          "null",
-                          "string"
-                        ]
                       }
-                    },
-                    "required": [
-                      "allowed",
-                      "reason",
-                      "usageEventId",
-                      "recordedAt",
-                      "reservationId",
-                      "reservationStatus",
-                      "expiresAt",
-                      "quantity",
-                      "walletQuantity",
-                      "originalUsageEventId",
-                      "originalRecordedAt",
-                      "balance"
-                    ],
-                    "type": "object"
+                    ]
                   },
                   "status": {
                     "enum": [
@@ -15588,326 +15878,412 @@
       "postV1BillingAccountsByBillingAccountIdUsageCheckResponse200": {
         "properties": {
           "data": {
-            "properties": {
-              "allowed": {
-                "type": "boolean"
-              },
-              "balance": {
+            "anyOf": [
+              {
                 "properties": {
-                  "available": {
+                  "allowed": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
+                  },
+                  "checkedAt": {
                     "type": "string"
                   },
-                  "breakdown": {
-                    "items": {
-                      "properties": {
-                        "allocationId": {
-                          "type": "string"
-                        },
-                        "available": {
-                          "type": "string"
-                        },
-                        "carryOverOriginAllocationId": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "consumed": {
-                          "type": "string"
-                        },
-                        "createdAt": {
-                          "type": "string"
-                        },
-                        "entityId": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "expiresAt": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "held": {
-                          "type": "string"
-                        },
-                        "periodEndAt": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "periodStartAt": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "quantity": {
-                          "type": "string"
-                        },
-                        "reversed": {
-                          "type": "string"
-                        },
-                        "rolloverOriginAllocationId": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "rolloverPolicyRevision": {
-                          "type": [
-                            "null",
-                            "number"
-                          ]
-                        },
-                        "sourceKey": {
-                          "type": "string"
-                        },
-                        "sourceKind": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "allocationId",
-                        "entityId",
-                        "sourceKind",
-                        "sourceKey",
-                        "rolloverOriginAllocationId",
-                        "carryOverOriginAllocationId",
-                        "rolloverPolicyRevision",
-                        "quantity",
-                        "reversed",
-                        "consumed",
-                        "held",
-                        "available",
-                        "periodStartAt",
-                        "periodEndAt",
-                        "expiresAt",
-                        "createdAt"
-                      ],
-                      "type": "object"
-                    },
-                    "type": "array"
+                  "entityId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
-                  "consumed": {
-                    "type": "string"
-                  },
-                  "featureKey": {
-                    "type": "string"
-                  },
-                  "granted": {
-                    "type": "string"
-                  },
-                  "held": {
-                    "type": "string"
-                  },
-                  "scale": {
-                    "type": "number"
-                  },
-                  "unit": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "featureKey",
-                  "unit",
-                  "scale",
-                  "granted",
-                  "consumed",
-                  "held",
-                  "available",
-                  "breakdown"
-                ],
-                "type": "object"
-              },
-              "control": {
-                "properties": {
-                  "currentValue": {
+                  "featureId": {
                     "type": "string"
                   },
                   "kind": {
                     "enum": [
-                      "spend_limit",
-                      "usage_limit"
-                    ],
-                    "type": "string"
-                  },
-                  "limitValue": {
-                    "type": "string"
-                  },
-                  "policyId": {
-                    "type": "string"
-                  },
-                  "remainingValue": {
-                    "type": "string"
-                  },
-                  "requestedValue": {
-                    "type": "string"
-                  },
-                  "revision": {
-                    "type": "number"
-                  },
-                  "source": {
-                    "enum": [
-                      "account",
-                      "entity",
-                      "plan_default",
-                      "contract"
+                      "boolean"
                     ],
                     "type": "string"
                   }
                 },
                 "required": [
+                  "featureId",
+                  "entityId",
                   "kind",
-                  "source",
-                  "revision",
-                  "policyId",
-                  "limitValue",
-                  "currentValue",
-                  "requestedValue",
-                  "remainingValue"
-                ],
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "eligiblePurchaseActions": {
-                "items": {
-                  "properties": {
-                    "action": {
-                      "enum": [
-                        "purchase_required",
-                        "provider_action_required"
-                      ],
-                      "type": "string"
-                    },
-                    "provider": {
-                      "enum": [
-                        "google",
-                        "apple",
-                        "stripe"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "provider",
-                    "action"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "rateCard": {
-                "properties": {
-                  "entryId": {
-                    "type": [
-                      "null",
-                      "string"
-                    ]
-                  },
-                  "meterFeatureKey": {
-                    "type": "string"
-                  },
-                  "path": {
-                    "enum": [
-                      "direct",
-                      "pinned",
-                      "additive"
-                    ],
-                    "type": "string"
-                  },
-                  "pricingModel": {
-                    "enum": [
-                      "flat",
-                      "graduated"
-                    ],
-                    "type": "string"
-                  },
-                  "ratePerUnit": {
-                    "type": "string"
-                  },
-                  "revision": {
-                    "type": [
-                      "null",
-                      "number"
-                    ]
-                  },
-                  "revisionId": {
-                    "type": [
-                      "null",
-                      "string"
-                    ]
-                  },
-                  "tiers": {
-                    "items": {
-                      "properties": {
-                        "ratePerUnit": {
-                          "type": "string"
-                        },
-                        "upToQuantity": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "upToQuantity",
-                        "ratePerUnit"
-                      ],
-                      "type": "object"
-                    },
-                    "type": "array"
-                  },
-                  "walletFeatureKey": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "path",
-                  "revision",
-                  "revisionId",
-                  "entryId",
-                  "meterFeatureKey",
-                  "walletFeatureKey",
-                  "pricingModel",
-                  "ratePerUnit",
-                  "tiers"
+                  "checkedAt",
+                  "allowed"
                 ],
                 "type": "object"
               },
-              "reason": {
-                "enum": [
+              {
+                "properties": {
+                  "allowed": {
+                    "enum": [
+                      false
+                    ],
+                    "type": "boolean"
+                  },
+                  "checkedAt": {
+                    "type": "string"
+                  },
+                  "control": {
+                    "properties": {
+                      "currentValue": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "spend_limit",
+                          "usage_limit"
+                        ],
+                        "type": "string"
+                      },
+                      "limitValue": {
+                        "type": "string"
+                      },
+                      "policyId": {
+                        "type": "string"
+                      },
+                      "remainingValue": {
+                        "type": "string"
+                      },
+                      "requestedValue": {
+                        "type": "string"
+                      },
+                      "revision": {
+                        "type": "number"
+                      },
+                      "source": {
+                        "enum": [
+                          "account",
+                          "entity",
+                          "plan_default",
+                          "contract"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "source",
+                      "revision",
+                      "policyId",
+                      "limitValue",
+                      "currentValue",
+                      "requestedValue",
+                      "remainingValue"
+                    ],
+                    "type": "object"
+                  },
+                  "entityId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "featureId": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "boolean"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "enum": [
+                      "not_entitled",
+                      "insufficient_balance",
+                      "control_limit_exceeded"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "featureId",
+                  "entityId",
+                  "kind",
+                  "checkedAt",
                   "allowed",
-                  "insufficient_balance",
-                  "control_limit_exceeded",
-                  "configuration_error"
+                  "reason"
                 ],
-                "type": "string"
+                "type": "object"
               },
-              "requestedQuantity": {
-                "type": "string"
+              {
+                "properties": {
+                  "allowed": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
+                  },
+                  "balance": {
+                    "properties": {
+                      "available": {
+                        "type": "string"
+                      },
+                      "consumed": {
+                        "type": "string"
+                      },
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "granted": {
+                        "type": "string"
+                      },
+                      "held": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "granted",
+                      "consumed",
+                      "held",
+                      "available"
+                    ],
+                    "type": "object"
+                  },
+                  "checkedAt": {
+                    "type": "string"
+                  },
+                  "entityId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "featureId": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "metered"
+                    ],
+                    "type": "string"
+                  },
+                  "rated": {
+                    "properties": {
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "usage": {
+                    "properties": {
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "value"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "featureId",
+                  "entityId",
+                  "usage",
+                  "rated",
+                  "balance",
+                  "kind",
+                  "checkedAt",
+                  "allowed"
+                ],
+                "type": "object"
               },
-              "walletQuantity": {
-                "type": "string"
+              {
+                "properties": {
+                  "allowed": {
+                    "enum": [
+                      false
+                    ],
+                    "type": "boolean"
+                  },
+                  "balance": {
+                    "properties": {
+                      "available": {
+                        "type": "string"
+                      },
+                      "consumed": {
+                        "type": "string"
+                      },
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "granted": {
+                        "type": "string"
+                      },
+                      "held": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "granted",
+                      "consumed",
+                      "held",
+                      "available"
+                    ],
+                    "type": "object"
+                  },
+                  "checkedAt": {
+                    "type": "string"
+                  },
+                  "control": {
+                    "properties": {
+                      "currentValue": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "spend_limit",
+                          "usage_limit"
+                        ],
+                        "type": "string"
+                      },
+                      "limitValue": {
+                        "type": "string"
+                      },
+                      "policyId": {
+                        "type": "string"
+                      },
+                      "remainingValue": {
+                        "type": "string"
+                      },
+                      "requestedValue": {
+                        "type": "string"
+                      },
+                      "revision": {
+                        "type": "number"
+                      },
+                      "source": {
+                        "enum": [
+                          "account",
+                          "entity",
+                          "plan_default",
+                          "contract"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "source",
+                      "revision",
+                      "policyId",
+                      "limitValue",
+                      "currentValue",
+                      "requestedValue",
+                      "remainingValue"
+                    ],
+                    "type": "object"
+                  },
+                  "entityId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "featureId": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "metered"
+                    ],
+                    "type": "string"
+                  },
+                  "rated": {
+                    "properties": {
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "reason": {
+                    "enum": [
+                      "not_entitled",
+                      "insufficient_balance",
+                      "control_limit_exceeded"
+                    ],
+                    "type": "string"
+                  },
+                  "usage": {
+                    "properties": {
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "value"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "featureId",
+                  "entityId",
+                  "usage",
+                  "rated",
+                  "balance",
+                  "kind",
+                  "checkedAt",
+                  "allowed",
+                  "reason"
+                ],
+                "type": "object"
               }
-            },
-            "required": [
-              "allowed",
-              "reason",
-              "requestedQuantity",
-              "walletQuantity",
-              "balance",
-              "rateCard",
-              "eligiblePurchaseActions",
-              "control"
-            ],
-            "type": "object"
+            ]
           },
           "success": {
             "enum": [
@@ -15925,374 +16301,290 @@
       "postV1BillingAccountsByBillingAccountIdUsageConsumeResponse200": {
         "properties": {
           "data": {
-            "properties": {
-              "allowed": {
-                "type": "boolean"
-              },
-              "balance": {
+            "oneOf": [
+              {
                 "properties": {
-                  "available": {
-                    "type": "string"
+                  "allowed": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
                   },
-                  "breakdown": {
-                    "items": {
-                      "properties": {
-                        "allocationId": {
-                          "type": "string"
-                        },
-                        "available": {
-                          "type": "string"
-                        },
-                        "carryOverOriginAllocationId": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "consumed": {
-                          "type": "string"
-                        },
-                        "createdAt": {
-                          "type": "string"
-                        },
-                        "entityId": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "expiresAt": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "held": {
-                          "type": "string"
-                        },
-                        "periodEndAt": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "periodStartAt": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "quantity": {
-                          "type": "string"
-                        },
-                        "reversed": {
-                          "type": "string"
-                        },
-                        "rolloverOriginAllocationId": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        },
-                        "rolloverPolicyRevision": {
-                          "type": [
-                            "null",
-                            "number"
-                          ]
-                        },
-                        "sourceKey": {
-                          "type": "string"
-                        },
-                        "sourceKind": {
-                          "type": "string"
-                        }
+                  "balance": {
+                    "properties": {
+                      "available": {
+                        "type": "string"
                       },
-                      "required": [
-                        "allocationId",
-                        "entityId",
-                        "sourceKind",
-                        "sourceKey",
-                        "rolloverOriginAllocationId",
-                        "carryOverOriginAllocationId",
-                        "rolloverPolicyRevision",
-                        "quantity",
-                        "reversed",
-                        "consumed",
-                        "held",
-                        "available",
-                        "periodStartAt",
-                        "periodEndAt",
-                        "expiresAt",
-                        "createdAt"
-                      ],
-                      "type": "object"
-                    },
-                    "type": "array"
-                  },
-                  "consumed": {
-                    "type": "string"
-                  },
-                  "featureKey": {
-                    "type": "string"
-                  },
-                  "granted": {
-                    "type": "string"
-                  },
-                  "held": {
-                    "type": "string"
-                  },
-                  "scale": {
-                    "type": "number"
-                  },
-                  "unit": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "featureKey",
-                  "unit",
-                  "scale",
-                  "granted",
-                  "consumed",
-                  "held",
-                  "available",
-                  "breakdown"
-                ],
-                "type": "object"
-              },
-              "control": {
-                "properties": {
-                  "currentValue": {
-                    "type": "string"
-                  },
-                  "kind": {
-                    "enum": [
-                      "spend_limit",
-                      "usage_limit"
-                    ],
-                    "type": "string"
-                  },
-                  "limitValue": {
-                    "type": "string"
-                  },
-                  "policyId": {
-                    "type": "string"
-                  },
-                  "remainingValue": {
-                    "type": "string"
-                  },
-                  "requestedValue": {
-                    "type": "string"
-                  },
-                  "revision": {
-                    "type": "number"
-                  },
-                  "source": {
-                    "enum": [
-                      "account",
-                      "entity",
-                      "plan_default",
-                      "contract"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "source",
-                  "revision",
-                  "policyId",
-                  "limitValue",
-                  "currentValue",
-                  "requestedValue",
-                  "remainingValue"
-                ],
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "deductions": {
-                "items": {
-                  "properties": {
-                    "allocationId": {
-                      "type": "string"
-                    },
-                    "expiresAt": {
-                      "type": [
-                        "null",
-                        "string"
-                      ]
-                    },
-                    "quantity": {
-                      "type": "string"
-                    },
-                    "sourceKey": {
-                      "type": "string"
-                    },
-                    "sourceKind": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "allocationId",
-                    "quantity",
-                    "sourceKind",
-                    "sourceKey",
-                    "expiresAt"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "eligiblePurchaseActions": {
-                "items": {
-                  "properties": {
-                    "action": {
-                      "enum": [
-                        "purchase_required",
-                        "provider_action_required"
-                      ],
-                      "type": "string"
-                    },
-                    "provider": {
-                      "enum": [
-                        "google",
-                        "apple",
-                        "stripe"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "provider",
-                    "action"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "rateCard": {
-                "properties": {
-                  "entryId": {
-                    "type": [
-                      "null",
-                      "string"
-                    ]
-                  },
-                  "meterFeatureKey": {
-                    "type": "string"
-                  },
-                  "path": {
-                    "enum": [
-                      "direct",
-                      "pinned",
-                      "additive"
-                    ],
-                    "type": "string"
-                  },
-                  "pricingModel": {
-                    "enum": [
-                      "flat",
-                      "graduated"
-                    ],
-                    "type": "string"
-                  },
-                  "ratePerUnit": {
-                    "type": "string"
-                  },
-                  "revision": {
-                    "type": [
-                      "null",
-                      "number"
-                    ]
-                  },
-                  "revisionId": {
-                    "type": [
-                      "null",
-                      "string"
-                    ]
-                  },
-                  "tiers": {
-                    "items": {
-                      "properties": {
-                        "ratePerUnit": {
-                          "type": "string"
-                        },
-                        "upToQuantity": {
-                          "type": [
-                            "null",
-                            "string"
-                          ]
-                        }
+                      "consumed": {
+                        "type": "string"
                       },
-                      "required": [
-                        "upToQuantity",
-                        "ratePerUnit"
-                      ],
-                      "type": "object"
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "granted": {
+                        "type": "string"
+                      },
+                      "held": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      }
                     },
-                    "type": "array"
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "granted",
+                      "consumed",
+                      "held",
+                      "available"
+                    ],
+                    "type": "object"
                   },
-                  "walletFeatureKey": {
+                  "entityId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "featureId": {
                     "type": "string"
+                  },
+                  "operation": {
+                    "enum": [
+                      "consume"
+                    ],
+                    "type": "string"
+                  },
+                  "operationId": {
+                    "type": "string"
+                  },
+                  "rated": {
+                    "properties": {
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "receiptId": {
+                    "type": "string"
+                  },
+                  "recordedAt": {
+                    "type": "string"
+                  },
+                  "usage": {
+                    "properties": {
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "value"
+                    ],
+                    "type": "object"
                   }
                 },
                 "required": [
-                  "path",
-                  "revision",
-                  "revisionId",
-                  "entryId",
-                  "meterFeatureKey",
-                  "walletFeatureKey",
-                  "pricingModel",
-                  "ratePerUnit",
-                  "tiers"
-                ],
-                "type": "object"
-              },
-              "reason": {
-                "enum": [
+                  "featureId",
+                  "entityId",
+                  "usage",
+                  "rated",
+                  "balance",
+                  "operation",
+                  "operationId",
                   "allowed",
-                  "insufficient_balance",
-                  "control_limit_exceeded",
-                  "configuration_error"
+                  "receiptId",
+                  "recordedAt"
                 ],
-                "type": "string"
+                "type": "object"
               },
-              "recordedAt": {
-                "type": [
-                  "null",
-                  "string"
-                ]
-              },
-              "requestedQuantity": {
-                "type": "string"
-              },
-              "usageEventId": {
-                "type": [
-                  "null",
-                  "string"
-                ]
-              },
-              "walletQuantity": {
-                "type": "string"
+              {
+                "properties": {
+                  "allowed": {
+                    "enum": [
+                      false
+                    ],
+                    "type": "boolean"
+                  },
+                  "balance": {
+                    "properties": {
+                      "available": {
+                        "type": "string"
+                      },
+                      "consumed": {
+                        "type": "string"
+                      },
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "granted": {
+                        "type": "string"
+                      },
+                      "held": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "granted",
+                      "consumed",
+                      "held",
+                      "available"
+                    ],
+                    "type": "object"
+                  },
+                  "control": {
+                    "properties": {
+                      "currentValue": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "spend_limit",
+                          "usage_limit"
+                        ],
+                        "type": "string"
+                      },
+                      "limitValue": {
+                        "type": "string"
+                      },
+                      "policyId": {
+                        "type": "string"
+                      },
+                      "remainingValue": {
+                        "type": "string"
+                      },
+                      "requestedValue": {
+                        "type": "string"
+                      },
+                      "revision": {
+                        "type": "number"
+                      },
+                      "source": {
+                        "enum": [
+                          "account",
+                          "entity",
+                          "plan_default",
+                          "contract"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "source",
+                      "revision",
+                      "policyId",
+                      "limitValue",
+                      "currentValue",
+                      "requestedValue",
+                      "remainingValue"
+                    ],
+                    "type": "object"
+                  },
+                  "entityId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "featureId": {
+                    "type": "string"
+                  },
+                  "operation": {
+                    "enum": [
+                      "consume"
+                    ],
+                    "type": "string"
+                  },
+                  "operationId": {
+                    "type": "string"
+                  },
+                  "rated": {
+                    "properties": {
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "reason": {
+                    "enum": [
+                      "not_entitled",
+                      "insufficient_balance",
+                      "control_limit_exceeded"
+                    ],
+                    "type": "string"
+                  },
+                  "usage": {
+                    "properties": {
+                      "featureId": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "featureId",
+                      "unit",
+                      "value"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "featureId",
+                  "entityId",
+                  "usage",
+                  "rated",
+                  "balance",
+                  "operation",
+                  "operationId",
+                  "allowed",
+                  "reason"
+                ],
+                "type": "object"
               }
-            },
-            "required": [
-              "usageEventId",
-              "recordedAt",
-              "deductions",
-              "allowed",
-              "reason",
-              "requestedQuantity",
-              "walletQuantity",
-              "balance",
-              "rateCard",
-              "eligiblePurchaseActions",
-              "control"
-            ],
-            "type": "object"
+            ]
           },
           "success": {
             "enum": [
@@ -24908,8 +25200,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -26362,6 +26655,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -26576,6 +26870,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -27319,8 +27614,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -27392,55 +27688,30 @@
                 "additionalProperties": false,
                 "properties": {
                   "entityId": {
-                    "maxLength": 256,
+                    "maxLength": 200,
                     "minLength": 1,
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "featureKey": {
-                    "maxLength": 120,
-                    "minLength": 1,
+                    "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
                     "type": "string"
                   },
-                  "filters": {
-                    "additionalProperties": {
-                      "anyOf": [
-                        {
-                          "maxLength": 256,
-                          "type": "string"
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "boolean"
-                        }
-                      ]
-                    },
-                    "type": "object"
-                  },
-                  "metadata": {
-                    "additionalProperties": {},
-                    "type": "object"
+                  "featureId": {
+                    "maxLength": 120,
+                    "minLength": 1,
+                    "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+                    "type": "string"
                   },
                   "occurredAt": {
                     "format": "date-time",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
-                  "quantity": {
+                  "value": {
                     "maxLength": 80,
                     "minLength": 1,
+                    "pattern": "^\\d+(?:\\.\\d+)?$",
                     "type": "string"
                   }
                 },
                 "required": [
-                  "featureKey",
-                  "quantity"
+                  "featureId"
                 ],
                 "type": "object"
               }
@@ -27886,8 +28157,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -28168,8 +28440,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -28195,6 +28468,18 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entityId",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -52004,6 +52289,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -55573,6 +55859,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           }
@@ -55746,6 +56033,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -64720,6 +65008,415 @@
         "x-quotum-credential-access": "read_only"
       }
     },
+    "/v1/billing-accounts/{billingAccountId}": {
+      "get": {
+        "operationId": "getV1BillingAccountsByBillingAccountId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "createdAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/billing-accounts/{billingAccountId}",
+        "tags": [
+          "accounts"
+        ],
+        "x-quotum-credential-access": "read_only"
+      },
+      "put": {
+        "operationId": "putV1BillingAccountsByBillingAccountId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "createdAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "PUT /v1/billing-accounts/{billingAccountId}",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
     "/v1/billing-accounts/{billingAccountId}/auto-topup": {
       "get": {
         "operationId": "getV1BillingAccountsByBillingAccountIdAutoTopup",
@@ -64731,6 +65428,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -64921,6 +65619,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -65348,8 +66047,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -66592,6 +67292,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -66772,6 +67473,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -67028,6 +67730,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           }
@@ -67198,6 +67901,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           }
@@ -67211,6 +67915,7 @@
                   "externalId": {
                     "maxLength": 200,
                     "minLength": 1,
+                    "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
                     "type": "string"
                   },
                   "kind": {
@@ -67389,6 +68094,190 @@
         ]
       }
     },
+    "/v1/billing-accounts/{billingAccountId}/entities/{entityId}": {
+      "get": {
+        "operationId": "getV1BillingAccountsByBillingAccountIdEntitiesByEntityId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "entityId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/postV1BillingAccountsByBillingAccountIdEntitiesResponse201"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/billing-accounts/{billingAccountId}/entities/{entityId}",
+        "tags": [
+          "controls"
+        ],
+        "x-quotum-credential-access": "read_only"
+      }
+    },
     "/v1/billing-accounts/{billingAccountId}/entities/{entityId}/licenses/{featureKey}": {
       "get": {
         "operationId": "getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKey",
@@ -67400,6 +68289,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -67410,6 +68300,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -67773,6 +68664,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -67986,6 +68878,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -68176,6 +69069,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           }
@@ -72359,6 +73253,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -72542,6 +73437,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           }
@@ -72712,6 +73608,7 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -72960,8 +73857,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           }
@@ -72973,55 +73871,30 @@
                 "additionalProperties": false,
                 "properties": {
                   "entityId": {
-                    "maxLength": 256,
+                    "maxLength": 200,
                     "minLength": 1,
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "featureKey": {
-                    "maxLength": 120,
-                    "minLength": 1,
+                    "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
                     "type": "string"
                   },
-                  "filters": {
-                    "additionalProperties": {
-                      "anyOf": [
-                        {
-                          "maxLength": 256,
-                          "type": "string"
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "boolean"
-                        }
-                      ]
-                    },
-                    "type": "object"
-                  },
-                  "metadata": {
-                    "additionalProperties": {},
-                    "type": "object"
+                  "featureId": {
+                    "maxLength": 120,
+                    "minLength": 1,
+                    "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+                    "type": "string"
                   },
                   "occurredAt": {
                     "format": "date-time",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
-                  "quantity": {
+                  "value": {
                     "maxLength": 80,
                     "minLength": 1,
+                    "pattern": "^\\d+(?:\\.\\d+)?$",
                     "type": "string"
                   }
                 },
                 "required": [
-                  "featureKey",
-                  "quantity"
+                  "featureId"
                 ],
                 "type": "object"
               }
@@ -73195,8 +74068,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -73218,55 +74092,31 @@
                 "additionalProperties": false,
                 "properties": {
                   "entityId": {
-                    "maxLength": 256,
+                    "maxLength": 200,
                     "minLength": 1,
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "featureKey": {
-                    "maxLength": 120,
-                    "minLength": 1,
+                    "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
                     "type": "string"
                   },
-                  "filters": {
-                    "additionalProperties": {
-                      "anyOf": [
-                        {
-                          "maxLength": 256,
-                          "type": "string"
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "boolean"
-                        }
-                      ]
-                    },
-                    "type": "object"
-                  },
-                  "metadata": {
-                    "additionalProperties": {},
-                    "type": "object"
+                  "featureId": {
+                    "maxLength": 120,
+                    "minLength": 1,
+                    "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+                    "type": "string"
                   },
                   "occurredAt": {
                     "format": "date-time",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
-                  "quantity": {
+                  "value": {
                     "maxLength": 80,
                     "minLength": 1,
+                    "pattern": "^\\d+(?:\\.\\d+)?$",
                     "type": "string"
                   }
                 },
                 "required": [
-                  "featureKey",
-                  "quantity"
+                  "featureId",
+                  "value"
                 ],
                 "type": "object"
               }
@@ -73679,8 +74529,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -73922,8 +74773,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -73949,6 +74801,18 @@
             "schema": {
               "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entityId",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           }
@@ -74110,6 +74974,630 @@
         "x-quotum-credential-access": "read_only"
       }
     },
+    "/v1/billing-accounts/{billingAccountId}/usage/receipts/{receiptId}": {
+      "get": {
+        "operationId": "getV1BillingAccountsByBillingAccountIdUsageReceiptsByReceiptId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "receiptId",
+            "required": true,
+            "schema": {
+              "maxLength": 503,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entityId",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "balance": {
+                          "properties": {
+                            "available": {
+                              "type": "string"
+                            },
+                            "consumed": {
+                              "type": "string"
+                            },
+                            "featureId": {
+                              "type": "string"
+                            },
+                            "granted": {
+                              "type": "string"
+                            },
+                            "held": {
+                              "type": "string"
+                            },
+                            "unit": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "featureId",
+                            "unit",
+                            "granted",
+                            "consumed",
+                            "held",
+                            "available"
+                          ],
+                          "type": "object"
+                        },
+                        "billingAccountId": {
+                          "type": "string"
+                        },
+                        "deductionCount": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "entityId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "featureId": {
+                          "type": "string"
+                        },
+                        "occurredAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "operation": {
+                          "enum": [
+                            "consume"
+                          ],
+                          "type": "string"
+                        },
+                        "operationId": {
+                          "type": "string"
+                        },
+                        "rated": {
+                          "properties": {
+                            "featureId": {
+                              "type": "string"
+                            },
+                            "unit": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "featureId",
+                            "unit",
+                            "value"
+                          ],
+                          "type": "object"
+                        },
+                        "rating": {
+                          "properties": {
+                            "path": {
+                              "enum": [
+                                "direct",
+                                "pinned",
+                                "additive"
+                              ],
+                              "type": "string"
+                            },
+                            "revision": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "revision"
+                          ],
+                          "type": "object"
+                        },
+                        "receiptId": {
+                          "type": "string"
+                        },
+                        "recordedAt": {
+                          "type": "string"
+                        },
+                        "usage": {
+                          "properties": {
+                            "featureId": {
+                              "type": "string"
+                            },
+                            "unit": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "featureId",
+                            "unit",
+                            "value"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "featureId",
+                        "entityId",
+                        "usage",
+                        "rated",
+                        "balance",
+                        "operation",
+                        "operationId",
+                        "receiptId",
+                        "billingAccountId",
+                        "occurredAt",
+                        "recordedAt",
+                        "rating",
+                        "deductionCount"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/billing-accounts/{billingAccountId}/usage/receipts/{receiptId}",
+        "tags": [
+          "metering"
+        ],
+        "x-quotum-credential-access": "read_only"
+      }
+    },
+    "/v1/billing-accounts/{billingAccountId}/usage/receipts/{receiptId}/deductions": {
+      "get": {
+        "operationId": "getV1BillingAccountsByBillingAccountIdUsageReceiptsByReceiptIdDeductions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "receiptId",
+            "required": true,
+            "schema": {
+              "maxLength": 503,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entityId",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 1024,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "properties": {
+                              "expiresAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "sourceKey": {
+                                "type": "string"
+                              },
+                              "sourceKind": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceKind",
+                              "sourceKey",
+                              "value",
+                              "expiresAt"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "nextCursor": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "nextCursor"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/billing-accounts/{billingAccountId}/usage/receipts/{receiptId}/deductions",
+        "tags": [
+          "metering"
+        ],
+        "x-quotum-credential-access": "read_only"
+      }
+    },
     "/v1/billing-accounts/{billingAccountId}/usage/reservations": {
       "post": {
         "operationId": "postV1BillingAccountsByBillingAccountIdUsageReservations",
@@ -74119,8 +75607,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -74369,8 +75858,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -74591,8 +76081,9 @@
             "name": "billingAccountId",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "maxLength": 200,
               "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
               "type": "string"
             }
           },
@@ -76545,6 +78036,10 @@
     }
   ],
   "tags": [
+    {
+      "description": "Implemented accounts operations.",
+      "name": "accounts"
+    },
     {
       "description": "Implemented admin operations.",
       "name": "admin"

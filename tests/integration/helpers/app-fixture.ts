@@ -196,6 +196,7 @@ export function createIntegrationApp({
 			env,
 			entitlementService: new EntitlementService(repository),
 			meteringService: new MeteringService(repository),
+			usageApiService: repository.usageApi,
 			controlsEnterpriseService: repository.controlsEnterprise,
 			promotionService: repository.promotions,
 			balanceAdjustmentService: repository.balanceAdjustments,

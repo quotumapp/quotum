@@ -602,6 +602,7 @@ export async function applyMeterLimitConsumption(
 		balance: meterLimitBalance(input.meterLimit, updated.usage),
 		usageEventId: event.id,
 		recordedAt: toIso(event.recorded_at),
+		recordedAtExact: event.recorded_at_exact,
 		deductions: [],
 	};
 }

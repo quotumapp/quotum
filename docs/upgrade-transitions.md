@@ -10,6 +10,25 @@ moves to a changed baseline by restoring its data into a freshly migrated databa
 the later sections name the steps they reuse and add what their own change needs. A release's pull requests name the baselines it changes under
 `Upgrade notes`.
 
+## Public SDK account and receipt cutover
+
+`migrations/003_metering_and_pricing.sql` now permits recovery version 2 and adds the nullable,
+bounded `usage_events.receipt` snapshot. Update the Drizzle mirror and committed OpenAPI together.
+Fresh disposable databases use the revised baseline. For a populated installation, follow the
+backup/restore transition below, preserving existing claims and events; do not reset it or bypass
+migration checksums. Historical events have no public receipt snapshot and are not synthesized from
+current catalog or balance state.
+
+Coordinate the API, bundled SDK, MCP, merchant adapter, UI contract and consuming backends:
+checks and consumes now use `featureId`/`value`, reject filters and metadata, and return compact
+results. Create accounts explicitly before usage and entity creation. New consumes store recovery
+version 2 with the exact public outcome and receipt snapshot. Prior consumes retain their original
+identity and billing effects; the new HTTP surface returns `OPERATION_RESULT_EXPIRED` for their
+legacy outcome rather than returning another response type or charging again. Drain or reconcile
+in-flight legacy operations before cutover; never mint replacement keys for uncertain charges.
+Reserve/confirm/release/correction retain their current response contract for this preview.
+No environment variable or API package version change is required.
+
 ## Stored job provider identity
 
 The baselines add a required `provider` column to `subscription_changes` and

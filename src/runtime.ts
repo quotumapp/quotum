@@ -269,6 +269,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const staff = createApp({
 		env,
 		entitlementService: new EntitlementService(billingRepository),
+		usageApiService: billingRepository.usageApi,
 		projectContextResolver,
 		providerRegistry,
 		providerCapabilityReads: capabilityReads,

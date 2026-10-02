@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { parseReceiptId } from "../../src/db/repository/usage-receipts";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -65,12 +66,12 @@ localDescribe("operator grants and administrative debits", () => {
 		const correct = (
 			billingAccountId: string,
 			key: string,
-			original: { usageEventId: string; recordedAt: string },
+			original: { receiptId?: string; usageEventId?: string; recordedAt: string },
 			quantity: string,
 		) =>
 			testRequest(
 				app,
-				`/v1/billing-accounts/${billingAccountId}/usage/events/${original.usageEventId}/corrections`,
+				`/v1/billing-accounts/${billingAccountId}/usage/events/${original.receiptId ? parseReceiptId(original.receiptId).id : original.usageEventId}/corrections`,
 				{
 					method: "POST",
 					headers: {
@@ -129,12 +130,12 @@ localDescribe("operator grants and administrative debits", () => {
 		expect(await context.sql`SELECT id FROM purchases`).toHaveLength(0);
 
 		const consumed = await usage("support_account", "consume", "spend-1", {
-			featureKey: "model_tokens",
-			quantity: "2000",
+			featureId: "model_tokens",
+			value: "2000",
 		});
 		expect((await consumed.json()).data).toMatchObject({
 			allowed: true,
-			balance: { available: "90", breakdown: [{ sourceKind: "operator", available: "90" }] },
+			balance: { available: "90" },
 		});
 		const listed = await get("/v1/admin/operator-grants/support_account");
 		expect((await listed.json()).data).toMatchObject([
@@ -205,13 +206,13 @@ localDescribe("operator grants and administrative debits", () => {
 		expect(own.status).toBe(201);
 
 		const entityUsage = await usage("support_account", "consume", "spend-seat", {
-			featureKey: "model_tokens",
-			quantity: "2000",
+			featureId: "model_tokens",
+			value: "2000",
 			entityId: "seat-1",
 		});
 		const accountUsage = await usage("support_account", "consume", "spend-account", {
-			featureKey: "model_tokens",
-			quantity: "400",
+			featureId: "model_tokens",
+			value: "400",
 		});
 
 		expect(entityUsage.status).toBe(200);
@@ -232,8 +233,8 @@ localDescribe("operator grants and administrative debits", () => {
 		const { get, post, usage, grant } = fixture();
 		const created = (await (await grant("revoke_account", "grant-1", "100")).json()).data.grant;
 		await usage("revoke_account", "consume", "spend-1", {
-			featureKey: "model_tokens",
-			quantity: "6000",
+			featureId: "model_tokens",
+			value: "6000",
 		});
 		const reserved = await usage("revoke_account", "reservations", "hold-1", {
 			featureKey: "model_tokens",
@@ -291,8 +292,8 @@ localDescribe("operator grants and administrative debits", () => {
 		const spent = (
 			await (
 				await usage("hold_account", "consume", "spend-1", {
-					featureKey: "model_tokens",
-					quantity: "6000",
+					featureId: "model_tokens",
+					value: "6000",
 				})
 			).json()
 		).data;

@@ -3,6 +3,7 @@ import { Elysia } from "elysia";
 import { createApp as createBillingApp } from "../../src/app";
 import type { AppDependencies } from "../../src/app/types";
 import type { MeteringServiceLike } from "../../src/billing/metering";
+import type { UsageApiServiceLike } from "../../src/billing/usage-api";
 import { composeRuntimeApp } from "../../src/composition/merchant-runtime";
 import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import type { FixtureBillingEnv as BillingEnv } from "../../src/testing/connection-fixtures";
@@ -53,7 +54,7 @@ const env: BillingEnv = {
 
 const auth = { authorization: "Bearer secret" };
 const consumePath = "/v1/billing-accounts/user_1/usage/consume";
-const validUsage = JSON.stringify({ featureKey: "api_calls", quantity: "1" });
+const validUsage = JSON.stringify({ featureId: "api_calls", value: "1" });
 
 function createApp(
 	dependencies: Partial<Omit<AppDependencies, "env">> & {
@@ -99,7 +100,18 @@ function recordingMeteringService() {
 		release: record("release"),
 		correct: record("correct"),
 	};
-	return { service, calls };
+	return {
+		service,
+		calls,
+		usage: {
+			check: record("check"),
+			consume: record("consume"),
+			createAccount: record("createAccount"),
+			getAccount: record("getAccount"),
+			getReceipt: record("getReceipt"),
+			listReceiptDeductions: record("listReceiptDeductions"),
+		} satisfies UsageApiServiceLike,
+	};
 }
 
 function send(
@@ -130,7 +142,10 @@ function meteredStream(totalBytes: number, chunkBytes = 64 * 1024) {
 describe("private request bodies", () => {
 	it("rejects non-finite JSON filter numbers before invoking metering", async () => {
 		const metering = recordingMeteringService();
-		const { app } = createApp({ meteringService: metering.service });
+		const { app } = createApp({
+			usageApiService: metering.usage,
+			meteringService: metering.service,
+		});
 		for (const value of ["1e400", "-1e400"]) {
 			const response = await send(app, consumePath, {
 				method: "POST",
@@ -152,7 +167,10 @@ describe("private request bodies", () => {
 
 	it("rejects form, multipart and binary bodies without reaching the handler", async () => {
 		const metering = recordingMeteringService();
-		const { app } = createApp({ meteringService: metering.service });
+		const { app } = createApp({
+			usageApiService: metering.usage,
+			meteringService: metering.service,
+		});
 		const form = new FormData();
 		form.set("featureKey", "api_calls");
 		form.set("quantity", "1");
@@ -187,7 +205,10 @@ describe("private request bodies", () => {
 
 	it("still parses JSON sent with a non-JSON content type, as the API always has", async () => {
 		const metering = recordingMeteringService();
-		const { app } = createApp({ meteringService: metering.service });
+		const { app } = createApp({
+			usageApiService: metering.usage,
+			meteringService: metering.service,
+		});
 
 		const response = await send(app, consumePath, {
 			method: "POST",
@@ -224,7 +245,10 @@ describe("private request bodies", () => {
 
 	it("accepts a reservation release without a body", async () => {
 		const metering = recordingMeteringService();
-		const { app } = createApp({ meteringService: metering.service });
+		const { app } = createApp({
+			usageApiService: metering.usage,
+			meteringService: metering.service,
+		});
 
 		const response = await send(
 			app,
@@ -238,7 +262,10 @@ describe("private request bodies", () => {
 
 	it("rejects an empty chunked body instead of handing it to another parser", async () => {
 		const metering = recordingMeteringService();
-		const { app } = createApp({ meteringService: metering.service });
+		const { app } = createApp({
+			usageApiService: metering.usage,
+			meteringService: metering.service,
+		});
 
 		const response = await send(
 			app,
@@ -329,7 +356,10 @@ describe("input Postgres would refuse", () => {
 
 	it("refuses a request body nested deeper than the walk allows", async () => {
 		const metering = recordingMeteringService();
-		const { app } = createApp({ meteringService: metering.service });
+		const { app } = createApp({
+			usageApiService: metering.usage,
+			meteringService: metering.service,
+		});
 		for (const depth of [100, 100_000]) {
 			const response = await send(app, consumePath, {
 				method: "POST",
@@ -348,7 +378,10 @@ describe("input Postgres would refuse", () => {
 
 	it("refuses NUL characters and unpaired surrogates in bodies, paths and queries", async () => {
 		const metering = recordingMeteringService();
-		const { app } = createApp({ meteringService: metering.service });
+		const { app } = createApp({
+			usageApiService: metering.usage,
+			meteringService: metering.service,
+		});
 		for (const body of [
 			'{"featureKey":"api\\u0000calls","quantity":"1"}',
 			'{"featureKey":"api_calls","quantity":"1","metadata":{"note":"a\\u0000b"}}',
@@ -376,7 +409,10 @@ describe("input Postgres would refuse", () => {
 
 	it("refuses dates a timestamp column cannot hold", async () => {
 		const metering = recordingMeteringService();
-		const { app } = createApp({ meteringService: metering.service });
+		const { app } = createApp({
+			usageApiService: metering.usage,
+			meteringService: metering.service,
+		});
 		const response = await send(app, consumePath, {
 			method: "POST",
 			headers: { ...auth, "idempotency-key": "year-zero", "content-type": "application/json" },
@@ -558,6 +594,7 @@ describe("metering operation metrics", () => {
 		const metering = recordingMeteringService();
 		const { app } = createApp({
 			metrics,
+			usageApiService: metering.usage,
 			meteringService: metering.service,
 			rateLimit: { meteringLimit: 2 },
 		});

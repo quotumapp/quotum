@@ -112,13 +112,16 @@ curl -s localhost:3000/v1/billing-accounts/user_1/balances/ai_credits "${AUTH[@]
 
 ## 7. Meter usage
 
+Explicit creation is idempotent, including for the account recorded by the preceding purchase.
+
 ```sh
+curl -s -X PUT localhost:3000/v1/billing-accounts/user_1 "${AUTH[@]}" -d '{}'
 curl -s -X POST localhost:3000/v1/billing-accounts/user_1/usage/check "${AUTH[@]}" \
-  -d '{"featureKey":"api_calls","quantity":"3"}' | jq '.data | {allowed, reason}'
+  -d '{"featureId":"api_calls","value":"3"}' | jq '.data | {allowed, reason}'
 
 curl -s -X POST localhost:3000/v1/billing-accounts/user_1/usage/consume "${AUTH[@]}" \
   -H "Idempotency-Key: quickstart-consume-1" \
-  -d '{"featureKey":"api_calls","quantity":"3"}' | jq '.data.balance | {granted, consumed, available}'
+  -d '{"featureId":"api_calls","value":"3"}' | jq '.data.balance | {granted, consumed, available}'
 # {"granted":"10","consumed":"3","available":"7"}
 
 curl -s localhost:3000/v1/billing-accounts/user_1/usage/events "${AUTH[@]}" | jq '.data[] | {operation, featureKey, quantity}'

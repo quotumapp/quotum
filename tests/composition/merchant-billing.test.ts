@@ -96,6 +96,51 @@ function command(
 }
 
 describe("merchant billing port", () => {
+	it("preserves and strictly validates the entity scope of an operation lookup", async () => {
+		const calls: unknown[] = [];
+		const outcome = {
+			operation: "consume" as const,
+			operationId: "job-1",
+			status: "processing" as const,
+			completedAt: null,
+			outcome: null,
+		};
+		const billing = port({
+			repository: {
+				async getUsageOperation(_project, input) {
+					calls.push(input);
+					return outcome;
+				},
+			},
+		});
+		const parameters = ["user_1", "consume", "job-1"];
+		expect(
+			await billing.dispatch(
+				command("usage.operation", {
+					parameters,
+					query: { entityId: "workspace/1" },
+				}),
+			),
+		).toEqual({ status: 200, body: { success: true, data: outcome } });
+		const invalidQueries: Record<string, string>[] = [
+			{ entityId: " workspace/1" },
+			{ entityId: "workspace/1", extra: "no" },
+		];
+		for (const query of invalidQueries) {
+			expect(
+				await billing.dispatch(command("usage.operation", { parameters, query })),
+			).toMatchObject({ status: 400, body: { error: { code: "INVALID_REQUEST" } } });
+		}
+		expect(calls).toEqual([
+			{
+				billingAccountId: "user_1",
+				operation: "consume",
+				operationId: "job-1",
+				entityId: "workspace/1",
+			},
+		]);
+	});
+
 	it("rejects each operation whose Stripe service lacks the method as not configured", async () => {
 		const billing = port();
 

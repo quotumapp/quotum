@@ -72,7 +72,7 @@ export async function applyDefaultPlan(
 }
 
 /**
- * Customer identity for the usage path. It reads first and inserts only a missing customer: the
+ * Customer identity for the usage path. Accounts must be explicitly created first. The
  * upsert in `ensureCustomer` locks the row for the rest of the transaction, which provider
  * mutations rely on as a per-customer mutex, but a usage call already serializes on its operation
  * lock and ordered allocation locks, and holding the customer row would queue the projection
@@ -93,7 +93,10 @@ export async function resolveUsageCustomer(
 	`,
 	);
 	if (existing !== null) return existing;
-	return await ensureCustomer(executor, projectId, billingAccountId);
+	throw new NotFoundBillingError(
+		"Billing account was not found; create it before recording usage",
+		"BILLING_ACCOUNT_NOT_FOUND",
+	);
 }
 
 export async function findCustomerByProviderCustomer(

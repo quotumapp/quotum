@@ -9,6 +9,7 @@ import type {
 	ReserveUsageInput,
 	UsageCorrectionResult,
 } from "./metering";
+import type { UsageConsumeResult } from "./usage-api";
 
 export const usageOperationKinds = ["consume", "reserve", "confirm", "release", "correct"] as const;
 export type UsageOperationKind = (typeof usageOperationKinds)[number];
@@ -26,6 +27,7 @@ export type UsageOperationResult =
 
 export interface UsageOperationLookupInput {
 	billingAccountId: string;
+	entityId?: string;
 	operation: UsageOperationKind;
 	operationId: string;
 }
@@ -51,5 +53,9 @@ export type UsageOperationLookupResult = {
 	operationId: string;
 } & (
 	| { status: "processing"; outcome: null; completedAt: null }
-	| { status: "completed"; outcome: UsageOperationReceipt; completedAt: string }
+	| {
+			status: "completed";
+			outcome: UsageOperationReceipt | UsageConsumeResult;
+			completedAt: string;
+	  }
 );
