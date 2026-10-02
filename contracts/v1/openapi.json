@@ -10127,6 +10127,9 @@
                                   "value"
                                 ],
                                 "type": "object"
+                              },
+                              "usageEventId": {
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -10139,6 +10142,7 @@
                               "operationId",
                               "allowed",
                               "receiptId",
+                              "usageEventId",
                               "recordedAt"
                             ],
                             "type": "object"
@@ -17116,6 +17120,9 @@
                       "value"
                     ],
                     "type": "object"
+                  },
+                  "usageEventId": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -17128,6 +17135,7 @@
                   "operationId",
                   "allowed",
                   "receiptId",
+                  "usageEventId",
                   "recordedAt"
                 ],
                 "type": "object"
@@ -79283,6 +79291,9 @@
                             "value"
                           ],
                           "type": "object"
+                        },
+                        "usageEventId": {
+                          "type": "string"
                         }
                       },
                       "required": [
@@ -79294,6 +79305,7 @@
                         "operation",
                         "operationId",
                         "receiptId",
+                        "usageEventId",
                         "billingAccountId",
                         "occurredAt",
                         "recordedAt",

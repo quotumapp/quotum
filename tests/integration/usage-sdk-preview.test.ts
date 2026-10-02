@@ -114,8 +114,10 @@ localDescribe("public usage SDK contract", () => {
 			rated: { value: "0.75", featureId: "ai_credits" },
 			balance: { available: "0.25" },
 		});
-		for (const field of ["reason", "deductions", "rateCard", "usageEventId"])
+		for (const field of ["reason", "deductions", "rateCard"])
 			expect(first).not.toHaveProperty(field);
+		// The usage event is returned so the consume can be corrected (owner decision, 2026-10-02).
+		expect(typeof first.usageEventId).toBe("string");
 		expect(first.balance).not.toHaveProperty("breakdown");
 		const scope = { billingAccountId: "payer", entityId: "workspace", receiptId: first.receiptId };
 		const receipt = await context.repository.usageApi.getReceipt(project, scope);
@@ -174,6 +176,59 @@ localDescribe("public usage SDK contract", () => {
 		await expect(
 			context.repository.usageApi.consume(project, { ...input, value: "151" }),
 		).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+	});
+
+	it("returns the usage event a correction needs with a compact consume", async () => {
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "payer",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "credit_grant",
+			sourceKey: "seed",
+		});
+		const { app, authHeaders } = createIntegrationApp(context);
+		const headers = { ...authHeaders(), "content-type": "application/json" };
+		const consumed = await testRequest(app, "/v1/billing-accounts/payer/usage/consume", {
+			method: "POST",
+			headers: { ...headers, "idempotency-key": "correctable" },
+			body: JSON.stringify({ featureId: "model_tokens", value: "100" }),
+		});
+		expect(consumed.status).toBe(200);
+		const result = (await consumed.json()).data;
+		expect(result.allowed).toBe(true);
+		expect(typeof result.usageEventId).toBe("string");
+		const available = async () =>
+			(await context.repository.getMeteringBalance(project, "payer", "ai_credits")).available;
+		const spent = await available();
+		expect(spent).not.toBe("10");
+
+		const receipt = await testRequest(
+			app,
+			`/v1/billing-accounts/payer/usage/receipts/${result.receiptId}`,
+			{ headers: authHeaders() },
+		);
+		expect((await receipt.json()).data.usageEventId).toBe(result.usageEventId);
+
+		// The usage event and its recorded time are all a correction names.
+		const corrected = await testRequest(
+			app,
+			`/v1/billing-accounts/payer/usage/events/${result.usageEventId}/corrections`,
+			{
+				method: "POST",
+				headers: {
+					...headers,
+					"idempotency-key": "correctable:refund",
+					"x-billing-actor": "support@acme.test",
+				},
+				body: JSON.stringify({
+					originalRecordedAt: result.recordedAt,
+					quantity: "100",
+					reason: "refund",
+				}),
+			},
+		);
+		expect(corrected.status).toBe(200);
+		expect(await available()).toBe("10");
 	});
 
 	it("concurrent delivery records one billing effect and retains the original outcome", async () => {

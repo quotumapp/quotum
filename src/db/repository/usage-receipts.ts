@@ -67,6 +67,7 @@ export async function persistUsageReceipt(
 		...context,
 		...identity,
 		receiptId: id,
+		usageEventId: result.usageEventId,
 		billingAccountId: input.billingAccountId,
 		occurredAt: input.occurredAt?.toISOString() ?? null,
 		recordedAt: result.recordedAt,
@@ -83,7 +84,14 @@ export async function persistUsageReceipt(
 	`,
 	);
 	if (saved === null) throw new Error("Usage receipt could not be persisted");
-	return { ...context, ...identity, allowed: true, receiptId: id, recordedAt: result.recordedAt };
+	return {
+		...context,
+		...identity,
+		allowed: true,
+		receiptId: id,
+		usageEventId: result.usageEventId,
+		recordedAt: result.recordedAt,
+	};
 }
 
 export class UsageReceiptRepository extends RepositoryModule {
