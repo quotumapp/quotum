@@ -98,7 +98,7 @@ export type UsageConsumeResult = UsageMeteredContext & {
 	operation: "consume";
 	operationId: string;
 } & (
-		| { allowed: true; receiptId: string; recordedAt: string }
+		| { allowed: true; receiptId: string; usageEventId: string; recordedAt: string }
 		| {
 				allowed: false;
 				reason: UsageDenialReason;
@@ -108,6 +108,8 @@ export type UsageConsumeResult = UsageMeteredContext & {
 
 export interface UsageReceipt extends UsageMeteredContext {
 	receiptId: string;
+	/** The usage event a correction names, with `recordedAt` as its `originalRecordedAt`. */
+	usageEventId: string;
 	operation: "consume";
 	operationId: string;
 	billingAccountId: string;

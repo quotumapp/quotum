@@ -65,10 +65,15 @@ still apply. Public responses contain canonical decimal strings.
 
 Metered results contain `featureId`, exact `entityId` (null for account scope), `usage` and `rated`
 quantities (`featureId`, `unit`, `value`), and a bounded `balance` with `featureId`, `unit`, `granted`,
-`consumed`, `held` and `available`. Boolean checks omit those quantities and balance. Consume also
+`consumed`, `held` and `available`. An unlimited quota reports `unlimited: true` with `granted` and
+`available` null; a meter limit also reports `scope`, `windowStartAt` and `windowEndAt`, the window
+counting the usage and when it resets. Boolean checks omit those quantities and balance. Consume also
 returns `operation: "consume"` and the caller's `operationId` from `Idempotency-Key`. Successful
-consumption includes `receiptId` and `recordedAt`; denial includes neither field. Allocation rows,
-rate-card tiers, purchase actions, internal event IDs and deduction arrays are absent.
+consumption includes `receiptId`, `usageEventId` and `recordedAt`; denial includes none of them.
+`usageEventId` and `recordedAt` are what a correction needs:
+`POST /v1/billing-accounts/:billingAccountId/usage/events/:usageEventId/corrections` with
+`originalRecordedAt` set to the consume's `recordedAt`. Allocation rows, rate-card tiers, purchase
+actions and deduction arrays are absent.
 
 Receipt detail is immutable, with operation and caller identity, account/entity scope, exact
 quantities, occurred/recorded times, balance after usage, catalog-rating reference and deduction
