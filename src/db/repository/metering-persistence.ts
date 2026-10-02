@@ -586,9 +586,10 @@ export async function checkMeterLimit(
 export interface LockedMeterLimitWindow {
 	/** The scope set's write row, which this write increments or reserves on. */
 	window: UsageWindowRow;
-	/** The usage and active holds the whole scope set counts. */
+	/** The usage and active holds the whole scope set counts, and the scope it counts them in. */
 	usage: string;
 	held: string;
+	scope: MeterLimitScope;
 	balance: MeteringBalance;
 	spendBalance: MeteringBalance;
 	decision: MeteringDecision;
@@ -628,7 +629,7 @@ export async function lockMeterLimitWindow(
 	);
 	const window = await upsertUsageWindow(executor, { ...input, selector: scoped.selector });
 	const { usage, held } = await readScopeSetExposure(executor, scoped.window, scoped.selector);
-	const balance = meterLimitBalance(input.meterLimit, usage, held);
+	const balance = meterLimitBalance(input.meterLimit, usage, held, scoped.selector.scope);
 	const decision = await checkMeterLimitFromBalance(
 		executor,
 		input.projectId,
@@ -642,7 +643,7 @@ export async function lockMeterLimitWindow(
 		input.customerId,
 		input.meterLimit,
 	);
-	return { window, usage, held, balance, spendBalance, decision };
+	return { window, usage, held, scope: scoped.selector.scope, balance, spendBalance, decision };
 }
 
 /** Applies an allowed, control-cleared consume to the window locked by `lockMeterLimitWindow`. */
@@ -714,7 +715,7 @@ export async function applyMeterLimitConsumption(
 	await enqueueMeteringProjection(executor, input.projectId, input.customerId, input.projectionKey);
 	return {
 		...locked.decision,
-		balance: meterLimitBalance(input.meterLimit, usageAfter, locked.held),
+		balance: meterLimitBalance(input.meterLimit, usageAfter, locked.held, locked.scope),
 		usageEventId: event.id,
 		recordedAt: toIso(event.recorded_at),
 		recordedAtExact: event.recorded_at_exact,
@@ -735,7 +736,7 @@ export async function reserveMeterLimit(
 		projectionKey: string;
 	},
 ): Promise<ReservationResult> {
-	const { window, usage, held, spendBalance, decision } = await lockMeterLimitWindow(
+	const { window, usage, held, scope, spendBalance, decision } = await lockMeterLimitWindow(
 		executor,
 		input,
 	);
@@ -831,6 +832,7 @@ export async function reserveMeterLimit(
 					decimalToUnits(input.quantity, input.meterLimit.feature.credit_scale),
 				input.meterLimit.feature.credit_scale,
 			),
+			scope,
 		),
 		reservationId: reservation.id,
 		status: "active",
@@ -873,7 +875,7 @@ export async function readMeterLimitBalance(
 	if (customerId === null) return meterLimitBalance(meterLimit, "0");
 	const scoped = await meterLimitScope(executor, projectId, customerId, entityId, meterLimit);
 	const { usage, held } = await readScopeSetExposure(executor, scoped.window, scoped.selector);
-	return meterLimitBalance(meterLimit, usage, held);
+	return meterLimitBalance(meterLimit, usage, held, scoped.selector.scope);
 }
 
 /** Matches invoice rating: one allowance across every entity/filter in the purchased period. */
@@ -989,6 +991,7 @@ function meterLimitBalance(
 	meterLimit: MeterLimitDecision,
 	rawUsage: unknown,
 	rawHeld: unknown = "0",
+	scope: MeterLimitScope = meterLimit.scope,
 ): MeteringBalance {
 	const scale = meterLimit.feature.credit_scale;
 	const limit = decimalToUnits(meterLimit.limit, scale);
@@ -1005,6 +1008,10 @@ function meterLimitBalance(
 			available: null,
 			unlimited: true,
 			breakdown: [],
+			// The window usage still counts in, as for a finite limit (PC-12).
+			scope,
+			windowStartAt: meterLimit.windowStartAt.toISOString(),
+			windowEndAt: meterLimit.windowEndAt.toISOString(),
 		};
 	}
 	return {
@@ -1016,6 +1023,9 @@ function meterLimitBalance(
 		held: unitsToDecimal(held, scale),
 		available: unitsToDecimal(limit > usage + held ? limit - usage - held : 0n, scale),
 		breakdown: [],
+		scope,
+		windowStartAt: meterLimit.windowStartAt.toISOString(),
+		windowEndAt: meterLimit.windowEndAt.toISOString(),
 	};
 }
 

@@ -366,6 +366,40 @@ localDescribe("unlimited usage items", () => {
 		expect(balance).toMatchObject({ granted: "100" });
 		expect(balance).not.toHaveProperty("unlimited");
 	});
+
+	it("reports the scope and window of an unlimited quota beside its null figures", async () => {
+		await publish(
+			catalog([
+				plan("pro", "base", [cap("100", "blocked")]),
+				plan("unlimited_requests", "addon", [unlimited]),
+			]),
+			null,
+		);
+		await subscribe("bounded", "pro", 1);
+		await subscribe("bounded", "unlimited_requests", 1);
+		const balance = await context.repository.getMeteringBalance(project, "bounded", "api_requests");
+		// A copy: toMatchObject writes asymmetric matchers into the object it receives.
+		expect({ ...balance }).toMatchObject({
+			granted: null,
+			available: null,
+			unlimited: true,
+			scope: "account",
+			windowStartAt: expect.any(String),
+			windowEndAt: expect.any(String),
+		});
+		expect(new Date(balance.windowEndAt ?? "").getTime()).toBeGreaterThan(
+			new Date(balance.windowStartAt ?? "").getTime(),
+		);
+		const decision = await context.repository.checkUsage(project, {
+			billingAccountId: "bounded",
+			featureKey: "api_requests",
+			quantity: "1000",
+		});
+		expect(decision).toMatchObject({
+			allowed: true,
+			balance: { unlimited: true, scope: "account", windowStartAt: balance.windowStartAt },
+		});
+	});
 });
 
 const unlimited: AuthoredPlanItemIntent = {

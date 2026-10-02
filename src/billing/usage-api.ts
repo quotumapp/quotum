@@ -65,6 +65,10 @@ export interface UsageBalance {
 	/** Null for an unlimited quota. */
 	available: string | null;
 	unlimited?: true;
+	/** A meter limit's scope and current window (PC-12); absent on wallet balances. */
+	scope?: "account" | "entity";
+	windowStartAt?: string;
+	windowEndAt?: string;
 }
 
 export type UsageDenialReason = "not_entitled" | "insufficient_balance" | "control_limit_exceeded";
@@ -166,6 +170,9 @@ export function usageContext(
 			held: balance.held,
 			available: balance.available,
 			...(balance.unlimited === true ? { unlimited: true as const } : {}),
+			...(balance.scope === undefined ? {} : { scope: balance.scope }),
+			...(balance.windowStartAt === undefined ? {} : { windowStartAt: balance.windowStartAt }),
+			...(balance.windowEndAt === undefined ? {} : { windowEndAt: balance.windowEndAt }),
 		},
 	};
 }

@@ -8363,6 +8363,13 @@
               "scale": {
                 "type": "number"
               },
+              "scope": {
+                "enum": [
+                  "account",
+                  "entity"
+                ],
+                "type": "string"
+              },
               "unit": {
                 "type": "string"
               },
@@ -8371,6 +8378,12 @@
                   true
                 ],
                 "type": "boolean"
+              },
+              "windowEndAt": {
+                "type": "string"
+              },
+              "windowStartAt": {
+                "type": "string"
               }
             },
             "required": [
@@ -9998,6 +10011,13 @@
                                   "held": {
                                     "type": "string"
                                   },
+                                  "scope": {
+                                    "enum": [
+                                      "account",
+                                      "entity"
+                                    ],
+                                    "type": "string"
+                                  },
                                   "unit": {
                                     "type": "string"
                                   },
@@ -10006,6 +10026,12 @@
                                       true
                                     ],
                                     "type": "boolean"
+                                  },
+                                  "windowEndAt": {
+                                    "type": "string"
+                                  },
+                                  "windowStartAt": {
+                                    "type": "string"
                                   }
                                 },
                                 "required": [
@@ -10126,6 +10152,13 @@
                                   "held": {
                                     "type": "string"
                                   },
+                                  "scope": {
+                                    "enum": [
+                                      "account",
+                                      "entity"
+                                    ],
+                                    "type": "string"
+                                  },
                                   "unit": {
                                     "type": "string"
                                   },
@@ -10134,6 +10167,12 @@
                                       true
                                     ],
                                     "type": "boolean"
+                                  },
+                                  "windowEndAt": {
+                                    "type": "string"
+                                  },
+                                  "windowStartAt": {
+                                    "type": "string"
                                   }
                                 },
                                 "required": [
@@ -16618,6 +16657,13 @@
                       "held": {
                         "type": "string"
                       },
+                      "scope": {
+                        "enum": [
+                          "account",
+                          "entity"
+                        ],
+                        "type": "string"
+                      },
                       "unit": {
                         "type": "string"
                       },
@@ -16626,6 +16672,12 @@
                           true
                         ],
                         "type": "boolean"
+                      },
+                      "windowEndAt": {
+                        "type": "string"
+                      },
+                      "windowStartAt": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -16738,6 +16790,13 @@
                       "held": {
                         "type": "string"
                       },
+                      "scope": {
+                        "enum": [
+                          "account",
+                          "entity"
+                        ],
+                        "type": "string"
+                      },
                       "unit": {
                         "type": "string"
                       },
@@ -16746,6 +16805,12 @@
                           true
                         ],
                         "type": "boolean"
+                      },
+                      "windowEndAt": {
+                        "type": "string"
+                      },
+                      "windowStartAt": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -16935,6 +17000,13 @@
                       "held": {
                         "type": "string"
                       },
+                      "scope": {
+                        "enum": [
+                          "account",
+                          "entity"
+                        ],
+                        "type": "string"
+                      },
                       "unit": {
                         "type": "string"
                       },
@@ -16943,6 +17015,12 @@
                           true
                         ],
                         "type": "boolean"
+                      },
+                      "windowEndAt": {
+                        "type": "string"
+                      },
+                      "windowStartAt": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -17063,6 +17141,13 @@
                       "held": {
                         "type": "string"
                       },
+                      "scope": {
+                        "enum": [
+                          "account",
+                          "entity"
+                        ],
+                        "type": "string"
+                      },
                       "unit": {
                         "type": "string"
                       },
@@ -17071,6 +17156,12 @@
                           true
                         ],
                         "type": "boolean"
+                      },
+                      "windowEndAt": {
+                        "type": "string"
+                      },
+                      "windowStartAt": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -17350,6 +17441,13 @@
                   "scale": {
                     "type": "number"
                   },
+                  "scope": {
+                    "enum": [
+                      "account",
+                      "entity"
+                    ],
+                    "type": "string"
+                  },
                   "unit": {
                     "type": "string"
                   },
@@ -17358,6 +17456,12 @@
                       true
                     ],
                     "type": "boolean"
+                  },
+                  "windowEndAt": {
+                    "type": "string"
+                  },
+                  "windowStartAt": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -17577,6 +17681,13 @@
                   "scale": {
                     "type": "number"
                   },
+                  "scope": {
+                    "enum": [
+                      "account",
+                      "entity"
+                    ],
+                    "type": "string"
+                  },
                   "unit": {
                     "type": "string"
                   },
@@ -17585,6 +17696,12 @@
                       true
                     ],
                     "type": "boolean"
+                  },
+                  "windowEndAt": {
+                    "type": "string"
+                  },
+                  "windowStartAt": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -17871,6 +17988,13 @@
                   "scale": {
                     "type": "number"
                   },
+                  "scope": {
+                    "enum": [
+                      "account",
+                      "entity"
+                    ],
+                    "type": "string"
+                  },
                   "unit": {
                     "type": "string"
                   },
@@ -17879,6 +18003,12 @@
                       true
                     ],
                     "type": "boolean"
+                  },
+                  "windowEndAt": {
+                    "type": "string"
+                  },
+                  "windowStartAt": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -18165,6 +18295,13 @@
                   "scale": {
                     "type": "number"
                   },
+                  "scope": {
+                    "enum": [
+                      "account",
+                      "entity"
+                    ],
+                    "type": "string"
+                  },
                   "unit": {
                     "type": "string"
                   },
@@ -18173,6 +18310,12 @@
                       true
                     ],
                     "type": "boolean"
+                  },
+                  "windowEndAt": {
+                    "type": "string"
+                  },
+                  "windowStartAt": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -78988,6 +79131,13 @@
                             "held": {
                               "type": "string"
                             },
+                            "scope": {
+                              "enum": [
+                                "account",
+                                "entity"
+                              ],
+                              "type": "string"
+                            },
                             "unit": {
                               "type": "string"
                             },
@@ -78996,6 +79146,12 @@
                                 true
                               ],
                               "type": "boolean"
+                            },
+                            "windowEndAt": {
+                              "type": "string"
+                            },
+                            "windowStartAt": {
+                              "type": "string"
                             }
                           },
                           "required": [

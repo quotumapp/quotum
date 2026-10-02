@@ -85,6 +85,14 @@ export interface MeteringBalance {
 	 */
 	unlimited?: true;
 	breakdown: BalanceAllocationBreakdown[];
+	/**
+	 * For a meter limit: the scope its window counts usage in, which is the declared scope except
+	 * while an account window keeps governing until it ends (PC-04).
+	 */
+	scope?: "account" | "entity";
+	/** For a meter limit: the window counting now; its end is when the capacity resets (PC-12). */
+	windowStartAt?: string;
+	windowEndAt?: string;
 }
 
 /** An allocation balance: allocations always grant a finite quantity, so it is never unlimited. */

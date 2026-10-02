@@ -41,6 +41,10 @@ const balanceSchema = z.object({
 	held: z.string(),
 	available: z.string().nullable(),
 	unlimited: z.literal(true).optional(),
+	/** A meter limit's scope and current window (PC-12); absent on wallet balances. */
+	scope: z.enum(["account", "entity"]).optional(),
+	windowStartAt: z.string().optional(),
+	windowEndAt: z.string().optional(),
 });
 const scopeShape = { featureId: z.string(), entityId: z.string().nullable() };
 const meteredShape = {

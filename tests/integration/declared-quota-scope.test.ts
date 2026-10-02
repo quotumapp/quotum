@@ -4,6 +4,7 @@ import type { CatalogIntent, CatalogPlanIntent } from "../../src/catalog/types";
 import { readProjectionBalances } from "../../src/db/repository/entitlements";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import type { CadenceUnit } from "../../src/shared/cadence";
+import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
@@ -325,6 +326,85 @@ localDescribe("declared meter-limit scope", () => {
 				quantity: "50",
 			}),
 		).toMatchObject({ allowed: true, balance: { consumed: "0", available: "50" } });
+	});
+
+	it("reports a meter limit's scope and window through the compact check and consume", async () => {
+		await publish(catalog([plan("pro", "base", 1, cap("50", "day", "account"))]), null);
+		await subscribe("compact", "pro", 1);
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = { ...authHeaders(), "content-type": "application/json" };
+		const consumed = await testRequest(app, "/v1/billing-accounts/compact/usage/consume", {
+			method: "POST",
+			headers: { ...headers, "idempotency-key": "compact:exhaust" },
+			body: JSON.stringify({ featureId: "api_requests", value: "50" }),
+		});
+		expect(consumed.status).toBe(200);
+		const [window] = await context.sql<Array<{ start: Date; end: Date }>>`
+			SELECT window_start_at AS start, window_end_at AS end FROM usage_windows
+		`;
+		if (window === undefined) throw new Error("Expected the account's window");
+		const bounds = {
+			featureId: "api_requests",
+			available: "0",
+			scope: "account",
+			windowStartAt: window.start.toISOString(),
+			windowEndAt: window.end.toISOString(),
+		};
+		expect((await consumed.json()).data).toMatchObject({ allowed: true, balance: bounds });
+		const checked = await testRequest(app, "/v1/billing-accounts/compact/usage/check", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ featureId: "api_requests", value: "1" }),
+		});
+		expect(checked.status).toBe(200);
+		expect((await checked.json()).data).toMatchObject({
+			kind: "metered",
+			allowed: false,
+			balance: bounds,
+		});
+	});
+
+	it("reports a meter limit's scope and window on balances and decisions", async () => {
+		await publish(catalog([plan("pro", "base", 1, cap("50", "day", "account"))]), null);
+		await publish(catalog([plan("pro", "base", 2, cap("50", "day", "entity"))]), 1);
+		await subscribe("bounds", "pro", 1);
+		await entity("bounds", "workspace-a");
+		const project = integrationProjectContext();
+		const usage = { billingAccountId: "bounds", featureKey: "api_requests" };
+		const consumed = await context.repository.consumeUsage(project, {
+			...usage,
+			quantity: "50",
+			idempotencyKey: "bounds:exhaust",
+		});
+		const [window] = await context.sql<Array<{ start: Date; end: Date }>>`
+			SELECT window_start_at AS start, window_end_at AS end FROM usage_windows
+		`;
+		if (window === undefined) throw new Error("Expected the account's window");
+		const bounds = {
+			scope: "account",
+			windowStartAt: window.start.toISOString(),
+			windowEndAt: window.end.toISOString(),
+		};
+		// The QA probe's expectations, reversed: an exhausted limit says when it resets.
+		expect(consumed.balance).toMatchObject({ available: "0", ...bounds });
+		expect(
+			await context.repository.getMeteringBalance(project, "bounds", "api_requests"),
+		).toMatchObject({ available: "0", ...bounds });
+		expect(await context.repository.checkUsage(project, { ...usage, quantity: "1" })).toMatchObject(
+			{ allowed: false, balance: bounds },
+		);
+		// After a switch to entity scope the account window keeps counting until it ends, and says so.
+		await movePinnedVersion("bounds", "pro", 2);
+		expect(
+			await context.repository.checkUsage(project, {
+				...usage,
+				entityId: "workspace-a",
+				quantity: "1",
+			}),
+		).toMatchObject({ allowed: false, balance: bounds });
 	});
 
 	it("refuses scopes an account could hold together, and postpaid entity limits", async () => {
