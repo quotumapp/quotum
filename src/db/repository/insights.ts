@@ -499,10 +499,14 @@ function summaryBalances(
 			: databaseDecimal(limit.available, "meter limit available", limit.creditScale),
 		held: databaseDecimal(limit.held, "meter limit held", limit.creditScale),
 		expiresAt: null,
-		...(limit.unlimited ? { unlimited: true as const } : {}),
 		scope: limit.scope,
-		windowStartAt: limit.windowStartAt.toISOString(),
-		windowEndAt: limit.windowEndAt.toISOString(),
+		// An unlimited quota has no reset, so its row carries no window.
+		...(limit.unlimited
+			? { unlimited: true as const }
+			: {
+					windowStartAt: limit.windowStartAt.toISOString(),
+					windowEndAt: limit.windowEndAt.toISOString(),
+				}),
 	}));
 	// A stable sort keeps a feature's wallet row before its meter-limit row.
 	return [...wallets, ...windows].sort((left, right) =>

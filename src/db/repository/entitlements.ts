@@ -737,7 +737,8 @@ export async function readProjectionBalances(
 			credit_scale: window.creditScale,
 			available: window.available,
 			held: window.held,
-			period_ends_at: window.windowEndAt,
+			// An unlimited quota never resets, so it reports no period end.
+			period_ends_at: window.unlimited ? null : window.windowEndAt,
 			unlimited: window.unlimited,
 		}),
 	);
