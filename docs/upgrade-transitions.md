@@ -363,17 +363,25 @@ intent, so a catalog preview taken before the upgrade fails to publish with
 `CATALOG_PREVIEW_MISMATCH` and must be previewed again, and the first `quotum catalog diff` of an
 unchanged catalog reports `changed: true` with an empty impact.
 
-## Preparing for declared meter-limit scope
+## Declared meter-limit scope
 
-Accepted target, not yet enforced: a later release makes a meter limit's declared
-`allocationScope` authoritative. An `account` cap will sum every entity's and filter value's usage
-in a window, and an `entity` cap will sum each entity's filters, where today each entity and filter
-value gets its own window with the whole limit. That release also refuses account and entity caps
-an account could hold together on one feature, and entity caps that allow postpaid overage. It
-moves no usage and cancels no reservation, and its stopped-service transition will be documented
-here when it ships.
+The baselines add `usage_windows.scope`, part of the window's unique index, and
+`reservations.filter_key`. A meter limit's declared `allocationScope` becomes authoritative
+([declared meter-limit scope](metering.md#meter-limits)): an `account` cap counts every entity's and
+filter value's usage in one window, and an `entity` cap gives each entity the whole limit, where
+before each entity and filter value had its own window with the whole limit. No usage is moved and
+no reservation is cancelled: windows written before keep their usage, subscription and plan item,
+and count where the declared scope places them from the first request after the upgrade. Accounts
+whose usage across entities and filters already exceeds an account cap are refused further usage
+until a correction, a released hold or a higher limit leaves room.
 
-Prepare on the current release with the read-only report:
+The release also refuses account and entity caps an account could hold together on one feature,
+and entity caps that allow postpaid overage. Prepare on the old release, then move with a
+verified, stopped-service transition.
+
+### Prepare on the old release
+
+Run the read-only report, which ships before this release:
 
 ```sh
 quotum usage scopes report              # every project instance, as text
@@ -396,12 +404,57 @@ It exits `2` while any of these **blocking** items remain:
 
 **Warnings** do not block: a base and add-on pair, or two add-ons, that cap one feature with
 different scopes although no account holds both, and postpaid entity limits nobody holds yet. The
-next publication refuses them. Publishing a new version is not enough on its own, because
-subscriptions stay pinned to their version until a
-[catalog migration](catalog.md#catalog-migrations) moves them.
-Accounts over a hard cap are informational: once the scope is enforced they are denied while
-usage plus active holds leave no capacity, and a correction, a released hold or a higher limit
-restores it.
+next publication refuses them.
+
+For a feature that should stay per entity, publish a version declaring
+`allocationScope: "entity"` (hard caps only), then move the subscriptions pinned to the old version
+with a [catalog migration](catalog.md#catalog-migrations): publishing alone moves nobody. Run the
+report again until the effective scope of every affected account is the one you intend and nothing
+blocks.
+
+### Move with a verified transition
+
+1. Run the report on the old release: it must exit `0`.
+2. Stop the whole old service, as in step 1 of
+   [stored job provider identity](#stored-job-provider-identity).
+3. Record the baseline the verification compares against, from the old database before it is
+   dumped. Run it with the new image's `quotum` and the old database's `POSTGRES_URI`; it reads only
+   columns both schemas have, and never overwrites a file:
+
+   ```sh
+   quotum usage scopes snapshot --out pre-scope.json
+   ```
+
+4. Take the [backup](operations.md#backup), then create the new database, run `quotum migrate` from
+   the new image and restore the data, as in steps 1 to 4 of
+   [stored job provider identity](#stored-job-provider-identity), with any steps the other
+   transitions in this release add.
+5. Verify the new database. **Start the service only when this exits `0`**:
+
+   ```sh
+   quotum usage scopes verify --baseline pre-scope.json
+   ```
+
+   It checks, against the snapshot:
+   - **usage totals**: every window row and its usage are unchanged, and so is the usage summed per
+     subscription, plan item and window, open and closed alike, which is what invoices bill;
+   - **active holds**: the same active reservations, on the same windows and quantities, each on a
+     window inside the scope set its account now counts;
+   - **correction routing**: every consume or confirm in an open window names an open window of its
+     account, feature and bounds inside the scope set it counts in, so a later correction frees
+     capacity where the limit counts (the query reads only the open windows' partitions);
+   - **invoice attribution**: pending and processing invoice periods are unchanged, and closed usage
+     not invoiced yet would invoice the same quantities;
+   - **no capacity gain**: every scope set counts at least each of its windows' usage;
+   - **blockers**: no account holds mixed scopes, and no open window with usage or holds is left
+     without a meter limit.
+
+   It also lists the scope sets already over their cap, which are refused until room is left and
+   do not fail the verification. `--json` prints the whole result. A failure exits `2`: do not
+   start the service; start the old release on its untouched database instead and investigate.
+   Because nothing was moved, restoring the dump from step 4 into the old schema also reads as
+   before.
+6. Start the new version and confirm `/ready`.
 
 ## Canonical catalog intent
 

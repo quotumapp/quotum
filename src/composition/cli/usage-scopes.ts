@@ -1,3 +1,4 @@
+import { readFile, writeFile } from "node:fs/promises";
 import { createBillingDatabaseConnection } from "../../db/client";
 import type { TransactionalQueryExecutor } from "../../db/repository/types";
 import {
@@ -11,6 +12,14 @@ import {
 	type UsageScopesReport,
 	UsageScopesReportError,
 } from "../../db/repository/usage-scopes-report";
+import {
+	parseUsageScopesSnapshot,
+	readUsageScopesSnapshot,
+	type UsageScopesSnapshot,
+	UsageScopesSnapshotError,
+	type UsageScopesVerification,
+	verifyUsageScopesTransition,
+} from "../../db/repository/usage-scopes-transition";
 import { loadPostgresPreparedStatements } from "../../env";
 import { writeStderr, writeStdout } from "../../shared/cli-output";
 import {
@@ -33,9 +42,16 @@ export interface UsageScopesCommandDependencies {
 }
 
 /**
- * `quotum usage scopes report`: what the declared meter-limit scope will change, read-only.
- * Exits 0 when nothing blocks the scope transition, 2 when something does, 64 for usage errors and
- * 1 when the report cannot be read.
+ * `quotum usage scopes report|snapshot|verify`, the declared meter-limit scope transition:
+ *
+ * - `report`: what the declared scope will change, read-only, on the release before it. Exits 2
+ *   while something blocks the transition.
+ * - `snapshot --out <file>`: records usage windows, active holds and unbilled usage before
+ *   `quotum migrate`, reading only columns both schemas have. The file is never overwritten.
+ * - `verify --baseline <file>`: after `quotum migrate`, checks the database against the snapshot.
+ *   Exits 2 when a check fails; start the service only once it passes.
+ *
+ * Usage errors exit 64, and a database or file failure exits 1.
  */
 export async function runUsageScopesCommand(
 	argv: readonly string[],
@@ -44,6 +60,8 @@ export async function runUsageScopesCommand(
 ): Promise<number> {
 	const output = dependencies.output ?? { stdout: writeStdout, stderr: writeStderr };
 	try {
+		if (argv[0] === "snapshot") return await runSnapshot(argv.slice(1), env, dependencies, output);
+		if (argv[0] === "verify") return await runVerify(argv.slice(1), env, dependencies, output);
 		const { json, projectKey, accountLimit } = parseReportArguments(argv);
 		const report = await withDatabase(env, dependencies, async (database) =>
 			(dependencies.read ?? readUsageScopesReportSnapshot)(database, { projectKey, accountLimit }),
@@ -57,13 +75,113 @@ export async function runUsageScopesCommand(
 		}
 		return 0;
 	} catch (error) {
-		// An instance key the database does not hold is a wrong argument, as other usage errors are.
-		if (error instanceof UsageScopesReportError) {
+		// An instance key the database does not hold, or a baseline that is not a snapshot, is a
+		// wrong argument, as other usage errors are.
+		if (error instanceof UsageScopesReportError || error instanceof UsageScopesSnapshotError) {
 			output.stderr(`${error.message} Run \`${help}\` for usage.`);
 			return 64;
 		}
 		return reportOperatorFailure(error, help, output);
 	}
+}
+
+async function runSnapshot(
+	argv: readonly string[],
+	env: Environment,
+	dependencies: UsageScopesCommandDependencies,
+	output: CommandOutput,
+): Promise<number> {
+	const { options } = parseArguments(argv, ["out"], 0);
+	const path = options.get("out");
+	if (path === undefined) throw new CliUsageError("Name the snapshot file with --out.");
+	const snapshot = await withDatabase(env, dependencies, readUsageScopesSnapshot);
+	await writeSnapshot(path, snapshot);
+	output.stdout(
+		`Snapshot of ${snapshot.windows.length} usage window${snapshot.windows.length === 1 ? "" : "s"}, ${snapshot.holds.length} active hold${snapshot.holds.length === 1 ? "" : "s"}, ${snapshot.invoicePeriods.length} pending invoice period${snapshot.invoicePeriods.length === 1 ? "" : "s"} and ${snapshot.unbilledGroups.length} unbilled usage group${snapshot.unbilledGroups.length === 1 ? "" : "s"} written to ${path}. Run \`quotum migrate\`, then \`quotum usage scopes verify --baseline ${path}\`.`,
+	);
+	return 0;
+}
+
+/** Writes the snapshot only to a new file, readable by its owner alone. */
+export async function writeSnapshot(path: string, snapshot: UsageScopesSnapshot): Promise<void> {
+	try {
+		await writeFile(path, `${JSON.stringify(snapshot)}\n`, { flag: "wx", mode: 0o600 });
+	} catch (error) {
+		const code = (error as { code?: unknown }).code;
+		if (code === "EEXIST")
+			throw new Error(`${path} already exists; a snapshot never overwrites a file.`);
+		if (code === "ENOENT") throw new Error(`The directory for ${path} does not exist.`);
+		if (code === "EACCES") throw new Error(`Permission denied writing ${path}.`);
+		throw error;
+	}
+}
+
+async function runVerify(
+	argv: readonly string[],
+	env: Environment,
+	dependencies: UsageScopesCommandDependencies,
+	output: CommandOutput,
+): Promise<number> {
+	const json = argv.filter((arg) => arg === "--json");
+	if (json.length > 1) throw new CliUsageError("--json is given more than once.");
+	const { options } = parseArguments(
+		argv.filter((arg) => arg !== "--json"),
+		["baseline"],
+		0,
+	);
+	const path = options.get("baseline");
+	if (path === undefined) throw new CliUsageError("Name the snapshot with --baseline.");
+	const baseline = parseUsageScopesSnapshot(await readBaseline(path));
+	const verification = await withDatabase(env, dependencies, (database) =>
+		verifyUsageScopesTransition(database, baseline),
+	);
+	output.stdout(
+		json.length === 1
+			? JSON.stringify(verification, null, 2)
+			: renderUsageScopesVerification(verification, baseline),
+	);
+	if (!verification.passed) {
+		output.stderr(
+			"The declared-scope transition did not verify: do not start the service; restore the dump instead (docs/upgrade-transitions.md).",
+		);
+		return 2;
+	}
+	return 0;
+}
+
+async function readBaseline(path: string): Promise<string> {
+	try {
+		return await readFile(path, "utf8");
+	} catch (error) {
+		if ((error as { code?: unknown }).code === "ENOENT")
+			throw new UsageScopesSnapshotError(`No snapshot at ${path}.`);
+		throw error;
+	}
+}
+
+/** The verification for an operator to read; `--json` prints the same data whole. */
+export function renderUsageScopesVerification(
+	verification: UsageScopesVerification,
+	baseline: Pick<UsageScopesSnapshot, "takenAt">,
+): string {
+	const lines = [`Declared-scope transition, verified against the snapshot of ${baseline.takenAt}`];
+	for (const check of verification.checks) {
+		lines.push(`${check.passed ? "PASS" : "FAIL"} ${check.name}`);
+		for (const detail of check.details) lines.push(`  - ${detail}`);
+		if (check.total > check.details.length)
+			lines.push(`  … ${check.total - check.details.length} more; use --json.`);
+	}
+	if (verification.overCap.length > 0) {
+		lines.push(
+			`${verification.overCap.length} scope set${verification.overCap.length === 1 ? " is" : "s are"} over the cap and will be refused until room is left:`,
+		);
+		for (const set of verification.overCap)
+			lines.push(
+				`  - customer ${set.customerId} feature ${set.featureId} [${set.scope}${set.entityId === null ? "" : ` entity ${set.entityId}`}] ${set.windowStartAt} to ${set.windowEndAt}: ${set.usage} used + ${set.held} held of ${set.limit}`,
+			);
+	}
+	lines.push(verification.passed ? "Verified: start the service." : "Not verified.");
+	return lines.join("\n");
 }
 
 export function parseReportArguments(argv: readonly string[]): {
