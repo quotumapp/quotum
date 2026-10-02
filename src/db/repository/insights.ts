@@ -22,6 +22,7 @@ import type { BillingChannel, BillingProvider, SubscriptionStatus } from "../../
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import { defaultPlanAllowanceEndingSql } from "./default-plan-sql";
+import { type MeterLimitWindowBalance, readMeterLimitWindowBalances } from "./entitlements";
 import { type PendingAllowance, readPendingAllowances } from "./plan-grant-windows";
 import { executeOne, executeRows } from "./query";
 import type { QueryExecutor } from "./types";
@@ -167,10 +168,13 @@ export class BillingInsightsRepository extends RepositoryModule {
 		if (customer === null) {
 			// An account Quotum has not recorded holds only the default plan its first write starts,
 			// so it reads as holding it, as balance reads do.
-			const pending = await readPendingAllowances(this.database, projectId, null, null);
+			const [pending, limits] = await Promise.all([
+				readPendingAllowances(this.database, projectId, null, null),
+				readMeterLimitWindowBalances(this.database, projectId, null),
+			]);
 			return {
 				...emptySummary(billingAccountId),
-				balances: summaryBalances(withPendingBalances([], pending)),
+				balances: summaryBalances(withPendingBalances([], pending), limits),
 			};
 		}
 		const [subscriptions, allocationBalances, usage, invoices, pending] = await Promise.all([
@@ -274,6 +278,7 @@ export class BillingInsightsRepository extends RepositoryModule {
 			readPendingAllowances(this.database, projectId, customer.id, null),
 		]);
 		const balances = withPendingBalances(allocationBalances, pending);
+		const limits = await readMeterLimitWindowBalances(this.database, projectId, customer.id);
 		return {
 			schemaVersion: 1,
 			billingAccountId,
@@ -289,7 +294,7 @@ export class BillingInsightsRepository extends RepositoryModule {
 				currentPeriodEnd: row.current_period_end === null ? null : iso(row.current_period_end),
 				cancelAtPeriodEnd: row.cancel_at_period_end,
 			})),
-			balances: summaryBalances(balances),
+			balances: summaryBalances(balances, limits),
 			usage: usage.map((row) => ({
 				featureKey: row.feature_key,
 				unit: row.unit,
@@ -470,16 +475,39 @@ async function requireCustomer(
 	return customer;
 }
 
+/**
+ * Wallet balances, then each meter-limited feature's current window, ordered by feature with a
+ * feature's wallet row first. A meter-limit row reports the window's end as `windowEndAt` rather
+ * than `expiresAt`, and an unlimited quota a null `available`, as metering balance reads do.
+ */
 function summaryBalances(
 	balances: ReturnType<typeof withPendingBalances>,
+	limits: readonly MeterLimitWindowBalance[],
 ): CustomerBillingSummary["balances"] {
-	return balances.map((row) => ({
+	const wallets: CustomerBillingSummary["balances"] = balances.map((row) => ({
 		featureKey: row.feature_key,
 		unit: row.unit,
 		available: signedDecimal(row.available, "available balance"),
 		held: databaseDecimal(row.held, "held balance"),
 		expiresAt: row.expires_at === null ? null : iso(row.expires_at),
 	}));
+	const windows: CustomerBillingSummary["balances"] = limits.map((limit) => ({
+		featureKey: limit.featureKey,
+		unit: limit.unit,
+		available: limit.unlimited
+			? null
+			: databaseDecimal(limit.available, "meter limit available", limit.creditScale),
+		held: databaseDecimal(limit.held, "meter limit held", limit.creditScale),
+		expiresAt: null,
+		...(limit.unlimited ? { unlimited: true as const } : {}),
+		scope: limit.scope,
+		windowStartAt: limit.windowStartAt.toISOString(),
+		windowEndAt: limit.windowEndAt.toISOString(),
+	}));
+	// A stable sort keeps a feature's wallet row before its meter-limit row.
+	return [...wallets, ...windows].sort((left, right) =>
+		left.featureKey < right.featureKey ? -1 : left.featureKey > right.featureKey ? 1 : 0,
+	);
 }
 
 function emptySummary(billingAccountId: string): CustomerBillingSummary {

@@ -1122,6 +1122,23 @@ localDescribe("default plan", () => {
 			balance: { granted: "1000", available: "1000" },
 		});
 		expect(beyond).toMatchObject({ allowed: false, reason: "insufficient_balance" });
+		// The billing summary reads the same limit with no usage yet, in a day-long window that, for
+		// an account with no usage, starts at the read.
+		const summary = await context.repository.getCustomerBillingSummary(project, "stranger");
+		const limit = summary.balances.find((row) => row.featureKey === "model_tokens");
+		expect({ ...limit, windowStartAt: undefined, windowEndAt: undefined }).toEqual({
+			featureKey: "model_tokens",
+			unit: "token",
+			available: "1000",
+			held: "0",
+			expiresAt: null,
+			scope: "account",
+			windowStartAt: undefined,
+			windowEndAt: undefined,
+		});
+		const start = Date.parse(limit?.windowStartAt ?? "");
+		expect(start).toBeGreaterThanOrEqual(Date.parse(within.balance.windowStartAt as string));
+		expect(Date.parse(limit?.windowEndAt ?? "") - start).toBe(24 * 60 * 60 * 1000);
 		expect(
 			await context.sql`SELECT id FROM customers WHERE billing_account_id = 'stranger'`,
 		).toHaveLength(0);

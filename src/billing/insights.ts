@@ -91,12 +91,21 @@ export interface CustomerBillingSummary {
 		currentPeriodEnd: string | null;
 		cancelAtPeriodEnd: boolean;
 	}>;
+	/**
+	 * Wallet balances, then each meter-limited feature's current window. A meter-limit row carries
+	 * its `scope` and window bounds (PC-12); an unlimited quota reports `unlimited: true` and a null
+	 * `available`.
+	 */
 	balances: Array<{
 		featureKey: string;
 		unit: string;
-		available: string;
+		available: string | null;
 		held: string;
 		expiresAt: string | null;
+		unlimited?: true;
+		scope?: "account" | "entity";
+		windowStartAt?: string;
+		windowEndAt?: string;
 	}>;
 	usage: Array<{
 		featureKey: string;

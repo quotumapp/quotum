@@ -400,6 +400,119 @@ localDescribe("unlimited usage items", () => {
 			balance: { unlimited: true, scope: "account", windowStartAt: balance.windowStartAt },
 		});
 	});
+
+	it("reports unlimited quotas, meter-limit scopes and windows in the billing summary", async () => {
+		const credits: AuthoredPlanItemIntent = {
+			itemKind: "allocation",
+			featureKey: "credits",
+			quantity: "50",
+			reset: { interval: "month", intervalCount: 1 },
+			expiry: { mode: "forever" },
+		};
+		const withCredits = (plans: AuthoredPlanIntent[]): AuthoredCatalogIntent => {
+			const intent = catalog(plans);
+			return {
+				...intent,
+				features: [
+					...intent.features,
+					{
+						key: "credits",
+						name: "Credits",
+						kind: "metered",
+						meterKind: "consumable",
+						unit: "credit",
+						creditScale: 0,
+						filterDimensions: [],
+					},
+				],
+			};
+		};
+		await publish(
+			withCredits([
+				plan("pro", "base", [cap("100", "blocked"), credits]),
+				plan("unlimited_requests", "addon", [unlimited]),
+			]),
+			null,
+		);
+		await subscribe("summary_capped", "pro", 1);
+		await subscribe("summary_lifted", "pro", 1);
+		await subscribe("summary_lifted", "unlimited_requests", 1);
+		// An ordinary wallet allocation of the plan's credits, as a subscription sync would grant.
+		await context.sql`
+			INSERT INTO balance_allocations (
+				project_id, customer_id, feature_id, plan_item_id, subscription_id,
+				source_kind, source_key, quantity, period_start_at, period_end_at, expires_at
+			)
+			SELECT subscription.project_id, subscription.customer_id, item.feature_id, item.id,
+				subscription.id, 'subscription', 'summary:credits', 50,
+				now() - INTERVAL '1 hour', now() + INTERVAL '30 days', now() + INTERVAL '30 days'
+			FROM subscriptions subscription
+			JOIN plan_items item ON item.plan_version_id = subscription.plan_version_id
+			JOIN features feature ON feature.id = item.feature_id AND feature.key = 'credits'
+			WHERE subscription.external_subscription_id = 'summary_capped:pro:1'
+		`;
+		for (const account of ["summary_capped", "summary_lifted"]) {
+			await context.repository.consumeUsage(project, {
+				billingAccountId: account,
+				featureKey: "api_requests",
+				quantity: "30",
+				idempotencyKey: `${account}:30`,
+			});
+		}
+
+		const capped = await context.repository.getCustomerBillingSummary(project, "summary_capped");
+		const cappedBalance = await context.repository.getMeteringBalance(
+			project,
+			"summary_capped",
+			"api_requests",
+		);
+		expect(capped.balances).toEqual([
+			{
+				featureKey: "api_requests",
+				unit: "request",
+				available: "70",
+				held: "0",
+				expiresAt: null,
+				scope: "account",
+				windowStartAt: cappedBalance.windowStartAt as string,
+				windowEndAt: cappedBalance.windowEndAt as string,
+			},
+			// A wallet balance carries none of the meter-limit fields.
+			{
+				featureKey: "credits",
+				unit: "credit",
+				available: "50",
+				held: "0",
+				expiresAt: expect.any(String),
+			},
+		]);
+
+		const lifted = await context.repository.getCustomerBillingSummary(project, "summary_lifted");
+		// Each account's window anchors at its own subscription's period start.
+		const liftedBalance = await context.repository.getMeteringBalance(
+			project,
+			"summary_lifted",
+			"api_requests",
+		);
+		expect(lifted.balances).toEqual([
+			{
+				featureKey: "api_requests",
+				unit: "request",
+				available: null,
+				held: "0",
+				expiresAt: null,
+				unlimited: true,
+				scope: "account",
+				windowStartAt: liftedBalance.windowStartAt as string,
+				windowEndAt: liftedBalance.windowEndAt as string,
+			},
+		]);
+
+		// An account Quotum has not recorded reads no limit: none of these plans is its default.
+		expect(
+			(await context.repository.getCustomerBillingSummary(project, "summary_unknown")).balances,
+		).toEqual([]);
+	});
 });
 
 const unlimited: AuthoredPlanItemIntent = {
