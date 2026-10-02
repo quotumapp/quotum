@@ -16,7 +16,8 @@ import { isBillingProvider } from "../billing/types";
 import type { SentryEnv } from "../env";
 import type { BillingLogger } from "./logger";
 import {
-	describeThrown,
+	DEFAULT_MAX_STRING,
+	describeError,
 	FILTERED,
 	maskPath,
 	scrubBreadcrumb,
@@ -152,15 +153,15 @@ export function createSentryBillingLogger({
 	return {
 		info(message, context) {
 			callSafely(() => baseLogger.info(message, context));
-			recordSentryLog(sentry, config, "info", message, context);
+			callSafely(() => recordSentryLog(sentry, config, "info", message, context));
 		},
 		warn(message, context) {
 			callSafely(() => baseLogger.warn(message, context));
-			recordSentryLog(sentry, config, "warn", message, context);
+			callSafely(() => recordSentryLog(sentry, config, "warn", message, context));
 		},
 		error(message, error, context) {
 			callSafely(() => baseLogger.error(message, error, context));
-			recordSentryLog(sentry, config, "error", message, context, error);
+			callSafely(() => recordSentryLog(sentry, config, "error", message, context, error));
 		},
 	};
 }
@@ -254,6 +255,7 @@ function recordSentryLog(
 	context?: Record<string, unknown>,
 	error?: unknown,
 ): void {
+	message = scrubString(message, DEFAULT_MAX_STRING);
 	const attributes = createSentryAttributes(message, context, error);
 	const category = breadcrumbCategory(attributes);
 	const run = (scope: SentryScopeLike) => {
@@ -384,31 +386,27 @@ function normalizeErrorAttributes(error: unknown): Record<string, unknown> {
 		return {};
 	}
 
-	if (error instanceof BillingError) {
-		return {
-			"error.name": error.name,
-			"error.message": scrubString(error.message),
-			"error.code": error.code,
-			"error.status": error.status,
-		};
-	}
-
-	if (error instanceof Error) {
-		const attributes: Record<string, unknown> = {
-			"error.name": error.name || "Error",
-			"error.message": scrubString(error.message),
-		};
-		const code = (error as { code?: unknown }).code;
-		if (typeof code === "string" || typeof code === "number") {
-			attributes["error.code"] = code;
+	const diagnostic = describeError(error);
+	const attributes: Record<string, unknown> = stripUndefined({
+		"error.name": diagnostic.type,
+		"error.message": diagnostic.message,
+		"error.sql_state": diagnostic.sqlState,
+		"error.constraint": diagnostic.constraint,
+	});
+	// Database diagnostics intentionally have no arbitrary driver properties.
+	if (diagnostic.type === "DatabaseError") return attributes;
+	try {
+		if (error instanceof BillingError) attributes["error.status"] = error.status;
+		if (error instanceof Error) {
+			const code = (error as { code?: unknown }).code;
+			if (typeof code === "string")
+				attributes["error.code"] = scrubString(code, DEFAULT_MAX_STRING);
+			else if (typeof code === "number") attributes["error.code"] = code;
 		}
-		return attributes;
+	} catch {
+		// The fixed fallback from describeError remains usable if a property cannot be read.
 	}
-
-	return {
-		"error.name": "Error",
-		"error.message": describeThrown(error),
-	};
+	return attributes;
 }
 
 function applyScopeContext(

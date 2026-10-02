@@ -11,6 +11,7 @@ import {
 	type SentryClientLike,
 	type SentryInitOptions,
 } from "../../src/observability/sentry";
+import { databaseFailure, diagnosticParameters } from "../helpers/database-diagnostic";
 import { testRequest } from "../helpers/openapi";
 
 const sentryEnv: SentryEnv = {
@@ -70,6 +71,50 @@ async function sendTransactionThroughSdk(
 }
 
 describe("initializeSentry", () => {
+	it("clears linked database messages and interpolated log entries using the original error hint", () => {
+		const options = sdkOptions();
+		const error = databaseFailure("23505");
+		const output = options.beforeSend(
+			{
+				type: undefined,
+				message: error.message,
+				logentry: Object.assign(
+					{ message: "%s", params: diagnosticParameters },
+					{ formatted: error.message },
+				),
+				exception: {
+					values: [
+						{ type: "Error", value: error.message },
+						{ type: "PostgresError", value: diagnosticParameters[2] },
+					],
+				},
+			},
+			{ originalException: new Error("wrapper", { cause: error }) },
+		);
+		expect(output).toMatchObject({
+			message: "Database operation failed",
+			logentry: { message: "Database operation failed" },
+			contexts: { database: { sqlState: "23505", constraint: "customers_project_id_id_unique" } },
+		});
+		for (const marker of diagnosticParameters) expect(JSON.stringify(output)).not.toContain(marker);
+		expect(output?.logentry).not.toHaveProperty("params");
+		expect(output?.logentry).not.toHaveProperty("formatted");
+	});
+
+	it("drops database events whose original exception cannot be safely inspected", () => {
+		const options = sdkOptions();
+		const error = {
+			get cause() {
+				throw new Error("private cause");
+			},
+		};
+		expect(
+			options.beforeSend(
+				{ type: undefined, message: "private message" },
+				{ originalException: error },
+			),
+		).toBeNull();
+	});
 	it("passes billing Sentry config to the SDK", () => {
 		const initCalls: unknown[] = [];
 		const sentry = {
@@ -275,6 +320,23 @@ describe("initializeSentry", () => {
 });
 
 describe("createSentryBillingLogger", () => {
+	it("does not change the caller's outcome when diagnostic properties throw", () => {
+		const { sentry, calls } = createRecordingSentry();
+		const lines: string[] = [];
+		const logger = createSentryBillingLogger({
+			baseLogger: createPinoBillingLogger({ destination: { write: (line) => lines.push(line) } }),
+			sentry,
+			config: sentryEnv,
+		});
+		const context = {
+			get count() {
+				throw new Error("private value");
+			},
+		};
+		expect(() => logger.error("Worker failed", databaseFailure(), context)).not.toThrow();
+		expect(JSON.parse(lines[0] ?? "").context).toBe("[Unserializable]");
+		expect(calls.logs).toEqual([]);
+	});
 	it("writes through to the base logger and captures unexpected errors with sanitized context", () => {
 		const baseErrors: unknown[] = [];
 		const { sentry, calls } = createRecordingSentry();
@@ -436,7 +498,6 @@ describe("createSentryBillingLogger", () => {
 				message: "Google webhook retry delayed",
 				attributes: {
 					"billing.category": "webhook",
-					detail: "Authorization: Bearer [Filtered]",
 					nested: {
 						message: "retry with Bearer [Filtered]",
 					},

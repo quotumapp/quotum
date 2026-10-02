@@ -15,7 +15,7 @@ import { createApp as createBillingApp } from "../src/app";
 import type { AppDependencies } from "../src/app/types";
 import { EntitlementService } from "../src/billing/entitlements";
 import { BillingError, InternalBillingError } from "../src/billing/errors";
-import type { BillingLogger } from "../src/observability/logger";
+import { type BillingLogger, createPinoBillingLogger } from "../src/observability/logger";
 import { type BillingMetrics, createInMemoryBillingMetrics } from "../src/observability/metrics";
 import { BillingAdminOperations } from "../src/operations/admin";
 import { AppleStoreKitClient, buildAppleStoreKitConfig } from "../src/providers/apple/client";
@@ -23,6 +23,11 @@ import { AppleStoreKitService } from "../src/providers/apple/service";
 import { createProviderRegistry } from "../src/providers/registry";
 import type { FixtureBillingEnv as BillingEnv } from "../src/testing/connection-fixtures";
 import { fixtureConnections } from "../src/testing/connection-fixtures";
+import {
+	databaseFailure,
+	diagnosticParameters,
+	diagnosticQuery,
+} from "./helpers/database-diagnostic";
 import { testRequest, withOpenApiAssertions } from "./helpers/openapi";
 import { projectContextResolver, projectInstanceContext } from "./helpers/project-context";
 
@@ -629,6 +634,46 @@ describe("billing app", () => {
 			routeGroup: "customer",
 			status: "500",
 		});
+	});
+
+	it("logs a database-backed HTTP failure safely without changing its response or metrics", async () => {
+		const lines: string[] = [];
+		const error = databaseFailure();
+		const metrics = createInMemoryBillingMetrics();
+		const app = createApp({
+			env,
+			metrics,
+			logger: createPinoBillingLogger({ destination: { write: (line) => lines.push(line) } }),
+			entitlementService: {
+				getSnapshot() {
+					throw error;
+				},
+			} as unknown as EntitlementService,
+		});
+		const response = await testRequest(app, "/v1/billing-accounts/private-customer/entitlements", {
+			headers: { authorization: "Bearer secret", "x-request-id": "diagnostic-request" },
+		});
+		expect(response.status).toBe(500);
+		expect(response.headers.get("x-request-id")).toBe("diagnostic-request");
+		expect(await response.json()).toEqual({
+			success: false,
+			error: {
+				code: "INTERNAL_ERROR",
+				message: "Billing request failed",
+				requestId: "diagnostic-request",
+			},
+		});
+		expect(metrics.renderPrometheus()).toContain(
+			'billing_http_errors_total{classification="internal",code="INTERNAL_ERROR",route_group="customer",status="500"} 1',
+		);
+		expect(lines).toHaveLength(1);
+		expect(JSON.parse(lines[0] ?? "")).toMatchObject({
+			msg: "Billing request failed",
+			context: { requestId: "diagnostic-request", path: "/v1/billing-accounts/:id/entitlements" },
+			err: { type: "DatabaseError", sqlState: "40P01" },
+		});
+		for (const marker of [diagnosticQuery, ...diagnosticParameters, "private-customer"])
+			expect(lines.join("")).not.toContain(marker);
 	});
 
 	it("splits liveness and readiness checks", async () => {

@@ -1,8 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import type { ProjectionSyncJobRow } from "../../src/db/repository";
-import type { BillingLogger } from "../../src/observability/logger";
+import { type BillingLogger, createPinoBillingLogger } from "../../src/observability/logger";
 import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import { ProjectionSyncWorker } from "../../src/workers/projection-sync";
+import {
+	databaseFailure,
+	diagnosticParameters,
+	diagnosticQuery,
+} from "../helpers/database-diagnostic";
 import { createDeferred } from "../helpers/deferred";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
@@ -55,6 +60,48 @@ function createRecordingLogger() {
 }
 
 describe("ProjectionSyncWorker", () => {
+	it("keeps failure recovery and job correlation while removing database values from logs", async () => {
+		const lines: string[] = [];
+		const error = databaseFailure();
+		const failures: Array<{ jobId: string; error: string; retry: Date | null }> = [];
+		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
+			workerId: "worker-a",
+			maxAttempts: 10,
+			batchSize: 5,
+			logger: createPinoBillingLogger({ destination: { write: (line) => lines.push(line) } }),
+			repository: {
+				claimProjectionSyncJobs: async () => [{ ...job, reason: "usage_changed", payload: null }],
+				buildUsageProjection: async () => {
+					throw error;
+				},
+				markProjectionSyncJobSucceeded: async () => {
+					throw new Error("must not succeed");
+				},
+				markProjectionSyncJobFailed: async (_projectId, jobId, lastError, nextAttemptAt) => {
+					failures.push({ jobId, error: lastError, retry: nextAttemptAt });
+				},
+			},
+			delivery: {
+				deliver: async () => {
+					throw new Error("must not deliver");
+				},
+			},
+			now: () => new Date("2026-05-31T00:00:00.000Z"),
+			jitterMs: () => 0,
+		});
+		expect(await worker.runOnce()).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+		expect(failures).toEqual([
+			{ jobId: job.id, error: error.message, retry: new Date("2026-05-31T00:01:00.000Z") },
+		]);
+		const entry = lines.map((line) => JSON.parse(line)).find((event) => event.level === 50);
+		expect(entry).toMatchObject({
+			context: { jobId: job.id, workerId: "worker-a", result: "failed" },
+			err: { sqlState: "40P01" },
+		});
+		for (const marker of [diagnosticQuery, ...diagnosticParameters])
+			expect(lines.join("")).not.toContain(marker);
+	});
 	it("syncs claimed jobs and marks them succeeded", async () => {
 		const calls: string[] = [];
 		const metrics = createInMemoryBillingMetrics();

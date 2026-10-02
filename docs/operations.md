@@ -227,10 +227,31 @@ must not change billing results. `BILLING_LOG_LEVEL` defaults to `info` and cont
 `silent` disables it without disabling Sentry forwarding. Sentry retains its own `SENTRY_LOG_LEVEL`,
 expected-error policy, and context sanitization.
 
+Local messages, context and ordinary errors use the same privacy rules as Sentry: recognized
+credentials and personal data are masked, sensitive keys are removed, and URL identifiers become
+`:id` with query strings and fragments removed. Request/job correlation, project keys, worker names,
+status and safe error codes remain available. Values are bounded to five levels, 50 keys/items and
+1,024 characters per string. Scrubbing is best effort for arbitrary free text; never put customer
+data in a diagnostic message. Unreadable input becomes `[Unserializable]` locally or is dropped by
+Sentry, and serialization hooks on context objects are not invoked.
+
 Events use Pino's numeric `level`, epoch-millisecond `time`, `pid`, `hostname`, and `msg` fields.
 Additional fields remain nested under `context`; errors use `err.type`, `err.message`, and
 `err.stack` when present. Error objects do not contribute arbitrary additional properties.
 BigInt context values are decimal strings and circular references use `[Circular]`.
+
+Database errors, including wrapped Drizzle and PostgreSQL failures, use `err.type: "DatabaseError"`
+and `err.message: "Database operation failed"`. They include `err.sqlState` when available and
+`err.constraint` only for a bounded PostgreSQL identifier. SQL, parameters, driver messages,
+detail/hint and raw database stacks are omitted. Nested causes are inspected without changing the
+original error used by retries. Structured context also drops raw database payload keys such as
+`query`, `params`, `parameters`, `detail` and `hint`.
+
+Collectors must tolerate removed sensitive context fields and truncated strings. Use request/job
+correlation and `err.sqlState` for investigations; for example, `40P01` identifies a deadlock and
+`23505` a unique-constraint violation. Sentry retains structured source locations for database
+errors, with source snippets and local variables removed. This change needs no schema migration or
+environment configuration and takes effect on deployment.
 
 When upgrading from console logging, update log collectors alongside the service: string `level`
 becomes numeric, `timestamp` becomes `time`, `message` becomes `msg`, and `error.name` becomes
