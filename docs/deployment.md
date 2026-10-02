@@ -42,6 +42,7 @@ usage and the settings it reads without running it; an unknown command or unexpe
 | --- | --- |
 | `quotum migrate` / `quotum migrate status` | Apply pending migrations, or verify the applied checksums. |
 | `quotum partitions status` / `ensure [--months <n>]` | Report or extend the monthly [usage partitions](operations.md#usage-partitions). |
+| `quotum usage scopes report [--project <instance>] [--limit <n>] [--json]` | Read-only report of what [declared meter-limit scope](upgrade-transitions.md#preparing-for-declared-meter-limit-scope) will change; exits `2` while blocking items remain. |
 | `quotum bootstrap --check` / `--apply [--credentials-out <path>]` | The [platform bootstrap](#first-start). |
 | `quotum catalog provision` | Import the store products in `BILLING_CATALOG_IMPORT_JSON`. |
 | `quotum catalog status` / `diff <file>` / `push <file>` | [Catalog automation](catalog.md) over HTTP. |
@@ -54,7 +55,7 @@ usage and the settings it reads without running it; an unknown command or unexpe
 | `quotum init` | Print a newly generated `QUOTUM_SECRETS_KEY_*`, `QUOTUM_AUTH_SECRET` and `BILLING_OPERATOR_API_KEY`. |
 | `quotum version`, `quotum help` | Build version and command list. |
 
-`bootstrap`, `catalog`, `partitions`, `connections` and `credentials` report a failure as one line
+`bootstrap`, `catalog`, `partitions`, `usage scopes`, `connections` and `credentials` report a failure as one line
 on stderr and exit `64` for wrong arguments or `1` otherwise. A missing table reads as "the
 database schema is not migrated", and an invalid `BILLING_PLATFORM_BOOTSTRAP_JSON` names the field
 at fault.
