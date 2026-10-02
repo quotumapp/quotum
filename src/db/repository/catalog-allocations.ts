@@ -551,7 +551,7 @@ export async function materializeSubscriptionAllocations(
 				-- Items that reset more often than the plan bills get one grant per reset window below.
 				AND NOT EXISTS (
 					SELECT 1 FROM plan_versions pv WHERE pv.project_id = pi.project_id
-						AND pv.id = pi.plan_version_id AND ${resetSplitsBillingPeriodSql("pi", "pv")}
+						AND pv.id = pi.plan_version_id AND ${resetSplitsBillingPeriodSql("pi", "pv", { start: drizzleSql`${input.periodStartAt.toISOString()}::timestamptz`, end: drizzleSql`${input.periodEndAt?.toISOString() ?? null}::timestamptz` })}
 				)
 				-- A lifetime item the subscription already holds a live allowance of, granted per
 				-- period before lifetime keys existed, is not granted again.

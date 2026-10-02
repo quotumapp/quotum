@@ -40,7 +40,7 @@ export async function materializeSubscriptionResetAllocations(
 				SELECT 1 FROM plan_items pi
 				JOIN plan_versions pv ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
 				WHERE pi.project_id = s.project_id AND pi.plan_version_id = s.plan_version_id
-					AND pi.item_kind = 'allocation' AND ${resetSplitsBillingPeriodSql("pi", "pv")}
+					AND pi.item_kind = 'allocation' AND ${resetSplitsBillingPeriodSql("pi", "pv", { start: drizzleSql`COALESCE(s.current_period_start, s.starts_at)`, end: drizzleSql`COALESCE(s.current_period_end, s.expires_at)` })}
 			)
 			AND s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
 			AND COALESCE(s.current_period_start, s.starts_at) <= now()
@@ -67,7 +67,7 @@ export async function materializeSubscriptionResetAllocations(
 		JOIN plan_versions pv ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
 		WHERE pi.project_id = ${projectId}
 			AND pi.plan_version_id = ${String(subscription.plan_version_id)}::bigint
-			AND pi.item_kind = 'allocation' AND ${resetSplitsBillingPeriodSql("pi", "pv")}
+			AND pi.item_kind = 'allocation' AND ${resetSplitsBillingPeriodSql("pi", "pv", { start: drizzleSql`${new Date(subscription.period_start).toISOString()}::timestamptz`, end: drizzleSql`${new Date(subscription.period_end).toISOString()}::timestamptz` })}
 		ORDER BY pi.id
 	`,
 	);
@@ -154,7 +154,7 @@ export async function materializeDueSubscriptionAllocations(
 					SELECT 1 FROM plan_items pi
 					JOIN plan_versions pv ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
 					WHERE pi.project_id = s.project_id AND pi.plan_version_id = s.plan_version_id
-						AND pi.item_kind = 'allocation' AND ${resetSplitsBillingPeriodSql("pi", "pv")}
+						AND pi.item_kind = 'allocation' AND ${resetSplitsBillingPeriodSql("pi", "pv", { start: drizzleSql`COALESCE(s.current_period_start, s.starts_at)`, end: drizzleSql`COALESCE(s.current_period_end, s.expires_at)` })}
 						AND NOT EXISTS (
 							SELECT 1 FROM balance_allocations a
 							WHERE a.project_id = s.project_id AND a.subscription_id = s.id AND a.plan_item_id = pi.id

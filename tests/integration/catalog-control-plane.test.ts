@@ -1173,6 +1173,228 @@ localDescribe("catalog control plane", () => {
 		});
 	});
 
+	it("reads the catalog back canonically and republishes a respelling without a new version", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = operatorHeaders(authHeaders());
+		const legacy = catalogIntent(1, "0.005");
+		const first = await previewCatalog(app, headers, null, legacy);
+		// Legacy syntax is reported, and a Stripe product the plan leaves to Stripe to price is advice.
+		expect(first.deprecations.map(({ path }: { path: string }) => path)).toEqual([
+			"plans[0].items[0]",
+			"plans[0]",
+			"topups[0]",
+		]);
+		expect(first.advisories).toEqual([
+			{
+				path: "plans[0].providerPriced.providerBindings[2]",
+				message: "Use `basePrice` when Quotum should model the price.",
+			},
+		]);
+		const published = await publishCatalog(app, headers, null, first.previewToken, legacy);
+
+		const read = (
+			await (await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() })).json()
+		).data;
+		expect(read.intentHash).toBe(published.intentHash);
+		expect(read.catalog.plans[0]).toMatchObject({
+			basePrice: null,
+			providerPriced: {
+				billingInterval: "month",
+				billingIntervalCount: 1,
+				providerBindings: [
+					{ productKey: "premium_monthly", provider: "apple", channel: "ios" },
+					{ productKey: "premium_monthly", provider: "google", channel: "android" },
+					{ productKey: "premium_monthly", provider: "stripe", channel: "web" },
+				],
+			},
+			items: [
+				{
+					itemKind: "allocation",
+					featureKey: "ai_credits",
+					quantity: "1000",
+					reset: { interval: "month", intervalCount: 1 },
+					expiry: { mode: "forever" },
+					allocationScope: "account",
+					rollover: null,
+				},
+			],
+		});
+		expect(read.catalog.plans[0]).not.toHaveProperty("baseAmountMinor");
+		expect(read.catalog.topups[0].expiry).toEqual({ mode: "after_seconds", seconds: 315_360_000 });
+
+		const versions = async () =>
+			(
+				await context.sql<
+					Array<{ count: string }>
+				>`SELECT count(*)::text AS count FROM plan_versions`
+			)[0]?.count;
+		const versionsBefore = await versions();
+		// The read-back previews unchanged, reports nothing to respell and publishes no version.
+		const again = await previewCatalog(app, headers, 1, read.catalog);
+		expect(again).toMatchObject({
+			intentHash: read.intentHash,
+			deprecations: [],
+			impact: { planVersionsCreated: 0, plansCreated: 0 },
+		});
+		const republished = await publishCatalog(app, headers, 1, again.previewToken, read.catalog);
+		expect(republished.impact.planVersionsCreated).toBe(0);
+		expect(await versions()).toBe(versionsBefore);
+		// The legacy file still diffs as unchanged: it canonicalizes to the same intent.
+		expect((await previewCatalog(app, headers, 2, legacy)).intentHash).toBe(read.intentHash);
+	});
+
+	it("decodes a catalog stored in the legacy spelling and refuses a preview issued before", async () => {
+		const errors: unknown[] = [];
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			logger: recordingErrorLogger(errors),
+		});
+		const headers = operatorHeaders(authHeaders());
+		const legacy = catalogIntent(1, "0.005");
+		const first = await previewCatalog(app, headers, null, legacy);
+		await publishCatalog(app, headers, null, first.previewToken, legacy, errors);
+		const canonical = (
+			await (await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() })).json()
+		).data;
+
+		// What the control plane stored before the canonical intent: the legacy spelling, and the
+		// hash recorded for it at publish, which stays as history.
+		const legacyHash = "0".repeat(64);
+		await context.sql`
+			UPDATE catalog_drafts SET intent = ${JSON.stringify(legacy)}::text::jsonb
+			WHERE status = 'published'
+		`;
+		await context.sql`UPDATE catalog_revisions SET intent_hash = ${legacyHash}`;
+		const decoded = (
+			await (await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() })).json()
+		).data;
+		expect(decoded.catalog).toEqual(canonical.catalog);
+		expect(decoded.intentHash).toBe(canonical.intentHash);
+		expect(
+			(
+				await context.sql<Array<{ intent_hash: string }>>`SELECT intent_hash FROM catalog_revisions`
+			)[0]?.intent_hash,
+		).toBe(legacyHash);
+		const diff = await previewCatalog(app, headers, 1, legacy);
+		expect(diff).toMatchObject({
+			intentHash: canonical.intentHash,
+			impact: { planVersionsCreated: 0 },
+		});
+
+		// A preview stored in the legacy spelling no longer matches what its intent canonicalizes to.
+		await context.sql`
+			UPDATE catalog_drafts
+			SET intent = ${JSON.stringify(legacy)}::text::jsonb, intent_hash = ${legacyHash}
+			WHERE preview_token = ${diff.previewToken}
+		`;
+		const stale = await testRequest(app, "/v1/admin/catalog/publish", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				expectedRevision: 1,
+				previewToken: diff.previewToken,
+				catalog: legacy,
+			}),
+		});
+		expect(stale.status).toBe(409);
+		expect((await stale.json()).error.code).toBe("CATALOG_PREVIEW_MISMATCH");
+	});
+
+	it("binds a plan to its base price's product and its store products alike", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = operatorHeaders(authHeaders());
+		const base = catalogIntent(1, "0.005");
+		const [premium] = base.plans;
+		const intent = {
+			...base,
+			plans: [
+				{
+					...premium,
+					basePrice: {
+						key: "premium-base",
+						currency: "USD",
+						unitAmountMinor: 999,
+						billingUnits: "1",
+						billingInterval: "month",
+						minimumQuantity: 1,
+						maximumQuantity: 1,
+						taxBehavior: "exclusive",
+						providerBindings: [
+							{ productKey: "premium_monthly", provider: "stripe", channel: "web" },
+						],
+					},
+					// The legacy list names only the store products. Before the canonical intent it replaced
+					// the base price's product as the plan's binding, so a Stripe subscription found no plan.
+					providerBindings: [
+						{ productKey: "premium_monthly", provider: "apple", channel: "ios" },
+						{ productKey: "premium_monthly", provider: "google", channel: "android" },
+					],
+				},
+			],
+		};
+		const preview = await previewCatalog(app, headers, null, intent as never);
+		expect(preview.advisories).toEqual([]);
+		await publishCatalog(app, headers, null, preview.previewToken, intent as never);
+		expect(
+			await context.sql<Array<{ provider: string; version: number }>>`
+				SELECT store.provider, version.version
+				FROM provider_plan_bindings binding
+				JOIN store_products store ON store.id = binding.store_product_id
+				JOIN plan_versions version ON version.id = binding.plan_version_id
+				WHERE binding.status = 'published'
+				ORDER BY store.provider
+			`,
+		).toEqual([
+			{ provider: "apple", version: 1 },
+			{ provider: "google", version: 1 },
+			{ provider: "stripe", version: 1 },
+		]);
+
+		const periodStart = new Date();
+		const periodEnd = new Date(periodStart.getTime() + 30 * 86_400_000);
+		const synced = await context.repository.recordStripeSubscriptionAndEnqueueProjection(
+			integrationProjectContext(),
+			{
+				billingAccountId: "union-account",
+				stripeCustomerId: "cus_union",
+				stripeSubscriptionId: "sub_union",
+				invoiceId: null,
+				externalProductId: "prod_stripe_premium",
+				externalPriceId: "price_premium_monthly",
+				subscriptionStatus: "active",
+				purchasedAt: periodStart,
+				startsAt: periodStart,
+				expiresAt: periodEnd,
+				currentPeriodStart: periodStart,
+				currentPeriodEnd: periodEnd,
+				autoRenew: true,
+				rawPayload: {},
+				eventType: "customer.subscription.created",
+				externalEventId: "evt_union",
+				projectionReason: "provider_webhook",
+				projectionIdempotencyKey: "evt_union:projection",
+				providerEventCreated: 1,
+			},
+		);
+		expect(synced.processingStatus).toBe("processed");
+		expect(
+			await context.sql<Array<{ plan_key: string; version: number }>>`
+				SELECT plan.key AS plan_key, version.version
+				FROM subscriptions subscription
+				JOIN plan_versions version ON version.id = subscription.plan_version_id
+				JOIN plans plan ON plan.id = version.plan_id
+				WHERE subscription.external_subscription_id = 'sub_union'
+			`,
+		).toEqual([{ plan_key: "premium", version: 1 }]);
+	});
+
 	it("refuses two spellings of one plan price and accepts a priced plan with no items", async () => {
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -1322,6 +1544,64 @@ localDescribe("catalog control plane", () => {
 			code: "INVALID_REQUEST",
 			message: "Plan team baseAmountMinor requires a currency",
 		});
+	});
+
+	it("publishes a plan priced only by its items without a plan currency", async () => {
+		await seedPhaseTwoStripePrices();
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = operatorHeaders(authHeaders());
+		const catalog = phaseTwoCatalogIntent();
+		const [pro, ...rest] = catalog.plans;
+		if (pro === undefined) throw new Error("phase-two catalog has no pro plan");
+		const {
+			currency: _currency,
+			baseAmountMinor: _baseAmountMinor,
+			billingInterval: _billingInterval,
+			basePrice: _basePrice,
+			providerBindings: _providerBindings,
+			...seatOnly
+		} = pro;
+		const intent = {
+			...catalog,
+			plans: [{ ...seatOnly, basePrice: null, providerPriced: null }, ...rest],
+		};
+		const preview = await testRequest(app, "/v1/admin/catalog/preview", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ expectedRevision: null, catalog: intent }),
+		});
+		expect(preview.status).toBe(200);
+		const { previewToken } = (await preview.json()).data;
+		// DEC-25 example 4: the seat and overage prices keep their own currency; the plan records none,
+		// so `plan_versions_price_check` (amount and currency together) holds instead of answering 500.
+		const publish = await testRequest(app, "/v1/admin/catalog/publish", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ expectedRevision: null, previewToken, catalog: intent }),
+		});
+		expect(publish.status).toBe(200);
+		const [version] = await context.sql<
+			Array<{
+				currency: string | null;
+				base_amount_minor: string | null;
+				billing_interval: string | null;
+			}>
+		>`
+			SELECT version.currency, version.base_amount_minor::text, version.billing_interval
+			FROM plan_versions version JOIN plans plan ON plan.id = version.plan_id
+			WHERE plan.key = 'pro'
+		`;
+		expect(version).toEqual({ currency: null, base_amount_minor: null, billing_interval: "month" });
+		const components = await context.sql<Array<{ currency: string }>>`
+			SELECT DISTINCT component.currency FROM price_components component
+			JOIN plan_versions version ON version.id = component.plan_version_id
+			JOIN plans plan ON plan.id = version.plan_id
+			WHERE plan.key = 'pro'
+		`;
+		expect(components).toEqual([{ currency: "USD" }]);
 	});
 });
 

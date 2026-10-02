@@ -62,7 +62,8 @@ const priceSchema = z
 	})
 	.strict();
 
-const planItemSchema = z
+/** @deprecated The legacy spelling of a plan item, accepted until the 1.0 release candidate. */
+const legacyPlanItemSchema = z
 	.object({
 		featureKey: z.string().trim().min(1).max(120),
 		itemKind: z.enum(["access", "allocation", "meter_limit", "licensed_quantity"]),
@@ -97,6 +98,89 @@ const planItemSchema = z
 	})
 	.strict();
 
+const featureKeySchema = z.string().trim().min(1).max(120);
+const quantitySchema = z.string().trim().min(1).max(80);
+
+const cadenceSchema = z
+	.object({
+		interval: z.enum(cadenceUnits),
+		intervalCount: z.number().int().min(1).max(maxCadenceCount),
+	})
+	.strict();
+
+/** An allowance or top-up expiry: never, or an exact duration. */
+const expirySchema = z.discriminatedUnion("mode", [
+	z.object({ mode: z.literal("forever") }).strict(),
+	z.object({ mode: z.literal("after_seconds"), seconds: z.number().int().positive() }).strict(),
+]);
+
+const canonicalRolloverSchema = z
+	.object({
+		maxQuantity: quantitySchema.nullable(),
+		expiry: z.discriminatedUnion("mode", [
+			z.object({ mode: z.literal("forever") }).strict(),
+			z
+				.object({
+					mode: z.literal("after"),
+					interval: z.enum(cadenceUnits),
+					intervalCount: z.number().int().min(1).max(maxCadenceCount),
+				})
+				.strict(),
+		]),
+	})
+	.strict();
+
+/** A plan item in the canonical spelling: each kind takes only the fields it uses. */
+const canonicalPlanItemSchema = z.discriminatedUnion("itemKind", [
+	z.object({ itemKind: z.literal("access"), featureKey: featureKeySchema }).strict(),
+	z
+		.object({
+			itemKind: z.literal("allocation"),
+			featureKey: featureKeySchema,
+			quantity: quantitySchema,
+			reset: cadenceSchema.nullable().optional(),
+			expiry: expirySchema.optional(),
+			allocationScope: z.enum(["account", "entity"]).optional(),
+			rollover: canonicalRolloverSchema.nullable().optional(),
+		})
+		.strict(),
+	z
+		.object({
+			itemKind: z.literal("meter_limit"),
+			featureKey: featureKeySchema,
+			quantity: quantitySchema,
+			reset: cadenceSchema,
+			overage: z
+				.discriminatedUnion("policy", [
+					z.object({ policy: z.literal("blocked") }).strict(),
+					z.object({ policy: z.literal("allowed"), price: priceSchema }).strict(),
+				])
+				.optional(),
+			allocationScope: z.enum(["account", "entity"]).optional(),
+		})
+		.strict(),
+	z
+		.object({
+			itemKind: z.literal("licensed_quantity"),
+			featureKey: featureKeySchema,
+			quantity: quantitySchema,
+			price: priceSchema,
+			allocationScope: z.enum(["account", "license_pool"]).optional(),
+		})
+		.strict(),
+]);
+
+const planItemSchema = z.union([canonicalPlanItemSchema, legacyPlanItemSchema]);
+
+/** Products whose price the provider owns: App Store, Google Play, or Stripe dashboard prices. */
+const providerPricedSchema = z
+	.object({
+		billingInterval: z.enum(billingCadenceUnits),
+		billingIntervalCount: z.number().int().min(1).max(maxCadenceCount).optional(),
+		providerBindings: z.array(providerBindingSchema).min(1).max(20),
+	})
+	.strict();
+
 const controlSchema = z
 	.object({
 		controlKind: z.enum(["spend_limit", "usage_limit"]),
@@ -108,16 +192,16 @@ const controlSchema = z
 	})
 	.strict();
 
+/**
+ * A plan, in the canonical spelling (`basePrice`, `providerPriced`) or the legacy plan-level price
+ * fields, which preview reports as deprecated. Defaulted fields are optional.
+ */
 const planSchema = z
 	.object({
 		key: z.string().trim().min(1).max(120),
 		name: z.string().trim().min(1).max(200),
 		version: z.number().int().positive(),
-		currency: z.string().trim().min(3).max(3).nullable(),
-		baseAmountMinor: z.number().int().nonnegative().nullable(),
-		billingInterval: z.enum(billingCadenceUnits).nullable(),
-		billingIntervalCount: z.number().int().min(1).max(maxCadenceCount).nullable().optional(),
-		trialDays: z.number().int().min(0).max(730).nullable(),
+		trialDays: z.number().int().min(0).max(730).nullable().optional(),
 		kind: z.enum(["base", "addon"]).optional(),
 		tierRank: z.number().int().optional(),
 		trialRequiresPaymentMethod: z.boolean().optional(),
@@ -127,9 +211,14 @@ const planSchema = z
 		visibility: z.enum(["public", "customer_specific"]).optional(),
 		customerBillingAccountId: z.string().trim().min(1).max(200).nullable().optional(),
 		basePrice: priceSchema.nullable().optional(),
+		providerPriced: providerPricedSchema.nullable().optional(),
 		items: z.array(planItemSchema).max(100),
 		controls: z.array(controlSchema).max(50).optional(),
-		providerBindings: z.array(providerBindingSchema).max(20),
+		currency: z.string().trim().min(3).max(3).nullable().optional(),
+		baseAmountMinor: z.number().int().nonnegative().nullable().optional(),
+		billingInterval: z.enum(billingCadenceUnits).nullable().optional(),
+		billingIntervalCount: z.number().int().min(1).max(maxCadenceCount).nullable().optional(),
+		providerBindings: z.array(providerBindingSchema).max(20).optional(),
 	})
 	.strict();
 
@@ -159,7 +248,8 @@ const topupSchema = z
 		key: z.string().trim().min(1).max(120),
 		featureKey: z.string().trim().min(1).max(120),
 		quantity: z.string().trim().min(1).max(80),
-		expiresAfterSeconds: z.number().int().positive().nullable(),
+		expiry: expirySchema.optional(),
+		expiresAfterSeconds: z.number().int().positive().nullable().optional(),
 		providerBindings: z.array(providerBindingSchema).min(1).max(20),
 	})
 	.strict();

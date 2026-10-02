@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	meterLimitWindowBounds,
+	periodSplits,
 	planGrantWindowBounds,
 } from "../../src/db/repository/meter-limit-windows";
 import { addCadence, addUtcMonths, type Cadence } from "../../src/shared/cadence";
@@ -9,6 +10,26 @@ const MONTH: Cadence = { unit: "month", count: 1 };
 const YEAR: Cadence = { unit: "year", count: 1 };
 
 describe("meter-limit window bounds", () => {
+	it("splits a period by its reset when the plan version records no billing cadence", () => {
+		// An unpriced plan has no billing cadence; a subscription holding it bills by its recorded
+		// period, so a daily limit still counts per day rather than over the whole month.
+		const DAY: Cadence = { unit: "day", count: 1 };
+		const start = new Date("2026-09-10T00:00:00.000Z");
+		const end = new Date("2026-10-10T00:00:00.000Z");
+		expect(periodSplits(DAY, null, start, end)).toBe(true);
+		expect(periodSplits(MONTH, null, start, end)).toBe(false);
+		expect(periodSplits(MONTH, MONTH, start, end)).toBe(false);
+		expect(
+			meterLimitWindowBounds(start, end, DAY, new Date("2026-09-16T12:00:00.000Z"), null),
+		).toEqual({
+			start: new Date("2026-09-16T00:00:00.000Z"),
+			end: new Date("2026-09-17T00:00:00.000Z"),
+		});
+		expect(
+			meterLimitWindowBounds(start, end, MONTH, new Date("2026-09-16T12:00:00.000Z"), null),
+		).toEqual({ start, end });
+	});
+
 	it("uses the subscription period while it is current", () => {
 		expect(
 			meterLimitWindowBounds(
@@ -253,7 +274,8 @@ describe("meter-limit window bounds", () => {
 			start: new Date("2026-09-10T00:00:00.000Z"),
 			end: new Date("2026-10-10T00:00:00.000Z"),
 		});
-		// Without a billing interval, or for an open-ended period, the period is the window.
+		// Without a billing interval the recorded period is the billing period, so a monthly reset
+		// still splits a yearly period; an open-ended period rolls by the reset.
 		expect(
 			meterLimitWindowBounds(
 				"2026-01-01T00:00:00.000Z",
@@ -262,8 +284,8 @@ describe("meter-limit window bounds", () => {
 				new Date("2026-09-22T00:00:00.000Z"),
 			),
 		).toEqual({
-			start: new Date("2026-01-01T00:00:00.000Z"),
-			end: new Date("2027-01-01T00:00:00.000Z"),
+			start: new Date("2026-09-01T00:00:00.000Z"),
+			end: new Date("2026-10-01T00:00:00.000Z"),
 		});
 		expect(
 			meterLimitWindowBounds(

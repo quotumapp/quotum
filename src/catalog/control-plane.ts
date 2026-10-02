@@ -32,6 +32,16 @@ import {
 	priceBillingCadence,
 	rolloverExpiryCadence,
 } from "./cadence-rules";
+import {
+	assertAuthoredShape,
+	canonicalFromWorking,
+	catalogAdvisories,
+	legacyPriceView,
+	type SpellingFindings,
+	toWorkingShape,
+	unionBindings,
+	workingFromCanonical,
+} from "./canonical-intent";
 import { assertDefaultPlan } from "./default-plan-rules";
 import {
 	assertBaseAmountHasCurrency,
@@ -44,9 +54,13 @@ import {
 	catalogProviderCompatibility,
 } from "./provider-compatibility";
 import type {
+	AuthoredCatalogIntent,
+	CanonicalCatalog,
+	CatalogAdvisory,
 	CatalogControlIntent,
 	CatalogControlPlaneLike,
 	CatalogDefaultPlanIntent,
+	CatalogDeprecation,
 	CatalogFeatureIntent,
 	CatalogImpact,
 	CatalogIntent,
@@ -59,6 +73,59 @@ import type {
 	CatalogPublishResult,
 	PublishedCatalog,
 } from "./types";
+
+/**
+ * An authored intent read every way the control plane needs it. Preview stores and hashes
+ * `canonical`; validation and publishing read `working`, rebuilt from `canonical`, so what is
+ * stored is what is published.
+ */
+export interface ParsedCatalogIntent {
+	/** The authored intent spelled the legacy way, before normalization. */
+	submitted: CatalogIntent;
+	/** `submitted`, normalized: it still holds what canonicalization drops. */
+	normalized: CatalogIntent;
+	canonical: CanonicalCatalog;
+	/** The normalized working intent rebuilt from `canonical`. */
+	working: CatalogIntent;
+	deprecations: CatalogDeprecation[];
+	advisories: CatalogAdvisory[];
+}
+
+/**
+ * Reads a new intent in either spelling. Structural only, like normalization: the rules of a new
+ * intent are asserted by {@link assertNewCatalogIntent}.
+ */
+export function parseAuthoredIntent(
+	authored: AuthoredCatalogIntent,
+	capabilities: ProviderCapabilityLookup = providerCapabilityCatalog,
+): ParsedCatalogIntent {
+	const findings: SpellingFindings = { deprecations: [] };
+	const submitted = toWorkingShape(authored, findings);
+	const normalized = normalizeCatalog(submitted, capabilities);
+	const canonical = canonicalFromWorking(normalized);
+	return {
+		submitted,
+		normalized,
+		canonical,
+		working: normalizeCatalog(workingFromCanonical(canonical), capabilities),
+		deprecations: findings.deprecations,
+		advisories: catalogAdvisories(canonical),
+	};
+}
+
+/**
+ * Reads a stored intent, in whichever spelling it was stored, as its canonical intent. Stored data
+ * only (published revisions, drafts, read-back and diff): it never applies the rules of a new intent,
+ * so a catalog published before a rule existed stays readable.
+ */
+export function decodeStoredIntent(
+	stored: unknown,
+	capabilities: ProviderCapabilityLookup = providerCapabilityCatalog,
+): CanonicalCatalog {
+	return canonicalFromWorking(
+		normalizeCatalog(toWorkingShape(stored as AuthoredCatalogIntent), capabilities),
+	);
+}
 
 interface ProjectCatalogRow {
 	id: string;
@@ -101,7 +168,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		const row = await executeOne<{
 			intent_hash: string;
 			published_at: Date | string;
-			intent: CatalogIntent;
+			intent: unknown;
 		}>(
 			this.database,
 			drizzleSql`
@@ -116,12 +183,15 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 			`,
 		);
 		if (row === null) throw new Error("Published catalog intent was not found");
+		// The canonical intent and its hash, so that previewing it unchanged reports the same hash;
+		// the revision keeps the hash recorded when it was published.
+		const catalog = decodeStoredIntent(row.intent, this.capabilities);
 		return {
 			revisionId: String(projectState.revision_id),
 			revision: projectState.revision,
-			intentHash: row.intent_hash,
+			intentHash: sha256Hex(stableJson(catalog)),
 			publishedAt: toIso(row.published_at),
-			catalog: normalizeCatalog(row.intent, this.capabilities),
+			catalog,
 		};
 	}
 
@@ -129,17 +199,17 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		project: ProjectInstanceContext,
 		input: CatalogPreviewInput,
 	): Promise<CatalogPreview> {
-		const catalog = normalizeCatalog(input.catalog, this.capabilities);
-		assertNewCatalogIntent(input.catalog, catalog, this.capabilities);
-		const providerCompatibility = catalogProviderCompatibility(catalog, {
+		const parsed = parseAuthoredIntent(input.catalog, this.capabilities);
+		assertNewCatalogIntent(input.catalog, parsed, this.capabilities);
+		const providerCompatibility = catalogProviderCompatibility(parsed.working, {
 			capabilities: this.capabilities,
 			includeUnbound: true,
 		});
 		return await this.transaction(async (tx) => {
 			const projectState = await readProjectCatalog(tx, project, false);
 			assertExpectedRevision(input.expectedRevision, projectState.revision);
-			await validateCatalogLifecycle(tx, projectState.id, catalog, this.capabilities);
-			const intentHash = sha256Hex(stableJson(catalog));
+			await validateCatalogLifecycle(tx, projectState.id, parsed.canonical, this.capabilities);
+			const intentHash = sha256Hex(stableJson(parsed.canonical));
 			const nextRevision = (projectState.revision ?? 0) + 1;
 			const previewToken = sha256Hex(
 				stableJson({
@@ -151,7 +221,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				}),
 			);
 			const expiresAt = new Date(Date.now() + 30 * 60_000);
-			const impact = await calculateImpact(tx, projectState.id, catalog, this.capabilities);
+			const impact = await calculateImpact(tx, projectState.id, parsed, this.capabilities);
 			await executeOne(
 				tx,
 				drizzleSql`
@@ -171,7 +241,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 						${nextRevision},
 						${intentHash},
 						${previewToken},
-						${jsonb(catalog)},
+						${jsonb(parsed.canonical)},
 						${requireActor(input.actor)},
 						${expiresAt.toISOString()}
 					)
@@ -186,6 +256,8 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				expiresAt: expiresAt.toISOString(),
 				impact,
 				providerCompatibility,
+				deprecations: parsed.deprecations,
+				advisories: parsed.advisories,
 			};
 		});
 	}
@@ -194,7 +266,8 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		project: ProjectInstanceContext,
 		input: CatalogPublishInput,
 	): Promise<CatalogPublishResult> {
-		const catalog = normalizeCatalog(input.catalog, this.capabilities);
+		const parsed = parseAuthoredIntent(input.catalog, this.capabilities);
+		const catalog = parsed.working;
 		return await this.transaction(async (tx) => {
 			const projectState = await readProjectCatalog(tx, project, true);
 			const token = input.previewToken.trim();
@@ -234,7 +307,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 			}
 			// After the retry branch: a published draft replays its result even if a declaration or
 			// rule narrowed since, while every new publish is still checked before any write.
-			assertNewCatalogIntent(input.catalog, catalog, this.capabilities);
+			assertNewCatalogIntent(input.catalog, parsed, this.capabilities);
 			if (draft.status !== "previewed" || new Date(draft.expires_at).getTime() <= Date.now()) {
 				throw new PersistenceConflictError(
 					"Catalog preview has expired",
@@ -248,21 +321,27 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 					"CATALOG_PREVIEW_STALE",
 				);
 			}
-			const intentHash = sha256Hex(stableJson(catalog));
-			if (draft.intent_hash !== intentHash || stableJson(draft.intent) !== stableJson(catalog)) {
+			// A preview issued before the canonical intent stored the legacy spelling, so it no longer
+			// matches and must be repeated.
+			const intentHash = sha256Hex(stableJson(parsed.canonical));
+			if (
+				draft.intent_hash !== intentHash ||
+				stableJson(draft.intent) !== stableJson(parsed.canonical)
+			) {
 				throw new PersistenceConflictError(
 					"Catalog publish intent differs from its preview",
 					"CATALOG_PREVIEW_MISMATCH",
 				);
 			}
 
-			await validateCatalogLifecycle(tx, projectState.id, catalog, this.capabilities);
-			const impact = await calculateImpact(tx, projectState.id, catalog, this.capabilities);
+			await validateCatalogLifecycle(tx, projectState.id, parsed.canonical, this.capabilities);
+			const impact = await calculateImpact(tx, projectState.id, parsed, this.capabilities);
 			const previousDefault = await readDefaultPlanTarget(tx, projectState.id);
 			const currentCatalog = await readCurrentCatalogIntent(tx, projectState.id, this.capabilities);
+			const changedKeys = changedPlanKeys(currentCatalog, parsed.canonical);
 			const changedCatalog = {
 				...catalog,
-				plans: changedPlans(currentCatalog, catalog),
+				plans: catalog.plans.filter((plan) => changedKeys.has(plan.key)),
 			};
 			const revision = await executeOne<{ id: string | number | bigint }>(
 				tx,
@@ -445,22 +524,26 @@ function assertExpectedRevision(expected: number | null, actual: number | null):
 /**
  * Checks a new intent in preview and publish, never a stored catalog: a published intent that
  * predates a rule stays readable, and preview still compares its replacement against it. A rule
- * that normalization would erase, such as two spellings of one price, reads the intent as submitted.
+ * that normalization or canonicalization would erase, such as two spellings of one price or a price
+ * that never charges, reads the intent as submitted; the rest read the working intent rebuilt from
+ * the canonical one.
  */
 function assertNewCatalogIntent(
-	submitted: CatalogIntent,
-	catalog: CatalogIntent,
+	authored: AuthoredCatalogIntent,
+	parsed: ParsedCatalogIntent,
 	capabilities: ProviderCapabilityLookup,
 ): void {
-	assertPriceSpellingsAgree(submitted, catalog);
-	assertBaseAmountHasCurrency(catalog);
-	assertItemPricesCharge(catalog);
+	assertAuthoredShape(authored);
+	assertPriceSpellingsAgree(legacyPriceView(authored, parsed.submitted), parsed.normalized);
+	assertBaseAmountHasCurrency(parsed.normalized);
+	assertItemPricesCharge(parsed.normalized);
 	// Usage windows and plan allocations reset within the provider period, so an item that resets
 	// less often than its plan bills would silently reset every period: a yearly limit on a monthly
 	// plan would become a monthly one.
-	for (const plan of catalog.plans) assertPlanCadences(plan);
-	assertDefaultPlan(catalog);
-	assertCatalogProviderCompatibility(catalog, capabilities);
+	for (const plan of parsed.normalized.plans) assertPlanCadences(plan);
+	// One definition of "unpriced": no base price, no provider-priced products, no item price.
+	assertDefaultPlan(parsed.working);
+	assertCatalogProviderCompatibility(parsed.working, capabilities);
 }
 
 /**
@@ -563,8 +646,9 @@ function normalizeCatalog(
 							},
 			})),
 			controls: (plan.controls ?? []).map((control) => normalizeControl(control, featureByKey)),
-			providerBindings:
-				legacyBindings.length > 0 ? legacyBindings : (basePrice?.providerBindings ?? []),
+			// The plan's products span both price spellings: a Stripe base price and the store
+			// products whose price the provider owns both identify this plan.
+			providerBindings: unionBindings(legacyBindings, basePrice?.providerBindings ?? []),
 		};
 	});
 	assertUnique(
@@ -992,15 +1076,24 @@ function controlIdentity(control: CatalogControlIntent): string {
 	].join(":");
 }
 
+/**
+ * Every product a plan binds: each price's bindings (a binding two prices share stays twice, so the
+ * uniqueness check can refuse it), then the provider-priced products no price binds.
+ */
 function allPlanPriceBindings(
 	plan: Pick<CatalogPlanIntent, "basePrice" | "items" | "providerBindings">,
 ): CatalogProviderBindingIntent[] {
 	const prices = [plan.basePrice ?? null, ...plan.items.map((item) => item.price ?? null)].filter(
 		(price): price is CatalogPriceIntent => price !== null,
 	);
-	return prices.length === 0
-		? plan.providerBindings
-		: prices.flatMap((price) => price.providerBindings);
+	const priced = prices.flatMap((price) => price.providerBindings);
+	const pricedIdentities = new Set(priced.map(providerBindingIdentity));
+	return [
+		...priced,
+		...plan.providerBindings.filter(
+			(binding) => !pricedIdentities.has(providerBindingIdentity(binding)),
+		),
+	];
 }
 
 function providerBindingIdentity(binding: CatalogProviderBindingIntent): string {
@@ -1029,9 +1122,10 @@ function validateFeature(feature: CatalogFeatureIntent): void {
 async function calculateImpact(
 	executor: QueryExecutor,
 	projectId: string,
-	catalog: CatalogIntent,
+	parsed: ParsedCatalogIntent,
 	capabilities: ProviderCapabilityLookup,
 ): Promise<CatalogImpact> {
+	const catalog = parsed.canonical;
 	const featureRows = await executeRows<{ key: string; active: boolean }>(
 		executor,
 		drizzleSql`SELECT key, active FROM features WHERE project_id = ${projectId}`,
@@ -1043,11 +1137,12 @@ async function calculateImpact(
 	const existingFeatures = new Set(featureRows.map(({ key }) => key));
 	const existingPlans = new Set(planRows.map(({ key }) => key));
 	const currentCatalog = await readCurrentCatalogIntent(executor, projectId, capabilities);
-	const planVersionsCreated = changedPlans(currentCatalog, catalog).length;
+	const changedKeys = changedPlanKeys(currentCatalog, catalog);
+	const planVersionsCreated = changedKeys.size;
 	const currentTopups = new Set((currentCatalog?.topups ?? []).map(({ key }) => key));
-	const retiredFeatures = new Set(catalog.retiredFeatureKeys ?? []);
-	const retiredPlans = new Set(catalog.retiredPlanKeys ?? []);
-	const retiredTopups = new Set(catalog.retiredTopupKeys ?? []);
+	const retiredFeatures = new Set(catalog.retiredFeatureKeys);
+	const retiredPlans = new Set(catalog.retiredPlanKeys);
+	const retiredTopups = new Set(catalog.retiredTopupKeys);
 	const grandfathered = await executeOne<{ count: number | string }>(
 		executor,
 		drizzleSql`
@@ -1057,7 +1152,7 @@ async function calculateImpact(
 				AND plan_version_id IS NOT NULL
 		`,
 	);
-	const marksDefaultPlan = (intent: CatalogIntent | null) =>
+	const marksDefaultPlan = (intent: CanonicalCatalog | null) =>
 		intent?.defaultPlan !== undefined && intent.defaultPlan !== null;
 	// The accounts without a base plan: those the marked default plan covers, or, when this
 	// publish removes the marker, those that lose it.
@@ -1083,29 +1178,40 @@ async function calculateImpact(
 		plansRetired: planRows.filter(({ key, active }) => active && retiredPlans.has(key)).length,
 		topupOptionsCreated: catalog.topups.length,
 		topupsRetired: [...currentTopups].filter((key) => retiredTopups.has(key)).length,
-		providerBindingsValidated: changedPlans(currentCatalog, catalog).reduce(
-			(total, plan) => total + allPlanPriceBindings(plan).length,
-			catalog.topups.reduce((total, topup) => total + topup.providerBindings.length, 0),
-		),
+		providerBindingsValidated: parsed.working.plans
+			.filter((plan) => changedKeys.has(plan.key))
+			.reduce(
+				(total, plan) => total + allPlanPriceBindings(plan).length,
+				catalog.topups.reduce((total, topup) => total + topup.providerBindings.length, 0),
+			),
 		existingSubscriptionsGrandfathered: Number(grandfathered?.count ?? 0),
 		defaultPlanAccounts: Number(defaultPlanAccounts?.count ?? 0),
 	};
 }
 
-function changedPlans(
-	currentCatalog: CatalogIntent | null,
-	nextCatalog: CatalogIntent,
-): CatalogPlanIntent[] {
+/**
+ * The keys of the plans a publish gives a new version: those whose canonical form differs from the
+ * published one. Comparing canonical forms means a respelling alone (legacy to canonical) creates
+ * no version.
+ */
+function changedPlanKeys(
+	currentCatalog: CanonicalCatalog | null,
+	nextCatalog: CanonicalCatalog,
+): Set<string> {
 	const currentPlans = new Map(
 		(currentCatalog?.plans ?? []).map((plan) => [plan.key, stableJson(plan)]),
 	);
-	return nextCatalog.plans.filter((plan) => currentPlans.get(plan.key) !== stableJson(plan));
+	return new Set(
+		nextCatalog.plans
+			.filter((plan) => currentPlans.get(plan.key) !== stableJson(plan))
+			.map(({ key }) => key),
+	);
 }
 
 async function validateCatalogLifecycle(
 	executor: QueryExecutor,
 	projectId: string,
-	catalog: CatalogIntent,
+	catalog: CanonicalCatalog,
 	capabilities: ProviderCapabilityLookup,
 ): Promise<void> {
 	const featureRows = await executeRows<{ key: string; active: boolean }>(
@@ -1123,9 +1229,9 @@ async function validateCatalogLifecycle(
 	const activeFeatureKeys = new Set(catalog.features.map(({ key }) => key));
 	const activePlanKeys = new Set(catalog.plans.map(({ key }) => key));
 	const activeTopupKeys = new Set(catalog.topups.map(({ key }) => key));
-	const retiredFeatureKeys = new Set(catalog.retiredFeatureKeys ?? []);
-	const retiredPlanKeys = new Set(catalog.retiredPlanKeys ?? []);
-	const retiredTopupKeys = new Set(catalog.retiredTopupKeys ?? []);
+	const retiredFeatureKeys = new Set(catalog.retiredFeatureKeys);
+	const retiredPlanKeys = new Set(catalog.retiredPlanKeys);
+	const retiredTopupKeys = new Set(catalog.retiredTopupKeys);
 	assertKnownRetirements(retiredFeatureKeys, new Set(featureRows.map(({ key }) => key)), "feature");
 	assertKnownRetirements(retiredPlanKeys, new Set(planRows.map(({ key }) => key)), "plan");
 	assertKnownRetirements(retiredTopupKeys, new Set(topupRows.map(({ key }) => key)), "top-up");
@@ -1168,8 +1274,8 @@ async function readCurrentCatalogIntent(
 	executor: QueryExecutor,
 	projectId: string,
 	capabilities: ProviderCapabilityLookup,
-): Promise<CatalogIntent | null> {
-	const row = await executeOne<{ intent: CatalogIntent }>(
+): Promise<CanonicalCatalog | null> {
+	const row = await executeOne<{ intent: unknown }>(
 		executor,
 		drizzleSql`
 			SELECT draft.intent
@@ -1184,7 +1290,7 @@ async function readCurrentCatalogIntent(
 			WHERE project.id = ${projectId}
 		`,
 	);
-	return row === null ? null : normalizeCatalog(row.intent, capabilities);
+	return row === null ? null : decodeStoredIntent(row.intent, capabilities);
 }
 
 async function applyCatalogRetirements(

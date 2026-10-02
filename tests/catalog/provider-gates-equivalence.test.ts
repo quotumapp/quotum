@@ -331,6 +331,24 @@ function blockedEntries(
 		}));
 }
 
+/**
+ * The blocked entries of a plan target, whose bindings span both price spellings: the base price's
+ * products and the plan-level ones, merged and sorted the way normalization sorts bindings.
+ */
+function blockedPlanEntries(
+	target: RecordedEntry["target"],
+	slots: Array<{ providers: readonly GatedProvider[]; slot: string }>,
+	requiredOperations: string[],
+): RecordedEntry[] {
+	return slots
+		.flatMap(({ providers, slot }) => blockedEntries(target, providers, slot, requiredOperations))
+		.sort((left, right) =>
+			`${left.provider}:${left.channel}:${left.productKey}`.localeCompare(
+				`${right.provider}:${right.channel}:${right.productKey}`,
+			),
+		);
+}
+
 /** The rejection order of catalog validation, and nothing else. */
 function oracleOutcome(plans: PlanSpec[], topup: TopupSpec | null): RecordedOutcome | "normalized" {
 	// Structural, phase 1: `plans.map` normalizes the base price, then each item price, per plan.
@@ -387,16 +405,18 @@ function oracleOutcome(plans: PlanSpec[], topup: TopupSpec | null): RecordedOutc
 	for (const [index, plan] of plans.entries()) {
 		const key = `plan_${index}`;
 		if ((plan.trialDays ?? 0) > 0 || plan.kind === "addon") {
-			const fallback = plan.legacy.length === 0;
 			const operations = inContractOrder([
 				...((plan.trialDays ?? 0) > 0 ? ["catalog.trial"] : []),
 				...(plan.kind === "addon" ? ["catalog.addon"] : []),
 			]);
+			// A plan's products are its base price's and its plan-level ones together.
 			entries.push(
-				...blockedEntries(
+				...blockedPlanEntries(
 					{ kind: "plan", key },
-					fallback ? (plan.basePrice?.providers ?? []) : plan.legacy,
-					fallback ? `p${index}-base` : `p${index}-plan`,
+					[
+						{ providers: plan.basePrice?.providers ?? [], slot: `p${index}-base` },
+						{ providers: plan.legacy, slot: `p${index}-plan` },
+					],
 					operations,
 				),
 			);

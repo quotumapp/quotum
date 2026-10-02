@@ -1,4 +1,5 @@
 import { capabilityErrorCodes } from "../billing/errors";
+import { workingFromCanonical } from "../catalog/canonical-intent";
 import { catalogProviderCompatibility } from "../catalog/provider-compatibility";
 import type { CatalogIntent } from "../catalog/types";
 import { BillingRepository } from "../db/repository";
@@ -150,7 +151,7 @@ export function createEnvironmentBillingPort(): EnvironmentBillingPort {
 				capabilityDetails:
 					published.catalog === null
 						? []
-						: catalogCapabilityReadiness(published.catalog, connections),
+						: catalogCapabilityReadiness(workingFromCanonical(published.catalog), connections),
 			};
 		},
 		async promote(input) {

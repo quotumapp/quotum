@@ -141,10 +141,237 @@ export interface CatalogIntent {
 	defaultPlan?: CatalogDefaultPlanIntent | null;
 }
 
+/** A reset or billing window: `intervalCount` units of `interval`. */
+export interface CatalogCadenceIntent {
+	interval: CadenceUnit;
+	intervalCount: number;
+}
+
+/**
+ * When an allowance or a top-up expires. `forever` never expires; `after_seconds` is an exact
+ * duration from the allowance's window start (capped at the window end) or from the purchase.
+ */
+export type CatalogExpiryIntent = { mode: "forever" } | { mode: "after_seconds"; seconds: number };
+
+/** A meter limit either blocks usage beyond its quantity or bills it in arrears at `price`. */
+export type CatalogOverageIntent =
+	| { policy: "blocked" }
+	| { policy: "allowed"; price: CatalogPriceIntent };
+
+/** When rolled-over quantity expires, in its canonical spelling. */
+export type CatalogCanonicalRolloverExpiry =
+	| { mode: "forever" }
+	| { mode: "after"; interval: CadenceUnit; intervalCount: number };
+
+export interface CatalogCanonicalRollover {
+	maxQuantity: string | null;
+	expiry: CatalogCanonicalRolloverExpiry;
+}
+
+/** A plan item in its canonical spelling: each kind carries only the fields it uses. */
+export type CanonicalPlanItem =
+	| { itemKind: "access"; featureKey: string }
+	| {
+			itemKind: "allocation";
+			featureKey: string;
+			quantity: string;
+			reset: CatalogCadenceIntent | null;
+			expiry: CatalogExpiryIntent;
+			allocationScope: "account" | "entity";
+			rollover: CatalogCanonicalRollover | null;
+	  }
+	| {
+			itemKind: "meter_limit";
+			featureKey: string;
+			quantity: string;
+			reset: CatalogCadenceIntent;
+			overage: CatalogOverageIntent;
+			allocationScope: "account" | "entity";
+	  }
+	| {
+			itemKind: "licensed_quantity";
+			featureKey: string;
+			quantity: string;
+			price: CatalogPriceIntent;
+			allocationScope: "account" | "license_pool";
+	  };
+
+/**
+ * The products a provider prices: App Store and Google Play products, and Stripe products priced in
+ * the Stripe dashboard. Quotum holds no amount for them, only their billing cadence and bindings.
+ * `billingInterval` is null only in a stored plan published without one before the canonical intent;
+ * a new intent must set it.
+ */
+export interface CatalogProviderPricedIntent {
+	billingInterval: BillingCadenceUnit | null;
+	billingIntervalCount: number;
+	providerBindings: CatalogProviderBindingIntent[];
+}
+
+/**
+ * A plan in its canonical spelling. A plan is unpriced when `basePrice` and `providerPriced` are
+ * both null and no item has a price.
+ */
+export interface CanonicalPlan {
+	key: string;
+	name: string;
+	version: number;
+	kind: "base" | "addon";
+	visibility: "public" | "customer_specific";
+	customerBillingAccountId: string | null;
+	tierRank: number;
+	trialDays: number | null;
+	trialRequiresPaymentMethod: boolean;
+	trialEndBehavior: "cancel" | "pause";
+	upgradeProrationBehavior: "always_invoice" | "create_prorations" | "none";
+	downgradeProrationBehavior: "always_invoice" | "create_prorations" | "none";
+	basePrice: CatalogPriceIntent | null;
+	providerPriced: CatalogProviderPricedIntent | null;
+	items: CanonicalPlanItem[];
+	controls: CatalogControlIntent[];
+}
+
+export interface CanonicalTopup {
+	key: string;
+	featureKey: string;
+	quantity: string;
+	expiry: CatalogExpiryIntent;
+	providerBindings: CatalogProviderBindingIntent[];
+}
+
+/**
+ * The catalog intent in its canonical spelling: what preview stores and hashes and what the
+ * published catalog reads back as, with every default spelled out. Features, rate cards, controls,
+ * retirements and the default-plan marker keep the shapes of {@link CatalogIntent}.
+ */
+export interface CanonicalCatalog {
+	features: CatalogFeatureIntent[];
+	plans: CanonicalPlan[];
+	topups: CanonicalTopup[];
+	rateCards: CatalogRateCardIntent[];
+	retiredFeatureKeys: string[];
+	retiredPlanKeys: string[];
+	retiredTopupKeys: string[];
+	/** Left out when the catalog marks no default plan. */
+	defaultPlan?: Required<CatalogDefaultPlanIntent>;
+}
+
+/**
+ * A plan as an operator writes it during the transition to the canonical intent: either the
+ * canonical fields (`basePrice`, `providerPriced`) or the legacy plan-level price fields, which
+ * preview reports as deprecated. Defaulted fields are optional.
+ */
+export interface AuthoredPlanIntent {
+	key: string;
+	name: string;
+	version: number;
+	trialDays?: number | null;
+	kind?: "base" | "addon";
+	tierRank?: number;
+	trialRequiresPaymentMethod?: boolean;
+	trialEndBehavior?: "cancel" | "pause";
+	upgradeProrationBehavior?: "always_invoice" | "create_prorations" | "none";
+	downgradeProrationBehavior?: "always_invoice" | "create_prorations" | "none";
+	visibility?: "public" | "customer_specific";
+	customerBillingAccountId?: string | null;
+	basePrice?: CatalogPriceIntent | null;
+	providerPriced?: AuthoredProviderPricedIntent | null;
+	items: AuthoredPlanItemIntent[];
+	controls?: CatalogControlIntent[];
+	/** @deprecated Use `basePrice` and `providerPriced`. */
+	currency?: string | null;
+	/** @deprecated Use `basePrice`; a provider-priced plan has no Quotum amount. */
+	baseAmountMinor?: number | null;
+	/** @deprecated Use the cadence of `basePrice` or `providerPriced`. */
+	billingInterval?: BillingCadenceUnit | null;
+	/** @deprecated Use the cadence of `basePrice` or `providerPriced`. */
+	billingIntervalCount?: number | null;
+	/** @deprecated Use the bindings of `basePrice` or `providerPriced`. */
+	providerBindings?: CatalogProviderBindingIntent[];
+}
+
+export interface AuthoredProviderPricedIntent {
+	billingInterval: BillingCadenceUnit;
+	billingIntervalCount?: number;
+	providerBindings: CatalogProviderBindingIntent[];
+}
+
+/** A plan item as an operator writes it: canonical, with defaults optional, or legacy. */
+export type AuthoredPlanItemIntent =
+	| { itemKind: "access"; featureKey: string }
+	| {
+			itemKind: "allocation";
+			featureKey: string;
+			quantity: string;
+			reset?: CatalogCadenceIntent | null;
+			expiry?: CatalogExpiryIntent;
+			allocationScope?: "account" | "entity";
+			rollover?: CatalogCanonicalRollover | null;
+	  }
+	| {
+			itemKind: "meter_limit";
+			featureKey: string;
+			quantity: string;
+			reset: CatalogCadenceIntent;
+			overage?: CatalogOverageIntent;
+			allocationScope?: "account" | "entity";
+	  }
+	| {
+			itemKind: "licensed_quantity";
+			featureKey: string;
+			quantity: string;
+			price: CatalogPriceIntent;
+			allocationScope?: "account" | "license_pool";
+	  }
+	| CatalogPlanItemIntent;
+
+/** A top-up as an operator writes it: canonical `expiry`, or the legacy `expiresAfterSeconds`. */
+export interface AuthoredTopupIntent {
+	key: string;
+	featureKey: string;
+	quantity: string;
+	expiry?: CatalogExpiryIntent;
+	/** @deprecated Use `expiry`. */
+	expiresAfterSeconds?: number | null;
+	providerBindings: CatalogProviderBindingIntent[];
+}
+
+/**
+ * A catalog intent as preview and publish accept it during the transition: canonical or legacy
+ * spellings, per plan, item and top-up. A legacy {@link CatalogIntent} is one.
+ */
+export interface AuthoredCatalogIntent {
+	features: CatalogFeatureIntent[];
+	plans: AuthoredPlanIntent[];
+	topups: AuthoredTopupIntent[];
+	rateCards: CatalogRateCardIntent[];
+	retiredFeatureKeys?: string[];
+	retiredPlanKeys?: string[];
+	retiredTopupKeys?: string[];
+	defaultPlan?: CatalogDefaultPlanIntent | null;
+}
+
+/**
+ * Legacy syntax a preview accepted: the fields at `path`, and the canonical fields that replace
+ * them (empty when the legacy value carries nothing the canonical intent keeps).
+ */
+export interface CatalogDeprecation {
+	path: string;
+	legacy: string[];
+	canonical: string[];
+	message: string;
+}
+
+/** A valid shape the operator may want to reconsider; it never implies removal. */
+export interface CatalogAdvisory {
+	path: string;
+	message: string;
+}
+
 export interface CatalogPreviewInput {
 	expectedRevision: number | null;
 	actor: string;
-	catalog: CatalogIntent;
+	catalog: AuthoredCatalogIntent;
 }
 
 export interface CatalogPublishInput extends CatalogPreviewInput {
@@ -179,6 +406,10 @@ export interface CatalogPreview {
 	 * entry is compatible.
 	 */
 	providerCompatibility: CatalogProviderCompatibility[];
+	/** Legacy syntax the intent used; it is accepted until the 1.0 release candidate. */
+	deprecations: CatalogDeprecation[];
+	/** Valid shapes the operator may want to reconsider. */
+	advisories: CatalogAdvisory[];
 }
 
 export interface CatalogPublishResult {
@@ -193,9 +424,10 @@ export interface CatalogPublishResult {
 export interface PublishedCatalog {
 	revisionId: string | null;
 	revision: number | null;
+	/** The hash of the canonical intent read back, which previewing it unchanged reports. */
 	intentHash: string | null;
 	publishedAt: string | null;
-	catalog: CatalogIntent | null;
+	catalog: CanonicalCatalog | null;
 }
 
 export interface CatalogControlPlaneLike {

@@ -403,3 +403,29 @@ Accounts over a hard cap are informational: once the scope is enforced they are 
 usage plus active holds leave no capacity, and a correction, a released hold or a higher limit
 restores it.
 
+## Canonical catalog intent
+
+No migration. The control plane now stores and hashes the [canonical intent](catalog.md#canonical-intent)
+and reads a catalog stored in the legacy spelling as its canonical form, so published catalogs keep
+their meaning:
+
+- `GET /v1/admin/catalog`, `client.catalog.status` and the MCP `get_catalog` tool return the
+  canonical spelling: `basePrice` and `providerPriced` instead of the plan-level price fields, and
+  item `reset`, `expiry` and `overage` instead of `resetInterval`, `expiresAfterSeconds` and
+  `overagePolicy`. Deploy a console that reads the canonical spelling with this release; an older
+  console cannot read the published catalog.
+- The reported `intentHash` changes once, to the hash of the canonical intent. Each revision keeps
+  the hash recorded when it was published. `quotum catalog diff` of an unchanged catalog file
+  reports `changed: false`, in either spelling, and republishing an unchanged catalog creates no
+  plan version.
+- A catalog preview taken before the upgrade stored the legacy spelling, so it fails to publish with
+  `CATALOG_PREVIEW_MISMATCH` and must be previewed again. Previews last 30 minutes.
+- A plan's products are now both its `basePrice` bindings and its plan-level (provider-priced)
+  bindings. A plan that sent both spellings used to lose its Stripe base price product's plan
+  binding; its next published version binds it, so a Stripe subscription to that product finds the
+  plan. Versions published before keep their bindings until a new version replaces them.
+- New intents are checked a little differently. A legacy plan whose plan-level bindings name
+  products without a `basePrice` needs a `billingInterval`, and a legacy access item may not carry an
+  expiry or a reset; both used to be accepted. A default plan with only a plan-level `currency` or
+  `baseAmountMinor`, and no price or binding, is now unpriced and accepted, with those fields
+  dropped.

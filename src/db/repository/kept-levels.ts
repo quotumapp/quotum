@@ -40,7 +40,7 @@ export async function keepNonConsumableLevels(
 					AND pi.plan_version_id = ${input.incomingPlanVersionId}::bigint
 					AND pi.item_kind = 'allocation'
 					-- Items granted per reset window inside the period keep their own windows.
-					AND NOT ${resetSplitsBillingPeriodSql("pi", "pv")}
+					AND NOT ${resetSplitsBillingPeriodSql("pi", "pv", { start: drizzleSql`${periodStart}::timestamptz`, end: drizzleSql`${periodEnd}::timestamptz` })}
 			),
 			levels AS (
 				SELECT allocation.id, incoming.id AS item_id, incoming.quantity AS item_quantity,
