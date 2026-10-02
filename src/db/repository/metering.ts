@@ -51,7 +51,6 @@ import { requireBillingAccount } from "./billing-accounts";
 import type { ControlDenial, UsageAlertRow } from "./controls-runtime";
 import {
 	checkControls,
-	checkUnrecordedControls,
 	confirmControlHolds,
 	consumeControls,
 	correctControlConsumption,
@@ -316,42 +315,25 @@ export class MeteringBillingRepository extends RepositoryModule {
 	): Promise<MeteringDecision> {
 		const projectId = project.projectInstanceId;
 		await validateOccurredAt(this.database, projectId, input.occurredAt ?? null);
-		const customer = await findCustomer(this.database, projectId, input.billingAccountId);
-		const entityId = await resolveEntityId(
-			this.database,
-			projectId,
-			customer?.id ?? null,
-			input.entityId,
-		);
+		// Usage checks need a created account (PUT /v1/billing-accounts/:id); the default plan
+		// applies from creation.
+		const customer = await requireBillingAccount(this.database, projectId, input.billingAccountId);
+		const entityId = await resolveEntityId(this.database, projectId, customer.id, input.entityId);
 		const feature = await requireMeteredFeature(this.database, projectId, input.featureKey);
 		validateFilters(feature, input.filters);
 		const requestedQuantity = positiveDecimal(input.quantity, "quantity", feature.credit_scale);
-		const meterLimit = await resolveMeterLimit(
-			this.database,
-			projectId,
-			customer?.id ?? null,
-			feature,
-		);
+		const meterLimit = await resolveMeterLimit(this.database, projectId, customer.id, feature);
 		if (meterLimit !== null) {
 			// Filters never create capacity under a declared scope; they matter only on usage events.
 			const decision = await checkMeterLimit(
 				this.database,
 				projectId,
-				customer?.id ?? null,
+				customer.id,
 				entityId,
 				meterLimit,
 				requestedQuantity,
 			);
 			if (!decision.allowed) return decision;
-			if (customer === null) {
-				const denial = await checkUnrecordedControls(this.database, {
-					projectId,
-					featureId: featureId(feature),
-					featureKey: feature.key,
-					usageDelta: requestedQuantity,
-				});
-				return denial === null ? decision : controlDeniedDecision(decision, denial);
-			}
 			const spend = meterLimitSpendDelta(
 				meterLimit,
 				await readMeterLimitSpendBalance(this.database, projectId, customer.id, meterLimit),
@@ -368,21 +350,10 @@ export class MeteringBillingRepository extends RepositoryModule {
 			});
 			return denial === null ? decision : controlDeniedDecision(decision, denial);
 		}
-		const rate = await resolveRateDecision(
-			this.database,
-			projectId,
-			customer?.id ?? null,
-			input.featureKey,
-		);
+		const rate = await resolveRateDecision(this.database, projectId, customer.id, input.featureKey);
 		validateFilters(rate.meter, input.filters);
 		const walletQuantity = await calculateWalletQuantity(this.database, rate, requestedQuantity);
-		const balance = await readBalance(
-			this.database,
-			projectId,
-			customer?.id ?? null,
-			rate.wallet,
-			entityId,
-		);
+		const balance = await readBalance(this.database, projectId, customer.id, rate.wallet, entityId);
 		const decision = await buildDecision(
 			this.database,
 			projectId,
@@ -392,15 +363,6 @@ export class MeteringBillingRepository extends RepositoryModule {
 			balance,
 		);
 		if (!decision.allowed) return decision;
-		if (customer === null) {
-			const denial = await checkUnrecordedControls(this.database, {
-				projectId,
-				featureId: featureId(rate.meter),
-				featureKey: rate.meter.key,
-				usageDelta: requestedQuantity,
-			});
-			return denial === null ? decision : controlDeniedDecision(decision, denial);
-		}
 		const denial = await checkControls(this.database, {
 			projectId,
 			customerId: customer.id,

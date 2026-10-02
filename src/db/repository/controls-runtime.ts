@@ -61,19 +61,6 @@ export async function checkControls(
 	return (await evaluateControls(executor, input, "check", null)).denial;
 }
 
-/**
- * The controls an account Quotum has not recorded would meet on its first write: the default
- * plan's, against windows that hold nothing yet. A read never records the account.
- */
-export async function checkUnrecordedControls(
-	executor: QueryExecutor,
-	input: Omit<ControlDeltaInput, "customerId" | "entityId">,
-): Promise<ControlDenial | null> {
-	return (
-		await evaluateControls(executor, { ...input, customerId: null, entityId: null }, "check", null)
-	).denial;
-}
-
 export async function consumeControls(
 	executor: QueryExecutor,
 	input: ControlDeltaInput,

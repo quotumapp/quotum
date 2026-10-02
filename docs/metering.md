@@ -45,8 +45,12 @@ Create an account explicitly with `PUT /v1/billing-accounts/:billingAccountId` a
 It returns `{ id, createdAt }`; repeated creation preserves the record and applies a default plan
 only when inserting the account. `GET` retrieves it or returns `BILLING_ACCOUNT_NOT_FOUND`.
 Identifiers are exact, case-sensitive strings of 1–200 characters without surrounding whitespace.
-Usage mutations and entity creation require an existing account. The `/billing-account` child
-resource remains the provider-specific Stripe summary, separate from this account record.
+Usage checks, usage mutations and entity creation require an existing account: for an account
+that was never created they answer `404 BILLING_ACCOUNT_NOT_FOUND`. Balance, billing-summary and
+controls reads still answer such an account from the catalog's
+[default plan](grants.md#default-plan), without recording it; creating the account records it with
+its default-plan grant. The `/billing-account` child resource remains the provider-specific Stripe
+summary, separate from this account record.
 
 `POST /usage/check` and `POST /usage/consume` use `featureId` and decimal-string `value`:
 

@@ -123,10 +123,12 @@ Reads never write, so they answer an account as its next write will leave it. An
 would start the default plan on that write reads as if it already held it. That is an account
 Quotum has not recorded yet, and a recorded one the pass has not reached or whose last base plan
 ended moments ago, such as a trial the worker has not recorded as expired yet. For such an account:
-- `check` and `GET .../balances/:featureKey` report the default version's allowance of the feature
-  in the current window, or what the previous default-plan grant left of it, and its meter limit
-  in the window it would count; `check` also applies the default version's usage limits, against
-  windows that hold nothing yet for an account Quotum has not recorded;
+- `GET .../balances/:featureKey` reports the default version's allowance of the feature in the
+  current window, or what the previous default-plan grant left of it, and its meter limit in the
+  window it would count. `check` answers the same for a recorded account and applies the default
+  version's usage limits; for an account that was never created, `check`, like `consume`, answers
+  `404 BILLING_ACCOUNT_NOT_FOUND` until `PUT /v1/billing-accounts/:billingAccountId` creates it,
+  which records the account with its default-plan grant;
 - `GET .../entitlements` reports the marker's keys, active, with
   `metadata: { source: "plan_grant", origin: "default", status: "active", planKey }` and no
   `planGrantId`;
