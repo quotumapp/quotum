@@ -716,7 +716,13 @@ function normalizeCatalog(
 					feature.creditScale,
 				);
 			}
-			if (item.itemKind !== "access" && item.quantity === null) {
+			if (item.itemKind === "unlimited_usage") {
+				if (feature.kind !== "metered") {
+					throw new InvalidRequestError(
+						`Unlimited usage ${item.featureKey} requires a metered feature`,
+					);
+				}
+			} else if (item.itemKind !== "access" && item.quantity === null) {
 				throw new InvalidRequestError(`Metered item ${item.featureKey} requires a quantity`);
 			}
 			if (
@@ -864,9 +870,12 @@ function normalizeCatalog(
 			);
 		}
 	}
+	// An unlimited quota lifts a feature's meter limits, so it counts usage in windows like them.
 	const meterLimitFeatures = new Set(
 		plans.flatMap((plan) =>
-			plan.items.filter((item) => item.itemKind === "meter_limit").map((item) => item.featureKey),
+			plan.items
+				.filter((item) => item.itemKind === "meter_limit" || item.itemKind === "unlimited_usage")
+				.map((item) => item.featureKey),
 		),
 	);
 	const allocationFeatures = new Set([
@@ -2081,6 +2090,10 @@ function requireMap(map: Map<string, string>, key: string): string {
  * account's other limits on the feature within one window, and any base plan can hold any add-on,
  * so once an add-on limits a feature every meter limit on it must be a hard cap with one reset.
  * Postpaid overage is invoiced against one item's own quantity and so never sums.
+ *
+ * Unlimited usage lifts hard caps only: a postpaid limit has no cap to lift, and whether its overage
+ * would still be billed is not decided, so an unlimited item and a postpaid limit that an account
+ * could hold together, because one of them is on an add-on, are refused.
  */
 function assertMeterLimitsCombine(
 	plans: ReadonlyArray<{
@@ -2098,6 +2111,24 @@ function assertMeterLimitsCombine(
 	const limits = plans.flatMap((plan) =>
 		plan.items.filter((item) => item.itemKind === "meter_limit").map((item) => ({ plan, item })),
 	);
+	const unlimited = plans.flatMap((plan) =>
+		plan.items
+			.filter((item) => item.itemKind === "unlimited_usage")
+			.map((item) => ({ plan, item })),
+	);
+	for (const { plan, item } of unlimited) {
+		const postpaid = limits.find(
+			(limit) =>
+				limit.item.featureKey === item.featureKey &&
+				limit.item.overagePolicy === "allowed" &&
+				(plan.kind === "addon" || limit.plan.kind === "addon"),
+		);
+		if (postpaid !== undefined) {
+			throw new InvalidRequestError(
+				`Plan ${postpaid.plan.key} cannot allow postpaid overage on ${item.featureKey}, because plan ${plan.key} grants unlimited usage of it; unlimited usage lifts hard caps only`,
+			);
+		}
+	}
 	for (const featureKey of new Set(limits.map(({ item }) => item.featureKey))) {
 		const onFeature = limits.filter(({ item }) => item.featureKey === featureKey);
 		const [first] = onFeature;

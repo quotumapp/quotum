@@ -105,6 +105,11 @@ export interface ProjectionPayload {
 		available: string;
 		held: string;
 		periodEndsAt: string | null;
+		/**
+		 * True when an unlimited usage source lifts the feature's quota cap; `available` then still
+		 * reports the window's finite figure, which applies again once the source ends.
+		 */
+		unlimited?: true;
 	}>;
 	reason: ProjectionSyncReason;
 	purchase?: {
@@ -206,6 +211,7 @@ export const projectionPayloadSchema = z
 					available: z.string().regex(/^\d+(?:\.\d+)?$/),
 					held: z.string().regex(/^\d+(?:\.\d+)?$/),
 					periodEndsAt: z.iso.datetime({ offset: true }).nullable(),
+					unlimited: z.literal(true).optional(),
 				})
 				.strict(),
 		),

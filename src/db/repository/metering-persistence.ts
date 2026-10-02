@@ -11,6 +11,7 @@ import type {
 	AllocationDeduction,
 	ConsumeUsageResult,
 	FinalizeReservationResult,
+	FiniteMeteringBalance,
 	MeteringBalance,
 	MeteringDecision,
 	RateCardPath,
@@ -43,6 +44,7 @@ import {
 	type MeterLimitRow,
 	meterLimitBounds,
 	queryMeterLimitRows,
+	unlimitedLiftsCap,
 } from "./meter-limit-sources";
 import { startOfUtcMonth } from "./meter-limit-windows";
 import {
@@ -86,6 +88,11 @@ export interface MeterLimitDecision {
 	limit: string;
 	overagePolicy: "blocked" | "allowed";
 	overagePrice: MeteredOveragePrice | null;
+	/**
+	 * An active unlimited usage source lifts the hard cap: usage is allowed and still counted in the
+	 * window, so the finite `limit` applies to it again once the source ends.
+	 */
+	unlimited: boolean;
 	windowStartAt: Date;
 	windowEndAt: Date;
 }
@@ -226,7 +233,7 @@ export function queryMeterLimitConfigured(
 					ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
 				WHERE pi.project_id = ${projectId}
 					AND pi.feature_id = ${featureId(feature)}
-					AND pi.item_kind = 'meter_limit'
+					AND pi.item_kind IN ('meter_limit', 'unlimited_usage')
 					AND pv.status = 'published'
 			) AS configured
 		`,
@@ -253,6 +260,7 @@ export async function meterLimitDecision(
 	configured: boolean | (() => Promise<boolean>),
 ): Promise<MeterLimitDecision | null> {
 	const combined = combineMeterLimits(candidates, feature.credit_scale);
+	const unlimited = unlimitedLiftsCap(candidates, combined?.anchor ?? null);
 	if (combined !== null) {
 		const { anchor } = combined;
 		const bounds = meterLimitBounds(anchor, new Date());
@@ -267,12 +275,16 @@ export async function meterLimitDecision(
 			limit: combined.quantity,
 			overagePolicy: anchor.overage_policy,
 			overagePrice,
+			unlimited,
 			windowStartAt: bounds.start,
 			windowEndAt: bounds.end,
 		};
 	}
 
-	const isConfigured = typeof configured === "function" ? await configured() : configured;
+	// No finite limit applies: the feature is capped at nothing when the catalog limits it at all,
+	// unless an unlimited source lifts that cap. Usage still counts in a calendar-month window.
+	const isConfigured =
+		unlimited || (typeof configured === "function" ? await configured() : configured);
 	if (!isConfigured) return null;
 	const start = startOfUtcMonth(new Date());
 	return {
@@ -282,6 +294,7 @@ export async function meterLimitDecision(
 		limit: "0",
 		overagePolicy: "blocked",
 		overagePrice: null,
+		unlimited,
 		windowStartAt: start,
 		windowEndAt: addUtcMonths(start, 1),
 	};
@@ -474,9 +487,7 @@ export async function checkMeterLimit(
 		filterKey,
 		meterLimit,
 	);
-	const allowed =
-		meterLimit.overagePolicy === "allowed" ||
-		decimalToUnits(balance.available, balance.scale) >= decimalToUnits(quantity, balance.scale);
+	const allowed = meterLimitAllows(meterLimit, balance, quantity);
 	return {
 		allowed,
 		reason: allowed ? "allowed" : "insufficient_balance",
@@ -559,6 +570,7 @@ export async function applyMeterLimitConsumption(
 				AND id = ${String(window.id)}::bigint
 				AND (
 					${input.meterLimit.overagePolicy} = 'allowed'
+					OR ${input.meterLimit.unlimited}::boolean
 					OR usage + ${input.quantity}::numeric <= ${input.meterLimit.limit}::numeric
 				)
 			RETURNING usage
@@ -726,9 +738,7 @@ async function checkMeterLimitFromBalance(
 	quantity: string,
 	balance: MeteringBalance,
 ): Promise<MeteringDecision> {
-	const allowed =
-		meterLimit.overagePolicy === "allowed" ||
-		decimalToUnits(balance.available, balance.scale) >= decimalToUnits(quantity, balance.scale);
+	const allowed = meterLimitAllows(meterLimit, balance, quantity);
 	return {
 		allowed,
 		reason: allowed ? "allowed" : "insufficient_balance",
@@ -908,6 +918,19 @@ function meterLimitBalance(
 	const limit = decimalToUnits(meterLimit.limit, scale);
 	const usage = decimalToUnits(databaseDecimal(rawUsage, "window usage", scale), scale);
 	const held = decimalToUnits(databaseDecimal(rawHeld, "window holds", scale), scale);
+	if (meterLimit.unlimited) {
+		return {
+			featureKey: meterLimit.feature.key,
+			unit: meterLimit.feature.unit,
+			scale,
+			granted: null,
+			consumed: unitsToDecimal(usage, scale),
+			held: unitsToDecimal(held, scale),
+			available: null,
+			unlimited: true,
+			breakdown: [],
+		};
+	}
 	return {
 		featureKey: meterLimit.feature.key,
 		unit: meterLimit.feature.unit,
@@ -918,6 +941,23 @@ function meterLimitBalance(
 		available: unitsToDecimal(limit > usage + held ? limit - usage - held : 0n, scale),
 		breakdown: [],
 	};
+}
+
+/**
+ * Whether a meter limit lets `quantity` through: postpaid overage and an unlimited source never
+ * deny, and a hard cap allows what its window still has available.
+ */
+function meterLimitAllows(
+	meterLimit: MeterLimitDecision,
+	balance: MeteringBalance,
+	quantity: string,
+): boolean {
+	return (
+		meterLimit.overagePolicy === "allowed" ||
+		meterLimit.unlimited ||
+		decimalToUnits(balance.available ?? "0", balance.scale) >=
+			decimalToUnits(quantity, balance.scale)
+	);
 }
 
 function directRate(feature: FeatureRow): RateDecision {
@@ -1387,7 +1427,7 @@ export async function readBalance(
 	customerId: string | null,
 	feature: FeatureRow,
 	entityId: string | null = null,
-): Promise<MeteringBalance> {
+): Promise<FiniteMeteringBalance> {
 	const [listed, pending] = await Promise.all([
 		customerId === null
 			? Promise.resolve<AllocationRow[]>([])
@@ -1431,10 +1471,10 @@ export function reopenListedAllowances(
 
 /** Adds allowances no write has created yet to a balance's totals. */
 export function withPendingAllowances(
-	balance: MeteringBalance,
+	balance: FiniteMeteringBalance,
 	scale: number,
 	pending: readonly WindowAllocation[],
-): MeteringBalance {
+): FiniteMeteringBalance {
 	if (pending.length === 0) return balance;
 	const units = (value: string, label: string) =>
 		decimalToUnits(databaseDecimal(value, label, scale), scale);
@@ -1507,7 +1547,7 @@ async function readAllocationRows(
 	);
 }
 
-export function emptyBalance(feature: FeatureRow): MeteringBalance {
+export function emptyBalance(feature: FeatureRow): FiniteMeteringBalance {
 	return {
 		featureKey: feature.key,
 		unit: feature.unit,
@@ -1602,7 +1642,7 @@ export async function lockAllAllocationRows(
 	);
 }
 
-export function balanceFromRows(feature: FeatureRow, rows: AllocationRow[]): MeteringBalance {
+export function balanceFromRows(feature: FeatureRow, rows: AllocationRow[]): FiniteMeteringBalance {
 	const scale = feature.credit_scale;
 	let granted = 0n;
 	let consumed = 0n;
@@ -1798,7 +1838,7 @@ export async function buildDecision(
 	rate: RateDecision,
 	requestedQuantity: string,
 	walletQuantity: string,
-	balance: MeteringBalance,
+	balance: FiniteMeteringBalance,
 ): Promise<MeteringDecision> {
 	const allowed =
 		decimalToUnits(balance.available, balance.scale) >=
@@ -2414,6 +2454,7 @@ export async function confirmMeterLimitReservation(
 		limit: "0",
 		overagePolicy: "blocked" as const,
 		overagePrice: null,
+		unlimited: false,
 		windowStartAt: new Date(window.window_start_at),
 		windowEndAt: new Date(window.window_end_at),
 	};
@@ -2444,7 +2485,11 @@ export async function confirmMeterLimitReservation(
 		const used = decimalToUnits(databaseDecimal(window.usage, "window usage", scale), scale);
 		const held = decimalToUnits(otherHolds, scale);
 		const limit = decimalToUnits(meterLimit.limit, scale);
-		if (meterLimit.overagePolicy === "blocked" && used + held + confirmed > limit) {
+		if (
+			meterLimit.overagePolicy === "blocked" &&
+			!meterLimit.unlimited &&
+			used + held + confirmed > limit
+		) {
 			return await insufficientMeterLimitConfirmation(
 				executor,
 				reservation,
@@ -2811,6 +2856,7 @@ export async function finalizedReservationResult(
 			limit: "0",
 			overagePolicy: "blocked" as const,
 			overagePrice: null,
+			unlimited: false,
 			windowStartAt: new Date(reservation.usage_window_start_at ?? reservation.expires_at),
 			windowEndAt: new Date(reservation.usage_window_end_at ?? reservation.expires_at),
 		};

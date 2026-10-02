@@ -1,6 +1,11 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { databaseDecimal, decimalToUnits, unitsToDecimal } from "../../billing/decimal";
-import { combineMeterLimits, type MeterLimitRow, queryMeterLimitRows } from "./meter-limit-sources";
+import {
+	combineMeterLimits,
+	type MeterLimitRow,
+	queryMeterLimitRows,
+	unlimitedLiftsCap,
+} from "./meter-limit-sources";
 import { executeRows } from "./query";
 import type { QueryExecutor, TransactionalQueryExecutor } from "./types";
 
@@ -414,7 +419,8 @@ export interface ResolvedAccountScope {
 
 /**
  * The scope and cap the account's current meter-limit sources give the feature: the anchor's
- * declared scope, and the summed quantity meter-limit resolution already computes.
+ * declared scope, and the summed quantity meter-limit resolution already computes. An active
+ * unlimited usage source lifts the cap, so the account reports no limit.
  */
 export function resolveAccountScope(
 	sources: readonly MeterLimitRow[],
@@ -425,7 +431,7 @@ export function resolveAccountScope(
 	if (combined === null) return { scope: "unresolved", limit: null, overagePolicy: null };
 	return {
 		scope: itemsById.get(String(combined.anchor.plan_item_id))?.scope ?? "account",
-		limit: combined.quantity,
+		limit: unlimitedLiftsCap(sources, combined.anchor) ? null : combined.quantity,
 		overagePolicy: combined.anchor.overage_policy,
 	};
 }

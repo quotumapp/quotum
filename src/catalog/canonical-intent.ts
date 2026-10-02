@@ -218,6 +218,19 @@ function workingItem(item: AuthoredPlanItemIntent): CatalogPlanItemIntent {
 				rollover: null,
 				price: item.price,
 			};
+		case "unlimited_usage":
+			return {
+				featureKey: item.featureKey,
+				itemKind: "unlimited_usage",
+				quantity: null,
+				resetInterval: null,
+				resetIntervalCount: null,
+				expiresAfterSeconds: null,
+				overagePolicy: "blocked",
+				allocationScope: "account",
+				rollover: null,
+				price: null,
+			};
 	}
 }
 
@@ -535,6 +548,8 @@ function canonicalItem(item: CatalogPlanItemIntent): CanonicalPlanItem {
 				price: item.price as CatalogPriceIntent,
 				allocationScope: item.allocationScope === "license_pool" ? "license_pool" : "account",
 			};
+		case "unlimited_usage":
+			return { itemKind: "unlimited_usage", featureKey: item.featureKey };
 	}
 }
 

@@ -31,6 +31,7 @@ function limit(overrides: Partial<ScopeVersionLimit>): ScopeVersionLimit {
 function source(overrides: Partial<MeterLimitRow>): MeterLimitRow {
 	return {
 		plan_item_id: "1",
+		item_kind: "meter_limit",
 		subscription_id: "sub-1",
 		plan_grant_id: null,
 		quantity: "100.000000000",

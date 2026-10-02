@@ -175,6 +175,7 @@ const canonicalPlanItemSchema = z.discriminatedUnion("itemKind", [
 			allocationScope: z.enum(["account", "license_pool"]).optional(),
 		})
 		.strict(),
+	z.object({ itemKind: z.literal("unlimited_usage"), featureKey: featureKeySchema }).strict(),
 ]);
 
 const planItemSchema = z.union([canonicalPlanItemSchema, legacyPlanItemSchema]);

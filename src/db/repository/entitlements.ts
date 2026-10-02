@@ -11,13 +11,20 @@ import type {
 	ProjectionPayload,
 	ProjectionSyncReason,
 } from "../../billing/types";
+import { addUtcMonths } from "../../shared/cadence";
 import { reconcileDefaultPlanGrant } from "./default-plan-grants";
 import {
 	defaultPlanAllowanceEndingSql,
 	defaultPlanReadVersionSql,
 	defaultPlanTargetSql,
 } from "./default-plan-sql";
-import { combineMeterLimits, meterLimitBounds, queryMeterLimitRows } from "./meter-limit-sources";
+import {
+	combineMeterLimits,
+	meterLimitBounds,
+	queryMeterLimitRows,
+	unlimitedLiftsCap,
+} from "./meter-limit-sources";
+import { startOfUtcMonth } from "./meter-limit-windows";
 import { type PendingAllowance, readPendingAllowances } from "./plan-grant-windows";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -734,7 +741,8 @@ export async function readProjectionBalances(
 								0::numeric
 							) AS available,
 							COALESCE(holds.held, 0) AS held,
-							limits.window_end_at AS period_ends_at
+							limits.window_end_at AS period_ends_at,
+							limits.unlimited
 						FROM (
 							VALUES ${drizzleSql.join(
 								limits.map(
@@ -742,12 +750,13 @@ export async function readProjectionBalances(
 										${limit.featureId}::bigint,
 										${limit.quantity}::numeric,
 										${limit.start.toISOString()}::timestamptz,
-										${limit.end.toISOString()}::timestamptz
+										${limit.end.toISOString()}::timestamptz,
+										${limit.unlimited}::boolean
 									)`,
 								),
 								drizzleSql`, `,
 							)}
-						) AS limits(feature_id, limit_quantity, window_start_at, window_end_at)
+						) AS limits(feature_id, limit_quantity, window_start_at, window_end_at, unlimited)
 						JOIN features f ON f.project_id = ${projectId} AND f.id = limits.feature_id
 						LEFT JOIN usage_windows windows
 							ON windows.project_id = ${projectId}
@@ -778,25 +787,31 @@ export async function readProjectionBalances(
 			available: databaseDecimal(row.available, "projection available", row.credit_scale),
 			held: databaseDecimal(row.held, "projection held", row.credit_scale),
 			periodEndsAt: toIsoStringOrNull(row.period_ends_at),
+			// Additive: an unlimited quota still reports its window's finite figures.
+			...(row.unlimited === true ? { unlimited: true as const } : {}),
 		}));
 }
 
 /**
- * The account's meter limits as metering resolves them (see `combineMeterLimits`): for each feature
- * a plan limits, the quantity its sources add up to and the window their anchor counts in.
+ * The account's meter limits as metering resolves them (see `combineMeterLimits` and
+ * `unlimitedLiftsCap`): for each feature a plan limits, the quantity its sources add up to, the
+ * window their anchor counts in, and whether an unlimited usage source lifts the cap. An unlimited
+ * feature with no finite limit counts in a calendar-month window, as metering does.
  */
 async function readProjectionMeterLimits(
 	executor: QueryExecutor,
 	projectId: string,
 	customerId: string,
-): Promise<Array<{ featureId: string; quantity: string; start: Date; end: Date }>> {
+): Promise<
+	Array<{ featureId: string; quantity: string; start: Date; end: Date; unlimited: boolean }>
+> {
 	const features = await executeRows<{ id: string | number | bigint; credit_scale: number }>(
 		executor,
 		drizzleSql`
 			SELECT DISTINCT f.id, f.credit_scale
 			FROM plan_items pi
 			JOIN features f ON f.project_id = pi.project_id AND f.id = pi.feature_id
-			WHERE pi.project_id = ${projectId} AND pi.item_kind = 'meter_limit'
+			WHERE pi.project_id = ${projectId} AND pi.item_kind IN ('meter_limit', 'unlimited_usage')
 			ORDER BY f.id
 		`,
 	);
@@ -805,13 +820,28 @@ async function readProjectionMeterLimits(
 	);
 	const now = new Date();
 	return features.flatMap((feature, index) => {
-		const combined = combineMeterLimits(sources[index] ?? [], feature.credit_scale);
-		if (combined === null) return [];
+		const rows = sources[index] ?? [];
+		const combined = combineMeterLimits(rows, feature.credit_scale);
+		const unlimited = unlimitedLiftsCap(rows, combined?.anchor ?? null);
+		if (combined === null) {
+			if (!unlimited) return [];
+			const start = startOfUtcMonth(now);
+			return [
+				{
+					featureId: String(feature.id),
+					quantity: "0",
+					start,
+					end: addUtcMonths(start, 1),
+					unlimited,
+				},
+			];
+		}
 		return [
 			{
 				featureId: String(feature.id),
 				quantity: combined.quantity,
 				...meterLimitBounds(combined.anchor, now),
+				unlimited,
 			},
 		];
 	});
@@ -824,6 +854,7 @@ interface ProjectionBalanceRow {
 	available: unknown;
 	held: unknown;
 	period_ends_at: unknown;
+	unlimited?: boolean;
 }
 
 /**

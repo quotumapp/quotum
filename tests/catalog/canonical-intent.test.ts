@@ -852,3 +852,103 @@ describe("calendar expiry", () => {
 		).toBe("normalized");
 	});
 });
+
+describe("unlimited usage items", () => {
+	const metered = (items: AuthoredPlanIntent["items"], kind: "base" | "addon" = "base") => ({
+		key: kind === "base" ? "pro" : "unlimited_calls",
+		name: "Plan",
+		version: 1,
+		kind,
+		items,
+	});
+	const unlimitedCalls = { itemKind: "unlimited_usage" as const, featureKey: "api_calls" };
+
+	it("reads an unlimited item back as itself and publishes it without a quantity", () => {
+		const parsed = parseAuthoredIntent(catalog([metered([unlimitedCalls])]));
+		expect(parsed.canonical.plans[0]?.items).toEqual([unlimitedCalls]);
+		expect(parsed.working.plans[0]?.items[0]).toMatchObject({
+			itemKind: "unlimited_usage",
+			quantity: null,
+			resetInterval: null,
+			price: null,
+		});
+		expect(CanonicalCatalogSchema.safeParse(parsed.canonical).success).toBe(true);
+		expect(parseAuthoredIntent(parsed.canonical as AuthoredCatalogIntent).canonical).toEqual(
+			parsed.canonical,
+		);
+	});
+
+	it("refuses an unlimited item on a boolean or wallet feature and beside a postpaid limit", async () => {
+		expect(
+			await previewOutcome(
+				catalog([metered([{ itemKind: "unlimited_usage", featureKey: "support" }])]),
+			),
+		).toBe("Unlimited usage support requires a metered feature");
+		expect(
+			await previewOutcome(
+				catalog([
+					metered([
+						unlimitedCalls,
+						{ itemKind: "allocation", featureKey: "credits", quantity: "10" },
+					]),
+					{
+						...metered([{ itemKind: "allocation", featureKey: "api_calls", quantity: "5" }]),
+						key: "starter",
+					},
+				]),
+			),
+		).toBe("Feature api_calls cannot use both a usage window and an allocation stack");
+		expect(
+			await previewOutcome(
+				catalog([
+					metered([
+						{
+							itemKind: "meter_limit",
+							featureKey: "api_calls",
+							quantity: "100",
+							reset: { interval: "month", intervalCount: 1 },
+							overage: {
+								policy: "allowed",
+								price: price("api-overage", [stripe("api_overage")], {
+									unitAmountMinor: 1,
+									maximumQuantity: null,
+								}),
+							},
+						},
+					]),
+					metered([unlimitedCalls], "addon"),
+				]),
+			),
+		).toBe(
+			"Plan pro cannot allow postpaid overage on api_calls, because plan unlimited_calls grants unlimited usage of it; unlimited usage lifts hard caps only",
+		);
+		// A base plan's unlimited item beside another base plan's postpaid limit is allowed: an
+		// account holds one base plan.
+		expect(
+			await previewOutcome(
+				catalog([
+					metered([unlimitedCalls]),
+					{
+						...metered([
+							{
+								itemKind: "meter_limit",
+								featureKey: "api_calls",
+								quantity: "100",
+								reset: { interval: "month", intervalCount: 1 },
+								overage: {
+									policy: "allowed",
+									price: price("api-overage", [stripe("api_overage")], {
+										unitAmountMinor: 1,
+										maximumQuantity: null,
+									}),
+								},
+							},
+						]),
+						key: "metered",
+						basePrice: price("metered-base", [stripe("metered")]),
+					},
+				]),
+			),
+		).toBe("normalized");
+	});
+});

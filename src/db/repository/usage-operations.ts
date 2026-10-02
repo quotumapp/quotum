@@ -352,6 +352,7 @@ function compactReceipt(result: UsageOperationResult): UsageOperationReceipt {
 			available: result.balance.available,
 			consumed: result.balance.consumed,
 			held: result.balance.held,
+			...(result.balance.unlimited === true ? { unlimited: true as const } : {}),
 		},
 	};
 }

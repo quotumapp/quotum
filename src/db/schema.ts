@@ -1695,7 +1695,7 @@ export const planItems = pgTable(
 			.notNull()
 			.references(() => features.id, { onDelete: "restrict" }),
 		itemKind: text("item_kind")
-			.$type<"access" | "allocation" | "meter_limit" | "licensed_quantity">()
+			.$type<"access" | "allocation" | "meter_limit" | "licensed_quantity" | "unlimited_usage">()
 			.notNull(),
 		quantity: quantityColumn("quantity"),
 		resetInterval: text("reset_interval").$type<CadenceUnit | null>(),
@@ -1744,11 +1744,11 @@ export const planItems = pgTable(
 		),
 		check(
 			"plan_items_item_kind_check",
-			sql`((item_kind = ANY (ARRAY['access'::text, 'allocation'::text, 'meter_limit'::text, 'licensed_quantity'::text])))`,
+			sql`((item_kind = ANY (ARRAY['access'::text, 'allocation'::text, 'meter_limit'::text, 'licensed_quantity'::text, 'unlimited_usage'::text])))`,
 		),
 		check(
 			"plan_items_quantity_check",
-			sql`((((item_kind = 'access'::text) AND (quantity IS NULL) AND (reset_interval IS NULL)) OR ((item_kind = ANY (ARRAY['allocation'::text, 'meter_limit'::text, 'licensed_quantity'::text])) AND (quantity IS NOT NULL) AND (quantity > (0)::numeric))))`,
+			sql`((((item_kind = ANY (ARRAY['access'::text, 'unlimited_usage'::text])) AND (quantity IS NULL) AND (reset_interval IS NULL)) OR ((item_kind = ANY (ARRAY['allocation'::text, 'meter_limit'::text, 'licensed_quantity'::text])) AND (quantity IS NOT NULL) AND (quantity > (0)::numeric))))`,
 		),
 		check(
 			"plan_items_licensed_reset_check",

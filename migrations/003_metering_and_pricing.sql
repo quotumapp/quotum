@@ -257,10 +257,14 @@ CREATE TABLE IF NOT EXISTS plan_items (
 	CONSTRAINT plan_items_project_feature_fk FOREIGN KEY (project_id, feature_id)
 		REFERENCES features(project_id, id),
 	CONSTRAINT plan_items_item_kind_check CHECK (
-		item_kind IN ('access', 'allocation', 'meter_limit', 'licensed_quantity')
+		item_kind IN ('access', 'allocation', 'meter_limit', 'licensed_quantity', 'unlimited_usage')
 	),
 	CONSTRAINT plan_items_quantity_check CHECK (
-		(item_kind = 'access' AND quantity IS NULL AND reset_interval IS NULL)
+		(
+			item_kind IN ('access', 'unlimited_usage')
+			AND quantity IS NULL
+			AND reset_interval IS NULL
+		)
 		OR (
 			item_kind IN ('allocation', 'meter_limit', 'licensed_quantity')
 			AND quantity IS NOT NULL

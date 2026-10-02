@@ -367,7 +367,9 @@ subscription or grant whose trial is ending or has ended.
 Each balance reports `periodEndsAt`, the end of its earliest allowance or meter-limit window. A
 plan grant's allowance (a trial's or the default plan's) resets without a delivery, as a meter-limit
 window does, so a snapshot's balance holds until its `periodEndsAt`; the next delivery, or a
-balance read, reports the new window.
+balance read, reports the new window. A meter-limited feature an unlimited usage source currently
+lifts carries `unlimited: true`; its `available` still reports the window's finite figure, which
+applies again once the source ends.
 
 Purchase, provider-webhook and reconciliation projections are delivered per event. Usage-driven
 projections are coalesced: one delivery per billing account covers every consume, reservation and

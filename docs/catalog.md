@@ -42,6 +42,7 @@ A plan item takes only the fields of its `itemKind`:
 | `allocation` | `featureKey`, `quantity`, `reset` (`{ interval, intervalCount }` or null), `expiry`, `allocationScope` (`account` or `entity`), `rollover` |
 | `meter_limit` | `featureKey`, `quantity`, `reset` (required), `overage` (`{ "policy": "blocked" }` or `{ "policy": "allowed", "price": … }`), `allocationScope` (`account` or `entity`) |
 | `licensed_quantity` | `featureKey`, `quantity`, `price` (required), `allocationScope` (`account` or `license_pool`) |
+| `unlimited_usage` | `featureKey` (a metered feature); lifts its quota cap, see [meter limits](metering.md#meter-limits) |
 
 An allocation or top-up `expiry` is `{ "mode": "forever" }`, a calendar cadence such as
 `{ "mode": "after", "interval": "year", "intervalCount": 1 }`, or an exact duration such as

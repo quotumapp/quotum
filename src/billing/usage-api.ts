@@ -58,10 +58,13 @@ export interface UsageQuantity {
 export interface UsageBalance {
 	featureId: string;
 	unit: string;
-	granted: string;
+	/** Null for an unlimited quota, which grants no finite amount. */
+	granted: string | null;
 	consumed: string;
 	held: string;
-	available: string;
+	/** Null for an unlimited quota. */
+	available: string | null;
+	unlimited?: true;
 }
 
 export type UsageDenialReason = "not_entitled" | "insufficient_balance" | "control_limit_exceeded";
@@ -162,6 +165,7 @@ export function usageContext(
 			consumed: balance.consumed,
 			held: balance.held,
 			available: balance.available,
+			...(balance.unlimited === true ? { unlimited: true as const } : {}),
 		},
 	};
 }

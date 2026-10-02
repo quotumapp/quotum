@@ -15,7 +15,8 @@ export interface CatalogFeatureIntent {
 
 export interface CatalogPlanItemIntent {
 	featureKey: string;
-	itemKind: "access" | "allocation" | "meter_limit" | "licensed_quantity";
+	/** `unlimited_usage` is canonical only: the legacy spelling has no unlimited item. */
+	itemKind: "access" | "allocation" | "meter_limit" | "licensed_quantity" | "unlimited_usage";
 	quantity: string | null;
 	resetInterval: CadenceUnit | null;
 	/** How many `resetInterval` units one window spans; defaults to one. */
@@ -208,7 +209,12 @@ export type CanonicalPlanItem =
 			quantity: string;
 			price: CatalogPriceIntent;
 			allocationScope: "account" | "license_pool";
-	  };
+	  }
+	/**
+	 * No quota cap on a metered feature: while a source holding it is active, the feature's meter
+	 * limits do not deny usage, which is still recorded and still subject to controls.
+	 */
+	| { itemKind: "unlimited_usage"; featureKey: string };
 
 /**
  * The products a provider prices: App Store and Google Play products, and Stripe products priced in
@@ -337,6 +343,7 @@ export type AuthoredPlanItemIntent =
 			price: CatalogPriceIntent;
 			allocationScope?: "account" | "license_pool";
 	  }
+	| { itemKind: "unlimited_usage"; featureKey: string }
 	| CatalogPlanItemIntent;
 
 /** A top-up as an operator writes it: canonical `expiry`, or the legacy `expiresAfterSeconds`. */

@@ -2075,6 +2075,24 @@
                                   "allocationScope"
                                 ],
                                 "type": "object"
+                              },
+                              {
+                                "properties": {
+                                  "featureKey": {
+                                    "type": "string"
+                                  },
+                                  "itemKind": {
+                                    "enum": [
+                                      "unlimited_usage"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "itemKind",
+                                  "featureKey"
+                                ],
+                                "type": "object"
                               }
                             ]
                           },
@@ -8227,7 +8245,10 @@
           "data": {
             "properties": {
               "available": {
-                "type": "string"
+                "type": [
+                  "null",
+                  "string"
+                ]
               },
               "breakdown": {
                 "items": {
@@ -8331,7 +8352,10 @@
                 "type": "string"
               },
               "granted": {
-                "type": "string"
+                "type": [
+                  "null",
+                  "string"
+                ]
               },
               "held": {
                 "type": "string"
@@ -8341,6 +8365,12 @@
               },
               "unit": {
                 "type": "string"
+              },
+              "unlimited": {
+                "enum": [
+                  true
+                ],
+                "type": "boolean"
               }
             },
             "required": [
@@ -9948,7 +9978,10 @@
                               "balance": {
                                 "properties": {
                                   "available": {
-                                    "type": "string"
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
                                   },
                                   "consumed": {
                                     "type": "string"
@@ -9957,13 +9990,22 @@
                                     "type": "string"
                                   },
                                   "granted": {
-                                    "type": "string"
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
                                   },
                                   "held": {
                                     "type": "string"
                                   },
                                   "unit": {
                                     "type": "string"
+                                  },
+                                  "unlimited": {
+                                    "enum": [
+                                      true
+                                    ],
+                                    "type": "boolean"
                                   }
                                 },
                                 "required": [
@@ -10064,7 +10106,10 @@
                               "balance": {
                                 "properties": {
                                   "available": {
-                                    "type": "string"
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
                                   },
                                   "consumed": {
                                     "type": "string"
@@ -10073,13 +10118,22 @@
                                     "type": "string"
                                   },
                                   "granted": {
-                                    "type": "string"
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
                                   },
                                   "held": {
                                     "type": "string"
                                   },
                                   "unit": {
                                     "type": "string"
+                                  },
+                                  "unlimited": {
+                                    "enum": [
+                                      true
+                                    ],
+                                    "type": "boolean"
                                   }
                                 },
                                 "required": [
@@ -10229,7 +10283,10 @@
                           "balance": {
                             "properties": {
                               "available": {
-                                "type": "string"
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
                               },
                               "consumed": {
                                 "type": "string"
@@ -10239,6 +10296,12 @@
                               },
                               "held": {
                                 "type": "string"
+                              },
+                              "unlimited": {
+                                "enum": [
+                                  true
+                                ],
+                                "type": "boolean"
                               }
                             },
                             "required": [
@@ -16466,7 +16529,10 @@
                   "balance": {
                     "properties": {
                       "available": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "consumed": {
                         "type": "string"
@@ -16475,13 +16541,22 @@
                         "type": "string"
                       },
                       "granted": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "held": {
                         "type": "string"
                       },
                       "unit": {
                         "type": "string"
+                      },
+                      "unlimited": {
+                        "enum": [
+                          true
+                        ],
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -16574,7 +16649,10 @@
                   "balance": {
                     "properties": {
                       "available": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "consumed": {
                         "type": "string"
@@ -16583,13 +16661,22 @@
                         "type": "string"
                       },
                       "granted": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "held": {
                         "type": "string"
                       },
                       "unit": {
                         "type": "string"
+                      },
+                      "unlimited": {
+                        "enum": [
+                          true
+                        ],
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -16759,7 +16846,10 @@
                   "balance": {
                     "properties": {
                       "available": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "consumed": {
                         "type": "string"
@@ -16768,13 +16858,22 @@
                         "type": "string"
                       },
                       "granted": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "held": {
                         "type": "string"
                       },
                       "unit": {
                         "type": "string"
+                      },
+                      "unlimited": {
+                        "enum": [
+                          true
+                        ],
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -16875,7 +16974,10 @@
                   "balance": {
                     "properties": {
                       "available": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "consumed": {
                         "type": "string"
@@ -16884,13 +16986,22 @@
                         "type": "string"
                       },
                       "granted": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "held": {
                         "type": "string"
                       },
                       "unit": {
                         "type": "string"
+                      },
+                      "unlimited": {
+                        "enum": [
+                          true
+                        ],
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -17052,7 +17163,10 @@
               "balance": {
                 "properties": {
                   "available": {
-                    "type": "string"
+                    "type": [
+                      "null",
+                      "string"
+                    ]
                   },
                   "breakdown": {
                     "items": {
@@ -17156,7 +17270,10 @@
                     "type": "string"
                   },
                   "granted": {
-                    "type": "string"
+                    "type": [
+                      "null",
+                      "string"
+                    ]
                   },
                   "held": {
                     "type": "string"
@@ -17166,6 +17283,12 @@
                   },
                   "unit": {
                     "type": "string"
+                  },
+                  "unlimited": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -17267,7 +17390,10 @@
               "balance": {
                 "properties": {
                   "available": {
-                    "type": "string"
+                    "type": [
+                      "null",
+                      "string"
+                    ]
                   },
                   "breakdown": {
                     "items": {
@@ -17371,7 +17497,10 @@
                     "type": "string"
                   },
                   "granted": {
-                    "type": "string"
+                    "type": [
+                      "null",
+                      "string"
+                    ]
                   },
                   "held": {
                     "type": "string"
@@ -17381,6 +17510,12 @@
                   },
                   "unit": {
                     "type": "string"
+                  },
+                  "unlimited": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -17549,7 +17684,10 @@
               "balance": {
                 "properties": {
                   "available": {
-                    "type": "string"
+                    "type": [
+                      "null",
+                      "string"
+                    ]
                   },
                   "breakdown": {
                     "items": {
@@ -17653,7 +17791,10 @@
                     "type": "string"
                   },
                   "granted": {
-                    "type": "string"
+                    "type": [
+                      "null",
+                      "string"
+                    ]
                   },
                   "held": {
                     "type": "string"
@@ -17663,6 +17804,12 @@
                   },
                   "unit": {
                     "type": "string"
+                  },
+                  "unlimited": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -17831,7 +17978,10 @@
               "balance": {
                 "properties": {
                   "available": {
-                    "type": "string"
+                    "type": [
+                      "null",
+                      "string"
+                    ]
                   },
                   "breakdown": {
                     "items": {
@@ -17935,7 +18085,10 @@
                     "type": "string"
                   },
                   "granted": {
-                    "type": "string"
+                    "type": [
+                      "null",
+                      "string"
+                    ]
                   },
                   "held": {
                     "type": "string"
@@ -17945,6 +18098,12 @@
                   },
                   "unit": {
                     "type": "string"
+                  },
+                  "unlimited": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -31197,6 +31356,27 @@
                                           "price"
                                         ],
                                         "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "featureKey": {
+                                            "maxLength": 120,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "itemKind": {
+                                            "enum": [
+                                              "unlimited_usage"
+                                            ],
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "itemKind",
+                                          "featureKey"
+                                        ],
+                                        "type": "object"
                                       }
                                     ]
                                   },
@@ -33440,6 +33620,27 @@
                                           "featureKey",
                                           "quantity",
                                           "price"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "featureKey": {
+                                            "maxLength": 120,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "itemKind": {
+                                            "enum": [
+                                              "unlimited_usage"
+                                            ],
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "itemKind",
+                                          "featureKey"
                                         ],
                                         "type": "object"
                                       }
@@ -56162,6 +56363,27 @@
                                           "price"
                                         ],
                                         "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "featureKey": {
+                                            "maxLength": 120,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "itemKind": {
+                                            "enum": [
+                                              "unlimited_usage"
+                                            ],
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "itemKind",
+                                          "featureKey"
+                                        ],
+                                        "type": "object"
                                       }
                                     ]
                                   },
@@ -58325,6 +58547,27 @@
                                           "featureKey",
                                           "quantity",
                                           "price"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "featureKey": {
+                                            "maxLength": 120,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "itemKind": {
+                                            "enum": [
+                                              "unlimited_usage"
+                                            ],
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "itemKind",
+                                          "featureKey"
                                         ],
                                         "type": "object"
                                       }
@@ -78656,7 +78899,10 @@
                         "balance": {
                           "properties": {
                             "available": {
-                              "type": "string"
+                              "type": [
+                                "string",
+                                "null"
+                              ]
                             },
                             "consumed": {
                               "type": "string"
@@ -78665,13 +78911,22 @@
                               "type": "string"
                             },
                             "granted": {
-                              "type": "string"
+                              "type": [
+                                "string",
+                                "null"
+                              ]
                             },
                             "held": {
                               "type": "string"
                             },
                             "unit": {
                               "type": "string"
+                            },
+                            "unlimited": {
+                              "enum": [
+                                true
+                              ],
+                              "type": "boolean"
                             }
                           },
                           "required": [

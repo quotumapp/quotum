@@ -186,6 +186,23 @@ still reaches such a combination another way, such as a later base-plan change, 
 limit and the add-on limits that can join it; usage never fails over it. A plan grant, such as a
 trial or the default plan, caps alone, and a paying subscription's limit replaces it.
 
+An `unlimited_usage` item lifts a feature's quota cap while a source holding it is active: a
+subscription in an access-granting status whose version holds the item, or, while no subscription
+pays, a plan grant. An unlimited add-on therefore lifts the base plan's finite `meter_limit`, and an
+unlimited plan without any finite limit lets usage through where an account holding no plan item on
+the feature is capped at nothing. Usage is still recorded, in the finite limit's window (a
+calendar-month window when no finite limit applies), and explicit spend and usage limits still deny
+and still fire their alerts: a 10,000 a day usage limit on an unlimited plan blocks at 10,000 and its
+80% alert fires at 8,000. When the unlimited source ends, the finite cap applies to the usage the
+window already holds. Balance reads and usage decisions report `unlimited: true` with `granted` and
+`available` null; `consumed` and `held` keep counting. Unlimited usage lifts hard caps only: a limit
+that allows postpaid overage has no cap to lift, so catalog preview and publication refuse an
+unlimited item and a postpaid limit on one feature that an account could hold together (either on an
+add-on) with `400 INVALID_REQUEST`, and an add-on purchase that would bring them together is
+`ADDON_METER_LIMIT_CONFLICT` (409). An account that reaches the combination another way keeps its
+postpaid limit, and its overage is billed as before. Until declared scope is enforced, an unlimited
+item applies across the account, as meter limits do.
+
 ## Spend and usage limits
 
 A usage limit caps the quantity recorded for the feature it names and nothing else: when a rate

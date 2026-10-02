@@ -45,7 +45,14 @@ export interface UsageOperationReceipt {
 	walletQuantity: string | null;
 	originalUsageEventId: string | null;
 	originalRecordedAt: string | null;
-	balance: { featureKey: string; available: string; consumed: string; held: string };
+	/** `available` is null, with `unlimited`, when an unlimited usage source lifted the quota cap. */
+	balance: {
+		featureKey: string;
+		available: string | null;
+		consumed: string;
+		held: string;
+		unlimited?: true;
+	};
 }
 
 export type UsageOperationLookupResult = {

@@ -450,3 +450,13 @@ both return 0. Published catalogs keep their meaning and their canonical hashes:
 `expiresAfterSeconds` still reads back as `{ "mode": "after_seconds" }`, and nothing moves to a
 calendar cadence until a catalog asks for one. An older image cannot read the new baseline, so a
 rollback restores the pre-upgrade backup and loses catalogs published since.
+
+## Unlimited usage items
+
+The metering baseline widens `plan_items_item_kind_check` to admit `unlimited_usage`, and
+`plan_items_quantity_check` to let it, like `access`, carry no quantity and no reset. Both checks
+only widen, so every existing row passes them and the move needs no manual SQL: follow steps 1, 2,
+4 and 6 of [stored job provider identity](#stored-job-provider-identity). No stored catalog holds an
+unlimited item, so balances and decisions are unchanged until a catalog publishes one. An older
+image cannot read the new baseline, so a rollback restores the pre-upgrade backup and loses catalogs
+published since.
