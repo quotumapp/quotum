@@ -21,6 +21,12 @@ export interface CatalogPlanItemIntent {
 	/** How many `resetInterval` units one window spans; defaults to one. */
 	resetIntervalCount?: number | null;
 	expiresAfterSeconds: number | null;
+	/**
+	 * A calendar expiry: `expiryIntervalCount` units of `expiryInterval` after the allowance's window
+	 * start. Exclusive with `expiresAfterSeconds`; only the canonical `expiry` can set it.
+	 */
+	expiryInterval?: CadenceUnit | null;
+	expiryIntervalCount?: number | null;
 	overagePolicy: "blocked" | "allowed";
 	allocationScope?: "account" | "entity" | "license_pool";
 	rollover?: {
@@ -117,6 +123,9 @@ export interface CatalogTopupIntent {
 	featureKey: string;
 	quantity: string;
 	expiresAfterSeconds: number | null;
+	/** A calendar expiry after the purchase; exclusive with `expiresAfterSeconds`. */
+	expiryInterval?: CadenceUnit | null;
+	expiryIntervalCount?: number | null;
 	providerBindings: CatalogProviderBindingIntent[];
 }
 
@@ -148,10 +157,15 @@ export interface CatalogCadenceIntent {
 }
 
 /**
- * When an allowance or a top-up expires. `forever` never expires; `after_seconds` is an exact
- * duration from the allowance's window start (capped at the window end) or from the purchase.
+ * When an allowance or a top-up expires, counted from the allowance's window start (and capped at
+ * the window end) or from the purchase. `forever` never expires; `after` adds a calendar cadence in
+ * UTC, month units clamping to a shorter month's last day as reset windows do; `after_seconds` is an
+ * exact duration.
  */
-export type CatalogExpiryIntent = { mode: "forever" } | { mode: "after_seconds"; seconds: number };
+export type CatalogExpiryIntent =
+	| { mode: "forever" }
+	| { mode: "after"; interval: CadenceUnit; intervalCount: number }
+	| { mode: "after_seconds"; seconds: number };
 
 /** A meter limit either blocks usage beyond its quantity or bills it in arrears at `price`. */
 export type CatalogOverageIntent =

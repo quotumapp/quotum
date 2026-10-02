@@ -1,5 +1,5 @@
 import { InvalidRequestError } from "../billing/errors";
-import { sameCadence } from "../shared/cadence";
+import { type CadenceUnit, sameCadence } from "../shared/cadence";
 import type {
 	AuthoredCatalogIntent,
 	AuthoredPlanIntent,
@@ -122,12 +122,42 @@ function planCadence(
 	return sharedItemPriceCadence(itemPrices);
 }
 
-function expiryToSeconds(expiry: CatalogExpiryIntent | undefined): number | null {
-	return expiry === undefined || expiry.mode === "forever" ? null : expiry.seconds;
+/** The working model's expiry columns: an exact duration or a calendar cadence, never both. */
+interface WorkingExpiry {
+	expiresAfterSeconds: number | null;
+	expiryInterval: CadenceUnit | null;
+	expiryIntervalCount: number | null;
 }
 
-function secondsToExpiry(seconds: number | null): CatalogExpiryIntent {
-	return seconds === null ? { mode: "forever" } : { mode: "after_seconds", seconds };
+function workingExpiry(expiry: CatalogExpiryIntent | undefined): WorkingExpiry {
+	if (expiry === undefined || expiry.mode === "forever") {
+		return { expiresAfterSeconds: null, expiryInterval: null, expiryIntervalCount: null };
+	}
+	if (expiry.mode === "after") {
+		return {
+			expiresAfterSeconds: null,
+			expiryInterval: expiry.interval,
+			expiryIntervalCount: expiry.intervalCount,
+		};
+	}
+	return { expiresAfterSeconds: expiry.seconds, expiryInterval: null, expiryIntervalCount: null };
+}
+
+function canonicalExpiry(working: {
+	expiresAfterSeconds: number | null;
+	expiryInterval?: CadenceUnit | null;
+	expiryIntervalCount?: number | null;
+}): CatalogExpiryIntent {
+	if (working.expiryInterval !== undefined && working.expiryInterval !== null) {
+		return {
+			mode: "after",
+			interval: working.expiryInterval,
+			intervalCount: working.expiryIntervalCount ?? 1,
+		};
+	}
+	return working.expiresAfterSeconds === null
+		? { mode: "forever" }
+		: { mode: "after_seconds", seconds: working.expiresAfterSeconds };
 }
 
 /** The working (legacy-shaped) item for a canonical one. */
@@ -154,7 +184,7 @@ function workingItem(item: AuthoredPlanItemIntent): CatalogPlanItemIntent {
 				quantity: item.quantity,
 				resetInterval: item.reset?.interval ?? null,
 				resetIntervalCount: item.reset?.intervalCount ?? null,
-				expiresAfterSeconds: expiryToSeconds(item.expiry),
+				...workingExpiry(item.expiry),
 				overagePolicy: "blocked",
 				allocationScope: item.allocationScope ?? "account",
 				rollover: item.rollover ?? null,
@@ -266,9 +296,13 @@ export function toWorkingShape(
 			key: topup.key,
 			featureKey: topup.featureKey,
 			quantity: topup.quantity,
-			expiresAfterSeconds: isLegacyTopup(topup)
-				? (topup.expiresAfterSeconds ?? null)
-				: expiryToSeconds(topup.expiry),
+			...(isLegacyTopup(topup)
+				? {
+						expiresAfterSeconds: topup.expiresAfterSeconds ?? null,
+						expiryInterval: null,
+						expiryIntervalCount: null,
+					}
+				: workingExpiry(topup.expiry)),
 			providerBindings: topup.providerBindings,
 		};
 	});
@@ -418,7 +452,7 @@ export function canonicalFromWorking(working: CatalogIntent): CanonicalCatalog {
 			key: topup.key,
 			featureKey: topup.featureKey,
 			quantity: topup.quantity,
-			expiry: secondsToExpiry(topup.expiresAfterSeconds),
+			expiry: canonicalExpiry(topup),
 			providerBindings: topup.providerBindings,
 		}),
 	);
@@ -456,7 +490,7 @@ function canonicalItem(item: CatalogPlanItemIntent): CanonicalPlanItem {
 					item.resetInterval === null
 						? null
 						: { interval: item.resetInterval, intervalCount: item.resetIntervalCount ?? 1 },
-				expiry: secondsToExpiry(item.expiresAfterSeconds),
+				expiry: canonicalExpiry(item),
 				allocationScope: item.allocationScope === "entity" ? "entity" : "account",
 				rollover:
 					item.rollover === undefined || item.rollover === null

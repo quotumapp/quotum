@@ -10,6 +10,13 @@ import {
 } from "./helpers/local-postgres";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
+
+/** A plan item's or top-up option's stored expiry columns. */
+type ExpiryColumns = {
+	expires_after_seconds: string | null;
+	expiry_interval: string | null;
+	expiry_interval_count: number;
+};
 let context: LocalPostgresContext;
 
 localDescribe("catalog control plane", () => {
@@ -1244,6 +1251,85 @@ localDescribe("catalog control plane", () => {
 		expect(await versions()).toBe(versionsBefore);
 		// The legacy file still diffs as unchanged: it canonicalizes to the same intent.
 		expect((await previewCatalog(app, headers, 2, legacy)).intentHash).toBe(read.intentHash);
+	});
+
+	it("publishes calendar expiries, reads them back unchanged and bounds them at ten years", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = operatorHeaders(authHeaders());
+		const legacy = catalogIntent(1, "0.005");
+		const first = await previewCatalog(app, headers, null, legacy);
+		await publishCatalog(app, headers, null, first.previewToken, legacy);
+		const readCatalog = async () =>
+			(await (await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() })).json()).data;
+		const published = await readCatalog();
+		/** The published catalog's next version, its allocations and top-ups expiring as given. */
+		const expiring = (allowance: unknown, topup: unknown) => ({
+			...published.catalog,
+			plans: published.catalog.plans.map(
+				(plan: { version: number; items: Array<{ itemKind: string }> }) => ({
+					...plan,
+					version: plan.version + 1,
+					items: plan.items.map((item) =>
+						item.itemKind === "allocation" ? { ...item, expiry: allowance } : item,
+					),
+				}),
+			),
+			topups: published.catalog.topups.map((option: object) => ({ ...option, expiry: topup })),
+		});
+		const twoWeeks = { mode: "after", interval: "week", intervalCount: 2 };
+		const oneYear = { mode: "after", interval: "year", intervalCount: 1 };
+		const next = expiring(twoWeeks, oneYear);
+
+		const tooLong = await testRequest(app, "/v1/admin/catalog/preview", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				expectedRevision: 1,
+				catalog: expiring(twoWeeks, { mode: "after", interval: "year", intervalCount: 11 }),
+			}),
+		});
+		expect(tooLong.status).toBe(400);
+		expect((await tooLong.json()).error).toMatchObject({
+			code: "INVALID_REQUEST",
+			message: "Top-up ai_credits_10 expiry cannot span more than 10 × year",
+		});
+
+		const preview = await previewCatalog(app, headers, 1, next);
+		await publishCatalog(app, headers, 1, preview.previewToken, next);
+		expect(
+			(
+				await context.sql<Array<ExpiryColumns>>`
+					SELECT item.expires_after_seconds, item.expiry_interval, item.expiry_interval_count
+					FROM plan_items item JOIN plan_versions version ON version.id = item.plan_version_id
+					WHERE item.item_kind = 'allocation' AND version.version = 2
+				`
+			).map((row) => ({ ...row })),
+		).toEqual([{ expires_after_seconds: null, expiry_interval: "week", expiry_interval_count: 2 }]);
+		expect(
+			(
+				await context.sql<Array<ExpiryColumns>>`
+					SELECT option.expires_after_seconds, option.expiry_interval, option.expiry_interval_count
+					FROM topup_options option
+					JOIN projects project
+						ON project.published_catalog_revision_id = option.catalog_revision_id
+				`
+			).map((row) => ({ ...row })),
+		).toEqual([{ expires_after_seconds: null, expiry_interval: "year", expiry_interval_count: 1 }]);
+
+		const read = await readCatalog();
+		expect(read.catalog.plans[0].items[0]).toMatchObject({
+			itemKind: "allocation",
+			expiry: twoWeeks,
+		});
+		expect(read.catalog.topups[0].expiry).toEqual(oneYear);
+		const again = await previewCatalog(app, headers, 2, read.catalog);
+		expect(again).toMatchObject({
+			intentHash: read.intentHash,
+			impact: { planVersionsCreated: 0, plansCreated: 0 },
+		});
 	});
 
 	it("decodes a catalog stored in the legacy spelling and refuses a preview issued before", async () => {

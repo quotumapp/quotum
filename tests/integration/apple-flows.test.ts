@@ -16,9 +16,16 @@ import {
 	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
-import { publishAiCreditsCatalog } from "./helpers/metering-catalog";
+import { aiCreditsCatalog, publishAiCreditsCatalog } from "./helpers/metering-catalog";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
+
+/** A plan item's or top-up option's stored expiry columns. */
+type ExpiryColumns = {
+	expires_after_seconds: string | null;
+	expiry_interval: string | null;
+	expiry_interval_count: number;
+};
 let context: LocalPostgresContext;
 
 localDescribe("Apple route flows integration", () => {
@@ -207,6 +214,74 @@ localDescribe("Apple route flows integration", () => {
 		expect(allocations).toEqual([
 			expect.objectContaining({ source_kind: "subscription", quantity: "1000.000000000" }),
 			expect.objectContaining({ source_kind: "topup", quantity: "10.000000000" }),
+		]);
+	});
+
+	// capability: catalog.topup
+	it("expires a top-up a calendar year after its purchase, leap days included", async () => {
+		const catalog = {
+			...aiCreditsCatalog,
+			topups: aiCreditsCatalog.topups.map(({ expiresAfterSeconds: _seconds, ...topup }) => ({
+				...topup,
+				expiry: { mode: "after" as const, interval: "year" as const, intervalCount: 1 },
+			})),
+		};
+		const preview = await context.repository.previewCatalog(integrationProjectContext(), {
+			expectedRevision: null,
+			actor: "calendar-expiry-test",
+			catalog,
+		});
+		await context.repository.publishCatalog(integrationProjectContext(), {
+			expectedRevision: null,
+			actor: "calendar-expiry-test",
+			previewToken: preview.previewToken,
+			catalog,
+		});
+		expect(
+			(
+				await context.sql<Array<ExpiryColumns>>`
+					SELECT expires_after_seconds, expiry_interval, expiry_interval_count FROM topup_options
+				`
+			).map((row) => ({ ...row })),
+		).toEqual([{ expires_after_seconds: null, expiry_interval: "year", expiry_interval_count: 1 }]);
+		for (const [transactionId, purchasedAt] of [
+			["apple_leap_day_topup", "2028-02-29T12:00:00.000Z"],
+			["apple_march_topup", "2027-03-01T00:00:00.000Z"],
+		] as const) {
+			await context.repository.recordStoreKitTransactionAndEnqueueProjection(
+				integrationProjectContext(),
+				{
+					billingAccountId: "integration_user",
+					appAccountToken: null,
+					channel: "ios",
+					externalProductId: "echo_credits_10",
+					purchaseKind: "consumable",
+					transactionId,
+					originalTransactionId: null,
+					webOrderLineItemId: null,
+					purchaseStatus: "completed",
+					subscriptionStatus: null,
+					purchasedAt: new Date(purchasedAt),
+					expiresAt: null,
+					autoRenew: null,
+					invalidatedAt: null,
+					invalidationReason: null,
+					rawPayload: { transactionId },
+					eventType: "ONE_TIME_CHARGE",
+					externalEventId: `${transactionId}_event`,
+					projectionReason: "provider_webhook",
+					projectionIdempotencyKey: `apple:${transactionId}`,
+				},
+			);
+		}
+		const expiries = await context.sql<Array<{ expires_at: Date }>>`
+			SELECT expires_at FROM balance_allocations WHERE source_kind = 'topup' ORDER BY expires_at
+		`;
+		// A year after a leap day ends on February 28; a year after March 1 is March 1, where 365 days
+		// of seconds would fall a day short.
+		expect(expiries.map(({ expires_at }) => new Date(expires_at).toISOString())).toEqual([
+			"2028-03-01T00:00:00.000Z",
+			"2029-02-28T12:00:00.000Z",
 		]);
 	});
 

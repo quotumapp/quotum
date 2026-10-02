@@ -1535,6 +1535,37 @@
                                       },
                                       {
                                         "properties": {
+                                          "interval": {
+                                            "enum": [
+                                              "hour",
+                                              "day",
+                                              "week",
+                                              "month",
+                                              "quarter",
+                                              "semi_annual",
+                                              "year"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "intervalCount": {
+                                            "type": "number"
+                                          },
+                                          "mode": {
+                                            "enum": [
+                                              "after"
+                                            ],
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "mode",
+                                          "interval",
+                                          "intervalCount"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "properties": {
                                           "mode": {
                                             "enum": [
                                               "after_seconds"
@@ -2271,6 +2302,37 @@
                               },
                               "required": [
                                 "mode"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "properties": {
+                                "interval": {
+                                  "enum": [
+                                    "hour",
+                                    "day",
+                                    "week",
+                                    "month",
+                                    "quarter",
+                                    "semi_annual",
+                                    "year"
+                                  ],
+                                  "type": "string"
+                                },
+                                "intervalCount": {
+                                  "type": "number"
+                                },
+                                "mode": {
+                                  "enum": [
+                                    "after"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "mode",
+                                "interval",
+                                "intervalCount"
                               ],
                               "type": "object"
                             },
@@ -30531,6 +30593,40 @@
                                               {
                                                 "additionalProperties": false,
                                                 "properties": {
+                                                  "interval": {
+                                                    "enum": [
+                                                      "hour",
+                                                      "day",
+                                                      "week",
+                                                      "month",
+                                                      "quarter",
+                                                      "semi_annual",
+                                                      "year"
+                                                    ],
+                                                    "type": "string"
+                                                  },
+                                                  "intervalCount": {
+                                                    "maximum": 1000,
+                                                    "minimum": 1,
+                                                    "type": "integer"
+                                                  },
+                                                  "mode": {
+                                                    "enum": [
+                                                      "after"
+                                                    ],
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "mode",
+                                                  "interval",
+                                                  "intervalCount"
+                                                ],
+                                                "type": "object"
+                                              },
+                                              {
+                                                "additionalProperties": false,
+                                                "properties": {
                                                   "mode": {
                                                     "enum": [
                                                       "after_seconds"
@@ -31722,6 +31818,40 @@
                                   },
                                   "required": [
                                     "mode"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "interval": {
+                                      "enum": [
+                                        "hour",
+                                        "day",
+                                        "week",
+                                        "month",
+                                        "quarter",
+                                        "semi_annual",
+                                        "year"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "intervalCount": {
+                                      "maximum": 1000,
+                                      "minimum": 1,
+                                      "type": "integer"
+                                    },
+                                    "mode": {
+                                      "enum": [
+                                        "after"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "mode",
+                                    "interval",
+                                    "intervalCount"
                                   ],
                                   "type": "object"
                                 },
@@ -32708,6 +32838,40 @@
                                               {
                                                 "additionalProperties": false,
                                                 "properties": {
+                                                  "interval": {
+                                                    "enum": [
+                                                      "hour",
+                                                      "day",
+                                                      "week",
+                                                      "month",
+                                                      "quarter",
+                                                      "semi_annual",
+                                                      "year"
+                                                    ],
+                                                    "type": "string"
+                                                  },
+                                                  "intervalCount": {
+                                                    "maximum": 1000,
+                                                    "minimum": 1,
+                                                    "type": "integer"
+                                                  },
+                                                  "mode": {
+                                                    "enum": [
+                                                      "after"
+                                                    ],
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "mode",
+                                                  "interval",
+                                                  "intervalCount"
+                                                ],
+                                                "type": "object"
+                                              },
+                                              {
+                                                "additionalProperties": false,
+                                                "properties": {
                                                   "mode": {
                                                     "enum": [
                                                       "after_seconds"
@@ -33899,6 +34063,40 @@
                                   },
                                   "required": [
                                     "mode"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "interval": {
+                                      "enum": [
+                                        "hour",
+                                        "day",
+                                        "week",
+                                        "month",
+                                        "quarter",
+                                        "semi_annual",
+                                        "year"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "intervalCount": {
+                                      "maximum": 1000,
+                                      "minimum": 1,
+                                      "type": "integer"
+                                    },
+                                    "mode": {
+                                      "enum": [
+                                        "after"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "mode",
+                                    "interval",
+                                    "intervalCount"
                                   ],
                                   "type": "object"
                                 },
@@ -55360,6 +55558,40 @@
                                               {
                                                 "additionalProperties": false,
                                                 "properties": {
+                                                  "interval": {
+                                                    "enum": [
+                                                      "hour",
+                                                      "day",
+                                                      "week",
+                                                      "month",
+                                                      "quarter",
+                                                      "semi_annual",
+                                                      "year"
+                                                    ],
+                                                    "type": "string"
+                                                  },
+                                                  "intervalCount": {
+                                                    "maximum": 1000,
+                                                    "minimum": 1,
+                                                    "type": "integer"
+                                                  },
+                                                  "mode": {
+                                                    "enum": [
+                                                      "after"
+                                                    ],
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "mode",
+                                                  "interval",
+                                                  "intervalCount"
+                                                ],
+                                                "type": "object"
+                                              },
+                                              {
+                                                "additionalProperties": false,
+                                                "properties": {
                                                   "mode": {
                                                     "enum": [
                                                       "after_seconds"
@@ -56551,6 +56783,40 @@
                                   },
                                   "required": [
                                     "mode"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "interval": {
+                                      "enum": [
+                                        "hour",
+                                        "day",
+                                        "week",
+                                        "month",
+                                        "quarter",
+                                        "semi_annual",
+                                        "year"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "intervalCount": {
+                                      "maximum": 1000,
+                                      "minimum": 1,
+                                      "type": "integer"
+                                    },
+                                    "mode": {
+                                      "enum": [
+                                        "after"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "mode",
+                                    "interval",
+                                    "intervalCount"
                                   ],
                                   "type": "object"
                                 },
@@ -57457,6 +57723,40 @@
                                               {
                                                 "additionalProperties": false,
                                                 "properties": {
+                                                  "interval": {
+                                                    "enum": [
+                                                      "hour",
+                                                      "day",
+                                                      "week",
+                                                      "month",
+                                                      "quarter",
+                                                      "semi_annual",
+                                                      "year"
+                                                    ],
+                                                    "type": "string"
+                                                  },
+                                                  "intervalCount": {
+                                                    "maximum": 1000,
+                                                    "minimum": 1,
+                                                    "type": "integer"
+                                                  },
+                                                  "mode": {
+                                                    "enum": [
+                                                      "after"
+                                                    ],
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "mode",
+                                                  "interval",
+                                                  "intervalCount"
+                                                ],
+                                                "type": "object"
+                                              },
+                                              {
+                                                "additionalProperties": false,
+                                                "properties": {
                                                   "mode": {
                                                     "enum": [
                                                       "after_seconds"
@@ -58648,6 +58948,40 @@
                                   },
                                   "required": [
                                     "mode"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "interval": {
+                                      "enum": [
+                                        "hour",
+                                        "day",
+                                        "week",
+                                        "month",
+                                        "quarter",
+                                        "semi_annual",
+                                        "year"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "intervalCount": {
+                                      "maximum": 1000,
+                                      "minimum": 1,
+                                      "type": "integer"
+                                    },
+                                    "mode": {
+                                      "enum": [
+                                        "after"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "mode",
+                                    "interval",
+                                    "intervalCount"
                                   ],
                                   "type": "object"
                                 },

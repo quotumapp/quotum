@@ -36,6 +36,7 @@ const cadenceSchema = z.object({ interval: z.enum(cadenceUnits), intervalCount: 
 
 const expirySchema = z.union([
 	z.object({ mode: z.literal("forever") }),
+	z.object({ mode: z.literal("after"), interval: z.enum(cadenceUnits), intervalCount: z.number() }),
 	z.object({ mode: z.literal("after_seconds"), seconds: z.number() }),
 ]);
 

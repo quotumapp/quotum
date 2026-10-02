@@ -23,10 +23,11 @@ import {
 	type ProviderCapabilityLookup,
 	providerCapabilityCatalog,
 } from "../providers/capabilities";
-import { isCadenceUnit, sameCadence } from "../shared/cadence";
+import { type CadenceUnit, isCadenceUnit, sameCadence } from "../shared/cadence";
 import { toIso } from "../shared/date";
 import {
 	assertPlanCadences,
+	assertTopupCadences,
 	normalizeRolloverExpiry,
 	planBillingCadence,
 	priceBillingCadence,
@@ -541,9 +542,23 @@ function assertNewCatalogIntent(
 	// less often than its plan bills would silently reset every period: a yearly limit on a monthly
 	// plan would become a monthly one.
 	for (const plan of parsed.normalized.plans) assertPlanCadences(plan);
+	for (const topup of parsed.normalized.topups) assertTopupCadences(topup);
 	// One definition of "unpriced": no base price, no provider-priced products, no item price.
 	assertDefaultPlan(parsed.working);
 	assertCatalogProviderCompatibility(parsed.working, capabilities);
+}
+
+/** A calendar expiry's columns spelled out: an interval with its count, or neither. */
+function normalizedExpiryInterval(source: {
+	expiryInterval?: CadenceUnit | null;
+	expiryIntervalCount?: number | null;
+}): { expiryInterval: CadenceUnit | null; expiryIntervalCount: number | null } {
+	const expiryInterval = source.expiryInterval ?? null;
+	return {
+		expiryInterval,
+		// A count without an interval is kept so that preview can reject it.
+		expiryIntervalCount: source.expiryIntervalCount ?? (expiryInterval === null ? null : 1),
+	};
 }
 
 /**
@@ -627,6 +642,7 @@ function normalizeCatalog(
 				featureKey: normalizedKey(item.featureKey, "plan item feature key"),
 				// A count without an interval is kept so that preview can reject it.
 				resetIntervalCount: item.resetIntervalCount ?? (item.resetInterval === null ? null : 1),
+				...normalizedExpiryInterval(item),
 				quantity:
 					item.quantity === null ? null : positiveDecimal(item.quantity, "plan item quantity"),
 				price:
@@ -773,6 +789,7 @@ function normalizeCatalog(
 			key: normalizedKey(topup.key, "top-up key"),
 			featureKey,
 			quantity: positiveDecimal(topup.quantity, "top-up quantity", feature.creditScale),
+			...normalizedExpiryInterval(topup),
 			providerBindings: topup.providerBindings
 				.map((binding) => normalizeProviderBinding(binding, capabilities))
 				.sort((left, right) =>
@@ -1440,14 +1457,16 @@ async function publishPlans(
 				drizzleSql`
 					INSERT INTO plan_items (
 						project_id, plan_version_id, feature_id, item_kind, quantity,
-						reset_interval, reset_interval_count, expires_after_seconds, overage_policy,
+						reset_interval, reset_interval_count, expires_after_seconds, expiry_interval,
+						expiry_interval_count, overage_policy,
 						allocation_scope, rollover_enabled, rollover_max_quantity, rollover_expiry_mode,
 						rollover_expiry_interval, rollover_expiry_interval_count
 					)
 					VALUES (
 						${projectId}, ${versionId}::bigint, ${requireMap(featureIds, item.featureKey)}::bigint,
 						${item.itemKind}, ${item.quantity}::numeric, ${item.resetInterval},
-						${item.resetIntervalCount ?? 1}, ${item.expiresAfterSeconds}, ${item.overagePolicy},
+						${item.resetIntervalCount ?? 1}, ${item.expiresAfterSeconds},
+						${item.expiryInterval ?? null}, ${item.expiryIntervalCount ?? 1}, ${item.overagePolicy},
 						${item.allocationScope ?? "account"}, ${item.rollover !== null},
 						${item.rollover?.maxQuantity ?? null}::numeric,
 						${rolloverExpiry === undefined ? "none" : rolloverExpiry === null ? "forever" : "after"},
@@ -1842,7 +1861,9 @@ async function publishTopupOptions(
 					key,
 					feature_id,
 					quantity,
-					expires_after_seconds
+					expires_after_seconds,
+					expiry_interval,
+					expiry_interval_count
 				)
 				VALUES (
 					${projectId},
@@ -1850,7 +1871,9 @@ async function publishTopupOptions(
 					${topup.key},
 					${requireMap(featureIds, topup.featureKey)}::bigint,
 					${topup.quantity}::numeric,
-					${topup.expiresAfterSeconds}
+					${topup.expiresAfterSeconds},
+					${topup.expiryInterval ?? null},
+					${topup.expiryIntervalCount ?? 1}
 				)
 				RETURNING id
 			`,

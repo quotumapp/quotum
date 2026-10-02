@@ -429,3 +429,24 @@ their meaning:
   expiry or a reset; both used to be accepted. A default plan with only a plan-level `currency` or
   `baseAmountMinor`, and no price or binding, is now unpriced and accepted, with those fields
   dropped.
+
+## Calendar expiry
+
+The metering baseline adds `expiry_interval` (a cadence unit) and `expiry_interval_count`
+(default 1) to `plan_items` and `topup_options`, with the checks `plan_items_expiry_interval_check`,
+`plan_items_expiry_check`, `topup_options_expiry_interval_check` and `topup_options_expiry_check`:
+the count runs from 1 to 1,000, needs an interval, and an item or option expires after seconds or
+on a cadence, never both. Every addition admits existing rows, so the move needs no manual SQL:
+follow steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity). The
+data-only restore lists its columns, so every restored item and option takes no calendar expiry and
+keeps its `expires_after_seconds`. Afterwards confirm
+
+```sql
+SELECT count(*) FROM plan_items WHERE expiry_interval IS NOT NULL;
+SELECT count(*) FROM topup_options WHERE expiry_interval IS NOT NULL;
+```
+
+both return 0. Published catalogs keep their meaning and their canonical hashes: an exact
+`expiresAfterSeconds` still reads back as `{ "mode": "after_seconds" }`, and nothing moves to a
+calendar cadence until a catalog asks for one. An older image cannot read the new baseline, so a
+rollback restores the pre-upgrade backup and loses catalogs published since.

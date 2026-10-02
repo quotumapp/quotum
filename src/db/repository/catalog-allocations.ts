@@ -1,6 +1,11 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type { SubscriptionStatus } from "../../billing/types";
-import { lifetimeItemSql, resetSplitsBillingPeriodSql } from "./cadence-sql";
+import {
+	expiresAtSql,
+	expiresSql,
+	lifetimeItemSql,
+	resetSplitsBillingPeriodSql,
+} from "./cadence-sql";
 import { carryOverAllowances } from "./carry-over";
 import { keepNonConsumableLevels } from "./kept-levels";
 import { supersedeBasePlanGrants } from "./plan-grants";
@@ -527,15 +532,13 @@ export async function materializeSubscriptionAllocations(
 					ELSE ${input.periodEndAt?.toISOString() ?? null}::timestamptz
 				END,
 				CASE
-					WHEN pi.expires_after_seconds IS NOT NULL AND ${input.periodEndAt?.toISOString() ?? null}::timestamptz IS NOT NULL
+					WHEN ${expiresSql("pi")} AND ${input.periodEndAt?.toISOString() ?? null}::timestamptz IS NOT NULL
 						THEN LEAST(
 							${input.periodEndAt?.toISOString() ?? null}::timestamptz,
-							${input.periodStartAt.toISOString()}::timestamptz
-								+ pi.expires_after_seconds * interval '1 second'
+							${expiresAtSql(drizzleSql`${input.periodStartAt.toISOString()}::timestamptz`, "pi")}
 						)
-					WHEN pi.expires_after_seconds IS NOT NULL
-						THEN ${input.periodStartAt.toISOString()}::timestamptz
-							+ pi.expires_after_seconds * interval '1 second'
+					WHEN ${expiresSql("pi")}
+						THEN ${expiresAtSql(drizzleSql`${input.periodStartAt.toISOString()}::timestamptz`, "pi")}
 					WHEN pi.reset_interval IS NOT NULL
 						THEN ${input.periodEndAt?.toISOString() ?? null}::timestamptz
 					ELSE NULL
@@ -642,10 +645,10 @@ async function resumeReturningAllowances(
 			WITH ended AS (
 				SELECT allocation.id,
 					CASE
-						WHEN item.expires_after_seconds IS NOT NULL
+						WHEN ${expiresSql("item")}
 							THEN LEAST(
 								allocation.period_end_at,
-								allocation.period_start_at + item.expires_after_seconds * interval '1 second'
+								${expiresAtSql(drizzleSql`allocation.period_start_at`, "item")}
 							)
 						WHEN item.reset_interval IS NOT NULL THEN allocation.period_end_at
 						ELSE NULL
@@ -926,11 +929,7 @@ export async function materializeTopupAllocation(
 				'topup',
 				concat('topup:', options.id::text, ':purchase:', ${input.purchaseId}::text),
 				options.quantity * ${multiplier}::numeric,
-				CASE
-					WHEN options.expires_after_seconds IS NULL THEN NULL
-					ELSE ${input.purchasedAt.toISOString()}::timestamptz
-						+ options.expires_after_seconds * interval '1 second'
-				END
+				${expiresAtSql(drizzleSql`${input.purchasedAt.toISOString()}::timestamptz`, "options")}
 			FROM provider_topup_bindings bindings
 			JOIN topup_options options
 				ON options.project_id = bindings.project_id

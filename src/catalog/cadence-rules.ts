@@ -2,6 +2,7 @@ import { assertCadence, controlCadence } from "../billing/cadence";
 import { InvalidRequestError } from "../billing/errors";
 import {
 	type Cadence,
+	type CadenceUnit,
 	cadenceFitsWithin,
 	describeCadence,
 	isCalendarUnit,
@@ -11,10 +12,54 @@ import type {
 	CatalogPlanItemIntent,
 	CatalogPriceIntent,
 	CatalogRolloverExpiryIntent,
+	CatalogTopupIntent,
 } from "./types";
 
 /** Rolled-over quantity can outlive its window by at most ten years (formerly 120 months). */
 const maxRolloverExpirySpan: Cadence = { unit: "year", count: 10 };
+
+/** A calendar expiry spans at most ten years, as a rollover expiry does. */
+const maxExpirySpan: Cadence = { unit: "year", count: 10 };
+
+/** The calendar cadence after which an allocation or a top-up expires, or null when it has none. */
+export function expiryCadence(source: {
+	expiryInterval?: CadenceUnit | null;
+	expiryIntervalCount?: number | null;
+}): Cadence | null {
+	if (source.expiryInterval === undefined || source.expiryInterval === null) return null;
+	return { unit: source.expiryInterval, count: source.expiryIntervalCount ?? 1 };
+}
+
+/**
+ * A calendar expiry is a published unit with a count from 1 to 1,000, spans at most ten years and
+ * can be hourly: it is a point in time, not a window maintenance grants. It cannot be combined with
+ * an exact duration, and a count needs an interval.
+ */
+function assertExpiry(
+	source: {
+		expiresAfterSeconds: number | null;
+		expiryInterval?: CadenceUnit | null;
+		expiryIntervalCount?: number | null;
+	},
+	label: string,
+): void {
+	const cadence = expiryCadence(source);
+	if (cadence === null) {
+		if (source.expiryIntervalCount !== undefined && source.expiryIntervalCount !== null) {
+			throw new InvalidRequestError(`${label} expiry count requires an interval`);
+		}
+		return;
+	}
+	if (source.expiresAfterSeconds !== null) {
+		throw new InvalidRequestError(`${label} cannot expire both after seconds and on a cadence`);
+	}
+	assertCadence(cadence, `${label} expiry`, "window", maxExpirySpan);
+}
+
+/** The cadence rules for a new top-up: its calendar expiry, when it has one. */
+export function assertTopupCadences(topup: CatalogTopupIntent): void {
+	assertExpiry(topup, `Top-up ${topup.key}`);
+}
 
 export function planItemResetCadence(item: CatalogPlanItemIntent): Cadence | null {
 	if (item.resetInterval === null) return null;
@@ -98,6 +143,7 @@ export function assertPlanCadences(plan: CatalogPlanIntent): void {
 		if (expiry !== null) {
 			assertCadence(expiry, `${label} rollover expiry`, "grant", maxRolloverExpirySpan);
 		}
+		assertExpiry(item, label);
 	}
 	for (const control of plan.controls ?? []) {
 		controlCadence(control.interval, control.intervalCount, `Plan ${plan.key} control`);

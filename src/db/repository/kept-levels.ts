@@ -1,5 +1,10 @@
 import { sql as drizzleSql } from "drizzle-orm";
-import { lifetimeItemSql, resetSplitsBillingPeriodSql } from "./cadence-sql";
+import {
+	expiresAtSql,
+	expiresSql,
+	lifetimeItemSql,
+	resetSplitsBillingPeriodSql,
+} from "./cadence-sql";
 import { executeRows } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -33,7 +38,8 @@ export async function keepNonConsumableLevels(
 		drizzleSql`
 			WITH incoming AS (
 				SELECT pi.id, pi.feature_id, pi.allocation_scope, pi.quantity, pi.reset_interval,
-					pi.expires_after_seconds, ${lifetimeItemSql("pi")} AS lifetime
+					pi.expires_after_seconds, pi.expiry_interval, pi.expiry_interval_count,
+					${lifetimeItemSql("pi")} AS lifetime
 				FROM plan_items pi
 				JOIN plan_versions pv ON pv.project_id = pi.project_id AND pv.id = pi.plan_version_id
 				WHERE pi.project_id = ${input.projectId}
@@ -44,7 +50,8 @@ export async function keepNonConsumableLevels(
 			),
 			levels AS (
 				SELECT allocation.id, incoming.id AS item_id, incoming.quantity AS item_quantity,
-					incoming.reset_interval, incoming.expires_after_seconds, incoming.lifetime,
+					incoming.reset_interval, incoming.expires_after_seconds, incoming.expiry_interval,
+					incoming.expiry_interval_count, incoming.lifetime,
 					allocation.consumed_quantity + allocation.held_quantity AS level,
 					allocation.reversed_quantity,
 					sum(allocation.consumed_quantity + allocation.held_quantity)
@@ -79,13 +86,13 @@ export async function keepNonConsumableLevels(
 				period_start_at = ${periodStart}::timestamptz,
 				period_end_at = CASE WHEN levels.lifetime THEN NULL ELSE ${periodEnd}::timestamptz END,
 				expires_at = CASE
-					WHEN levels.expires_after_seconds IS NOT NULL AND ${periodEnd}::timestamptz IS NOT NULL
+					WHEN ${expiresSql("levels")} AND ${periodEnd}::timestamptz IS NOT NULL
 						THEN LEAST(
 							${periodEnd}::timestamptz,
-							${periodStart}::timestamptz + levels.expires_after_seconds * interval '1 second'
+							${expiresAtSql(drizzleSql`${periodStart}::timestamptz`, "levels")}
 						)
-					WHEN levels.expires_after_seconds IS NOT NULL
-						THEN ${periodStart}::timestamptz + levels.expires_after_seconds * interval '1 second'
+					WHEN ${expiresSql("levels")}
+						THEN ${expiresAtSql(drizzleSql`${periodStart}::timestamptz`, "levels")}
 					WHEN levels.reset_interval IS NOT NULL THEN ${periodEnd}::timestamptz
 					ELSE NULL
 				END,

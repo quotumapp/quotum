@@ -43,8 +43,15 @@ A plan item takes only the fields of its `itemKind`:
 | `meter_limit` | `featureKey`, `quantity`, `reset` (required), `overage` (`{ "policy": "blocked" }` or `{ "policy": "allowed", "price": … }`), `allocationScope` (`account` or `entity`) |
 | `licensed_quantity` | `featureKey`, `quantity`, `price` (required), `allocationScope` (`account` or `license_pool`) |
 
-An allocation or top-up `expiry` is `{ "mode": "forever" }` or
-`{ "mode": "after_seconds", "seconds": 86400 }`. In what preview accepts, `reset` on an
+An allocation or top-up `expiry` is `{ "mode": "forever" }`, a calendar cadence such as
+`{ "mode": "after", "interval": "year", "intervalCount": 1 }`, or an exact duration such as
+`{ "mode": "after_seconds", "seconds": 86400 }`. An allocation's expiry counts from its window
+start and never outlives the window; a top-up's counts from the purchase. A calendar expiry adds
+its cadence in UTC: month units (`month`, `quarter`, `semi_annual`, `year`) add whole months, so a
+purchase on February 29 expires on February 28 a year later and one on January 31 expires a month
+later on the last day of February, the way reset windows clamp; `hour`, `day` and `week` add exact
+hours. An exact duration stays exact: 31,536,000 seconds (365 days) fall a day short of a calendar
+year across a leap day. In what preview accepts, `reset` on an
 allocation, `expiry`, `allocationScope`, `rollover` and `overage` may be left out and default to
 null, `forever`, `account`, null and `blocked`; plan defaults such as `kind`, `visibility` and
 `controls` are optional too.
@@ -84,9 +91,11 @@ years, `resetIntervalCount` is a whole number from 1 to 1,000 and needs a
 overage is invoiced once per closed window; a daily or weekly meter limit is a hard cap. A rollover
 expiry is `{ "mode": "after", "interval": "week", "intervalCount": 2 }` or `{ "mode": "forever" }`
 and spans at most ten years; the earlier `{ "mode": "months", "months": 3 }` is still accepted and
-is returned as `after` with a month interval. A plan bills every `billingInterval` (`day`, `week`,
-`month`, `quarter`, `semi_annual` or `year`) times `billingIntervalCount` (default 1, at most three
-years), and every price on it recurs at the same interval however it is spelled: `quarter` and
+is returned as `after` with a month interval. An allocation's or top-up's calendar `expiry` takes a
+count from 1 to 1,000 of any cadence unit, `hour` included, and spans at most ten years too. A plan
+bills every `billingInterval` (`day`, `week`, `month`, `quarter`, `semi_annual` or `year`) times
+`billingIntervalCount` (default 1, at most three years), and every price on it recurs at the same
+interval however it is spelled: `quarter` and
 `month` × 3 agree. Only then do they check each provider binding against
 its provider's capability declaration: a plan with a trial, an add-on plan, every explicit price
 component (`basePrice` or an item `price`), and every top-up need the matching `catalog.*`
@@ -135,7 +144,7 @@ provider period start in UTC. A plan version with no billing cadence, such as an
 bills by the period the subscription recorded: a reset shorter than that period splits it the same
 way, for allowances and meter limits alike. Month-end anchors clamp to the shorter month and recover their
 original day afterwards; the last window stops at the provider period end and grants the whole
-quantity. Its expiry is the earlier of that boundary and `expiresAfterSeconds` after the window
+quantity. Its expiry is the earlier of that boundary and its item's `expiry` after the window
 start. Provider synchronization grants the current window and metering maintenance grants later
 windows on its normal polling cadence. Reads do not create grants. After downtime only the current
 window is granted; elapsed windows are not reconstructed. Existing rollover rules still apply to
@@ -143,7 +152,7 @@ allocations that were actually issued. Grants use the subscription's pinned plan
 account/entity scope, and stop when its recorded period or access ends. Period-end cancellation
 continues grants while access remains valid.
 
-An allocation with neither `resetInterval` nor `expiresAfterSeconds` is a lifetime allowance: a
+An allocation with neither a `reset` nor an `expiry` is a lifetime allowance: a
 subscription is granted it once, in its first period, and keeps it across renewals instead of
 receiving the quantity again every period. It ends with the version, at a switch to another one,
 and a return to the version resumes it with its use kept, as the
