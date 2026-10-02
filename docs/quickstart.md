@@ -182,7 +182,9 @@ curl -s -X POST localhost:3000/v1/billing-accounts/user_2/usage/check "${AUTH[@]
 ```
 
 `GET /v1/admin/catalog` returns the published catalog with every default spelled out; previewing that
-output unchanged creates nothing.
+output unchanged creates nothing. `bun run catalog format examples/quickstart/catalog.json` prints the
+starter catalog the same way, rewriting its legacy `expiresAfterSeconds: null` as
+`expiry: { "mode": "forever" }`.
 
 ## Clean up
 

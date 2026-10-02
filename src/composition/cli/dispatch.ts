@@ -91,13 +91,16 @@ export const quotumCommands: readonly QuotumCommand[] = [
 	{
 		path: ["catalog"],
 		file: "composition/cli/catalog.ts",
-		usage: "catalog status | diff <file> | push <file>",
-		summary: "Read, preview or publish the catalog through the API",
+		usage: "catalog status | diff <file> | push <file> | format <file> [--write]",
+		summary: "Read, preview or publish the catalog through the API, or print a file canonically",
 		environment:
-			"BILLING_BASE_URL, BILLING_PROJECT_API_KEY (or BILLING_PROJECT_KEY); diff and push also BILLING_OPERATOR_API_KEY and optional BILLING_ACTOR",
+			"BILLING_BASE_URL, BILLING_PROJECT_API_KEY (or BILLING_PROJECT_KEY); diff and push also BILLING_OPERATOR_API_KEY and optional BILLING_ACTOR; format needs none",
 		accepts: (args) =>
 			(args.length === 1 && args[0] === "status") ||
-			(args.length === 2 && (args[0] === "diff" || args[0] === "push")),
+			(args.length === 2 && (args[0] === "diff" || args[0] === "push")) ||
+			(args[0] === "format" &&
+				((args.length === 2 && args[1] !== "--write") ||
+					(args.length === 3 && args.slice(1).filter((arg) => arg === "--write").length === 1))),
 	},
 	{
 		path: ["connections", "rotate-secrets"],

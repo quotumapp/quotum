@@ -214,6 +214,17 @@ to publish only while no catalog is published. Without the export, `diff` and `p
 current revision. `diff` compares canonical intents, so a file that spells the published catalog the
 legacy way still reports `changed: false`.
 
+`bun run catalog format <file>` (`quotum catalog format` in the image) prints a `.ts`, `.js` or
+`.json` catalog file in the canonical spelling, with every default spelled out, and `--write`
+rewrites the file instead. It calls no API and needs no settings: it checks the file the way preview
+does before reading the database (the request schema, the authoring rules and provider
+compatibility), so a file it accepts can still be refused for what is published, such as a missing
+store product. Keys are written in a fixed order, so formatting a formatted file changes nothing. A
+TypeScript or JavaScript file is written as a module that exports `catalog` and keeps the file's
+`expectedRevision`, `null` included; comments and code in the original module are not kept. A JSON
+file stays the bare intent. Advice, such as a Stripe price left to Stripe in `providerPriced`, is
+printed on stderr; legacy spellings are simply rewritten.
+
 ## Catalog migrations
 
 An applied catalog migration settles once when the subscription is synchronized. Later updates,

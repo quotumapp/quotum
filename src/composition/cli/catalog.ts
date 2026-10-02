@@ -1,16 +1,27 @@
 #!/usr/bin/env bun
-import { resolve } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { extname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AuthoredCatalogIntent } from "../../catalog/types";
+import type { z } from "zod";
+import { previewSchema } from "../../app/catalog-routes";
+import { checkNewCatalogIntent } from "../../catalog/control-plane";
+import { type CatalogFileLanguage, catalogFileText } from "../../catalog/format";
+import type { AuthoredCatalogIntent, CatalogAdvisory } from "../../catalog/types";
 import { BillingClient } from "../../sdk/client";
 import { writeStderr, writeStdout } from "../../shared/cli-output";
-import { CliUsageError, type CommandOutput, runOperatorCommand } from "./operator-context";
+import {
+	CliUsageError,
+	type CommandOutput,
+	reportOperatorFailure,
+	runOperatorCommand,
+} from "./operator-context";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
 /**
  * Runs `quotum catalog`. `status` is a project-authenticated read; only `diff` and `push`, which
- * preview and publish, need the operator key. A failure is one line on stderr.
+ * preview and publish, need the operator key, and `format` calls no API at all. A failure is one
+ * line on stderr.
  */
 export async function runCatalogCommand(
 	argv: readonly string[],
@@ -22,7 +33,83 @@ export async function runCatalogCommand(
 		output.stdout(help);
 		return 0;
 	}
+	if (command === "format") return await runCatalogFormat(argv.slice(1), output);
 	return await runOperatorCommand(() => catalogCommand(argv, env), "quotum catalog --help", output);
+}
+
+/**
+ * `quotum catalog format <file> [--write]`: checks a catalog file the way preview does, without
+ * calling the API or publishing, and prints it in the canonical spelling, or rewrites the file in
+ * place with `--write`. Formatting is idempotent and keeps the file's `expectedRevision`, `null`
+ * included. Wrong arguments exit 64; an unreadable or invalid catalog exits 1.
+ */
+export async function runCatalogFormat(
+	args: readonly string[],
+	output: CommandOutput = { stdout: writeStdout, stderr: writeStderr },
+): Promise<number> {
+	try {
+		const unknown = args.find((arg) => arg.startsWith("--") && arg !== "--write");
+		if (unknown !== undefined) throw new CliUsageError(`Unknown option ${unknown}.`);
+		const files = args.filter((arg) => !arg.startsWith("--"));
+		const [file] = files;
+		if (file === undefined || files.length > 1)
+			throw new CliUsageError("format requires one catalog file.");
+		const language = catalogFileLanguage(file);
+		const formatted = formatCatalogSource(await loadCatalog(file), language);
+		for (const advisory of formatted.advisories)
+			output.stderr(`Advice at ${advisory.path}: ${advisory.message}`);
+		if (args.includes("--write")) {
+			await writeFile(resolve(file), formatted.text, "utf8");
+			output.stdout(`Wrote ${file} in the canonical spelling.`);
+		} else {
+			// The output writer ends the text with its own newline.
+			output.stdout(formatted.text.slice(0, -1));
+		}
+		return 0;
+	} catch (error) {
+		return reportOperatorFailure(error, "quotum catalog --help", output);
+	}
+}
+
+/**
+ * A loaded catalog file checked the way preview checks it, and its text in the canonical spelling.
+ * Preview's request schema runs first, so a file is refused for what the API would refuse.
+ */
+export function formatCatalogSource(
+	source: { catalog: unknown; expectedRevision?: number | null },
+	language: CatalogFileLanguage,
+): { text: string; advisories: CatalogAdvisory[] } {
+	const parsed = previewSchema.shape.catalog.safeParse(source.catalog);
+	if (!parsed.success) {
+		const [issue] = parsed.error.issues;
+		throw new Error(
+			`Catalog is invalid${issue === undefined ? "" : ` at ${issuePath(issue)}: ${issue.message}`}`,
+		);
+	}
+	const checked = checkNewCatalogIntent(parsed.data as AuthoredCatalogIntent);
+	return {
+		text: catalogFileText(checked.canonical, language, source.expectedRevision),
+		advisories: checked.advisories,
+	};
+}
+
+/** The language a catalog file is written in, from its extension. */
+export function catalogFileLanguage(file: string): CatalogFileLanguage {
+	const extension = extname(file).toLowerCase();
+	if (extension === ".json") return "json";
+	if ([".ts", ".mts", ".cts"].includes(extension)) return "ts";
+	if ([".js", ".mjs", ".cjs"].includes(extension)) return "js";
+	throw new CliUsageError("format reads a .ts, .js or .json catalog file.");
+}
+
+function issuePath(issue: z.core.$ZodIssue): string {
+	return issue.path.length === 0
+		? "the catalog"
+		: issue.path
+				.map((part, index) =>
+					typeof part === "number" ? `[${part}]` : `${index === 0 ? "" : "."}${String(part)}`,
+				)
+				.join("");
 }
 
 async function catalogCommand(argv: readonly string[], env: Environment): Promise<unknown> {
@@ -131,9 +218,11 @@ function requiredEnv(env: Environment, name: string, purpose?: string): string {
 const help = `quotum catalog <command> [catalog.ts]
 
 Commands:
-  status             Print the currently published catalog intent and revision
-  diff <catalog.ts>  Validate and preview a catalog-as-code change
-  push <catalog.ts>  Preview, then publish the unchanged catalog intent
+  status                       Print the currently published catalog intent and revision
+  diff <catalog.ts>            Validate and preview a catalog-as-code change
+  push <catalog.ts>            Preview, then publish the unchanged catalog intent
+  format <file> [--write]      Print a .ts, .js or .json catalog in the canonical spelling,
+                               or rewrite the file with --write; calls no API
 
 Environment:
   BILLING_BASE_URL, BILLING_PROJECT_API_KEY (or BILLING_PROJECT_KEY);
