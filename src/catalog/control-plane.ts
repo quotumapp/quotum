@@ -116,6 +116,20 @@ export function parseAuthoredIntent(
 }
 
 /**
+ * A new intent read and checked the way preview checks it before reading the database: its
+ * structure, the authoring rules and provider compatibility, but not the lifecycle rules that
+ * compare it with what is published. `quotum catalog format` prints its canonical intent.
+ */
+export function checkNewCatalogIntent(
+	authored: AuthoredCatalogIntent,
+	capabilities: ProviderCapabilityLookup = providerCapabilityCatalog,
+): ParsedCatalogIntent {
+	const parsed = parseAuthoredIntent(authored, capabilities);
+	assertNewCatalogIntent(authored, parsed, capabilities);
+	return parsed;
+}
+
+/**
  * Reads a stored intent, in whichever spelling it was stored, as its canonical intent. Stored data
  * only (published revisions, drafts, read-back and diff): it never applies the rules of a new intent,
  * so a catalog published before a rule existed stays readable.
@@ -201,8 +215,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 		project: ProjectInstanceContext,
 		input: CatalogPreviewInput,
 	): Promise<CatalogPreview> {
-		const parsed = parseAuthoredIntent(input.catalog, this.capabilities);
-		assertNewCatalogIntent(input.catalog, parsed, this.capabilities);
+		const parsed = checkNewCatalogIntent(input.catalog, this.capabilities);
 		const providerCompatibility = catalogProviderCompatibility(parsed.working, {
 			capabilities: this.capabilities,
 			includeUnbound: true,

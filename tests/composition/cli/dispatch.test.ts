@@ -59,6 +59,12 @@ describe("quotum command resolution", () => {
 		[["catalog", "provision"], "composition/cli/catalog-provision.ts", []],
 		[["catalog", "push", "catalog.ts"], "composition/cli/catalog.ts", ["push", "catalog.ts"]],
 		[["catalog", "status"], "composition/cli/catalog.ts", ["status"]],
+		[["catalog", "format", "catalog.ts"], "composition/cli/catalog.ts", ["format", "catalog.ts"]],
+		[
+			["catalog", "format", "catalog.ts", "--write"],
+			"composition/cli/catalog.ts",
+			["format", "catalog.ts", "--write"],
+		],
 		[["connections", "rotate-secrets"], "composition/cli/connections-rotate-secrets.ts", []],
 		[
 			["merchant", "service-principal", "ui-proxy"],
@@ -109,6 +115,10 @@ describe("quotum command resolution", () => {
 			["catalog", "push"],
 			["catalog", "status", "extra"],
 			["catalog", "provision", "extra"],
+			["catalog", "format"],
+			["catalog", "format", "--write"],
+			["catalog", "format", "a.ts", "b.ts"],
+			["catalog", "format", "--write", "--write"],
 			["connections", "rotate-secrets", "--force"],
 			["merchant", "service-principal"],
 			["mcp", "extra"],
