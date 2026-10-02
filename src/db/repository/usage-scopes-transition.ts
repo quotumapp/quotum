@@ -91,6 +91,11 @@ export interface TransitionCheck {
 export interface OverCapScopeSet {
 	customerId: string;
 	featureId: string;
+	/** The names the report uses: project instance, billing account, feature and external entity. */
+	projectKey: string;
+	billingAccountId: string;
+	featureKey: string;
+	entityExternalId: string | null;
 	scope: MeterLimitScope;
 	entityId: string | null;
 	windowStartAt: string;
@@ -284,6 +289,10 @@ function readUnbilledGroups(
 interface ScopedWindow extends SnapshotWindow {
 	scope: MeterLimitScope | null;
 	held: string;
+	projectKey: string;
+	billingAccountId: string;
+	featureKey: string;
+	entityExternalId: string | null;
 }
 
 function readScopedOpenWindows(executor: QueryExecutor): Promise<ScopedWindow[]> {
@@ -305,6 +314,10 @@ function readScopedOpenWindows(executor: QueryExecutor): Promise<ScopedWindow[]>
 				usage_window.subscription_id::text AS "subscriptionId",
 				usage_window.anchor_plan_item_id::text AS "anchorPlanItemId",
 				usage_window.scope,
+				project.key AS "projectKey",
+				customer.billing_account_id AS "billingAccountId",
+				feature.key AS "featureKey",
+				entity.external_id AS "entityExternalId",
 				COALESCE((
 					SELECT sum(reservation.held_quantity)
 					FROM reservations reservation
@@ -313,6 +326,13 @@ function readScopedOpenWindows(executor: QueryExecutor): Promise<ScopedWindow[]>
 						AND reservation.status = 'active'
 				), 0)::text AS "held"
 			FROM usage_windows usage_window
+			JOIN projects project ON project.id = usage_window.project_id
+			JOIN customers customer
+				ON customer.project_id = usage_window.project_id AND customer.id = usage_window.customer_id
+			JOIN features feature
+				ON feature.project_id = usage_window.project_id AND feature.id = usage_window.feature_id
+			LEFT JOIN entities entity
+				ON entity.project_id = usage_window.project_id AND entity.id = usage_window.entity_id
 			WHERE usage_window.window_end_at > now()
 			ORDER BY usage_window.id
 		`,
@@ -746,6 +766,14 @@ function overCapSets(
 			{
 				customerId: first.customerId,
 				featureId: first.featureId,
+				projectKey: first.projectKey,
+				billingAccountId: first.billingAccountId,
+				featureKey: first.featureKey,
+				entityExternalId:
+					set.selector.entityId === null
+						? null
+						: (set.rows.find((row) => row.entityId === set.selector.entityId)?.entityExternalId ??
+							null),
 				scope: set.selector.scope,
 				entityId: set.selector.entityId,
 				windowStartAt: first.windowStartAt,

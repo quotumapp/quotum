@@ -1014,7 +1014,7 @@ function meterLimitBalance(
 			windowEndAt: meterLimit.windowEndAt.toISOString(),
 		};
 	}
-	return {
+	const balance: MeteringBalance = {
 		featureKey: meterLimit.feature.key,
 		unit: meterLimit.feature.unit,
 		scale,
@@ -1023,6 +1023,12 @@ function meterLimitBalance(
 		held: unitsToDecimal(held, scale),
 		available: unitsToDecimal(limit > usage + held ? limit - usage - held : 0n, scale),
 		breakdown: [],
+	};
+	// An account no limit applies to holds none of the feature: there is no scope or window to
+	// report, only the placeholder month a capped-at-nothing decision counts in.
+	if (meterLimit.planItemId === null) return balance;
+	return {
+		...balance,
 		scope,
 		windowStartAt: meterLimit.windowStartAt.toISOString(),
 		windowEndAt: meterLimit.windowEndAt.toISOString(),
