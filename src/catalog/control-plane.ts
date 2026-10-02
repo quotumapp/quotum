@@ -33,7 +33,12 @@ import {
 	rolloverExpiryCadence,
 } from "./cadence-rules";
 import { assertDefaultPlan } from "./default-plan-rules";
-import { assertItemPricesCharge, assertPriceSpellingsAgree } from "./price-rules";
+import {
+	assertBaseAmountHasCurrency,
+	assertItemPricesCharge,
+	assertPriceSpellingsAgree,
+	planVersionCurrency,
+} from "./price-rules";
 import {
 	assertCatalogProviderCompatibility,
 	catalogProviderCompatibility,
@@ -448,6 +453,7 @@ function assertNewCatalogIntent(
 	capabilities: ProviderCapabilityLookup,
 ): void {
 	assertPriceSpellingsAgree(submitted, catalog);
+	assertBaseAmountHasCurrency(catalog);
 	assertItemPricesCharge(catalog);
 	// Usage windows and plan allocations reset within the provider period, so an item that resets
 	// less often than its plan bills would silently reset every period: a yearly limit on a monthly
@@ -1296,7 +1302,7 @@ async function publishPlans(
 				)
 				VALUES (
 					${projectId}, ${String(stablePlan.id)}::bigint, ${revisionId}::bigint,
-					${plan.version}, 'published', ${plan.currency}, ${plan.baseAmountMinor},
+					${plan.version}, 'published', ${planVersionCurrency(plan)}, ${plan.baseAmountMinor},
 					${plan.billingInterval}, ${plan.billingIntervalCount ?? 1}, ${plan.trialDays},
 					${plan.kind ?? "base"},
 					${plan.tierRank ?? 0}, ${plan.trialRequiresPaymentMethod ?? true},

@@ -105,3 +105,28 @@ export function assertItemPricesCharge(catalog: CatalogIntent): void {
 		}
 	}
 }
+
+/**
+ * A plan's base price is its amount and currency together. A plan-level `currency` without
+ * `baseAmountMinor` only names the currency its item prices use, but an amount without a currency
+ * is no price at all, and `plan_versions_price_check` would refuse it at publish.
+ */
+export function assertBaseAmountHasCurrency(catalog: CatalogIntent): void {
+	for (const plan of catalog.plans) {
+		if (plan.baseAmountMinor !== null && plan.currency === null) {
+			throw new InvalidRequestError(`Plan ${plan.key} baseAmountMinor requires a currency`);
+		}
+	}
+}
+
+/**
+ * The currency a plan version records: its base price's, and none for a plan without a base price.
+ * Item prices keep their own currency on their price components, so a plan priced only by its items,
+ * such as a seat-only plan or a meter limit with postpaid overage, records neither an amount nor a
+ * currency (`plan_versions_price_check` requires both or neither).
+ */
+export function planVersionCurrency(
+	plan: Pick<CatalogPlanIntent, "baseAmountMinor" | "currency">,
+): string | null {
+	return plan.baseAmountMinor === null ? null : plan.currency;
+}

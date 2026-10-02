@@ -61,6 +61,13 @@ limit, so such a price would show in the plan's pricing and never be billed. A p
 items. A catalog published before these rules keeps working as it was published; previewing it
 unchanged is refused until the conflicting value or the unbilled price is removed.
 
+A plan's base price is its amount and currency together: a plan version records a currency only
+with a `baseAmountMinor` or a `basePrice`. A plan priced only by its items, such as a seat-only plan
+or a meter limit with postpaid overage, may still name `currency` for its item prices, which must
+use it, but publishes no base price; each item price keeps its own currency on its price component,
+which is what Checkout and invoicing charge. A `baseAmountMinor` without a `currency` is refused
+with `400 INVALID_REQUEST` (`Plan team baseAmountMinor requires a currency`).
+
 ## Allowance windows
 
 An allocation that resets more often than its plan bills, such as `resetInterval: "month"` on an

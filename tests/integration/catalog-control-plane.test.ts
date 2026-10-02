@@ -1214,6 +1214,115 @@ localDescribe("catalog control plane", () => {
 		expect(empty.status).toBe(200);
 		expect(await context.sql`SELECT id FROM catalog_drafts`).toHaveLength(1);
 	});
+
+	it("publishes plans priced only by their items without a plan currency", async () => {
+		await seedPhaseTwoStripePrices();
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = operatorHeaders(authHeaders());
+		const base = phaseTwoCatalogIntent();
+		const [pro] = base.plans;
+		const [seats, apiCalls] = pro.items;
+		const itemPriced = (key: string, items: readonly unknown[]) => {
+			const { basePrice: _basePrice, ...plan } = pro;
+			return {
+				...plan,
+				key,
+				name: key,
+				baseAmountMinor: null,
+				trialDays: null,
+				items,
+			};
+		};
+		// A plan-level currency without a base amount described the item prices; it used to reach
+		// plan_versions_price_check and fail the publish with a 500.
+		const catalog = {
+			...base,
+			plans: [itemPriced("team", [seats]), itemPriced("metered", [apiCalls])],
+		};
+		const preview = await testRequest(app, "/v1/admin/catalog/preview", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ expectedRevision: null, catalog }),
+		});
+		expect(preview.status).toBe(200);
+		const publish = await testRequest(app, "/v1/admin/catalog/publish", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				expectedRevision: null,
+				previewToken: (await preview.json()).data.previewToken,
+				catalog,
+			}),
+		});
+		expect(publish.status).toBe(200);
+
+		expect(
+			await context.sql<
+				Array<{ key: string; currency: string | null; base_amount_minor: number | null }>
+			>`
+				SELECT plan.key, version.currency, version.base_amount_minor::integer AS base_amount_minor
+				FROM plan_versions version
+				JOIN plans plan ON plan.id = version.plan_id
+				ORDER BY plan.key
+			`,
+		).toEqual([
+			{ key: "metered", currency: null, base_amount_minor: null },
+			{ key: "team", currency: null, base_amount_minor: null },
+		]);
+		expect(
+			await context.sql<
+				Array<{ key: string; component_kind: string; currency: string; unit_amount_minor: number }>
+			>`
+				SELECT key, component_kind, currency, unit_amount_minor::integer AS unit_amount_minor
+				FROM price_components
+				ORDER BY key
+			`,
+		).toEqual([
+			{
+				key: "api-overage",
+				component_kind: "metered_overage",
+				currency: "USD",
+				unit_amount_minor: 50,
+			},
+			{ key: "seat", component_kind: "licensed", currency: "USD", unit_amount_minor: 200 },
+		]);
+
+		// The item prices still have to agree with the currency the plan names.
+		const mismatched = await testRequest(app, "/v1/admin/catalog/preview", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				expectedRevision: 1,
+				catalog: { ...catalog, plans: [{ ...itemPriced("team", [seats]), currency: "EUR" }] },
+			}),
+		});
+		expect(mismatched.status).toBe(400);
+		expect((await mismatched.json()).error).toMatchObject({
+			code: "INVALID_REQUEST",
+			message: "Plan team price currencies must match",
+		});
+
+		// A base amount without a currency is not a price.
+		const amountOnly = await testRequest(app, "/v1/admin/catalog/preview", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				expectedRevision: 1,
+				catalog: {
+					...catalog,
+					plans: [{ ...itemPriced("team", [seats]), currency: null, baseAmountMinor: 500 }],
+				},
+			}),
+		});
+		expect(amountOnly.status).toBe(400);
+		expect((await amountOnly.json()).error).toMatchObject({
+			code: "INVALID_REQUEST",
+			message: "Plan team baseAmountMinor requires a currency",
+		});
+	});
 });
 
 async function seedPhaseTwoStripePrices(period = { unit: "month", count: 1 }) {
