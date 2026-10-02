@@ -3,8 +3,8 @@
 - Document kind: Current behavior
 
 This guide runs the real service against a local Postgres, publishes a catalog, records a synthetic
-purchase through the guarded fake Stripe boundary, and meters usage. No provider account is needed.
-It takes about five minutes. The fixtures it uses are in [`examples/quickstart/`](../examples/quickstart/).
+purchase through the guarded fake Stripe boundary, meters usage, and then publishes a set of plan
+examples. No provider account is needed. It takes about five minutes. The fixtures it uses are in [`examples/quickstart/`](../examples/quickstart/).
 
 Prerequisites: [Bun](https://bun.sh) 1.4.x, Docker, `curl`, `jq`, and `openssl`.
 
@@ -39,10 +39,12 @@ export TOKEN="$(jq -r '.credentials[] | select(.projectInstanceKey=="acme") | .c
 The `acme` instance is a sandbox, so its credential starts with `sqpk_`; production credentials
 start with `pqpk_`.
 
-## 3. Import the store product the catalog will bind to
+## 3. Import the store products the catalogs will bind to
 
 Provider bindings in a published catalog adopt pre-provisioned store products. The development import
-creates one Stripe web top-up product, `credits_10`.
+creates the Stripe web products both catalogs in this guide bind to: the `credits_10` top-up used in
+steps 5 to 7, and the products of the plan examples in step 8. It writes only while nothing has been
+published, so run it before step 5.
 
 ```sh
 BILLING_CATALOG_IMPORT_JSON="$(cat examples/quickstart/catalog-import.json)" bun run catalog:provision
@@ -129,6 +131,58 @@ curl -s localhost:3000/v1/billing-accounts/user_1/usage/events "${AUTH[@]}" | jq
 
 Repeat the consume call with the same `Idempotency-Key` and you get the original receipt back without
 a second charge. Change the body under the same key and you get `409 IDEMPOTENCY_CONFLICT`.
+
+## 8. Publish the plan examples
+
+[`examples/quickstart/catalog-plans.json`](../examples/quickstart/catalog-plans.json) keeps everything
+the first catalog published and adds one plan of each kind, written in the
+[canonical spelling](catalog.md#canonical-intent):
+
+- `free`, the catalog's default plan: no price, 100 AI credits a month and 10 exports a day. Every
+  created account without a paid base plan holds it.
+- `pro`, a monthly base plan priced at $20.00 by its `basePrice`: 1,000 AI credits a month and 1,000
+  exports a day.
+- `team`, priced only through its seats (`licensed_quantity`, $8.00 a seat), with no `basePrice`: 5
+  seats, 5,000 AI credits a month and 5,000 exports a day.
+- `unlimited_exports`, an add-on whose `unlimited_usage` item lifts the daily export limit of the
+  base plan it is bought with.
+- `credits_1000`, a top-up whose credits expire one calendar year after purchase.
+
+Each base plan declares its own `exports` limit, because an account whose plans declare no limit for
+a metered feature that some plan limits gets none of it. `api_calls` stays priced by its rate card in
+AI credits; a meter limit on it would stop calls drawing on the wallet. Publish it as revision 2:
+
+```sh
+CATALOG="$(cat examples/quickstart/catalog-plans.json)"
+PREVIEW="$(curl -s -X POST localhost:3000/v1/admin/catalog/preview "${AUTH[@]}" "${OPS[@]}" \
+  -d "{\"expectedRevision\":1,\"catalog\":$CATALOG}")"
+echo "$PREVIEW" | jq '.data | {deprecations, advisories, plansCreated: .impact.plansCreated}'
+# {"deprecations":[],"advisories":[],"plansCreated":4}
+
+curl -s -X POST localhost:3000/v1/admin/catalog/publish "${AUTH[@]}" "${OPS[@]}" \
+  -d "{\"expectedRevision\":1,\"previewToken\":$(echo "$PREVIEW" | jq .data.previewToken),\"catalog\":$CATALOG}" | jq .data.revision
+# 2
+```
+
+A new account holds the free plan as soon as it is created:
+
+```sh
+curl -s -X PUT localhost:3000/v1/billing-accounts/user_2 "${AUTH[@]}" -d '{}'
+curl -s -X POST localhost:3000/v1/billing-accounts/user_2/usage/consume "${AUTH[@]}" \
+  -H "Idempotency-Key: quickstart-free-consume-1" \
+  -d '{"featureId":"api_calls","value":"3"}' | jq .data.allowed
+# true
+
+curl -s localhost:3000/v1/billing-accounts/user_2/balances/ai_credits "${AUTH[@]}" | jq '.data | {granted, consumed, available}'
+# {"granted":"100","consumed":"3","available":"97"}
+
+curl -s -X POST localhost:3000/v1/billing-accounts/user_2/usage/check "${AUTH[@]}" \
+  -d '{"featureId":"exports","value":"11"}' | jq '.data | {allowed, limit: .balance.granted}'
+# {"allowed":false,"limit":"10"}
+```
+
+`GET /v1/admin/catalog` returns the published catalog with every default spelled out; previewing that
+output unchanged creates nothing.
 
 ## Clean up
 
