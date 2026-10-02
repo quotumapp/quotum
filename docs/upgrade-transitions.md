@@ -10,6 +10,62 @@ moves to a changed baseline by restoring its data into a freshly migrated databa
 the later sections name the steps they reuse and add what their own change needs. A release's pull requests name the baselines it changes under
 `Upgrade notes`.
 
+## Upgrading a populated deployment to v0.19.0
+
+v0.19.0 changes the metering baseline for five changes at once: the
+[public SDK account and receipt cutover](#public-sdk-account-and-receipt-cutover), the
+[canonical catalog intent](#canonical-catalog-intent), [calendar expiry](#calendar-expiry),
+[unlimited usage items](#unlimited-usage-items) and the
+[declared meter-limit scope](#declared-meter-limit-scope). They move together in one
+stopped-service transition, in this order:
+
+1. **Prepare on v0.18.x while it serves traffic.**
+   - Run `quotum usage scopes report` until it exits `0`, resolving what it blocks as
+     [prepare on the old release](#prepare-on-the-old-release) describes: catalog-migration targets
+     priced through `basePrice`, and cancellations that take effect immediately.
+   - Preview your catalog and fix what the price-spelling refusals report, so the first publish
+     after the upgrade passes.
+   - Ready the callers without deploying them: backends create each new account with
+     `PUT /v1/billing-accounts/:billingAccountId` before its first usage, and call check and consume
+     with `featureId` and `value`, without `filters` or `metadata`. Accounts that already exist,
+     including those created implicitly by earlier usage, need no `PUT`.
+2. **Pause callers and drain legacy usage operations** while the old API still serves. With usage
+   callers stopped, look up every consume whose response was lost through
+   `GET /v1/billing-accounts/:billingAccountId/usage/operations/consume/:operationId` (add
+   `?entityId=` for an entity-scoped operation), and settle or release open reservations as callers
+   require. A claim is written in the same transaction as its charge, so a request cut off by the
+   stop leaves nothing to drain. After the upgrade a legacy consume's lookup, and a retry with its
+   key, answer `409 OPERATION_RESULT_EXPIRED` and never charge again; holds survive the transition
+   either way.
+3. **Stop the whole old service**: API, provider webhooks, merchant application and workers, as in
+   step 1 of [stored job provider identity](#stored-job-provider-identity).
+4. **Record the scope snapshot** from the old database with the new image's `quotum`:
+   `quotum usage scopes snapshot --out pre-scope.json`.
+5. **Back up, migrate and restore**: take the `pg_dump --format=custom` backup, create an empty
+   database, run `quotum migrate` from the new image, delete the seeded OAuth clients and restore
+   the data without the migrations table, as in steps 1, 2 and 4 of
+   [stored job provider identity](#stored-job-provider-identity). The calendar-expiry columns must
+   then be empty (the queries are in [calendar expiry](#calendar-expiry)).
+6. **Verify**: `quotum usage scopes verify --baseline pre-scope.json` must exit `0`. If it does not,
+   start the old release on its untouched database and investigate.
+7. **Start v0.19.0**, API and workers, and confirm `/ready`. Deploy the console re-pinned to the
+   release and pass its `bun run check:deployment`; an older console cannot read the canonical
+   catalog or the compact usage results.
+8. **Resume callers** on the new contract, and preview again any catalog previewed before the
+   upgrade: such a preview answers `409 CATALOG_PREVIEW_MISMATCH`.
+
+What operators and callers see afterwards:
+
+- `GET /v1/admin/catalog` reads back the canonical intent and its `intentHash` changes once. A
+  legacy plan priced through Stripe plan-level fields reads back as `providerPriced`: the plan-level
+  amount is dropped and preview advises "Use `basePrice` when Quotum should model the price."
+  Publish such plans with `basePrice` to keep an amount Quotum models.
+- Check and consume answer `404 BILLING_ACCOUNT_NOT_FOUND` for an account that was never created.
+  Balance, billing-summary and controls reads still answer it from the default plan.
+- Meter limits count usage in their declared scope. Accounts already over an account cap are
+  refused until a correction, a released hold or a higher limit leaves room.
+- A rollback restores the pre-upgrade backup and loses what was written since.
+
 ## Public SDK account and receipt cutover
 
 `migrations/003_metering_and_pricing.sql` now permits recovery version 2 and adds the nullable,
@@ -396,8 +452,9 @@ that change and the hard caps already exceeded.
 
 It exits `2` while any of these **blocking** items remain:
 
-- an account whose live subscriptions cap one feature with different scopes; migrate or cancel one
-  of them;
+- an account whose live subscriptions cap one feature with different scopes; migrate one of them,
+  or cancel it immediately: a cancellation at the period end keeps the subscription live, and the
+  item blocking, until that period ends;
 - an entity-scoped limit with postpaid overage on a version a subscription or grant still holds;
   migrate those subscriptions to a blocked or account-scoped version;
 - an open window that no meter limit applies to any more, for example after a subscription lapsed.
@@ -408,7 +465,10 @@ next publication refuses them.
 
 For a feature that should stay per entity, publish a version declaring
 `allocationScope: "entity"` (hard caps only), then move the subscriptions pinned to the old version
-with a [catalog migration](catalog.md#catalog-migrations): publishing alone moves nobody. Run the
+with a [catalog migration](catalog.md#catalog-migrations): publishing alone moves nobody. Price the
+migration's target version through `basePrice`: on the old release a target priced only through the
+legacy plan-level fields fails the migration job with "Target plan does not have a complete
+published Stripe recurring-price mapping". Run the
 report again until the effective scope of every affected account is the one you intend and nothing
 blocks.
 
@@ -449,8 +509,9 @@ blocks.
    - **blockers**: no account holds mixed scopes, and no open window with usage or holds is left
      without a meter limit.
 
-   It also lists the scope sets already over their cap, which are refused until room is left and
-   do not fail the verification. `--json` prints the whole result. A failure exits `2`: do not
+   It also lists the scope sets already over their cap, by project instance, billing account,
+   feature key and external entity, which are refused until room is left and do not fail the
+   verification. `--json` prints the whole result. A failure exits `2`: do not
    start the service; start the old release on its untouched database instead and investigate.
    Because nothing was moved, restoring the dump from step 4 into the old schema also reads as
    before.
