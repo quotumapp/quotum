@@ -1149,6 +1149,24 @@ function allPlanPriceBindings(
 	];
 }
 
+/**
+ * The products that identify a plan, which is how a provider's subscription finds its version: the
+ * base price's and the provider-priced ones. A plan without a base price that sells seats, such as
+ * a seat-only plan, has no product of its own, so its licensed prices' products identify it: they
+ * are the first lines its Checkout creates, and so the product its subscription reports.
+ */
+function planProductBindings(
+	plan: Pick<CatalogPlanIntent, "basePrice" | "items" | "providerBindings">,
+): CatalogProviderBindingIntent[] {
+	if ((plan.basePrice ?? null) !== null) return plan.providerBindings;
+	return unionBindings(
+		plan.providerBindings,
+		plan.items.flatMap((item) =>
+			item.itemKind === "licensed_quantity" ? (item.price?.providerBindings ?? []) : [],
+		),
+	);
+}
+
 function providerBindingIdentity(binding: CatalogProviderBindingIntent): string {
 	return `${binding.provider}:${binding.channel}:${binding.productKey}`;
 }
@@ -1858,7 +1876,7 @@ async function publishProviderBindings(
 	planVersionIds: Map<string, string>,
 ): Promise<void> {
 	for (const plan of catalog.plans) {
-		for (const binding of plan.providerBindings) {
+		for (const binding of planProductBindings(plan)) {
 			const storeProduct = await executeOne<{ id: string }>(
 				executor,
 				drizzleSql`

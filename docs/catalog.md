@@ -36,6 +36,10 @@ carry no price either, is unpriced:
   or a meter limit with priced overage, records no plan currency or amount; each item price keeps
   its own currency, which is what Checkout and invoicing charge. Its billing cadence is the one its
   item prices share.
+- A plan without a `basePrice` that sells seats is also found through the products of its
+  `licensed_quantity` prices: a seat-only plan has no other product, so its seat price's product is
+  the one a subscription to it reports. A seat price beside a `basePrice` does not identify the
+  plan; the base price's product does.
 
 A plan item takes only the fields of its `itemKind`:
 
