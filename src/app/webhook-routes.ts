@@ -33,7 +33,7 @@ import type {
 
 const publicWebhookMaxBodyBytes = 256 * 1024;
 
-const WEBHOOK_PATH_PATTERN = /^\/v1\/projects\/([^/]+)\/webhooks\/(apple|google|stripe)$/;
+const WEBHOOK_PATH_PATTERN = /^\/v1\/projects\/([^/]+)\/webhooks\/(apple|google|stripe|paddle)$/;
 
 const appleWebhookSchema = z.object({
 	signedPayload: z.string().trim().min(1),
@@ -256,6 +256,53 @@ export function registerWebhookRoutes(input: {
 			return { success: true as const, data: result };
 		});
 	};
+
+	app.post(
+		"/v1/projects/:projectKey/webhooks/paddle",
+		async ({ params, request }) => {
+			const project = await webhookProject(params.projectKey);
+			const rawBody = await readCappedText(request, publicWebhookMaxBodyBytes, tooLargeError);
+			const unverified = new BillingError(
+				"Paddle webhook signature is invalid",
+				"PADDLE_SIGNATURE_INVALID",
+				400,
+			);
+			if (!project) throw unverified;
+			return withWebhookFailureRecording("paddle", "Paddle webhook failed", project, async () => {
+				const service = connected(
+					(await providerServices.paddleBillingService?.(project, "recovery")) ?? null,
+					stripeNotConfigured,
+					unverified,
+				);
+				return {
+					success: true,
+					data: await service.handleWebhook({
+						rawBody,
+						signatureHeader: request.headers.get("paddle-signature"),
+					}),
+				};
+			});
+		},
+		{
+			parse: "none",
+			params: z.object({ projectKey: z.string().min(1) }),
+			detail: operationDetail({
+				operationId: "postV1ProjectsByProjectKeyWebhooksPaddle",
+				tags: ["webhook"],
+				path: "/v1/projects/:projectKey/webhooks/paddle",
+				security: [{ paddleSignature: [] }],
+				description:
+					"Verifies Paddle-Signature over capped raw bytes and stores the event for asynchronous processing.",
+				request: { body: z.record(z.string(), z.unknown()) },
+				responses: {
+					200: z.object({
+						success: z.literal(true),
+						data: z.object({ status: z.literal("queued"), eventType: z.string() }),
+					}),
+				},
+			}),
+		},
+	);
 
 	app.post(
 		"/v1/projects/:projectKey/webhooks/apple",

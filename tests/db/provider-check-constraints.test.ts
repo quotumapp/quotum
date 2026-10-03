@@ -14,6 +14,7 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 const providerTables = [
 	"store_products",
 	"provider_customers",
+	"provider_operations",
 	"subscriptions",
 	"purchases",
 	"store_events",
@@ -123,11 +124,12 @@ describe("provider CHECK constraints", () => {
 		const expected = new Map(providerTables.map((table) => [table, admitted]));
 		expected.set("checkout_requests", checkoutProviders());
 		expected.set("payment_setup_sessions", providersImplementing(paymentSetupOperations));
-		expected.set("promotion_redemptions", [...admitted, "quotum"].sort());
+		expected.set("promotion_provider_objects", sqlShapeProviders());
+		expected.set("promotion_redemptions", [...sqlShapeProviders(), "quotum"].sort());
 		expect(Object.fromEntries(providerChecks)).toEqual(Object.fromEntries(expected));
 	});
 
-	it("limits checkout requests to providers that implement checkout", () => {
+	it("limits legacy checkout receipts to providers with native idempotency", () => {
 		expect(providerChecks.get("checkout_requests")).toEqual(checkoutProviders());
 		const drizzleType = read("src/db/schema.ts").match(
 			/checkoutRequests = pgTable\([\s\S]*?provider: text\("provider"\)\.\$type<([^>]*)>\(\)/,
@@ -172,7 +174,12 @@ describe("provider CHECK constraints", () => {
 });
 
 function checkoutProviders(): string[] {
-	return providersImplementing(checkoutOperations);
+	// Reconcile-required writes, including Paddle, use provider_operations instead.
+	return providersImplementing(checkoutOperations).filter(
+		(provider) =>
+			providerCapabilityDeclaration(provider as BillingProvider).writeSemantics
+				.clientIdempotencyKeys,
+	);
 }
 
 function providersImplementing(operations: ProviderOperation[]): string[] {

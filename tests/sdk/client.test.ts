@@ -2,6 +2,64 @@ import { describe, expect, it } from "bun:test";
 import { BillingApiError, BillingClient } from "../../src/sdk/client";
 
 describe("BillingClient", () => {
+	it("preserves Paddle checkout keys and scopes audited observation requests", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example",
+			apiKey: "project",
+			operatorKey: "operator",
+			actor: "tester",
+			fetch: async (input, init) => {
+				calls.push(new Request(input, init));
+				return Response.json({ success: true, data: {} });
+			},
+		});
+		await client.commercial.createPaddleCheckout(
+			"payer/one",
+			{ productKey: "pro", email: "test@example.com" },
+			"stable",
+		);
+		await client.commercial.reconcileOperation("payer/one", "operation/one");
+		expect(calls).toHaveLength(2);
+		expect(calls[0]?.headers.get("idempotency-key")).toBe("stable");
+		expect(calls[0]?.url).toEndWith(
+			"/v1/billing-accounts/payer%2Fone/providers/paddle/checkout-sessions",
+		);
+		expect(await calls[0]?.json()).toEqual({ productKey: "pro", email: "test@example.com" });
+		expect(calls[1]?.url).toEndWith(
+			"/v1/admin/billing-accounts/payer%2Fone/provider-operations/operation%2Fone/reconcile",
+		);
+		expect(calls[1]?.headers.get("x-billing-actor")).toBe("tester");
+		expect(calls[1]?.headers.get("x-billing-operator-key")).toBe("operator");
+	});
+
+	it("reads a provider operation receipt without retrying a commercial mutation", async () => {
+		const calls: Request[] = [];
+		const receipt = {
+			id: "00000000-0000-4000-8000-000000000099",
+			status: "requires_review",
+			provider: "stripe",
+			operation: "checkout.create",
+			providerObjectId: null,
+			errorCode: "PROVIDER_OPERATION_UNCERTAIN",
+			createdAt: "2026-10-01T00:00:00.000Z",
+			updatedAt: "2026-10-01T00:00:00.000Z",
+		} as const;
+		const client = new BillingClient({
+			baseUrl: "https://billing.example",
+			apiKey: "read-only-test-key",
+			fetch: async (input, init) => {
+				calls.push(new Request(input, init));
+				return Response.json({ success: true, data: receipt });
+			},
+		});
+		expect(await client.commercial.getOperation("payer/one", receipt.id)).toEqual(receipt);
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.method).toBe("GET");
+		expect(calls[0]?.url).toBe(
+			`https://billing.example/v1/billing-accounts/payer%2Fone/provider-operations/${receipt.id}`,
+		);
+	});
 	it("looks up recovery with encoded account/operation IDs and no replacement mutation", async () => {
 		const calls: Request[] = [];
 		const expected = {

@@ -560,6 +560,7 @@
         "src/db/repository/commercial-actions.ts",
         "src/db/repository/plan-grants.ts",
         "src/db/repository/promotions.ts",
+        "src/db/repository/provider-operations.ts",
         "src/db/repository/recurring-pricing.ts",
         "src/db/repository/stripe.ts",
         "src/db/repository/usage-operations.ts",
@@ -868,6 +869,98 @@
       ]
     },
     {
+      "code": "PADDLE_CHECKOUT_INVALID",
+      "sources": [
+        "src/providers/paddle/service.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_CHECKOUT_SCOPE_UNSUPPORTED",
+      "sources": [
+        "src/providers/paddle/gateway.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_CONNECTION_INVALID",
+      "sources": [
+        "src/providers/paddle/connection.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_CUSTOMER_EMAIL_REQUIRED",
+      "sources": [
+        "src/providers/paddle/service.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_CUSTOMER_MISMATCH",
+      "sources": [
+        "src/providers/paddle/gateway.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_CUSTOMER_NOT_FOUND",
+      "sources": [
+        "src/providers/paddle/service.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_FULFILLMENT_MISMATCH",
+      "sources": [
+        "src/db/repository/paddle.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_ITEMS_INVALID",
+      "sources": [
+        "src/providers/paddle/catalog.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_OPERATION_INTENT_MISMATCH",
+      "sources": [
+        "src/providers/paddle/checkout.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_OPERATION_UNSUPPORTED",
+      "sources": [
+        "src/providers/paddle/commands.ts",
+        "src/providers/paddle/service.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_PAYMENT_PAGE_INVALID",
+      "sources": [
+        "src/providers/paddle/commands.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_PREVIEW_STALE",
+      "sources": [
+        "src/providers/paddle/commands.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_PRICE_MISMATCH",
+      "sources": [
+        "src/providers/paddle/catalog.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_SANDBOX_ONLY",
+      "sources": [
+        "src/providers/paddle/config.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_SIGNATURE_INVALID",
+      "sources": [
+        "src/app/webhook-routes.ts",
+        "src/providers/paddle/webhook.ts"
+      ]
+    },
+    {
       "code": "PAYMENT_SETUP_ALREADY_ACTIVE",
       "sources": [
         "src/billing/payment-setup.ts"
@@ -1124,6 +1217,18 @@
       "code": "PROVIDER_EVENT_REQUIRED",
       "sources": [
         "src/platform/connections/lifecycle.ts"
+      ]
+    },
+    {
+      "code": "PROVIDER_OPERATION_LEASE_LOST",
+      "sources": [
+        "src/db/repository/provider-operations.ts"
+      ]
+    },
+    {
+      "code": "PROVIDER_OPERATION_PENDING",
+      "sources": [
+        "src/db/repository/provider-operations.ts"
       ]
     },
     {

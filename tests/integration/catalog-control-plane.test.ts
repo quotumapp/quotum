@@ -62,9 +62,9 @@ localDescribe("catalog control plane", () => {
 		});
 		expect(previewData.intentHash).toMatch(/^[a-f0-9]{64}$/);
 		expect(previewData.previewToken).toMatch(/^[a-f0-9]{64}$/);
-		// Only the top-up asks something of its bindings, and every admitted provider binds it.
-		expect(previewData.providerCompatibility).toEqual(
-			(
+		// Only the top-up asks something of its bindings, and Paddle remains an unbound unsupported option.
+		expect(previewData.providerCompatibility).toEqual([
+			...(
 				[
 					["apple", "ios"],
 					["google", "android"],
@@ -79,7 +79,13 @@ localDescribe("catalog control plane", () => {
 				compatible: true,
 				verdicts: [],
 			})),
-		);
+			expect.objectContaining({
+				provider: "paddle",
+				productKey: null,
+				compatible: false,
+				requiredOperations: ["catalog.topup"],
+			}),
+		]);
 
 		const publishBody = {
 			expectedRevision: null,

@@ -21,6 +21,7 @@ export const DEFAULT_MAX_STRING = 1024;
 const BEARER_BASIC_PATTERN = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi;
 // Project API keys are a prefix plus base64url, so the secret itself can contain `-` and `_`.
 const PROJECT_API_KEY_PATTERN = /(?<![A-Za-z0-9])([sp]q[pr]k)_[A-Za-z0-9_-]+/g;
+const PADDLE_SECRET_PATTERN = /\b(?:pdl_(?:live|sdbx|ntfset)_[A-Za-z0-9_]+|pga_[A-Za-z0-9._-]+)/g;
 const URL_USERINFO_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi;
 const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
 const PREFIXED_ID_PATTERN =
@@ -54,6 +55,7 @@ const COLLECTIONS = new Set([
 	"licenses",
 	"members",
 	"payment-setup-sessions",
+	"provider-operations",
 	"projection-jobs",
 	"projects",
 	"apple-offers",
@@ -197,6 +199,7 @@ const URL_KEY_SUFFIXES = ["url", "uri", "href", "path", "endpoint"];
 export function scrubString(value: string, maxLength?: number): string {
 	if (isDatabaseMessage(value)) return DATABASE_ERROR_MESSAGE;
 	let output = value.replace(PROJECT_API_KEY_PATTERN, "$1_[Filtered]");
+	output = output.replace(PADDLE_SECRET_PATTERN, FILTERED);
 	output = output.replace(BEARER_BASIC_PATTERN, "$1 [Filtered]");
 	output = output.replace(URL_USERINFO_PATTERN, "$1[Filtered]@");
 	output = output.replace(JWT_PATTERN, "[jwt]");

@@ -385,7 +385,7 @@ describe("catalog capability requirements", () => {
 		).toThrow("A price capability target requires a price component");
 	});
 
-	it("finds non-Stripe bindings incompatible for exactly the constructs the control plane rejects", () => {
+	it("matches each provider’s supported catalog constructs through both helpers", () => {
 		const corpus: Array<{ name: string; target: CatalogCapabilityTarget }> = [
 			{ name: "subscription product", target: { kind: "product", productType: "subscription" } },
 			{ name: "consumable product", target: { kind: "product", productType: "consumable" } },
@@ -433,8 +433,26 @@ describe("catalog capability requirements", () => {
 				provider,
 				outcomes: corpus.map((entry) => ({
 					name: entry.name,
-					compatible: provider === "stripe" || !rejectedForNonStripe(entry),
-					throughBinding: provider === "stripe" || !rejectedForNonStripe(entry),
+					compatible:
+						provider === "paddle"
+							? [
+									"subscription product",
+									"consumable product",
+									"base plan",
+									"plan without trial days",
+									"flat base price",
+								].includes(entry.name)
+							: provider === "stripe" || !rejectedForNonStripe(entry),
+					throughBinding:
+						provider === "paddle"
+							? [
+									"subscription product",
+									"consumable product",
+									"base plan",
+									"plan without trial days",
+									"flat base price",
+								].includes(entry.name)
+							: provider === "stripe" || !rejectedForNonStripe(entry),
 				})),
 			});
 		}
@@ -488,9 +506,12 @@ describe("declaration helpers the runtime gates read", () => {
 		expect(implementsOperation(apple, "catalog.trial")).toBe(false);
 		expect(implementsOperation(apple, "catalog.price.flat")).toBe(false);
 		// A planned declaration is blocked one layer earlier, whatever it says per operation.
-		expect(implementsOperation(providerCapabilityDeclaration("paddle"), "checkout.hosted")).toBe(
-			false,
-		);
+		expect(
+			implementsOperation(
+				{ ...providerCapabilityDeclaration("paddle"), availability: "planned" },
+				"checkout.hosted",
+			),
+		).toBe(false);
 		// A hand-built declaration must still declare every operation; a gap throws rather than
 		// silently reading as unimplemented.
 		expect(() =>
@@ -506,9 +527,15 @@ describe("declaration helpers the runtime gates read", () => {
 		]);
 		expect(providersImplementing("topup.automatic")).toEqual(["stripe"]);
 		expect(providersImplementing("checkout.plan")).toEqual(["stripe"]);
-		for (const operation of providerOperations) {
-			expect(providersImplementing(operation)).not.toContain("paddle");
-		}
+		expect(
+			providerOperations.filter((operation) => providersImplementing(operation).includes("paddle")),
+		).toEqual([
+			"catalog.product.subscription",
+			"catalog.price.flat",
+			"checkout.hosted",
+			"webhook.ingest",
+			"event.replay",
+		]);
 	});
 
 	it("honours an injected lookup, including a declaration that is no longer available", () => {
@@ -561,14 +588,20 @@ describe("declaration helpers the runtime gates read", () => {
 		expect(bindingImplementsCatalogTarget(providerCapabilityCatalog, "stripe", plainPlan)).toBe(
 			true,
 		);
-		expect(bindingImplementsCatalogTarget(providerCapabilityCatalog, "paddle", plainPlan)).toBe(
-			false,
-		);
+		expect(
+			bindingImplementsCatalogTarget(
+				catalogDeclaring("paddle", { availability: "planned" }),
+				"paddle",
+				plainPlan,
+			),
+		).toBe(false);
 	});
 
 	it("asks every admitted provider for a customer-initiated top-up purchase", () => {
 		for (const provider of admittedProviders()) {
-			expect(purchaseActionFor(provider)).toBe("purchase_required");
+			expect(purchaseActionFor(provider)).toBe(
+				provider === "paddle" ? "provider_action_required" : "purchase_required",
+			);
 		}
 		expect(
 			purchaseActionFor("apple", withSupport("apple", "topup.customer_initiated", unsupported)),
@@ -606,9 +639,14 @@ describe("declaration helpers the runtime gates read", () => {
 			expect(() =>
 				commercialPreviewProvider(providerCapabilityDeclaration("apple"), action),
 			).toThrow(`Provider apple does not implement ${operation}`);
-			expect(() =>
-				commercialPreviewProvider(providerCapabilityDeclaration("paddle"), action),
-			).toThrow(`Provider paddle is not admitted for ${operation}`);
+			if (action === "checkout_product")
+				expect(commercialPreviewProvider(providerCapabilityDeclaration("paddle"), action)).toBe(
+					"paddle",
+				);
+			else
+				expect(() =>
+					commercialPreviewProvider(providerCapabilityDeclaration("paddle"), action),
+				).toThrow(`Provider paddle does not implement ${operation}`);
 		}
 	});
 

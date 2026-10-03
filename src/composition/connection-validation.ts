@@ -13,6 +13,9 @@ import {
 	googlePlayProjectConfigSchema,
 	stripeProjectConfigSchema,
 } from "../projects/config";
+import { PaddleClient } from "../providers/paddle/client";
+import { paddleConfigSchema } from "../providers/paddle/config";
+import { validatePaddleConnection } from "../providers/paddle/connection";
 import {
 	DestinationError,
 	type DestinationPolicy,
@@ -25,6 +28,7 @@ const secretFields: Record<ConnectionKind, string[]> = {
 	stripe: ["secretKey", "webhookSecret"],
 	apple: ["privateKey"],
 	google: ["serviceAccountJson", "obfuscatedAccountIdSecret"],
+	paddle: ["apiKey", "webhookSecret"],
 	projection: ["projectionSecret"],
 };
 const projectionSchema = z
@@ -59,7 +63,10 @@ export function createConnectionValidation({
 			const combined = { ...input.settings, ...input.secrets };
 			let parsed: Record<string, unknown>;
 			try {
-				if (kind === "stripe") {
+				if (kind === "paddle") {
+					if (environment !== "sandbox") throw new Error("Paddle sandbox required");
+					parsed = paddleConfigSchema.extend({ webhookUrl: z.url() }).parse(combined);
+				} else if (kind === "stripe") {
 					parsed = stripeProjectConfigSchema.parse(combined);
 					if (
 						!String(parsed.secretKey).startsWith(
@@ -147,6 +154,35 @@ export function createConnectionValidation({
 			};
 		},
 		async validate(kind, environment, input, context) {
+			if (kind === "paddle") {
+				if (environment !== "sandbox")
+					throw new MerchantError("CONNECTION_INVALID", "Paddle requires a sandbox environment.");
+				const { webhookUrl, ...settings } = input.settings;
+				const url = new URL(String(webhookUrl));
+				if (
+					url.protocol !== "https:" ||
+					url.username ||
+					url.password ||
+					url.search ||
+					url.hash ||
+					url.pathname !== `/v1/projects/${context.instanceKey}/webhooks/paddle`
+				)
+					throw new MerchantError(
+						"CONNECTION_INVALID",
+						"Paddle webhook URL must target this project instance.",
+					);
+				const config = paddleConfigSchema.parse({ ...settings, ...input.secrets });
+				const result = await validatePaddleConnection({
+					client: new PaddleClient(config),
+					config,
+					webhookUrl: url.href,
+				});
+				return {
+					identity: result.accountAnchor,
+					eventVerified: false,
+					checks: [{ code: "paddle_notification_setting", passed: true }],
+				};
+			}
 			if (kind === "projection") {
 				const challenge = randomUUID();
 				const url = new URL(String(input.settings.projectionUrl));

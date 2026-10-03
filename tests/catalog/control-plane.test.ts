@@ -186,13 +186,13 @@ describe("catalog control plane provider bindings", () => {
 		}
 	});
 
-	it("never admits a planned provider through its declared channel", async () => {
+	it("never admits an unknown provider through a valid channel", async () => {
 		const error = await previewError(
-			planWith({ provider: "paddle" as never, channel: "web", productKey: "pro" }),
+			planWith({ provider: "adyen" as never, channel: "web", productKey: "pro" }),
 		);
 		expect(error).toBeInstanceOf(InvalidRequestError);
 		expect((error as InvalidRequestError).message).toBe(
-			"paddle catalog bindings must use the undefined channel",
+			"adyen catalog bindings must use the undefined channel",
 		);
 	});
 
@@ -429,6 +429,14 @@ describe("catalog control plane preview provider compatibility", () => {
 					blocked: [["catalog.trial", ["PROVIDER_MANAGED"]]],
 				}),
 			),
+			{
+				target: { kind: "plan", key: "pro" },
+				provider: "paddle",
+				channel: "web",
+				productKey: null,
+				compatible: false,
+				blocked: [["catalog.trial", ["IMPLEMENTATION_PLANNED"]]],
+			},
 			...packBindings.map(
 				({ provider, channel }): SummarizedEntry => ({
 					target: { kind: "topup", key: "pack" },
@@ -439,6 +447,14 @@ describe("catalog control plane preview provider compatibility", () => {
 					blocked: [],
 				}),
 			),
+			{
+				target: { kind: "topup", key: "pack" },
+				provider: "paddle",
+				channel: "web",
+				productKey: null,
+				compatible: false,
+				blocked: [["catalog.topup", ["IMPLEMENTATION_PLANNED"]]],
+			},
 		]);
 		expect(
 			result.providerCompatibility

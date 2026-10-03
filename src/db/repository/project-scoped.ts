@@ -23,6 +23,7 @@ import type { BillingChannel, BillingProvider, EntitlementSnapshot } from "../..
 import type { ProjectInstanceContext } from "../../projects/context";
 import type { StripeCatalog } from "../../providers/stripe/types";
 import type { BillingRepository } from "../repository";
+import type { PaddleBillingRepository } from "./paddle";
 import type {
 	PaymentSetupReservation,
 	PaymentSetupRow,
@@ -56,6 +57,19 @@ export class ProjectScopedBillingRepository {
 		private readonly repository: BillingRepository,
 		private readonly project: ProjectInstanceContext,
 	) {}
+
+	getPaddleCustomer(billingAccountId: string, accountIdentity: string) {
+		return this.repository.paddle.customer(this.project, billingAccountId, accountIdentity);
+	}
+	getPaddleBinding(productKey: string) {
+		return this.repository.paddle.binding(this.project, productKey);
+	}
+	linkPaddleCustomer(input: Parameters<PaddleBillingRepository["linkCustomer"]>[1]) {
+		return this.repository.paddle.linkCustomer(this.project, input);
+	}
+	recordPaddleEvent(input: Parameters<PaddleBillingRepository["record"]>[1]) {
+		return this.repository.paddle.record(this.project, input);
+	}
 
 	async getEntitlementSnapshot(billingAccountId: string): Promise<EntitlementSnapshot> {
 		return await this.repository.getEntitlementSnapshot(this.project, billingAccountId);

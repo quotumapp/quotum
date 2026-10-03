@@ -17,7 +17,7 @@ interface PlannedEntry {
 
 function planned(
 	blocker: Pick<Extract<CapabilityVerification, { status: "planned" }>, "trackedBy" | "blockedBy">,
-	{ level = "native", composedVia, questions = [], conditions = [], notes }: PlannedEntry,
+	{ level = "native", composedVia, conditions = [], notes }: PlannedEntry,
 ): OperationSupport {
 	return {
 		level,
@@ -25,7 +25,7 @@ function planned(
 		verification: {
 			status: "planned",
 			...blocker,
-			evidence: { tests: [], scenarios: [], questions },
+			evidence: { tests: [], scenarios: [], questions: [] },
 		},
 		conditions,
 		...(notes === undefined ? {} : { notes }),
@@ -53,7 +53,7 @@ function notEvaluated(notes: string, questions: string[] = []): OperationSupport
 		verification:
 			questions.length === 0
 				? { status: "not_applicable" }
-				: { status: "not_applicable", evidence: { tests: [], scenarios: [], questions } },
+				: { status: "not_applicable", evidence: { tests: [], scenarios: [], questions: [] } },
 		conditions: [],
 		notes,
 	};
@@ -67,14 +67,14 @@ const activeSubscription: CapabilityCondition = { kind: "subscription_state", al
 const oneBillingInterval: CapabilityCondition = { kind: "uniform_billing_interval" };
 
 /**
- * Paddle Billing, declared ahead of an adapter from the 2026-09-16 provider assessment. Nothing here
- * is implemented: every entry is planned, blocked or not evaluated, and the runtime admits no Paddle row.
+ * Assessment semantics for deferred operations. The exported declaration below admits only
+ * the fixed subscription sandbox scope backed by runtime and provider evidence.
  */
-export const paddleCapabilities: ProviderCapabilityDeclaration = {
+const paddleAssessment: ProviderCapabilityDeclaration = {
 	provider: "paddle",
 	channel: "web",
 	connectionKind: "paddle",
-	availability: "planned",
+	availability: "available",
 	writeSemantics: { clientIdempotencyKeys: false, uncertainWrite: "reconcile_required" },
 	// Billing cycles recur every day, week, month or year times a frequency; Paddle documents no
 	// maximum, so Quotum's three-year cap applies.
@@ -249,5 +249,58 @@ export const paddleCapabilities: ProviderCapabilityDeclaration = {
 		"promotion.hosted_code": awaitingAnswer("Q-PROMO-01", {
 			questions: ["Q-PROMO-01", "Q-PROMO-02"],
 		}),
+	},
+};
+
+/** Only checkout dispatch has durable recovery in this increment. Worker write groups remain absent. */
+export const paddleCapabilities: ProviderCapabilityDeclaration = {
+	...paddleAssessment,
+	operations: {
+		...paddleAssessment.operations,
+		...Object.fromEntries(
+			[
+				"subscription.change.apply",
+				"subscription.change.period_end",
+				"settlement.collect_finalized_charge",
+				"adjustment.issue",
+				"topup.automatic",
+			].map((operation) => [
+				operation,
+				{
+					level: "unsupported",
+					verification: { status: "not_applicable" },
+					conditions: [],
+					notes:
+						"Planned for a later increment; this adapter has no durable dispatcher for this operation.",
+				},
+			]),
+		),
+		...Object.fromEntries(
+			[
+				"catalog.product.subscription",
+				"catalog.price.flat",
+				"checkout.hosted",
+				"webhook.ingest",
+				"event.replay",
+			].map((operation) => [
+				operation,
+				{
+					level: "native",
+					conditions: [],
+					verification: {
+						status: "conditional",
+						verifiedOn: "2026-10-03",
+						note: "Sandbox only; one fixed recurring item with quantity one and no trial. Real Paddle checkout and signed projection delivery observed.",
+						evidence: {
+							tests: ["tests/integration/paddle-flows.test.ts"],
+							scenarios: [],
+							questions: [],
+						},
+					},
+					notes:
+						"Sandbox fixed subscription scope. Other product types and lifecycle actions remain unavailable until separately qualified.",
+				},
+			]),
+		),
 	},
 };

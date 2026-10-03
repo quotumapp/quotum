@@ -56,7 +56,10 @@ The policy is deny-by-default:
   accepting new work. Immediate subscription changes use the database clock for their effective
   time and worker claims, so application clock skew cannot delay the first claim. Explicit
   `period_end` changes retain the stored subscription period end. Stripe App events are handled
-  outside the registry.
+  outside the registry. Paddle sandbox customer/checkout writes use `provider_operations`;
+  `provider_operation_recovery` observes them with the original encrypted connection version.
+  Its dispatcher and fulfillment live in the Paddle adapter, while lease fencing and operator
+  receipt/review routes remain provider-neutral.
 - `src/mcp/`: shared read-only [MCP tools and stdio server](mcp.md), a client of `/v1` through
   `src/sdk/`, plus separately enabled remote proposal tools. The remote transport in
   `composition/remote-mcp.ts` dispatches read tools through guarded SDK requests and

@@ -17,6 +17,7 @@ import type {
 	RuntimeConnectionResolver,
 } from "../projects/connections";
 import type { ProjectInstanceContext } from "../projects/context";
+import { buildPaddleConfig } from "../providers/paddle/config";
 import { merchantSql } from "./merchant-persistence";
 import { createStripeOAuthPort } from "./stripe-oauth";
 
@@ -62,6 +63,26 @@ export function createRuntimeConnectionResolver(
 	stripeOAuth?: StripeOAuthPort | null,
 ): RuntimeConnectionResolver {
 	return {
+		async resolvePaddleVersion(project, versionId) {
+			try {
+				const version = await repository.version(project.projectInstanceId, versionId);
+				if (
+					!version.validated_at ||
+					!["active", "retired"].includes(version.status) ||
+					!version.external_identity ||
+					!(await repository.matchesKind(version.connection_id, "paddle"))
+				)
+					return null;
+				const { webhookUrl: _, ...settings } = version.settings;
+				return {
+					...buildPaddleConfig(project, { ...settings, ...(await repository.secrets(version)) }),
+					accountIdentity: version.external_identity,
+					versionId: version.id,
+				};
+			} catch {
+				throw connectionUnavailable();
+			}
+		},
 		async resolve<K extends RuntimeConnectionKind>(
 			project: ProjectInstanceContext,
 			kind: K,
@@ -77,7 +98,15 @@ export function createRuntimeConnectionResolver(
 				const value = { ...current.version.settings, ...current.secrets };
 				const accountIdentity = current.version.external_identity ?? null;
 				let parsed: unknown;
-				if (kind === "stripe") {
+				if (kind === "paddle") {
+					const { webhookUrl: _, ...settings } = value;
+					if (!accountIdentity) throw new Error("Paddle account identity missing");
+					parsed = {
+						...buildPaddleConfig(project, settings),
+						accountIdentity,
+						versionId: current.version.id,
+					};
+				} else if (kind === "stripe") {
 					if (current.version.settings.authMethod === "oauth") {
 						if (project.environment === "internal")
 							throw new Error("Merchant OAuth is unavailable internally");

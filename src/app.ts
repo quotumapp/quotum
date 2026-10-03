@@ -10,6 +10,7 @@ import { registerCustomerRoutes } from "./app/customer-routes";
 import { registerInsightsRoutes } from "./app/insights-routes";
 import { registerMeteringRoutes } from "./app/metering-routes";
 import { registerPromotionRoutes } from "./app/promotion-routes";
+import { registerProviderOperationRoutes } from "./app/provider-operation-routes";
 import {
 	projectProviderServiceResolver,
 	requireApplePromotionSigner,
@@ -76,7 +77,7 @@ import {
 
 export type { AppDependencies } from "./app/types";
 
-const WEBHOOK_PATH_PATTERN = /^\/v1\/projects\/[^/]+\/webhooks\/(apple|google|stripe)$/;
+const WEBHOOK_PATH_PATTERN = /^\/v1\/projects\/[^/]+\/webhooks\/(apple|google|stripe|paddle)$/;
 
 /** Webhook requests one client IP may send per window, as a multiple of the per-project limit. */
 const WEBHOOK_CLIENT_LIMIT_MULTIPLIER = 10;
@@ -120,6 +121,8 @@ export function createApp({
 	projectProviderServices,
 	providerRegistry: sharedProviderRegistry,
 	providerCapabilityReads,
+	providerOperationStore,
+	providerOperationReconciler,
 	adminBillingReader,
 	adminOperations,
 	logger,
@@ -530,6 +533,13 @@ export function createApp({
 		},
 	});
 	registerCapabilityRoutes({ app, reads: capabilityReads });
+	registerProviderOperationRoutes({
+		app,
+		reconcile: providerOperationReconciler,
+		store: providerOperationStore ?? {
+			get: (...args) => getRepository().providerOperations.get(...args),
+		},
+	});
 	const usageApi = usageApiService ?? getRepository().usageApi;
 	registerUsageReceiptRoutes(app, usageApi);
 	registerMeteringRoutes({

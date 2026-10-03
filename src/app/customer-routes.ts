@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { EntitlementService } from "../billing/entitlements";
-import { BillingError, isBillingError } from "../billing/errors";
+import { BillingError, isBillingError, NotConfiguredError } from "../billing/errors";
 import { projectScopedRateLimitGuard } from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
@@ -454,6 +454,45 @@ export function registerCustomerRoutes({
 				path: "/v1/billing-accounts/:billingAccountId/providers/google/account-link",
 				responses: {
 					200: responses.getV1BillingAccountsByBillingAccountIdProvidersGoogleAccountLinkResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.post(
+		"/v1/billing-accounts/:billingAccountId/providers/paddle/checkout-sessions",
+		async ({ params, body, request, project }) => {
+			const service = await providerServices.paddleBillingService?.(privateProject(project));
+			if (!service)
+				throw new NotConfiguredError("Paddle provider is not configured", undefined, 503);
+			return {
+				success: true,
+				data: await service.createCheckoutSession({
+					billingAccountId: params.billingAccountId,
+					productKey: body.productKey,
+					email: body.email,
+					idempotencyKey: request.headers.get("idempotency-key"),
+				}),
+			};
+		},
+		{
+			parse: [LENIENT_JSON_PARSE],
+			params: stripeCustomerRouteParamsSchema,
+			body: z
+				.object({ productKey: z.string().trim().min(1), email: z.email().optional() })
+				.strict(),
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1BillingAccountsByBillingAccountIdProvidersPaddleCheckoutSessions",
+				tags: ["customer"],
+				path: "/v1/billing-accounts/:billingAccountId/providers/paddle/checkout-sessions",
+				description:
+					"Sandbox fixed subscription checkout. Requires Idempotency-Key. Uncertain writes return PROVIDER_OPERATION_PENDING with an operationId to inspect.",
+				responses: {
+					200: z.object({
+						success: z.literal(true),
+						data: z.object({ sessionId: z.string(), url: z.url() }),
+					}),
 				},
 			}),
 		},

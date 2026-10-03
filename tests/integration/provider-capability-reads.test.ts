@@ -107,14 +107,14 @@ localDescribe("Provider capability reads integration", () => {
 		expect(capabilities.status).toBe(200);
 		const environment = ((await capabilities.json()) as { data: ProviderEnvironmentCapabilities })
 			.data;
-		// Project services replace the connection build, so every provider reads as configured.
+		// The three overridden services are configured; Paddle has no connection.
 		expect(environment.providers.map((entry) => [entry.provider, entry.connection])).toEqual(
-			(["apple", "google", "stripe"] as const).map((provider) => [
+			(["apple", "google", "stripe", "paddle"] as const).map((provider) => [
 				provider,
 				{
-					configured: true,
-					enabled: true,
-					validated: true,
+					configured: provider !== "paddle",
+					enabled: provider !== "paddle",
+					validated: provider !== "paddle",
 					validatedAt: null,
 					accountIdentity: null,
 				},
@@ -236,6 +236,13 @@ localDescribe("Provider capability reads integration", () => {
 				validated: true,
 				validatedAt: "2026-09-18T10:00:00.000Z",
 				accountIdentity: "acct_1CapabilityReads",
+			},
+			{
+				configured: true,
+				enabled: false,
+				validated: true,
+				validatedAt: "2026-09-18T10:00:00.000Z",
+				accountIdentity: null,
 			},
 		]);
 		const data = ((await actions.json()) as { data: BillingAccountAvailableActions }).data;

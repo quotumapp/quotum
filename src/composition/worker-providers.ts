@@ -73,7 +73,12 @@ function onlyProvider<T>(
 	provider: BillingProvider,
 	value: T | null,
 ): Record<BillingProvider, T | null> {
-	const providers: Record<BillingProvider, T | null> = { apple: null, google: null, stripe: null };
+	const providers: Record<BillingProvider, T | null> = {
+		apple: null,
+		google: null,
+		stripe: null,
+		paddle: null,
+	};
 	providers[provider] = value;
 	return providers;
 }

@@ -190,9 +190,14 @@ describe("worker provider selectors", () => {
 		expect(
 			await replay.google?.replayStoreEvent({ id: "event-1" } as StoreEventReplayJobRow),
 		).toEqual({ status: "processed" });
-		expect({ apple: reconciliation.apple, stripe: reconciliation.stripe }).toEqual({
+		expect({
+			apple: reconciliation.apple,
+			stripe: reconciliation.stripe,
+			paddle: reconciliation.paddle,
+		}).toEqual({
 			apple: null,
 			stripe: null,
+			paddle: null,
 		});
 		await reconciliation.google?.reconcileSubscription({
 			id: "subscription-1",
@@ -205,11 +210,13 @@ describe("worker provider selectors", () => {
 			apple: null,
 			google: null,
 			stripe: null,
+			paddle: null,
 		});
 		expect(await selectors.subscriptionReconciliation(otherProject, "google")).toEqual({
 			apple: null,
 			google: null,
 			stripe: null,
+			paddle: null,
 		});
 		expect(resolved).toEqual([
 			{ project: "globex", kind: "google", purpose: "recovery" },

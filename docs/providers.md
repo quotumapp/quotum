@@ -17,6 +17,100 @@ period as `billing_period` (`one_time` or a billing unit) and `billing_period_co
 binding adopts it only when that period spans the same time as the price's interval. The import
 takes `interval` and an optional `intervalCount` per subscription entry.
 
+## Paddle qualification work
+
+Paddle is admitted for **sandbox fixed subscription checkout**. The runtime exposes hosted product
+checkout, signed webhook ingestion and stored-event replay, with normal subscription, purchase,
+entitlement and `billing_state_v1` projection persistence. Only one fixed recurring item, quantity
+one, without a trial is qualified. The Paddle price must have minimum and maximum quantity both
+set to one; checkout validates its product, currency, amount and cadence before any write. Catalog
+mappings require operator provisioning, as with native stores; the Stripe import does not create them.
+
+On 2026-10-03, real Paddle sandbox checkouts, signed event delivery and signed projections passed.
+A deliberately discarded successful transaction-create response recovered automatically with one
+dispatch. Duplicate transaction delivery kept one purchase, and a replay of an old subscription event
+after immediate cancellation did not restore access. These are bounded provider observations;
+`tests/integration/paddle-flows.test.ts` and `tests/integration/provider-operations.test.ts` provide
+repeatable database regressions. No live-account payment or production deployment was performed.
+
+Trials, seats, multiple items, add-ons, one-time products, portal, public cancellation/change actions,
+refunds, promotions, usage settlement and top-ups remain unavailable. Candidate command and
+normalization helpers for those operations are not runtime support. The generic commercial preview
+flow and merchant UI have not adopted Paddle; use the explicit trusted-backend checkout route.
+Production keys and production/internal project environments are rejected.
+
+### Connection and payment page
+
+The database-owned `paddle` connection uses the existing draft/validate/commit/disable lifecycle,
+through the platform API or `quotum connections`. Submit `apiKey` and `webhookSecret` in `secrets`;
+`notificationSettingId`, `paymentPageUrl`, `clientToken` and `webhookUrl` belong in `settings`.
+The API key must be sandbox scoped (`pdl_sdbx_`), and the browser token sandbox scoped (`test_`).
+Validation reads the seller's notification setting and checks its secret, active state, API version,
+event subscriptions and exact destination. The URL must be public HTTPS at
+`/v1/projects/:projectInstanceKey/webhooks/paddle` for the selected instance. This API check does
+not claim receipt of an event; sandbox commit is permitted and real delivery must then be tested.
+There is no Paddle draft-event setup receiver or production activation path in this increment.
+
+Host Paddle.js on the approved `paymentPageUrl`, initialize it with the sandbox client token, and
+configure a default payment link in the Paddle sandbox dashboard. Passing a transaction checkout
+URL does not remove that prerequisite. Paddle opens the server-created transaction using `_ptxn`.
+The guarded example in `src/testing/paddle-payment-page.ts` demonstrates this setup; browser
+callbacks display progress and never grant access. Fulfillment uses verified server events and
+current authenticated provider state.
+
+The notification-setting ID forms the provider-account continuity anchor. Keep it stable when
+rotating API keys. Write recovery decrypts the recorded validated active/retired connection version;
+it never substitutes the current connection or another account. Retain old encrypted versions while
+operations reference them. Missing credentials or ambiguous lookup require operator review.
+See [provider write recovery](operations.md#provider-write-recovery-foundation).
+
+### Local sandbox qualification
+
+The read-only preflight remains available. Its owner-only JSON file contains `connection` (the five
+runtime settings below), `webhookUrl`, and `bindings` matching the published local catalog. It checks
+API/catalog access and always reports `qualification: "pending"`; it does not collect payment:
+
+```sh
+BILLING_ENV=test BILLING_TEST_PADDLE_SANDBOX=true \
+  BILLING_TEST_PADDLE_CONFIG_FILE=/private/path/preflight.json \
+  bun src/testing/paddle-preflight.ts
+```
+
+For the real runtime, use a separate owner-only regular JSON file outside Git:
+
+```json
+{
+  "projectInstanceKey": "example-sandbox",
+  "connection": {
+    "apiKey": "<sandbox API key>",
+    "webhookSecret": "<notification destination secret>",
+    "notificationSettingId": "ntfset_<26-character ID>",
+    "paymentPageUrl": "https://merchant.example/pay",
+    "clientToken": "test_<client token>"
+  },
+  "connectionVersionId": "<UUID>",
+  "projectionUrl": "http://127.0.0.1:4320",
+  "projectionSecret": "<test receiver secret>"
+}
+```
+
+Against a disposable migrated/bootstrap database with a sandbox project and provisioned mapping,
+run `bun src/testing/test-paddle-entrypoint.ts` with `BILLING_ENV=test`,
+`BILLING_TEST_PADDLE_SANDBOX=true`, `BILLING_TEST_PADDLE_CONFIG_FILE`, the normal database settings
+and `QUOTUM_MERCHANT_ENABLED=false`. This guarded entrypoint serves the private API on loopback
+4318 and `/pay` plus the exact Paddle webhook on loopback 4319. Tunnel only 4319. Its injected
+projection transport permits a local test receiver; it does not change production destination rules.
+After testing, cancel test subscriptions, disable the temporary notification destination, remove
+its approved domain and stop the tunnel. Restore the previous default payment link when possible.
+If Paddle refuses an empty default, record the stale URL and replace it with a stable approved
+payment page before the next checkout. Keep credentials and raw captures
+outside Git; report synthetic regressions separately from real sandbox observations.
+
+Paddle's [default payment link](https://developer.paddle.com/build/transactions/default-payment-link/),
+[signature verification](https://developer.paddle.com/webhooks/about/signature-verification/) and
+[notification replay](https://developer.paddle.com/api-reference/notifications/replay-notification/)
+document the provider behavior behind this flow. The capability table below is the Quotum scope.
+
 ## Provider capabilities
 
 The table below states which billing operations each declared provider supports, under which
@@ -44,52 +138,52 @@ connections cannot serve. See
 <!-- provider-capabilities:start -->
 <!-- Generated from contracts/v1/provider-capabilities.json by bun run openapi:generate; do not edit. -->
 
-| Operation | Apple | Google | Stripe | Paddle (planned) |
+| Operation | Apple | Google | Stripe | Paddle |
 | --- | --- | --- | --- | --- |
 | **Catalog** | | | | |
-| Subscription products<br>`catalog.product.subscription` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts) | Planned · Native<br>Questions: Q-CHK-01 |
-| Consumable products<br>`catalog.product.consumable` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts), [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Requires policy decision (DEC-14) · Native<br>Questions: Q-ELIG-03 |
-| Non-consumable products<br>`catalog.product.non_consumable` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-CHK-03 |
-| Trials<br>`catalog.trial` | Managed by provider, mirrored by Quotum<br>Tests: [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts), [providers/apple/service](../tests/providers/apple/service.test.ts), [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Managed by provider, mirrored by Quotum<br>Tests: [providers/google/normalizer](../tests/providers/google/normalizer.test.ts), [providers/google/service](../tests/providers/google/service.test.ts), [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-SUB-06 |
-| Add-on plans<br>`catalog.addon` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts) | Conditional; not implemented · Native<br>All recurring prices must share one billing interval.<br>Questions: Q-SUB-04 |
-| Top-up options<br>`catalog.topup` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Requires policy decision (DEC-14) · Native<br>Questions: Q-ELIG-03 |
-| Flat price components<br>`catalog.price.flat` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native |
-| Licensed-quantity prices<br>`catalog.price.licensed` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Conditional; not implemented · Native<br>Quantities must be whole numbers.<br>Questions: Q-SUB-05 |
+| Subscription products<br>`catalog.product.subscription` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts) | Conditional · Native<br>Tests: [integration/paddle-flows](../tests/integration/paddle-flows.test.ts) |
+| Consumable products<br>`catalog.product.consumable` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts), [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Requires policy decision (DEC-14) · Native |
+| Non-consumable products<br>`catalog.product.non_consumable` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native |
+| Trials<br>`catalog.trial` | Managed by provider, mirrored by Quotum<br>Tests: [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts), [providers/apple/service](../tests/providers/apple/service.test.ts), [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Managed by provider, mirrored by Quotum<br>Tests: [providers/google/normalizer](../tests/providers/google/normalizer.test.ts), [providers/google/service](../tests/providers/google/service.test.ts), [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native |
+| Add-on plans<br>`catalog.addon` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts) | Conditional; not implemented · Native<br>All recurring prices must share one billing interval. |
+| Top-up options<br>`catalog.topup` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Requires policy decision (DEC-14) · Native |
+| Flat price components<br>`catalog.price.flat` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Conditional · Native<br>Tests: [integration/paddle-flows](../tests/integration/paddle-flows.test.ts) |
+| Licensed-quantity prices<br>`catalog.price.licensed` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Conditional; not implemented · Native<br>Quantities must be whole numbers. |
 | Tiered prices<br>`catalog.price.tiered` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/phase3-release-journeys](../tests/integration/phase3-release-journeys.test.ts), [billing/commercial-pricing](../tests/billing/commercial-pricing.test.ts) | Not evaluated |
-| Hybrid prices<br>`catalog.price.hybrid` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Conditional; not implemented · Native<br>All recurring prices must share one billing interval.<br>Questions: Q-SUB-04 |
-| Postpaid usage prices<br>`catalog.price.postpaid_usage` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts) | Requires policy decision (DEC-14) · Quotum-composed via non-catalog transaction item<br>Questions: Q-SET-01, Q-SET-03, Q-TAX-01 |
+| Hybrid prices<br>`catalog.price.hybrid` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Conditional; not implemented · Native<br>All recurring prices must share one billing interval. |
+| Postpaid usage prices<br>`catalog.price.postpaid_usage` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts) | Requires policy decision (DEC-14) · Quotum-composed via non-catalog transaction item |
 | **Checkout** | | | | |
-| Hosted product checkout<br>`checkout.hosted` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-ELIG-02, Q-ELIG-05, Q-CHK-02, Q-CHK-03, Q-RET-01 |
-| Hosted plan checkout<br>`checkout.plan` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-ELIG-02, Q-CHK-01, Q-CHK-02, Q-RET-01 |
+| Hosted product checkout<br>`checkout.hosted` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Conditional · Native<br>Tests: [integration/paddle-flows](../tests/integration/paddle-flows.test.ts) |
+| Hosted plan checkout<br>`checkout.plan` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native |
 | **Purchase verification** | | | | |
 | Purchase verification<br>`purchase.verify` | Supported · Native<br>Tests: [providers/apple/service](../tests/providers/apple/service.test.ts), [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [providers/google/service](../tests/providers/google/service.test.ts), [integration/google-flows](../tests/integration/google-flows.test.ts) | Unsupported | Not evaluated |
 | **Customer portal** | | | | |
-| Customer portal session<br>`portal.session` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-PORT-01 |
+| Customer portal session<br>`portal.session` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native |
 | **Payment methods** | | | | |
-| Hosted payment method setup<br>`payment_method.setup` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Supported · Native<br>Tests: [providers/stripe/payment-setup](../tests/providers/stripe/payment-setup.test.ts), [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Requires semantic validation (Q-SET-02) · Native<br>Questions: Q-SET-02 |
+| Hosted payment method setup<br>`payment_method.setup` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Supported · Native<br>Tests: [providers/stripe/payment-setup](../tests/providers/stripe/payment-setup.test.ts), [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Requires semantic validation (Q-SET-02) · Native |
 | **Events and reconciliation** | | | | |
-| Webhook ingestion<br>`webhook.ingest` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts), [providers/apple/service](../tests/providers/apple/service.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts), [providers/google/service](../tests/providers/google/service.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-WH-01, Q-WH-02, Q-WH-03 |
-| Stored event replay<br>`event.replay` | Supported · Native<br>Tests: [providers/apple/service](../tests/providers/apple/service.test.ts) | Supported · Native<br>Tests: [providers/google/service](../tests/providers/google/service.test.ts) | Supported · Native<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-WH-03 |
-| Subscription reconciliation<br>`subscription.reconcile` | Supported · Native<br>Tests: [providers/apple/service](../tests/providers/apple/service.test.ts) | Supported · Native<br>Tests: [providers/google/service](../tests/providers/google/service.test.ts), [integration/worker-flows](../tests/integration/worker-flows.test.ts) | Supported · Native<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native<br>Questions: Q-RET-02, Q-RATE-01 |
+| Webhook ingestion<br>`webhook.ingest` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts), [providers/apple/service](../tests/providers/apple/service.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts), [providers/google/service](../tests/providers/google/service.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Conditional · Native<br>Tests: [integration/paddle-flows](../tests/integration/paddle-flows.test.ts) |
+| Stored event replay<br>`event.replay` | Supported · Native<br>Tests: [providers/apple/service](../tests/providers/apple/service.test.ts) | Supported · Native<br>Tests: [providers/google/service](../tests/providers/google/service.test.ts) | Supported · Native<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Conditional · Native<br>Tests: [integration/paddle-flows](../tests/integration/paddle-flows.test.ts) |
+| Subscription reconciliation<br>`subscription.reconcile` | Supported · Native<br>Tests: [providers/apple/service](../tests/providers/apple/service.test.ts) | Supported · Native<br>Tests: [providers/google/service](../tests/providers/google/service.test.ts), [integration/worker-flows](../tests/integration/worker-flows.test.ts) | Supported · Native<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native |
 | Trial ending notice<br>`trial.ending_notice` | Supported · Quotum-composed via App Store free-trial transactions<br>Tests: [integration/worker-flows](../tests/integration/worker-flows.test.ts) | Supported · Quotum-composed via Play free-trial offer phases<br>Tests: [integration/worker-flows](../tests/integration/worker-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Not evaluated |
 | **Subscription changes** | | | | |
-| Subscription change preview<br>`subscription.change.preview` | Unsupported | Unsupported | Conditional · Native<br>The subscription state must be active, grace_period, billing_retry or cancelled.<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Not evaluated<br>Questions: Q-SUB-07 |
-| Immediate subscription change<br>`subscription.change.apply` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Conditional · Native<br>The subscription state must be active, grace_period, billing_retry or cancelled.<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [integration/promotions](../tests/integration/promotions.test.ts), [workers/recurring-billing](../tests/workers/recurring-billing.test.ts) | Planned · Native<br>Questions: Q-SUB-01, Q-SUB-03, Q-RET-01 |
-| Period-end subscription change<br>`subscription.change.period_end` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Conditional · Native<br>The subscription state must be active, grace_period, billing_retry or cancelled.<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [billing/pricing](../tests/billing/pricing.test.ts) | Requires semantic validation (Q-SUB-02) · Native<br>Questions: Q-SUB-01, Q-SUB-02 |
-| Subscription cancellation<br>`subscription.cancel` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Conditional · Native<br>The subscription state must be active, grace_period or billing_retry.<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/commercial-cancellation](../tests/providers/stripe/commercial-cancellation.test.ts) | Planned · Native<br>Questions: Q-SUB-01 |
-| Subscription uncancellation<br>`subscription.uncancel` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Conditional · Native<br>The subscription state must be active, grace_period or billing_retry.<br>The subscription must have a cancellation pending at its period end.<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/commercial-cancellation](../tests/providers/stripe/commercial-cancellation.test.ts) | Not evaluated<br>Questions: Q-SUB-01 |
+| Subscription change preview<br>`subscription.change.preview` | Unsupported | Unsupported | Conditional · Native<br>The subscription state must be active, grace_period, billing_retry or cancelled.<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Not evaluated |
+| Immediate subscription change<br>`subscription.change.apply` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Conditional · Native<br>The subscription state must be active, grace_period, billing_retry or cancelled.<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [integration/promotions](../tests/integration/promotions.test.ts), [workers/recurring-billing](../tests/workers/recurring-billing.test.ts) | Unsupported |
+| Period-end subscription change<br>`subscription.change.period_end` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Conditional · Native<br>The subscription state must be active, grace_period, billing_retry or cancelled.<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [billing/pricing](../tests/billing/pricing.test.ts) | Unsupported |
+| Subscription cancellation<br>`subscription.cancel` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Conditional · Native<br>The subscription state must be active, grace_period or billing_retry.<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/commercial-cancellation](../tests/providers/stripe/commercial-cancellation.test.ts) | Planned · Native |
+| Subscription uncancellation<br>`subscription.uncancel` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Conditional · Native<br>The subscription state must be active, grace_period or billing_retry.<br>The subscription must have a cancellation pending at its period end.<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/commercial-cancellation](../tests/providers/stripe/commercial-cancellation.test.ts) | Not evaluated |
 | Server-side subscription start<br>`subscription.create` | Unsupported | Unsupported | Supported · Native<br>Tests: [providers/stripe/payment-setup](../tests/providers/stripe/payment-setup.test.ts), [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Planned · Native |
 | **Usage settlement** | | | | |
-| Postpaid usage collection<br>`settlement.collect_finalized_charge` | Unsupported | Unsupported | Supported · Quotum-composed via Stripe invoices with a one-off usage line<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts), [workers/recurring-billing](../tests/workers/recurring-billing.test.ts), [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [integration/phase3-release-journeys](../tests/integration/phase3-release-journeys.test.ts) | Requires policy decision (DEC-14) · Quotum-composed via one-time subscription charge<br>The operation is unavailable during the 30 minutes before the next renewal.<br>The subscription state must be active.<br>Questions: Q-SET-02, Q-SET-03, Q-TAX-01, Q-RET-01, Q-RET-02, Q-RATE-02 |
-| Usage adjustment<br>`adjustment.issue` | Unsupported | Unsupported | Supported · Quotum-composed via Stripe invoices with a signed correction line<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts), [integration/phase3-release-journeys](../tests/integration/phase3-release-journeys.test.ts) | Requires policy decision (DEC-14) · Quotum-composed via transaction adjustment<br>Questions: Q-REF-01, Q-REF-02, Q-SET-03, Q-RET-01 |
+| Postpaid usage collection<br>`settlement.collect_finalized_charge` | Unsupported | Unsupported | Supported · Quotum-composed via Stripe invoices with a one-off usage line<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts), [workers/recurring-billing](../tests/workers/recurring-billing.test.ts), [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [integration/phase3-release-journeys](../tests/integration/phase3-release-journeys.test.ts) | Unsupported |
+| Usage adjustment<br>`adjustment.issue` | Unsupported | Unsupported | Supported · Quotum-composed via Stripe invoices with a signed correction line<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts), [integration/phase3-release-journeys](../tests/integration/phase3-release-journeys.test.ts) | Unsupported |
 | **Refunds** | | | | |
-| Refund and reversal sync<br>`refund.sync` | Managed by provider, mirrored by Quotum<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts), [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts) | Managed by provider, mirrored by Quotum<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts), [providers/google/service](../tests/providers/google/service.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Planned · Native<br>Questions: Q-REF-01 |
+| Refund and reversal sync<br>`refund.sync` | Managed by provider, mirrored by Quotum<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts), [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts) | Managed by provider, mirrored by Quotum<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts), [providers/google/service](../tests/providers/google/service.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Planned · Native |
 | **Top-ups** | | | | |
-| Customer-initiated top-up<br>`topup.customer_initiated` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Requires policy decision (DEC-14) · Native<br>Questions: Q-ELIG-03, Q-CHK-03 |
-| Automatic top-up<br>`topup.automatic` | Unsupported | Unsupported | Conditional · Quotum-composed via Stripe invoices with a top-up price line<br>The customer must have a saved payment method; without one, use payment_method.setup.<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts), [workers/auto-topup](../tests/workers/auto-topup.test.ts), [integration/phase3-release-journeys](../tests/integration/phase3-release-journeys.test.ts) | Requires policy decision (DEC-14) · Quotum-composed via one-time subscription charge<br>The connection setting "spmConsent" must be true.<br>The customer must have a saved payment method; without one, use topup.customer_initiated.<br>The operation is unavailable during the 30 minutes before the next renewal.<br>The subscription state must be active.<br>Questions: Q-SET-02, Q-SET-04, Q-ELIG-03, Q-RET-01, Q-RET-02, Q-RATE-02 |
+| Customer-initiated top-up<br>`topup.customer_initiated` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Requires policy decision (DEC-14) · Native |
+| Automatic top-up<br>`topup.automatic` | Unsupported | Unsupported | Conditional · Quotum-composed via Stripe invoices with a top-up price line<br>The customer must have a saved payment method; without one, use payment_method.setup.<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts), [workers/auto-topup](../tests/workers/auto-topup.test.ts), [integration/phase3-release-journeys](../tests/integration/phase3-release-journeys.test.ts) | Unsupported |
 | **Promotions** | | | | |
-| Promotion code applied by Quotum<br>`promotion.code_entry` | Supported · Quotum-composed via Apple subscription promotional offers<br>Tests: [integration/apple-promotions](../tests/integration/apple-promotions.test.ts) | Not evaluated | Supported · Quotum-composed via Stripe coupons applied as Checkout and subscription discounts<br>Tests: [integration/promotions](../tests/integration/promotions.test.ts), [providers/stripe/promotions](../tests/providers/stripe/promotions.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Requires semantic validation (Q-PROMO-01) · Native<br>Questions: Q-PROMO-01 |
-| Hosted promotion code entry<br>`promotion.hosted_code` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/promotions](../tests/integration/promotions.test.ts), [providers/stripe/promotions](../tests/providers/stripe/promotions.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Requires semantic validation (Q-PROMO-01) · Native<br>Questions: Q-PROMO-01, Q-PROMO-02 |
+| Promotion code applied by Quotum<br>`promotion.code_entry` | Supported · Quotum-composed via Apple subscription promotional offers<br>Tests: [integration/apple-promotions](../tests/integration/apple-promotions.test.ts) | Not evaluated | Supported · Quotum-composed via Stripe coupons applied as Checkout and subscription discounts<br>Tests: [integration/promotions](../tests/integration/promotions.test.ts), [providers/stripe/promotions](../tests/providers/stripe/promotions.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Requires semantic validation (Q-PROMO-01) · Native |
+| Hosted promotion code entry<br>`promotion.hosted_code` | Not evaluated | Not evaluated | Supported · Native<br>Tests: [integration/promotions](../tests/integration/promotions.test.ts), [providers/stripe/promotions](../tests/providers/stripe/promotions.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Requires semantic validation (Q-PROMO-01) · Native |
 | Signed subscription offers<br>`promotion.signed_offer` | Supported · Quotum-composed via Apple subscription promotional offers<br>Tests: [integration/apple-promotions](../tests/integration/apple-promotions.test.ts) | Unsupported | Unsupported | Unsupported |
 | Native store offer codes<br>`promotion.store_offer_code` | Managed by provider, mirrored by Quotum<br>Tests: [integration/apple-promotions](../tests/integration/apple-promotions.test.ts) | Unsupported | Unsupported | Unsupported |
 
@@ -98,7 +192,7 @@ Billing intervals a plan can bind to, as `unit × count`; a quarter is three mon
 - **Apple**: week × 1, month × 1–3, month × 6, year × 1
 - **Google**: week × 1, week × 4, month × 1–4, month × 6, month × 8, year × 1
 - **Stripe**: day × 1–1095, week × 1–156, month × 1–36, year × 1–3
-- **Paddle (planned)**: day × 1–1095, week × 1–156, month × 1–36, year × 1–3
+- **Paddle**: day × 1–1095, week × 1–156, month × 1–36, year × 1–3
 
 Statuses:
 
@@ -293,10 +387,12 @@ path is not a secret, so the answer never says whether it exists: an unknown key
 without a connection for that provider, answer exactly what a request failing that provider's own
 verification gets, after the same body and header checks (Stripe
 `400 STRIPE_WEBHOOK_SIGNATURE_INVALID`, or `400 INVALID_REQUEST` without a `Stripe-Signature`; Apple
-`400 APPLE_SIGNED_DATA_INVALID`; Google `401 GOOGLE_PLAY_RTDN_UNAUTHORIZED`). For a known project
+`400 APPLE_SIGNED_DATA_INVALID`; Google `401 GOOGLE_PLAY_RTDN_UNAUTHORIZED`; Paddle
+`400 PADDLE_SIGNATURE_INVALID`). For a known project
 the log keeps the real reason, `BILLING_PROVIDER_NOT_CONFIGURED`. An inactive environment still
 answers `403 ENVIRONMENT_INACTIVE`. Connection setup also exposes the version-specific route
-`/v1/projects/:projectKey/connections/:versionId/webhooks/:provider` to verify the draft connection.
+`/v1/projects/:projectKey/connections/:versionId/webhooks/:provider` to verify the draft connection
+for Apple, Google and Stripe. Paddle uses the committed sandbox connection and its regular route.
 Stripe App OAuth events instead use `/v1/stripe-app/webhooks/test` or `/v1/stripe-app/webhooks/live`
 when OAuth is enabled. These signed app-level events resolve the connection by Stripe account and
 mode; they are not addressed by a project key.

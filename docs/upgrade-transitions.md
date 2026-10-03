@@ -10,6 +10,68 @@ moves to a changed baseline by restoring its data into a freshly migrated databa
 the later sections name the steps they reuse and add what their own change needs. A release's pull requests name the baselines it changes under
 `Upgrade notes`.
 
+## Upgrading a populated deployment to v0.21.0
+
+v0.21.0 combines sandbox Paddle and browser-approved MCP proposals. All four baselines change:
+
+- `migrations/001_platform.sql`: admits the encrypted `paddle` connection kind.
+- `migrations/002_billing_core.sql`: admits Paddle billing facts and adds `provider_operations`,
+  immutable intent, lease/state checks, retry scheduling and append-only operator review requests.
+- `migrations/003_metering_and_pricing.sql`: admits Paddle in general provider-bound billing tables.
+  Legacy checkout receipts and unsupported promotion shapes keep their narrower provider sets.
+  It also adds `billing_administration_receipts` for idempotent browser-approved mutations.
+- `migrations/004_merchant.sql`: adds `platform_mcp_changes`, persisted authorization scopes and
+  the optional billing-write scope on seeded OAuth clients.
+
+Recreate disposable databases and apply all migrations. Move a populated **v0.20.0** deployment in
+one stopped-service transition:
+
+1. **Stop the whole old service**, including API, webhooks, merchant application and workers.
+   Preserve the connection encryption keys and every referenced encrypted connection version;
+   Paddle recovery uses the recorded validated active or retired version, not its replacement.
+2. **Back up, migrate and restore** using steps 1, 2 and 4 of
+   [stored job provider identity](#stored-job-provider-identity): take a custom-format backup,
+   migrate an empty database with the v0.21.0 image, delete its seeded OAuth clients, then restore
+   data with triggers disabled and without the old migration history. Skip that procedure's
+   provider-column relaxation/backfill: v0.20.0 already stores those columns. Never edit recorded
+   migration checksums or run the revised baselines against the populated old database.
+3. **Verify before starting.** Compare every existing table's row count with the source and run
+   `quotum migrate status`. The new `provider_operations`, `billing_administration_receipts` and
+   `platform_mcp_changes` tables start empty. Restored MCP authorizations receive the default
+   `["quotum.read","offline_access"]` scopes; existing OAuth clients and grants retain their
+   access. Check these separately from the preserved billing and Apple promotion records.
+4. **Start v0.21.0 with MCP writes disabled.** Leave `QUOTUM_MCP_WRITES_ENABLED` unset or `false`,
+   then verify `/ready` and the application's normal billing and projection flows. Paddle is
+   sandbox-only; configure its sandbox connection and mappings separately using
+   [the provider guide](providers.md). `BILLING_TEST_PADDLE_*` settings belong only to guarded test
+   entrypoints, not the production service.
+
+For seat-only plans published before the fix, publish a new plan version to create the missing
+binding; publishing an unchanged plan does not repair it. The affected subscription adopts its
+bound version on the next Stripe event. See [catalog](catalog.md) and [subscriptions](subscriptions.md)
+for the binding rule. The carry-over fix preserves existing records and corrects subsequent
+calculations; it does not rewrite historically miscounted allowances.
+
+A rollback restores the pre-upgrade backup with the v0.20.0 image and loses subsequent writes.
+
+### Enabling MCP proposals after the upgrade
+
+This is a separate opt-in after matching merchant UI/BFF review and decision routes are deployed.
+The data restore replaces newly seeded OAuth clients with the old rows. Before requesting write
+consent for the built-in clients, add the allowed scope without changing existing grants:
+
+```sql
+UPDATE platform_auth_oauth_clients
+SET scopes = array_append(scopes, 'quotum.billing.write'), updated_at = now()
+WHERE client_id IN ('quotum-claude-code', 'quotum-cursor')
+  AND NOT ('quotum.billing.write' = ANY(scopes));
+```
+
+Then enable `QUOTUM_MCP_WRITES_ENABLED=true` with remote MCP enabled and reconnect clients with
+fresh `quotum.billing.write` consent. Do not modify `platform_mcp_authorizations`, existing token
+scopes or consent rows to grant access. Disabling the flag blocks new proposals and approvals while
+retaining read access and result inspection. Stdio remains read-only. See [MCP](mcp.md).
+
 ## Upgrading a populated deployment to v0.20.0
 
 v0.20.0 changes `migrations/003_metering_and_pricing.sql` for

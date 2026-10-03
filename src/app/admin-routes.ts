@@ -38,7 +38,7 @@ import { privateProject } from "./request-context";
 import type { BillingElysia, PostAuthGuard } from "./types";
 
 const OPERATOR_PATH_PATTERN =
-	/^\/v1\/admin\/(store-events\/[^/]+\/replay|projection-jobs\/[^/]+\/retry|reconciliation\/subscriptions\/run|metrics)$/;
+	/^\/v1\/admin\/(billing-accounts\/[^/]+\/provider-operations\/[^/]+\/reconcile|store-events\/[^/]+\/replay|projection-jobs\/[^/]+\/retry|reconciliation\/subscriptions\/run|metrics)$/;
 
 /** Customer-scoped lists take the customer from the path; a `customerId` query value is ignored. */
 const customerScoped = { customerId: true } as const;

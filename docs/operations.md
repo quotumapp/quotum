@@ -371,6 +371,37 @@ FROM default_plan_reconciliations
 WHERE customers_skipped > 0 OR attempts > 0;
 ```
 
+### Provider write recovery foundation
+
+`provider_operations` stores one immutable intent per project, billing account, provider and
+idempotency key. It records the original provider account and connection version, a request hash
+and body, and a resource key. The repository refuses changed input and concurrent unresolved work
+on the same provider-account resource, including work in `requires_review`.
+
+A dispatch lease changes `prepared` to `in_flight` before network I/O; the database permits at most
+one dispatch. An expired lease never permits another dispatch. Network errors, malformed replies
+and local completion failures leave the operation unresolved. Reconciliation uses the original
+account identity, can observe an effect or request review, and never repeats the write. Lease tokens
+and database-clock deadlines fence stale local completion. Credential rotation may preserve the
+original receipt; changing the provider account cannot.
+
+Paddle sandbox customer and checkout creation use this ledger. The `provider_operation_recovery`
+worker polls every ten seconds, selecting at most ten expired in-flight or reconciling operations.
+Each observation claims a fresh 60-second lease, renewed every 20 seconds, and uses the recorded
+connection version. Transient failures back off exponentially from ten seconds, capped at one hour;
+after ten recovery attempts they require review. Ambiguous, absent or mismatched remote effects
+require review immediately. Unavailable projects are deferred so they cannot starve eligible work.
+`prepared` operations are dispatched only by a matching caller retry; automatic recovery never writes.
+
+`GET /v1/billing-accounts/:billingAccountId/provider-operations/:operationId` returns a safe receipt,
+including to read-only credentials. An operator can request another observation with
+`POST /v1/admin/billing-accounts/:billingAccountId/provider-operations/:operationId/reconcile`, using
+project authentication, `X-Billing-Operator-Key` and `X-Billing-Actor`. The request appends actor,
+time and prior status to `review_requests` before recovery. Terminal receipts stay terminal; this
+endpoint never redispatches, forces success/failure or releases an unresolved resource. Keep the
+original credentials and provider evidence available; do not clear rows to make a replacement run.
+Existing Stripe workflows retain their own recovery and do not produce these receipts.
+
 ### Hosted payment setup recovery
 
 Hosted payment-method setups ride the provider event replay worker. The webhook route only records

@@ -117,7 +117,7 @@ describe("provider environment capabilities", () => {
 
 		expect(result.schemaVersion).toBe(1);
 		expect(result.generatedAt).toBe(generatedAt);
-		expect(described).toEqual(["apple", "google", "stripe"]);
+		expect(described).toEqual(["apple", "google", "stripe", "paddle"]);
 		expect(
 			result.providers.map(({ provider, channel, connectionKind }) => ({
 				provider,
@@ -128,6 +128,7 @@ describe("provider environment capabilities", () => {
 			{ provider: "apple", channel: "ios", connectionKind: "apple" },
 			{ provider: "google", channel: "android", connectionKind: "google" },
 			{ provider: "stripe", channel: "web", connectionKind: "stripe" },
+			{ provider: "paddle", channel: "web", connectionKind: "paddle" },
 		]);
 		for (const entry of result.providers) {
 			expect(entry.operations.map((operation) => operation.operation)).toEqual([
@@ -173,7 +174,7 @@ describe("billing account available actions", () => {
 
 		const result = await service.availableActions(project, "acct_1");
 
-		expect(described).toEqual(["apple", "google", "stripe"]);
+		expect(described).toEqual(["apple", "google", "stripe", "paddle"]);
 		expect(factCalls).toEqual(["acct_1"]);
 		expect(result).toMatchObject({
 			schemaVersion: 1,
@@ -343,6 +344,7 @@ describe("billing account available actions", () => {
 			["apple", providerCapabilityDeclaration("apple")],
 			["google", providerCapabilityDeclaration("google")],
 			["stripe", windowed],
+			["paddle", providerCapabilityDeclaration("paddle")],
 		]);
 		const { service } = reads({
 			capabilities,

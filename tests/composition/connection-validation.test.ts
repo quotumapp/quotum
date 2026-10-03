@@ -163,3 +163,61 @@ describe("projection connection validation", () => {
 		expect(failure).toBeInstanceOf(TypeError);
 	});
 });
+
+describe("Paddle connection custody", () => {
+	const settings = {
+		notificationSettingId: `ntfset_${"a".repeat(26)}`,
+		paymentPageUrl: "https://merchant.example/pay",
+		clientToken: "test_example",
+		webhookUrl: "https://billing.example/v1/projects/example-sandbox/webhooks/paddle",
+	};
+	const secrets = { apiKey: "pdl_sdbx_example", webhookSecret: "sandbox-webhook-secret-example" };
+	it("separates credentials and refuses production or incorrectly placed secrets", () => {
+		const validation = createConnectionValidation();
+		expect(validation.normalize("paddle", "sandbox", { settings, secrets })).toEqual({
+			settings,
+			secrets,
+		});
+		expect(() => validation.normalize("paddle", "production", { settings, secrets })).toThrow(
+			MerchantError,
+		);
+		expect(() =>
+			validation.normalize("paddle", "sandbox", {
+				settings: { ...settings, apiKey: secrets.apiKey },
+				secrets,
+			}),
+		).toThrow(MerchantError);
+		expect(() =>
+			validation.normalize("paddle", "sandbox", {
+				settings,
+				secrets: { ...secrets, clientToken: settings.clientToken },
+			}),
+		).toThrow(MerchantError);
+		expect(() =>
+			validation.normalize("paddle", "sandbox", {
+				settings,
+				secrets: { ...secrets, apiKey: "pdl_live_example" },
+			}),
+		).toThrow(MerchantError);
+	});
+	it("rejects foreign ingress and production before any provider call", async () => {
+		const validation = createConnectionValidation();
+		await expect(
+			validation.validate("paddle", "production", { settings, secrets }, context),
+		).rejects.toMatchObject({ code: "CONNECTION_INVALID" });
+		for (const webhookUrl of [
+			"http://billing.example/v1/projects/example-sandbox/webhooks/paddle",
+			"https://billing.example/v1/projects/foreign/webhooks/paddle",
+			`${settings.webhookUrl}?secret=x`,
+		]) {
+			await expect(
+				validation.validate(
+					"paddle",
+					"sandbox",
+					{ settings: { ...settings, webhookUrl }, secrets },
+					context,
+				),
+			).rejects.toMatchObject({ code: "CONNECTION_INVALID" });
+		}
+	});
+});

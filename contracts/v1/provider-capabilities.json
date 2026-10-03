@@ -1803,7 +1803,7 @@
       }
     },
     {
-      "availability": "planned",
+      "availability": "available",
       "billingCadences": [
         {
           "maxCount": 1095,
@@ -1860,26 +1860,11 @@
       },
       "operations": {
         "adjustment.issue": {
-          "composedVia": "transaction adjustment",
           "conditions": [],
-          "level": "quotum_composed",
-          "notes": "Most live refund adjustments need Paddle approval, so pending, approved, rejected and reversed states are kept before allocations change; a negative correction is not a negative price.",
+          "level": "unsupported",
+          "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
-            "blockedBy": {
-              "kind": "decision",
-              "ref": "DEC-14"
-            },
-            "evidence": {
-              "questions": [
-                "Q-REF-01",
-                "Q-REF-02",
-                "Q-SET-03",
-                "Q-RET-01"
-              ],
-              "scenarios": [],
-              "tests": []
-            },
-            "status": "planned"
+            "status": "not_applicable"
           }
         },
         "catalog.addon": {
@@ -1892,9 +1877,7 @@
           "notes": "All recurring items in one Paddle subscription must share a billing period.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-SUB-04"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -1905,14 +1888,18 @@
         "catalog.price.flat": {
           "conditions": [],
           "level": "native",
+          "notes": "Sandbox fixed subscription scope. Other product types and lifecycle actions remain unavailable until separately qualified.",
           "verification": {
             "evidence": {
               "questions": [],
               "scenarios": [],
-              "tests": []
+              "tests": [
+                "tests/integration/paddle-flows.test.ts"
+              ]
             },
-            "status": "planned",
-            "trackedBy": "P4"
+            "note": "Sandbox only; one fixed recurring item with quantity one and no trial. Real Paddle checkout and signed projection delivery observed.",
+            "status": "conditional",
+            "verifiedOn": "2026-10-03"
           }
         },
         "catalog.price.hybrid": {
@@ -1925,9 +1912,7 @@
           "notes": "Base and seat items share one subscription and one billing period; metered overage follows postpaid usage settlement.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-SUB-04"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -1945,9 +1930,7 @@
           "notes": "Paddle quantities are whole numbers; Quotum keeps seat allocation authority.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-SUB-05"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -1966,11 +1949,7 @@
               "ref": "DEC-14"
             },
             "evidence": {
-              "questions": [
-                "Q-SET-01",
-                "Q-SET-03",
-                "Q-TAX-01"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -1995,9 +1974,7 @@
               "ref": "DEC-14"
             },
             "evidence": {
-              "questions": [
-                "Q-ELIG-03"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2009,9 +1986,7 @@
           "level": "native",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-CHK-03"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2022,16 +1997,18 @@
         "catalog.product.subscription": {
           "conditions": [],
           "level": "native",
+          "notes": "Sandbox fixed subscription scope. Other product types and lifecycle actions remain unavailable until separately qualified.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-CHK-01"
-              ],
+              "questions": [],
               "scenarios": [],
-              "tests": []
+              "tests": [
+                "tests/integration/paddle-flows.test.ts"
+              ]
             },
-            "status": "planned",
-            "trackedBy": "P4"
+            "note": "Sandbox only; one fixed recurring item with quantity one and no trial. Real Paddle checkout and signed projection delivery observed.",
+            "status": "conditional",
+            "verifiedOn": "2026-10-03"
           }
         },
         "catalog.topup": {
@@ -2044,9 +2021,7 @@
               "ref": "DEC-14"
             },
             "evidence": {
-              "questions": [
-                "Q-ELIG-03"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2059,9 +2034,7 @@
           "notes": "Trial access follows subscription lifecycle state, separately from paid fulfilment.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-SUB-06"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2072,21 +2045,18 @@
         "checkout.hosted": {
           "conditions": [],
           "level": "native",
-          "notes": "A server-created transaction opens through Paddle.js on the merchant's approved payment page; fulfilment follows the completed transaction event, never a browser callback.",
+          "notes": "Sandbox fixed subscription scope. Other product types and lifecycle actions remain unavailable until separately qualified.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-ELIG-02",
-                "Q-ELIG-05",
-                "Q-CHK-02",
-                "Q-CHK-03",
-                "Q-RET-01"
-              ],
+              "questions": [],
               "scenarios": [],
-              "tests": []
+              "tests": [
+                "tests/integration/paddle-flows.test.ts"
+              ]
             },
-            "status": "planned",
-            "trackedBy": "P4"
+            "note": "Sandbox only; one fixed recurring item with quantity one and no trial. Real Paddle checkout and signed projection delivery observed.",
+            "status": "conditional",
+            "verifiedOn": "2026-10-03"
           }
         },
         "checkout.plan": {
@@ -2095,12 +2065,7 @@
           "notes": "Paddle creates subscriptions only from paid recurring transactions or issued recurring invoices; it has no direct create-subscription operation.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-ELIG-02",
-                "Q-CHK-01",
-                "Q-CHK-02",
-                "Q-RET-01"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2111,16 +2076,18 @@
         "event.replay": {
           "conditions": [],
           "level": "native",
+          "notes": "Sandbox fixed subscription scope. Other product types and lifecycle actions remain unavailable until separately qualified.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-WH-03"
-              ],
+              "questions": [],
               "scenarios": [],
-              "tests": []
+              "tests": [
+                "tests/integration/paddle-flows.test.ts"
+              ]
             },
-            "status": "planned",
-            "trackedBy": "P4"
+            "note": "Sandbox only; one fixed recurring item with quantity one and no trial. Real Paddle checkout and signed projection delivery observed.",
+            "status": "conditional",
+            "verifiedOn": "2026-10-03"
           }
         },
         "payment_method.setup": {
@@ -2133,9 +2100,7 @@
               "ref": "Q-SET-02"
             },
             "evidence": {
-              "questions": [
-                "Q-SET-02"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2148,9 +2113,7 @@
           "notes": "Portal sessions are created on demand; their authenticated URLs are never stored.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-PORT-01"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2168,9 +2131,7 @@
               "ref": "Q-PROMO-01"
             },
             "evidence": {
-              "questions": [
-                "Q-PROMO-01"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2186,10 +2147,7 @@
               "ref": "Q-PROMO-01"
             },
             "evidence": {
-              "questions": [
-                "Q-PROMO-01",
-                "Q-PROMO-02"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2224,9 +2182,7 @@
           "notes": "Refunds arrive as adjustments whose approval state can change after creation.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-REF-01"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2235,39 +2191,11 @@
           }
         },
         "settlement.collect_finalized_charge": {
-          "composedVia": "one-time subscription charge",
-          "conditions": [
-            {
-              "kind": "renewal_exclusion_window",
-              "minutes": 30
-            },
-            {
-              "allowed": [
-                "active"
-              ],
-              "kind": "subscription_state"
-            }
-          ],
-          "level": "quotum_composed",
-          "notes": "Charges are blocked within 30 minutes of renewal and while the subscription is past due, and the charge response returns the subscription rather than the created transaction.",
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
-            "blockedBy": {
-              "kind": "decision",
-              "ref": "DEC-14"
-            },
-            "evidence": {
-              "questions": [
-                "Q-SET-02",
-                "Q-SET-03",
-                "Q-TAX-01",
-                "Q-RET-01",
-                "Q-RET-02",
-                "Q-RATE-02"
-              ],
-              "scenarios": [],
-              "tests": []
-            },
-            "status": "planned"
+            "status": "not_applicable"
           }
         },
         "subscription.cancel": {
@@ -2276,9 +2204,7 @@
           "notes": "Paddle cancels immediately or at the next billing period; whether an immediate cancellation refunds the paid period is not assessed.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-SUB-01"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2288,40 +2214,18 @@
         },
         "subscription.change.apply": {
           "conditions": [],
-          "level": "native",
-          "notes": "Updates carry the full retained item set rather than item patches, with one of Paddle's five proration modes.",
+          "level": "unsupported",
+          "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
-            "evidence": {
-              "questions": [
-                "Q-SUB-01",
-                "Q-SUB-03",
-                "Q-RET-01"
-              ],
-              "scenarios": [],
-              "tests": []
-            },
-            "status": "planned",
-            "trackedBy": "P4"
+            "status": "not_applicable"
           }
         },
         "subscription.change.period_end": {
           "conditions": [],
-          "level": "native",
-          "notes": "Collecting at the next renewal does not by itself prove that the entitlement change waits for it.",
+          "level": "unsupported",
+          "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
-            "blockedBy": {
-              "kind": "question",
-              "ref": "Q-SUB-02"
-            },
-            "evidence": {
-              "questions": [
-                "Q-SUB-01",
-                "Q-SUB-02"
-              ],
-              "scenarios": [],
-              "tests": []
-            },
-            "status": "planned"
+            "status": "not_applicable"
           }
         },
         "subscription.change.preview": {
@@ -2330,9 +2234,7 @@
           "notes": "The Paddle assessment does not cover previewing subscription updates.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-SUB-07"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2358,10 +2260,7 @@
           "level": "native",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-RET-02",
-                "Q-RATE-01"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2375,9 +2274,7 @@
           "notes": "The Paddle assessment does not cover clearing a scheduled cancellation.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-SUB-01"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2385,51 +2282,11 @@
           }
         },
         "topup.automatic": {
-          "composedVia": "one-time subscription charge",
-          "conditions": [
-            {
-              "expected": [
-                true
-              ],
-              "flag": "spmConsent",
-              "kind": "account_flag"
-            },
-            {
-              "kind": "saved_payment_method",
-              "required": true,
-              "resolveWith": "topup.customer_initiated"
-            },
-            {
-              "kind": "renewal_exclusion_window",
-              "minutes": 30
-            },
-            {
-              "allowed": [
-                "active"
-              ],
-              "kind": "subscription_state"
-            }
-          ],
-          "level": "quotum_composed",
-          "notes": "Consent to save a payment method for future purchases differs from the method a subscription renews with; a customer without a collectable method needs a customer-initiated top-up.",
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
-            "blockedBy": {
-              "kind": "decision",
-              "ref": "DEC-14"
-            },
-            "evidence": {
-              "questions": [
-                "Q-SET-02",
-                "Q-SET-04",
-                "Q-ELIG-03",
-                "Q-RET-01",
-                "Q-RET-02",
-                "Q-RATE-02"
-              ],
-              "scenarios": [],
-              "tests": []
-            },
-            "status": "planned"
+            "status": "not_applicable"
           }
         },
         "topup.customer_initiated": {
@@ -2442,10 +2299,7 @@
               "ref": "DEC-14"
             },
             "evidence": {
-              "questions": [
-                "Q-ELIG-03",
-                "Q-CHK-03"
-              ],
+              "questions": [],
               "scenarios": [],
               "tests": []
             },
@@ -2463,19 +2317,18 @@
         "webhook.ingest": {
           "conditions": [],
           "level": "native",
-          "notes": "Paddle-Signature is verified over the raw body; deliveries need HTTP 200 within five seconds and may arrive out of order.",
+          "notes": "Sandbox fixed subscription scope. Other product types and lifecycle actions remain unavailable until separately qualified.",
           "verification": {
             "evidence": {
-              "questions": [
-                "Q-WH-01",
-                "Q-WH-02",
-                "Q-WH-03"
-              ],
+              "questions": [],
               "scenarios": [],
-              "tests": []
+              "tests": [
+                "tests/integration/paddle-flows.test.ts"
+              ]
             },
-            "status": "planned",
-            "trackedBy": "P4"
+            "note": "Sandbox only; one fixed recurring item with quantity one and no trial. Real Paddle checkout and signed projection delivery observed.",
+            "status": "conditional",
+            "verifiedOn": "2026-10-03"
           }
         }
       },

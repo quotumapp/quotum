@@ -114,6 +114,37 @@ JSON, such as a proxy's text or HTML 502, raises `BillingApiError` with code `HT
 HTTP status, so callers can retry on 5xx. The read-only
 [MCP server](mcp.md) for coding agents is built on these reads.
 
+`commercial.getOperation(billingAccountId, operationId)` reads a durable provider-write receipt from
+`GET /v1/billing-accounts/:billingAccountId/provider-operations/:operationId`. It accepts a read-only
+project credential and never calls a provider. The receipt contains `id`, `provider`, `operation`,
+`status`, `providerObjectId`, `errorCode`, `createdAt` and `updatedAt`; it excludes request data,
+connection versions, idempotency keys, results and authenticated URLs. Unknown operations, including
+those belonging to another account/project, return `404 NOT_FOUND`. The merchant equivalent is
+`GET /api/billing/admin/billing-accounts/:billingAccountId/provider-operations/:operationId`, requiring
+`billing.read`.
+
+Paddle sandbox customer and checkout creation produce these receipts; existing
+Stripe commercial calls do not create these receipts. `prepared`, `in_flight`, `reconciling` and
+`requires_review` are unresolved states. `succeeded` records an observed remote effect; it does not
+assert payment collection or grant entitlements. `failed` records a definitive provider rejection.
+Never turn an unresolved receipt into a new charge with a different key; see
+[provider write recovery](operations.md#provider-write-recovery-foundation).
+
+`commercial.createPaddleCheckout(billingAccountId, { productKey, email }, idempotencyKey)` calls
+`POST /v1/billing-accounts/:billingAccountId/providers/paddle/checkout-sessions`. It requires a full
+project credential and `Idempotency-Key`. `email` is required until a Paddle customer is linked.
+Example body: `{"productKey":"pro-monthly","email":"buyer@example.com"}`. A successful response
+is `{"success":true,"data":{"sessionId":"txn_<id>","url":"https://merchant.example/pay?_ptxn=txn_<id>"}}`.
+An unresolved write returns `409 PROVIDER_OPERATION_PENDING` with its operation ID; a definitive
+rejection returns `409 PROVIDER_OPERATION_FAILED`. Read the receipt and retain the same key.
+Checkout creation is not payment confirmation. Access follows verified server events; see the
+[sandbox scope and setup](providers.md#paddle-qualification-work).
+
+`commercial.reconcileOperation(billingAccountId, operationId)` requests an operator observation via
+`POST /v1/admin/billing-accounts/:billingAccountId/provider-operations/:operationId/reconcile`.
+Configure the SDK's `operatorKey` and `actor`. It returns the same safe receipt shape and records
+the operator request. It never sends the uncertain mutation again.
+
 Its `usage.check` and `usage.consume` methods now accept `featureId` and `value`, returning the
 compact public results. Other usage methods retain their existing fields until their coordinated
 cutover. The bundled client remains distinct from the standalone SDK's automatic retry and recovery

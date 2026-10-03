@@ -40,6 +40,10 @@ export type {
 	PromotionValidation,
 } from "../billing/promotions";
 export type {
+	ProviderOperationReceipt,
+	ProviderOperationStatus,
+} from "../billing/provider-operations";
+export type {
 	UsageOperationKind,
 	UsageOperationLookupInput,
 	UsageOperationLookupResult,

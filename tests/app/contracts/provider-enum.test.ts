@@ -9,10 +9,10 @@ describe("billingProviderValues", () => {
 	});
 
 	it("keeps the enum orders the published contract already renders", () => {
-		expect(billingProviderValues("google")).toEqual(["google", "apple", "stripe"]);
-		expect(billingProviderValues("stripe")).toEqual(["stripe", "apple", "google"]);
+		expect(billingProviderValues("google")).toEqual(["google", "apple", "stripe", "paddle"]);
+		expect(billingProviderValues("stripe")).toEqual(["stripe", "apple", "google", "paddle"]);
 		expect(z.toJSONSchema(z.enum(billingProviderValues("google")))).toMatchObject({
-			enum: ["google", "apple", "stripe"],
+			enum: ["google", "apple", "stripe", "paddle"],
 		});
 	});
 
@@ -23,11 +23,17 @@ describe("billingProviderValues", () => {
 	});
 
 	it("lists a repeated leading provider once, keeping the order of first appearance", () => {
-		expect(billingProviderValues("stripe", "stripe")).toEqual(["stripe", "apple", "google"]);
+		expect(billingProviderValues("stripe", "stripe")).toEqual([
+			"stripe",
+			"apple",
+			"google",
+			"paddle",
+		]);
 		expect(billingProviderValues("google", "stripe", "google")).toEqual([
 			"google",
 			"stripe",
 			"apple",
+			"paddle",
 		]);
 	});
 });

@@ -455,6 +455,14 @@ describe("catalog provider compatibility options", () => {
 				verdicts: [["catalog.trial", "blocked", "provider"]],
 			},
 			{
+				target: "plan:trial",
+				provider: "paddle",
+				channel: "web",
+				productKey: null,
+				compatible: false,
+				verdicts: [["catalog.trial", "blocked", "implementation"]],
+			},
+			{
 				target: "plan:addon",
 				provider: "google",
 				channel: "android",
@@ -477,6 +485,14 @@ describe("catalog provider compatibility options", () => {
 				productKey: null,
 				compatible: false,
 				verdicts: [["catalog.addon", "blocked", "provider"]],
+			},
+			{
+				target: "plan:addon",
+				provider: "paddle",
+				channel: "web",
+				productKey: null,
+				compatible: false,
+				verdicts: [["catalog.addon", "blocked", "implementation"]],
 			},
 			{
 				target: "addon-base",
@@ -507,6 +523,14 @@ describe("catalog provider compatibility options", () => {
 					["catalog.price.flat", "blocked", "provider"],
 					["catalog.price.hybrid", "blocked", "provider"],
 				],
+			},
+			{
+				target: "addon-base",
+				provider: "paddle",
+				channel: "web",
+				productKey: null,
+				compatible: false,
+				verdicts: [["catalog.price.hybrid", "blocked", "implementation"]],
 			},
 			{
 				target: "addon-seats",
@@ -530,6 +554,17 @@ describe("catalog provider compatibility options", () => {
 					],
 				}),
 			),
+			{
+				target: "addon-seats",
+				provider: "paddle",
+				channel: "web",
+				productKey: null,
+				compatible: false,
+				verdicts: [
+					["catalog.price.licensed", "blocked", "implementation"],
+					["catalog.price.hybrid", "blocked", "implementation"],
+				],
+			},
 			...(["apple", "google", "stripe"] as const).map(
 				(provider): JudgedEntry => ({
 					target: "topup:pack",
@@ -540,6 +575,14 @@ describe("catalog provider compatibility options", () => {
 					verdicts: [],
 				}),
 			),
+			{
+				target: "topup:pack",
+				provider: "paddle",
+				channel: "web",
+				productKey: null,
+				compatible: false,
+				verdicts: [["catalog.topup", "blocked", "implementation"]],
+			},
 		]);
 		const hypothetical = entries.find(
 			({ target, productKey }) => target.key === "trial" && productKey === null,
@@ -564,10 +607,12 @@ describe("catalog provider compatibility options", () => {
 			["stripe", "t"],
 			["apple", null],
 			["google", null],
+			["paddle", null],
 		]);
 		expect(providers(plannedGoogle)).toEqual([
 			["stripe", "t"],
 			["apple", null],
+			["paddle", null],
 		]);
 	});
 

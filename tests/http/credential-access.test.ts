@@ -63,6 +63,7 @@ const readOnlyOperations = [
 	"getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKey",
 	"getV1BillingAccountsByBillingAccountIdEntitlements",
 	"getV1BillingAccountsByBillingAccountIdLicensePools",
+	"getV1BillingAccountsByBillingAccountIdProviderOperationsByOperationId",
 	"getV1BillingAccountsByBillingAccountIdTrialEligibility",
 	"getV1BillingAccountsByBillingAccountIdTrials",
 	"getV1BillingAccountsByBillingAccountIdTrialsByTrialId",

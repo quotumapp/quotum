@@ -136,7 +136,7 @@ CREATE UNIQUE INDEX idx_platform_project_api_credentials_active_access
 CREATE TABLE platform_connections (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	project_instance_id uuid NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
-	kind text NOT NULL CHECK (kind IN ('stripe','apple','google','projection')),
+	kind text NOT NULL CHECK (kind IN ('stripe','apple','google','paddle','projection')),
 	revision integer NOT NULL DEFAULT 0 CHECK (revision >= 0),
 	enabled boolean NOT NULL DEFAULT false,
 	active_version_id uuid,

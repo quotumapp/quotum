@@ -776,7 +776,8 @@
             "enum": [
               "apple",
               "google",
-              "stripe"
+              "stripe",
+              "paddle"
             ],
             "type": "string"
           },
@@ -1346,7 +1347,8 @@
                                     "enum": [
                                       "google",
                                       "apple",
-                                      "stripe"
+                                      "stripe",
+                                      "paddle"
                                     ],
                                     "type": "string"
                                   }
@@ -1804,7 +1806,8 @@
                                                       "enum": [
                                                         "google",
                                                         "apple",
-                                                        "stripe"
+                                                        "stripe",
+                                                        "paddle"
                                                       ],
                                                       "type": "string"
                                                     }
@@ -1996,7 +1999,8 @@
                                               "enum": [
                                                 "google",
                                                 "apple",
-                                                "stripe"
+                                                "stripe",
+                                                "paddle"
                                               ],
                                               "type": "string"
                                             }
@@ -2149,7 +2153,8 @@
                                     "enum": [
                                       "google",
                                       "apple",
-                                      "stripe"
+                                      "stripe",
+                                      "paddle"
                                     ],
                                     "type": "string"
                                   }
@@ -2398,7 +2403,8 @@
                                 "enum": [
                                   "google",
                                   "apple",
-                                  "stripe"
+                                  "stripe",
+                                  "paddle"
                                 ],
                                 "type": "string"
                               }
@@ -2552,7 +2558,8 @@
                   "enum": [
                     "google",
                     "apple",
-                    "stripe"
+                    "stripe",
+                    "paddle"
                   ],
                   "type": "string"
                 },
@@ -2741,7 +2748,8 @@
                       "enum": [
                         "google",
                         "apple",
-                        "stripe"
+                        "stripe",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -2911,7 +2919,8 @@
                       "enum": [
                         "google",
                         "apple",
-                        "stripe"
+                        "stripe",
+                        "paddle"
                       ],
                       "type": "string"
                     }
@@ -3077,7 +3086,8 @@
                               "enum": [
                                 "google",
                                 "apple",
-                                "stripe"
+                                "stripe",
+                                "paddle"
                               ],
                               "type": "string"
                             },
@@ -3149,7 +3159,8 @@
                               "enum": [
                                 "google",
                                 "apple",
-                                "stripe"
+                                "stripe",
+                                "paddle"
                               ],
                               "type": "string"
                             },
@@ -3224,7 +3235,8 @@
                               "enum": [
                                 "apple",
                                 "google",
-                                "stripe"
+                                "stripe",
+                                "paddle"
                               ],
                               "type": "string"
                             },
@@ -3367,7 +3379,8 @@
                       "enum": [
                         "google",
                         "apple",
-                        "stripe"
+                        "stripe",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -3491,7 +3504,8 @@
                       "enum": [
                         "google",
                         "apple",
-                        "stripe"
+                        "stripe",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -3742,7 +3756,8 @@
                           "enum": [
                             "google",
                             "apple",
-                            "stripe"
+                            "stripe",
+                            "paddle"
                           ],
                           "type": "string"
                         },
@@ -3814,7 +3829,8 @@
                           "enum": [
                             "google",
                             "apple",
-                            "stripe"
+                            "stripe",
+                            "paddle"
                           ],
                           "type": "string"
                         },
@@ -3889,7 +3905,8 @@
                           "enum": [
                             "apple",
                             "google",
-                            "stripe"
+                            "stripe",
+                            "paddle"
                           ],
                           "type": "string"
                         },
@@ -4062,7 +4079,8 @@
                   "enum": [
                     "google",
                     "apple",
-                    "stripe"
+                    "stripe",
+                    "paddle"
                   ],
                   "type": "string"
                 },
@@ -4208,7 +4226,8 @@
                       "enum": [
                         "google",
                         "apple",
-                        "stripe"
+                        "stripe",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -4378,7 +4397,8 @@
                       "enum": [
                         "google",
                         "apple",
-                        "stripe"
+                        "stripe",
+                        "paddle"
                       ],
                       "type": "string"
                     }
@@ -4544,7 +4564,8 @@
                               "enum": [
                                 "google",
                                 "apple",
-                                "stripe"
+                                "stripe",
+                                "paddle"
                               ],
                               "type": "string"
                             },
@@ -4616,7 +4637,8 @@
                               "enum": [
                                 "google",
                                 "apple",
-                                "stripe"
+                                "stripe",
+                                "paddle"
                               ],
                               "type": "string"
                             },
@@ -4691,7 +4713,8 @@
                               "enum": [
                                 "apple",
                                 "google",
-                                "stripe"
+                                "stripe",
+                                "paddle"
                               ],
                               "type": "string"
                             },
@@ -4834,7 +4857,8 @@
                       "enum": [
                         "google",
                         "apple",
-                        "stripe"
+                        "stripe",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -4958,7 +4982,8 @@
                       "enum": [
                         "google",
                         "apple",
-                        "stripe"
+                        "stripe",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -5130,7 +5155,8 @@
                   "enum": [
                     "google",
                     "apple",
-                    "stripe"
+                    "stripe",
+                    "paddle"
                   ],
                   "type": "string"
                 },
@@ -5295,7 +5321,8 @@
                   "enum": [
                     "google",
                     "apple",
-                    "stripe"
+                    "stripe",
+                    "paddle"
                   ],
                   "type": "string"
                 },
@@ -5646,7 +5673,8 @@
                           "enum": [
                             "google",
                             "apple",
-                            "stripe"
+                            "stripe",
+                            "paddle"
                           ],
                           "type": "string"
                         },
@@ -5718,7 +5746,8 @@
                           "enum": [
                             "google",
                             "apple",
-                            "stripe"
+                            "stripe",
+                            "paddle"
                           ],
                           "type": "string"
                         },
@@ -5793,7 +5822,8 @@
                           "enum": [
                             "apple",
                             "google",
-                            "stripe"
+                            "stripe",
+                            "paddle"
                           ],
                           "type": "string"
                         },
@@ -6134,7 +6164,8 @@
                     "quotum",
                     "stripe",
                     "apple",
-                    "google"
+                    "google",
+                    "paddle"
                   ],
                   "type": "string"
                 },
@@ -6551,7 +6582,8 @@
                       "enum": [
                         "stripe",
                         "apple",
-                        "google"
+                        "google",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -6975,7 +7007,8 @@
                         "enum": [
                           "stripe",
                           "apple",
-                          "google"
+                          "google",
+                          "paddle"
                         ],
                         "type": "string"
                       },
@@ -7207,7 +7240,8 @@
                   "enum": [
                     "google",
                     "apple",
-                    "stripe"
+                    "stripe",
+                    "paddle"
                   ],
                   "type": "string"
                 },
@@ -7433,7 +7467,8 @@
                       "enum": [
                         "google",
                         "apple",
-                        "stripe"
+                        "stripe",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -7648,7 +7683,8 @@
                 "enum": [
                   "google",
                   "apple",
-                  "stripe"
+                  "stripe",
+                  "paddle"
                 ],
                 "type": "string"
               },
@@ -7806,7 +7842,8 @@
                   "enum": [
                     "google",
                     "apple",
-                    "stripe"
+                    "stripe",
+                    "paddle"
                   ],
                   "type": "string"
                 },
@@ -7971,7 +8008,8 @@
                   "enum": [
                     "google",
                     "apple",
-                    "stripe"
+                    "stripe",
+                    "paddle"
                   ],
                   "type": "string"
                 },
@@ -8221,7 +8259,8 @@
                 "enum": [
                   "google",
                   "apple",
-                  "stripe"
+                  "stripe",
+                  "paddle"
                 ],
                 "type": "string"
               },
@@ -8623,7 +8662,8 @@
                       "enum": [
                         "google",
                         "apple",
-                        "stripe"
+                        "stripe",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -9327,7 +9367,8 @@
                   "quotum",
                   "stripe",
                   "apple",
-                  "google"
+                  "google",
+                  "paddle"
                 ],
                 "type": "string"
               },
@@ -9540,7 +9581,8 @@
                     "quotum",
                     "stripe",
                     "apple",
-                    "google"
+                    "google",
+                    "paddle"
                   ],
                   "type": "string"
                 },
@@ -11922,7 +11964,8 @@
                 "enum": [
                   "google",
                   "apple",
-                  "stripe"
+                  "stripe",
+                  "paddle"
                 ],
                 "type": "string"
               },
@@ -12629,7 +12672,8 @@
                       "quotum",
                       "stripe",
                       "apple",
-                      "google"
+                      "google",
+                      "paddle"
                     ],
                     "type": "string"
                   },
@@ -13071,7 +13115,8 @@
                       "enum": [
                         "stripe",
                         "apple",
-                        "google"
+                        "google",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -13731,7 +13776,8 @@
                       "enum": [
                         "stripe",
                         "apple",
-                        "google"
+                        "google",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -14154,7 +14200,8 @@
                       "enum": [
                         "stripe",
                         "apple",
-                        "google"
+                        "google",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -14577,7 +14624,8 @@
                       "enum": [
                         "stripe",
                         "apple",
-                        "google"
+                        "google",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -16170,7 +16218,8 @@
                       "enum": [
                         "stripe",
                         "apple",
-                        "google"
+                        "google",
+                        "paddle"
                       ],
                       "type": "string"
                     },
@@ -16473,7 +16522,8 @@
                           "quotum",
                           "stripe",
                           "apple",
-                          "google"
+                          "google",
+                          "paddle"
                         ],
                         "type": "string"
                       },
@@ -16728,7 +16778,8 @@
                           "quotum",
                           "stripe",
                           "apple",
-                          "google"
+                          "google",
+                          "paddle"
                         ],
                         "type": "string"
                       },
@@ -19011,7 +19062,8 @@
                       "enum": [
                         "google",
                         "apple",
-                        "stripe"
+                        "stripe",
+                        "paddle"
                       ],
                       "type": "string"
                     }
@@ -19728,7 +19780,8 @@
                   "enum": [
                     "apple",
                     "google",
-                    "stripe"
+                    "stripe",
+                    "paddle"
                   ],
                   "type": "string"
                 }
@@ -19939,7 +19992,8 @@
                 "enum": [
                   "google",
                   "apple",
-                  "stripe"
+                  "stripe",
+                  "paddle"
                 ],
                 "type": "string"
               },
@@ -20148,6 +20202,7 @@
               "stripe",
               "apple",
               "google",
+              "paddle",
               "projection"
             ],
             "type": "string"
@@ -20173,7 +20228,8 @@
             "enum": [
               "apple",
               "google",
-              "stripe"
+              "stripe",
+              "paddle"
             ],
             "type": "string"
           },
@@ -20259,7 +20315,8 @@
             "enum": [
               "apple",
               "google",
-              "stripe"
+              "stripe",
+              "paddle"
             ],
             "type": "string"
           },
@@ -20524,7 +20581,8 @@
             "enum": [
               "apple",
               "google",
-              "stripe"
+              "stripe",
+              "paddle"
             ],
             "type": "string"
           },
@@ -20804,6 +20862,11 @@
       "operatorKey": {
         "in": "header",
         "name": "X-Billing-Operator-Key",
+        "type": "apiKey"
+      },
+      "paddleSignature": {
+        "in": "header",
+        "name": "Paddle-Signature",
         "type": "apiKey"
       },
       "projectKey": {
@@ -29013,6 +29076,295 @@
         ]
       }
     },
+    "/api/billing/admin/billing-accounts/{billingAccountId}/provider-operations/{operationId}": {
+      "get": {
+        "description": "Requires billing.read in sandbox and billing.read in production.  ",
+        "operationId": "merchantGetV1BillingAccountsByBillingAccountIdProviderOperationsByOperationId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "operationId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Organization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Project",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Environment",
+            "required": true,
+            "schema": {
+              "enum": [
+                "sandbox",
+                "production"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Step-Up-Grant",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "createdAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "errorCode": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "id": {
+                          "format": "uuid",
+                          "type": "string"
+                        },
+                        "operation": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "enum": [
+                            "apple",
+                            "google",
+                            "stripe",
+                            "paddle"
+                          ],
+                          "type": "string"
+                        },
+                        "providerObjectId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "prepared",
+                            "in_flight",
+                            "reconciling",
+                            "requires_review",
+                            "succeeded",
+                            "failed"
+                          ],
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "provider",
+                        "operation",
+                        "status",
+                        "providerObjectId",
+                        "errorCode",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "GET /api/billing/admin/billing-accounts/{billingAccountId}/provider-operations/{operationId}",
+        "tags": [
+          "merchant-billing"
+        ]
+      }
+    },
     "/api/billing/admin/billing-accounts/{billingAccountId}/usage/check": {
       "post": {
         "description": "Requires billing.read in sandbox and billing.read in production.  ",
@@ -31312,7 +31664,8 @@
                                         "enum": [
                                           "apple",
                                           "google",
-                                          "stripe"
+                                          "stripe",
+                                          "paddle"
                                         ],
                                         "type": "string"
                                       }
@@ -31858,7 +32211,8 @@
                                                               "enum": [
                                                                 "apple",
                                                                 "google",
-                                                                "stripe"
+                                                                "stripe",
+                                                                "paddle"
                                                               ],
                                                               "type": "string"
                                                             }
@@ -32075,7 +32429,8 @@
                                                       "enum": [
                                                         "apple",
                                                         "google",
-                                                        "stripe"
+                                                        "stripe",
+                                                        "paddle"
                                                       ],
                                                       "type": "string"
                                                     }
@@ -32297,7 +32652,8 @@
                                                   "enum": [
                                                     "apple",
                                                     "google",
-                                                    "stripe"
+                                                    "stripe",
+                                                    "paddle"
                                                   ],
                                                   "type": "string"
                                                 }
@@ -32553,7 +32909,8 @@
                                     "enum": [
                                       "apple",
                                       "google",
-                                      "stripe"
+                                      "stripe",
+                                      "paddle"
                                     ],
                                     "type": "string"
                                   }
@@ -32608,7 +32965,8 @@
                                         "enum": [
                                           "apple",
                                           "google",
-                                          "stripe"
+                                          "stripe",
+                                          "paddle"
                                         ],
                                         "type": "string"
                                       }
@@ -32892,7 +33250,8 @@
                                     "enum": [
                                       "apple",
                                       "google",
-                                      "stripe"
+                                      "stripe",
+                                      "paddle"
                                     ],
                                     "type": "string"
                                   }
@@ -33578,7 +33937,8 @@
                                         "enum": [
                                           "apple",
                                           "google",
-                                          "stripe"
+                                          "stripe",
+                                          "paddle"
                                         ],
                                         "type": "string"
                                       }
@@ -34124,7 +34484,8 @@
                                                               "enum": [
                                                                 "apple",
                                                                 "google",
-                                                                "stripe"
+                                                                "stripe",
+                                                                "paddle"
                                                               ],
                                                               "type": "string"
                                                             }
@@ -34341,7 +34702,8 @@
                                                       "enum": [
                                                         "apple",
                                                         "google",
-                                                        "stripe"
+                                                        "stripe",
+                                                        "paddle"
                                                       ],
                                                       "type": "string"
                                                     }
@@ -34563,7 +34925,8 @@
                                                   "enum": [
                                                     "apple",
                                                     "google",
-                                                    "stripe"
+                                                    "stripe",
+                                                    "paddle"
                                                   ],
                                                   "type": "string"
                                                 }
@@ -34819,7 +35182,8 @@
                                     "enum": [
                                       "apple",
                                       "google",
-                                      "stripe"
+                                      "stripe",
+                                      "paddle"
                                     ],
                                     "type": "string"
                                   }
@@ -34874,7 +35238,8 @@
                                         "enum": [
                                           "apple",
                                           "google",
-                                          "stripe"
+                                          "stripe",
+                                          "paddle"
                                         ],
                                         "type": "string"
                                       }
@@ -35158,7 +35523,8 @@
                                     "enum": [
                                       "apple",
                                       "google",
-                                      "stripe"
+                                      "stripe",
+                                      "paddle"
                                     ],
                                     "type": "string"
                                   }
@@ -35413,7 +35779,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -36568,7 +36935,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -36896,7 +37264,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -37240,7 +37609,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -37572,7 +37942,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -38325,7 +38696,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -42348,7 +42720,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -42669,7 +43042,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -42932,7 +43306,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -43710,7 +44085,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -44691,6 +45067,7 @@
                 "stripe",
                 "apple",
                 "google",
+                "paddle",
                 "projection"
               ],
               "type": "string"
@@ -44976,6 +45353,7 @@
                 "stripe",
                 "apple",
                 "google",
+                "paddle",
                 "projection"
               ],
               "type": "string"
@@ -45256,6 +45634,7 @@
                 "stripe",
                 "apple",
                 "google",
+                "paddle",
                 "projection"
               ],
               "type": "string"
@@ -45553,6 +45932,7 @@
                 "stripe",
                 "apple",
                 "google",
+                "paddle",
                 "projection"
               ],
               "type": "string"
@@ -45960,6 +46340,7 @@
                                   "stripe",
                                   "apple",
                                   "google",
+                                  "paddle",
                                   "projection"
                                 ],
                                 "type": "string"
@@ -48224,6 +48605,7 @@
                                   "stripe",
                                   "apple",
                                   "google",
+                                  "paddle",
                                   "projection"
                                 ],
                                 "type": "string"
@@ -56953,6 +57335,273 @@
         ]
       }
     },
+    "/v1/admin/billing-accounts/{billingAccountId}/provider-operations/{operationId}/reconcile": {
+      "post": {
+        "description": "Audits X-Billing-Actor and re-observes the effect with the recorded connection version. Never redispatches or forces a successful outcome.",
+        "operationId": "postV1AdminBillingAccountsByBillingAccountIdProviderOperationsByOperationIdReconcile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "operationId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Billing-Actor",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "createdAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "errorCode": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "id": {
+                          "format": "uuid",
+                          "type": "string"
+                        },
+                        "operation": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "enum": [
+                            "apple",
+                            "google",
+                            "stripe",
+                            "paddle"
+                          ],
+                          "type": "string"
+                        },
+                        "providerObjectId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "prepared",
+                            "in_flight",
+                            "reconciling",
+                            "requires_review",
+                            "succeeded",
+                            "failed"
+                          ],
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "provider",
+                        "operation",
+                        "status",
+                        "providerObjectId",
+                        "errorCode",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "POST /v1/admin/billing-accounts/{billingAccountId}/provider-operations/{operationId}/reconcile",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/catalog": {
       "get": {
         "operationId": "getV1AdminCatalog",
@@ -57756,7 +58405,8 @@
                                         "enum": [
                                           "apple",
                                           "google",
-                                          "stripe"
+                                          "stripe",
+                                          "paddle"
                                         ],
                                         "type": "string"
                                       }
@@ -58302,7 +58952,8 @@
                                                               "enum": [
                                                                 "apple",
                                                                 "google",
-                                                                "stripe"
+                                                                "stripe",
+                                                                "paddle"
                                                               ],
                                                               "type": "string"
                                                             }
@@ -58519,7 +59170,8 @@
                                                       "enum": [
                                                         "apple",
                                                         "google",
-                                                        "stripe"
+                                                        "stripe",
+                                                        "paddle"
                                                       ],
                                                       "type": "string"
                                                     }
@@ -58741,7 +59393,8 @@
                                                   "enum": [
                                                     "apple",
                                                     "google",
-                                                    "stripe"
+                                                    "stripe",
+                                                    "paddle"
                                                   ],
                                                   "type": "string"
                                                 }
@@ -58997,7 +59650,8 @@
                                     "enum": [
                                       "apple",
                                       "google",
-                                      "stripe"
+                                      "stripe",
+                                      "paddle"
                                     ],
                                     "type": "string"
                                   }
@@ -59052,7 +59706,8 @@
                                         "enum": [
                                           "apple",
                                           "google",
-                                          "stripe"
+                                          "stripe",
+                                          "paddle"
                                         ],
                                         "type": "string"
                                       }
@@ -59336,7 +59991,8 @@
                                     "enum": [
                                       "apple",
                                       "google",
-                                      "stripe"
+                                      "stripe",
+                                      "paddle"
                                     ],
                                     "type": "string"
                                   }
@@ -59942,7 +60598,8 @@
                                         "enum": [
                                           "apple",
                                           "google",
-                                          "stripe"
+                                          "stripe",
+                                          "paddle"
                                         ],
                                         "type": "string"
                                       }
@@ -60488,7 +61145,8 @@
                                                               "enum": [
                                                                 "apple",
                                                                 "google",
-                                                                "stripe"
+                                                                "stripe",
+                                                                "paddle"
                                                               ],
                                                               "type": "string"
                                                             }
@@ -60705,7 +61363,8 @@
                                                       "enum": [
                                                         "apple",
                                                         "google",
-                                                        "stripe"
+                                                        "stripe",
+                                                        "paddle"
                                                       ],
                                                       "type": "string"
                                                     }
@@ -60927,7 +61586,8 @@
                                                   "enum": [
                                                     "apple",
                                                     "google",
-                                                    "stripe"
+                                                    "stripe",
+                                                    "paddle"
                                                   ],
                                                   "type": "string"
                                                 }
@@ -61183,7 +61843,8 @@
                                     "enum": [
                                       "apple",
                                       "google",
-                                      "stripe"
+                                      "stripe",
+                                      "paddle"
                                     ],
                                     "type": "string"
                                   }
@@ -61238,7 +61899,8 @@
                                         "enum": [
                                           "apple",
                                           "google",
-                                          "stripe"
+                                          "stripe",
+                                          "paddle"
                                         ],
                                         "type": "string"
                                       }
@@ -61522,7 +62184,8 @@
                                     "enum": [
                                       "apple",
                                       "google",
-                                      "stripe"
+                                      "stripe",
+                                      "paddle"
                                     ],
                                     "type": "string"
                                   }
@@ -61780,7 +62443,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -63141,7 +63805,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -63435,7 +64100,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -63745,7 +64411,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -64043,7 +64710,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -66341,7 +67009,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -69739,7 +70408,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -70187,7 +70857,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -70416,7 +71087,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -71069,7 +71741,8 @@
               "enum": [
                 "apple",
                 "google",
-                "stripe"
+                "stripe",
+                "paddle"
               ],
               "type": "string"
             }
@@ -72244,7 +72917,8 @@
                     "enum": [
                       "apple",
                       "google",
-                      "stripe"
+                      "stripe",
+                      "paddle"
                     ],
                     "type": "string"
                   },
@@ -76973,7 +77647,8 @@
                                 "quotum",
                                 "stripe",
                                 "apple",
-                                "google"
+                                "google",
+                                "paddle"
                               ],
                               "type": "string"
                             },
@@ -77242,6 +77917,261 @@
         "tags": [
           "promotions"
         ]
+      }
+    },
+    "/v1/billing-accounts/{billingAccountId}/provider-operations/{operationId}": {
+      "get": {
+        "operationId": "getV1BillingAccountsByBillingAccountIdProviderOperationsByOperationId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "operationId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "createdAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "errorCode": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "id": {
+                          "format": "uuid",
+                          "type": "string"
+                        },
+                        "operation": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "enum": [
+                            "apple",
+                            "google",
+                            "stripe",
+                            "paddle"
+                          ],
+                          "type": "string"
+                        },
+                        "providerObjectId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "prepared",
+                            "in_flight",
+                            "reconciling",
+                            "requires_review",
+                            "succeeded",
+                            "failed"
+                          ],
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "provider",
+                        "operation",
+                        "status",
+                        "providerObjectId",
+                        "errorCode",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/billing-accounts/{billingAccountId}/provider-operations/{operationId}",
+        "tags": [
+          "customer"
+        ],
+        "x-quotum-credential-access": "read_only"
       }
     },
     "/v1/billing-accounts/{billingAccountId}/providers/apple/account-token": {
@@ -77579,6 +78509,239 @@
           }
         ],
         "summary": "GET /v1/billing-accounts/{billingAccountId}/providers/google/account-link",
+        "tags": [
+          "customer"
+        ]
+      }
+    },
+    "/v1/billing-accounts/{billingAccountId}/providers/paddle/checkout-sessions": {
+      "post": {
+        "description": "Sandbox fixed subscription checkout. Requires Idempotency-Key. Uncertain writes return PROVIDER_OPERATION_PENDING with an operationId to inspect.",
+        "operationId": "postV1BillingAccountsByBillingAccountIdProvidersPaddleCheckoutSessions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "format": "email",
+                    "type": "string"
+                  },
+                  "productKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "productKey"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "format": "uri",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "url"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "POST /v1/billing-accounts/{billingAccountId}/providers/paddle/checkout-sessions",
         "tags": [
           "customer"
         ]
@@ -78927,7 +80090,8 @@
                                 "enum": [
                                   "apple",
                                   "google",
-                                  "stripe"
+                                  "stripe",
+                                  "paddle"
                                 ],
                                 "type": "string"
                               }
@@ -79284,7 +80448,8 @@
                                   "enum": [
                                     "apple",
                                     "google",
-                                    "stripe"
+                                    "stripe",
+                                    "paddle"
                                   ],
                                   "type": "string"
                                 }
@@ -79421,7 +80586,8 @@
                                   "enum": [
                                     "apple",
                                     "google",
-                                    "stripe"
+                                    "stripe",
+                                    "paddle"
                                   ],
                                   "type": "string"
                                 }
@@ -79723,7 +80889,8 @@
                               "enum": [
                                 "apple",
                                 "google",
-                                "stripe"
+                                "stripe",
+                                "paddle"
                               ],
                               "type": "string"
                             }
@@ -80062,7 +81229,8 @@
                                   "enum": [
                                     "apple",
                                     "google",
-                                    "stripe"
+                                    "stripe",
+                                    "paddle"
                                   ],
                                   "type": "string"
                                 }
@@ -84385,6 +85553,215 @@
           }
         ],
         "summary": "POST /v1/projects/{projectKey}/webhooks/google",
+        "tags": [
+          "webhook"
+        ]
+      }
+    },
+    "/v1/projects/{projectKey}/webhooks/paddle": {
+      "post": {
+        "description": "Verifies Paddle-Signature over capped raw bytes and stores the event for asynchronous processing.",
+        "operationId": "postV1ProjectsByProjectKeyWebhooksPaddle",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectKey",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "eventType": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "queued"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "eventType"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "paddleSignature": []
+          }
+        ],
+        "summary": "POST /v1/projects/{projectKey}/webhooks/paddle",
         "tags": [
           "webhook"
         ]

@@ -2,7 +2,7 @@ import type { PlatformQueryExecutor } from "../persistence/query-executor";
 import { MerchantError } from "../security";
 import type { ConnectionCipher, SecretEnvelope } from "./cipher";
 
-export type ConnectionKind = "stripe" | "apple" | "google" | "projection";
+export type ConnectionKind = "stripe" | "apple" | "google" | "paddle" | "projection";
 export interface ConnectionVersion {
 	id: string;
 	connection_id: string;
@@ -138,6 +138,7 @@ export class ConnectionRepository {
 						: ["secretKey", "webhookSecret"],
 				apple: ["privateKey"],
 				google: ["serviceAccountJson", "obfuscatedAccountIdSecret"],
+				paddle: ["apiKey", "webhookSecret"],
 				projection: ["projectionSecret"],
 			};
 			if (

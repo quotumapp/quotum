@@ -326,12 +326,14 @@ function headerParameters(route: DocumentedRoute): ParameterObject[] {
 		);
 	if (route.path.startsWith("/v1/") && mutation) {
 		const actor =
+			route.path.endsWith("/provider-operations/:operationId/reconcile") ||
 			((tags.includes("catalog") || tags.includes("controls")) &&
 				!route.path.endsWith("/entities")) ||
 			(tags.includes("promotions") && route.path.startsWith("/v1/admin/")) ||
 			tags.includes("balance-adjustments") ||
 			route.path.endsWith("/corrections");
 		const idempotent =
+			route.path.endsWith("/providers/paddle/checkout-sessions") ||
 			(tags.includes("metering") && !route.path.endsWith("/check")) ||
 			tags.includes("balance-adjustments") ||
 			route.path.endsWith("/commercial-actions") ||
@@ -484,6 +486,7 @@ export async function generateOpenApi(version: string) {
 					in: "header",
 					name: "X-Billing-Operator-Key",
 				},
+				paddleSignature: { type: "apiKey", in: "header", name: "Paddle-Signature" },
 				stripeSignature: {
 					type: "apiKey",
 					in: "header",

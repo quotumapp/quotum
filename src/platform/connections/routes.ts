@@ -8,7 +8,7 @@ import type { MerchantStore } from "../store";
 import type { MerchantStripeOAuth } from "./oauth";
 import type { MerchantConnections } from "./service";
 
-const kind = z.enum(["stripe", "apple", "google", "projection"]);
+const kind = z.enum(["stripe", "apple", "google", "paddle", "projection"]);
 const scope = MerchantScopeSchema.strict();
 const success = (data: z.ZodType) => z.object({ success: z.literal(true), data });
 const draftBody = z.strictObject({

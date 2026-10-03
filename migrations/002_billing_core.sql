@@ -2,6 +2,64 @@
 -- Billing core: customers, products, provider purchases, subscriptions, entitlements, provider events,
 -- and projection delivery.
 
+-- Remote writes are reserved before dispatch. An expired in-flight lease authorizes
+-- reconciliation only: it never authorizes sending the same money-moving request again.
+CREATE TABLE IF NOT EXISTS provider_operations (
+	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	billing_account_id TEXT NOT NULL,
+	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
+	provider_account_id TEXT NOT NULL,
+	connection_version_id UUID NOT NULL,
+	idempotency_key TEXT NOT NULL,
+	resource_key TEXT NOT NULL,
+	operation TEXT NOT NULL,
+	request_hash TEXT NOT NULL,
+	request JSONB NOT NULL,
+	review_requests JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(review_requests) = 'array'),
+	status TEXT NOT NULL DEFAULT 'prepared',
+	attempts INTEGER NOT NULL DEFAULT 0,
+	recovery_attempts INTEGER NOT NULL DEFAULT 0 CHECK (recovery_attempts >= 0),
+	next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	lease_token UUID,
+	lease_until TIMESTAMPTZ,
+	result JSONB,
+	provider_object_id TEXT,
+	error_code TEXT,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT provider_operations_identity_check CHECK (
+		char_length(billing_account_id) BETWEEN 1 AND 200
+		AND char_length(provider_account_id) BETWEEN 1 AND 200
+		AND char_length(idempotency_key) BETWEEN 1 AND 200
+		AND char_length(resource_key) BETWEEN 1 AND 200
+		AND char_length(operation) BETWEEN 1 AND 100
+		AND request_hash ~ '^[a-f0-9]{64}$'
+	),
+	CONSTRAINT provider_operations_request_check CHECK (jsonb_typeof(request) = 'object'),
+	CONSTRAINT provider_operations_status_check CHECK (
+		status IN ('prepared', 'in_flight', 'reconciling', 'requires_review', 'succeeded', 'failed')
+	),
+	CONSTRAINT provider_operations_attempts_check CHECK (attempts BETWEEN 0 AND 1),
+	CONSTRAINT provider_operations_lease_check CHECK (
+		(lease_token IS NULL) = (lease_until IS NULL)
+		AND (lease_token IS NULL OR status IN ('in_flight', 'reconciling'))
+		AND (status <> 'in_flight' OR lease_token IS NOT NULL)
+	),
+	CONSTRAINT provider_operations_result_check CHECK (
+		(status = 'succeeded' AND result IS NOT NULL AND jsonb_typeof(result) = 'object'
+			AND provider_object_id IS NOT NULL AND error_code IS NULL)
+		OR (status <> 'succeeded' AND result IS NULL AND provider_object_id IS NULL)
+	)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_operations_idempotency
+	ON provider_operations (project_id, billing_account_id, provider, idempotency_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_operations_active_resource
+	ON provider_operations (project_id, provider, provider_account_id, resource_key)
+	WHERE status IN ('prepared', 'in_flight', 'reconciling', 'requires_review');
+CREATE INDEX IF NOT EXISTS idx_provider_operations_recovery
+	ON provider_operations (project_id, status, lease_until);
+
 CREATE TABLE IF NOT EXISTS customers (
 	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
@@ -34,7 +92,7 @@ CREATE TABLE IF NOT EXISTS store_products (
 	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
-	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe')),
+	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
 	channel TEXT NOT NULL CHECK (channel IN ('ios', 'android', 'web')),
 	external_product_id TEXT NOT NULL,
 	external_price_id TEXT,
@@ -60,7 +118,7 @@ CREATE TABLE IF NOT EXISTS provider_customers (
 	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe')),
+	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
 	provider_account_id TEXT,
 	external_customer_id TEXT NOT NULL,
 	metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -76,7 +134,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
 	store_product_id UUID NOT NULL REFERENCES store_products(id) ON DELETE RESTRICT,
-	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe')),
+	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
 	channel TEXT NOT NULL CHECK (channel IN ('ios', 'android', 'web')),
 	provider_account_id TEXT,
 	external_subscription_id TEXT NOT NULL,
@@ -139,7 +197,7 @@ CREATE TABLE IF NOT EXISTS purchases (
 	product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
 	store_product_id UUID REFERENCES store_products(id) ON DELETE SET NULL,
 	subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL,
-	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe')),
+	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
 	channel TEXT NOT NULL CHECK (channel IN ('ios', 'android', 'web')),
 	purchase_kind TEXT NOT NULL CHECK (purchase_kind IN ('subscription', 'consumable', 'non_consumable')),
 	transaction_id TEXT NOT NULL,
@@ -190,7 +248,7 @@ CREATE TABLE IF NOT EXISTS entitlements (
 CREATE TABLE IF NOT EXISTS store_events (
 	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
-	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe')),
+	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
 	channel TEXT NOT NULL CHECK (channel IN ('ios', 'android', 'web')),
 	external_event_id TEXT,
 	event_fingerprint TEXT,
@@ -485,7 +543,7 @@ CREATE TABLE IF NOT EXISTS credit_grant_provider_objects (
 	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	grant_id UUID NOT NULL REFERENCES credit_grants(id) ON DELETE CASCADE,
-	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe')),
+	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
 	provider_object_id TEXT NOT NULL,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	CONSTRAINT credit_grant_provider_objects_project_grant_fk

@@ -17,6 +17,7 @@ export interface ProjectConnectionFixture {
 	apple?: AppleBillingEnv | null;
 	googlePlay?: GooglePlayBillingEnv | null;
 	stripe?: StripeBillingEnv | null;
+	paddle?: import("../projects/connections").RuntimeConnectionConfigs["paddle"] | null;
 }
 export interface FixtureBillingEnv extends BillingEnv {
 	connectionFixtures: ProjectConnectionFixture[];
@@ -26,6 +27,12 @@ export function fixtureConnections(
 	fixtures: ProjectConnectionFixture[],
 ): RuntimeConnectionResolver {
 	return {
+		async resolvePaddleVersion(project, versionId) {
+			const config = fixtures.find(
+				(row) => row.projectInstanceKey === project.projectInstanceKey,
+			)?.paddle;
+			return config?.versionId === versionId ? config : null;
+		},
 		async resolve(project, kind) {
 			const fixture = fixtures.find((row) => row.projectInstanceKey === project.projectInstanceKey);
 			if (!fixture) return null;
@@ -41,7 +48,9 @@ export function fixtureConnections(
 						? fixture.googlePlay
 						: kind === "apple"
 							? fixture.apple
-							: fixture.stripe;
+							: kind === "paddle"
+								? fixture.paddle
+								: fixture.stripe;
 			return result ?? null;
 		},
 		async describe(project, kind) {
@@ -51,7 +60,9 @@ export function fixtureConnections(
 					? fixture?.googlePlay
 					: kind === "apple"
 						? fixture?.apple
-						: fixture?.stripe;
+						: kind === "paddle"
+							? fixture?.paddle
+							: fixture?.stripe;
 			if (!config) return null;
 			return {
 				enabled: true,

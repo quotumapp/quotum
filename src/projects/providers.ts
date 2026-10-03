@@ -2,6 +2,7 @@ export interface ProjectProviderServices<AppleService, GoogleService, StripeServ
 	appleStoreKitService: AppleService | null;
 	googlePlayBillingService: GoogleService | null;
 	stripeBillingService: StripeService | null;
+	paddleBillingService?: StripeService | null;
 }
 
 export type ProjectProviderServiceOverrides<AppleService, GoogleService, StripeService> = Record<

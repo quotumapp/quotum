@@ -169,7 +169,7 @@ export const StepUpChallengeViewSchema = z.object({
 export const ReadinessBlockerDetailSchema = z.object({
 	code: z.string(),
 	gating: z.boolean(),
-	connectionKind: z.enum(["stripe", "apple", "google", "projection"]).optional(),
+	connectionKind: z.enum(["stripe", "apple", "google", "paddle", "projection"]).optional(),
 	provider: z.enum(billingProviders).optional(),
 	operation: ProviderOperationSchema.optional(),
 	targets: z.array(catalogCompatibilityTargetSchema).optional(),
