@@ -257,6 +257,23 @@ export const paddleCapabilities: ProviderCapabilityDeclaration = {
 	...paddleAssessment,
 	operations: {
 		...paddleAssessment.operations,
+		"checkout.plan": {
+			level: "quotum_composed",
+			composedVia: "checkout.hosted",
+			conditions: [],
+			verification: {
+				status: "conditional",
+				verifiedOn: "2026-10-03",
+				note: "Sandbox common preview/execute only; one fixed base-plan component at quantity one without trial or promotion.",
+				evidence: {
+					tests: ["tests/integration/paddle-flows.test.ts"],
+					scenarios: [],
+					questions: [],
+				},
+			},
+			notes:
+				"Sandbox fixed subscription scope. The stored commercial preview pins the provider connection and plan version; fulfillment awaits signed provider events.",
+		},
 		...Object.fromEntries(
 			[
 				"subscription.change.apply",

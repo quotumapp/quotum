@@ -12,12 +12,14 @@ import { paddlePriceBindingSchema } from "./catalog";
 import { paddleCheckoutCommand } from "./commands";
 import type { PaddleConfig } from "./config";
 import { matchesPaddleCheckoutItems, type PaddleGateway } from "./gateway";
+import { type PaddlePlanPin, paddlePlanPinSchema } from "./plan";
 import { paddleId, paddleTransactionSchema } from "./schemas";
 
 const checkoutIntentSchema = z.object({
 	customerId: paddleId("ctm"),
 	bindings: z.array(paddlePriceBindingSchema).min(1),
 	paymentPageUrl: z.url(),
+	plan: paddlePlanPinSchema.optional(),
 });
 
 /** One remote transaction per durable intent, including after a lost response or process crash. */
@@ -37,6 +39,7 @@ export class PaddleCheckout {
 		idempotencyKey: string;
 		customerId: string;
 		bindings: z.infer<typeof paddlePriceBindingSchema>[];
+		plan?: PaddlePlanPin;
 	}): Promise<ProviderOperation> {
 		const request = checkoutIntentSchema.parse({
 			...input,

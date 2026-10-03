@@ -1188,6 +1188,10 @@ export const commercialActionPreviews = pgTable(
 		stateFingerprint: text("state_fingerprint").notNull(),
 		intent: jsonb("intent").$type<Record<string, unknown>>().notNull(),
 		preview: jsonb("preview").$type<Record<string, unknown>>().notNull(),
+		providerContext: jsonb("provider_context")
+			.$type<Record<string, unknown>>()
+			.notNull()
+			.default({}),
 		status: text("status")
 			.$type<"previewed" | "executing" | "executed">()
 			.notNull()
@@ -1219,6 +1223,10 @@ export const commercialActionPreviews = pgTable(
 		check(
 			"commercial_action_previews_preview_check",
 			sql`((jsonb_typeof(preview) = 'object'::text))`,
+		),
+		check(
+			"commercial_action_previews_provider_context_check",
+			sql`((jsonb_typeof(provider_context) = 'object'::text))`,
 		),
 		check(
 			"commercial_action_previews_status_check",

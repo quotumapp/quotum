@@ -26,7 +26,9 @@ Preview stores and hashes the canonical intent, and publish compares the canonic
 it is sent with the preview's. A plan has two price blocks, and a plan with neither, whose items
 carry no price either, is unpriced:
 
-- `basePrice` is a price Quotum models and charges through a Stripe price component.
+- `basePrice` is a price Quotum models through a provider price component. Stripe supports the
+  general commercial surface; Paddle supports the sandbox
+  [fixed quantity-one base-plan scope](subscriptions.md#paddle-fixed-plan-checkout).
 - `providerPriced` holds the products whose price their provider owns: App Store and Google Play
   products, and Stripe products priced in the Stripe dashboard. It has a `billingInterval`
   (required), a `billingIntervalCount` and its `providerBindings`, and no amount. When a plan has

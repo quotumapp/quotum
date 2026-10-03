@@ -16,12 +16,15 @@ import type {
 import type { RuntimeConnectionConfigs } from "../../projects/connections";
 import type { ProjectInstanceContext } from "../../projects/context";
 import type { StoreEventReplayProviderResult } from "../../workers/store-event-replay";
+import type { PaddlePriceBinding } from "./catalog";
 import { PaddleCheckout } from "./checkout";
 import { PaddleClient } from "./client";
 import { paddleCorrelation } from "./commands";
+import { PaddleCommercial } from "./commercial";
 import { buildPaddleConfig } from "./config";
 import { assertPaddleCustomer, PaddleGateway } from "./gateway";
 import { normalizePaddleEvent } from "./normalizer";
+import type { PaddlePlanPin } from "./plan";
 import { type PaddleTransaction, paddleEventSchema, paddleId } from "./schemas";
 import { verifyPaddleSignature } from "./webhook";
 
@@ -35,6 +38,7 @@ const customerSchema = z.object({
 export class PaddleBillingService implements WebBillingService {
 	readonly gateway: PaddleGateway;
 	readonly checkout: PaddleCheckout;
+	readonly commercial: PaddleCommercial;
 	constructor(
 		private readonly project: ProjectInstanceContext,
 		private readonly config: RuntimeConnectionConfigs["paddle"],
@@ -46,6 +50,12 @@ export class PaddleBillingService implements WebBillingService {
 		buildPaddleConfig(project, credentials);
 		this.gateway = new PaddleGateway(client, config);
 		this.checkout = new PaddleCheckout(project, operations, this.gateway, config);
+		this.commercial = new PaddleCommercial(
+			repository,
+			this.gateway,
+			config,
+			(input, binding, plan) => this.createFixedCheckout(input, binding, plan),
+		);
 	}
 
 	async createCheckoutSession(input: Parameters<WebBillingService["createCheckoutSession"]>[0]) {
@@ -57,6 +67,49 @@ export class PaddleBillingService implements WebBillingService {
 			);
 		}
 		const binding = await this.repository.getPaddleBinding(input.productKey);
+		return this.createFixedCheckout({ ...input, idempotencyKey: input.idempotencyKey }, binding);
+	}
+
+	previewCommercialAction(
+		input: Parameters<NonNullable<WebBillingService["previewCommercialAction"]>>[0],
+	) {
+		return this.commercial.preview(input);
+	}
+	executeCommercialAction(
+		input: Parameters<NonNullable<WebBillingService["executeCommercialAction"]>>[0],
+	) {
+		return this.commercial.execute(input);
+	}
+
+	private async createFixedCheckout(
+		input: { billingAccountId: string; email?: string | null; idempotencyKey: string },
+		binding: PaddlePriceBinding,
+		plan?: PaddlePlanPin,
+	) {
+		const existingId = await this.repository.findPaddleOperation(
+			input.billingAccountId,
+			input.idempotencyKey,
+			this.config.accountIdentity,
+		);
+		if (existingId) {
+			const existing = await this.operations.get(this.project, input.billingAccountId, existingId);
+			const request = existing.request as { bindings?: unknown; plan?: unknown };
+			if (
+				stableJson(request.bindings) !== stableJson([binding]) ||
+				stableJson(request.plan ?? null) !== stableJson(plan ?? null)
+			)
+				throw new BillingError(
+					"Checkout key belongs to another target",
+					"IDEMPOTENCY_CONFLICT",
+					409,
+				);
+			if (existing.status !== "succeeded" && existing.status !== "prepared") pending(existing);
+			if (existing.status === "succeeded")
+				return {
+					...z.object({ sessionId: paddleId("txn"), url: z.url() }).parse(existing.result),
+					duplicate: true,
+				};
+		}
 		await this.gateway.validatePrices([binding], true);
 		let customerId = await this.repository.getPaddleCustomer(
 			input.billingAccountId,
@@ -123,9 +176,13 @@ export class PaddleBillingService implements WebBillingService {
 			idempotencyKey: input.idempotencyKey,
 			customerId,
 			bindings: [binding],
+			...(plan ? { plan } : {}),
 		});
 		if (operation.status !== "succeeded") pending(operation);
-		return z.object({ sessionId: paddleId("txn"), url: z.url() }).parse(operation.result);
+		return {
+			...z.object({ sessionId: paddleId("txn"), url: z.url() }).parse(operation.result),
+			duplicate: false,
+		};
 	}
 
 	async observeOperation(

@@ -211,6 +211,8 @@ export interface CommercialActionPreview {
 }
 
 export interface StoredCommercialActionPreview {
+	/** Private provider snapshot; never part of the public preview response. */
+	providerContext?: Record<string, unknown>;
 	intent: CommercialActionIntent;
 	preview: CommercialActionPreview;
 	status: "previewed" | "executing" | "executed";
@@ -273,6 +275,7 @@ export type CommercialActionExecutionResult =
 	  };
 
 export interface CommercialPreviewDraft {
+	providerContext?: Record<string, unknown>;
 	billingAccountId: string;
 	intent: CommercialActionIntent;
 	intentHash: string;

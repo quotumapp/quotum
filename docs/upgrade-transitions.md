@@ -10,6 +10,23 @@ moves to a changed baseline by restoring its data into a freshly migrated databa
 the later sections name the steps they reuse and add what their own change needs. A release's pull requests name the baselines it changes under
 `Upgrade notes`.
 
+## Paddle commercial previews (unreleased)
+
+This follow-up changes `migrations/003_metering_and_pricing.sql` by adding
+`commercial_action_previews.provider_context`, a non-null JSON object with default `{}`. It stores
+the private Paddle connection, price and plan snapshot; the public preview response never includes
+it. Keep the matching Drizzle mirror and generated contracts with the runtime. No environment
+variable changes are required.
+
+Recreate disposable databases. For a populated v0.21.0 database, stop the service, back up, migrate
+an empty database and restore data using the [stored job provider identity](#stored-job-provider-identity)
+procedure. Skip its provider-column relaxation/backfill, because v0.21.0 already has those columns.
+Restore existing previews with the new column's default `{}`; old Stripe previews remain usable.
+Verify counts and migration status before starting the new runtime. Never edit recorded checksums.
+Retain referenced encrypted connection versions for provider recovery and unfinished Paddle
+commercial executions. Rollback restores the pre-upgrade backup with the old binary and loses
+subsequent writes; no production upgrade is qualified by the sandbox tests.
+
 ## Upgrading a populated deployment to v0.21.0
 
 v0.21.0 combines sandbox Paddle and browser-approved MCP proposals. All four baselines change:

@@ -400,6 +400,10 @@ project authentication, `X-Billing-Operator-Key` and `X-Billing-Actor`. The requ
 time and prior status to `review_requests` before recovery. Terminal receipts stay terminal; this
 endpoint never redispatches, forces success/failure or releases an unresolved resource. Keep the
 original credentials and provider evidence available; do not clear rows to make a replacement run.
+Common Paddle preview/execute uses the same ledger. Retry the original token/key while the receipt
+is unresolved, including after preview expiry once execution was claimed. Recovery resolves the
+recorded connection version; an unavailable version fails closed. Completed commercial receipts
+replay without a provider call, and concurrent completions preserve the first result.
 Existing Stripe workflows retain their own recovery and do not produce these receipts.
 
 ### Hosted payment setup recovery

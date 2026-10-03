@@ -285,6 +285,7 @@ describe("error inventory", () => {
 			"src/providers/stripe/service.ts",
 		]);
 		expect(codes.get("BILLING_PROVIDER_NOT_CONFIGURED")).toEqual([
+			"src/app/commercial-actions.ts",
 			"src/app/provider-services.ts",
 			"src/billing/errors.ts",
 		]);

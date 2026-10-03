@@ -197,10 +197,14 @@ export class BillingClient {
 				this.request<ProviderOperationReceipt>(
 					`/v1/billing-accounts/${segment(billingAccountId)}/provider-operations/${segment(operationId)}`,
 				),
-			preview: (billingAccountId: string, intent: CommercialActionIntent) =>
+			preview: (
+				billingAccountId: string,
+				intent: CommercialActionIntent,
+				provider?: "stripe" | "paddle",
+			) =>
 				this.request<CommercialActionPreview>(
 					`/v1/billing-accounts/${segment(billingAccountId)}/commercial-actions/preview`,
-					{ method: "POST", body: { intent } },
+					{ method: "POST", body: { intent, ...(provider === undefined ? {} : { provider }) } },
 				),
 			execute: (billingAccountId: string, previewToken: string, idempotencyKey: string) =>
 				this.request<CommercialActionExecutionResult>(

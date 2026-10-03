@@ -2,6 +2,7 @@ import { z } from "zod";
 import * as queries from "../admin/query";
 import type { AdminBillingReader, AdminListResult } from "../admin/types";
 import { previewSchema, publishSchema } from "../app/catalog-routes";
+import { executeCommercial, previewCommercial } from "../app/commercial-actions";
 import { checkBodySchema, operationLookupQuerySchema } from "../app/contracts/usage-api";
 import { contractBody, controlBody, migrationBody } from "../app/controls-routes";
 import {
@@ -513,28 +514,22 @@ export function createMerchantBillingPort(input: {
 			}
 			case "commercial.preview": {
 				const body = parse(commercialActionPreviewBodySchema, command.body);
-				const previewCommercialAction = requireProviderMethod(
-					await stripe(),
-					"stripe",
-					"commercial.preview",
-					"Commercial previews are unavailable",
-				);
 				return ok(
-					await previewCommercialAction({
+					await previewCommercial({
+						project,
+						services: input.providers,
 						billingAccountId: account(),
+						provider: body.provider ?? "stripe",
 						intent: body.intent,
 					}),
 				);
 			}
 			case "commercial.execute": {
 				const body = parse(commercialActionExecuteBodySchema, command.body);
-				const executeCommercialAction = requireProviderMethod(
-					await stripe(),
-					"stripe",
-					"commercial.execute",
-					"Commercial actions are unavailable",
-				);
-				const result = await executeCommercialAction({
+				const result = await executeCommercial({
+					project,
+					services: input.providers,
+					reader: repo,
 					billingAccountId: account(),
 					previewToken: body.previewToken,
 					idempotencyKey: requireKey(command),
