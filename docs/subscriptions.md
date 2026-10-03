@@ -92,8 +92,10 @@ Stripe's view of a subscription decides its plan version. When Quotum records a 
   moves the subscription to that version with the allowance handling above and no carry-over. A
   newer version that reuses the same price leaves existing subscriptions on their pinned version.
   The switch is read from the subscription's first Stripe item, the item whose product the plan
-  binding names. A subscription whose first item is a seat or add-on price stays on its pinned
-  version and records the prices it cannot place as unbound, below, instead of moving.
+  binding names: the base price's, or the seat price's for a plan
+  [priced only by its seats](catalog.md#canonical-intent). A subscription whose first item is an
+  add-on price, or a seat price of a plan that has a base price, stays on its pinned version and
+  records the prices it cannot place as unbound, below, instead of moving.
 - An applied API change or catalog migration takes effect when Stripe reports its target. Quotum's
   own update stamps the change's id in the subscription's metadata (`billingChangeId`), and Stripe
   keeps it on every later copy. An update that carries the stamp and shows anything else, for
