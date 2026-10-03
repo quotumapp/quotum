@@ -9,6 +9,7 @@ import { createMerchantBilling } from "../platform/billing";
 import type { MerchantConfig } from "../platform/config";
 import { MerchantStripeOAuth } from "../platform/connections/oauth";
 import type { StripeOAuthPort } from "../platform/connections/oauth-port";
+import type { ConnectionValidationPort } from "../platform/connections/ports";
 import type { ConnectionRepository } from "../platform/connections/repository";
 import { MerchantConnections } from "../platform/connections/service";
 import type { MerchantSql } from "../platform/database";
@@ -40,6 +41,8 @@ export interface MerchantRuntimeOptions {
 	registerBackground?: (worker: { runOnce(): Promise<void> }) => void;
 	config?: MerchantConfig;
 	mailer?: MerchantMailer;
+	connectionValidation?: ConnectionValidationPort;
+	stripeOAuth?: StripeOAuthPort | null;
 	createAuth?: (
 		store: MerchantStore,
 		mailer: MerchantMailer,
@@ -67,8 +70,8 @@ export function attachMerchantRuntime(
 		throw new Error("Merchant email transport is required; tests must inject a capture mailer");
 	const database = merchantAuthDatabase(sql);
 	const repository = createConnectionRepository(persistence);
-	const validator = createConnectionValidation();
-	const oauth = createStripeOAuthPort();
+	const validator = options.connectionValidation ?? createConnectionValidation();
+	const oauth = options.stripeOAuth === undefined ? createStripeOAuthPort() : options.stripeOAuth;
 	const connections = new MerchantConnections(
 		store,
 		repository,

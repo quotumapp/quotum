@@ -4,6 +4,7 @@ import {
 	connectionDescription,
 	createRuntimeConnectionResolver,
 } from "../../src/composition/connections";
+import type { StripeOAuthPort } from "../../src/platform/connections/oauth-port";
 import type {
 	ConnectionDescriptionRow,
 	ConnectionRepository,
@@ -183,6 +184,40 @@ describe("runtime connection resolver account identity", () => {
 			secretKey: "rk_test_access",
 			webhookSecret: "whsec_app_test",
 		});
+	});
+
+	it("uses an injected OAuth port without requiring provider app environment", async () => {
+		const { repository, persistence } = oauthRepository("acct_injected");
+		const port: StripeOAuthPort = {
+			authorize() {
+				throw new Error("Unexpected authorization");
+			},
+			async exchange() {
+				throw new Error("Unexpected exchange");
+			},
+			async refresh() {
+				throw new Error("Fresh access must not refresh");
+			},
+			webhookSecret: () => "whsec_synthetic_injected",
+		};
+		const resolved = await createRuntimeConnectionResolver(repository, persistence, port).resolve(
+			sandboxProject,
+			"stripe",
+		);
+		expect(resolved?.accountIdentity).toBe("acct_injected");
+		expect(resolved?.webhookSecret === "whsec_synthetic_injected").toBe(true);
+	});
+
+	it("keeps disabled projections unavailable for new work while allowing recovery", async () => {
+		const { repository } = apiKeyRepository("projection", null);
+		const active = repository.active.bind(repository);
+		repository.active = async (instance, kind, recovery) =>
+			recovery ? active(instance, kind, recovery) : null;
+		const resolver = createRuntimeConnectionResolver(repository);
+		expect(await resolver.resolve(project, "projection", "new")).toBeNull();
+		expect((await resolver.resolve(project, "projection", "recovery"))?.projectionUrl).toBe(
+			"https://acme.example.com/billing/projection",
+		);
 	});
 
 	it("fills accountIdentity for Apple and Google connections", async () => {

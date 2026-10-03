@@ -89,6 +89,15 @@ The optional `scheduler.schedule({ name, runOnce, pollIntervalMs })` returns a h
 public polling scheduler remains the default. This interface does not move billing logic into the
 scheduler and does not support multiple databases or merchant movement by itself.
 
+The internal `createBillingRuntime` composition accepts provider client factories and merchant
+connection-validation and Stripe OAuth ports. Omitted dependencies keep the standard implementations.
+An explicit `stripeOAuth: null` disables the corresponding merchant OAuth transport. The OAuth port
+is shared by merchant authorization, provider ingress and the default database connection resolver,
+so token refresh and webhook verification use the same application configuration. An explicitly
+supplied connection resolver owns its own dependencies. Client factories customize provider I/O
+after managed connection resolution; per-project service overrides instead replace that resolution.
+The existing `stripeClientFactory` takes precedence over `providerClientFactories.stripe`.
+
 `quotum-api/testing/merchant` exports `createMerchantTestRuntime({ composeApp? })` for disposable
 browser integration. It reuses the public synthetic providers and control server and requires the
 existing explicit test flags and loopback origin. Callers must stop its returned runtime. Production
