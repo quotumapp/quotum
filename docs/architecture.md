@@ -103,6 +103,28 @@ browser integration. It reuses the public synthetic providers and control server
 existing explicit test flags and loopback origin. Callers must stop its returned runtime. Production
 code must not import this testing export. The standalone test entrypoint uses the same factory.
 
+The guarded merchant runtime supplies synthetic provider validation and Stripe OAuth through the
+ordinary connection ports, retaining production input normalization. Managed connections resolve
+from PostgreSQL; legacy seed fixtures apply only when no managed row exists. Disabled rows never
+fall back to fixture credentials, and projection recovery continues to use the stored active version.
+The synthetic HTTPS receiver verifies both draft challenges and deliveries against independently
+decrypted database secrets, exposing only bounded signature/bearer verdicts through the control server.
+
+Bearer-authenticated loopback controls additionally support targeted reset/verification/OTP expiry,
+per-user OTP cooldown expiry, scoped billing state, catalog prerequisites, connection validation expiry,
+scoped expiry of the latest MCP grant's refresh replay window, and explicitly running projection and
+promotion-maintenance workers. `POST /seed/billing` accepts
+`managed: true` to seed billing facts without overriding managed providers. Remote MCP clients are
+reseeded after each database reset; the browser authorizes through the UI origin while the disposable
+API origin is the public issuer. OAuth tokens, OTP identifiers, receiver secrets and captured email
+bodies must never be attached to reports.
+
+OTP expiry is fixture-owned. The disposable wrapper observes successful, ordinary OTP-send HTTP
+requests, correlates one captured message with one changed verification row, and later updates that
+row's expiry directly. Ambiguous observations fail closed and reset clears the fixture mapping.
+Production auth has no observer callback or test branch for these controls; the fixture neither
+parses signed auth cookies nor depends on the auth library's OTP identifier format.
+
 Distributions invoke the pinned checkout's `migrate` and `migrate:status` commands. Core migrations
 remain unchanged and checksum-verified; private migration coordination does not authorize edits to
 core SQL or ledger tables. Generic merchant features remain available to standalone operators.
