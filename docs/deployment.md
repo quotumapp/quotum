@@ -49,7 +49,7 @@ usage and the settings it reads without running it; an unknown command or unexpe
 | `quotum catalog provision` | Import the store products in `BILLING_CATALOG_IMPORT_JSON`. |
 | `quotum catalog status` / `diff <file>` / `push <file>` | [Catalog automation](catalog.md) over HTTP. |
 | `quotum catalog format <file> [--write]` | Print a catalog file in the [canonical spelling](catalog.md#canonical-intent), or rewrite it; needs no API or database. |
-| `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play and projections. |
+| `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play, sandbox Paddle and projections. |
 | `quotum credentials status` / `rotate` / `revoke` | Inspect, [rotate](operations.md#project-credentials) or revoke an instance's project API keys. |
 | `quotum connections rotate-secrets` | [Encryption-key rotation](#encryption-key-rotation). |
 | `quotum merchant service-principal <name>` | The [merchant proxy service principal](#merchant-proxy-service-principal). Refused in headless mode. |

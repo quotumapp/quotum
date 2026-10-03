@@ -25,8 +25,8 @@ export interface ConnectionsCommandDependencies extends OperatorContextDependenc
 	pollIntervalMs?: number;
 }
 
-const kinds: readonly ConnectionKind[] = ["stripe", "apple", "google", "projection"];
-const providers = new Set<ConnectionKind>(["stripe", "apple", "google"]);
+const kinds: readonly ConnectionKind[] = ["stripe", "apple", "google", "paddle", "projection"];
+const providers = new Set<ConnectionKind>(["stripe", "apple", "google", "paddle"]);
 
 export async function runConnectionsCommand(
 	argv: readonly string[],

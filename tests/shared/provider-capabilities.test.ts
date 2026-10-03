@@ -111,8 +111,8 @@ const renewalAt = "2026-10-01T00:00:00.000Z";
 
 describe("provider capability vocabulary", () => {
 	it("declares admitted, planned and declared providers and channels in contract order", () => {
-		expect([...billingProviders]).toEqual(["apple", "google", "stripe"]);
-		expect([...plannedProviders]).toEqual(["paddle"]);
+		expect([...billingProviders]).toEqual(["apple", "google", "stripe", "paddle"]);
+		expect([...plannedProviders] as string[]).toEqual([]);
 		expect([...declaredProviders]).toEqual(["apple", "google", "stripe", "paddle"]);
 		expect([...billingChannels]).toEqual(["ios", "android", "web"]);
 	});
@@ -126,7 +126,7 @@ describe("provider capability vocabulary", () => {
 
 	it("narrows provider, channel and operation identities", () => {
 		expect(billingProviders.every((provider) => isBillingProvider(provider))).toBe(true);
-		expect(isBillingProvider("paddle")).toBe(false);
+		expect(isBillingProvider("paddle")).toBe(true);
 		expect(isBillingProvider("Stripe")).toBe(false);
 		expect(isBillingProvider(undefined)).toBe(false);
 		expect(isBillingProvider(1)).toBe(false);
@@ -1061,7 +1061,7 @@ describe("validateDeclaration", () => {
 				conditions: [],
 			},
 		});
-		expect(validateDeclaration(paddle)).toEqual([]);
+		expect(validateDeclaration({ ...paddle, availability: "available" })).toEqual([]);
 	});
 
 	it.each([
@@ -1071,8 +1071,8 @@ describe("validateDeclaration", () => {
 		["an unknown availability", withFields({ availability: "beta" }), ["availability"]],
 		["a planned admitted provider", withFields({ availability: "planned" }), ["availability"]],
 		[
-			"an available planned provider",
-			declaration({}, { provider: "paddle", availability: "available" }),
+			"a planned Paddle provider",
+			declaration({}, { provider: "paddle", availability: "planned" }),
 			["availability"],
 		],
 		["missing write semantics", withFields({ writeSemantics: undefined }), ["writeSemantics"]],
@@ -1277,6 +1277,7 @@ describe("validateDeclaration", () => {
 				}),
 			),
 		).toEqual([
+			"availability",
 			"operations.checkout.plan.verification.status",
 			"operations.portal.session.verification.status",
 		]);

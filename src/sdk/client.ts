@@ -43,6 +43,7 @@ import type {
 	PromotionTarget,
 	PromotionValidation,
 } from "../billing/promotions";
+import type { ProviderOperationReceipt } from "../billing/provider-operations";
 import type {
 	BillingChannel,
 	BillingProvider,
@@ -178,6 +179,24 @@ export class BillingClient {
 				),
 		};
 		this.commercial = {
+			createPaddleCheckout: (
+				billingAccountId: string,
+				input: { productKey: string; email?: string },
+				idempotencyKey: string,
+			) =>
+				this.request<{ sessionId: string; url: string }>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/providers/paddle/checkout-sessions`,
+					{ method: "POST", body: input, idempotencyKey },
+				),
+			reconcileOperation: (billingAccountId: string, operationId: string) =>
+				this.request<ProviderOperationReceipt>(
+					`/v1/admin/billing-accounts/${segment(billingAccountId)}/provider-operations/${segment(operationId)}/reconcile`,
+					{ method: "POST", operator: true },
+				),
+			getOperation: (billingAccountId: string, operationId: string) =>
+				this.request<ProviderOperationReceipt>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/provider-operations/${segment(operationId)}`,
+				),
 			preview: (billingAccountId: string, intent: CommercialActionIntent) =>
 				this.request<CommercialActionPreview>(
 					`/v1/billing-accounts/${segment(billingAccountId)}/commercial-actions/preview`,

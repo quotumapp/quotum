@@ -31,6 +31,7 @@ export interface SubscriptionReconciliationProviders {
 	apple: SubscriptionReconciliationProvider | null;
 	google: SubscriptionReconciliationProvider | null;
 	stripe: SubscriptionReconciliationProvider | null;
+	paddle?: SubscriptionReconciliationProvider | null;
 }
 
 export type SubscriptionReconciliationProviderSelector = (
@@ -291,7 +292,7 @@ export class SubscriptionReconciliationWorker {
 	): Promise<SubscriptionReconciliationProvider> {
 		const provider = subscription.provider;
 		const reconciliationProvider = (await this.providersFor(project, provider))[provider];
-		if (reconciliationProvider === null) {
+		if (reconciliationProvider == null) {
 			throw new Error(`Subscription reconciliation provider is not configured: ${provider}`);
 		}
 

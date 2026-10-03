@@ -338,7 +338,7 @@ test("no operation reaches declaration-only capability schemas or a planned prov
 	const leakedReach = operationReach(leaked);
 	expect(leakedReach.schemas.has("ProviderCapabilityMatrix")).toBe(true);
 	expect(leakedReach.schemas.has("ProviderCapabilityDeclaration")).toBe(true);
-	expect(leakedReach.planned.length).toBeGreaterThan(0);
+	expect(leakedReach.planned.length > 0).toBe(plannedProviders.length > 0);
 });
 
 test("new literal routes must register OpenAPI detail metadata", async () => {

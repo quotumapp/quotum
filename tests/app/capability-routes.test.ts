@@ -116,8 +116,13 @@ describe("provider capability routes", () => {
 				"operations",
 				"provider",
 			]);
-		expect(text).not.toContain("paddle");
-		expect(data.providers.map((entry) => entry.provider)).toEqual(["apple", "google", "stripe"]);
+		expect(text).toContain("paddle");
+		expect(data.providers.map((entry) => entry.provider)).toEqual([
+			"apple",
+			"google",
+			"stripe",
+			"paddle",
+		]);
 		const [apple, , stripe] = data.providers;
 		expect(stripe?.connection).toEqual({
 			configured: true,
@@ -173,7 +178,7 @@ describe("provider capability routes", () => {
 		);
 
 		expect(resolved).toBe(0);
-		expect(data.providers.map((entry) => entry.connection)).toEqual([null, null, null]);
+		expect(data.providers.map((entry) => entry.connection)).toEqual([null, null, null, null]);
 		for (const entry of data.providers) {
 			const ingest = entry.operations.find((operation) => operation.operation === "webhook.ingest");
 			expect(ingest).toMatchObject({ outcome: "undetermined", blockingLayer: null });
@@ -249,7 +254,7 @@ describe("provider capability routes", () => {
 			subscriptions: [],
 		});
 		expect(new Set(unknownData.account.map((entry) => entry.provider))).toEqual(
-			new Set(["apple", "google", "stripe"]),
+			new Set(["apple", "google", "stripe", "paddle"]),
 		);
 	});
 

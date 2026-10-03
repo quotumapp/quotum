@@ -485,7 +485,7 @@ describe("merchant platform transactions", () => {
 		expect(environment.status).toBe(200);
 		const { providers } = (await environment.json()).data as ProviderEnvironmentCapabilities;
 		expect(providers.map(({ provider, connection }) => ({ provider, connection }))).toEqual(
-			(["apple", "google", "stripe"] as const).map((provider) => ({
+			(["apple", "google", "stripe", "paddle"] as const).map((provider) => ({
 				provider,
 				connection: {
 					configured: false,

@@ -2,6 +2,7 @@ import { createApp } from "./app";
 import { projectProviderServiceResolver } from "./app/provider-services";
 import type { AppDependencies } from "./app/types";
 import { EntitlementService } from "./billing/entitlements";
+import { reconcileProviderOperation } from "./billing/provider-operations";
 import {
 	createConnectionRepository,
 	createRuntimeConnectionResolver,
@@ -46,6 +47,7 @@ import type { RuntimeConnectionResolver } from "./projects/connections";
 import type { ProjectInstanceContextResolver } from "./projects/context";
 import { createProviderCapabilityReads } from "./providers/capability-reads";
 import type { ProviderClientFactories } from "./providers/contract";
+import { PaddleBillingService } from "./providers/paddle/service";
 import { createProviderRegistry } from "./providers/registry";
 import type { StripeBillingConfig } from "./providers/stripe/client";
 import type { StripeBillingClientDependency } from "./providers/stripe/service";
@@ -53,6 +55,7 @@ import { AutoTopupWorker } from "./workers/auto-topup";
 import { MeteringMaintenanceWorker } from "./workers/metering-maintenance";
 import { ProjectionSyncWorker } from "./workers/projection-sync";
 import { PromotionMaintenanceWorker } from "./workers/promotion-maintenance";
+import { ProviderOperationRecoveryWorker } from "./workers/provider-operation-recovery";
 import { RecurringBillingWorker } from "./workers/recurring-billing";
 import { startPollingRuntime } from "./workers/runtime";
 import { StoreEventReplayWorker } from "./workers/store-event-replay";
@@ -223,6 +226,40 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		logger,
 		metrics,
 	});
+	const resolveProviderOperation: (
+		project: import("./projects/context").ProjectInstanceContext,
+		operation: import("./billing/provider-operations").ProviderOperation,
+	) => ReturnType<Parameters<typeof reconcileProviderOperation>[0]["resolve"]> = async (
+		project,
+		operation,
+	) => {
+		if (operation.provider !== "paddle")
+			throw new Error("Provider operation recovery is unavailable");
+		const config = await connections.resolvePaddleVersion?.(project, operation.connectionVersionId);
+		if (!config) throw new Error("Pinned Paddle connection is unavailable");
+		const service = new PaddleBillingService(
+			project,
+			config,
+			billingRepository.forProject(project),
+			billingRepository.providerOperations,
+		);
+		return {
+			provider: "paddle",
+			providerAccountId: config.accountIdentity,
+			observe: (operation) => service.observeOperation(operation),
+		};
+	};
+
+	const operationRecoveryWorker = new ProviderOperationRecoveryWorker({
+		repository: billingRepository.providerOperations,
+		projects: projectContextResolver,
+		resolve: resolveProviderOperation,
+	});
+	jobs.push({
+		name: "provider_operation_recovery",
+		runOnce: () => operationRecoveryWorker.runOnce(),
+		pollIntervalMs: 10_000,
+	});
 	const adminOperations = new BillingAdminOperations({
 		replayWorker: storeEventReplayWorker,
 		reconciliationWorker: subscriptionReconciliationWorker,
@@ -281,6 +318,21 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		usageApiService: billingRepository.usageApi,
 		projectContextResolver,
 		providerRegistry,
+		providerOperationReconciler: async (project, billingAccountId, operationId, actor) => {
+			await billingRepository.providerOperations.requestReview(
+				project,
+				billingAccountId,
+				operationId,
+				actor,
+			);
+			return reconcileProviderOperation({
+				project,
+				store: billingRepository.providerOperations,
+				billingAccountId,
+				operationId,
+				resolve: (operation) => resolveProviderOperation(project, operation),
+			});
+		},
 		providerCapabilityReads: capabilityReads,
 		adminOperations,
 		logger,

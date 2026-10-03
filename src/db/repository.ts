@@ -78,6 +78,7 @@ import { CoreBillingRepository } from "./repository/core";
 import { GoogleBillingRepository } from "./repository/google";
 import { BillingInsightsRepository } from "./repository/insights";
 import { type GrantAllocationInput, MeteringBillingRepository } from "./repository/metering";
+import { PaddleBillingRepository } from "./repository/paddle";
 import {
 	PaymentSetupRepository,
 	type PaymentSetupReservation,
@@ -90,6 +91,7 @@ import { ProjectScopedBillingRepository } from "./repository/project-scoped";
 import { ProjectionJobBillingRepository } from "./repository/projection-jobs";
 import { PromotionProviderObjectRepository } from "./repository/promotion-provider-objects";
 import { PromotionRepository } from "./repository/promotions";
+import { ProviderOperationRepository } from "./repository/provider-operations";
 import {
 	type ClaimedSubscriptionChange,
 	type ClaimedUsageInvoiceJob,
@@ -203,6 +205,8 @@ export class BillingRepository {
 	readonly planGrants: PlanGrantRepository;
 	readonly balanceAdjustments: BalanceAdjustmentRepository;
 	readonly promotionProviders: PromotionProviderObjectRepository;
+	readonly providerOperations: ProviderOperationRepository;
+	readonly paddle: PaddleBillingRepository;
 
 	private readonly database: TransactionalQueryExecutor;
 
@@ -231,6 +235,8 @@ export class BillingRepository {
 		this.planGrants = new PlanGrantRepository(database);
 		this.balanceAdjustments = new BalanceAdjustmentRepository(database);
 		this.promotionProviders = new PromotionProviderObjectRepository(database);
+		this.providerOperations = new ProviderOperationRepository(database);
+		this.paddle = new PaddleBillingRepository(database);
 	}
 
 	administrationTarget(projectId: string, action: string, parameters: string[], body: unknown) {

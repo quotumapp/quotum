@@ -92,7 +92,7 @@ describe("CapabilityError", () => {
 		expect(new PersistenceConflictError("conflict").classification).toBe("persistence_conflict");
 	});
 
-	it("keeps PROVIDER_OPERATION_UNCERTAIN reserved", () => {
+	it("keeps provider uncertainty separate from capability rejection codes", () => {
 		const codes = Object.values(capabilityErrorCodes).map((entry) => entry.code);
 		expect(new Set(codes)).toEqual(
 			new Set([
@@ -223,7 +223,7 @@ describe("error inventory", () => {
 		return new Map(registry.codes.map(({ code, sources }) => [code, sources]));
 	}
 
-	it("records the capability codes from src/billing/errors.ts and nothing reserved", async () => {
+	it("records capability and ledger errors, keeping receipt statuses out of HTTP errors", async () => {
 		const codes = await inventory();
 		for (const { code } of Object.values(capabilityErrorCodes))
 			expect(codes.get(code), code).toEqual(["src/billing/errors.ts"]);
@@ -233,6 +233,8 @@ describe("error inventory", () => {
 			"PROVIDER_ACTION_REQUIRED",
 			"PROVIDER_CAPABILITY_NOT_CONFIGURED",
 			"PROVIDER_CAPABILITY_UNSUPPORTED",
+			"PROVIDER_OPERATION_LEASE_LOST",
+			"PROVIDER_OPERATION_PENDING",
 		]);
 		expect(codes.has("PROVIDER_OPERATION_UNCERTAIN")).toBe(false);
 		expect(

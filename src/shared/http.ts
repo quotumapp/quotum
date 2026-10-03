@@ -87,7 +87,7 @@ export async function lenientJsonParser({ request }: { request: Request }): Prom
 }
 
 const operatorRequiredPathPattern =
-	/^\/v1\/admin\/(store-events\/[^/]+\/replay|projection-jobs\/[^/]+\/retry|reconciliation\/subscriptions\/run|metrics)$/;
+	/^\/v1\/admin\/(billing-accounts\/[^/]+\/provider-operations\/[^/]+\/reconcile|store-events\/[^/]+\/replay|projection-jobs\/[^/]+\/retry|reconciliation\/subscriptions\/run|metrics)$/;
 
 function operatorRequiredPath(path: string): boolean {
 	return (

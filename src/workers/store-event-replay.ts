@@ -38,6 +38,7 @@ export interface StoreEventReplayProviders {
 	apple: StoreEventReplayProvider | null;
 	google: StoreEventReplayProvider | null;
 	stripe: StoreEventReplayProvider | null;
+	paddle?: StoreEventReplayProvider | null;
 }
 
 export type StoreEventReplayProviderSelector = (
@@ -315,7 +316,7 @@ export class StoreEventReplayWorker {
 		}
 
 		const replayProvider = (await this.providersFor(project, provider))[provider];
-		if (replayProvider === null) {
+		if (replayProvider == null) {
 			throw new Error(`Store event replay provider is not configured: ${provider}`);
 		}
 

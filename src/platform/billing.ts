@@ -19,6 +19,7 @@ const readPatterns = [
 	"catalog",
 	`admin/billing-accounts/${account}/balances/[^/]+`,
 	`admin/billing-accounts/${account}/usage/operations/[^/]+/[^/]+`,
+	`admin/billing-accounts/${account}/provider-operations/${id}`,
 	"admin/stats/summary",
 	"admin/customers/search",
 	`admin/customers/by-billing-account/${account}`,

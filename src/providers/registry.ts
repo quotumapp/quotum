@@ -34,6 +34,7 @@ import {
 	type ProviderServiceTypes,
 } from "./contract";
 import { googleRegistryEntry } from "./google/adapter";
+import { paddleRegistryEntry } from "./paddle/adapter";
 import { stripeRegistryEntry } from "./stripe/adapter";
 
 export type ProviderPurpose = "new" | "recovery";
@@ -49,6 +50,7 @@ export const defaultProviderRegistryEntries: readonly AnyProviderRegistryEntry[]
 	appleRegistryEntry,
 	googleRegistryEntry,
 	stripeRegistryEntry,
+	paddleRegistryEntry,
 ];
 
 export interface ProviderRegistryDependencies {
@@ -157,7 +159,7 @@ export function createProviderRegistry({
 			);
 			if (guarded.length > 0) {
 				throw new Error(
-					`Provider ${entry.provider} requires reconciliation of uncertain writes and cannot implement ${guarded.join(", ")} until an uncertain-write ledger exists`,
+					`Provider ${entry.provider} requires reconciliation of uncertain writes and cannot implement ${guarded.join(", ")} until durable write recovery is wired`,
 				);
 			}
 		}
@@ -208,6 +210,7 @@ export function createProviderRegistry({
 				project,
 				config,
 				repository: getRepository().forProject(project),
+				providerOperations: getRepository().providerOperations,
 				clientFactories,
 			}),
 			accountIdentity: entry.accountIdentity(config),

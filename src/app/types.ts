@@ -1,11 +1,6 @@
 import type { AdminBillingReader } from "../admin/types";
 import type { ApplePromotionSigner } from "../billing/apple-promotions";
 import type { BalanceAdjustmentServiceLike } from "../billing/balance-adjustments";
-import type {
-	CommercialActionExecutionResult,
-	CommercialActionIntent,
-	CommercialActionPreview,
-} from "../billing/commercial";
 import type { ControlsEnterpriseRepositoryLike } from "../billing/controls";
 import type { EntitlementService } from "../billing/entitlements";
 import type {
@@ -18,10 +13,11 @@ import type {
 	UsageSeriesPoint,
 } from "../billing/insights";
 import type { MeteringServiceLike } from "../billing/metering";
-import type { PaymentSetupSession } from "../billing/payment-setup";
 import type { TrialServiceLike } from "../billing/plan-grants";
 import type { PromotionServiceLike } from "../billing/promotions";
+import type { ProviderOperationStore } from "../billing/provider-operations";
 import type { UsageApiServiceLike } from "../billing/usage-api";
+import type { WebBillingService } from "../billing/web-provider";
 import type { CatalogControlPlaneLike } from "../catalog/types";
 import type { BillingEnv } from "../env";
 import type { BillingLogger } from "../observability/logger";
@@ -35,8 +31,6 @@ import type {
 } from "../projects/providers";
 import type { ProviderCapabilityReads } from "../providers/capability-read-types";
 import type { ProviderRegistry } from "../providers/registry";
-import type { StripeCheckoutSessionStatus } from "../providers/stripe/service";
-import type { StripeCatalog } from "../providers/stripe/types";
 import type { AppElysia, ElysiaPluginLike } from "../shared/http";
 
 /** The staff /v1 application instance; per-route schemas keep handler typing local. */
@@ -121,76 +115,8 @@ export interface GooglePlayBillingServiceLike {
 	verifyRtdnAuthorization?(authorizationHeader: string | null): Promise<void>;
 }
 
-export interface StripeBillingServiceLike {
-	expireCheckoutSession?(input: {
-		billingAccountId: string;
-		sessionId: string;
-	}): Promise<StripeCheckoutSessionStatus>;
-	getCatalog?(): Promise<StripeCatalog>;
-	getBillingAccount?(billingAccountId: string): Promise<{
-		schemaVersion: 1;
-		customerExists: boolean;
-		subscriptions: unknown[];
-		recentInvoices: unknown[];
-	}>;
-	createCheckoutSession(input: {
-		billingAccountId: string;
-		productKey: string;
-		email?: string | null;
-		idempotencyKey?: string | null;
-		successUrl?: string | null;
-		cancelUrl?: string | null;
-		expiresAt?: number;
-	}): Promise<{
-		sessionId: string;
-		url: string;
-		duplicate?: boolean;
-	}>;
-	createRecurringCheckoutSession?(input: {
-		billingAccountId: string;
-		planKey: string;
-		quantities?: Record<string, number>;
-		email?: string | null;
-		idempotencyKey?: string | null;
-		successUrl?: string | null;
-		cancelUrl?: string | null;
-		expiresAt?: number;
-	}): Promise<{ sessionId: string; url: string; duplicate?: boolean }>;
-	requestSubscriptionChange?(input: {
-		billingAccountId: string;
-		externalSubscriptionId: string;
-		targetPlanKey: string;
-		quantities: Record<string, number>;
-		effectiveMode?: "immediate" | "period_end";
-		prorationBehavior?: "always_invoice" | "create_prorations" | "none";
-		idempotencyKey: string;
-	}): Promise<unknown>;
-	previewCommercialAction?(input: {
-		billingAccountId: string;
-		intent: CommercialActionIntent;
-	}): Promise<CommercialActionPreview>;
-	executeCommercialAction?(input: {
-		billingAccountId: string;
-		previewToken: string;
-		idempotencyKey: string;
-	}): Promise<CommercialActionExecutionResult>;
-	getPaymentSetupSession?(input: {
-		billingAccountId: string;
-		sessionId: string;
-	}): Promise<PaymentSetupSession>;
-	createPortalSession(input: {
-		billingAccountId: string;
-		returnUrl?: string | null;
-	}): Promise<{ url: string }>;
-	getCheckoutSessionStatus(input: { billingAccountId: string; sessionId: string }): Promise<{
-		sessionId: string;
-		status: string | null;
-		paymentStatus: string | null;
-		customerEmail: string | null;
-		productKey: string | null;
-	}>;
-	handleWebhook(input: { rawBody: string; signatureHeader: string | null }): Promise<unknown>;
-}
+/** Compatibility name for existing runtime consumers. */
+export type StripeBillingServiceLike = WebBillingService;
 
 export interface BillingInsightsServiceLike {
 	listUsageEvents(
@@ -237,6 +163,10 @@ export interface AppDependencies {
 	providerRegistry?: ProviderRegistry;
 	/** Defaults to reads over this app's provider registry and billing repository. */
 	providerCapabilityReads?: ProviderCapabilityReads;
+	providerOperationStore?: Pick<ProviderOperationStore, "get">;
+	providerOperationReconciler?: Parameters<
+		typeof import("./provider-operation-routes").registerProviderOperationRoutes
+	>[0]["reconcile"];
 	adminBillingReader?: AdminBillingReader | null;
 	adminOperations?: BillingAdminOperations | null;
 	logger?: BillingLogger;
@@ -247,6 +177,10 @@ export interface AppDependencies {
 }
 
 export interface ProjectProviderServiceResolver {
+	paddleBillingService?(
+		project: ProjectInstanceContext,
+		purpose?: "new" | "recovery",
+	): Promise<StripeBillingServiceLike | null>;
 	appleStoreKitService(
 		project: ProjectInstanceContext,
 		purpose?: "new" | "recovery",

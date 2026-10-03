@@ -33,6 +33,7 @@ import {
 	promotionCodeInputs,
 	revokePromotionRedemptionBodySchema,
 } from "../app/promotion-routes";
+import { providerOperationParamsSchema } from "../app/provider-operation-routes";
 import {
 	requireApplePromotionSigner,
 	requireProviderMethod,
@@ -47,6 +48,7 @@ import {
 } from "../billing/errors";
 import { encodeUsageCursor } from "../billing/insights";
 import { MeteringService } from "../billing/metering";
+import { providerOperationReceipt } from "../billing/provider-operations";
 import { publicOperationLookup } from "../billing/usage-api";
 import type { BillingRepository } from "../db/repository";
 import type { BillingAdminOperations } from "../operations/admin";
@@ -217,6 +219,17 @@ export function createMerchantBillingPort(input: {
 						queries.parseCatalogStoreProductListQuery(query),
 					),
 				);
+			case "commercial.operation": {
+				const params = parse(providerOperationParamsSchema, {
+					billingAccountId: id,
+					operationId: event,
+				});
+				return ok(
+					providerOperationReceipt(
+						await repo.providerOperations.get(project, params.billingAccountId, params.operationId),
+					),
+				);
+			}
 			case "providers.capabilities":
 				return ok(await capabilityReads.environment(project));
 			case "catalog.preview":

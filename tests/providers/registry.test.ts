@@ -34,7 +34,7 @@ import {
 	providerOperationMethods,
 } from "../../src/providers/contract";
 import { GooglePlayBillingService } from "../../src/providers/google/service";
-import { paddleCapabilities } from "../../src/providers/paddle/capabilities";
+import { PaddleBillingService } from "../../src/providers/paddle/service";
 import {
 	createProviderRegistry,
 	defaultProviderRegistryEntries,
@@ -59,8 +59,9 @@ import {
 	createFakeAppleStoreKitClient,
 	createFakeGooglePlayClient,
 } from "../integration/helpers/fake-provider-clients";
+import { config as paddleConfig } from "./paddle/fixtures";
 
-const project = projectInstanceContext("acme");
+const project = projectInstanceContext("acme", { environment: "sandbox" });
 const otherProject = projectInstanceContext("globex");
 
 const appleConfig: AppleBillingEnv = {
@@ -99,7 +100,16 @@ const stripeConfig: StripeBillingEnv = {
 	portalReturnUrl: "https://acme.example.com/account",
 };
 
-const configs = { apple: appleConfig, google: googleConfig, stripe: stripeConfig };
+const configs = {
+	apple: appleConfig,
+	google: googleConfig,
+	stripe: stripeConfig,
+	paddle: {
+		...paddleConfig,
+		accountIdentity: `paddle:sandbox:${paddleConfig.notificationSettingId}`,
+		versionId: "00000000-0000-4000-8000-000000000111",
+	},
+};
 
 function recordingConnections(configured: Partial<typeof configs> = configs) {
 	const resolved: Array<{ project: string; kind: RuntimeConnectionKind; purpose?: string }> = [];
@@ -247,34 +257,16 @@ describe("provider registry", () => {
 		]);
 	});
 
-	it("declares planned Paddle but never builds it", async () => {
+	it("builds the sandbox Paddle adapter with durable checkout and replay groups", async () => {
 		const registry = realRegistry();
-		const paddle = registry.declarations().find((declaration) => declaration.provider === "paddle");
-		const unadmitted = "paddle" as unknown as BillingProvider;
-
-		expect(paddle?.availability).toBe("planned");
-		expect(registry.admitted()).not.toContain(unadmitted);
-		for (const lookup of [
-			registry.service(project, unadmitted),
-			registry.adapter(project, unadmitted),
-			registry.require(project, unadmitted, "checkout.hosted"),
-		]) {
-			expect(await rejection(lookup)).toEqual(
-				new Error("Provider paddle is not admitted by the runtime"),
-			);
-		}
-		expect(() =>
-			createProviderRegistry({
-				getRepository: fakeRepository().getRepository,
-				entries: [
-					{
-						...stripeRegistryEntry,
-						provider: "paddle",
-						declaration: paddleCapabilities,
-					} as unknown as AnyProviderRegistryEntry,
-				],
-			}),
-		).toThrow("Provider paddle is not available and cannot be registered");
+		expect(await registry.service(project, "paddle")).toBeInstanceOf(PaddleBillingService);
+		const adapter = await registry.require(project, "paddle", "checkout.hosted");
+		expect(adapter.checkout).toBeDefined();
+		expect(adapter.replay).toBeDefined();
+		expect(adapter.changes).toBeUndefined();
+		await expect(
+			registry.service({ ...project, environment: "production" }, "paddle"),
+		).rejects.toMatchObject({ code: "PADDLE_SANDBOX_ONLY" });
 	});
 
 	it("rejects entries that disagree with their declaration or repeat a provider", () => {
@@ -303,9 +295,10 @@ describe("provider registry", () => {
 			"Apple StoreKit",
 			"Google Play",
 			"Stripe",
+			"Paddle",
 		]);
-		expect(() => registry.label("paddle" as unknown as BillingProvider)).toThrow(
-			"Provider paddle is not admitted by the runtime",
+		expect(() => registry.label("adyen" as unknown as BillingProvider)).toThrow(
+			"Provider adyen is not admitted by the runtime",
 		);
 	});
 
@@ -348,12 +341,12 @@ describe("provider registry", () => {
 		expect(() => realRegistry()).not.toThrow();
 		expect(() => createProviderRegistry({ getRepository, entries: [withAutomaticTopups] })).toThrow(
 			new Error(
-				"Provider apple requires reconciliation of uncertain writes and cannot implement topup.automatic until an uncertain-write ledger exists",
+				"Provider apple requires reconciliation of uncertain writes and cannot implement topup.automatic until durable write recovery is wired",
 			),
 		);
 		expect(() => createProviderRegistry({ getRepository, entries: [reconcilingStripe] })).toThrow(
 			new Error(
-				"Provider stripe requires reconciliation of uncertain writes and cannot implement subscription.change.apply, subscription.change.period_end, settlement.collect_finalized_charge, adjustment.issue, topup.automatic until an uncertain-write ledger exists",
+				"Provider stripe requires reconciliation of uncertain writes and cannot implement subscription.change.apply, subscription.change.period_end, settlement.collect_finalized_charge, adjustment.issue, topup.automatic until durable write recovery is wired",
 			),
 		);
 		const withPlannedAutomaticTopups = {
@@ -374,7 +367,7 @@ describe("provider registry", () => {
 			createProviderRegistry({ getRepository, entries: [withPlannedAutomaticTopups] }),
 		).toThrow(
 			new Error(
-				"Provider apple requires reconciliation of uncertain writes and cannot implement topup.automatic until an uncertain-write ledger exists",
+				"Provider apple requires reconciliation of uncertain writes and cannot implement topup.automatic until durable write recovery is wired",
 			),
 		);
 	});
@@ -394,18 +387,29 @@ describe("provider registry", () => {
 				apple: { ...appleConfig, accountIdentity: "com.acme.app" },
 				google: { ...googleConfig, accountIdentity: "com.acme.android" },
 				stripe: { ...stripeConfig, accountIdentity: "acct_identity" },
+				paddle: configs.paddle,
 			}),
-		).toEqual(["com.acme.app", "com.acme.android", "acct_identity"]);
+		).toEqual([
+			"com.acme.app",
+			"com.acme.android",
+			"acct_identity",
+			configs.paddle.accountIdentity,
+		]);
 		expect(
 			await identities({ ...configs, stripe: { ...stripeConfig, accountIdentity: null } }),
-		).toEqual([null, null, "acct_acme"]);
+		).toEqual([null, null, "acct_acme", configs.paddle.accountIdentity]);
 		expect(
 			await identities({
 				...configs,
 				stripe: { ...apiKeyStripe, accountIdentity: "acct_api_key" },
 			}),
-		).toEqual([null, null, "acct_api_key"]);
-		expect(await identities({ ...configs, stripe: apiKeyStripe })).toEqual([null, null, null]);
+		).toEqual([null, null, "acct_api_key", configs.paddle.accountIdentity]);
+		expect(await identities({ ...configs, stripe: apiKeyStripe })).toEqual([
+			null,
+			null,
+			null,
+			configs.paddle.accountIdentity,
+		]);
 	});
 
 	it("builds real services from connections with the requested purpose", async () => {
@@ -450,6 +454,9 @@ describe("provider registry", () => {
 			getRepository: fakeRepository().getRepository,
 		});
 		const facadeErrors: Record<BillingProvider, () => unknown> = {
+			paddle: () => {
+				throw new NotConfiguredError("Paddle provider is not configured", undefined, 503);
+			},
 			apple: () => requireAppleStoreKitService(null),
 			google: () => requireGooglePlayBillingService(null),
 			stripe: () => requireStripeBillingService(null),
@@ -642,6 +649,7 @@ describe("provider registry", () => {
 					appleStoreKitService: appleFake,
 					googlePlayBillingService: googleFake,
 					stripeBillingService: stripeFake,
+					paddleBillingService: stripeFake,
 				},
 			},
 		});
@@ -768,7 +776,7 @@ describe("provider registry", () => {
 		const paddle = await registry.verdict(project, "paddle", "subscription.change.apply");
 		expect(stripe.provider).toBe("stripe");
 		expect(paddle.provider).toBe("paddle");
-		expect(paddle.blockingLayer).toBe("implementation");
+		expect(paddle.blockingLayer).toBe("provider");
 
 		const adapter = (await registry.adapter(project, "stripe")) as ProviderAdapter<"stripe">;
 		expect(adapter.provider).toBe("stripe");
@@ -1067,7 +1075,7 @@ describe("provider registry describe", () => {
 
 		expect(await registry.describe(project, "stripe")).toEqual(absentConnection);
 		expect(
-			await rejection(registry.describe(project, "paddle" as unknown as BillingProvider)),
-		).toEqual(new Error("Provider paddle is not admitted by the runtime"));
+			await rejection(registry.describe(project, "adyen" as unknown as BillingProvider)),
+		).toEqual(new Error("Provider adyen is not admitted by the runtime"));
 	});
 });

@@ -13,6 +13,8 @@ export function projectProviderServiceResolver(
 	registry: ProviderRegistry,
 ): ProjectProviderServiceResolver {
 	return {
+		paddleBillingService: (project, purpose = "new") =>
+			registry.service(project, "paddle", purpose),
 		appleStoreKitService: (project, purpose = "new") => registry.service(project, "apple", purpose),
 		googlePlayBillingService: (project, purpose = "new") =>
 			registry.service(project, "google", purpose),

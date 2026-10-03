@@ -53,6 +53,17 @@ describe("scrubString", () => {
 		expect(scrubString("in_progress sub_total")).toBe("in_progress sub_total");
 	});
 
+	it("filters Paddle credentials and authenticated portal tokens, including lowercase secrets", () => {
+		for (const secret of [
+			"pdl_sdbx_apikey_test_only_secret",
+			"pdl_live_apikey_test_only_secret",
+			"pdl_ntfset_lowercase_test_secret",
+			"pga_test.only.token",
+		]) {
+			expect(scrubString(`value ${secret} end`)).toBe(`value ${FILTERED} end`);
+		}
+	});
+
 	it("filters whole project API keys, including base64url - and _", () => {
 		const secret = "AbCdEfGh12345678-qwertyuiop_ASDFGH1234567";
 		expect(scrubString(`key sqpk_${secret} end`)).toBe("key sqpk_[Filtered] end");

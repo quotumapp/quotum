@@ -19,6 +19,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import type { PaymentSetupPlanStatus, PaymentSetupStatus } from "../billing/payment-setup";
+import type { ProviderOperationStatus } from "../billing/provider-operations";
 import type {
 	BillingChannel,
 	BillingProvider,
@@ -40,6 +41,78 @@ const timestampColumns = () => ({
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const providerOperations = pgTable(
+	"provider_operations",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		billingAccountId: text("billing_account_id").notNull(),
+		provider: text("provider").$type<BillingProvider>().notNull(),
+		providerAccountId: text("provider_account_id").notNull(),
+		connectionVersionId: uuid("connection_version_id").notNull(),
+		idempotencyKey: text("idempotency_key").notNull(),
+		resourceKey: text("resource_key").notNull(),
+		operation: text("operation").notNull(),
+		requestHash: text("request_hash").notNull(),
+		request: jsonb("request").$type<Record<string, unknown>>().notNull(),
+		reviewRequests: jsonb("review_requests")
+			.$type<Record<string, unknown>[]>()
+			.notNull()
+			.default([]),
+		status: text("status").$type<ProviderOperationStatus>().notNull().default("prepared"),
+		attempts: integer("attempts").notNull().default(0),
+		recoveryAttempts: integer("recovery_attempts").notNull().default(0),
+		nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+		leaseToken: uuid("lease_token"),
+		leaseUntil: timestamp("lease_until", { withTimezone: true }),
+		result: jsonb("result").$type<Record<string, unknown>>(),
+		providerObjectId: text("provider_object_id"),
+		errorCode: text("error_code"),
+		...timestampColumns(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"provider_operations_provider_check",
+			sql`provider IN ('apple', 'google', 'stripe', 'paddle')`,
+		),
+		check(
+			"provider_operations_identity_check",
+			sql`char_length(billing_account_id) BETWEEN 1 AND 200 AND char_length(provider_account_id) BETWEEN 1 AND 200 AND char_length(idempotency_key) BETWEEN 1 AND 200 AND char_length(resource_key) BETWEEN 1 AND 200 AND char_length(operation) BETWEEN 1 AND 100 AND request_hash ~ '^[a-f0-9]{64}$'`,
+		),
+		check(
+			"provider_operations_review_requests_check",
+			sql`jsonb_typeof(review_requests) = 'array'`,
+		),
+		check("provider_operations_request_check", sql`jsonb_typeof(request) = 'object'`),
+		check(
+			"provider_operations_status_check",
+			sql`status IN ('prepared', 'in_flight', 'reconciling', 'requires_review', 'succeeded', 'failed')`,
+		),
+		check("provider_operations_recovery_attempts_check", sql`recovery_attempts >= 0`),
+		check("provider_operations_attempts_check", sql`attempts BETWEEN 0 AND 1`),
+		check(
+			"provider_operations_lease_check",
+			sql`(lease_token IS NULL) = (lease_until IS NULL) AND (lease_token IS NULL OR status IN ('in_flight', 'reconciling')) AND (status <> 'in_flight' OR lease_token IS NOT NULL)`,
+		),
+		check(
+			"provider_operations_result_check",
+			sql`(status = 'succeeded' AND result IS NOT NULL AND jsonb_typeof(result) = 'object' AND provider_object_id IS NOT NULL AND error_code IS NULL) OR (status <> 'succeeded' AND result IS NULL AND provider_object_id IS NULL)`,
+		),
+		uniqueIndex("idx_provider_operations_idempotency").on(
+			table.projectId,
+			table.billingAccountId,
+			table.provider,
+			table.idempotencyKey,
+		),
+		uniqueIndex("idx_provider_operations_active_resource")
+			.on(table.projectId, table.provider, table.providerAccountId, table.resourceKey)
+			.where(sql`status IN ('prepared', 'in_flight', 'reconciling', 'requires_review')`),
+		index("idx_provider_operations_recovery").on(table.projectId, table.status, table.leaseUntil),
+	],
+);
 
 export const projects = pgTable(
 	"projects",
@@ -184,7 +257,10 @@ export const storeProducts = pgTable(
 			.on(table.projectId, table.provider, table.externalProductId)
 			.where(sql`${table.externalPriceId} IS NULL`),
 		index("idx_billing_store_products_product_id").on(table.productId),
-		check("store_products_provider_check", sql`${table.provider} IN ('apple', 'google', 'stripe')`),
+		check(
+			"store_products_provider_check",
+			sql`${table.provider} IN ('apple', 'google', 'stripe', 'paddle')`,
+		),
 		check("store_products_channel_check", sql`${table.channel} IN ('ios', 'android', 'web')`),
 		check(
 			"store_products_billing_period_check",
@@ -236,7 +312,7 @@ export const providerCustomers = pgTable(
 		index("idx_billing_provider_customers_external_customer_id").on(table.externalCustomerId),
 		check(
 			"provider_customers_provider_check",
-			sql`${table.provider} IN ('apple', 'google', 'stripe')`,
+			sql`${table.provider} IN ('apple', 'google', 'stripe', 'paddle')`,
 		),
 	],
 );
@@ -390,7 +466,10 @@ export const subscriptions = pgTable(
 			.where(
 				sql`${table.trialEndingNotifiedAt} IS NULL AND ${table.trialEndAt} IS NOT NULL AND ${table.status} IN ('active', 'grace_period', 'billing_retry', 'cancelled')`,
 			),
-		check("subscriptions_provider_check", sql`${table.provider} IN ('apple', 'google', 'stripe')`),
+		check(
+			"subscriptions_provider_check",
+			sql`${table.provider} IN ('apple', 'google', 'stripe', 'paddle')`,
+		),
 		check("subscriptions_channel_check", sql`${table.channel} IN ('ios', 'android', 'web')`),
 		check(
 			"subscriptions_status_check",
@@ -560,7 +639,7 @@ export const creditGrantProviderObjects = pgTable(
 		index("idx_billing_credit_grant_provider_objects_grant_id").on(table.grantId),
 		check(
 			"credit_grant_provider_objects_provider_check",
-			sql`${table.provider} IN ('apple', 'google', 'stripe')`,
+			sql`${table.provider} IN ('apple', 'google', 'stripe', 'paddle')`,
 		),
 	],
 );
@@ -738,7 +817,10 @@ export const purchases = pgTable(
 		index("idx_billing_purchases_store_product_id").on(table.storeProductId),
 		index("idx_billing_purchases_subscription_id").on(table.subscriptionId),
 		index("idx_billing_purchases_original_transaction").on(table.originalTransactionId),
-		check("purchases_provider_check", sql`${table.provider} IN ('apple', 'google', 'stripe')`),
+		check(
+			"purchases_provider_check",
+			sql`${table.provider} IN ('apple', 'google', 'stripe', 'paddle')`,
+		),
 		check("purchases_channel_check", sql`${table.channel} IN ('ios', 'android', 'web')`),
 		check(
 			"purchases_purchase_kind_check",
@@ -883,7 +965,10 @@ export const storeEvents = pgTable(
 			.where(sql`${table.processingStatus} = 'processing'`),
 		index("idx_billing_store_events_customer_id").on(table.customerId),
 		index("idx_billing_store_events_store_product_id").on(table.storeProductId),
-		check("store_events_provider_check", sql`${table.provider} IN ('apple', 'google', 'stripe')`),
+		check(
+			"store_events_provider_check",
+			sql`${table.provider} IN ('apple', 'google', 'stripe', 'paddle')`,
+		),
 		check("store_events_channel_check", sql`${table.channel} IN ('ios', 'android', 'web')`),
 		check(
 			"store_events_purchase_kind_check",
@@ -2154,7 +2239,7 @@ export const subscriptionChanges = pgTable(
 		}),
 		check(
 			"subscription_changes_provider_check",
-			sql`${table.provider} IN ('apple', 'google', 'stripe')`,
+			sql`${table.provider} IN ('apple', 'google', 'stripe', 'paddle')`,
 		),
 		check(
 			"subscription_changes_synchronization_check",
@@ -3286,7 +3371,7 @@ export const usageInvoicePeriods = pgTable(
 		}),
 		check(
 			"usage_invoice_periods_provider_check",
-			sql`${table.provider} IN ('apple', 'google', 'stripe')`,
+			sql`${table.provider} IN ('apple', 'google', 'stripe', 'paddle')`,
 		),
 		unique("usage_invoice_periods_project_id_id_unique").on(table.projectId, table.id),
 		unique("usage_invoice_periods_scope_unique").on(

@@ -34,6 +34,8 @@ export async function upsertSubscription(
 		latestProviderObjectId?: string | null;
 		lastProviderEventCreated?: number;
 		enforceProviderEventOrder?: boolean;
+		/** Current authoritative provider state can shorten access (e.g. immediate cancellation). */
+		replaceExpiresAt?: boolean;
 		rawState: Record<string, unknown>;
 		updateProduct: boolean;
 		allowRestoration?: boolean;
@@ -129,7 +131,7 @@ export async function upsertSubscription(
 				ELSE subscriptions.starts_at
 			END,
 			expires_at = CASE
-				WHEN ${updateIsMonotonic} THEN ${greatestSubscriptionExpiresAtSql()}
+				WHEN ${updateIsMonotonic} THEN ${input.replaceExpiresAt ? drizzleSql`EXCLUDED.expires_at` : greatestSubscriptionExpiresAtSql()}
 				ELSE subscriptions.expires_at
 			END,
 			current_period_start = CASE

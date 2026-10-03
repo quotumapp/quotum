@@ -6,6 +6,7 @@ import type {
 import type { AutoTopupChargeResult, AutoTopupJob } from "../billing/auto-topup";
 import type { PromotionStripeSyncJob, PromotionStripeSyncOutcome } from "../billing/promotions";
 import type { SubscriptionChangeOperation, UsageInvoiceJob } from "../billing/recurring";
+import type { WebBillingService } from "../billing/web-provider";
 import type { ProjectScopedBillingRepository } from "../db/repository";
 import type { RuntimeConnectionConfigs } from "../projects/connections";
 import type { ProjectInstanceContext } from "../projects/context";
@@ -62,10 +63,12 @@ export interface ProviderServiceTypes {
 	apple: AppleStoreKitServiceLike;
 	google: GooglePlayBillingServiceLike;
 	stripe: StripeBillingServiceLike;
+	paddle: WebBillingService;
 }
 
 /** The worker ports each real provider service implements. */
 export interface ProviderWorkerPorts {
+	paddle: StoreEventReplayProvider & SubscriptionReconciliationProvider;
 	apple: StoreEventReplayProvider & SubscriptionReconciliationProvider;
 	google: StoreEventReplayProvider & SubscriptionReconciliationProvider;
 	stripe: StoreEventReplayProvider &
@@ -83,9 +86,7 @@ export type ProviderService<P extends BillingProvider> = ProviderServiceTypes[P]
 export type ProviderServiceSource<P extends BillingProvider> = ProviderServiceTypes[P] &
 	Partial<ProviderWorkerPorts[P]>;
 
-type StripeMethod<K extends keyof StripeBillingServiceLike> = NonNullable<
-	StripeBillingServiceLike[K]
->;
+type WebMethod<K extends keyof WebBillingService> = NonNullable<WebBillingService[K]>;
 
 export interface ProviderWebhookGroups {
 	apple: { ingest: AppleStoreKitServiceLike["handleNotification"] };
@@ -95,6 +96,7 @@ export interface ProviderWebhookGroups {
 		verifyAuthorization?: NonNullable<GooglePlayBillingServiceLike["verifyRtdnAuthorization"]>;
 	};
 	stripe: { ingest: StripeBillingServiceLike["handleWebhook"] };
+	paddle: { ingest: WebBillingService["handleWebhook"] };
 }
 
 export interface ProviderPurchaseGroups {
@@ -108,28 +110,29 @@ export interface ProviderPurchaseGroups {
 		accountLink: GooglePlayBillingServiceLike["getAccountLink"];
 	};
 	stripe: never;
+	paddle: never;
 }
 
 export interface ProviderCheckoutGroup {
-	createHosted: StripeMethod<"createCheckoutSession">;
-	createPlan?: StripeMethod<"createRecurringCheckoutSession">;
-	status: StripeMethod<"getCheckoutSessionStatus">;
-	expire?: StripeMethod<"expireCheckoutSession">;
+	createHosted: WebMethod<"createCheckoutSession">;
+	createPlan?: WebMethod<"createRecurringCheckoutSession">;
+	status: WebMethod<"getCheckoutSessionStatus">;
+	expire?: WebMethod<"expireCheckoutSession">;
 }
 
 export interface ProviderPortalGroup {
-	createSession: StripeMethod<"createPortalSession">;
+	createSession: WebMethod<"createPortalSession">;
 }
 
 /** Reads over hosted payment-method setup; the setup itself runs through `commercial.execute`. */
 export interface ProviderPaymentMethodGroup {
-	setupSession?: StripeMethod<"getPaymentSetupSession">;
+	setupSession?: WebMethod<"getPaymentSetupSession">;
 }
 
 export interface ProviderCommercialGroup {
-	preview?: StripeMethod<"previewCommercialAction">;
-	execute?: StripeMethod<"executeCommercialAction">;
-	requestChange?: StripeMethod<"requestSubscriptionChange">;
+	preview?: WebMethod<"previewCommercialAction">;
+	execute?: WebMethod<"executeCommercialAction">;
+	requestChange?: WebMethod<"requestSubscriptionChange">;
 }
 
 export interface ProviderChangeGroup {
@@ -154,8 +157,8 @@ export interface ProviderPromotionGroup {
 }
 
 export interface ProviderReadGroup {
-	catalog?: StripeMethod<"getCatalog">;
-	billingAccount?: StripeMethod<"getBillingAccount">;
+	catalog?: WebMethod<"getCatalog">;
+	billingAccount?: WebMethod<"getBillingAccount">;
 }
 
 /**
@@ -291,6 +294,7 @@ export interface ProviderOverrideKeys {
 	apple: "appleStoreKitService";
 	google: "googlePlayBillingService";
 	stripe: "stripeBillingService";
+	paddle: "paddleBillingService";
 }
 
 export interface ProviderBuildInput<P extends BillingProvider> {
@@ -298,6 +302,7 @@ export interface ProviderBuildInput<P extends BillingProvider> {
 	config: RuntimeConnectionConfigs[P];
 	repository: ProjectScopedBillingRepository;
 	clientFactories: ProviderClientFactories;
+	providerOperations: import("../billing/provider-operations").ProviderOperationRecoveryStore;
 }
 
 /** Builds provider clients from the config the default client would use; tests inject fakes. */

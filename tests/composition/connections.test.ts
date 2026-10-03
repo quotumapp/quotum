@@ -24,6 +24,11 @@ const stripeSettings = {
 };
 
 const settingsByKind: Record<RuntimeConnectionKind, Record<string, unknown>> = {
+	paddle: {
+		notificationSettingId: `ntfset_${"a".repeat(26)}`,
+		paymentPageUrl: "https://example.com/pay",
+		clientToken: "test_example",
+	},
 	apple: {
 		bundleId: "com.acme.app",
 		appAppleId: 123456789,
@@ -44,6 +49,7 @@ const settingsByKind: Record<RuntimeConnectionKind, Record<string, unknown>> = {
 };
 
 const secretsByKind: Record<RuntimeConnectionKind, Record<string, string>> = {
+	paddle: { apiKey: "pdl_sdbx_test", webhookSecret: "sandbox-test-webhook-secret" },
 	apple: { privateKey: "-----BEGIN PRIVATE KEY-----\\nkey\\n-----END PRIVATE KEY-----" },
 	google: {
 		serviceAccountJson: JSON.stringify({ client_email: "play@example.iam.gserviceaccount.com" }),
@@ -386,5 +392,55 @@ describe("runtime connection resolver describe", () => {
 			code: "CONNECTION_UNAVAILABLE",
 			status: 503,
 		});
+	});
+});
+
+describe("pinned Paddle connection recovery", () => {
+	it("reads a validated retired version, without falling back to the active connection", async () => {
+		const identity = `paddle:sandbox:ntfset_${"a".repeat(26)}`;
+		const version = {
+			...connectionVersion(
+				{
+					...settingsByKind.paddle,
+					webhookUrl: "https://example.com/v1/projects/acme/webhooks/paddle",
+				},
+				identity,
+			),
+			id: crypto.randomUUID(),
+			status: "retired",
+			validated_at: new Date(),
+		} as ConnectionVersion;
+		let activeReads = 0;
+		let decryptions = 0;
+		const repository = {
+			version: async (instanceId: string, versionId: string) => {
+				expect(instanceId).toBe(sandboxProject.projectInstanceId);
+				expect(versionId).toBe(version.id);
+				return version;
+			},
+			matchesKind: async (connectionId: string, kind: string) => {
+				expect([connectionId, kind]).toEqual([version.connection_id, "paddle"]);
+				return true;
+			},
+			secrets: async () => {
+				decryptions++;
+				return secretsByKind.paddle;
+			},
+			active: async () => {
+				activeReads++;
+				throw new Error("wrong version");
+			},
+		} as unknown as ConnectionRepository;
+		const resolver = createRuntimeConnectionResolver(repository);
+		expect(await resolver.resolvePaddleVersion?.(sandboxProject, version.id)).toMatchObject({
+			versionId: version.id,
+			accountIdentity: identity,
+			apiKey: "pdl_sdbx_test",
+		});
+		expect(activeReads).toBe(0);
+		expect(decryptions).toBe(1);
+		version.validated_at = null;
+		expect(await resolver.resolvePaddleVersion?.(sandboxProject, version.id)).toBeNull();
+		expect(decryptions).toBe(1);
 	});
 });

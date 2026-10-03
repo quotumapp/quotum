@@ -89,7 +89,7 @@ export class InternalBillingError extends BillingError {
 
 /**
  * Wire code, status and classification for a capability rejection, keyed by the verdict's blocking
- * layer. `PROVIDER_OPERATION_UNCERTAIN` stays reserved until a provider write can be uncertain.
+ * layer. `PROVIDER_OPERATION_UNCERTAIN` is a durable receipt error, not a capability rejection.
  */
 export const capabilityErrorCodes = {
 	provider: {

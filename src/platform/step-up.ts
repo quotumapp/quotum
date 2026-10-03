@@ -77,7 +77,7 @@ export class MerchantStepUp {
 	): Promise<StepUpChallengeView> {
 		const setupTarget =
 			input.action === "connections.manage"
-				? /^(?:[0-9a-f-]{36}|disable:(?:stripe|apple|google|projection):[0-9]+)$/
+				? /^(?:[0-9a-f-]{36}|disable:(?:stripe|apple|google|paddle|projection):[0-9]+)$/
 				: input.action === "environment.activate"
 					? /^[a-f0-9]{64}$/
 					: credentialActions.has(input.action)

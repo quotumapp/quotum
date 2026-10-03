@@ -2,6 +2,10 @@ import type { AppleBillingEnv, GooglePlayBillingEnv, StripeBillingEnv } from "..
 import type { ProjectInstanceContext } from "./context";
 
 export interface RuntimeConnectionConfigs {
+	paddle: import("../providers/paddle/config").PaddleConfig & {
+		accountIdentity: string;
+		versionId: string;
+	};
 	apple: AppleBillingEnv;
 	google: GooglePlayBillingEnv;
 	stripe: StripeBillingEnv;
@@ -29,6 +33,10 @@ export interface RuntimeConnectionDescription {
 }
 /** Billing-owned port. Platform persistence and secret custody stay behind composition. */
 export interface RuntimeConnectionResolver {
+	resolvePaddleVersion?(
+		project: ProjectInstanceContext,
+		versionId: string,
+	): Promise<RuntimeConnectionConfigs["paddle"] | null>;
 	resolve<K extends RuntimeConnectionKind>(
 		project: ProjectInstanceContext,
 		kind: K,

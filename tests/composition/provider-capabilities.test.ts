@@ -76,7 +76,7 @@ describe("renderProviderCapabilityBlock", () => {
 		for (const row of rows) expect(cells(row)).toHaveLength(width);
 
 		const header = cells(rows[0] ?? "").map((cell) => cell.trim());
-		expect(header).toEqual(["Operation", "Apple", "Google", "Stripe", "Paddle (planned)"]);
+		expect(header).toEqual(["Operation", "Apple", "Google", "Stripe", "Paddle"]);
 		for (const operation of providerOperations) {
 			expect(rows.filter((row) => row.includes(`\`${operation}\``))).toHaveLength(1);
 		}
@@ -97,11 +97,7 @@ describe("renderProviderCapabilityBlock", () => {
 			"Conditional · Quotum-composed via Stripe invoices with a top-up price line<br>The customer must have a saved payment method",
 		);
 		expect(stripe).toContain("[workers/auto-topup](../tests/workers/auto-topup.test.ts)");
-		expect(paddle).toContain(
-			"Requires policy decision (DEC-14) · Quotum-composed via one-time subscription charge",
-		);
-		expect(paddle).toContain('The connection setting "spmConsent" must be true.');
-		expect(paddle).toContain("Questions: Q-SET-02");
+		expect(paddle?.trim()).toBe("Unsupported");
 		expect(row("subscription.cancel")[1]?.trim()).toBe("Managed by provider, mirrored by Quotum");
 		expect(row("catalog.trial")[1]).toContain(
 			"Managed by provider, mirrored by Quotum<br>Tests: [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts)",
