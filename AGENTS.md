@@ -18,7 +18,7 @@ enabled, the remote MCP endpoint, and it runs the background workers. Runtime co
 - `billing/`, `catalog/`, `db/`: billing domain, versioned catalog and Drizzle repositories.
 - `providers/`: Apple, Google and Stripe integrations and their capability declarations.
 - `workers/`, `projections/`: durable background work and signed HTTP projection delivery.
-- `mcp/`: the read-only MCP tools and stdio server, a client of `/v1` through the bundled `sdk/`
+- `mcp/`: the MCP tools and read-only stdio server, a client of `/v1` through the bundled `sdk/`
   ([docs/mcp.md](docs/mcp.md)).
 - `composition/`: wires the modules together, including the remote MCP transport and OpenAPI
   generation.
@@ -174,17 +174,21 @@ projection secrets are encrypted, database-owned connections resolved per projec
 
 ### MCP
 
-`src/mcp/` holds the read-only tools, the contract tools and the stdio entrypoint (`bun run mcp`).
-Every API request a tool sends goes through `createGuardedFetch` (`src/mcp/guarded-fetch.ts`),
-whose `allowedRequests` list is the complete set of calls either transport can make. The optional
+`src/mcp/` holds the read-only tools, remote proposal tools, contract tools and the read-only stdio
+entrypoint (`bun run mcp`). Read tools send API requests through `createGuardedFetch`
+(`src/mcp/guarded-fetch.ts`), whose `allowedRequests` list remains read-only. The optional
 remote transport (`QUOTUM_MCP_ENABLED`, `QUOTUM_MCP_PUBLIC_ORIGIN`) is
 `src/composition/remote-mcp.ts`: it serves `/mcp` and the OAuth endpoints in the API process,
 verifies grants issued by `src/platform/mcp/`, and dispatches the same guarded requests through
-`MerchantBillingPort` (`src/composition/mcp-port-fetch.ts`) without a project key. A new tool
+`MerchantBillingPort` (`src/composition/mcp-port-fetch.ts`) without a project key. A new read tool
 needs its route in `allowedRequests` (`tests/mcp/inventory.test.ts` pins tools against the
 allowlist), a `/v1` route that opts into read-only credentials
 (`tests/mcp/contract-allowlist.test.ts`), and a `merchantBillingOperations` entry handled by
-`src/composition/merchant-billing.ts` (`tests/mcp/port-fetch.test.ts`). Never add a write.
+`src/composition/merchant-billing.ts` (`tests/mcp/port-fetch.test.ts`). Never add a write to this
+allowlist. Remote proposal tools are separately gated by `QUOTUM_MCP_WRITES_ENABLED` (default
+false), explicit `quotum.billing.write` consent and current permissions. They use the injected
+change port to prepare immutable proposals; execution requires the merchant browser decision
+routes and applicable step-up authentication. Deploy matching merchant UI before enabling them.
 
 ### Test entrypoints
 

@@ -43,6 +43,7 @@ const COLLECTIONS = new Set([
 	"billing-accounts",
 	"by-billing-account",
 	"checkout-sessions",
+	"changes",
 	"codes",
 	"connections",
 	"customers",

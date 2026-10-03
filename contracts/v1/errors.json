@@ -15,6 +15,7 @@
     {
       "code": "ACTION_MISMATCH",
       "sources": [
+        "src/platform/mcp/routes.ts",
         "src/platform/step-up.ts"
       ]
     },
@@ -22,6 +23,7 @@
       "code": "ACTION_REJECTED",
       "sources": [
         "src/platform/app.ts",
+        "src/platform/mcp/changes.ts",
         "src/platform/step-up.ts"
       ]
     },
@@ -144,6 +146,30 @@
         "src/app/admin-routes.ts",
         "src/composition/merchant-billing.ts",
         "src/operations/admin.ts"
+      ]
+    },
+    {
+      "code": "BILLING_CHANGE_PREVIEW_FAILED",
+      "sources": [
+        "src/composition/billing-changes.ts"
+      ]
+    },
+    {
+      "code": "BILLING_CHANGE_REJECTED",
+      "sources": [
+        "src/db/repository.ts"
+      ]
+    },
+    {
+      "code": "BILLING_CHANGE_STALE",
+      "sources": [
+        "src/composition/billing-changes.ts"
+      ]
+    },
+    {
+      "code": "BILLING_CONFIGURATION_UNAVAILABLE",
+      "sources": [
+        "src/composition/billing-changes.ts"
       ]
     },
     {
@@ -471,6 +497,7 @@
       "code": "FORBIDDEN",
       "sources": [
         "src/platform/mcp/authorization.ts",
+        "src/platform/mcp/changes.ts",
         "src/platform/security.ts",
         "src/platform/store.ts"
       ]
@@ -527,6 +554,7 @@
     {
       "code": "IDEMPOTENCY_CONFLICT",
       "sources": [
+        "src/db/repository.ts",
         "src/db/repository/apple-promotions.ts",
         "src/db/repository/balance-adjustments.ts",
         "src/db/repository/commercial-actions.ts",
@@ -536,6 +564,7 @@
         "src/db/repository/stripe.ts",
         "src/db/repository/usage-operations.ts",
         "src/platform/connections/lifecycle.ts",
+        "src/platform/mcp/changes.ts",
         "src/platform/store.ts",
         "src/providers/stripe/service.ts"
       ]
@@ -612,6 +641,7 @@
         "src/app/webhook-routes.ts",
         "src/billing/errors.ts",
         "src/billing/payment-setup.ts",
+        "src/composition/billing-changes.ts",
         "src/operations/admin.ts",
         "src/platform/app.ts",
         "src/platform/application/billing-port.ts",
@@ -678,7 +708,14 @@
     {
       "code": "MCP_AUTHORIZATION_REVOKED",
       "sources": [
-        "src/platform/mcp/authorization.ts"
+        "src/platform/mcp/authorization.ts",
+        "src/platform/mcp/changes.ts"
+      ]
+    },
+    {
+      "code": "MCP_WRITES_DISABLED",
+      "sources": [
+        "src/platform/mcp/changes.ts"
       ]
     },
     {
@@ -744,6 +781,7 @@
         "src/platform/app.ts",
         "src/platform/billing.ts",
         "src/platform/mcp/authorization.ts",
+        "src/platform/mcp/changes.ts",
         "src/platform/mcp/routes.ts",
         "src/platform/onboarding.ts",
         "src/platform/team.ts"
@@ -1419,7 +1457,8 @@
       "sources": [
         "src/app.ts",
         "src/app/admin-routes.ts",
-        "src/billing/errors.ts"
+        "src/billing/errors.ts",
+        "src/platform/mcp/changes.ts"
       ]
     },
     {

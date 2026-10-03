@@ -16,7 +16,7 @@ import {
 
 const origin = "https://api.example.test";
 const resource = `${origin}/mcp`;
-const f = merchantFixture({ mcp: { origin } });
+const f = merchantFixture({ mcp: { origin, writesEnabled: true } });
 const remote = createRemoteMcpApp({ auth: f.auth, store: f.store, port: f.billingPort });
 beforeEach(() => f.reset());
 afterAll(() => f.sql.close());
@@ -81,7 +81,13 @@ async function owner() {
 	return browser;
 }
 
-async function signIn(browser: OAuthBrowser) {
+async function createBillingAccount(environment: "sandbox" | "production" = "sandbox") {
+	expect(
+		await f.sql`INSERT INTO customers(project_id,billing_account_id) SELECT id,'customer-a' FROM projects WHERE environment=${environment} RETURNING id`,
+	).toHaveLength(1);
+}
+
+async function signIn(browser: OAuthBrowser, write = false) {
 	// Exercise fresh authentication without waiting for the existing per-user OTP cooldown.
 	await f.sql`DELETE FROM platform_rate_limits`;
 	const verifier = randomBytes(32).toString("base64url");
@@ -89,7 +95,7 @@ async function signIn(browser: OAuthBrowser) {
 		response_type: "code",
 		client_id: clientId,
 		redirect_uri: redirect,
-		scope: "quotum.read offline_access",
+		scope: write ? "quotum.read offline_access quotum.billing.write" : "quotum.read offline_access",
 		state: crypto.randomUUID(),
 		code_challenge: createHash("sha256").update(verifier).digest("base64url"),
 		code_challenge_method: "S256",
@@ -115,8 +121,9 @@ async function authorize(
 	browser: OAuthBrowser,
 	scope: MerchantScope = merchantTestScope,
 	beforeConsent?: () => Promise<void>,
+	write = false,
 ) {
-	const pending = await signIn(browser);
+	const pending = await signIn(browser, write);
 	const context = await browser.json<{ principal: { email: string }; environments: unknown[] }>(
 		"/api/platform/oauth/context",
 		{ oauth_query: pending.query },
@@ -160,8 +167,12 @@ async function token(body: Record<string, string>) {
 	await assertOpenApiResponse("POST", "/oauth/token", response);
 	return response;
 }
-async function redeem(browser: OAuthBrowser, scope: MerchantScope = merchantTestScope) {
-	const code = await authorize(browser, scope);
+async function redeem(
+	browser: OAuthBrowser,
+	scope: MerchantScope = merchantTestScope,
+	write = false,
+) {
+	const code = await authorize(browser, scope, undefined, write);
 	const response = await token({
 		grant_type: "authorization_code",
 		code: code.code,
@@ -631,5 +642,211 @@ describe("remote MCP browser authorization", () => {
 		expect(
 			(await token({ grant_type: "refresh_token", refresh_token: tokens.refresh_token })).status,
 		).toBe(400);
+	});
+});
+
+describe("MCP browser-approved writes", () => {
+	it("requires write consent and applies an immutable entity proposal only once", async () => {
+		const browser = await owner();
+		const tokens = await redeem(browser, merchantTestScope, true);
+		const [grant] = await f.sql<
+			{ id: string; scopes: string[] }[]
+		>`SELECT * FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		expect(grant.scopes).toContain("quotum.billing.write");
+		const input = {
+			requestKey: "entity-a",
+			reason: "Allocate credits to a team",
+			action: "entities.write",
+			parameters: ["customer-a"],
+			body: { externalId: "team-a", kind: "team" },
+		};
+		await expect(f.mcpChanges.prepare(grant.id, input)).rejects.toMatchObject({
+			code: "BILLING_CHANGE_PREVIEW_FAILED",
+			status: 404,
+		});
+		expect(await f.sql`SELECT id FROM customers`).toHaveLength(0);
+		expect(await f.sql`SELECT id FROM platform_mcp_changes`).toHaveLength(0);
+		await createBillingAccount();
+		const inventory = await (await rpc(tokens.access_token)).json();
+		expect(
+			inventory.result.tools.some(
+				(tool: { name: string }) => tool.name === "prepare_billing_change",
+			),
+		).toBe(true);
+		expect(
+			inventory.result.tools.some((tool: { name: string }) => /execute|approve/.test(tool.name)),
+		).toBe(false);
+		const prepared = await (
+			await rpc(tokens.access_token, "tools/call", {
+				name: "prepare_billing_change",
+				arguments: {
+					requestKey: input.requestKey,
+					reason: input.reason,
+					change: { action: input.action, parameters: input.parameters, body: input.body },
+				},
+			})
+		).json();
+		expect(prepared.result.isError).toBeUndefined();
+		const change = await f.mcpChanges.prepare(grant.id, input);
+		expect(JSON.parse(prepared.result.content[0].text).id).toBe(change.id);
+		expect(await f.sql`SELECT id FROM entities`).toHaveLength(0);
+		expect(await f.sql`SELECT * FROM billing_administration_receipts`).toHaveLength(0);
+		expect(change.status).toBe("pending");
+		expect((await f.mcpChanges.prepare(grant.id, input)).id).toBe(change.id);
+		await expect(f.mcpChanges.prepare(grant.id, { ...input, reason: "Changed" })).rejects.toThrow(
+			"new request key",
+		);
+		const reviewed = await browser.json<{ status: string }>(
+			`/api/platform/mcp/changes/${change.id}`,
+		);
+		expect(reviewed.status).toBe("pending");
+		const response = await browser.json<{ status: string }>(
+			`/api/platform/mcp/changes/${change.id}/approve`,
+			{ requestHash: change.requestHash },
+		);
+		expect(response.status).toBe("completed");
+		expect(
+			(
+				await browser.json<{ status: string }>(`/api/platform/mcp/changes/${change.id}/approve`, {
+					requestHash: change.requestHash,
+				})
+			).status,
+		).toBe("completed");
+		const receipt =
+			await f.sql`SELECT response FROM billing_administration_receipts WHERE operation_key=${`mcp:${change.id}`}`;
+		expect(receipt).toHaveLength(1);
+		await f.sql`UPDATE platform_mcp_changes SET status='applying',result=NULL WHERE id=${change.id}`;
+		expect((await f.mcpChanges.get(grant.id, change.id)).status).toBe("completed");
+	});
+	it("denies read-only grants, cancelled proposals, and expired proposals", async () => {
+		const browser = await owner();
+		await createBillingAccount();
+		await redeem(browser);
+		const [read] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		await expect(f.mcpChanges.capabilities(read.id)).rejects.toThrow("write consent");
+		await redeem(browser, merchantTestScope, true);
+		const [grant] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM platform_mcp_authorizations WHERE scopes ? 'quotum.billing.write' AND approved_at IS NOT NULL`;
+		const input = {
+			requestKey: "entity-a",
+			reason: "Team setup",
+			action: "entities.write",
+			parameters: ["customer-a"],
+			body: { externalId: "team-a", kind: "team" },
+		};
+		const cancelled = await f.mcpChanges.prepare(grant.id, input);
+		expect((await f.mcpChanges.cancel(grant.id, cancelled.id)).status).toBe("cancelled");
+		expect(
+			(
+				await browser.json<{ status: string }>(
+					`/api/platform/mcp/changes/${cancelled.id}/approve`,
+					{ requestHash: cancelled.requestHash },
+				)
+			).status,
+		).toBe("cancelled");
+		const expired = await f.mcpChanges.prepare(grant.id, { ...input, requestKey: "expiry" });
+		f.advance(900001);
+		expect((await f.mcpChanges.get(grant.id, expired.id)).status).toBe("expired");
+		const receipts = await f.sql`SELECT * FROM billing_administration_receipts`;
+		expect(receipts).toHaveLength(0);
+	});
+	it("rejects stale state and immediately stops revoked or disabled write access", async () => {
+		const browser = await owner();
+		await createBillingAccount();
+		await redeem(browser, merchantTestScope, true);
+		const [grant] = await f.sql<
+			{ id: string; project_instance_id: string; principal_id: string }[]
+		>`SELECT * FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		const input = {
+			requestKey: "stale",
+			reason: "Add a team",
+			action: "entities.write",
+			parameters: ["customer-a"],
+			body: { externalId: "team-a", kind: "team" },
+		};
+		const change = await f.mcpChanges.prepare(grant.id, input);
+		await f.billingPort.dispatch({
+			operation: "entities.write",
+			parameters: ["customer-a"],
+			body: { externalId: "team-b", kind: "team" },
+			projectInstanceId: grant.project_instance_id,
+			actor: `merchant:${grant.principal_id}`,
+			query: {},
+			idempotencyKey: "other",
+		});
+		expect(
+			(
+				await browser.json<{ status: string }>(`/api/platform/mcp/changes/${change.id}/approve`, {
+					requestHash: change.requestHash,
+				})
+			).status,
+		).toBe("stale");
+		const config = f.store.config.mcp;
+		if (!config) throw new Error("MCP configuration missing");
+		config.writesEnabled = false;
+		try {
+			await expect(
+				f.mcpChanges.prepare(grant.id, { ...input, requestKey: "disabled" }),
+			).rejects.toThrow("disabled");
+		} finally {
+			config.writesEnabled = true;
+		}
+		await new McpAuthorizations(f.store).revoke(grant.id, grant.principal_id);
+		await expect(f.mcpChanges.get(grant.id, change.id)).rejects.toThrow();
+	});
+	it("requires step-up in production and keeps approval bound to the connected person", async () => {
+		const browser = await owner();
+		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
+		await createBillingAccount("production");
+		await redeem(browser, { ...merchantTestScope, environment: "production" }, true);
+		const [grant] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		const change = await f.mcpChanges.prepare(grant.id, {
+			requestKey: "production",
+			reason: "Team setup",
+			action: "entities.write",
+			parameters: ["customer-a"],
+			body: { externalId: "team-a", kind: "team" },
+		});
+		expect(change.stepUp?.action).toBe("operations.write");
+		const denied = await browser.request(`/api/platform/mcp/changes/${change.id}/approve`, {
+			requestHash: change.requestHash,
+		});
+		expect(denied.status).toBe(403);
+		expect((await denied.json()).error.code).toBe("STEP_UP_REQUIRED");
+		expect((await f.mcpChanges.get(grant.id, change.id)).status).toBe("pending");
+		const other = new MerchantBrowser(f);
+		await other.signup("other@example.com");
+		expect((await other.request(`/api/platform/mcp/changes/${change.id}`)).status).toBe(404);
+		expect(await f.sql`SELECT * FROM billing_administration_receipts`).toHaveLength(0);
+	});
+	it("reads fixed target snapshots without crossing project or customer scope", async () => {
+		const browser = await owner();
+		await redeem(browser, merchantTestScope, true);
+		const [grant] = await f.sql<
+			{ project_instance_id: string }[]
+		>`SELECT project_instance_id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		const uuid = "11111111-1111-4111-8111-111111111111";
+		for (const [action, parameters, body] of [
+			["debits.create", ["missing"], { allocations: [{ allocationId: "1", quantity: "1" }] }],
+			["topups.reset", ["missing", "1"], {}],
+			["licenses.release", ["missing", "1"], {}],
+			["promotions.redemptions.revoke", [uuid], {}],
+			["promotions.codes.deactivate", ["missing", uuid], {}],
+			["usage.correct", ["missing", uuid], {}],
+			["projections.retry", [uuid], {}],
+		] as const)
+			expect(
+				await f.repository.administrationTarget(
+					grant.project_instance_id,
+					action,
+					[...parameters],
+					body,
+				),
+			).toEqual([]);
 	});
 });

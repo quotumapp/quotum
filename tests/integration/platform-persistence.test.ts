@@ -124,6 +124,7 @@ localDescribe("platform project identity persistence", () => {
 			"platform_idempotency",
 			"platform_invitations",
 			"platform_mcp_authorizations",
+			"platform_mcp_changes",
 			"platform_memberships",
 			"platform_merchant_sessions",
 			"platform_onboarding_drafts",

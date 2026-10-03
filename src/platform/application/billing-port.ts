@@ -1,6 +1,35 @@
 import { MerchantError } from "../security";
+import type { BillingChangesPort } from "./billing-changes";
 
 /** Consumer-owned operation boundary. It carries no credentials, HTTP requests, or database handles. */
+export const mcpBillingOperations = [
+	["POST", "/billing-accounts/:billingAccountId/entities", "entities.write"],
+	["GET", "/billing-accounts/:billingAccountId/entities", "entities"],
+	["POST", "/admin/operator-grants/:billingAccountId", "grants.create"],
+	["POST", "/admin/operator-grants/:billingAccountId/:grantId/revoke", "grants.revoke"],
+	["GET", "/admin/operator-grants/:billingAccountId", "grants"],
+	["POST", "/admin/administrative-debits/:billingAccountId", "debits.create"],
+	["GET", "/admin/administrative-debits/:billingAccountId", "debits"],
+	["POST", "/billing-accounts/:billingAccountId/trials", "trials.start"],
+	["POST", "/billing-accounts/:billingAccountId/trials/:trialId/end", "trials.end"],
+	["GET", "/billing-accounts/:billingAccountId/trials", "trials"],
+	["POST", "/billing-accounts/:billingAccountId/usage-alerts", "alerts.create"],
+	["GET", "/billing-accounts/:billingAccountId/usage-alerts", "alerts"],
+	["PUT", "/billing-accounts/:billingAccountId/auto-topup", "topups.write"],
+	["GET", "/billing-accounts/:billingAccountId/auto-topup", "topups"],
+	["POST", "/admin/auto-topups/:billingAccountId/:policyId/reset", "topups.reset"],
+	["POST", "/billing-accounts/:billingAccountId/license-assignments", "licenses.assign"],
+	[
+		"DELETE",
+		"/billing-accounts/:billingAccountId/license-assignments/:assignmentId",
+		"licenses.release",
+	],
+	["GET", "/billing-accounts/:billingAccountId/license-pools", "licenses"],
+	["DELETE", "/admin/contracts/:billingAccountId/:contractId", "contracts.terminate"],
+	["GET", "/admin/contracts/:billingAccountId", "contracts"],
+	["POST", "/billing-accounts/:billingAccountId/promotion-redemptions", "promotions.redeem"],
+] as const;
+
 export const merchantBillingOperations = [
 	["GET", "/catalog", "stripe.catalog"],
 	["GET", "/billing-accounts/:billingAccountId/balances/:featureKey", "usage.balance"],
@@ -82,7 +111,10 @@ export const merchantBillingOperations = [
 	],
 ] as const;
 
-export type MerchantBillingOperation = (typeof merchantBillingOperations)[number][2];
+export type MerchantBillingOperation = (
+	| typeof merchantBillingOperations
+	| typeof mcpBillingOperations
+)[number][2];
 export interface MerchantBillingCommand {
 	operation: MerchantBillingOperation;
 	parameters: string[];
@@ -93,11 +125,15 @@ export interface MerchantBillingCommand {
 	idempotencyKey: string | null;
 }
 export interface MerchantBillingPort {
+	changes?: BillingChangesPort;
 	dispatch(command: MerchantBillingCommand): Promise<{ status: number; body: unknown }>;
 }
 
 export function billingOperation(method: string, path: string) {
-	for (const [verb, pattern, operation] of merchantBillingOperations) {
+	for (const [verb, pattern, operation] of [
+		...merchantBillingOperations,
+		...mcpBillingOperations,
+	]) {
 		if (method !== verb) continue;
 		const match = new RegExp(
 			`^/v1${pattern.replace(/:[A-Za-z][A-Za-z0-9]*/g, "([^/]+)")}$`,

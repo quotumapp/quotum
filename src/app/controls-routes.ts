@@ -27,7 +27,7 @@ const policyParams = accountParams.extend({ policyId: bigintIdSchema() }).strict
 const assignmentParams = accountParams.extend({ assignmentId: bigintIdSchema() }).strict();
 const contractParams = accountParams.extend({ contractId: bigintIdSchema() }).strict();
 
-const entityBody = z
+export const entityBody = z
 	.object({
 		externalId: publicIdSchema,
 		kind: z.string().trim().min(1).max(120),
@@ -47,7 +47,7 @@ export const controlBody = z
 	})
 	.strict();
 
-const alertBody = z
+export const alertBody = z
 	.object({
 		entityId: z.string().trim().min(1).max(200).nullable().optional(),
 		featureKey: z.string().trim().min(1).max(120),
@@ -59,7 +59,7 @@ const alertBody = z
 	})
 	.strict();
 
-const autoTopupBody = z
+export const autoTopupBody = z
 	.object({
 		entityId: z.string().trim().min(1).max(200).nullable().optional(),
 		featureKey: z.string().trim().min(1).max(120),
@@ -105,7 +105,7 @@ const postV1AdminContractsPublishBodySchema = contractBody
 const postV1AdminCatalogMigrationsPublishBodySchema = migrationBody
 	.extend({ previewToken: z.string().regex(/^[a-f0-9]{64}$/) })
 	.strict();
-const postV1BillingAccountsByBillingAccountIdLicenseAssignmentsBodySchema = z
+export const postV1BillingAccountsByBillingAccountIdLicenseAssignmentsBodySchema = z
 	.object({
 		poolId: bigintIdSchema(),
 		entityId: z.string().trim().min(1).max(200),

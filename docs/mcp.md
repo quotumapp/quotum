@@ -2,7 +2,7 @@
 
 - Document kind: Current behavior
 
-`src/mcp/` is a read-only [Model Context Protocol](https://modelcontextprotocol.io) server for
+`src/mcp/` is a [Model Context Protocol](https://modelcontextprotocol.io) server for
 coding agents such as Claude Code, Codex and Cursor. It answers questions about one project instance, a
 sandbox or, with a read-only key, production: why a consume is denied, what an idempotency key
 resolved to, why a product backend is not receiving `billing_state_v1`, and what the catalog
@@ -22,7 +22,7 @@ the public routes and schema ordering.
 
 Add `https://api.example.com/mcp` to a coding client. Authorization opens the merchant application,
 requires a fresh password plus email OTP or Google sign-in, then asks for one organization,
-project, and environment and explicit read-only consent. An existing console session does not
+project, and environment and explicit consent to the requested scopes. An existing console session does not
 skip sign-in. Sandbox and production require separate authorizations. The displayed identity is
 the fresh sign-in identity, which may differ from the console identity.
 
@@ -39,7 +39,7 @@ authorization requests and fetched client metadata, including metadata without a
 The server uses authorization code with PKCE S256 and the `/mcp` resource indicator. It issues
 15-minute bearer access tokens and rotating refresh tokens. Authorization expires 30 days after
 environment selection regardless of refreshes. DPoP, client secrets, client credentials grants,
-and MCP write tools are not supported.
+and direct MCP execution of mutations are not supported.
 
 In **Developer setup → MCP connections**, view and revoke your connections for the selected
 environment. Revocation immediately invalidates access tokens, refresh tokens, and cached refresh
@@ -69,6 +69,64 @@ server object to the runtime so its connection address is available. These check
 the remote MCP and OAuth endpoints; staff, merchant and health routes use their own policies.
 The transport is stateless,
 with current MCP messages and the SDK's older-protocol fallback; it keeps no cross-request session.
+
+## Propose billing changes
+
+Remote writes are separately opt-in: set `QUOTUM_MCP_WRITES_ENABLED=true` only after deploying
+matching schema, API and merchant UI. Clients must request `quotum.billing.write` alongside
+`quotum.read` and `offline_access` and complete fresh consent. Existing grants retain their saved
+scopes; enabling the flag does not upgrade them. Stdio remains read-only, even with a sandbox key.
+
+Write-consented connections gain these tools:
+
+| Tool | Behavior |
+| --- | --- |
+| `get_mcp_capabilities` | Lists available actions under current merchant permissions. |
+| `get_billing_configuration` | Reads entities, grants, debits, trials, controls, alerts, top-up policies, license pools, enterprise contracts and promotions. |
+| `prepare_billing_change` | Saves a typed proposal and returns a browser review URL. Does not apply it. |
+| `get_billing_change` / `list_billing_changes` | Read proposal status and recorded outcome. |
+| `cancel_billing_change` | Withdraws a pending proposal. |
+
+Account-scoped changes retain the trusted API's account requirements. Before preparing an entity,
+the product backend must create its billing account with
+`PUT /v1/billing-accounts/:billingAccountId`; a proposal never creates a missing account implicitly.
+For example, for an existing account, prepare an entity with:
+
+```json
+{
+  "requestKey": "create-team-a-1",
+  "reason": "Track Team A usage separately",
+  "change": {
+    "action": "entities.write",
+    "parameters": ["customer-123"],
+    "body": {"externalId": "team-a", "kind": "team"}
+  }
+}
+```
+
+The tool schema lists supported actions and their existing domain body schemas. They cover catalog
+publication (including default-plan configuration), migrations, commercial actions, entities,
+shared/entity grants and debits, controls, trials, alerts, auto-top-ups, licenses, contracts,
+promotions, usage corrections, event replay and projection retry. Credential, connection, team,
+environment administration, global reconciliation and usage consumption are excluded.
+
+Every effective change requires the same connected merchant to open the returned URL, review it,
+and choose **Approve and apply**, including in sandbox. Production and sensitive recovery/correction
+actions also require the existing step-up authentication. The backend rechecks the live session,
+connection and role. The agent must present the URL to the user, never approve it itself. There is
+no MCP execute tool and no arbitrary HTTP passthrough.
+
+Proposals expire after at most 15 minutes, capped by domain preview expiry. They are immutable:
+use a new request key and `replacesChangeId` to replace a pending proposal. Reusing a key with changed
+input conflicts. Approval compares the recorded state and domain preview preconditions; stale
+proposals require a new preview. Database-only execution stores its receipt in the mutation's
+transaction; repeated approval does not dispatch twice. Commercial execution retains its domain
+idempotency key and can recover a saved result. An uncertain external outcome stays `needs_review`;
+it is not automatically rerun. `completed` means the operation returned successfully, which may
+mean a checkout link or queued job was created, not that payment or background processing finished.
+
+Disabling the write flag prevents new proposals and approvals. Existing write-consented connections
+can inspect results and cancel pending proposals while their authorization remains valid.
 
 ## Run over stdio
 
@@ -125,7 +183,7 @@ picked up from the environment.
 
 ## Tools
 
-Every tool is read-only. Lists return one page of at most 25 rows (10 by default) with `nextCursor`;
+The shared tools below are read-only. Lists return one page of at most 25 rows (10 by default) with `nextCursor`;
 the server never follows a cursor on its own.
 
 | Tool | Reads |

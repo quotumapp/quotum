@@ -10,6 +10,7 @@ import type { MerchantStripeOAuth } from "./connections/oauth";
 import { registerConnectionRoutes } from "./connections/routes";
 import type { MerchantConnections } from "./connections/service";
 import type { MerchantMailer } from "./email";
+import type { McpChanges } from "./mcp/changes";
 import { registerMcpRoutes } from "./mcp/routes";
 import { MerchantOnboarding } from "./onboarding";
 import * as responses from "./platform-responses";
@@ -75,6 +76,7 @@ export interface MerchantAppDependencies {
 	mailer: MerchantMailer;
 	auth: MerchantAuth;
 	onboarding?: MerchantOnboarding;
+	mcpChanges?: McpChanges;
 	billing?: (request: Request, identity: MerchantIdentity) => Promise<Response>;
 	requestObservabilityMiddleware?: ElysiaPluginLike;
 	onUnexpectedError?: (error: unknown, report: MerchantUnexpectedErrorReport) => void;
@@ -131,6 +133,7 @@ export function createMerchantApp({
 	connections,
 	stripeOAuth,
 	billing,
+	mcpChanges,
 	requestObservabilityMiddleware,
 	onUnexpectedError,
 }: MerchantAppDependencies) {
@@ -866,7 +869,7 @@ export function createMerchantApp({
 	);
 
 	if (connections) registerConnectionRoutes(app, store, connections, stripeOAuth);
-	registerMcpRoutes(app, store, auth);
+	registerMcpRoutes(app, store, auth, mcpChanges);
 
 	return app;
 

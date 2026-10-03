@@ -349,8 +349,8 @@ CREATE INDEX platform_auth_oauth_clients_user_id_idx ON platform_auth_oauth_clie
 
 INSERT INTO platform_auth_oauth_clients(client_id,name,redirect_uris,scopes,grant_types,response_types,token_endpoint_auth_method,require_p_k_c_e,skip_consent,created_at,updated_at)
 VALUES
-('quotum-claude-code','Claude Code',ARRAY['http://localhost:8788/callback'],ARRAY['quotum.read','offline_access'],ARRAY['authorization_code','refresh_token'],ARRAY['code'],'none',true,false,now(),now()),
-('quotum-cursor','Cursor',ARRAY['http://localhost:8787/callback'],ARRAY['quotum.read','offline_access'],ARRAY['authorization_code','refresh_token'],ARRAY['code'],'none',true,false,now(),now());
+('quotum-claude-code','Claude Code',ARRAY['http://localhost:8788/callback'],ARRAY['quotum.read','quotum.billing.write','offline_access'],ARRAY['authorization_code','refresh_token'],ARRAY['code'],'none',true,false,now(),now()),
+('quotum-cursor','Cursor',ARRAY['http://localhost:8787/callback'],ARRAY['quotum.read','quotum.billing.write','offline_access'],ARRAY['authorization_code','refresh_token'],ARRAY['code'],'none',true,false,now(),now());
 
 CREATE TABLE platform_auth_oauth_resources (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -467,6 +467,7 @@ CREATE TABLE platform_mcp_authorizations (
 	project_instance_id uuid NOT NULL,
 	client_id text NOT NULL,
 	client_name text NOT NULL,
+	scopes jsonb NOT NULL DEFAULT '["quotum.read","offline_access"]'::jsonb,
 	proof_session_id uuid UNIQUE REFERENCES platform_auth_sessions(id) ON DELETE SET NULL,
 	code_hash text UNIQUE,
 	created_at timestamptz NOT NULL DEFAULT now(),
@@ -507,3 +508,29 @@ CREATE TRIGGER platform_principals_revoke_mcp AFTER UPDATE OF status ON platform
 FOR EACH ROW EXECUTE FUNCTION platform_revoke_mcp_authorizations();
 CREATE TRIGGER platform_memberships_revoke_mcp AFTER UPDATE OF status ON platform_memberships
 FOR EACH ROW EXECUTE FUNCTION platform_revoke_mcp_authorizations();
+
+-- An immutable proposal never carries browser credentials or an operator key.
+CREATE TABLE platform_mcp_changes (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ authorization_id uuid NOT NULL REFERENCES platform_mcp_authorizations(id),
+ principal_id uuid NOT NULL REFERENCES platform_principals(id),
+ project_instance_id uuid NOT NULL,
+ request_key text NOT NULL,
+ request_hash text NOT NULL,
+ action text NOT NULL,
+ parameters jsonb NOT NULL,
+ body jsonb NOT NULL,
+ reason text NOT NULL,
+ preview jsonb NOT NULL,
+ capability text NOT NULL,
+ step_up_action text NOT NULL,
+ sensitive boolean NOT NULL,
+ scope jsonb NOT NULL,
+ status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','applying','completed','rejected','cancelled','expired','stale','failed','needs_review')),
+ result jsonb,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ expires_at timestamptz NOT NULL,
+ applied_at timestamptz,
+ UNIQUE (authorization_id, request_key)
+);
+CREATE INDEX platform_mcp_changes_owner_idx ON platform_mcp_changes(principal_id, project_instance_id, created_at DESC);

@@ -2780,3 +2780,12 @@ ALTER TABLE plans
 			FOREIGN KEY (project_id, active_version_id)
 			REFERENCES plan_versions(project_id, id)
 			ON DELETE RESTRICT;
+
+CREATE TABLE billing_administration_receipts (
+ project_id uuid NOT NULL REFERENCES projects(id),
+ operation_key text NOT NULL,
+ request_hash text NOT NULL,
+ response jsonb,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(project_id, operation_key)
+);

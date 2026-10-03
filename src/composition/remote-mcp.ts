@@ -3,8 +3,10 @@ import { resolve } from "node:path";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { type DocumentDecoration, Elysia } from "elysia";
 import { createLocalJWKSet, jwtVerify } from "jose";
+import { BillingError } from "../billing/errors";
 import { createContractStore } from "../mcp/contracts";
 import { createGuardedFetch } from "../mcp/guarded-fetch";
+import { omitKeys } from "../mcp/results";
 import { createQuotumMcpServer } from "../mcp/server";
 import type { MerchantBillingPort } from "../platform/application/billing-port";
 import type { MerchantAuth } from "../platform/auth";
@@ -12,13 +14,16 @@ import {
 	MCP_GRANT_CLAIM,
 	MCP_INSTANCE_CLAIM,
 	MCP_SCOPES,
+	MCP_WRITE_SCOPE,
 	McpAuthorizations,
 } from "../platform/mcp/authorization";
+import { McpChanges } from "../platform/mcp/changes";
 import { MerchantError } from "../platform/security";
 import type { MerchantStore } from "../platform/store";
-import { BillingClient } from "../sdk/client";
+import { BillingApiError, BillingClient } from "../sdk/client";
 import { readCappedText } from "../shared/body-limit";
 import { type ElysiaPluginLike, HTTP_APP_CONFIG } from "../shared/http";
+import { prepareBillingChangeSchema } from "./billing-change-actions";
 import { createMcpPortFetch } from "./mcp-port-fetch";
 import { remoteMcpOpenApi } from "./remote-mcp-openapi";
 
@@ -167,6 +172,14 @@ export function createRemoteMcpApp(options: {
 							256 * 1024,
 							() => new MerchantError("REQUEST_TOO_LARGE", "The request is too large.", 413),
 						);
+			const changes =
+				port.changes &&
+				grant.scopes.includes(MCP_WRITE_SCOPE) &&
+				String(claims.scope ?? "")
+					.split(" ")
+					.includes(MCP_WRITE_SCOPE)
+					? new McpChanges(store, port.changes)
+					: undefined;
 			const client = new BillingClient({
 				baseUrl: "http://billing.internal",
 				fetch: createGuardedFetch({
@@ -181,6 +194,27 @@ export function createRemoteMcpApp(options: {
 			const handler = createMcpHandler(() =>
 				createQuotumMcpServer({
 					client,
+					changes: changes
+						? {
+								schema: prepareBillingChangeSchema,
+								inspect: (input) => changeResult(() => changes.inspect(grant.id, input)),
+								capabilities: () => changeResult(() => changes.capabilities(grant.id)),
+								prepare: async (value) => {
+									const input = prepareBillingChangeSchema.parse(value);
+									return changeResult(() =>
+										changes.prepare(grant.id, {
+											...input.change,
+											requestKey: input.requestKey,
+											reason: input.reason,
+											replacesChangeId: input.replacesChangeId,
+										}),
+									);
+								},
+								get: (id) => changeResult(() => changes.get(grant.id, id)),
+								list: () => changeResult(() => changes.list(grant.id)),
+								cancel: (id) => changeResult(() => changes.cancel(grant.id, id)),
+							}
+						: undefined,
 					contracts,
 					version: process.env.BUILD_VERSION ?? "0.0.0-dev",
 					log: (_line, error) => report(error, request, "/mcp", 200, "tool_failure"),
@@ -286,7 +320,9 @@ export function createRemoteMcpApp(options: {
 				// The authorization endpoint is on the UI origin, so clients that bind a callback to
 				// its issuer (RFC 9207) need this before they accept the split; every callback carries `iss`.
 				authorization_response_iss_parameter_supported: true,
-				scopes_supported: MCP_SCOPES,
+				scopes_supported: store.config.mcp?.writesEnabled
+					? [...MCP_SCOPES, MCP_WRITE_SCOPE]
+					: MCP_SCOPES,
 				client_id_metadata_document_supported: true,
 			}),
 		{ detail: docs["/.well-known/oauth-authorization-server"]?.get },
@@ -301,10 +337,22 @@ export function createRemoteMcpApp(options: {
 				Response.json({
 					resource,
 					authorization_servers: [origin],
-					scopes_supported: ["quotum.read"],
+					scopes_supported: store.config.mcp?.writesEnabled
+						? ["quotum.read", MCP_WRITE_SCOPE]
+						: ["quotum.read"],
 					bearer_methods_supported: ["header"],
 				}),
 			{ detail: docs[path]?.get },
 		);
 	return app;
+}
+
+async function changeResult(work: () => Promise<unknown>): Promise<unknown> {
+	try {
+		return omitKeys(await work(), new Set(["metadata", "rawPayload", "payload", "previewToken"]));
+	} catch (error) {
+		if (error instanceof MerchantError || error instanceof BillingError)
+			throw new BillingApiError(error.message, error.code, error.status);
+		throw error;
+	}
 }
