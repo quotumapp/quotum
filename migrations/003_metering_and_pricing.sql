@@ -1808,6 +1808,7 @@ CREATE TABLE IF NOT EXISTS commercial_action_previews (
 	state_fingerprint TEXT NOT NULL CHECK (char_length(state_fingerprint) = 64),
 	intent JSONB NOT NULL CHECK (jsonb_typeof(intent) = 'object'),
 	preview JSONB NOT NULL CHECK (jsonb_typeof(preview) = 'object'),
+	provider_context JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(provider_context) = 'object'),
 	status TEXT NOT NULL DEFAULT 'previewed' CHECK (
 		status IN ('previewed', 'executing', 'executed')
 	),

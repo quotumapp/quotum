@@ -58,6 +58,20 @@ export class ProjectScopedBillingRepository {
 		private readonly project: ProjectInstanceContext,
 	) {}
 
+	findPaddleOperation(billingAccountId: string, idempotencyKey: string, accountIdentity: string) {
+		return this.repository.paddle.operationId(
+			this.project,
+			billingAccountId,
+			idempotencyKey,
+			accountIdentity,
+		);
+	}
+	getPaddlePlan(billingAccountId: string, planKey: string) {
+		return this.repository.paddle.plan(this.project, billingAccountId, planKey);
+	}
+	getPaddleProduct(productKey: string) {
+		return this.repository.paddle.product(this.project, productKey);
+	}
 	getPaddleCustomer(billingAccountId: string, accountIdentity: string) {
 		return this.repository.paddle.customer(this.project, billingAccountId, accountIdentity);
 	}

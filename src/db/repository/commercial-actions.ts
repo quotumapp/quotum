@@ -19,6 +19,7 @@ type SubscriptionCancellationResult = Extract<
 >;
 
 interface PreviewRow {
+	provider_context: Record<string, unknown>;
 	intent: CommercialActionIntent;
 	preview: CommercialActionPreview;
 	intent_hash: string;
@@ -50,11 +51,11 @@ export class CommercialActionRepository extends RepositoryModule {
 				drizzleSql`
 					INSERT INTO commercial_action_previews (
 						project_id, billing_account_id, preview_token, intent_kind,
-						intent_hash, state_fingerprint, intent, preview, expires_at
+						intent_hash, state_fingerprint, intent, preview, provider_context, expires_at
 					) VALUES (
 						${projectId}, ${draft.billingAccountId}, ${previewToken}, ${draft.intent.kind},
 						${draft.intentHash}, ${draft.stateFingerprint}, ${jsonb(draft.intent)},
-						${jsonb(preview)}, ${expiresAt.toISOString()}
+						${jsonb(preview)}, ${jsonb(draft.providerContext ?? {})}, ${expiresAt.toISOString()}
 					)
 					RETURNING id
 				`,
@@ -121,7 +122,7 @@ export class CommercialActionRepository extends RepositoryModule {
 					SET status = 'executing', execution_idempotency_key = ${input.idempotencyKey},
 						updated_at = now()
 					WHERE project_id = ${projectId} AND preview_token = ${input.previewToken}
-					RETURNING intent, preview, intent_hash, state_fingerprint, status,
+					RETURNING intent, preview, provider_context, intent_hash, state_fingerprint, status,
 						execution_idempotency_key, execution_result, expires_at
 				`,
 			);
@@ -196,8 +197,8 @@ async function completeExecutionInTx(
 		executor,
 		drizzleSql`
 			UPDATE commercial_action_previews
-			SET status = 'executed', execution_result = ${jsonb(input.result)},
-				executed_at = now(), updated_at = now()
+			SET status = 'executed', execution_result = COALESCE(execution_result, ${jsonb(input.result)}),
+				executed_at = COALESCE(executed_at, now()), updated_at = now()
 			WHERE project_id = ${projectId}
 				AND billing_account_id = ${input.billingAccountId}
 				AND preview_token = ${input.previewToken}
@@ -228,7 +229,7 @@ async function previewRow(
 	const row = await executeOne<PreviewRow>(
 		executor,
 		drizzleSql`
-			SELECT intent, preview, intent_hash, state_fingerprint, status,
+			SELECT intent, preview, provider_context, intent_hash, state_fingerprint, status,
 				execution_idempotency_key, execution_result, expires_at
 			FROM commercial_action_previews
 			WHERE project_id = ${projectId}
@@ -248,6 +249,7 @@ async function previewRow(
 
 function storedPreview(row: PreviewRow): StoredCommercialActionPreview {
 	return {
+		providerContext: row.provider_context,
 		intent: row.intent,
 		preview: row.preview,
 		status: row.status,

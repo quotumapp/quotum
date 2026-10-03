@@ -225,7 +225,7 @@ export const providerOperationMethods: Record<ProviderOperation, readonly Provid
 		"catalog.price.hybrid": [],
 		"catalog.price.postpaid_usage": [],
 		"checkout.hosted": ["checkout.createHosted"],
-		"checkout.plan": ["checkout.createPlan"],
+		"checkout.plan": ["checkout.createPlan", "commercial.execute"],
 		"purchase.verify": ["purchases.verify"],
 		"portal.session": ["portal.createSession"],
 		"payment_method.setup": ["commercial.execute"],

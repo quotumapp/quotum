@@ -8,6 +8,7 @@ import type { MerchantBillingCommand } from "../../src/platform/application/bill
 import { appleCapabilities } from "../../src/providers/apple/capabilities";
 import type { ProviderCapabilityReads } from "../../src/providers/capability-read-types";
 import { evaluateCapability } from "../../src/shared/provider-capabilities";
+import { storedCommercialPreview } from "../helpers/commercial-preview";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const project = projectInstanceContext("acme");
@@ -59,10 +60,12 @@ function recordingCapabilityReads(calls: string[][] = []): ProviderCapabilityRea
 
 function port({
 	stripe = requiredOnlyStripeService(),
+	paddle = null,
 	repository = {},
 	capabilityReads = recordingCapabilityReads(),
 }: {
 	stripe?: StripeBillingServiceLike | null;
+	paddle?: StripeBillingServiceLike | null;
 	repository?: Partial<BillingRepository>;
 	capabilityReads?: ProviderCapabilityReads;
 } = {}) {
@@ -74,6 +77,7 @@ function port({
 			appleStoreKitService: async () => null,
 			googlePlayBillingService: async () => null,
 			stripeBillingService: async () => stripe,
+			paddleBillingService: async () => paddle,
 		},
 		capabilityReads,
 	});
@@ -142,20 +146,22 @@ describe("merchant billing port", () => {
 	});
 
 	it("rejects each operation whose Stripe service lacks the method as not configured", async () => {
-		const billing = port();
+		const billing = port({
+			repository: { getCommercialActionPreview: async () => storedCommercialPreview() },
+		});
 
 		for (const [operation, adapterMethod, message, overrides] of [
 			["account.billing", "reads.billingAccount", "Billing account is unavailable", {}],
 			[
 				"commercial.preview",
 				"commercial.preview",
-				"Commercial previews are unavailable",
+				"Commercial previews are not available",
 				{ body: { intent: { kind: "checkout_product", productKey: "credits_100" } } },
 			],
 			[
 				"commercial.execute",
 				"commercial.execute",
-				"Commercial actions are unavailable",
+				"Commercial actions are not available",
 				{
 					body: { previewToken: "11111111-1111-4111-8111-111111111111" },
 					idempotencyKey: "execute-1",
@@ -180,6 +186,62 @@ describe("merchant billing port", () => {
 				},
 			});
 		}
+	});
+
+	it("uses the shared Paddle preview and account-scoped execution routing", async () => {
+		const stored = storedCommercialPreview("paddle");
+		const calls: unknown[] = [];
+		const paddle = {
+			...requiredOnlyStripeService(),
+			previewCommercialAction: async (input: unknown) => {
+				calls.push(input);
+				return stored.preview;
+			},
+			executeCommercialAction: async (input: unknown) => {
+				calls.push(input);
+				return {
+					kind: "checkout" as const,
+					sessionId: "txn_test",
+					url: "https://example.com/pay",
+					duplicate: false,
+				};
+			},
+		};
+		const billing = port({
+			stripe: null,
+			paddle,
+			repository: {
+				getCommercialActionPreview: async (context, account, token) => {
+					expect([context.projectInstanceId, account, token]).toEqual([
+						project.projectInstanceId,
+						"user_1",
+						stored.preview.previewToken,
+					]);
+					return stored;
+				},
+			},
+		});
+		expect(
+			await billing.dispatch(
+				command("commercial.preview", { body: { provider: "paddle", intent: stored.intent } }),
+			),
+		).toMatchObject({ status: 200, body: { data: { provider: "paddle" } } });
+		expect(
+			await billing.dispatch(
+				command("commercial.execute", {
+					body: { previewToken: stored.preview.previewToken },
+					idempotencyKey: "purchase",
+				}),
+			),
+		).toMatchObject({ status: 200, body: { data: { kind: "checkout", sessionId: "txn_test" } } });
+		expect(calls).toEqual([
+			{ billingAccountId: "user_1", intent: stored.intent },
+			{
+				billingAccountId: "user_1",
+				previewToken: stored.preview.previewToken,
+				idempotencyKey: "purchase",
+			},
+		]);
 	});
 
 	it("dispatches the capability reads for the environment and one billing account", async () => {

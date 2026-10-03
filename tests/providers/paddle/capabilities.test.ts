@@ -11,6 +11,7 @@ const qualified = new Set([
 	"catalog.product.subscription",
 	"catalog.price.flat",
 	"checkout.hosted",
+	"checkout.plan",
 	"webhook.ingest",
 	"event.replay",
 ]);

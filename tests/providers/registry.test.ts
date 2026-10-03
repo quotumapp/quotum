@@ -269,6 +269,23 @@ describe("provider registry", () => {
 		).rejects.toMatchObject({ code: "PADDLE_SANDBOX_ONLY" });
 	});
 
+	it("resolves recorded Paddle credentials without falling back to the active connection", async () => {
+		const { connections, resolved } = recordingConnections();
+		const versions: string[] = [];
+		connections.resolvePaddleVersion = async (context, versionId) => {
+			expect(context).toBe(project);
+			versions.push(versionId);
+			return versionId === configs.paddle.versionId ? configs.paddle : null;
+		};
+		const registry = realRegistry({ connections });
+		expect(await registry.paddleServiceVersion?.(project, configs.paddle.versionId)).toBeInstanceOf(
+			PaddleBillingService,
+		);
+		expect(await registry.paddleServiceVersion?.(project, "missing")).toBeNull();
+		expect(versions).toEqual([configs.paddle.versionId, "missing"]);
+		expect(resolved).toEqual([]);
+	});
+
 	it("rejects entries that disagree with their declaration or repeat a provider", () => {
 		const { getRepository } = fakeRepository();
 
@@ -721,7 +738,7 @@ describe("provider registry", () => {
 
 		expect(await rejection(registry.adapter(project, "stripe"))).toEqual(
 			new Error(
-				"Provider stripe adapter has no method for declared operations: checkout.hosted, checkout.plan, topup.customer_initiated",
+				"Provider stripe adapter has no method for declared operations: checkout.hosted, topup.customer_initiated",
 			),
 		);
 	});
@@ -747,7 +764,7 @@ describe("provider registry", () => {
 				operation: { savedPaymentMethod: false },
 			}),
 		).toMatchObject({ outcome: "blocked", blockingLayer: "operation" });
-		expect(await registry.verdict(project, "paddle", "checkout.plan")).toMatchObject({
+		expect(await registry.verdict(project, "paddle", "subscription.cancel")).toMatchObject({
 			provider: "paddle",
 			outcome: "blocked",
 			blockingLayer: "implementation",

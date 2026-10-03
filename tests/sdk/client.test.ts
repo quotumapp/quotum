@@ -33,6 +33,27 @@ describe("BillingClient", () => {
 		expect(calls[1]?.headers.get("x-billing-operator-key")).toBe("operator");
 	});
 
+	it("selects Paddle only in the preview request and preserves the default Stripe wire shape", async () => {
+		const bodies: unknown[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "test",
+			fetch: async (_url, init) => {
+				bodies.push(JSON.parse(String(init?.body)));
+				return Response.json({ success: true, data: {} });
+			},
+		});
+		const intent = { kind: "checkout_plan" as const, planKey: "fixed", quantities: {} };
+		await client.commercial.preview("account", intent);
+		await client.commercial.preview("account", intent, "paddle");
+		await client.commercial.execute("account", "11111111-1111-4111-8111-111111111111", "purchase");
+		expect(bodies).toEqual([
+			{ intent },
+			{ provider: "paddle", intent },
+			{ previewToken: "11111111-1111-4111-8111-111111111111" },
+		]);
+	});
+
 	it("reads a provider operation receipt without retrying a commercial mutation", async () => {
 		const calls: Request[] = [];
 		const receipt = {

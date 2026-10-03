@@ -526,13 +526,14 @@ describe("declaration helpers the runtime gates read", () => {
 			"stripe",
 		]);
 		expect(providersImplementing("topup.automatic")).toEqual(["stripe"]);
-		expect(providersImplementing("checkout.plan")).toEqual(["stripe"]);
+		expect(providersImplementing("checkout.plan")).toEqual(["stripe", "paddle"]);
 		expect(
 			providerOperations.filter((operation) => providersImplementing(operation).includes("paddle")),
 		).toEqual([
 			"catalog.product.subscription",
 			"catalog.price.flat",
 			"checkout.hosted",
+			"checkout.plan",
 			"webhook.ingest",
 			"event.replay",
 		]);
@@ -639,7 +640,7 @@ describe("declaration helpers the runtime gates read", () => {
 			expect(() =>
 				commercialPreviewProvider(providerCapabilityDeclaration("apple"), action),
 			).toThrow(`Provider apple does not implement ${operation}`);
-			if (action === "checkout_product")
+			if (action === "checkout_product" || action === "checkout_plan")
 				expect(commercialPreviewProvider(providerCapabilityDeclaration("paddle"), action)).toBe(
 					"paddle",
 				);
@@ -650,7 +651,7 @@ describe("declaration helpers the runtime gates read", () => {
 		}
 	});
 
-	it("leaves Stripe as the only provider behind the commercial wire literal", () => {
+	it("leaves Stripe as the only provider implementing every commercial action", () => {
 		const operations = Object.values(commercialActionOperations);
 		expect(
 			admittedProviders().filter((provider) =>

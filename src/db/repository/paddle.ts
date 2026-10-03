@@ -4,12 +4,14 @@ import { BillingError } from "../../billing/errors";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { type PaddlePriceBinding, paddlePriceBindingSchema } from "../../providers/paddle/catalog";
 import type { NormalizedPaddleEvent } from "../../providers/paddle/normalizer";
+import { type PaddleCommercialTarget, paddlePlanPinSchema } from "../../providers/paddle/plan";
 import type { PaddleSubscription, PaddleTransaction } from "../../providers/paddle/schemas";
 import { RepositoryModule } from "./base";
 import { materializeSubscriptionAllocations } from "./catalog-allocations";
 import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
 import { ensureCustomer, upsertProviderCustomer } from "./identities";
 import { upsertPurchase, upsertSubscription } from "./mutations";
+import { paddlePlanTarget } from "./paddle-plans";
 import { executeOne } from "./query";
 import { recordStoreEventProcessingResult } from "./store-events";
 import type { StoreProductIdentityRow } from "./types";
@@ -21,6 +23,42 @@ type SubscriptionEvent = Extract<NormalizedPaddleEvent, { kind: "subscription" }
 
 /** Persists the initial fixed-price sandbox scope through the normal entitlement/projection path. */
 export class PaddleBillingRepository extends RepositoryModule {
+	async operationId(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		idempotencyKey: string,
+		accountIdentity: string,
+	) {
+		const row = await executeOne<{ id: string }>(
+			this.database,
+			sql`SELECT id FROM provider_operations WHERE project_id = ${project.projectInstanceId} AND billing_account_id = ${billingAccountId} AND provider = 'paddle' AND provider_account_id = ${accountIdentity} AND idempotency_key = ${idempotencyKey} AND operation = 'checkout.hosted'`,
+		);
+		return row?.id ?? null;
+	}
+	plan(project: ProjectInstanceContext, billingAccountId: string, planKey: string) {
+		return paddlePlanTarget(this.database, project.projectInstanceId, billingAccountId, planKey);
+	}
+	async product(
+		project: ProjectInstanceContext,
+		productKey: string,
+	): Promise<PaddleCommercialTarget> {
+		const row = await executeOne<{ id: string; name: string }>(
+			this.database,
+			sql`
+			SELECT sp.id, p.name FROM store_products sp JOIN products p ON p.project_id = sp.project_id AND p.id = sp.product_id
+			WHERE sp.project_id = ${project.projectInstanceId} AND sp.provider = 'paddle' AND sp.channel = 'web' AND sp.active = true AND p.active = true AND p.key = ${productKey} AND p.type = 'subscription'
+		`,
+		);
+		if (!row) mismatch();
+		return {
+			productKey,
+			name: row.name,
+			priceKey: productKey,
+			storeProductId: row.id,
+			binding: await this.binding(project, productKey),
+			plan: null,
+		};
+	}
 	async customer(
 		project: ProjectInstanceContext,
 		billingAccountId: string,
@@ -124,6 +162,7 @@ export class PaddleBillingRepository extends RepositoryModule {
 				request: {
 					customerId: string;
 					bindings: PaddlePriceBinding[];
+					plan?: unknown;
 				};
 			}>(
 				tx,
@@ -237,7 +276,33 @@ export class PaddleBillingRepository extends RepositoryModule {
 					updateProduct: false,
 					identityError: "Paddle subscription identity mismatch",
 				});
+				if (intent.request.plan !== undefined) {
+					const pin = paddlePlanPinSchema.parse(intent.request.plan);
+					if (pin.storeProductId !== product.id) mismatch();
+					const pinned = await executeOne(
+						tx,
+						sql`
+						UPDATE subscriptions s SET plan_version_id = pv.id, catalog_revision_id = pv.catalog_revision_id
+						FROM plan_versions pv JOIN price_components pc ON pc.project_id = pv.project_id AND pc.plan_version_id = pv.id
+						WHERE s.project_id = ${projectId} AND s.id = ${subscriptionId} AND pv.project_id = s.project_id
+						AND pv.id = ${pin.planVersionId}::bigint AND pv.catalog_revision_id = ${pin.catalogRevisionId}::bigint AND pc.id = ${pin.priceComponentId}::bigint
+						AND (s.plan_version_id IS NULL OR s.plan_version_id = pv.id) RETURNING s.id
+					`,
+					);
+					if (!pinned) mismatch();
+					await executeOne(
+						tx,
+						sql`
+						INSERT INTO subscription_items(project_id, subscription_id, price_component_id, quantity, unit_amount_minor, currency, active, starts_at)
+						SELECT ${projectId}, ${subscriptionId}, pc.id, 1, pc.unit_amount_minor, pc.currency, true, ${start.toISOString()}
+						FROM price_components pc WHERE pc.project_id = ${projectId} AND pc.id = ${pin.priceComponentId}::bigint
+						ON CONFLICT(project_id, subscription_id, price_component_id) DO UPDATE SET quantity=1, active=true, ends_at=NULL, updated_at=now()
+						RETURNING id
+					`,
+					);
+				}
 				await materializeSubscriptionAllocations(tx, {
+					preservePlanVersion: intent.request.plan !== undefined,
 					projectId,
 					customerId: customer.id,
 					storeProductId: product.id,

@@ -57,6 +57,8 @@ async function resolveSubscriptionPlanVersion(
 		storeProductId: string;
 		subscriptionId: string;
 		snapshot?: ProviderSnapshotContext;
+		/** A durable checkout intent already supplied the authoritative fixed plan version. */
+		preservePlanVersion?: boolean;
 	},
 ): Promise<{
 	planVersionId: string;
@@ -225,6 +227,16 @@ async function resolveSubscriptionPlanVersion(
 					planVersionId: String(row.binding_version_id),
 					catalogRevisionId: String(row.binding_revision_id),
 				};
+	if (current && input.preservePlanVersion)
+		return {
+			...current,
+			changed: false,
+			changeId: null,
+			previousPlanVersionId: current.planVersionId,
+			carryOver: null,
+			providerSwitch: false,
+		};
+
 	// 1. A subscription without a version adopts what the purchased product is bound to.
 	if (current === null) {
 		return binding === null
@@ -371,6 +383,8 @@ export async function materializeSubscriptionAllocations(
 		periodStartAt: Date;
 		periodEndAt: Date | null;
 		snapshot?: ProviderSnapshotContext;
+		/** A durable checkout intent already supplied the authoritative fixed plan version. */
+		preservePlanVersion?: boolean;
 	},
 ): Promise<number> {
 	const version = await resolveSubscriptionPlanVersion(executor, input);

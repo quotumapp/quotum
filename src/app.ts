@@ -121,6 +121,7 @@ export function createApp({
 	projectProviderServices,
 	providerRegistry: sharedProviderRegistry,
 	providerCapabilityReads,
+	commercialPreviewReader,
 	providerOperationStore,
 	providerOperationReconciler,
 	adminBillingReader,
@@ -515,6 +516,9 @@ export function createApp({
 
 	registerCustomerRoutes({
 		app,
+		commercialPreviewReader: commercialPreviewReader ?? {
+			getCommercialActionPreview: (...args) => getRepository().getCommercialActionPreview(...args),
+		},
 		verifyLimiter: createVerifyLimiter(),
 		rateLimitKeyOptions,
 		entitlementService: service,

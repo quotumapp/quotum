@@ -126,6 +126,7 @@
     {
       "code": "BASE_PLAN_ALREADY_ACTIVE",
       "sources": [
+        "src/providers/paddle/commercial.ts",
         "src/providers/stripe/saved-card-plan.ts"
       ]
     },
@@ -182,6 +183,7 @@
       "code": "BILLING_PLAN_NOT_FOUND",
       "sources": [
         "src/db/repository/controls-enterprise.ts",
+        "src/db/repository/paddle-plans.ts",
         "src/db/repository/plan-grants.ts",
         "src/db/repository/stripe.ts"
       ]
@@ -218,6 +220,7 @@
     {
       "code": "BILLING_PROVIDER_NOT_CONFIGURED",
       "sources": [
+        "src/app/commercial-actions.ts",
         "src/app/provider-services.ts",
         "src/billing/errors.ts"
       ]
@@ -291,7 +294,8 @@
     {
       "code": "COMMERCIAL_PREVIEW_MISMATCH",
       "sources": [
-        "src/db/repository/commercial-actions.ts"
+        "src/db/repository/commercial-actions.ts",
+        "src/providers/paddle/commercial.ts"
       ]
     },
     {
@@ -306,6 +310,7 @@
       "sources": [
         "src/db/repository/commercial-actions.ts",
         "src/db/repository/recurring-pricing.ts",
+        "src/providers/paddle/commercial.ts",
         "src/providers/stripe/service.ts"
       ]
     },
@@ -554,6 +559,7 @@
     {
       "code": "IDEMPOTENCY_CONFLICT",
       "sources": [
+        "src/app/commercial-actions.ts",
         "src/db/repository.ts",
         "src/db/repository/apple-promotions.ts",
         "src/db/repository/balance-adjustments.ts",
@@ -567,6 +573,8 @@
         "src/platform/connections/lifecycle.ts",
         "src/platform/mcp/changes.ts",
         "src/platform/store.ts",
+        "src/providers/paddle/commercial.ts",
+        "src/providers/paddle/service.ts",
         "src/providers/stripe/service.ts"
       ]
     },
@@ -889,6 +897,7 @@
     {
       "code": "PADDLE_CUSTOMER_EMAIL_REQUIRED",
       "sources": [
+        "src/providers/paddle/commercial.ts",
         "src/providers/paddle/service.ts"
       ]
     },
@@ -926,6 +935,7 @@
       "code": "PADDLE_OPERATION_UNSUPPORTED",
       "sources": [
         "src/providers/paddle/commands.ts",
+        "src/providers/paddle/commercial.ts",
         "src/providers/paddle/service.ts"
       ]
     },
@@ -933,6 +943,12 @@
       "code": "PADDLE_PAYMENT_PAGE_INVALID",
       "sources": [
         "src/providers/paddle/commands.ts"
+      ]
+    },
+    {
+      "code": "PADDLE_PLAN_UNSUPPORTED",
+      "sources": [
+        "src/db/repository/paddle-plans.ts"
       ]
     },
     {

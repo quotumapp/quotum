@@ -15433,7 +15433,8 @@
               },
               "provider": {
                 "enum": [
-                  "stripe"
+                  "stripe",
+                  "paddle"
                 ],
                 "type": "string"
               },
@@ -27950,6 +27951,13 @@
                         "type": "object"
                       }
                     ]
+                  },
+                  "provider": {
+                    "enum": [
+                      "stripe",
+                      "paddle"
+                    ],
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -74348,6 +74356,13 @@
                         "type": "object"
                       }
                     ]
+                  },
+                  "provider": {
+                    "enum": [
+                      "stripe",
+                      "paddle"
+                    ],
+                    "type": "string"
                   }
                 },
                 "required": [
