@@ -133,43 +133,46 @@ export interface CarriedUsageEdge {
 }
 
 /**
- * How much of what `holder` consumed came from `source` through earlier carries: written onto it
- * from `source` directly, or from an allowance that had itself been carried usage from `source`, up
- * to what that carry applied.
- */
-function carriedFrom(
-	edges: readonly CarriedUsageEdge[],
-	holder: string,
-	source: string,
-	visiting: ReadonlySet<string>,
-): bigint {
-	let total = 0n;
-	for (const edge of edges) {
-		if (edge.to !== holder || edge.applied <= 0n) continue;
-		if (edge.from === source) {
-			total += edge.applied;
-		} else if (!visiting.has(edge.from)) {
-			const through = carriedFrom(edges, edge.from, source, new Set([...visiting, holder]));
-			total += through < edge.applied ? through : edge.applied;
-		}
-	}
-	return total;
-}
-
-/**
- * Usage an outgoing allowance and the allowance it is carried onto already share. A return resumes
- * an allowance with its use kept, so the outgoing allowance's consumption can include usage carried
- * from it, and the resumed allowance can hold usage carried from the outgoing one on an earlier
- * switch. That usage is counted once: only the rest is carried.
+ * Usage two allowances already share. Replay carries in change order: each allowance holds a
+ * quantity of each distinct usage portion, identified by the edge that first carried it. A carry
+ * copies only portions its target lacks; any remainder is previously uncarried use of its source.
+ * A capped carry copies a prefix of a portion, so later overlap is the smaller held quantity.
+ * Summing paths instead loses this identity when carries form cycles or share a common ancestor.
  */
 export function sharedCarriedUsage(
 	edges: readonly CarriedUsageEdge[],
 	origin: string,
 	target: string,
 ): bigint {
-	return (
-		carriedFrom(edges, origin, target, new Set()) + carriedFrom(edges, target, origin, new Set())
-	);
+	const holdings = new Map<string, Map<number, bigint>>();
+	for (const [portion, edge] of edges.entries()) {
+		if (edge.applied <= 0n) continue;
+		const from = holdings.get(edge.from) ?? new Map<number, bigint>();
+		const to = holdings.get(edge.to) ?? new Map<number, bigint>();
+		holdings.set(edge.from, from);
+		holdings.set(edge.to, to);
+		let remaining = edge.applied;
+		for (const [id, quantity] of from) {
+			const held = to.get(id) ?? 0n;
+			const missing = quantity - held;
+			if (missing <= 0n) continue;
+			const copied = missing < remaining ? missing : remaining;
+			to.set(id, held + copied);
+			remaining -= copied;
+			if (remaining === 0n) break;
+		}
+		if (remaining > 0n) {
+			from.set(portion, remaining);
+			to.set(portion, remaining);
+		}
+	}
+	let shared = 0n;
+	const incoming = holdings.get(target);
+	for (const [portion, quantity] of holdings.get(origin) ?? []) {
+		const held = incoming?.get(portion) ?? 0n;
+		shared += quantity < held ? quantity : held;
+	}
+	return shared;
 }
 
 /** The recorded carries onto a subscription's allowances. */
@@ -188,12 +191,15 @@ async function carriedUsageEdges(
 			SELECT carried.from_allocation_id, carried.to_allocation_id,
 				carried.applied_quantity::text AS applied
 			FROM carried_usages carried
+			JOIN subscription_changes change
+				ON change.project_id = carried.project_id AND change.id = carried.subscription_change_id
 			JOIN balance_allocations allocation
 				ON allocation.project_id = carried.project_id
 				AND allocation.id = carried.to_allocation_id
 			WHERE carried.project_id = ${projectId}
 				AND allocation.subscription_id = ${subscriptionId}
 				AND carried.applied_quantity > 0
+			ORDER BY change.created_at, change.id, carried.from_allocation_id
 		`,
 	);
 	return rows.map((row) => ({
