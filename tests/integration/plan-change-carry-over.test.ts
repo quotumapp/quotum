@@ -330,6 +330,71 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		]);
 	});
 
+	it("counts each unit of usage once when it is carried around three plans", async () => {
+		await threePlans("100");
+		await sync(1);
+		// 20 on each plan in turn: A, B, C, back to A, then back to B.
+		await spend(20, "three-plans-a");
+		await commercialSwitch("other-plan", "three-plans-to-b", { usages: ["ai_credits"] });
+		await sync(2);
+		await spend(20, "three-plans-b");
+		await commercialSwitch("third-plan", "three-plans-to-c", { usages: ["ai_credits"] });
+		await sync(3);
+		await spend(20, "three-plans-c");
+		await commercialSwitch("migration-plan", "three-plans-back-to-a", { usages: ["ai_credits"] });
+		await sync(1);
+		expect(await usage()).toEqual({ consumed: "60", available: "40" });
+		await spend(20, "three-plans-a-again");
+		const back = await commercialSwitch("other-plan", "three-plans-back-to-b", {
+			usages: ["ai_credits"],
+		});
+		expect(back).toMatchObject({ features: [{ usage: { carried: true, quantity: "40" } }] });
+		await sync(2);
+
+		// 80 units were used against a 100-unit allowance.
+		expect(await usage()).toEqual({ consumed: "80", available: "20" });
+		const over = await context.repository.consumeUsage(project, {
+			billingAccountId: "migration-stripe",
+			featureKey: "model_tokens",
+			quantity: "40",
+			idempotencyKey: "three-plans-over",
+		});
+		expect(over.allowed).toBe(false);
+		expect(await usage()).toEqual({ consumed: "80", available: "20" });
+		// Later returns and duplicate provider syncs keep the same consumption.
+		await commercialSwitch("third-plan", "three-plans-back-to-c", { usages: ["ai_credits"] });
+		await sync(3);
+		await sync(3);
+		expect(await usage()).toEqual({ consumed: "80", available: "20" });
+	});
+
+	it("counts usage two plans were both carried from one allowance once", async () => {
+		await threePlans("100");
+		await sync(1);
+		// 1 on each plan in turn: A, B, back to A, C, then back to B.
+		await spend(1, "common-source-a");
+		await commercialSwitch("other-plan", "common-source-to-b", { usages: ["ai_credits"] });
+		await sync(2);
+		await spend(1, "common-source-b");
+		await commercialSwitch("migration-plan", "common-source-back-to-a", {
+			usages: ["ai_credits"],
+		});
+		await sync(1);
+		await spend(1, "common-source-a-again");
+		await commercialSwitch("third-plan", "common-source-to-c", { usages: ["ai_credits"] });
+		await sync(3);
+		await spend(1, "common-source-c");
+		expect(await usage()).toEqual({ consumed: "4", available: "96" });
+		const back = await commercialSwitch("other-plan", "common-source-back-to-b", {
+			usages: ["ai_credits"],
+		});
+		expect(back).toMatchObject({ features: [{ usage: { carried: true, quantity: "2" } }] });
+		await sync(2);
+
+		// 4 units were used.
+		expect(await usage()).toEqual({ consumed: "4", available: "96" });
+	});
+
 	it("refuses carry-over on a period-end change, for an unallocated feature and on the direct route", async () => {
 		await addAllowance(1, "100");
 		await addAllowance(2, "300");
@@ -569,6 +634,125 @@ async function separatePlans(): Promise<void> {
 		UPDATE plans plan SET active_version_id = version.id
 		FROM plan_versions version WHERE version.plan_id = plan.id
 	`;
+}
+
+/**
+ * Three plans that each grant the same monthly `ai_credits` allowance: versions 1 and 2 of the
+ * migration plan become `migration-plan` and `other-plan`, and a third version, with its own Stripe
+ * prices, becomes `third-plan`.
+ */
+async function threePlans(quantity: string): Promise<void> {
+	await context.sql`
+		INSERT INTO plan_versions (
+			project_id, plan_id, catalog_revision_id, version, status, currency,
+			base_amount_minor, billing_interval, tier_rank
+		)
+		SELECT version.project_id, version.plan_id, version.catalog_revision_id, 3, 'published',
+			'USD', 2000, 'month', 30
+		FROM plan_versions version
+		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+		WHERE plan.key = 'migration-plan' AND version.version = 2
+	`;
+	await context.sql`
+		INSERT INTO plan_items (
+			project_id, plan_version_id, feature_id, item_kind, quantity,
+			reset_interval, allocation_scope
+		)
+		SELECT version.project_id, version.id, feature.id, 'licensed_quantity', 1, NULL, 'license_pool'
+		FROM plan_versions version
+		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+		JOIN features feature
+			ON feature.project_id = version.project_id AND feature.key = 'licensed_seats'
+		WHERE plan.key = 'migration-plan' AND version.version = 3
+	`;
+	await context.sql`
+		INSERT INTO price_components (
+			project_id, plan_version_id, plan_item_id, key, component_kind, charge_timing,
+			currency, unit_amount_minor, billing_units, billing_interval,
+			minimum_quantity, maximum_quantity
+		)
+		SELECT version.project_id, version.id, NULL, 'base', 'base', 'in_advance',
+			'USD', version.base_amount_minor, 1, 'month', 1, 1
+		FROM plan_versions version
+		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+		WHERE plan.key = 'migration-plan' AND version.version = 3
+		UNION ALL
+		SELECT version.project_id, version.id, item.id, 'seats', 'licensed', 'in_advance',
+			'USD', 200, 1, 'month', 1, 100
+		FROM plan_versions version
+		JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+		JOIN plan_items item
+			ON item.project_id = version.project_id AND item.plan_version_id = version.id
+		WHERE plan.key = 'migration-plan' AND version.version = 3
+	`;
+	await context.sql`
+		INSERT INTO store_products (
+			project_id, product_id, provider, channel, external_product_id,
+			external_price_id, billing_period, currency, price_amount
+		)
+		SELECT project.id, product.id, 'stripe', 'web',
+			concat('prod_migrate_v3_', component.kind), concat('price_migrate_v3_', component.kind),
+			'month', 'USD', component.amount
+		FROM projects project
+		JOIN products product ON product.project_id = project.id AND product.key = 'premium_monthly'
+		CROSS JOIN (VALUES ('base', 2000), ('seats', 200)) AS component(kind, amount)
+		WHERE project.key = 'acme'
+	`;
+	await context.sql`
+		INSERT INTO provider_price_bindings (
+			project_id, price_component_id, store_product_id, provider, channel, status
+		)
+		SELECT price.project_id, price.id, store.id, 'stripe', 'web', 'published'
+		FROM price_components price
+		JOIN plan_versions version
+			ON version.project_id = price.project_id AND version.id = price.plan_version_id
+		JOIN store_products store ON store.project_id = price.project_id
+			AND store.external_price_id = concat('price_migrate_v3_', price.key)
+		WHERE version.version = 3
+	`;
+	await context.sql`
+		INSERT INTO provider_plan_bindings (
+			project_id, plan_version_id, store_product_id, provider, channel, status
+		)
+		SELECT price.project_id, price.plan_version_id, binding.store_product_id,
+			'stripe', 'web', 'published'
+		FROM price_components price
+		JOIN plan_versions version
+			ON version.project_id = price.project_id AND version.id = price.plan_version_id
+		JOIN provider_price_bindings binding
+			ON binding.project_id = price.project_id AND binding.price_component_id = price.id
+		WHERE price.key = 'base' AND version.version = 3
+	`;
+	for (const version of [1, 2, 3]) await addAllowance(version, quantity);
+	await context.sql`
+		INSERT INTO plans (project_id, key, name, active)
+		SELECT plan.project_id, added.key, added.name, true
+		FROM plans plan
+		CROSS JOIN (VALUES ('other-plan', 'Other plan'), ('third-plan', 'Third plan'))
+			AS added(key, name)
+		WHERE plan.key = 'migration-plan'
+	`;
+	await context.sql`
+		UPDATE plan_versions version SET plan_id = moved.id
+		FROM plans original, plans moved
+		WHERE original.key = 'migration-plan' AND version.plan_id = original.id
+			AND moved.project_id = original.project_id
+			AND moved.key = CASE version.version WHEN 2 THEN 'other-plan' WHEN 3 THEN 'third-plan' END
+	`;
+	await context.sql`
+		UPDATE plans plan SET active_version_id = version.id
+		FROM plan_versions version WHERE version.plan_id = plan.id
+	`;
+}
+
+/** What the account has used of its `ai_credits` and what is left. */
+async function usage(): Promise<{ consumed: string; available: string | null }> {
+	const balance = await context.repository.getMeteringBalance(
+		project,
+		"migration-stripe",
+		"ai_credits",
+	);
+	return { consumed: balance.consumed, available: balance.available };
 }
 
 /**

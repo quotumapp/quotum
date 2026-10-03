@@ -66,9 +66,12 @@ An immediate `subscription_change` intent can carry some of that over, per consu
   does not carry. It is capped at what the new allowance holds; usage beyond it is forgiven, not
   charged. Usage is counted once: when a return resumes an allowance that already holds some of
   the outgoing allowance's usage, because that usage was carried from it, or onto it on an earlier
-  switch, only the rest is carried. Switching from plan A to B and back with `usages` each time
-  leaves A with its own use plus what was used on B, not A's use twice. A carry of nothing is not
-  recorded in `carried_usages`.
+  switch, only the rest is carried. This includes usage shared through a third plan: switching
+  A → B → C → A → B with `usages` each time and consuming 20 before each switch leaves B with
+  80 consumed and 20 available when every plan grants 100 in the same window. Switching
+  A → B → A → C → B and consuming 1 before each switch leaves B with 4 consumed. Each carry
+  preserves the portions of usage already shared by the allowances, up to the quantity actually
+  applied by earlier carries. A carry of nothing is not recorded in `carried_usages`.
 - The preview reports `carryOver.features[]`, with each feature's current unused balance and the
   usage the switch would carry, and whether it carries. Those figures are indicative: the switch carries what the allowances hold
   when Quotum records the provider's update. When the provider reports the new version before the
