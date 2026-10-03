@@ -105,6 +105,18 @@ export const paddleTransactionSchema = z
 	.passthrough();
 export type PaddleTransaction = z.infer<typeof paddleTransactionSchema>;
 
+// Canceled drafts can lack calculated totals. Their authenticated identity proves cancellation.
+export const paddleTransactionIdentitySchema = paddleTransactionSchema.pick({
+	id: true,
+	origin: true,
+	status: true,
+	customer_id: true,
+	subscription_id: true,
+	collection_mode: true,
+	custom_data: true,
+});
+export type PaddleTransactionIdentity = z.infer<typeof paddleTransactionIdentitySchema>;
+
 export const paddleAdjustmentSchema = z
 	.object({
 		id: paddleId("adj"),

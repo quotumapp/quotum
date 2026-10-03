@@ -7,6 +7,7 @@ import { paddleId } from "./schemas";
 
 export const paddleRequiredEvents = [
 	"transaction.completed",
+	"transaction.canceled",
 	"subscription.created",
 	"subscription.updated",
 	"subscription.activated",

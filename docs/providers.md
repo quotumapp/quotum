@@ -20,7 +20,7 @@ takes `interval` and an optional `intervalCount` per subscription entry.
 ## Paddle qualification work
 
 Paddle is admitted for **sandbox fixed subscription checkout**. The runtime exposes hosted product
-checkout, signed webhook ingestion and stored-event replay, with normal subscription, purchase,
+checkout and common commercial preview/execute for fixed base plans, signed webhook ingestion and stored-event replay, with normal subscription, purchase,
 entitlement and `billing_state_v1` projection persistence. Only one fixed recurring item, quantity
 one, without a trial is qualified. The Paddle price must have minimum and maximum quantity both
 set to one; checkout validates its product, currency, amount and cadence before any write. Catalog
@@ -35,8 +35,23 @@ repeatable database regressions. No live-account payment or production deploymen
 
 Trials, seats, multiple items, add-ons, one-time products, portal, public cancellation/change actions,
 refunds, promotions, usage settlement and top-ups remain unavailable. Candidate command and
-normalization helpers for those operations are not runtime support. The generic commercial preview
-flow and merchant UI have not adopted Paddle; use the explicit trusted-backend checkout route.
+normalization helpers for those operations are not runtime support. Trusted backends and the merchant
+billing port can select `provider: "paddle"` on the common commercial preview route. The merchant UI
+has not adopted that choice. Fixed-plan checkout requires a published, account-visible base plan
+with exactly one flat base component bound to an active Paddle subscription price; no trial,
+additional paid component, paid overage or entity-scoped allocation is accepted. Quantities are
+omitted/empty or the base component key with value one. The configured payment page is used;
+custom return URLs, explicit expiry and promotion options are refused. See
+[common commercial checkout](subscriptions.md#paddle-fixed-plan-checkout) for the request/response.
+
+The common flow has database and HTTP regression coverage, including catalog drift, plan-version
+pinning, concurrent previews, merchant receipt replay and uncertain-write recovery. On 2026-10-04,
+a real quantity-one fixed-plan commercial execution created a transaction; a competing preview
+returned `409 PADDLE_CHECKOUT_PENDING`. Real signed `transaction.canceled` delivery and an
+authenticated transaction read closed the reservation, allowing the previously blocked preview to
+create a replacement. The original receipt replayed unchanged. Both transactions were canceled,
+the test customer archived, and the temporary notification setting/domain approval disabled/removed.
+This check did not pay for the common-route checkout or widen the qualified lifecycle scope.
 Production keys and production/internal project environments are rejected.
 
 ### Connection and payment page
@@ -49,6 +64,9 @@ Validation reads the seller's notification setting and checks its secret, active
 event subscriptions and exact destination. The URL must be public HTTPS at
 `/v1/projects/:projectInstanceKey/webhooks/paddle` for the selected instance. This API check does
 not claim receipt of an event; sandbox commit is permitted and real delivery must then be tested.
+The required event set includes `transaction.canceled` so unpaid checkout reservations can close;
+add it to existing notification settings before enabling this runtime. Losing that delivery keeps
+the reservation open until the notification is replayed and authenticated state proves cancellation.
 There is no Paddle draft-event setup receiver or production activation path in this increment.
 
 Host Paddle.js on the approved `paymentPageUrl`, initialize it with the sandbox client token, and
@@ -154,7 +172,7 @@ connections cannot serve. See
 | Postpaid usage prices<br>`catalog.price.postpaid_usage` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts) | Requires policy decision (DEC-14) · Quotum-composed via non-catalog transaction item |
 | **Checkout** | | | | |
 | Hosted product checkout<br>`checkout.hosted` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Conditional · Native<br>Tests: [integration/paddle-flows](../tests/integration/paddle-flows.test.ts) |
-| Hosted plan checkout<br>`checkout.plan` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Planned · Native |
+| Hosted plan checkout<br>`checkout.plan` | Unsupported | Unsupported | Supported · Native<br>Tests: [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts) | Conditional · Quotum-composed via checkout.hosted<br>Tests: [integration/paddle-flows](../tests/integration/paddle-flows.test.ts) |
 | **Purchase verification** | | | | |
 | Purchase verification<br>`purchase.verify` | Supported · Native<br>Tests: [providers/apple/service](../tests/providers/apple/service.test.ts), [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [providers/google/service](../tests/providers/google/service.test.ts), [integration/google-flows](../tests/integration/google-flows.test.ts) | Unsupported | Not evaluated |
 | **Customer portal** | | | | |

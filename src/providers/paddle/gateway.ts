@@ -8,6 +8,7 @@ import {
 	type PaddleTransaction,
 	paddleId,
 	paddleSubscriptionSchema,
+	paddleTransactionIdentitySchema,
 	paddleTransactionSchema,
 } from "./schemas";
 
@@ -54,6 +55,13 @@ export class PaddleGateway {
 	async transaction(id: string) {
 		const response = await this.client.get(`/transactions/${paddleId("txn").parse(id)}`);
 		const transaction = paddleTransactionSchema.parse(response.data);
+		if (transaction.id !== id) throw new Error("Paddle returned a different transaction");
+		return transaction;
+	}
+
+	async transactionIdentity(id: string) {
+		const response = await this.client.get(`/transactions/${paddleId("txn").parse(id)}`);
+		const transaction = paddleTransactionIdentitySchema.parse(response.data);
 		if (transaction.id !== id) throw new Error("Paddle returned a different transaction");
 		return transaction;
 	}

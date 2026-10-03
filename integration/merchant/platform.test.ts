@@ -13,6 +13,7 @@ import type {
 import { capabilitiesFor, SESSION_COOKIE } from "../../src/platform/security";
 import { mutationTarget } from "../../src/platform/step-up";
 import type { ProviderEnvironmentCapabilities } from "../../src/providers/capability-read-types";
+import { storedCommercialPreview } from "../../tests/helpers/commercial-preview";
 import { createDeferred } from "../../tests/helpers/deferred";
 import {
 	assertOpenApiResponse,
@@ -20,7 +21,14 @@ import {
 	withOpenApiAssertions,
 } from "../../tests/helpers/openapi";
 import { createIntegrationBillingEnv } from "../../tests/integration/helpers/local-postgres";
-import { MerchantBrowser, merchantFixture, password, serviceToken, testConfig } from "./fixture";
+import {
+	MerchantBrowser,
+	merchantFixture,
+	password,
+	serviceToken,
+	grant as stepUpGrant,
+	testConfig,
+} from "./fixture";
 
 const f = merchantFixture();
 beforeEach(() => f.reset());
@@ -1142,6 +1150,70 @@ describe("merchant platform transactions", () => {
 			expect(dispatch).toHaveBeenCalledTimes(1);
 		} finally {
 			dispatch.mockRestore();
+		}
+	});
+
+	it("protects completed commercial replay with production step-up and preserves key ownership", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
+		const stored = storedCommercialPreview("paddle");
+		stored.status = "executed";
+		stored.executionIdempotencyKey = "purchase";
+		stored.executionResult = {
+			kind: "checkout",
+			sessionId: "txn_test",
+			url: "https://example.com/pay",
+			duplicate: false,
+		};
+		const path = `/api/billing/admin/billing-accounts/user_1/commercial-actions`;
+		const body = { previewToken: stored.preview.previewToken };
+		const headers = { ...sandbox, "x-quotum-environment": "production" };
+		// Keep the real merchant port and authorization; only the account-scoped billing read is synthetic.
+		const read = spyOn(f.repository, "getCommercialActionPreview").mockResolvedValue(stored);
+		try {
+			const unauthorized = await browser.request(path, body, { key: "purchase", headers });
+			expect(unauthorized.status).toBe(403);
+			expect((await unauthorized.json()).error.code).toBe("STEP_UP_REQUIRED");
+			const grant = await stepUpGrant(
+				f,
+				browser,
+				mutationTarget("POST", path, body),
+				"operations.write",
+			);
+			const first = await browser.request(path, body, {
+				key: "purchase",
+				headers: { ...headers, "x-quotum-step-up-grant": grant },
+			});
+			expect(first.status).toBe(200);
+			const receipt = await first.json();
+			expect(receipt.data).toEqual(stored.executionResult);
+			const repeated = await browser.request(path, body, { key: "purchase", headers });
+			expect(repeated.status).toBe(200);
+			expect(await repeated.json()).toEqual(receipt);
+			expect(read).toHaveBeenCalledTimes(1);
+			const unauthorizedNewKey = await browser.request(path, body, {
+				key: "other-purchase",
+				headers,
+			});
+			expect(unauthorizedNewKey.status).toBe(403);
+			expect((await unauthorizedNewKey.json()).error.code).toBe("STEP_UP_REQUIRED");
+			const nextGrant = await stepUpGrant(
+				f,
+				browser,
+				mutationTarget("POST", path, body),
+				"operations.write",
+			);
+			const conflict = await browser.request(path, body, {
+				key: "other-purchase",
+				headers: { ...headers, "x-quotum-step-up-grant": nextGrant },
+			});
+			expect(conflict.status).toBe(409);
+			expect((await conflict.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
+			expect(read).toHaveBeenCalledTimes(2);
+		} finally {
+			read.mockRestore();
 		}
 	});
 });

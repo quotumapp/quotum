@@ -168,11 +168,14 @@ export async function executeProviderOperation(input: {
 	project: ProjectInstanceContext;
 	store: ProviderOperationStore;
 	intent: PrepareProviderOperation;
+	/** Verify and bind any longer-lived checkout reservation before claiming a dispatch. */
+	beforeDispatch?: (operation: ProviderOperation) => Promise<void>;
 	write: (
 		operation: ProviderOperation,
 	) => Promise<{ providerObjectId: string; result: Record<string, unknown> }>;
 }): Promise<ProviderOperation> {
 	const operation = await input.store.prepare(input.project, input.intent);
+	if (operation.status === "prepared") await input.beforeDispatch?.(operation);
 	const lease = await input.store.claimDispatch(
 		input.project,
 		operation.billingAccountId,

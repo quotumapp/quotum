@@ -114,6 +114,65 @@ export const providerOperations = pgTable(
 	],
 );
 
+export const paddleCheckoutReservations = pgTable(
+	"paddle_checkout_reservations",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		billingAccountId: text("billing_account_id").notNull(),
+		ownerKind: text("owner_kind").$type<"commercial" | "direct">().notNull(),
+		idempotencyKey: text("idempotency_key").notNull(),
+		previewToken: uuid("preview_token"),
+		providerAccountId: text("provider_account_id").notNull(),
+		connectionVersionId: uuid("connection_version_id").notNull(),
+		target: jsonb("target").$type<Record<string, unknown>>().notNull(),
+		operationId: uuid("operation_id").references(() => providerOperations.id, {
+			onDelete: "restrict",
+		}),
+		closedAt: timestamp("closed_at", { withTimezone: true }),
+		closureReason: text("closure_reason").$type<"rejected" | "canceled" | "fulfilled">(),
+		...timestampColumns(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"paddle_checkout_reservations_billing_account_id_check",
+			sql`char_length(billing_account_id) BETWEEN 1 AND 200`,
+		),
+		check(
+			"paddle_checkout_reservations_owner_kind_check",
+			sql`owner_kind IN ('commercial', 'direct')`,
+		),
+		check(
+			"paddle_checkout_reservations_idempotency_key_check",
+			sql`char_length(idempotency_key) BETWEEN 1 AND 200`,
+		),
+		check("paddle_checkout_reservations_target_check", sql`jsonb_typeof(target) = 'object'`),
+		check(
+			"paddle_checkout_reservations_closure_reason_check",
+			sql`closure_reason IN ('rejected', 'canceled', 'fulfilled')`,
+		),
+		check(
+			"paddle_checkout_reservations_owner_check",
+			sql`(owner_kind = 'commercial') = (preview_token IS NOT NULL)`,
+		),
+		check(
+			"paddle_checkout_reservations_closure_check",
+			sql`(closed_at IS NULL) = (closure_reason IS NULL)`,
+		),
+		unique("paddle_checkout_reservations_owner_unique").on(
+			table.projectId,
+			table.billingAccountId,
+			table.ownerKind,
+			table.idempotencyKey,
+		),
+		uniqueIndex("idx_paddle_checkout_reservations_open")
+			.on(table.projectId, table.billingAccountId)
+			.where(sql`closed_at IS NULL`),
+	],
+);
+
 export const projects = pgTable(
 	"projects",
 	{
@@ -1188,6 +1247,10 @@ export const commercialActionPreviews = pgTable(
 		stateFingerprint: text("state_fingerprint").notNull(),
 		intent: jsonb("intent").$type<Record<string, unknown>>().notNull(),
 		preview: jsonb("preview").$type<Record<string, unknown>>().notNull(),
+		providerContext: jsonb("provider_context")
+			.$type<Record<string, unknown>>()
+			.notNull()
+			.default({}),
 		status: text("status")
 			.$type<"previewed" | "executing" | "executed">()
 			.notNull()
@@ -1219,6 +1282,10 @@ export const commercialActionPreviews = pgTable(
 		check(
 			"commercial_action_previews_preview_check",
 			sql`((jsonb_typeof(preview) = 'object'::text))`,
+		),
+		check(
+			"commercial_action_previews_provider_context_check",
+			sql`((jsonb_typeof(provider_context) = 'object'::text))`,
 		),
 		check(
 			"commercial_action_previews_status_check",

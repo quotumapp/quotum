@@ -163,6 +163,7 @@ export interface AppDependencies {
 	providerRegistry?: ProviderRegistry;
 	/** Defaults to reads over this app's provider registry and billing repository. */
 	providerCapabilityReads?: ProviderCapabilityReads;
+	commercialPreviewReader?: import("./commercial-actions").CommercialPreviewReader;
 	providerOperationStore?: Pick<ProviderOperationStore, "get">;
 	providerOperationReconciler?: Parameters<
 		typeof import("./provider-operation-routes").registerProviderOperationRoutes
@@ -177,6 +178,10 @@ export interface AppDependencies {
 }
 
 export interface ProjectProviderServiceResolver {
+	paddleBillingServiceVersion?(
+		project: ProjectInstanceContext,
+		versionId: string,
+	): Promise<WebBillingService | null>;
 	paddleBillingService?(
 		project: ProjectInstanceContext,
 		purpose?: "new" | "recovery",

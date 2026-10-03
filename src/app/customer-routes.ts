@@ -5,6 +5,11 @@ import { projectScopedRateLimitGuard } from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
+import {
+	type CommercialPreviewReader,
+	executeCommercial,
+	previewCommercial,
+} from "./commercial-actions";
 import * as responses from "./contracts/customer-responses";
 import {
 	requireAppleStoreKitService,
@@ -26,6 +31,7 @@ export interface CustomerRoutesDependencies {
 	rateLimitKeyOptions: { trustProxyHeaders?: boolean };
 	entitlementService: EntitlementService;
 	providerServices: ProjectProviderServiceResolver;
+	commercialPreviewReader: CommercialPreviewReader;
 	billingMetrics: BillingMetrics;
 	billingLogger: BillingLogger;
 	registerPostAuthGuard: (guard: PostAuthGuard) => void;
@@ -179,7 +185,10 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const commercialActionPreviewBodySchema = z
-	.object({ intent: commercialActionIntentSchema })
+	.object({
+		provider: z.enum(["stripe", "paddle"]).optional(),
+		intent: commercialActionIntentSchema,
+	})
 	.strict();
 export const commercialActionExecuteBodySchema = z.object({ previewToken: z.uuid() }).strict();
 
@@ -218,6 +227,7 @@ export function registerCustomerRoutes({
 	rateLimitKeyOptions,
 	entitlementService,
 	providerServices,
+	commercialPreviewReader,
 	billingMetrics,
 	billingLogger,
 	registerPostAuthGuard,
@@ -312,16 +322,11 @@ export function registerCustomerRoutes({
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/commercial-actions/preview",
 		async ({ params, body, project }) => {
-			const previewCommercialAction = requireProviderMethod(
-				requireStripeBillingService(
-					await providerServices.stripeBillingService(privateProject(project)),
-				),
-				"stripe",
-				"commercial.preview",
-				"Commercial previews are not available",
-			);
-			const preview = await previewCommercialAction({
+			const preview = await previewCommercial({
+				project: privateProject(project),
+				services: providerServices,
 				billingAccountId: params.billingAccountId,
+				provider: body.provider ?? "stripe",
 				intent: body.intent,
 			});
 			return { success: true, data: preview };
@@ -349,15 +354,10 @@ export function registerCustomerRoutes({
 			if (idempotencyKey === undefined || idempotencyKey === "" || idempotencyKey.length > 200) {
 				throw new BillingError("Invalid commercial action execution", "INVALID_REQUEST", 400);
 			}
-			const executeCommercialAction = requireProviderMethod(
-				requireStripeBillingService(
-					await providerServices.stripeBillingService(privateProject(project)),
-				),
-				"stripe",
-				"commercial.execute",
-				"Commercial actions are not available",
-			);
-			const result = await executeCommercialAction({
+			const result = await executeCommercial({
+				project: privateProject(project),
+				services: providerServices,
+				reader: commercialPreviewReader,
 				billingAccountId: params.billingAccountId,
 				previewToken: body.previewToken,
 				idempotencyKey,

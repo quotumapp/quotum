@@ -376,17 +376,17 @@ describe("commercial preview provider", () => {
 		);
 	});
 
-	it("keeps the wire literal equal to the providers that implement every commercial action", () => {
+	it("exposes providers that implement at least one commercial action", () => {
 		const operations = Object.values(commercialActionOperations);
 		const implementers = admittedProviders().filter((provider) =>
-			operations.every((operation) =>
+			operations.some((operation) =>
 				implementsOperation(providerCapabilityDeclaration(provider), operation),
 			),
 		);
 
-		const wireProviders: string[] = [previewResponseSchema.shape.data.shape.provider.value];
+		const wireProviders: string[] = [...previewResponseSchema.shape.data.shape.provider.options];
 
-		expect(implementers).toEqual(["stripe"]);
+		expect(implementers).toEqual(["stripe", "paddle"]);
 		expect(wireProviders).toEqual(implementers);
 	});
 });

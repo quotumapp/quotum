@@ -17,6 +17,10 @@ export const paddleRegistryEntry: ProviderRegistryEntry<"paddle"> = {
 		provider: "paddle",
 		declaration: paddleCapabilities,
 		accountIdentity,
+		commercial: adapterGroup({
+			preview: service.previewCommercialAction?.bind(service),
+			execute: service.executeCommercialAction?.bind(service),
+		}),
 		webhooks: { ingest: service.handleWebhook.bind(service) },
 		checkout: {
 			createHosted: service.createCheckoutSession.bind(service),
