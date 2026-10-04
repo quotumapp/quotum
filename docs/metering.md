@@ -112,7 +112,10 @@ spendable again: on an expired allocation it stays expired (and follows the allo
 rules), and on a revoked operator grant it is revoked too (see [Operator grants](grants.md#operator-grants-and-administrative-debits)).
 License pools follow the purchased subscription-item quantity: an
 entity license check honors active assignments in assignment order up to that capacity, so a seat
-downgrade stops authorizing the assignments beyond it until they are revoked.
+downgrade stops authorizing the assignments beyond it until they are revoked. The entity license
+check's optional `quantity` query parameter accepts decimal digits only, defaults to 1, and must
+be between 1 and 1,000,000 inclusive. Hexadecimal, exponent and decimal-point notation, signs,
+whitespace, empty values, and out-of-range quantities return `400 INVALID_REQUEST`.
 
 ## Automatic top-ups
 
