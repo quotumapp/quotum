@@ -268,12 +268,14 @@ its runner covers and on any skip, todo or conditional test modifier.
 
 ## Commits and pull requests
 
-Keep Git history linear. Each feature branch must contain one commit before merging: amend
-follow-up changes into that commit (`git commit --amend`) and squash any existing intermediate
-commits. Rebase onto current `main`; never merge `main` into the branch. After rewriting a
-published feature branch, push with `--force-with-lease`. Use squash merge for pull requests;
-never create merge commits. Do not rewrite published `main` except for an explicitly authorized
-history repair. CI runs on pull requests to any base branch, on merge groups and on
+Keep Git history linear. Feature branches and PRs may contain multiple commits. During
+implementation and review, add follow-up changes as separate commits and push normally so
+reviewers can compare iterations. Use squash merge when merging a PR into `main` so it produces
+one commit on `main`; the feature branch itself does not need to be rewritten into one commit.
+Reserve amending or squashing branch history for final merge preparation when needed. Rebase onto
+current `main`; never merge `main` into the branch. After rewriting a published feature branch,
+push with `--force-with-lease` and rerun required checks on the final commit. Never create merge
+commits. Do not rewrite published `main` except for an explicitly authorized history repair. CI runs on pull requests to any base branch, on merge groups and on
 every `main` commit; see [CONTRIBUTING.md](CONTRIBUTING.md#pull-requests) for the merge-queue flow.
 
 Use Conventional Commits with a subject under 72 characters: `feat`, `fix`, `perf`, `refactor`,
