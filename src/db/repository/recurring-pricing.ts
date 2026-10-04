@@ -489,6 +489,48 @@ export class RecurringPricingRepository extends RepositoryModule {
 		}));
 	}
 
+	async renewSubscriptionChangeLease(
+		projectId: string,
+		changeId: string,
+		workerId: string,
+	): Promise<boolean> {
+		const row = await executeOne(
+			this.database,
+			drizzleSql`
+			UPDATE subscription_changes SET locked_at = now(), updated_at = now()
+			WHERE project_id = ${projectId} AND id = ${changeId}::uuid
+				AND status = 'processing' AND locked_by = ${workerId}
+			RETURNING id
+		`,
+		);
+		return row !== null;
+	}
+
+	async renewUsageInvoiceJobLease(
+		projectId: string,
+		jobKind: UsageInvoiceJob["jobKind"],
+		jobId: string,
+		workerId: string,
+	): Promise<boolean> {
+		const row = await executeOne(
+			this.database,
+			jobKind === "period"
+				? drizzleSql`
+			UPDATE usage_invoice_periods SET locked_at = now(), updated_at = now()
+			WHERE project_id = ${projectId} AND id = ${jobId}::uuid
+				AND status = 'processing' AND locked_by = ${workerId}
+			RETURNING id
+		`
+				: drizzleSql`
+			UPDATE usage_invoice_adjustments SET locked_at = now(), updated_at = now()
+			WHERE project_id = ${projectId} AND id = ${jobId}::bigint
+				AND status = 'processing' AND locked_by = ${workerId}
+			RETURNING id
+		`,
+		);
+		return row !== null;
+	}
+
 	/**
 	 * Builds a claimed change after re-checking the lease. A lost lease returns null, which is not
 	 * the same as a job that cannot be built: only the latter reaches the failure path.

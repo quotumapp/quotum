@@ -8,6 +8,7 @@ import {
 	type RecurringBillingWorkerAdapter,
 	type RecurringBillingWorkerRepository,
 } from "../../src/workers/recurring-billing";
+import { heartbeatTimers } from "../helpers/heartbeat-timers";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const workerProjectResolver = projectContextResolver();
@@ -94,6 +95,12 @@ function recordingRepository({
 }) {
 	const calls: Array<Record<string, unknown>> = [];
 	const repository: RecurringBillingWorkerRepository = {
+		async renewSubscriptionChangeLease() {
+			return true;
+		},
+		async renewUsageInvoiceJobLease() {
+			return true;
+		},
 		async claimSubscriptionChanges() {
 			return changes.map(claimedChange);
 		},
@@ -159,6 +166,54 @@ function committedAdapter(): RecurringBillingWorkerAdapter {
 	};
 }
 
+it.each(
+	(["change", "period", "adjustment"] as const).flatMap((kind) =>
+		["before", "during", "unavailable"].map((stage) => ({ kind, stage })),
+	),
+)("fences $kind work when ownership is $stage", async ({ kind, stage }) => {
+	const clock = heartbeatTimers();
+	const { repository, calls } = recordingRepository({
+		changes: kind === "change" ? [changeFixture()] : [],
+		usage: kind === "change" ? [] : [usageFixture({ jobKind: kind })],
+	});
+	let owned = stage !== "before";
+	const renew = async () => {
+		if (stage === "unavailable") throw new Error("database unavailable");
+		return owned;
+	};
+	repository.renewSubscriptionChangeLease = renew;
+	repository.renewUsageInvoiceJobLease = renew;
+	let dispatched = 0;
+	const adapter: RecurringBillingWorkerAdapter = {
+		changes: {
+			async apply() {
+				dispatched++;
+				owned = false;
+				return { outcome: "committed", providerRequestId: "sub_1", timing };
+			},
+		},
+		settlement: {
+			async collectFinalizedCharge() {
+				dispatched++;
+				owned = false;
+				return { outcome: "committed", externalChargeId: "in_1", timing };
+			},
+		},
+	};
+	const result = await new RecurringBillingWorker({
+		workerId: "worker-1",
+		repository,
+		projectContextResolver: workerProjectResolver,
+		adapterForJob: () => adapter,
+		logger: { error() {} },
+		leaseHeartbeatTimers: clock.timers,
+	}).runOnce();
+	expect(dispatched).toBe(stage === "during" ? 1 : 0);
+	expect(calls).toEqual([]);
+	expect(result.failed).toBe(stage === "unavailable" ? 1 : 0);
+	expect(clock.active).toBe(0);
+});
+
 // capability: subscription.change.apply
 // capability: settlement.collect_finalized_charge
 it("applies due changes and invoices closed overage periods", async () => {
@@ -170,6 +225,12 @@ it("applies due changes and invoices closed overage periods", async () => {
 		projectContextResolver: workerProjectResolver,
 		workerId: "worker-1",
 		repository: {
+			async renewSubscriptionChangeLease() {
+				return true;
+			},
+			async renewUsageInvoiceJobLease() {
+				return true;
+			},
 			async claimSubscriptionChanges() {
 				return [claimedChange(change)];
 			},
@@ -231,6 +292,12 @@ it("fails claimed recurring-billing work when its project id and key disagree", 
 		projectContextResolver: workerProjectResolver,
 		workerId: "worker-1",
 		repository: {
+			async renewSubscriptionChangeLease() {
+				return true;
+			},
+			async renewUsageInvoiceJobLease() {
+				return true;
+			},
 			async claimSubscriptionChanges() {
 				return [claimedChange(change)];
 			},
@@ -327,6 +394,51 @@ it("selects each job's adapter by the provider the job stores", async () => {
 		{ kind: "usage_succeeded", providerRequestId: undefined, externalInvoiceId: "apple-charge" },
 	]);
 });
+
+it.each([false, true])(
+	"retains uncertain-write correlation when the lease check fails: %s",
+	async (unavailable) => {
+		const { repository, calls } = recordingRepository({
+			changes: [changeFixture()],
+			usage: [usageFixture()],
+		});
+		let changeWritten = false;
+		let usageWritten = false;
+		const renew = (written: boolean) => {
+			if (written && unavailable) throw new Error("database unavailable");
+			return !written;
+		};
+		repository.renewSubscriptionChangeLease = async () => renew(changeWritten);
+		repository.renewUsageInvoiceJobLease = async () => renew(usageWritten);
+		const logged: unknown[] = [];
+		await new RecurringBillingWorker({
+			workerId: "worker-1",
+			repository,
+			projectContextResolver: workerProjectResolver,
+			logger: {
+				error(_message, _error, context) {
+					if (context?.correlation) logged.push(context.correlation);
+				},
+			},
+			adapterForJob: () => ({
+				changes: {
+					async apply() {
+						changeWritten = true;
+						return { outcome: "uncertain", correlation: { requestKey: "change" }, timing };
+					},
+				},
+				settlement: {
+					async collectFinalizedCharge() {
+						usageWritten = true;
+						return { outcome: "uncertain", correlation: { requestKey: "invoice" }, timing };
+					},
+				},
+			}),
+		}).runOnce();
+		expect(calls).toEqual([]);
+		expect(logged).toEqual([{ requestKey: "change" }, { requestKey: "invoice" }]);
+	},
+);
 
 it("never finalizes an uncertain provider write and fails it for reconciliation", async () => {
 	const logged: Array<{ message: string; context?: Record<string, unknown> }> = [];
