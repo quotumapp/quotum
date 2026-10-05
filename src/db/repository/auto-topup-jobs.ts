@@ -91,6 +91,23 @@ export class AutoTopupJobRepository extends RepositoryModule {
 		});
 	}
 
+	async renewAutoTopupJobLease(
+		projectId: string,
+		jobId: string,
+		workerId: string,
+	): Promise<boolean> {
+		const row = await executeOne(
+			this.database,
+			drizzleSql`
+			UPDATE auto_topup_jobs SET locked_at = now(), updated_at = now()
+			WHERE project_id = ${projectId} AND id = ${jobId}::uuid
+				AND status = 'processing' AND locked_by = ${workerId}
+			RETURNING id
+		`,
+		);
+		return row !== null;
+	}
+
 	async markAutoTopupSucceeded(
 		projectId: string,
 		jobId: string,

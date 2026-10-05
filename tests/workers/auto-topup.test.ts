@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { AutoTopupJob } from "../../src/billing/auto-topup";
 import type { OperationTiming } from "../../src/providers/contract";
 import { AutoTopupWorker, type AutoTopupWorkerAdapter } from "../../src/workers/auto-topup";
+import { heartbeatTimers } from "../helpers/heartbeat-timers";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const job: AutoTopupJob = {
@@ -31,6 +32,61 @@ const workerProjectResolver = projectContextResolver({
 	contexts: [projectInstanceContext("acme", { projectInstanceId: job.projectId })],
 });
 
+it.each(["before", "during", "unavailable"])(
+	"does not charge or finalize an auto top-up after ownership is %s",
+	async (stage) => {
+		const clock = heartbeatTimers();
+		let charged = 0;
+		let markers = 0;
+		let owned = stage !== "before";
+		const worker = new AutoTopupWorker({
+			workerId: "worker-1",
+			projectContextResolver: workerProjectResolver,
+			leaseHeartbeatTimers: clock.timers,
+			repository: {
+				async claimAutoTopupJobs() {
+					return [job];
+				},
+				async renewAutoTopupJobLease() {
+					if (stage === "unavailable") throw new Error("database unavailable");
+					return owned;
+				},
+				async markAutoTopupSucceeded() {
+					markers++;
+					return { circuitOpened: false };
+				},
+				async markAutoTopupFailed() {
+					markers++;
+					return { circuitOpened: false, retryScheduled: false };
+				},
+			},
+			adapterForJob: () => ({
+				topups: {
+					async chargeAutomatic() {
+						charged++;
+						owned = false;
+						return {
+							status: "succeeded",
+							externalInvoiceId: "in_1",
+							externalPaymentId: "pi_1",
+							amountPaidMinor: 500,
+							currency: "USD",
+							timing,
+						};
+					},
+				},
+			}),
+			logger: { error() {} },
+		});
+		const result = await worker.runOnce();
+		expect(charged).toBe(stage === "during" ? 1 : 0);
+		expect(markers).toBe(0);
+		expect(result.succeeded).toBe(0);
+		expect(result.failed).toBe(stage === "unavailable" ? 1 : 0);
+		expect(clock.active).toBe(0);
+	},
+);
+
 describe("AutoTopupWorker", () => {
 	// capability: topup.automatic
 	it("records a successful off-session top-up", async () => {
@@ -39,6 +95,9 @@ describe("AutoTopupWorker", () => {
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
+				async renewAutoTopupJobLease() {
+					return true;
+				},
 				async claimAutoTopupJobs() {
 					return [job];
 				},
@@ -100,6 +159,9 @@ describe("AutoTopupWorker", () => {
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
+				async renewAutoTopupJobLease() {
+					return true;
+				},
 				async claimAutoTopupJobs() {
 					return [job];
 				},
@@ -157,6 +219,9 @@ describe("AutoTopupWorker", () => {
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
+				async renewAutoTopupJobLease() {
+					return true;
+				},
 				async claimAutoTopupJobs() {
 					return [job];
 				},
@@ -189,6 +254,9 @@ describe("AutoTopupWorker", () => {
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
+				async renewAutoTopupJobLease() {
+					return true;
+				},
 				async claimAutoTopupJobs() {
 					return [{ ...job, consecutiveFailures: 2, attempts: 3 }];
 				},
@@ -221,6 +289,9 @@ describe("AutoTopupWorker", () => {
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
+				async renewAutoTopupJobLease() {
+					return true;
+				},
 				async claimAutoTopupJobs() {
 					return [{ ...job, provider: "google", providerAccountId: "play-account" }];
 				},

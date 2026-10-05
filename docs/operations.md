@@ -280,8 +280,16 @@ One process runs the HTTP API and all workers. Each polls on the interval shown:
 | Stripe App event processing, only when the Apps OAuth integration is configured | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
 | [Usage partition upkeep](#usage-partitions), unless `BILLING_USAGE_PARTITION_UPKEEP=false` | Fixed, every 15 minutes |
 
-Replicas coordinate through leased jobs with heartbeats; projection delivery claims up to 25 jobs
-per poll from a candidate set bounded by the batch size and delivers five concurrently.
+Automatic top-up and recurring billing renew every outstanding claim in their current batch,
+including jobs waiting behind a provider call. The heartbeat runs every 60 seconds against the
+five-minute reclaim window. Each provider dispatch and completion also checks ownership; a lost
+lease skips that work, and a database error during the check leaves the claim for recovery. A
+provider call already in flight cannot be recalled, so completion markers remain fenced and Stripe
+retries keep their existing job-scoped idempotency keys. Heartbeats prevent live-job reclamation;
+they do not extend Stripe's idempotency retention or guarantee recovery after a prolonged outage.
+Provider event replay and subscription reconciliation also renew their claims. Projection delivery
+claims up to 25 jobs per poll from a candidate set bounded by the batch size and delivers five
+concurrently with bounded HTTP timeouts.
 Usage-driven projections are one job per billing account built at delivery, so the backlog is
 bounded by active accounts. Tune intervals and attempt limits with the `BILLING_*` variables listed
 in [deployment.md](deployment.md#optional-variables).

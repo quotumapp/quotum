@@ -18,9 +18,22 @@ import {
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
 import type { ProviderAdapter } from "../providers/contract";
 import type { ProviderOperation } from "../shared/provider-capabilities";
+import { JobLeaseRenewalError, jobHeartbeatInterval, startJobLeases } from "./job-leases";
+import type { LeaseHeartbeatTimers } from "./lease-heartbeat";
 import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface RecurringBillingWorkerRepository {
+	renewSubscriptionChangeLease(
+		projectId: string,
+		changeId: string,
+		workerId: string,
+	): Promise<boolean>;
+	renewUsageInvoiceJobLease(
+		projectId: string,
+		jobKind: UsageInvoiceJob["jobKind"],
+		jobId: string,
+		workerId: string,
+	): Promise<boolean>;
 	claimSubscriptionChanges(
 		workerId: string,
 		limit: number,
@@ -91,10 +104,13 @@ export interface RecurringBillingWorkerLogger {
 }
 
 export class RecurringBillingWorker {
+	private readonly heartbeatIntervalMs: number;
 	constructor(
 		private readonly dependencies: {
 			workerId: string;
 			batchSize?: number;
+			leaseHeartbeatIntervalMs?: number;
+			leaseHeartbeatTimers?: LeaseHeartbeatTimers;
 			repository: RecurringBillingWorkerRepository;
 			projectContextResolver: ProjectInstanceContextResolver;
 			adapterForJob(
@@ -104,7 +120,12 @@ export class RecurringBillingWorker {
 			logger: RecurringBillingWorkerLogger;
 			metrics?: BillingMetrics;
 		},
-	) {}
+	) {
+		this.heartbeatIntervalMs = jobHeartbeatInterval(
+			5 * 60_000,
+			dependencies.leaseHeartbeatIntervalMs,
+		);
+	}
 
 	async runOnce(): Promise<RecurringBillingRunResult> {
 		const limit = this.dependencies.batchSize ?? 25;
@@ -134,81 +155,119 @@ export class RecurringBillingWorker {
 			});
 		}
 
-		for (const claimed of claimedChanges) {
-			try {
-				const change = await this.dependencies.repository.loadClaimedSubscriptionChange(
+		const changeLeases = startJobLeases({
+			jobs: claimedChanges,
+			intervalMs: this.heartbeatIntervalMs,
+			timers: this.dependencies.leaseHeartbeatTimers,
+			renew: (claimed) =>
+				this.dependencies.repository.renewSubscriptionChangeLease(
 					claimed.projectInstanceId,
 					claimed.changeId,
 					this.dependencies.workerId,
-				);
-				if (change === null) {
-					this.logWarn("Subscription change lease lost", {
-						projectKey: claimed.projectKey,
-						changeId: claimed.changeId,
-						workerId: this.dependencies.workerId,
-					});
-					continue;
-				}
-				const project = await resolveClaimedProjectInstance(
-					this.dependencies.projectContextResolver,
-					{
-						projectInstanceId: claimed.projectInstanceId,
-						projectInstanceKey: claimed.projectKey,
-					},
-				);
-				const { changes } = await this.dependencies.adapterForJob(project, change.provider);
-				if (changes === undefined) {
-					throw unservedOperation(
-						change.provider,
-						change.effectiveMode === "period_end"
-							? "subscription.change.period_end"
-							: "subscription.change.apply",
-					);
-				}
-				const unappliable = !changeableSubscriptionStatuses.has(change.subscriptionStatus)
-					? `The subscription is ${change.subscriptionStatus} and can no longer be changed`
-					: change.sourceSuperseded
-						? "The subscription moved to another plan version at the provider"
-						: null;
-				if (unappliable !== null) {
-					const ended = await this.endUnappliableChange(claimed, unappliable);
-					if (ended) subscriptionChangesCancelled += 1;
-					else failed += 1;
-					continue;
-				}
-				const applied = await changes.apply(change);
-				if (applied.outcome === "uncertain") {
-					throw new UncertainProviderWriteError(applied.correlation);
-				}
-				await this.dependencies.repository.markSubscriptionChangeApplied(
-					claimed.projectInstanceId,
-					claimed.changeId,
-					applied.providerRequestId,
-					this.dependencies.workerId,
-				);
-				subscriptionChangesApplied += 1;
-				this.recordJob("subscription_change", "succeeded");
-			} catch (error) {
-				// The provider may know the subscription ended before the local row does; retrying
-				// that change can never succeed, so it ends here instead of burning its attempts.
-				if (providerRejectedEndedSubscription(error)) {
-					if (await this.endUnappliableChange(claimed, errorMessage(error))) {
-						subscriptionChangesCancelled += 1;
-					} else {
-						failed += 1;
-					}
-					continue;
-				}
-				failed += 1;
-				this.recordJob("subscription_change", "failed");
-				// Log first: an uncertain write's correlation must survive a failing mark.
-				this.logError("Subscription change failed", error, {
+				),
+			onLost: (claimed) =>
+				this.logWarn("Recurring billing lease lost", {
 					projectKey: claimed.projectKey,
 					changeId: claimed.changeId,
-					...uncertainWriteContext(error),
-				});
-				await this.markSubscriptionChangeFailedSafely(claimed, error);
+					workerId: this.dependencies.workerId,
+				}),
+			onError: (error, claimed) =>
+				this.logError("Recurring billing lease renewal failed", error, {
+					projectKey: claimed.projectKey,
+					changeId: claimed.changeId,
+					workerId: this.dependencies.workerId,
+				}),
+		});
+		try {
+			for (const claimed of claimedChanges) {
+				try {
+					const change = await this.dependencies.repository.loadClaimedSubscriptionChange(
+						claimed.projectInstanceId,
+						claimed.changeId,
+						this.dependencies.workerId,
+					);
+					if (change === null) {
+						this.logWarn("Subscription change lease lost", {
+							projectKey: claimed.projectKey,
+							changeId: claimed.changeId,
+							workerId: this.dependencies.workerId,
+						});
+						continue;
+					}
+					const project = await resolveClaimedProjectInstance(
+						this.dependencies.projectContextResolver,
+						{
+							projectInstanceId: claimed.projectInstanceId,
+							projectInstanceKey: claimed.projectKey,
+						},
+					);
+					const { changes } = await this.dependencies.adapterForJob(project, change.provider);
+					if (changes === undefined) {
+						throw unservedOperation(
+							change.provider,
+							change.effectiveMode === "period_end"
+								? "subscription.change.period_end"
+								: "subscription.change.apply",
+						);
+					}
+					if (!(await changeLeases.owns(claimed))) continue;
+					const unappliable = !changeableSubscriptionStatuses.has(change.subscriptionStatus)
+						? `The subscription is ${change.subscriptionStatus} and can no longer be changed`
+						: change.sourceSuperseded
+							? "The subscription moved to another plan version at the provider"
+							: null;
+					if (unappliable !== null) {
+						const ended = await this.endUnappliableChange(claimed, unappliable);
+						if (ended) subscriptionChangesCancelled += 1;
+						else failed += 1;
+						continue;
+					}
+					const applied = await changes.apply(change);
+					if (applied.outcome === "uncertain") {
+						throw new UncertainProviderWriteError(applied.correlation);
+					}
+					if (!(await changeLeases.owns(claimed))) continue;
+					await this.dependencies.repository.markSubscriptionChangeApplied(
+						claimed.projectInstanceId,
+						claimed.changeId,
+						applied.providerRequestId,
+						this.dependencies.workerId,
+					);
+					subscriptionChangesApplied += 1;
+					this.recordJob("subscription_change", "succeeded");
+				} catch (error) {
+					if (error instanceof JobLeaseRenewalError) {
+						failed += 1;
+						continue;
+					}
+					// Preserve uncertain-write correlation even if ownership cannot be re-established.
+					if (!providerRejectedEndedSubscription(error)) {
+						this.logError("Subscription change failed", error, {
+							projectKey: claimed.projectKey,
+							changeId: claimed.changeId,
+							...uncertainWriteContext(error),
+						});
+					}
+					if (!(await changeLeases.owns(claimed).catch(() => false))) continue;
+					// The provider may know the subscription ended before the local row does; retrying
+					// that change can never succeed, so it ends here instead of burning its attempts.
+					if (providerRejectedEndedSubscription(error)) {
+						if (await this.endUnappliableChange(claimed, errorMessage(error))) {
+							subscriptionChangesCancelled += 1;
+						} else {
+							failed += 1;
+						}
+						continue;
+					}
+					failed += 1;
+					this.recordJob("subscription_change", "failed");
+					await this.markSubscriptionChangeFailedSafely(claimed, error);
+				} finally {
+					changeLeases.release(claimed);
+				}
 			}
+		} finally {
+			await changeLeases.stop();
 		}
 
 		let usage: { materialized: number; jobs: ClaimedUsageInvoiceJob[] } = {
@@ -234,65 +293,104 @@ export class RecurringBillingWorker {
 			});
 		}
 
-		for (const claimed of usage.jobs) {
-			let job: UsageInvoiceJob | null = null;
-			try {
-				job = await this.dependencies.repository.loadClaimedUsageInvoiceJob(
+		const usageLeases = startJobLeases({
+			jobs: usage.jobs,
+			intervalMs: this.heartbeatIntervalMs,
+			timers: this.dependencies.leaseHeartbeatTimers,
+			renew: (claimed) =>
+				this.dependencies.repository.renewUsageInvoiceJobLease(
 					claimed.projectInstanceId,
 					claimed.jobKind,
 					claimed.jobId,
 					this.dependencies.workerId,
-				);
-				if (job === null) {
-					this.logWarn("Usage invoice lease lost", {
-						projectKey: claimed.projectKey,
-						jobKind: claimed.jobKind,
-						jobId: claimed.jobId,
-						workerId: this.dependencies.workerId,
-					});
-					continue;
-				}
-				const project = await resolveClaimedProjectInstance(
-					this.dependencies.projectContextResolver,
-					{
-						projectInstanceId: claimed.projectInstanceId,
-						projectInstanceKey: claimed.projectKey,
-					},
-				);
-				const { settlement } = await this.dependencies.adapterForJob(project, job.provider);
-				if (settlement === undefined) {
-					throw unservedOperation(
-						job.provider,
-						job.jobKind === "adjustment"
-							? "adjustment.issue"
-							: "settlement.collect_finalized_charge",
-					);
-				}
-				const charged = await settlement.collectFinalizedCharge(job);
-				if (charged.outcome === "uncertain") {
-					throw new UncertainProviderWriteError(charged.correlation);
-				}
-				await this.dependencies.repository.markUsageInvoiceSucceeded(
-					claimed.projectInstanceId,
-					claimed.jobKind,
-					claimed.jobId,
-					charged.externalChargeId,
-					this.dependencies.workerId,
-				);
-				if (claimed.jobKind === "period") usageInvoicesCreated += 1;
-				else usageAdjustmentsCreated += 1;
-				this.recordJob(`usage_${claimed.jobKind}`, "succeeded");
-			} catch (error) {
-				failed += 1;
-				this.recordJob(`usage_${claimed.jobKind}`, "failed");
-				this.logError("Usage invoice failed", error, {
+				),
+			onLost: (claimed) =>
+				this.logWarn("Recurring billing lease lost", {
 					projectKey: claimed.projectKey,
-					...(job === null ? {} : { provider: job.provider }),
-					periodId: claimed.periodId,
-					...uncertainWriteContext(error),
-				});
-				await this.markUsageInvoiceFailedSafely(claimed, error);
+					jobKind: claimed.jobKind,
+					jobId: claimed.jobId,
+					workerId: this.dependencies.workerId,
+				}),
+			onError: (error, claimed) =>
+				this.logError("Recurring billing lease renewal failed", error, {
+					projectKey: claimed.projectKey,
+					jobKind: claimed.jobKind,
+					jobId: claimed.jobId,
+					workerId: this.dependencies.workerId,
+				}),
+		});
+		try {
+			for (const claimed of usage.jobs) {
+				let job: UsageInvoiceJob | null = null;
+				try {
+					job = await this.dependencies.repository.loadClaimedUsageInvoiceJob(
+						claimed.projectInstanceId,
+						claimed.jobKind,
+						claimed.jobId,
+						this.dependencies.workerId,
+					);
+					if (job === null) {
+						this.logWarn("Usage invoice lease lost", {
+							projectKey: claimed.projectKey,
+							jobKind: claimed.jobKind,
+							jobId: claimed.jobId,
+							workerId: this.dependencies.workerId,
+						});
+						continue;
+					}
+					const project = await resolveClaimedProjectInstance(
+						this.dependencies.projectContextResolver,
+						{
+							projectInstanceId: claimed.projectInstanceId,
+							projectInstanceKey: claimed.projectKey,
+						},
+					);
+					const { settlement } = await this.dependencies.adapterForJob(project, job.provider);
+					if (settlement === undefined) {
+						throw unservedOperation(
+							job.provider,
+							job.jobKind === "adjustment"
+								? "adjustment.issue"
+								: "settlement.collect_finalized_charge",
+						);
+					}
+					if (!(await usageLeases.owns(claimed))) continue;
+					const charged = await settlement.collectFinalizedCharge(job);
+					if (charged.outcome === "uncertain") {
+						throw new UncertainProviderWriteError(charged.correlation);
+					}
+					if (!(await usageLeases.owns(claimed))) continue;
+					await this.dependencies.repository.markUsageInvoiceSucceeded(
+						claimed.projectInstanceId,
+						claimed.jobKind,
+						claimed.jobId,
+						charged.externalChargeId,
+						this.dependencies.workerId,
+					);
+					if (claimed.jobKind === "period") usageInvoicesCreated += 1;
+					else usageAdjustmentsCreated += 1;
+					this.recordJob(`usage_${claimed.jobKind}`, "succeeded");
+				} catch (error) {
+					if (error instanceof JobLeaseRenewalError) {
+						failed += 1;
+						continue;
+					}
+					this.logError("Usage invoice failed", error, {
+						projectKey: claimed.projectKey,
+						...(job === null ? {} : { provider: job.provider }),
+						periodId: claimed.periodId,
+						...uncertainWriteContext(error),
+					});
+					if (!(await usageLeases.owns(claimed).catch(() => false))) continue;
+					failed += 1;
+					this.recordJob(`usage_${claimed.jobKind}`, "failed");
+					await this.markUsageInvoiceFailedSafely(claimed, error);
+				} finally {
+					usageLeases.release(claimed);
+				}
 			}
+		} finally {
+			await usageLeases.stop();
 		}
 
 		return {

@@ -318,6 +318,36 @@ export class BillingRepository {
 		});
 	}
 
+	async renewAutoTopupJobLease(
+		projectId: string,
+		jobId: string,
+		workerId: string,
+	): Promise<boolean> {
+		return await this.autoTopupJobs.renewAutoTopupJobLease(projectId, jobId, workerId);
+	}
+
+	async renewSubscriptionChangeLease(
+		projectId: string,
+		changeId: string,
+		workerId: string,
+	): Promise<boolean> {
+		return await this.recurringPricing.renewSubscriptionChangeLease(projectId, changeId, workerId);
+	}
+
+	async renewUsageInvoiceJobLease(
+		projectId: string,
+		jobKind: UsageInvoiceJob["jobKind"],
+		jobId: string,
+		workerId: string,
+	): Promise<boolean> {
+		return await this.recurringPricing.renewUsageInvoiceJobLease(
+			projectId,
+			jobKind,
+			jobId,
+			workerId,
+		);
+	}
+
 	async claimAutoTopupJobs(
 		workerId: string,
 		limit: number,
