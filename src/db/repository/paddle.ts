@@ -188,6 +188,19 @@ export class PaddleBillingRepository extends RepositoryModule {
 		return row?.external_customer_id ?? null;
 	}
 	async binding(project: ProjectInstanceContext, productKey: string) {
+		const binding = await this.bindingRow(project, productKey, false);
+		if (!binding) mismatch();
+		return binding;
+	}
+	/** The product's price binding even after its mapping or product was retired; null when none exists. */
+	bindingIncludingRetired(project: ProjectInstanceContext, productKey: string) {
+		return this.bindingRow(project, productKey, true);
+	}
+	private async bindingRow(
+		project: ProjectInstanceContext,
+		productKey: string,
+		includeRetired: boolean,
+	) {
 		const row = await executeOne<{
 			external_product_id: string;
 			external_price_id: string;
@@ -201,10 +214,11 @@ export class PaddleBillingRepository extends RepositoryModule {
 			SELECT sp.external_product_id, sp.external_price_id, sp.currency, sp.price_amount, sp.billing_period, sp.billing_period_count
 			FROM store_products sp JOIN products p ON p.id = sp.product_id AND p.project_id = sp.project_id
 			WHERE sp.project_id = ${project.projectInstanceId} AND sp.provider = 'paddle' AND sp.channel = 'web'
-			AND sp.active = true AND p.active = true AND p.type = 'subscription' AND p.key = ${productKey}
+			${includeRetired ? sql`` : sql`AND sp.active = true AND p.active = true`}
+			AND p.type = 'subscription' AND p.key = ${productKey}
 		`,
 		);
-		if (!row) mismatch();
+		if (!row) return null;
 		return paddlePriceBindingSchema.parse({
 			priceId: row.external_price_id,
 			productId: row.external_product_id,

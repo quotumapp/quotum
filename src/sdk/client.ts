@@ -184,7 +184,7 @@ export class BillingClient {
 				input: { productKey: string; email?: string },
 				idempotencyKey: string,
 			) =>
-				this.request<{ sessionId: string; url: string }>(
+				this.request<{ sessionId: string; url: string; duplicate: boolean }>(
 					`/v1/billing-accounts/${segment(billingAccountId)}/providers/paddle/checkout-sessions`,
 					{ method: "POST", body: input, idempotencyKey },
 				),

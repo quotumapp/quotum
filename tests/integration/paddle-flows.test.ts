@@ -81,12 +81,24 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		let discardResponse = false;
 		let rejectNext = false;
 		let rejectCustomer = false;
+		let priceMode: "active" | "archived" | "down" = "active";
+		let priceReads = 0;
 		let onCreated: (() => Promise<void>) | undefined;
 		const client = new PaddleClient(config, async (url, init) => {
 			const path = new URL(String(url)).pathname;
 			const body = init?.body ? JSON.parse(String(init.body)) : {};
-			if (path.startsWith("/prices/"))
-				return Response.json({ data: { ...selectedPrice, quantity: { minimum: 1, maximum: 1 } } });
+			if (path.startsWith("/prices/")) {
+				priceReads++;
+				if (priceMode === "down")
+					return Response.json({ error: { code: "service_unavailable" } }, { status: 503 });
+				return Response.json({
+					data: {
+						...selectedPrice,
+						...(priceMode === "archived" ? { status: "archived" } : {}),
+						quantity: { minimum: 1, maximum: 1 },
+					},
+				});
+			}
 			if (path === "/customers" && init?.method === "POST") {
 				customerWrites++;
 				if (rejectCustomer)
@@ -180,6 +192,15 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			},
 			rejectTransaction() {
 				rejectNext = true;
+			},
+			archivePrice() {
+				priceMode = "archived";
+			},
+			makePriceUnavailable() {
+				priceMode = "down";
+			},
+			get priceReads() {
+				return priceReads;
 			},
 			onTransactionCreated(callback: () => Promise<void>) {
 				onCreated = callback;
@@ -712,6 +733,98 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		} finally {
 			await retireCatalog("mapping", true);
 		}
+	});
+
+	// QA-03: a succeeded receipt replays from the durable operation, without a provider read, an extra
+	// dispatch, or a dependence on the product still being on sale.
+	it("replays a succeeded direct checkout after the provider price is archived or unavailable", async () => {
+		const h = harness();
+		const original = await h.create();
+		expect(original.duplicate).toBe(false);
+		const readsBeforeReplay = h.priceReads;
+		expect(readsBeforeReplay).toBeGreaterThan(0);
+		h.archivePrice();
+		expect(await h.create()).toEqual({ ...original, duplicate: true });
+		h.makePriceUnavailable();
+		expect(await h.create()).toEqual({ ...original, duplicate: true });
+		expect(h.priceReads).toBe(readsBeforeReplay);
+		expect([h.writes, h.customerWrites]).toEqual([1, 1]);
+	});
+
+	it("replays a succeeded direct checkout after its mapping was retired, but not a new key", async () => {
+		const h = harness();
+		const original = await h.create();
+		try {
+			await retireCatalog("mapping", false);
+			expect(await h.create()).toEqual({ ...original, duplicate: true });
+			await expect(
+				h.service.createCheckoutSession({
+					billingAccountId: h.billingAccountId,
+					productKey: "paddle_test",
+					email: `${h.billingAccountId}@example.com`,
+					idempotencyKey: "another",
+				}),
+			).rejects.toMatchObject({ code: "PADDLE_FULFILLMENT_MISMATCH" });
+		} finally {
+			await retireCatalog("mapping", true);
+		}
+		expect(h.writes).toBe(1);
+	});
+
+	it("reports the replay flag over the trusted HTTP route", async () => {
+		const h = harness();
+		const app = withOpenApiAssertions(
+			createApp({
+				env: context.env,
+				projectContextResolver: context.projectContextResolver,
+				projectProviderServices: {
+					[project.projectInstanceKey]: { paddleBillingService: h.service },
+				},
+				providerOperationStore: context.repository.providerOperations,
+			}),
+		);
+		const send = async () => {
+			const response = await testRequest(
+				app,
+				`/v1/billing-accounts/${h.billingAccountId}/providers/paddle/checkout-sessions`,
+				{
+					method: "POST",
+					headers: {
+						authorization: `Bearer ${integrationProjectCredential(project.projectInstanceKey)}`,
+						"idempotency-key": "http-replay",
+					},
+					body: JSON.stringify({
+						productKey: "paddle_test",
+						email: `${h.billingAccountId}@example.com`,
+					}),
+				},
+			);
+			expect(response.status).toBe(200);
+			return (await response.json()).data;
+		};
+		const first = await send();
+		expect(first).toMatchObject({ sessionId: h.remote.id, duplicate: false });
+		h.makePriceUnavailable();
+		expect(await send()).toEqual({ ...first, duplicate: true });
+		expect(h.writes).toBe(1);
+	});
+
+	it("replays a succeeded common execution without provider reads after the price changed", async () => {
+		const h = harness();
+		const flow = commercial(h, {
+			kind: "checkout_product",
+			productKey: "paddle_test",
+			email: `${h.billingAccountId}@example.com`,
+		});
+		const preview = await flow.preview();
+		const first = await flow.execute(preview.previewToken);
+		const readsBeforeReplay = h.priceReads;
+		h.archivePrice();
+		expect(await flow.execute(preview.previewToken)).toEqual(first);
+		h.makePriceUnavailable();
+		expect(await flow.execute(preview.previewToken)).toEqual(first);
+		expect(h.priceReads).toBe(readsBeforeReplay);
+		expect(h.writes).toBe(1);
 	});
 
 	it("recovers customer creation against its correlation before creating one checkout", async () => {

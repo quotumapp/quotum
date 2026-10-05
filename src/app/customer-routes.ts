@@ -487,11 +487,11 @@ export function registerCustomerRoutes({
 				tags: ["customer"],
 				path: "/v1/billing-accounts/:billingAccountId/providers/paddle/checkout-sessions",
 				description:
-					"Sandbox fixed subscription checkout. Requires Idempotency-Key. Uncertain writes return PROVIDER_OPERATION_PENDING with an operationId to inspect.",
+					"Sandbox fixed subscription checkout. Requires Idempotency-Key. Uncertain writes return PROVIDER_OPERATION_PENDING with an operationId to inspect. `duplicate` is true when the same key replays a checkout that already succeeded.",
 				responses: {
 					200: z.object({
 						success: z.literal(true),
-						data: z.object({ sessionId: z.string(), url: z.url() }),
+						data: z.object({ sessionId: z.string(), url: z.url(), duplicate: z.boolean() }),
 					}),
 				},
 			}),
