@@ -338,7 +338,9 @@ Consume, reserve, confirm, release, and correction are recoverable under the cal
 timeout, lost response, `5xx`, or restart, retry with the same key and input: same-input replay
 returns the original result, including a denial; different input returns `409 IDEMPOTENCY_CONFLICT`.
 Keep `occurredAt` stable across retries and put per-attempt tracing in headers. Deferred reservation
-and correction inputs still accept metadata, which also participates in their fingerprint.
+and correction inputs still accept metadata, which also participates in their fingerprint. The
+fingerprint does not depend on JSON property order, including for keys that are canonically
+equivalent Unicode (for example U+00E9 and U+0065 U+0301), which stay distinct keys.
 
 ```http
 GET /v1/billing-accounts/:billingAccountId/usage/operations/:operation/:operationId

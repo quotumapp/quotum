@@ -3,6 +3,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import type { MeteringMutationInput } from "../../src/billing/metering";
 import { BillingRepository } from "../../src/db/repository";
 import type { TransactionalQueryExecutor } from "../../src/db/repository/types";
+import { operationFingerprint } from "../../src/db/repository/usage-operations";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import {
 	resetAndSeedIntegrationData,
@@ -40,6 +41,70 @@ localDescribe("usage operation recovery", () => {
 	});
 	afterAll(async () => {
 		await context.sql.close();
+	});
+
+	it("replays a reservation whose metadata keys are Unicode-equivalent, whatever their order", async () => {
+		const precomposed = "\u00e9";
+		const decomposed = "e\u0301";
+		const reserve = {
+			billingAccountId: "recovery",
+			featureKey: "model_tokens",
+			quantity: "10",
+			idempotencyKey: "unicode-order",
+		};
+		const first = await context.repository.reserveUsage(project, {
+			...reserve,
+			metadata: { [precomposed]: 1, [decomposed]: 2 },
+		});
+		expect(first.allowed).toBe(true);
+		expect(
+			await context.repository.reserveUsage(project, {
+				...reserve,
+				metadata: { [decomposed]: 2, [precomposed]: 1 },
+			}),
+		).toEqual(first);
+		await expect(
+			context.repository.reserveUsage(project, {
+				...reserve,
+				metadata: { [decomposed]: 1, [precomposed]: 2 },
+			}),
+		).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+
+		const { app, authHeaders } = createIntegrationApp(context);
+		const route = "/v1/billing-accounts/recovery/usage/reservations";
+		const headers = { ...authHeaders(), "idempotency-key": "http-unicode-order" };
+		const body = (metadata: Record<string, number>) =>
+			JSON.stringify({ featureKey: "model_tokens", quantity: "1", metadata });
+		const created = await testRequest(app, route, {
+			method: "POST",
+			headers,
+			body: body({ [precomposed]: 1, [decomposed]: 2 }),
+		});
+		expect(created.status).toBe(200);
+		const replay = await testRequest(app, route, {
+			method: "POST",
+			headers,
+			body: body({ [decomposed]: 2, [precomposed]: 1 }),
+		});
+		expect(replay.status).toBe(200);
+	});
+
+	it("still replays a claim whose fingerprint was stored before tied keys were ordered", async () => {
+		const precomposed = "\u00e9";
+		const decomposed = "e\u0301";
+		const request = {
+			billingAccountId: "recovery",
+			featureKey: "model_tokens",
+			quantity: "10",
+			idempotencyKey: "legacy-fingerprint",
+			// Insertion order is the opposite of code unit order, so the stored fingerprint differs.
+			metadata: { [precomposed]: 1, [decomposed]: 2 },
+		};
+		const first = await context.repository.reserveUsage(project, request);
+		const legacy = operationFingerprint("reserve", request, true);
+		expect(legacy).not.toBe(operationFingerprint("reserve", request));
+		await context.sql`UPDATE client_idempotency_claims SET request_fingerprint = ${legacy} WHERE idempotency_key = ${"legacy-fingerprint"}`;
+		expect(await context.repository.reserveUsage(project, request)).toEqual(first);
 	});
 
 	it("replays the original outcome after other usage and canonicalizes semantic input", async () => {

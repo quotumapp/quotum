@@ -14,6 +14,34 @@ const input = {
 };
 
 describe("usage operation fingerprints", () => {
+	it("does not depend on the order of Unicode-equivalent metadata keys", () => {
+		const precomposed = "\u00e9";
+		const decomposed = "e\u0301";
+		const first = operationFingerprint("reserve", {
+			...input,
+			metadata: { [precomposed]: 1, [decomposed]: 2 },
+		});
+		expect(
+			operationFingerprint("reserve", {
+				...input,
+				metadata: { [decomposed]: 2, [precomposed]: 1 },
+			}),
+		).toBe(first);
+		expect(
+			operationFingerprint("reserve", {
+				...input,
+				metadata: { [precomposed]: 2, [decomposed]: 1 },
+			}),
+		).not.toBe(first);
+	});
+
+	it("a legacy fingerprint matches the one stored before key ties were ordered", () => {
+		const metadata = { b: 1, B: 2 };
+		expect(operationFingerprint("consume", { ...input, metadata }, true)).toBe(
+			operationFingerprint("consume", { ...input, metadata }),
+		);
+	});
+
 	it("canonicalizes decimal, date, object order and default-empty optional fields", () => {
 		const first = operationFingerprint("consume", {
 			...input,

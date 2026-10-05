@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { positiveDecimal, sha256Hex, stableJson } from "../../billing/decimal";
+import { legacyStableJson, positiveDecimal, sha256Hex, stableJson } from "../../billing/decimal";
 import {
 	InternalBillingError,
 	InvalidRequestError,
@@ -36,11 +36,13 @@ interface Claim {
 export function operationFingerprint(
 	operation: UsageOperationKind,
 	input: UsageOperationInput,
+	legacy = false,
 ): string {
 	// Include all semantics still accepted by the current wire contract. Dates and numeric strings
 	// are normalized; absent/default-empty fields and transport headers do not change the identity.
+	// `legacy` reproduces the fingerprint stored before Unicode-equivalent keys were ordered.
 	return sha256Hex(
-		stableJson({
+		(legacy ? legacyStableJson : stableJson)({
 			operation,
 			billingAccountId: input.billingAccountId.trim(),
 			featureKey: "featureKey" in input ? input.featureKey.trim() : null,
@@ -188,7 +190,11 @@ export async function runUsageOperation<T extends StoredOutcome, P = undefined>(
 				"OPERATION_RESULT_EXPIRED",
 			);
 		}
-		if (existing.recovery_version > 0 && existing.request_fingerprint !== fingerprint) {
+		if (
+			existing.recovery_version > 0 &&
+			existing.request_fingerprint !== fingerprint &&
+			existing.request_fingerprint !== operationFingerprint(operation, input, true)
+		) {
 			throw new PersistenceConflictError(
 				"Operation identity is bound to different input",
 				"IDEMPOTENCY_CONFLICT",
