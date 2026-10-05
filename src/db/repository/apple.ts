@@ -18,6 +18,7 @@ import {
 	findCustomerByProviderCustomer,
 	findCustomerBySubscription,
 	getAppleStoreProduct,
+	getRecordedAppleStoreProduct,
 	upsertProviderCustomer,
 } from "./identities";
 import { findAppleInvalidationTarget } from "./invalidations";
@@ -143,12 +144,18 @@ export class AppleBillingRepository extends RepositoryModule {
 			}
 
 			if (!isInvalidatedStatus(input.purchaseStatus) && storeProduct === null) {
-				storeProduct = await getAppleStoreProduct(
-					tx,
-					projectId,
-					input.channel,
-					input.externalProductId,
-				);
+				// A new subscription needs a mapping that is on sale. One Quotum already recorded keeps
+				// following its recorded product after that mapping is retired, so a renewal, an expiry
+				// or a reconciliation still applies instead of being refused.
+				storeProduct =
+					(await getAppleStoreProduct(tx, projectId, input.channel, input.externalProductId)) ??
+					(input.purchaseKind === "subscription" && input.originalTransactionId !== null
+						? await getRecordedAppleStoreProduct(tx, projectId, {
+								channel: input.channel,
+								originalTransactionId: input.originalTransactionId,
+								externalProductId: input.externalProductId,
+							})
+						: null);
 			}
 
 			if (storeProduct === null) {

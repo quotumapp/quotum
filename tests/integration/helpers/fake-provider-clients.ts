@@ -71,9 +71,14 @@ export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOp
 	let appAccountToken = "00000000-0000-0000-0000-000000000000";
 	let renewalAppAccountToken: string | undefined = appAccountToken;
 	let transactionAppAccountToken: string | undefined = appAccountToken;
+	let expiresDate: AppleDateInput = options.expiresDate ?? farFutureSubscriptionExpiry;
+	let productId = options.productId ?? "premium_monthly";
+	let notificationType = "DID_RENEW";
+	let notificationUuid = "00000000-0000-0000-0000-000000000001";
+	let storeKitStatus = 1;
 
 	const renewalInfo = (): AppleDecodedRenewalInfoPayload => ({
-		autoRenewProductId: options.productId ?? "premium_monthly",
+		autoRenewProductId: productId,
 		autoRenewStatus: 1,
 		environment: "Sandbox",
 		...appleAccountTokenPayload(renewalAppAccountToken),
@@ -81,9 +86,9 @@ export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOp
 	const transaction = (): AppleDecodedTransactionPayload => ({
 		bundleId: "com.acme.app",
 		environment: "Sandbox",
-		expiresDate: appleDateMillis(options.expiresDate ?? farFutureSubscriptionExpiry),
+		expiresDate: appleDateMillis(expiresDate),
 		originalTransactionId: options.originalTransactionId,
-		productId: options.productId ?? "premium_monthly",
+		productId,
 		purchaseDate: appleDateMillis(options.purchaseDate ?? "2026-05-31T00:00:00.000Z"),
 		transactionId: options.transactionId,
 		type: "Auto-Renewable Subscription",
@@ -96,8 +101,8 @@ export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOp
 			environment: "Sandbox",
 			status: 1,
 		},
-		notificationType: "DID_RENEW",
-		notificationUUID: "00000000-0000-0000-0000-000000000001",
+		notificationType,
+		notificationUUID: notificationUuid,
 	});
 
 	return attachFailNext({
@@ -109,7 +114,7 @@ export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOp
 				return {
 					environment: "sandbox" as const,
 					renewalInfo: renewalInfo(),
-					storeKitStatus: 1,
+					storeKitStatus,
 					transaction: transaction(),
 				};
 			},
@@ -143,6 +148,23 @@ export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOp
 		},
 		setTransactionAppAccountToken(token: string | undefined) {
 			transactionAppAccountToken = token;
+		},
+		/** The product the transactions this client returns from now on report. */
+		setProductId(next: string) {
+			productId = next;
+		},
+		/** The subscription's expiry in the transactions this client returns from now on. */
+		setExpiresDate(next: AppleDateInput) {
+			expiresDate = next;
+		},
+		/** The next notifications' type and id; the id is the event's idempotency key. */
+		setNotification(next: { type: string; uuid: string }) {
+			notificationType = next.type;
+			notificationUuid = next.uuid;
+		},
+		/** The StoreKit status that provider reconciliation reads back (1 active, 2 expired). */
+		setStoreKitStatus(next: number) {
+			storeKitStatus = next;
 		},
 	});
 }

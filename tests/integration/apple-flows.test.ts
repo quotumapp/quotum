@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
 import type { EntitlementSnapshot, ProjectionPayload } from "../../src/billing/types";
+import type { ProviderSubscriptionReconciliationRow } from "../../src/db/repository/types";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -331,6 +332,108 @@ localDescribe("Apple route flows integration", () => {
 			"apple:00000000-0000-0000-0000-000000000001:projection",
 		);
 		await expectAppleWebhookRows(context.sql);
+	});
+
+	describe("a subscription whose store product mapping was retired", () => {
+		// `catalog:provision` deactivates the old mapping when a declared product changes. A
+		// subscription Quotum already recorded keeps following its recorded product, so its renewals,
+		// expiry and reconciliation still apply; selling the retired product to someone new does not.
+		async function verifiedSubscription() {
+			const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+			fixture.apple.setExpiresDate("2099-01-31T00:00:00.000Z");
+			await createAppleAccountToken(fixture.app, fixture.authHeaders, fixture.apple);
+			expect((await verifyAppleSubscription(fixture.app, fixture.authHeaders)).status).toBe(200);
+			await retireAppleStoreProducts();
+			return fixture;
+		}
+
+		it("applies a renewal that extends the period", async () => {
+			const { app, apple } = await verifiedSubscription();
+			apple.setExpiresDate("2099-02-28T00:00:00.000Z");
+			apple.setNotification({ type: "DID_RENEW", uuid: "00000000-0000-0000-0000-0000000000a1" });
+
+			const response = await postAppleNotification(app);
+			const body = await response.json();
+
+			expect(response.status).toBe(200);
+			expect(body.data.status).toBe("processed");
+			expect(await appleSubscription()).toEqual({ status: "active", expires: "2099-02-28" });
+		});
+
+		it("applies an expiry notification and ends the entitlement", async () => {
+			const { app, apple } = await verifiedSubscription();
+			// The recorded period has ended; Apple's expiry carries that same date.
+			await context.sql`
+				UPDATE subscriptions
+				SET expires_at = '2026-01-31T00:00:00Z', current_period_end = '2026-01-31T00:00:00Z'
+				WHERE provider = 'apple'
+			`;
+			apple.setExpiresDate("2026-01-31T00:00:00.000Z");
+			apple.setNotification({ type: "EXPIRED", uuid: "00000000-0000-0000-0000-0000000000a2" });
+
+			const response = await postAppleNotification(app);
+			const body = await response.json();
+
+			expect(response.status).toBe(200);
+			expect(body.data.status).toBe("processed");
+			expect(await appleSubscription()).toEqual({ status: "expired", expires: "2026-01-31" });
+			const premium = body.data.entitlements.entitlements.find(
+				(entitlement: { key: string }) => entitlement.key === "premium",
+			);
+			expect(premium.active).toBe(false);
+		});
+
+		it("applies a refund", async () => {
+			const { app, apple } = await verifiedSubscription();
+			apple.setNotification({ type: "REFUND", uuid: "00000000-0000-0000-0000-0000000000a3" });
+
+			const response = await postAppleNotification(app);
+
+			expect(response.status).toBe(200);
+			expect((await appleSubscription()).status).toBe("refunded");
+		});
+
+		it("reconciles the subscription from the provider's latest status", async () => {
+			const { apple, projectProviderServices } = await verifiedSubscription();
+			apple.setExpiresDate("2099-03-31T00:00:00.000Z");
+			apple.setStoreKitStatus(1);
+
+			const result =
+				await projectProviderServices.acme?.appleStoreKitService?.reconcileSubscription({
+					provider: "apple",
+					channel: "ios",
+					external_subscription_id: "100000000000001",
+				} as ProviderSubscriptionReconciliationRow);
+
+			expect(result).toEqual({ status: "processed" });
+			expect(await appleSubscription()).toEqual({ status: "active", expires: "2099-03-31" });
+		});
+
+		it("still refuses a notification that reports another product", async () => {
+			const { app, apple } = await verifiedSubscription();
+			apple.setProductId("premium_yearly_unmapped");
+			apple.setExpiresDate("2099-02-28T00:00:00.000Z");
+			apple.setNotification({ type: "DID_RENEW", uuid: "00000000-0000-0000-0000-0000000000a4" });
+
+			const response = await postAppleNotification(app);
+			const body = await response.json();
+
+			expect(response.status).toBe(404);
+			expect(body.error.code).toBe("BILLING_PRODUCT_NOT_FOUND");
+			expect(await appleSubscription()).toEqual({ status: "active", expires: "2099-01-31" });
+		});
+
+		it("still refuses to sell the retired product to a new subscriber", async () => {
+			const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+			await createAppleAccountToken(fixture.app, fixture.authHeaders, fixture.apple);
+			await retireAppleStoreProducts();
+
+			const response = await verifyAppleSubscription(fixture.app, fixture.authHeaders);
+			const body = await response.json();
+
+			expect(response.status).toBe(404);
+			expect(body.error.code).toBe("BILLING_PRODUCT_NOT_FOUND");
+		});
 	});
 
 	// capability: refund.sync
@@ -739,6 +842,32 @@ localDescribe("Apple route flows integration", () => {
 });
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function retireAppleStoreProducts(): Promise<void> {
+	await context.sql`UPDATE store_products SET active = false WHERE provider = 'apple'`;
+}
+
+async function postAppleNotification(
+	app: ReturnType<typeof createIntegrationApp>["app"],
+): Promise<Response> {
+	return await withIsoDateSqlParameters(() =>
+		testRequest(app, "/v1/projects/acme/webhooks/apple", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ signedPayload: "signed-notification" }),
+		}),
+	);
+}
+
+async function appleSubscription(): Promise<{ status: string; expires: string }> {
+	const [row] = await context.sql<{ status: string; expires: string }[]>`
+		SELECT status, (expires_at AT TIME ZONE 'UTC')::date::text AS expires
+		FROM subscriptions
+		WHERE provider = 'apple' AND external_subscription_id = '100000000000001'
+	`;
+	if (row === undefined) throw new Error("Expected the Apple subscription");
+	return row;
+}
 
 async function createAppleAccountToken(
 	app: ReturnType<typeof createIntegrationApp>["app"],

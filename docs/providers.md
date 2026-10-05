@@ -263,6 +263,13 @@ verification, or that belongs to another app or environment, answers `400 APPLE_
 and records nothing; a transient failure of Apple's online certificate checks answers
 `503 BILLING_PROVIDER_UNAVAILABLE`. Apple retries any answer other than 200.
 
+A notification or a reconciliation for a subscription Quotum already recorded follows the product it
+was recorded against after its store mapping or product is retired, for example when
+`catalog:provision` replaces a declared product: renewals, expiry, grace and billing-retry changes
+and renewal-status changes still apply. A subscription Quotum has never recorded, and an event that
+reports a product other than the recorded one, still need a mapping that is on sale and answer
+`404 BILLING_PRODUCT_NOT_FOUND`. Refunds and revocations always followed the recorded purchase.
+
 A transaction whose `offerDiscountType` is `FREE_TRIAL`, under any offer type (introductory,
 promotional, offer code or win-back), records its purchase date and transaction expiry as the
 subscription's trial. A billing grace period after the trial does not move the trial end. Later
@@ -310,6 +317,13 @@ Configure the Real-time Developer Notifications push subscription to
 `https://<billing-host>/v1/projects/<projectKey>/webhooks/google`. Quotum verifies the Pub/Sub OIDC
 token issuer, audience, authorized party, service-account email, and expiry. Voided purchases use a
 stable `google:voided:<purchaseToken>:<eventTimeMillis>:...` event id.
+
+A notification or a reconciliation for a subscription Quotum already recorded under its purchase
+token follows the product and price mapping it was recorded against after that mapping or product is
+retired, so renewals and expiry still apply. A purchase token Quotum has not recorded, including a
+resubscription or upgrade under a new token, and an event that reports another product or a price
+the recorded mapping does not name, still need a mapping that is on sale and answer
+`404 BILLING_PRODUCT_NOT_FOUND`. Voided purchases always followed the recorded purchase.
 
 While a subscription's line item is in a free-trial offer phase (`offerPhase.freeTrial`), Quotum
 records the subscription start and the item expiry as its trial. Play reports only the current
