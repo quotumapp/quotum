@@ -8,6 +8,7 @@ import {
 	isStorableText,
 	urlHasEncodedNul,
 } from "../shared/input-bounds";
+import { hasMediaType } from "../shared/media-type";
 import type { MerchantAuth } from "./auth";
 import { SIGNUP_COOKIE } from "./auth";
 import { merchantBillingRoute } from "./billing";
@@ -90,7 +91,7 @@ export interface MerchantAppDependencies {
 const MERCHANT_MAX_BODY_BYTES = 64 * 1024;
 
 export async function merchantJson(request: Request): Promise<unknown> {
-	if (!(request.headers.get("content-type") ?? "").startsWith("application/json"))
+	if (!hasMediaType(request.headers.get("content-type"), "application/json"))
 		throw new MerchantError("INVALID_REQUEST", "Send a JSON request.", 415);
 	const text = await readCappedText(request, MERCHANT_MAX_BODY_BYTES, tooLarge);
 	let value: unknown;

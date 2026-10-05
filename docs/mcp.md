@@ -55,6 +55,10 @@ response carries `iss` (RFC 9207); clients such as Codex refuse an authorization
 another origin without it.
 `/oauth/token`, `/oauth/revoke`, and `/oauth/jwks` are cookie-free API endpoints. Browser auth and
 selection stay behind the BFF's exact route allowlist, service identity, Origin and CSRF checks.
+The token and revoke endpoints read only `application/x-www-form-urlencoded` bodies, and the
+merchant API reads only `application/json`: the media type matches exactly, ignoring case and
+allowing parameters such as `charset`, so `application/jsonx` and `application/json-seq` answer
+`415`.
 An auth proof belongs to one OAuth request and cannot be exchanged for a console session or
 step-up grant. Environment selection and consent require a proof issued within five minutes.
 An accepted authorization code has its own five-minute redemption window. The transient session
