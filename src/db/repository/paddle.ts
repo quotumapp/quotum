@@ -310,9 +310,10 @@ export class PaddleBillingRepository extends RepositoryModule {
 				FROM store_products sp JOIN products p ON p.id = sp.product_id AND p.project_id = sp.project_id
 				WHERE sp.project_id = ${projectId} AND sp.provider = 'paddle' AND sp.channel = 'web'
 					AND sp.external_product_id = ${item.price.product_id} AND sp.external_price_id = ${item.price.id}
-					AND sp.active = true AND p.active = true
 			`,
 			);
+			// The recorded checkout intent already pins this price and product (assertFixedSubscription), so a
+			// mapping or product retired after checkout creation must not stop fulfillment or cancellation.
 			if (product?.product_type !== "subscription") mismatch();
 			const payment = input.transaction;
 			if (
