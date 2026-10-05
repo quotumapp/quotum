@@ -912,6 +912,12 @@
       ]
     },
     {
+      "code": "PADDLE_CUSTOMER_ALREADY_EXISTS",
+      "sources": [
+        "src/providers/paddle/operation-errors.ts"
+      ]
+    },
+    {
       "code": "PADDLE_CUSTOMER_EMAIL_REQUIRED",
       "sources": [
         "src/providers/paddle/commercial.ts",

@@ -18,10 +18,11 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import type { StoreEventReplayProviderResult } from "../../workers/store-event-replay";
 import type { PaddlePriceBinding } from "./catalog";
 import { PaddleCheckout } from "./checkout";
-import { PaddleClient } from "./client";
+import { PaddleClient, PaddleRequestRejected } from "./client";
 import { paddleCorrelation } from "./commands";
 import { PaddleCommercial } from "./commercial";
 import { buildPaddleConfig } from "./config";
+import { adoptExistingPaddleCustomer, paddleCustomerIdFromDetail } from "./customer-adoption";
 import { paddleCustomerResourceKey } from "./customer-operation";
 import { assertPaddleCustomer, PaddleGateway } from "./gateway";
 import { normalizePaddleEvent } from "./normalizer";
@@ -198,7 +199,8 @@ export class PaddleBillingService implements WebBillingService {
 			const beforeDispatch = (operation: ProviderOperation) =>
 				this.repository.bindPaddleCheckoutOperation(reservationId, operation);
 			if (customerId === null) {
-				if (customerKey === null) throw new Error("Paddle customer operation key was not resolved");
+				if (customerKey === null || email === null)
+					throw new Error("Paddle customer operation key was not resolved");
 				const request = { email };
 				const operation = await executeProviderOperation({
 					beforeDispatch,
@@ -218,13 +220,41 @@ export class PaddleBillingService implements WebBillingService {
 					write: async (operation) => {
 						if (operation.connectionVersionId !== this.config.versionId)
 							throw new Error("Resolve the recorded connection before dispatch");
-						const response = await this.client.write("POST", "/customers", {
-							email,
-							custom_data: paddleCorrelation({
-								operationId: operation.id,
-								requestHash: operation.requestHash,
-							}),
-						});
+						let response: Awaited<ReturnType<PaddleClient["write"]>>;
+						try {
+							response = await this.client.write("POST", "/customers", {
+								email,
+								custom_data: paddleCorrelation({
+									operationId: operation.id,
+									requestHash: operation.requestHash,
+								}),
+							});
+						} catch (error) {
+							// Paddle already holds a customer for this email. It is linked only when it is
+							// active, matches the email and no other billing account holds it; the outcome,
+							// either way, is this operation's receipt, so a replay of the key repeats it.
+							if (
+								!(error instanceof PaddleRequestRejected) ||
+								error.status !== 409 ||
+								error.code !== "customer_already_exists"
+							)
+								throw error;
+							const { customerId: existingId } = await adoptExistingPaddleCustomer({
+								client: this.client,
+								email,
+								hintedCustomerId: paddleCustomerIdFromDetail(error.detail),
+								claim: (customerId) =>
+									this.repository.claimExistingPaddleCustomer({
+										billingAccountId: input.billingAccountId,
+										customerId,
+										providerAccountId: this.config.accountIdentity,
+									}),
+							});
+							return {
+								providerObjectId: existingId,
+								result: { customerId: existingId, linkedExisting: true },
+							};
+						}
 						const customer = customerSchema.parse(response.data);
 						if (
 							customer.email !== email ||
@@ -304,6 +334,25 @@ export class PaddleBillingService implements WebBillingService {
 					),
 		);
 		const customer = matches[0];
+		if (matches.length === 0) {
+			// An existing customer is linked before its operation settles; a lost settle leaves that link.
+			const linkedId = await this.repository.getPaddleCustomer(
+				operation.billingAccountId,
+				this.config.accountIdentity,
+			);
+			const adopted = customers.find(
+				(candidate) =>
+					candidate.id === linkedId &&
+					candidate.status === "active" &&
+					candidate.email.toLowerCase() === email.toLowerCase(),
+			);
+			if (adopted)
+				return {
+					status: "succeeded",
+					providerObjectId: adopted.id,
+					result: { customerId: adopted.id, linkedExisting: true },
+				};
+		}
 		if (matches.length !== 1 || !customer || customer.status !== "active")
 			return { status: "requires_review", errorCode: "PADDLE_CUSTOMER_UNRESOLVED" };
 		await this.repository.linkPaddleCustomer({

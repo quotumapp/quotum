@@ -428,10 +428,23 @@ same key with a rejected customer returns `409 PROVIDER_OPERATION_FAILED`, and a
 that key returns `409 IDEMPOTENCY_CONFLICT`. A definitive rejection (a provider 4xx answer,
 including a `429`) created no Paddle customer, so a new checkout key, with the same or a corrected
 email, creates it once. The failed receipt carries the reason in `details.errorCode`: a rate limit
-is `PADDLE_RATE_LIMITED` (retry with a new key after the cooldown), and `customer_already_exists`
-means Paddle already holds a customer for that email. Quotum does not adopt a customer it did not
-create, so every new key asks Paddle again and gets the same answer until the email is changed or
-the existing Paddle customer is removed or archived. A customer write that is still
+is `PADDLE_RATE_LIMITED` (retry with a new key after the cooldown).
+When Paddle answers `409 customer_already_exists`, the same operation resolves the customer Paddle
+holds for the email, from the id in Paddle's error detail or else by an authenticated lookup by
+email, and reads it back: it must be active and its email must match the checkout email,
+ignoring case. The customer is linked to the billing account only if no other billing account in
+the project already holds that Paddle customer id; the link is made inside the operation, so the
+succeeded `customer.create` receipt carries the customer id (`result.linkedExisting`) and a replay
+of the same checkout key returns the original outcome. Otherwise the receipt is terminal and the
+checkout answers `409 PADDLE_CUSTOMER_ALREADY_EXISTS` with `details.reason`: `claimed` (another
+account holds it), `inactive` (archived), `email_mismatch`, or `ambiguous` (more than one active
+match, or no customer obtainable). Nothing is shared across accounts; use a different email under a
+new key. Two accounts racing for one customer are decided by the unique
+`(project, provider, external customer)` index on `provider_customers`: exactly one links it. These
+reads use the same cooldown guard as every Paddle call; a rate limit or an unreachable Paddle while
+reading fails the key (`PADDLE_RATE_LIMITED` or `PADDLE_UNAVAILABLE`), and a new key repeats the
+lookup. If the process stops after the link but before the receipt settles, recovery observes the
+linked customer and settles the receipt. A customer write that is still
 unresolved (`prepared`, `in_flight`, `reconciling` or `requires_review`) blocks every other key with
 `409 PROVIDER_OPERATION_PENDING` until it is reconciled; previews check the same condition before
 reserving anything. Operations created before this change are keyed by the account alone: an

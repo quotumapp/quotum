@@ -69,6 +69,12 @@ add it to existing notification settings before enabling this runtime. Losing th
 the reservation open until the notification is replayed and authenticated state proves cancellation.
 Canceled renewals and transactions without valid Quotum checkout correlation are ignored; conflicting
 evidence for a correlated checkout still fails without releasing its reservation.
+A checkout creates the billing account's Paddle customer from the checkout email. If Paddle already
+holds an active customer for that email, Quotum links it instead, once, to the first billing account
+that claims it, and refuses with `409 PADDLE_CUSTOMER_ALREADY_EXISTS` (`details.reason`: `claimed`,
+`inactive`, `email_mismatch` or `ambiguous`) when it is held by another account, archived, has
+another email or cannot be singled out; see [Operations](operations.md#provider-write-recovery-foundation) for the
+receipt behaviour.
 There is no Paddle draft-event setup receiver or production activation path in this increment.
 
 Host Paddle.js on the approved `paymentPageUrl`, initialize it with the sandbox client token, and

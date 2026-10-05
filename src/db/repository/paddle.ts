@@ -318,6 +318,39 @@ export class PaddleBillingRepository extends RepositoryModule {
 		});
 	}
 
+	/**
+	 * Links a Paddle customer the account did not create. The unique (project, provider, external
+	 * customer) index decides a race between accounts: the insert either takes the customer or
+	 * finds it held by another account, so exactly one account links it and no lock is needed.
+	 */
+	async claimExistingCustomer(
+		project: ProjectInstanceContext,
+		input: { billingAccountId: string; customerId: string; providerAccountId: string },
+	): Promise<"linked" | "claimed"> {
+		return await this.transaction(async (tx) => {
+			const customer = await ensureCustomer(tx, project.projectInstanceId, input.billingAccountId);
+			const own = await executeOne<{ external_customer_id: string }>(
+				tx,
+				sql`
+				SELECT external_customer_id FROM provider_customers
+				WHERE project_id = ${project.projectInstanceId} AND customer_id = ${customer.id} AND provider = 'paddle'
+			`,
+			);
+			if (own && own.external_customer_id !== input.customerId) mismatch();
+			const row = await executeOne<{ id: string }>(
+				tx,
+				sql`
+				INSERT INTO provider_customers (project_id, customer_id, provider, provider_account_id, external_customer_id)
+				VALUES (${project.projectInstanceId}, ${customer.id}, 'paddle', ${input.providerAccountId}, ${input.customerId})
+				ON CONFLICT (project_id, provider, external_customer_id) DO UPDATE SET updated_at = now()
+				WHERE provider_customers.customer_id = EXCLUDED.customer_id
+				RETURNING id
+			`,
+			);
+			return row === null ? "claimed" : "linked";
+		});
+	}
+
 	async record(
 		project: ProjectInstanceContext,
 		input: {

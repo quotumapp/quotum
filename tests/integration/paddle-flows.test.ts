@@ -80,7 +80,11 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		let writes = 0;
 		let discardResponse = false;
 		let rejectNext = false;
-		let customerRejection: { status: number; code: string } | null = null;
+		let customerRejection: { status: number; code: string; detail?: string } | null = null;
+		let existingCustomers: { id: string; email: string; status: string; custom_data: unknown }[] =
+			[];
+		let lookupFailure: { status: number; code: string } | null = null;
+		const calls: string[] = [];
 		let priceMode: "active" | "archived" | "down" = "active";
 		let priceReads = 0;
 		let cooldownUntil = 0;
@@ -98,6 +102,7 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			async (url, init) => {
 				const path = new URL(String(url)).pathname;
 				const body = init?.body ? JSON.parse(String(init.body)) : {};
+				calls.push(`${init?.method ?? "GET"} ${path}`);
 				if (path.startsWith("/prices/")) {
 					priceReads++;
 					onPriceRead?.(priceReads);
@@ -115,7 +120,12 @@ localDescribe("Paddle fixed subscription persistence", () => {
 					customerWrites++;
 					if (customerRejection)
 						return Response.json(
-							{ error: { code: customerRejection.code } },
+							{
+								error: {
+									code: customerRejection.code,
+									...(customerRejection.detail ? { detail: customerRejection.detail } : {}),
+								},
+							},
 							{
 								status: customerRejection.status,
 								...(customerRejection.status === 429
@@ -132,9 +142,25 @@ localDescribe("Paddle fixed subscription persistence", () => {
 					if (loseCustomer) throw new Error("Customer response lost");
 					return Response.json({ data: customer });
 				}
+				if (lookupFailure && path.startsWith("/customers")) {
+					const failure = lookupFailure;
+					return Response.json(
+						{ error: { code: failure.code } },
+						{
+							status: failure.status,
+							...(failure.status === 429 ? { headers: { "retry-after": "60" } } : {}),
+						},
+					);
+				}
+				if (path.startsWith("/customers/")) {
+					const known = existingCustomers.find((entry) => path.endsWith(`/${entry.id}`));
+					return known
+						? Response.json({ data: known })
+						: Response.json({ error: { code: "not_found" } }, { status: 404 });
+				}
 				if (path === "/customers")
 					return Response.json({
-						data: customer ? [customer] : [],
+						data: [...existingCustomers, ...(customer ? [customer] : [])],
 						meta: { pagination: { has_more: false } },
 					});
 				if (path === "/transactions" && init?.method === "POST") {
@@ -147,6 +173,7 @@ localDescribe("Paddle fixed subscription persistence", () => {
 					remote = {
 						...remote,
 						id: transactionId,
+						customer_id: body.customer_id ?? remote.customer_id,
 						custom_data: body.custom_data,
 						subscription_id: current.id,
 						checkout: { url: `${config.paymentPageUrl}?_ptxn=${transactionId}` },
@@ -210,8 +237,24 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			set remote(value) {
 				remote = value;
 			},
-			rejectCustomer(status = 400, code = "customer_invalid") {
-				customerRejection = { status, code };
+			rejectCustomer(status = 400, code = "customer_invalid", detail?: string) {
+				customerRejection = { status, code, ...(detail ? { detail } : {}) };
+			},
+			/** Customers Paddle already holds, as the conflict lookup and the id read see them. */
+			setExistingCustomers(
+				entries: { id: string; email: string; status?: string; custom_data?: unknown }[],
+			) {
+				existingCustomers = entries.map((entry) => ({
+					status: "active",
+					custom_data: null,
+					...entry,
+				}));
+			},
+			failLookup(status: number | null, code = "") {
+				lookupFailure = status === null ? null : { status, code };
+			},
+			get calls() {
+				return calls;
 			},
 			acceptCustomer() {
 				customerRejection = null;
@@ -1579,21 +1622,276 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		expect((await down.json()).error.code).toBe("BILLING_PROVIDER_UNAVAILABLE");
 	});
 
-	it("tells the caller why Paddle refused a customer for an email it already knows", async () => {
+	// QA-02(c): Paddle already holds a customer for the email (409 customer_already_exists). It is linked
+	// only when it is active, matches the email and no other billing account holds it.
+	const holders = async (customerId: string) =>
+		(
+			await context.sql<
+				{ billing_account_id: string }[]
+			>`SELECT c.billing_account_id FROM provider_customers pc JOIN customers c ON c.project_id = pc.project_id AND c.id = pc.customer_id WHERE pc.project_id=${project.projectInstanceId} AND pc.provider='paddle' AND pc.external_customer_id=${customerId}`
+		).map((row) => row.billing_account_id);
+	const conflict = (customerId: string) =>
+		`customer email conflicts with customer of ID ${customerId}`;
+	const customerReceipt = async (billingAccountId: string) =>
+		Array.from(
+			await context.sql<
+				{
+					status: string;
+					error_code: string | null;
+					provider_object_id: string | null;
+					result: unknown;
+				}[]
+			>`SELECT status, error_code, provider_object_id, result FROM provider_operations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${billingAccountId} AND operation='customer.create' ORDER BY created_at`,
+		);
+
+	it("links the existing customer Paddle names in the conflict, case-insensitively, and replays the outcome", async () => {
+		const existingId = unique("ctm");
 		const h = harness();
+		h.setExistingCustomers([{ id: existingId, email: "buyer@example.com" }]);
+		h.rejectCustomer(409, "customer_already_exists", conflict(existingId));
+		const session = await checkout(h, "adopt", "Buyer@Example.com");
+		expect(session).toMatchObject({ sessionId: h.remote.id, duplicate: false });
+		expect(h.calls).toContain(`GET /customers/${existingId}`);
+		expect(h.calls.filter((call) => call === "GET /customers")).toHaveLength(0);
+		expect(await holders(existingId)).toEqual([h.billingAccountId]);
+		expect(await customerReceipt(h.billingAccountId)).toMatchObject([
+			{
+				status: "succeeded",
+				error_code: null,
+				provider_object_id: existingId,
+				result: { customerId: existingId, linkedExisting: true },
+			},
+		]);
+		const transactionBody = h.calls.filter((call) => call === "POST /transactions");
+		expect(transactionBody).toHaveLength(1);
+		// The same checkout key returns the original outcome without asking Paddle again.
+		const callsBefore = h.calls.length;
+		expect(await checkout(h, "adopt", "Buyer@Example.com")).toEqual({
+			...session,
+			duplicate: true,
+		});
+		expect(h.calls.length).toBe(callsBefore);
+		expect([h.writes, h.customerWrites]).toEqual([1, 1]);
+	});
+
+	it("looks the customer up by email when the conflict does not name it", async () => {
+		const existingId = unique("ctm");
+		const h = harness();
+		h.setExistingCustomers([
+			{ id: existingId, email: "buyer@example.com" },
+			{ id: id("ctm", "f"), email: "buyer@example.com", status: "archived" },
+		]);
 		h.rejectCustomer(409, "customer_already_exists");
-		await expect(h.create()).rejects.toMatchObject({
+		expect(await checkout(h, "lookup", "buyer@example.com")).toMatchObject({ duplicate: false });
+		expect(h.calls).toContain("GET /customers");
+		expect(await holders(existingId)).toEqual([h.billingAccountId]);
+	});
+
+	it("refuses to share a customer another billing account holds, and a corrected email recovers", async () => {
+		const existingId = unique("ctm");
+		const first = harness();
+		const second = harness();
+		for (const h of [first, second]) {
+			h.setExistingCustomers([{ id: existingId, email: "shared@example.com" }]);
+			h.rejectCustomer(409, "customer_already_exists", conflict(existingId));
+		}
+		await checkout(first, "one", "shared@example.com");
+		const refused = await checkout(second, "two", "shared@example.com").catch(
+			(error: unknown) => error,
+		);
+		expect(refused).toMatchObject({
+			code: "PADDLE_CUSTOMER_ALREADY_EXISTS",
+			status: 409,
+			details: { status: "failed", reason: "claimed" },
+		});
+		expect(await holders(existingId)).toEqual([first.billingAccountId]);
+		expect(await openReservations(second.billingAccountId)).toHaveLength(0);
+		expect((await customerReceipt(second.billingAccountId))[0]).toMatchObject({
+			status: "failed",
+			error_code: "PADDLE_CUSTOMER_EXISTS_CLAIMED",
+		});
+		// The refusal is terminal for its key and sends no customer request again.
+		const customerCalls = () => second.calls.filter((call) => call.includes("/customers")).length;
+		const callsBefore = customerCalls();
+		await expect(checkout(second, "two", "shared@example.com")).rejects.toMatchObject({
+			code: "PADDLE_CUSTOMER_ALREADY_EXISTS",
+			details: { reason: "claimed" },
+		});
+		expect(customerCalls()).toBe(callsBefore);
+		// A corrected email under a new key creates the account's own customer.
+		second.acceptCustomer();
+		expect(await checkout(second, "corrected", "own@example.com")).toMatchObject({
+			duplicate: false,
+		});
+		expect(await holders(existingId)).toEqual([first.billingAccountId]);
+	});
+
+	it("refuses an inactive customer, a customer with another email and an ambiguous or missing match", async () => {
+		const existingId = unique("ctm");
+		const cases: {
+			reason: string;
+			existing: { id: string; email: string; status?: string }[];
+			detail?: string;
+		}[] = [
+			{
+				reason: "inactive",
+				existing: [{ id: existingId, email: "buyer@example.com", status: "archived" }],
+				detail: conflict(existingId),
+			},
+			{
+				reason: "inactive",
+				existing: [{ id: existingId, email: "buyer@example.com", status: "archived" }],
+			},
+			{
+				reason: "email_mismatch",
+				existing: [{ id: existingId, email: "someone@else.com" }],
+				detail: conflict(existingId),
+			},
+			{
+				reason: "ambiguous",
+				existing: [
+					{ id: existingId, email: "buyer@example.com" },
+					{ id: id("ctm", "f"), email: "buyer@example.com" },
+				],
+			},
+			{ reason: "ambiguous", existing: [] },
+		];
+		for (const { reason, existing, detail } of cases) {
+			const h = harness();
+			h.setExistingCustomers(existing);
+			h.rejectCustomer(409, "customer_already_exists", detail);
+			await expect(checkout(h, "refused", "buyer@example.com")).rejects.toMatchObject({
+				code: "PADDLE_CUSTOMER_ALREADY_EXISTS",
+				status: 409,
+				details: { reason },
+			});
+			expect(await holders(existingId)).toEqual([]);
+			expect(h.writes).toBe(0);
+			expect(await openReservations(h.billingAccountId)).toHaveLength(0);
+			// Nothing was linked, so a corrected email under a new key still recovers.
+			h.acceptCustomer();
+			expect(await checkout(h, "corrected", "corrected@example.com")).toMatchObject({
+				duplicate: false,
+			});
+		}
+	});
+
+	it("lets exactly one of two accounts claim the same customer", async () => {
+		const existingId = unique("ctm");
+		const accounts = [harness(), harness()];
+		for (const h of accounts) {
+			h.setExistingCustomers([{ id: existingId, email: "race@example.com" }]);
+			h.rejectCustomer(409, "customer_already_exists", conflict(existingId));
+		}
+		const outcomes = await Promise.allSettled(
+			accounts.map((h) => checkout(h, "race", "race@example.com")),
+		);
+		expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+		const rejected = outcomes.filter((outcome) => outcome.status === "rejected");
+		expect(rejected).toHaveLength(1);
+		expect(rejected[0]?.reason).toMatchObject({
+			code: "PADDLE_CUSTOMER_ALREADY_EXISTS",
+			details: { reason: "claimed" },
+		});
+		expect(await holders(existingId)).toHaveLength(1);
+		// Claiming directly: six accounts, one winner, and the winner's repeat is idempotent.
+		const direct = Array.from({ length: 6 }, () => unique("account"));
+		const contested = id("ctm", "d");
+		const scoped = context.repository.forProject(project);
+		const results = await Promise.all(
+			direct.map((billingAccountId) =>
+				scoped.claimExistingPaddleCustomer({
+					billingAccountId,
+					customerId: contested,
+					providerAccountId: accountIdentity,
+				}),
+			),
+		);
+		expect(results.filter((result) => result === "linked")).toHaveLength(1);
+		const [winner] = await holders(contested);
+		expect(winner).toBeDefined();
+		expect(
+			await scoped.claimExistingPaddleCustomer({
+				billingAccountId: winner ?? "",
+				customerId: contested,
+				providerAccountId: accountIdentity,
+			}),
+		).toBe("linked");
+		await expect(
+			scoped.claimExistingPaddleCustomer({
+				billingAccountId: winner ?? "",
+				customerId: id("ctm", "c"),
+				providerAccountId: accountIdentity,
+			}),
+		).rejects.toThrow("Paddle");
+	});
+
+	it("applies the rate-limit cooldown to the lookup and fails the key when Paddle cannot answer", async () => {
+		const existingId = unique("ctm");
+		const limited = harness();
+		limited.setExistingCustomers([{ id: existingId, email: "buyer@example.com" }]);
+		limited.rejectCustomer(409, "customer_already_exists");
+		limited.failLookup(429, "too_many_requests");
+		await expect(checkout(limited, "limited", "buyer@example.com")).rejects.toMatchObject({
 			code: "PROVIDER_OPERATION_FAILED",
-			details: { status: "failed", errorCode: "customer_already_exists" },
+			details: { errorCode: "PADDLE_RATE_LIMITED" },
 		});
-		// No customer was created or linked, so another key asks Paddle again instead of being
-		// blocked by this key's receipt, and succeeds as soon as Paddle accepts the email.
-		await expect(checkout(h, "second")).rejects.toMatchObject({
-			details: { errorCode: "customer_already_exists" },
+		// The 429 started the shared cooldown: the next attempt is refused before any request.
+		const callsBefore = limited.calls.length;
+		await expect(checkout(limited, "next", "buyer@example.com")).rejects.toMatchObject({
+			code: "BILLING_PROVIDER_UNAVAILABLE",
 		});
-		h.acceptCustomer();
-		expect(await checkout(h, "third")).toMatchObject({ duplicate: false });
-		expect(h.customerWrites).toBe(3);
+		expect(limited.calls.length).toBe(callsBefore);
+		expect(await holders(existingId)).toEqual([]);
+
+		const down = harness();
+		down.setExistingCustomers([{ id: existingId, email: "buyer@example.com" }]);
+		down.rejectCustomer(409, "customer_already_exists");
+		down.failLookup(503, "service_unavailable");
+		await expect(checkout(down, "down", "buyer@example.com")).rejects.toMatchObject({
+			code: "PROVIDER_OPERATION_FAILED",
+			details: { errorCode: "PADDLE_UNAVAILABLE" },
+		});
+		down.failLookup(null);
+		expect(await checkout(down, "back", "buyer@example.com")).toMatchObject({ duplicate: false });
+		expect(await holders(existingId)).toEqual([down.billingAccountId]);
+	});
+
+	it("recovers a claim whose receipt was never settled", async () => {
+		const existingId = unique("ctm");
+		const h = harness();
+		const email = "buyer@example.com";
+		h.setExistingCustomers([{ id: existingId, email }]);
+		const scoped = context.repository.forProject(project);
+		const request = { email };
+		const store = context.repository.providerOperations;
+		const prepared = await store.prepare(project, {
+			billingAccountId: h.billingAccountId,
+			provider: "paddle",
+			providerAccountId: accountIdentity,
+			connectionVersionId: h.config.versionId,
+			idempotencyKey: `customer:${sha256Hex(h.billingAccountId)}:lost`,
+			resourceKey: `customer:${sha256Hex(h.billingAccountId)}`,
+			operation: "customer.create",
+			requestHash: sha256Hex(stableJson(request)),
+			request,
+		});
+		expect(await store.claimDispatch(project, h.billingAccountId, prepared.id)).not.toBeNull();
+		// The claim committed but the process stopped before the receipt settled.
+		await scoped.claimExistingPaddleCustomer({
+			billingAccountId: h.billingAccountId,
+			customerId: existingId,
+			providerAccountId: accountIdentity,
+		});
+		await context.sql`UPDATE provider_operations SET lease_until = now() - interval '1 second' WHERE id = ${prepared.id}`;
+		const lease = await store.claimReconciliation(project, h.billingAccountId, prepared.id);
+		if (!lease) throw new Error("Missing lease");
+		const settled = await store.settle(
+			project,
+			lease,
+			await h.service.observeOperation(lease.operation),
+		);
+		expect(settled).toMatchObject({ status: "succeeded", providerObjectId: existingId });
 	});
 
 	it("does not block previews or other executions on a terminal customer rejection", async () => {
