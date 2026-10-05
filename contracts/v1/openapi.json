@@ -78532,7 +78532,7 @@
     },
     "/v1/billing-accounts/{billingAccountId}/providers/paddle/checkout-sessions": {
       "post": {
-        "description": "Sandbox fixed subscription checkout. Requires Idempotency-Key. Uncertain writes return PROVIDER_OPERATION_PENDING with an operationId to inspect.",
+        "description": "Sandbox fixed subscription checkout. Requires Idempotency-Key. Uncertain writes return PROVIDER_OPERATION_PENDING with an operationId to inspect. `duplicate` is true when the same key replays a checkout that already succeeded.",
         "operationId": "postV1BillingAccountsByBillingAccountIdProvidersPaddleCheckoutSessions",
         "parameters": [
           {
@@ -78587,6 +78587,9 @@
                   "properties": {
                     "data": {
                       "properties": {
+                        "duplicate": {
+                          "type": "boolean"
+                        },
                         "sessionId": {
                           "type": "string"
                         },
@@ -78597,7 +78600,8 @@
                       },
                       "required": [
                         "sessionId",
-                        "url"
+                        "url",
+                        "duplicate"
                       ],
                       "type": "object"
                     },

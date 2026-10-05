@@ -412,6 +412,9 @@ Common Paddle preview/execute uses the same ledger. Retry the original token/key
 is unresolved, including after preview expiry once execution was claimed. Recovery resolves the
 recorded connection version; an unavailable version fails closed. Completed commercial receipts
 replay without a provider call, and concurrent completions preserve the first result.
+A succeeded direct or common checkout receipt replays (`duplicate: true`) from its durable operation
+with no provider read, even after the Paddle price was archived, the price endpoint became
+unavailable or the store mapping was retired; only a new key is checked against the current catalog.
 Paddle checkout also owns a durable `paddle_checkout_reservations` row. One open row per
 project/billing account covers common and direct checkout, including the time after transaction
 creation succeeds but before payment. Competing callers receive `409 PADDLE_CHECKOUT_PENDING`;

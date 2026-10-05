@@ -71,8 +71,44 @@ export class PaddleBillingService implements WebBillingService {
 				400,
 			);
 		}
+		const replayed = await this.replaySucceededCheckout({
+			...input,
+			idempotencyKey: input.idempotencyKey,
+		});
+		if (replayed) return replayed;
 		const binding = await this.repository.getPaddleBinding(input.productKey);
 		return this.createFixedCheckout({ ...input, idempotencyKey: input.idempotencyKey }, binding);
+	}
+
+	/**
+	 * A succeeded receipt replays from its durable operation: no provider read, and no dependence on
+	 * the product still being on sale. A key that names another target falls through to the checks.
+	 */
+	private async replaySucceededCheckout(input: {
+		billingAccountId: string;
+		productKey: string;
+		idempotencyKey: string;
+	}) {
+		const existingId = await this.repository.findPaddleOperation(
+			input.billingAccountId,
+			input.idempotencyKey,
+			this.config.accountIdentity,
+		);
+		if (!existingId) return null;
+		const existing = await this.operations.get(this.project, input.billingAccountId, existingId);
+		if (existing.status !== "succeeded") return null;
+		const binding = await this.repository.findPaddleBindingIncludingRetired(input.productKey);
+		const request = existing.request as { bindings?: unknown; plan?: unknown };
+		if (
+			!binding ||
+			stableJson(request.bindings) !== stableJson([binding]) ||
+			stableJson(request.plan ?? null) !== stableJson(null)
+		)
+			return null;
+		return {
+			...z.object({ sessionId: paddleId("txn"), url: z.url() }).parse(existing.result),
+			duplicate: true,
+		};
 	}
 
 	previewCommercialAction(
