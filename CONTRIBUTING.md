@@ -154,12 +154,15 @@ latest revision before merging; a successful branch push alone is not validation
 tagging requires successful CI on the exact `main` commit being tagged, as described in the
 publishing checklist.
 
-Keep history linear and prepare one commit per feature branch before merging. Fold follow-up
-changes into the branch commit with `git commit --amend`; squash intermediate commits with an
-interactive rebase when needed. Rebase the branch onto current `main` instead of merging `main`
-into it. Update a previously pushed branch with `git push --force-with-lease`. Run the required
-checks on the final amended commit, then use GitHub **Squash and merge**. Merge commits and
-rebase-merging multiple branch commits are not part of this workflow. Published `main` must not
+Keep history linear. Feature branches and PRs may contain multiple commits. During implementation
+and review, add follow-up changes as separate commits and push normally so reviewers can compare
+iterations. Use GitHub **Squash and merge** when merging into `main` so the PR produces one commit
+on `main`; the feature branch itself does not need to be rewritten into one commit. Reserve
+`git commit --amend` or an interactive squash rebase for final merge preparation when needed.
+Rebase the branch onto current `main` instead of merging `main` into it. After rewriting a
+published branch, push with `git push --force-with-lease`. Run required checks on the final head
+before merging. Merge commits and rebase-merging multiple branch commits are not part of this
+workflow. Published `main` must not
 be rewritten without explicit authorization for a history repair. Once the repository merge queue is
 enabled, enqueue with `gh pr merge --squash --auto --match-head-commit <sha>` after rebasing and
 validating the current head; enabling the queue is a separate repository setting change.
