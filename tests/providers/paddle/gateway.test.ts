@@ -15,6 +15,41 @@ const page = (data: unknown[], pagination = { has_more: false, next: null as str
 	Response.json({ data, meta: { pagination } });
 
 describe("Paddle gateway", () => {
+	it("reports a price read that Paddle rate limits or cannot answer as retryable, not as a bad catalog", async () => {
+		const fixed = { ...binding, quantity: 1 };
+		const limited = new PaddleGateway(
+			client(async () =>
+				Response.json(
+					{ error: { code: "too_many_requests" } },
+					{ status: 429, headers: { "retry-after": "3" } },
+				),
+			),
+			config,
+		);
+		await expect(limited.validatePrices([fixed], true)).rejects.toMatchObject({
+			code: "BILLING_PROVIDER_UNAVAILABLE",
+			status: 503,
+			details: { retryAfterSeconds: 3 },
+		});
+		const down = new PaddleGateway(
+			client(async () =>
+				Response.json({ error: { code: "service_unavailable" } }, { status: 503 }),
+			),
+			config,
+		);
+		await expect(down.validatePrices([fixed], true)).rejects.toMatchObject({
+			code: "BILLING_PROVIDER_UNAVAILABLE",
+			status: 503,
+		});
+		const missing = new PaddleGateway(
+			client(async () => Response.json({ error: { code: "not_found" } }, { status: 404 })),
+			config,
+		);
+		await expect(missing.validatePrices([fixed], true)).rejects.toMatchObject({
+			status: 404,
+			code: "not_found",
+		});
+	});
 	it("requires quantity-locked, trial-free prices in the qualified checkout", async () => {
 		const fixed = { ...binding, quantity: 1 };
 		for (const remote of [

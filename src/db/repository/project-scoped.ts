@@ -76,16 +76,26 @@ export class ProjectScopedBillingRepository {
 	getPaddleCustomer(billingAccountId: string, accountIdentity: string) {
 		return this.repository.paddle.customer(this.project, billingAccountId, accountIdentity);
 	}
+	paddleCustomerOperationKey(billingAccountId: string, email: string | null, checkoutKey: string) {
+		return this.repository.paddle.customerOperationKey(
+			this.project,
+			billingAccountId,
+			email,
+			checkoutKey,
+		);
+	}
 	assertPaddleCustomerIntent(
 		billingAccountId: string,
 		accountIdentity: string,
 		email: string | null,
+		operationKey: string | null,
 	) {
 		return this.repository.paddle.assertCustomerIntent(
 			this.project,
 			billingAccountId,
 			accountIdentity,
 			email,
+			operationKey,
 		);
 	}
 	getPaddleBinding(productKey: string) {

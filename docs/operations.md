@@ -422,9 +422,29 @@ the conflict details identify the available original preview/operation. Keep the
 A `failed` checkout receipt stays terminal (`409 PROVIDER_OPERATION_FAILED`), while its reservation
 closes so a corrected request with a new key can proceed. A retry repairs an interrupted local
 reservation cleanup only when the retained operation proves definitive rejection.
-Before reserving a checkout, customer creation checks its retained account-scoped intent: a changed
-email returns `409 IDEMPOTENCY_CONFLICT`, and the same failed intent returns
-`409 PROVIDER_OPERATION_FAILED`. A new checkout key does not reset a terminal customer receipt.
+Customer creation is attempted once per checkout key: its `customer.create` operation is keyed by
+the account and that key, and its terminal receipt stays immutable. Before reserving a checkout, the
+same key with a rejected customer returns `409 PROVIDER_OPERATION_FAILED`, and a changed email under
+that key returns `409 IDEMPOTENCY_CONFLICT`. A definitive rejection (a provider 4xx answer,
+including a `429`) created no Paddle customer, so a new checkout key, with the same or a corrected
+email, creates it once. The failed receipt carries the reason in `details.errorCode`: a rate limit
+is `PADDLE_RATE_LIMITED` (retry with a new key after the cooldown), and `customer_already_exists`
+means Paddle already holds a customer for that email. Quotum does not adopt a customer it did not
+create, so every new key asks Paddle again and gets the same answer until the email is changed or
+the existing Paddle customer is removed or archived. A customer write that is still
+unresolved (`prepared`, `in_flight`, `reconciling` or `requires_review`) blocks every other key with
+`409 PROVIDER_OPERATION_PENDING` until it is reconciled; previews check the same condition before
+reserving anything. Operations created before this change are keyed by the account alone: an
+unresolved one with the same email is resumed by the next attempt, and a failed one no longer
+blocks new keys.
+While the process-wide Paddle rate-limit cooldown is active (set by any 429, including another
+project's, because all projects share one egress IP), a checkout is refused before it reserves or
+prepares anything, and so is a price read: `503 BILLING_PROVIDER_UNAVAILABLE` with
+`details.retryAfterSeconds`. No receipt records that refusal, so the same Idempotency-Key is retried
+unchanged once the interval has passed. A price read that Paddle cannot answer (`5xx`, timeout) is
+reported the same way instead of as `500 INTERNAL_ERROR`. A cooldown that begins in the few
+milliseconds between that check and the write itself still refuses the write locally, and that
+refusal is a failed receipt like any other definitive rejection: retry with a new key.
 If local preparation fails after reservation, cleanup closes only a reservation with no bound
 operation, recording `rejected`; binding is required before dispatch. Bound or ambiguous writes
 keep their reservation. A locally rejected owner cannot dispatch again; start a fresh preview or

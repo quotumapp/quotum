@@ -133,6 +133,7 @@ export class PaddleCommercial {
 				billingAccountId,
 				this.config.accountIdentity,
 				intent.email ?? null,
+				null,
 			);
 		await this.gateway.validatePrices([target.binding], true);
 		const context = {

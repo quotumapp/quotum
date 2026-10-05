@@ -4,7 +4,12 @@ import { sha256Hex, stableJson } from "../../billing/decimal";
 import { BillingError } from "../../billing/errors";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { type PaddlePriceBinding, paddlePriceBindingSchema } from "../../providers/paddle/catalog";
+import {
+	paddleCustomerAttemptKey,
+	paddleCustomerResourceKey,
+} from "../../providers/paddle/customer-operation";
 import type { NormalizedPaddleEvent } from "../../providers/paddle/normalizer";
+import { paddleOperationFailed } from "../../providers/paddle/operation-errors";
 import { type PaddleCommercialTarget, paddlePlanPinSchema } from "../../providers/paddle/plan";
 import {
 	paddleCorrelationSchema as correlationSchema,
@@ -19,56 +24,103 @@ import { ensureCustomer, upsertProviderCustomer } from "./identities";
 import { upsertPurchase, upsertSubscription } from "./mutations";
 import { closePaddleCheckoutInTx, lockPaddleCheckoutAccount } from "./paddle-checkouts";
 import { paddlePlanTarget } from "./paddle-plans";
-import { executeOne } from "./query";
+import { executeOne, executeRows } from "./query";
 import { recordStoreEventProcessingResult } from "./store-events";
 import type { StoreProductIdentityRow } from "./types";
 
 type SubscriptionEvent = Extract<NormalizedPaddleEvent, { kind: "subscription" }>;
+const UNRESOLVED_STATUSES = new Set(["prepared", "in_flight", "reconciling", "requires_review"]);
 
 /** Persists the initial fixed-price sandbox scope through the normal entitlement/projection path. */
 export class PaddleBillingRepository extends RepositoryModule {
-	/** Read-only preflight; dispatch still rechecks the immutable intent under its key lock. */
+	/**
+	 * The `customer.create` key a checkout attempt uses: its own, or the account-keyed key of an
+	 * unresolved operation created before attempts had their own keys, which the attempt resumes.
+	 */
+	async customerOperationKey(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		email: string | null,
+		checkoutKey: string,
+	): Promise<string> {
+		const attempt = paddleCustomerAttemptKey(billingAccountId, checkoutKey);
+		const legacy = paddleCustomerResourceKey(billingAccountId);
+		const rows = await executeRows<{
+			idempotency_key: string;
+			status: string;
+			request: Record<string, unknown>;
+		}>(
+			this.database,
+			sql`SELECT idempotency_key, status, request FROM provider_operations
+				WHERE project_id = ${project.projectInstanceId} AND billing_account_id = ${billingAccountId}
+				AND provider = 'paddle' AND idempotency_key IN (${attempt}, ${legacy})`,
+		);
+		if (rows.some((row) => row.idempotency_key === attempt)) return attempt;
+		const old = rows.find((row) => row.idempotency_key === legacy);
+		return old &&
+			UNRESOLVED_STATUSES.has(old.status) &&
+			stableJson(old.request) === stableJson({ email })
+			? legacy
+			: attempt;
+	}
+
+	/**
+	 * Read-only preflight; dispatch still rechecks the immutable intent under its key lock. With the
+	 * attempt's key it refuses a changed intent and a terminal receipt for that key. With or without
+	 * it, an unresolved customer write from another attempt blocks a new one: a definitive rejection
+	 * created no Paddle customer, so only unresolved writes can still produce one.
+	 */
 	async assertCustomerIntent(
 		project: ProjectInstanceContext,
 		billingAccountId: string,
 		providerAccountId: string,
 		email: string | null,
+		operationKey: string | null,
 	) {
-		const key = `customer:${sha256Hex(billingAccountId)}`;
-		const existing = await executeOne<{
+		const resourceKey = paddleCustomerResourceKey(billingAccountId);
+		const rows = await executeRows<{
 			id: string;
+			idempotency_key: string;
 			request_hash: string;
 			request: Record<string, unknown>;
 			provider_account_id: string;
 			operation: string;
 			resource_key: string;
 			status: string;
+			error_code: string | null;
 		}>(
 			this.database,
-			sql`SELECT id, request_hash, request, provider_account_id, operation, resource_key, status
+			sql`SELECT id, idempotency_key, request_hash, request, provider_account_id, operation, resource_key, status, error_code
 				FROM provider_operations WHERE project_id = ${project.projectInstanceId}
-				AND billing_account_id = ${billingAccountId} AND provider = 'paddle' AND idempotency_key = ${key}`,
+				AND billing_account_id = ${billingAccountId} AND provider = 'paddle'
+				AND (idempotency_key = ${operationKey ?? ""} OR (resource_key = ${resourceKey}
+					AND status IN ('prepared', 'in_flight', 'reconciling', 'requires_review')))`,
 		);
-		if (!existing) return;
-		const request = stableJson({ email });
-		if (
-			existing.request_hash !== sha256Hex(request) ||
-			stableJson(existing.request) !== request ||
-			existing.provider_account_id !== providerAccountId ||
-			existing.operation !== "customer.create" ||
-			existing.resource_key !== key
-		)
+		const own = rows.find((row) => row.idempotency_key === operationKey);
+		if (own) {
+			const request = stableJson({ email });
+			if (
+				own.request_hash !== sha256Hex(request) ||
+				stableJson(own.request) !== request ||
+				own.provider_account_id !== providerAccountId ||
+				own.operation !== "customer.create" ||
+				own.resource_key !== resourceKey
+			)
+				throw new BillingError(
+					"This idempotency key belongs to a different provider operation",
+					"IDEMPOTENCY_CONFLICT",
+					409,
+				);
+			if (own.status === "failed")
+				throw paddleOperationFailed({ id: own.id, errorCode: own.error_code });
+		}
+		const other = rows.find((row) => row.idempotency_key !== operationKey);
+		if (other)
 			throw new BillingError(
-				"This idempotency key belongs to a different provider operation",
-				"IDEMPOTENCY_CONFLICT",
+				"An earlier Paddle customer operation is unresolved; inspect it before retrying checkout",
+				"PROVIDER_OPERATION_PENDING",
 				409,
-			);
-		if (existing.status === "failed")
-			throw new BillingError(
-				"Paddle rejected this customer operation; inspect its terminal receipt",
-				"PROVIDER_OPERATION_FAILED",
-				409,
-				{ details: { operationId: existing.id, status: existing.status } },
+				{ details: { operationId: other.id, status: other.status } },
 			);
 	}
 

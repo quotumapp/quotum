@@ -64,8 +64,13 @@ export class NotConfiguredError extends BillingError {
 }
 
 export class ProviderUnavailableError extends BillingError {
-	constructor(message: string, code = "BILLING_PROVIDER_UNAVAILABLE", status = 503) {
-		super(message, code, status, { classification: "provider" });
+	constructor(
+		message: string,
+		code = "BILLING_PROVIDER_UNAVAILABLE",
+		status = 503,
+		details?: BillingErrorDetails,
+	) {
+		super(message, code, status, { classification: "provider", details });
 	}
 }
 

@@ -1,5 +1,7 @@
+import { ProviderUnavailableError } from "../../billing/errors";
 import { RejectedProviderWrite } from "../../billing/provider-operations";
 import type { PaddleConfig } from "./config";
+import { PADDLE_RATE_LIMITED } from "./operation-errors";
 
 const API_ORIGIN = "https://sandbox-api.paddle.com";
 // All tenants sharing this process also share its egress IP. Respect the aggregate cooldown.
@@ -19,6 +21,25 @@ export class PaddleWriteUncertain extends Error {
 	constructor() {
 		super("Paddle request outcome must be reconciled");
 	}
+}
+
+/**
+ * A caller-facing refusal for a read, or for a write that has not been prepared yet. Nothing was
+ * applied and no receipt exists, so the same request can simply be sent again.
+ */
+export function paddleUnavailable(error: unknown): unknown {
+	if (error instanceof PaddleRequestRejected && error.status === 429)
+		return new ProviderUnavailableError(
+			"Paddle is rate limiting requests; retry the same request after the retry interval",
+			undefined,
+			undefined,
+			error.retryAfterMs === null
+				? undefined
+				: { retryAfterSeconds: Math.max(1, Math.ceil(error.retryAfterMs / 1000)) },
+		);
+	if (error instanceof PaddleWriteUncertain)
+		return new ProviderUnavailableError("Paddle is unavailable; retry the same request later");
+	return error;
 }
 
 export interface PaddleResponse<T> {
@@ -43,6 +64,16 @@ export class PaddleClient {
 	) {
 		if (!/^pdl_sdbx_[A-Za-z0-9_]+$/.test(config.apiKey))
 			throw new Error("A Paddle sandbox API key is required");
+	}
+
+	/**
+	 * Call before preparing a write. While the shared rate-limit cooldown is active the write could
+	 * only be refused locally, so refuse it here, before any durable receipt can record the refusal.
+	 */
+	assertAvailable(): void {
+		const retryAfterMs = this.cooldown.get() - this.now();
+		if (retryAfterMs > 0)
+			throw paddleUnavailable(new PaddleRequestRejected(429, PADDLE_RATE_LIMITED, retryAfterMs));
 	}
 
 	async get<T>(path: string): Promise<PaddleResponse<T>> {
@@ -78,7 +109,7 @@ export class PaddleClient {
 		if (url.origin !== API_ORIGIN || url.pathname.includes(".."))
 			throw new Error("Invalid Paddle API destination");
 		const retryAfterMs = this.cooldown.get() - this.now();
-		if (retryAfterMs > 0) throw new PaddleRequestRejected(429, "PADDLE_RATE_LIMITED", retryAfterMs);
+		if (retryAfterMs > 0) throw new PaddleRequestRejected(429, PADDLE_RATE_LIMITED, retryAfterMs);
 		let response: Response;
 		try {
 			response = await this.fetcher(url, {
@@ -119,7 +150,11 @@ export class PaddleClient {
 				typeof error.code === "string" &&
 				/^[a-z0-9_]+$/.test(error.code)
 			) {
-				throw new PaddleRequestRejected(response.status, error.code, retryMs);
+				throw new PaddleRequestRejected(
+					response.status,
+					response.status === 429 ? PADDLE_RATE_LIMITED : error.code,
+					retryMs,
+				);
 			}
 			throw new PaddleWriteUncertain();
 		}

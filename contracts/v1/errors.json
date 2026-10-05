@@ -1255,8 +1255,7 @@
     {
       "code": "PROVIDER_OPERATION_FAILED",
       "sources": [
-        "src/db/repository/paddle-checkouts.ts",
-        "src/db/repository/paddle.ts"
+        "src/providers/paddle/operation-errors.ts"
       ]
     },
     {
@@ -1268,7 +1267,9 @@
     {
       "code": "PROVIDER_OPERATION_PENDING",
       "sources": [
-        "src/db/repository/provider-operations.ts"
+        "src/db/repository/paddle.ts",
+        "src/db/repository/provider-operations.ts",
+        "src/providers/paddle/service.ts"
       ]
     },
     {
