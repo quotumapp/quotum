@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
 import type { EntitlementSnapshot, ProjectionPayload } from "../../src/billing/types";
+import type { ProviderSubscriptionReconciliationRow } from "../../src/db/repository/types";
 import { createGoogleObfuscatedAccountId } from "../../src/providers/google/account-link";
 import { signGoogleOidcToken, tamperGoogleOidcSignature } from "../helpers/google-oidc";
 import { testRequest } from "../helpers/openapi";
@@ -313,6 +314,91 @@ localDescribe("Google route flows integration", () => {
 			externalEventId: "google:message_1",
 			transactionId: "purchase_token_1",
 			projectionIdempotencyKey: "google:message_1:projection",
+		});
+	});
+
+	describe("a subscription whose store product mapping was retired", () => {
+		// `catalog:provision` deactivates the old mapping when a declared product changes. A
+		// subscription Quotum already recorded keeps following its recorded product, so its renewals,
+		// expiry and reconciliation still apply; selling the retired product to someone new does not.
+		async function recordedSubscription() {
+			const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+			await createGoogleAccountLink(fixture.app, fixture.authHeaders);
+			expect((await postGoogleRtdn(fixture.app, "message_1")).status).toBe(200);
+			await retireGoogleStoreProducts();
+			return fixture;
+		}
+
+		it("applies a renewal that extends the period", async () => {
+			const { app, google } = await recordedSubscription();
+			google.setSubscriptionLineItem({ expiryTime: "2099-09-30T00:00:00.000Z" });
+
+			const response = await postGoogleRtdn(app, "message_2");
+			const body = await response.json();
+
+			expect(response.status).toBe(200);
+			expect(body.data.processed).toBe(true);
+			expect(await googleSubscription()).toEqual({ status: "active", expires: "2099-09-30" });
+		});
+
+		it("applies an expiry and ends the entitlement", async () => {
+			const { app, google } = await recordedSubscription();
+			// The recorded period has ended; Google's state carries that same expiry.
+			await context.sql`
+				UPDATE subscriptions
+				SET expires_at = '2026-01-01T00:00:00Z', current_period_end = '2026-01-01T00:00:00Z'
+				WHERE provider = 'google'
+			`;
+			google.setSubscriptionLineItem({ expiryTime: "2026-01-01T00:00:00.000Z" });
+
+			const response = await postGoogleRtdn(app, "message_2");
+			const body = await response.json();
+
+			expect(response.status).toBe(200);
+			expect(await googleSubscription()).toEqual({ status: "expired", expires: "2026-01-01" });
+			const premium = body.data.entitlements.entitlements.find(
+				(entitlement: { key: string }) => entitlement.key === "premium",
+			);
+			expect(premium.active).toBe(false);
+		});
+
+		it("reconciles the subscription from the provider's latest state", async () => {
+			const { google, projectProviderServices } = await recordedSubscription();
+			google.setSubscriptionLineItem({ expiryTime: "2099-11-30T00:00:00.000Z" });
+
+			const result =
+				await projectProviderServices.acme?.googlePlayBillingService?.reconcileSubscription({
+					provider: "google",
+					channel: "android",
+					external_subscription_id: "purchase_token_1",
+				} as ProviderSubscriptionReconciliationRow);
+
+			expect(result).toEqual({ status: "processed" });
+			expect(await googleSubscription()).toEqual({ status: "active", expires: "2099-11-30" });
+		});
+
+		it("still refuses a notification that reports another product", async () => {
+			const { app, google } = await recordedSubscription();
+			google.setSubscriptionLineItem({
+				productId: "premium_yearly_unmapped",
+				expiryTime: "2099-09-30T00:00:00.000Z",
+			});
+
+			const response = await postGoogleRtdn(app, "message_2");
+
+			expect(response.status).toBe(404);
+			expect(await googleSubscription()).toEqual({ status: "active", expires: "2099-06-30" });
+		});
+
+		it("still refuses to sell the retired product to a new subscriber", async () => {
+			const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+			await createGoogleAccountLink(fixture.app, fixture.authHeaders);
+			await retireGoogleStoreProducts();
+
+			const response = await postGoogleRtdn(fixture.app, "message_1");
+
+			expect(response.status).not.toBe(200);
+			await expectTableCounts(context.sql, { subscriptions: 0 });
 		});
 	});
 
@@ -672,6 +758,20 @@ localDescribe("Google route flows integration", () => {
 		});
 	});
 });
+
+async function retireGoogleStoreProducts(): Promise<void> {
+	await context.sql`UPDATE store_products SET active = false WHERE provider = 'google'`;
+}
+
+async function googleSubscription(): Promise<{ status: string; expires: string }> {
+	const [row] = await context.sql<{ status: string; expires: string }[]>`
+		SELECT status, (expires_at AT TIME ZONE 'UTC')::date::text AS expires
+		FROM subscriptions
+		WHERE provider = 'google' AND external_subscription_id = 'purchase_token_1'
+	`;
+	if (row === undefined) throw new Error("Expected the Google subscription");
+	return row;
+}
 
 function googleAccountId(billingAccountId: string): string {
 	return createGoogleObfuscatedAccountId(billingAccountId, "google-account-link-secret");

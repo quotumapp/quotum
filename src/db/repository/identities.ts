@@ -346,6 +346,82 @@ export async function getGoogleStoreProduct(
 	);
 }
 
+/**
+ * The store product an Apple subscription was recorded against, whether or not its mapping or
+ * product is still on sale. Selling is gated on `active`; a notification, renewal or
+ * reconciliation for a subscription Quotum already recorded follows the identity recorded for it,
+ * so retiring a mapping never strands a paid renewal or an expiry. Only the recorded product is
+ * accepted: an event that reports another one is a different sale.
+ */
+export async function getRecordedAppleStoreProduct(
+	executor: QueryExecutor,
+	projectId: string,
+	input: { channel: BillingChannel; originalTransactionId: string; externalProductId: string },
+): Promise<StoreProductIdentityRow | null> {
+	return await executeOne<StoreProductIdentityRow>(
+		executor,
+		drizzleSql`
+		SELECT
+			sp.id,
+			sp.product_id,
+			p.key AS product_key,
+			p.type AS product_type,
+			p.credit_amount
+		FROM subscriptions s
+		JOIN store_products sp ON sp.project_id = s.project_id AND sp.id = s.store_product_id
+		JOIN products p ON p.id = sp.product_id AND p.project_id = sp.project_id
+		WHERE s.project_id = ${projectId}
+			AND s.provider = 'apple'
+			AND s.channel = ${input.channel}
+			AND s.external_subscription_id = ${input.originalTransactionId}
+			AND sp.provider = 'apple'
+			AND sp.channel = ${input.channel}
+			AND sp.external_product_id = ${input.externalProductId}
+		LIMIT 1
+	`,
+	);
+}
+
+/**
+ * The store product a Google Play subscription was recorded against, whether or not its mapping
+ * or product is still on sale; see {@link getRecordedAppleStoreProduct}. The recorded mapping
+ * matches the event's price the way a sale does: its price id equals the event's, or it names none.
+ * A purchase token Quotum has not recorded, including a resubscription under a new token, is a new
+ * sale and still needs an active mapping.
+ */
+export async function getRecordedGoogleStoreProduct(
+	executor: QueryExecutor,
+	projectId: string,
+	input: { purchaseToken: string; externalProductId: string; externalPriceId: string | null },
+): Promise<StoreProductIdentityRow | null> {
+	return await executeOne<StoreProductIdentityRow>(
+		executor,
+		drizzleSql`
+		SELECT
+			sp.id,
+			sp.product_id,
+			p.key AS product_key,
+			p.type AS product_type,
+			p.credit_amount
+		FROM subscriptions s
+		JOIN store_products sp ON sp.project_id = s.project_id AND sp.id = s.store_product_id
+		JOIN products p ON p.id = sp.product_id AND p.project_id = sp.project_id
+		WHERE s.project_id = ${projectId}
+			AND s.provider = 'google'
+			AND s.channel = 'android'
+			AND s.external_subscription_id = ${input.purchaseToken}
+			AND sp.provider = 'google'
+			AND sp.channel = 'android'
+			AND sp.external_product_id = ${input.externalProductId}
+			AND (
+				(${input.externalPriceId}::text IS NOT NULL AND sp.external_price_id = ${input.externalPriceId})
+				OR sp.external_price_id IS NULL
+			)
+		LIMIT 1
+	`,
+	);
+}
+
 export async function getStripeStoreProduct(
 	executor: QueryExecutor,
 	projectId: string,

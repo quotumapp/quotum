@@ -20,6 +20,7 @@ import {
 	findGoogleCustomerByPurchaseTokens,
 	findGoogleCustomerBySubscriptionTokens,
 	getGoogleStoreProduct,
+	getRecordedGoogleStoreProduct,
 	upsertProviderCustomer,
 } from "./identities";
 import {
@@ -220,10 +221,21 @@ export class GoogleBillingRepository extends RepositoryModule {
 			}
 
 			if (!isInvalidatedStatus(input.purchaseStatus) && input.externalProductId !== "unknown") {
-				storeProduct = await getGoogleStoreProduct(tx, projectId, {
-					externalProductId: input.externalProductId,
-					externalPriceId: input.externalPriceId,
-				});
+				// A new subscription needs a mapping that is on sale. One Quotum already recorded keeps
+				// following its recorded product after that mapping is retired, so a renewal, an expiry
+				// or a reconciliation still applies instead of being refused.
+				storeProduct =
+					(await getGoogleStoreProduct(tx, projectId, {
+						externalProductId: input.externalProductId,
+						externalPriceId: input.externalPriceId,
+					})) ??
+					(input.purchaseKind === "subscription"
+						? await getRecordedGoogleStoreProduct(tx, projectId, {
+								purchaseToken: input.purchaseToken,
+								externalProductId: input.externalProductId,
+								externalPriceId: input.externalPriceId,
+							})
+						: null);
 				if (storeProduct === null) {
 					throw new NotFoundBillingError(
 						`active Google Play store product ${input.externalProductId} price ${input.externalPriceId} was not found`,
