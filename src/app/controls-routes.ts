@@ -4,7 +4,7 @@ import { InvalidRequestError } from "../billing/errors";
 import { billingProviders } from "../billing/types";
 import { cadenceUnits, maxCadenceCount } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
-import { bigintIdSchema, storableDateTimeSchema } from "../shared/input-bounds";
+import { bigintIdSchema, decimalDigitsQuery, storableDateTimeSchema } from "../shared/input-bounds";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/controls-responses";
 import { publicIdSchema } from "./contracts/usage-api";
@@ -23,6 +23,9 @@ const entityParams = accountParams.extend({ entityId: publicIdSchema }).strict()
 const licenseCheckParams = entityParams
 	.extend({ featureKey: z.string().trim().min(1).max(120) })
 	.strict();
+const licenseCheckQuery = z.object({
+	quantity: decimalDigitsQuery(z.coerce.number().int().min(1).max(1_000_000).default(1)),
+});
 const policyParams = accountParams.extend({ policyId: bigintIdSchema() }).strict();
 const assignmentParams = accountParams.extend({ assignmentId: bigintIdSchema() }).strict();
 const contractParams = accountParams.extend({ contractId: bigintIdSchema() }).strict();
@@ -645,21 +648,20 @@ export function registerControlsRoutes({
 
 	app.get(
 		"/v1/billing-accounts/:billingAccountId/entities/:entityId/licenses/:featureKey",
-		async ({ params, project, request }) => {
-			const rawQuantity = new URL(request.url).searchParams.get("quantity");
-			const requiredQuantity = rawQuantity === null ? 1 : Number(rawQuantity);
+		async ({ params, project, query }) => {
 			return {
 				success: true,
 				data: await service.checkEntityLicense(privateProject(project), {
 					billingAccountId: params.billingAccountId,
 					entityId: params.entityId,
 					featureKey: params.featureKey,
-					requiredQuantity,
+					requiredQuantity: query.quantity,
 				}),
 			};
 		},
 		{
 			params: licenseCheckParams,
+			query: licenseCheckQuery,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKey",
 				credentialAccess: "read_only",
@@ -667,10 +669,6 @@ export function registerControlsRoutes({
 				path: "/v1/billing-accounts/:billingAccountId/entities/:entityId/licenses/:featureKey",
 				responses: {
 					200: responses.getV1BillingAccountsByBillingAccountIdEntitiesByEntityIdLicensesByFeatureKeyResponse200Schema,
-				},
-				// The handler reads `quantity` itself and defaults it to 1.
-				request: {
-					query: z.object({ quantity: z.coerce.number().int().min(1).max(1_000_000).optional() }),
 				},
 			}),
 		},
