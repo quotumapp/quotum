@@ -10,9 +10,9 @@ moves to a changed baseline by restoring its data into a freshly migrated databa
 the later sections name the steps they reuse and add what their own change needs. A release's pull requests name the baselines it changes under
 `Upgrade notes`.
 
-## Paddle commercial previews (unreleased)
+## Upgrading a populated deployment to v0.22.0
 
-This follow-up changes two baselines:
+v0.22.0 adds the common Paddle checkout and changes two baselines relative to v0.21.0:
 
 - `migrations/002_billing_core.sql` adds `paddle_checkout_reservations`, with one open reservation per
   project/billing account and retained closed-owner history.
@@ -55,6 +55,16 @@ variables change. Recreate disposable databases. For a populated v0.21.0 databas
    notification setting without changing its identity, verify signed delivery, and verify counts,
    foreign keys and migration status before enabling traffic and workers. Replay pending provider
    notifications after startup; do not release unknown reservations by age or preview expiry.
+
+**Skipping releases and calendar months.** An upgrade that skips releases follows this procedure
+once: run each skipped release's pre-checks (for example the Apple provider-row check in the v0.20.0
+section), migrate an empty database with the target image and restore the data; the intermediate
+releases' stopped-service steps are not repeated. The baseline creates the monthly `usage_events`
+partitions from the month before it runs, so a database migrated in a different calendar month than
+the dump can lack a partition the dump lists, and `pg_restore` then stops with a missing relation.
+Before restoring, compare the dump's `usage_events_YYYY_MM` data entries with the migrated
+database's partitions. If an entry has no partition and the old partition held no rows, drop its
+`TABLE DATA` line from the restore list; if it held rows, stop and create the partition first.
 
 Rollback restores the pre-upgrade backup with the old binary and loses subsequent writes. Sandbox
 checks qualify the new behavior, not a populated production upgrade; rehearse the transformation

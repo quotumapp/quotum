@@ -435,7 +435,7 @@ provider notification through the normal signed ingress/replay pipeline. Do not 
 or reservations to permit another checkout. `PADDLE_CHECKOUT_CLOSED` means an already-closed owner
 cannot dispatch again; use its retained receipt when one exists. A restored nonfailed legacy
 checkout without a reservation also blocks new keys until its history is reconstructed under the
-[upgrade procedure](upgrade-transitions.md#paddle-commercial-previews-unreleased).
+[upgrade procedure](upgrade-transitions.md#upgrading-a-populated-deployment-to-v0220).
 
 Existing Stripe workflows retain their own recovery and do not produce these receipts.
 
