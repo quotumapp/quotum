@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { BillingError } from "../../billing/errors";
 import { type PaddlePriceBinding, validatePaddleItemSet, validatePaddlePrice } from "./catalog";
-import type { PaddleClient } from "./client";
+import { type PaddleClient, paddleUnavailable } from "./client";
 import type { PaddleCommand, PaddleCorrelation } from "./commands";
 import type { PaddleConfig } from "./config";
 import {
@@ -15,7 +15,7 @@ import {
 /** Authenticated Paddle transport; mutations are called only from durable dispatchers. */
 export class PaddleGateway {
 	constructor(
-		private readonly client: Pick<PaddleClient, "get" | "write">,
+		private readonly client: Pick<PaddleClient, "get" | "write" | "assertAvailable">,
 		private readonly config: Pick<PaddleConfig, "paymentPageUrl">,
 	) {}
 
@@ -26,7 +26,12 @@ export class PaddleGateway {
 		validatePaddleItemSet(bindings);
 		// Sequential to avoid bursting the seller's shared IP limit for large item sets.
 		for (const binding of bindings) {
-			const response = await this.client.get(`/prices/${paddleId("pri").parse(binding.priceId)}`);
+			// A rate limit or outage here is not a catalog problem: the caller may retry unchanged.
+			const response = await this.client
+				.get(`/prices/${paddleId("pri").parse(binding.priceId)}`)
+				.catch((error: unknown) => {
+					throw paddleUnavailable(error);
+				});
 			const price = validatePaddlePrice(binding, response.data);
 			if (
 				fixedSubscription &&
@@ -43,6 +48,11 @@ export class PaddleGateway {
 					409,
 				);
 		}
+	}
+
+	/** Refuses before a write is prepared while Paddle's rate limit is cooling down. */
+	assertAvailable(): void {
+		this.client.assertAvailable();
 	}
 
 	async subscription(id: string) {

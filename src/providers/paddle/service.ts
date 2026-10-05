@@ -22,8 +22,10 @@ import { PaddleClient } from "./client";
 import { paddleCorrelation } from "./commands";
 import { PaddleCommercial } from "./commercial";
 import { buildPaddleConfig } from "./config";
+import { paddleCustomerResourceKey } from "./customer-operation";
 import { assertPaddleCustomer, PaddleGateway } from "./gateway";
 import { normalizePaddleEvent } from "./normalizer";
+import { paddleOperationFailed } from "./operation-errors";
 import { normalizePaddleEmail, type PaddlePlanPin } from "./plan";
 import {
 	type PaddleTransaction,
@@ -168,12 +170,22 @@ export class PaddleBillingService implements WebBillingService {
 				"PADDLE_CUSTOMER_EMAIL_REQUIRED",
 				400,
 			);
-		if (!customerId)
+		const customerKey = customerId
+			? null
+			: await this.repository.paddleCustomerOperationKey(
+					input.billingAccountId,
+					email,
+					input.idempotencyKey,
+				);
+		if (customerKey !== null)
 			await this.repository.assertPaddleCustomerIntent(
 				input.billingAccountId,
 				this.config.accountIdentity,
 				email,
+				customerKey,
 			);
+		// A cooldown refusal must not leave a reservation or receipt behind for this key.
+		this.gateway.assertAvailable();
 		const reservationId = await this.repository.reservePaddleCheckout({
 			billingAccountId: input.billingAccountId,
 			idempotencyKey: input.idempotencyKey,
@@ -186,6 +198,7 @@ export class PaddleBillingService implements WebBillingService {
 			const beforeDispatch = (operation: ProviderOperation) =>
 				this.repository.bindPaddleCheckoutOperation(reservationId, operation);
 			if (customerId === null) {
+				if (customerKey === null) throw new Error("Paddle customer operation key was not resolved");
 				const request = { email };
 				const operation = await executeProviderOperation({
 					beforeDispatch,
@@ -196,8 +209,8 @@ export class PaddleBillingService implements WebBillingService {
 						provider: "paddle",
 						providerAccountId: this.config.accountIdentity,
 						connectionVersionId: this.config.versionId,
-						idempotencyKey: `customer:${sha256Hex(input.billingAccountId)}`,
-						resourceKey: `customer:${sha256Hex(input.billingAccountId)}`,
+						idempotencyKey: customerKey,
+						resourceKey: paddleCustomerResourceKey(input.billingAccountId),
 						operation: "customer.create",
 						requestHash: sha256Hex(stableJson(request)),
 						request,
@@ -447,11 +460,10 @@ export class PaddleBillingService implements WebBillingService {
 }
 
 function pending(operation: ProviderOperation): never {
+	if (operation.status === "failed") throw paddleOperationFailed(operation);
 	throw new BillingError(
-		operation.status === "failed"
-			? "Paddle rejected this operation; inspect its receipt before submitting a corrected request"
-			: "Inspect the provider operation before retrying checkout",
-		operation.status === "failed" ? "PROVIDER_OPERATION_FAILED" : "PROVIDER_OPERATION_PENDING",
+		"Inspect the provider operation before retrying checkout",
+		"PROVIDER_OPERATION_PENDING",
 		409,
 		{
 			details: { operationId: operation.id, status: operation.status },

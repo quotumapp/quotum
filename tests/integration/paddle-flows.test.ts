@@ -80,68 +80,91 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		let writes = 0;
 		let discardResponse = false;
 		let rejectNext = false;
-		let rejectCustomer = false;
+		let customerRejection: { status: number; code: string } | null = null;
 		let priceMode: "active" | "archived" | "down" = "active";
 		let priceReads = 0;
+		let cooldownUntil = 0;
+		let onPriceRead: ((read: number) => void) | undefined;
 		let onCreated: (() => Promise<void>) | undefined;
-		const client = new PaddleClient(config, async (url, init) => {
-			const path = new URL(String(url)).pathname;
-			const body = init?.body ? JSON.parse(String(init.body)) : {};
-			if (path.startsWith("/prices/")) {
-				priceReads++;
-				if (priceMode === "down")
-					return Response.json({ error: { code: "service_unavailable" } }, { status: 503 });
-				return Response.json({
-					data: {
-						...selectedPrice,
-						...(priceMode === "archived" ? { status: "archived" } : {}),
-						quantity: { minimum: 1, maximum: 1 },
-					},
-				});
-			}
-			if (path === "/customers" && init?.method === "POST") {
-				customerWrites++;
-				if (rejectCustomer)
-					return Response.json({ error: { code: "customer_invalid" } }, { status: 400 });
-				customer = {
-					id: customerId,
-					email: body.email,
-					status: "active",
-					custom_data: body.custom_data,
-				};
-				if (loseCustomer) throw new Error("Customer response lost");
-				return Response.json({ data: customer });
-			}
-			if (path === "/customers")
-				return Response.json({
-					data: customer ? [customer] : [],
-					meta: { pagination: { has_more: false } },
-				});
-			if (path === "/transactions" && init?.method === "POST") {
-				writes++;
-				if (rejectNext) {
-					rejectNext = false;
-					return Response.json({ error: { code: "transaction_invalid" } }, { status: 400 });
+		// A private cooldown keeps one test's rate limit from reaching the others in this process.
+		const cooldown = {
+			get: () => cooldownUntil,
+			set: (value: number) => {
+				cooldownUntil = Math.max(cooldownUntil, value);
+			},
+		};
+		const client = new PaddleClient(
+			config,
+			async (url, init) => {
+				const path = new URL(String(url)).pathname;
+				const body = init?.body ? JSON.parse(String(init.body)) : {};
+				if (path.startsWith("/prices/")) {
+					priceReads++;
+					onPriceRead?.(priceReads);
+					if (priceMode === "down")
+						return Response.json({ error: { code: "service_unavailable" } }, { status: 503 });
+					return Response.json({
+						data: {
+							...selectedPrice,
+							...(priceMode === "archived" ? { status: "archived" } : {}),
+							quantity: { minimum: 1, maximum: 1 },
+						},
+					});
 				}
-				const transactionId = unique("txn");
-				remote = {
-					...remote,
-					id: transactionId,
-					custom_data: body.custom_data,
-					subscription_id: current.id,
-					checkout: { url: `${config.paymentPageUrl}?_ptxn=${transactionId}` },
-				};
-				current = { ...current, custom_data: body.custom_data };
-				await onCreated?.();
-				if (discardResponse) throw new Error("Response lost after remote creation");
-				return Response.json({ data: remote });
-			}
-			if (path === "/transactions")
-				return Response.json({ data: [remote], meta: { pagination: { has_more: false } } });
-			if (path.startsWith("/transactions/")) return Response.json({ data: remote });
-			if (path.startsWith("/subscriptions/")) return Response.json({ data: current });
-			throw new Error(`Unexpected Paddle request: ${path}`);
-		});
+				if (path === "/customers" && init?.method === "POST") {
+					customerWrites++;
+					if (customerRejection)
+						return Response.json(
+							{ error: { code: customerRejection.code } },
+							{
+								status: customerRejection.status,
+								...(customerRejection.status === 429
+									? { headers: { "retry-after": "0.001" } }
+									: {}),
+							},
+						);
+					customer = {
+						id: customerId,
+						email: body.email,
+						status: "active",
+						custom_data: body.custom_data,
+					};
+					if (loseCustomer) throw new Error("Customer response lost");
+					return Response.json({ data: customer });
+				}
+				if (path === "/customers")
+					return Response.json({
+						data: customer ? [customer] : [],
+						meta: { pagination: { has_more: false } },
+					});
+				if (path === "/transactions" && init?.method === "POST") {
+					writes++;
+					if (rejectNext) {
+						rejectNext = false;
+						return Response.json({ error: { code: "transaction_invalid" } }, { status: 400 });
+					}
+					const transactionId = unique("txn");
+					remote = {
+						...remote,
+						id: transactionId,
+						custom_data: body.custom_data,
+						subscription_id: current.id,
+						checkout: { url: `${config.paymentPageUrl}?_ptxn=${transactionId}` },
+					};
+					current = { ...current, custom_data: body.custom_data };
+					await onCreated?.();
+					if (discardResponse) throw new Error("Response lost after remote creation");
+					return Response.json({ data: remote });
+				}
+				if (path === "/transactions")
+					return Response.json({ data: [remote], meta: { pagination: { has_more: false } } });
+				if (path.startsWith("/transactions/")) return Response.json({ data: remote });
+				if (path.startsWith("/subscriptions/")) return Response.json({ data: current });
+				throw new Error(`Unexpected Paddle request: ${path}`);
+			},
+			Date.now,
+			cooldown,
+		);
 		const service = new PaddleBillingService(
 			project,
 			configWithIdentity,
@@ -187,8 +210,11 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			set remote(value) {
 				remote = value;
 			},
-			rejectCustomer() {
-				rejectCustomer = true;
+			rejectCustomer(status = 400, code = "customer_invalid") {
+				customerRejection = { status, code };
+			},
+			acceptCustomer() {
+				customerRejection = null;
 			},
 			rejectTransaction() {
 				rejectNext = true;
@@ -201,6 +227,13 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			},
 			get priceReads() {
 				return priceReads;
+			},
+			/** Starts, or with 0 ends, the shared rate-limit cooldown another tenant's 429 would set. */
+			coolDown(ms: number) {
+				cooldownUntil = ms === 0 ? 0 : Date.now() + ms;
+			},
+			onPriceRead(callback: (read: number) => void) {
+				onPriceRead = callback;
 			},
 			onTransactionCreated(callback: () => Promise<void>) {
 				onCreated = callback;
@@ -1361,41 +1394,209 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		expect([h.writes, h.customerWrites]).toEqual([0, 0]);
 	});
 
-	it("retains terminal customer rejection across same-key retries and releases corrected-request reservations", async () => {
+	const openReservations = (billingAccountId: string) =>
+		context.sql`SELECT id FROM paddle_checkout_reservations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${billingAccountId} AND closed_at IS NULL`;
+	const customerOperations = (billingAccountId: string) =>
+		context.sql<
+			{
+				idempotency_key: string;
+				status: string;
+				request: { email: string };
+				error_code: string | null;
+			}[]
+		>`SELECT idempotency_key, status, request, error_code FROM provider_operations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${billingAccountId} AND operation='customer.create' ORDER BY created_at`;
+	const checkout = (h: ReturnType<typeof harness>, idempotencyKey: string, email?: string) =>
+		h.service.createCheckoutSession({
+			billingAccountId: h.billingAccountId,
+			productKey: "paddle_test",
+			email: email ?? `${h.billingAccountId}@example.com`,
+			idempotencyKey,
+		});
+
+	// QA-02: a definite rejection created no Paddle customer, so it is terminal only for its own key.
+	it("keeps a customer rejection terminal for its own key and lets a new key create the customer", async () => {
 		const h = harness();
-		h.rejectCustomer();
+		h.rejectCustomer(400, "invalid_email");
 		await expect(h.create()).rejects.toMatchObject({
 			code: "PROVIDER_OPERATION_FAILED",
 			details: { status: "failed" },
 		});
 		await expect(h.create()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_FAILED" });
-		await expect(
-			h.service.createCheckoutSession({
-				billingAccountId: h.billingAccountId,
-				productKey: "paddle_test",
-				email: "payer@example.com",
-				idempotencyKey: "corrected",
-			}),
-		).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
-		expect(
-			await context.sql`SELECT id FROM paddle_checkout_reservations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${h.billingAccountId} AND closed_at IS NULL`,
-		).toHaveLength(0);
-		// The same customer intent keeps returning its terminal receipt without reserving a checkout.
-		await expect(
-			h.service.createCheckoutSession({
-				billingAccountId: h.billingAccountId,
-				productKey: "paddle_test",
-				email: `${h.billingAccountId}@example.com`,
-				idempotencyKey: "corrected",
-			}),
-		).rejects.toMatchObject({ code: "PROVIDER_OPERATION_FAILED" });
-		expect(
-			await context.sql`SELECT id FROM paddle_checkout_reservations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${h.billingAccountId} AND closed_at IS NULL`,
-		).toHaveLength(0);
+		expect(await openReservations(h.billingAccountId)).toHaveLength(0);
 		expect([h.writes, h.customerWrites]).toEqual([0, 1]);
+		// A changed email under the same key is still a different request.
+		await expect(checkout(h, "initial", "payer@example.com")).rejects.toMatchObject({
+			code: "IDEMPOTENCY_CONFLICT",
+		});
+		// A corrected request with a new key creates the customer once; the first receipt stays failed.
+		h.acceptCustomer();
+		const recovered = await checkout(h, "corrected", "payer@example.com");
+		expect(recovered).toMatchObject({ sessionId: h.remote.id, duplicate: false });
+		expect([h.writes, h.customerWrites]).toEqual([1, 2]);
+		const operations = await customerOperations(h.billingAccountId);
+		expect(operations.map((operation) => [operation.status, operation.request.email])).toEqual([
+			["failed", `${h.billingAccountId}@example.com`],
+			["succeeded", "payer@example.com"],
+		]);
+		expect(operations[0]?.error_code).toBe("invalid_email");
+		expect(await checkout(h, "corrected", "payer@example.com")).toEqual({
+			...recovered,
+			duplicate: true,
+		});
+		// The rejected key never dispatches a checkout later, even though the account now has a customer.
+		await expect(h.create()).rejects.toMatchObject({ status: 409 });
+		expect(h.writes).toBe(1);
 	});
 
-	it("refuses customer conflicts and terminal receipts before preview or execution can reserve", async () => {
+	it("lets a new key retry the same email after Paddle rate limits the customer write", async () => {
+		const h = harness();
+		h.rejectCustomer(429, "too_many_requests");
+		// Paddle answered 429, so the write was refused and is a terminal receipt for this key; the
+		// receipt names the rate limit so the caller knows a new key is the way forward.
+		const refused = await h.create().catch((error: unknown) => error);
+		expect(refused).toMatchObject({
+			code: "PROVIDER_OPERATION_FAILED",
+			status: 409,
+			details: { status: "failed", errorCode: "PADDLE_RATE_LIMITED" },
+		});
+		expect((refused as Error).message).toContain("retry with a new Idempotency-Key");
+		h.acceptCustomer();
+		await Bun.sleep(10);
+		await expect(h.create()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_FAILED" });
+		const recovered = await checkout(h, "fresh-attempt");
+		expect(recovered).toMatchObject({ sessionId: h.remote.id, duplicate: false });
+		expect(h.customerWrites).toBe(2);
+		const operations = await customerOperations(h.billingAccountId);
+		expect(operations.map((operation) => operation.status)).toEqual(["failed", "succeeded"]);
+		expect(operations[0]?.error_code).toBe("PADDLE_RATE_LIMITED");
+	});
+
+	// QA-02: a cooldown that another tenant's 429 started refuses this write locally. Nothing was
+	// sent, so it must not leave a terminal receipt (or a reservation) behind for the key.
+	it("refuses a customer write during the shared cooldown without a receipt, and the same key then succeeds", async () => {
+		const h = harness();
+		h.onPriceRead((read) => {
+			if (read === 1) h.coolDown(60_000);
+		});
+		const refused = await h.create().catch((error: unknown) => error);
+		expect(refused).toMatchObject({
+			code: "BILLING_PROVIDER_UNAVAILABLE",
+			status: 503,
+			details: { retryAfterSeconds: 60 },
+		});
+		expect(h.customerWrites).toBe(0);
+		expect(await customerOperations(h.billingAccountId)).toHaveLength(0);
+		expect(await openReservations(h.billingAccountId)).toHaveLength(0);
+		h.coolDown(0);
+		expect(await h.create()).toMatchObject({ sessionId: h.remote.id, duplicate: false });
+		expect([h.writes, h.customerWrites]).toEqual([1, 1]);
+	});
+
+	it("refuses the checkout write during the shared cooldown without a receipt and resumes the same key", async () => {
+		const h = harness();
+		h.onPriceRead((read) => {
+			// The second read belongs to the checkout step, after the customer already exists.
+			if (read === 2) h.coolDown(60_000);
+		});
+		await expect(h.create()).rejects.toMatchObject({
+			code: "BILLING_PROVIDER_UNAVAILABLE",
+			status: 503,
+		});
+		expect([h.writes, h.customerWrites]).toEqual([0, 1]);
+		const checkoutOperations =
+			await context.sql`SELECT id FROM provider_operations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${h.billingAccountId} AND operation='checkout.hosted'`;
+		expect(checkoutOperations).toHaveLength(0);
+		h.coolDown(0);
+		expect(await h.create()).toMatchObject({ sessionId: h.remote.id, duplicate: false });
+		expect([h.writes, h.customerWrites]).toEqual([1, 1]);
+		expect(
+			(await customerOperations(h.billingAccountId)).map((operation) => operation.status),
+		).toEqual(["succeeded"]);
+	});
+
+	it("maps a rate limit or an outage on the price read to a retryable provider error", async () => {
+		const limited = harness();
+		limited.coolDown(30_000);
+		await expect(limited.create()).rejects.toMatchObject({
+			code: "BILLING_PROVIDER_UNAVAILABLE",
+			status: 503,
+			details: { retryAfterSeconds: 30 },
+		});
+		const down = harness();
+		down.makePriceUnavailable();
+		await expect(down.create()).rejects.toMatchObject({
+			code: "BILLING_PROVIDER_UNAVAILABLE",
+			status: 503,
+		});
+		for (const h of [limited, down]) {
+			expect([h.writes, h.customerWrites]).toEqual([0, 0]);
+			expect(await customerOperations(h.billingAccountId)).toHaveLength(0);
+			expect(await openReservations(h.billingAccountId)).toHaveLength(0);
+		}
+		limited.coolDown(0);
+		expect(await limited.create()).toMatchObject({ duplicate: false });
+	});
+
+	it("reports a provider outage and the shared cooldown as 503 over the trusted HTTP route", async () => {
+		const h = harness();
+		const app = withOpenApiAssertions(
+			createApp({
+				env: context.env,
+				projectContextResolver: context.projectContextResolver,
+				projectProviderServices: {
+					[project.projectInstanceKey]: { paddleBillingService: h.service },
+				},
+				providerOperationStore: context.repository.providerOperations,
+			}),
+		);
+		const send = async () =>
+			await testRequest(
+				app,
+				`/v1/billing-accounts/${h.billingAccountId}/providers/paddle/checkout-sessions`,
+				{
+					method: "POST",
+					headers: {
+						authorization: `Bearer ${integrationProjectCredential(project.projectInstanceKey)}`,
+						"idempotency-key": "http-unavailable",
+					},
+					body: JSON.stringify({
+						productKey: "paddle_test",
+						email: `${h.billingAccountId}@example.com`,
+					}),
+				},
+			);
+		h.coolDown(45_000);
+		const limited = await send();
+		expect(limited.status).toBe(503);
+		expect((await limited.json()).error).toMatchObject({
+			code: "BILLING_PROVIDER_UNAVAILABLE",
+			details: { retryAfterSeconds: 45 },
+		});
+		h.coolDown(0);
+		h.makePriceUnavailable();
+		const down = await send();
+		expect(down.status).toBe(503);
+		expect((await down.json()).error.code).toBe("BILLING_PROVIDER_UNAVAILABLE");
+	});
+
+	it("tells the caller why Paddle refused a customer for an email it already knows", async () => {
+		const h = harness();
+		h.rejectCustomer(409, "customer_already_exists");
+		await expect(h.create()).rejects.toMatchObject({
+			code: "PROVIDER_OPERATION_FAILED",
+			details: { status: "failed", errorCode: "customer_already_exists" },
+		});
+		// No customer was created or linked, so another key asks Paddle again instead of being
+		// blocked by this key's receipt, and succeeds as soon as Paddle accepts the email.
+		await expect(checkout(h, "second")).rejects.toMatchObject({
+			details: { errorCode: "customer_already_exists" },
+		});
+		h.acceptCustomer();
+		expect(await checkout(h, "third")).toMatchObject({ duplicate: false });
+		expect(h.customerWrites).toBe(3);
+	});
+
+	it("does not block previews or other executions on a terminal customer rejection", async () => {
 		const h = harness();
 		const corrected = commercial(h, {
 			kind: "checkout_product",
@@ -1411,25 +1612,86 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		const sameEmailPreview = await original.preview();
 		h.rejectCustomer();
 		await expect(h.create()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_FAILED" });
-		await expect(corrected.preview()).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
-		await expect(corrected.execute(preview.previewToken)).rejects.toMatchObject({
-			code: "IDEMPOTENCY_CONFLICT",
+		// New previews and the earlier previews' own keys are unaffected by the direct key's receipt.
+		await expect(corrected.preview()).resolves.toHaveProperty("previewToken");
+		await expect(original.preview()).resolves.toHaveProperty("previewToken");
+		h.acceptCustomer();
+		await expect(corrected.execute(preview.previewToken)).resolves.toMatchObject({
+			kind: "checkout",
 		});
-		await expect(original.preview()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_FAILED" });
-		await expect(original.execute(sameEmailPreview.previewToken)).rejects.toMatchObject({
-			code: "PROVIDER_OPERATION_FAILED",
-		});
-		const stored = await context.repository.getCommercialActionPreview(
-			project,
-			h.billingAccountId,
-			preview.previewToken,
+		expect([h.writes, h.customerWrites]).toEqual([1, 2]);
+		// The customer now exists, so the earlier preview is stale; a fresh one still meets the single
+		// open reservation per account instead of checking out twice.
+		await expect(original.execute(sameEmailPreview.previewToken)).rejects.toThrow(
+			"changed after preview",
 		);
-		expect(stored.status).toBe("previewed");
-		expect(stored.executionIdempotencyKey).toBeNull();
-		expect(
-			await context.sql`SELECT id FROM paddle_checkout_reservations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${h.billingAccountId} AND closed_at IS NULL`,
-		).toHaveLength(0);
-		expect([h.writes, h.customerWrites]).toEqual([0, 1]);
+		const next = await original.preview();
+		await expect(original.execute(next.previewToken)).rejects.toMatchObject({
+			code: "PADDLE_CHECKOUT_PENDING",
+		});
+		expect(await openReservations(h.billingAccountId)).toHaveLength(1);
+	});
+
+	it("blocks a new key while an earlier customer write is unresolved, before reserving or dispatching", async () => {
+		const h = harness();
+		h.loseCustomerResponse();
+		await expect(h.create()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_PENDING" });
+		const corrected = commercial(h, {
+			kind: "checkout_product",
+			productKey: "paddle_test",
+			email: "corrected@example.com",
+		});
+		await expect(checkout(h, "second", "corrected@example.com")).rejects.toMatchObject({
+			code: "PROVIDER_OPERATION_PENDING",
+			details: { status: "reconciling" },
+		});
+		await expect(corrected.preview()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_PENDING" });
+		expect(h.customerWrites).toBe(1);
+		expect(await openReservations(h.billingAccountId)).toHaveLength(1);
+		// The first key resumes once recovery resolves the write against Paddle.
+		const [row] = await context.sql<
+			{ id: string }[]
+		>`SELECT id FROM provider_operations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${h.billingAccountId} AND operation='customer.create'`;
+		if (!row) throw new Error("Missing customer operation");
+		const store = context.repository.providerOperations;
+		const lease = await store.claimReconciliation(project, h.billingAccountId, row.id);
+		if (!lease) throw new Error("Missing lease");
+		await store.settle(project, lease, await h.service.observeOperation(lease.operation));
+		expect(await h.create()).toMatchObject({ sessionId: h.remote.id });
+		expect([h.writes, h.customerWrites]).toEqual([1, 1]);
+	});
+
+	it("treats operations keyed by the account alone as before: failed ones no longer block, unresolved ones resume", async () => {
+		const legacyKey = (account: string) => `customer:${sha256Hex(account)}`;
+		// A failed account-keyed operation, as an earlier build stranded the account with.
+		const stranded = harness();
+		stranded.rejectCustomer();
+		await expect(stranded.create()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_FAILED" });
+		await context.sql`UPDATE provider_operations SET idempotency_key=${legacyKey(stranded.billingAccountId)} WHERE project_id=${project.projectInstanceId} AND billing_account_id=${stranded.billingAccountId} AND operation='customer.create'`;
+		stranded.acceptCustomer();
+		expect(await checkout(stranded, "retry")).toMatchObject({ sessionId: stranded.remote.id });
+		expect(stranded.customerWrites).toBe(2);
+		// An account-keyed operation that was prepared and never dispatched is resumed, not duplicated.
+		const waiting = harness();
+		const email = `${waiting.billingAccountId}@example.com`;
+		const request = { email };
+		await context.repository.providerOperations.prepare(project, {
+			billingAccountId: waiting.billingAccountId,
+			provider: "paddle",
+			providerAccountId: accountIdentity,
+			connectionVersionId: waiting.config.versionId,
+			idempotencyKey: legacyKey(waiting.billingAccountId),
+			resourceKey: legacyKey(waiting.billingAccountId),
+			operation: "customer.create",
+			requestHash: sha256Hex(stableJson(request)),
+			request,
+		});
+		await expect(checkout(waiting, "other-key", "different@example.com")).rejects.toMatchObject({
+			code: "PROVIDER_OPERATION_PENDING",
+		});
+		expect(await checkout(waiting, "resume")).toMatchObject({ sessionId: waiting.remote.id });
+		expect(waiting.customerWrites).toBe(1);
+		expect(await customerOperations(waiting.billingAccountId)).toHaveLength(1);
 	});
 
 	it("closes unbound reservations after preparation fails for common and direct checkout", async () => {
@@ -1469,8 +1731,20 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			email: "corrected@example.com",
 		});
 		const preview = await flow.preview();
-		h.rejectCustomer();
-		await expect(h.create()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_FAILED" });
+		// An unresolved customer write from another path (prepared, never dispatched) blocks this
+		// attempt before it reserves or dispatches anything.
+		const request = { email: `${h.billingAccountId}@example.com` };
+		await context.repository.providerOperations.prepare(project, {
+			billingAccountId: h.billingAccountId,
+			provider: "paddle",
+			providerAccountId: accountIdentity,
+			connectionVersionId: h.config.versionId,
+			idempotencyKey: `customer:${sha256Hex(h.billingAccountId)}:${sha256Hex("other-key")}`,
+			resourceKey: `customer:${sha256Hex(h.billingAccountId)}`,
+			operation: "customer.create",
+			requestHash: sha256Hex(stableJson(request)),
+			request,
+		});
 		// Reproduce an executing preview retained by an older runtime after customer preparation failed.
 		await context.repository.beginCommercialActionExecution(project, {
 			billingAccountId: h.billingAccountId,
@@ -1480,11 +1754,11 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			idempotencyKey: "execute",
 		});
 		await expect(flow.execute(preview.previewToken, "execute")).rejects.toMatchObject({
-			code: "IDEMPOTENCY_CONFLICT",
+			code: "PROVIDER_OPERATION_PENDING",
 		});
 		const [hold] =
 			await context.sql`SELECT operation_id, closure_reason FROM paddle_checkout_reservations WHERE project_id=${project.projectInstanceId} AND preview_token=${preview.previewToken}`;
 		expect(hold).toMatchObject({ operation_id: null, closure_reason: "rejected" });
-		expect([h.writes, h.customerWrites]).toEqual([0, 1]);
+		expect([h.writes, h.customerWrites]).toEqual([0, 0]);
 	});
 });

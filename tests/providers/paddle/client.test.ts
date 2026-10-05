@@ -1,8 +1,10 @@
 import { describe, expect, it } from "bun:test";
+import { ProviderUnavailableError } from "../../../src/billing/errors";
 import {
 	PaddleClient,
 	PaddleRequestRejected,
 	PaddleWriteUncertain,
+	paddleUnavailable,
 } from "../../../src/providers/paddle/client";
 
 const config = { apiKey: "pdl_sdbx_test_only" };
@@ -81,6 +83,75 @@ describe("Paddle transport", () => {
 			retryAfterMs: 12000,
 		});
 		expect(requests).toBe(1);
+	});
+	it("refuses a write before it is prepared only while the shared cooldown is active", () => {
+		const gate = cooldown();
+		const client = new PaddleClient(
+			config,
+			async () => Response.json({ data: {} }),
+			() => 1000,
+			gate,
+		);
+		expect(() => client.assertAvailable()).not.toThrow();
+		gate.set(13_500);
+		let refused: unknown;
+		try {
+			client.assertAvailable();
+		} catch (error) {
+			refused = error;
+		}
+		expect(refused).toBeInstanceOf(ProviderUnavailableError);
+		expect(refused).toMatchObject({
+			code: "BILLING_PROVIDER_UNAVAILABLE",
+			status: 503,
+			details: { retryAfterSeconds: 13 },
+		});
+		gate.set(900);
+		expect(() =>
+			new PaddleClient(config, fetch, () => 14_000, gate).assertAvailable(),
+		).not.toThrow();
+	});
+	it("stores one receipt code for every rate limit Paddle answers with", async () => {
+		const client = new PaddleClient(
+			config,
+			async () =>
+				Response.json(
+					{ error: { code: "too_many_requests" } },
+					{ status: 429, headers: { "retry-after": "7" } },
+				),
+			() => 1000,
+			cooldown(),
+		);
+		await expect(client.write("POST", "/customers", {})).rejects.toMatchObject({
+			status: 429,
+			code: "PADDLE_RATE_LIMITED",
+			retryAfterMs: 7000,
+		});
+		const other = new PaddleClient(
+			config,
+			async () => Response.json({ error: { code: "customer_already_exists" } }, { status: 409 }),
+			() => 1000,
+			cooldown(),
+		);
+		await expect(other.write("POST", "/customers", {})).rejects.toMatchObject({
+			status: 409,
+			code: "customer_already_exists",
+		});
+	});
+	it("turns only a rate limit or an outage into a retryable provider error", () => {
+		const limited = paddleUnavailable(new PaddleRequestRejected(429, "PADDLE_RATE_LIMITED", 1500));
+		expect(limited).toBeInstanceOf(ProviderUnavailableError);
+		expect(limited).toMatchObject({ status: 503, details: { retryAfterSeconds: 2 } });
+		const unhinted = paddleUnavailable(new PaddleRequestRejected(429, "PADDLE_RATE_LIMITED", null));
+		expect(unhinted).toBeInstanceOf(ProviderUnavailableError);
+		expect(unhinted).not.toHaveProperty("details");
+		const outage = paddleUnavailable(new PaddleWriteUncertain());
+		expect(outage).toBeInstanceOf(ProviderUnavailableError);
+		expect(outage).toMatchObject({ code: "BILLING_PROVIDER_UNAVAILABLE", status: 503 });
+		const missing = new PaddleRequestRejected(404, "not_found", null);
+		expect(paddleUnavailable(missing)).toBe(missing);
+		const unrelated = new Error("bug");
+		expect(paddleUnavailable(unrelated)).toBe(unrelated);
 	});
 	it("rejects production credentials and foreign destinations before fetch", async () => {
 		expect(() => new PaddleClient({ apiKey: "pdl_live_secret" })).toThrow("sandbox API key");

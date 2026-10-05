@@ -48,6 +48,7 @@ export class PaddleCheckout {
 		});
 		// Validation is read-only. A rejected catalog never reserves or dispatches an operation.
 		await this.gateway.validatePrices(request.bindings, true);
+		this.gateway.assertAvailable();
 		return await executeProviderOperation({
 			beforeDispatch: input.beforeDispatch,
 			project: this.project,

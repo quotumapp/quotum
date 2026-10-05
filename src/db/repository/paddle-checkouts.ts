@@ -4,6 +4,7 @@ import { BillingError } from "../../billing/errors";
 import type { ProviderOperation } from "../../billing/provider-operations";
 import type { ProjectInstanceContext } from "../../projects/context";
 import type { PaddlePriceBinding } from "../../providers/paddle/catalog";
+import { paddleOperationFailed } from "../../providers/paddle/operation-errors";
 import type { PaddlePlanPin } from "../../providers/paddle/plan";
 import { RepositoryModule } from "./base";
 import { executeOne, jsonb } from "./query";
@@ -28,6 +29,7 @@ interface ReservationRow {
 	operation_id: string | null;
 	closed_at: Date | string | null;
 	operation_status?: string | null;
+	operation_error_code?: string | null;
 }
 
 export class PaddleCheckoutRepository extends RepositoryModule {
@@ -126,7 +128,7 @@ export async function reservePaddleCheckoutInTx(
 	const existing = await executeOne<ReservationRow>(
 		tx,
 		sql`
-		SELECT r.*, o.status AS operation_status FROM paddle_checkout_reservations r
+		SELECT r.*, o.status AS operation_status, o.error_code AS operation_error_code FROM paddle_checkout_reservations r
 		LEFT JOIN provider_operations o ON o.project_id = r.project_id AND o.billing_account_id = r.billing_account_id AND o.id = r.operation_id
 		WHERE r.project_id = ${projectId} AND r.billing_account_id = ${input.billingAccountId} AND r.owner_kind = ${kind}
 			AND r.idempotency_key = ${input.idempotencyKey}
@@ -146,14 +148,10 @@ export async function reservePaddleCheckoutInTx(
 			);
 		}
 		if (existing.operation_status === "failed")
-			throw new BillingError(
-				"Paddle rejected this operation; inspect its receipt before submitting a corrected request",
-				"PROVIDER_OPERATION_FAILED",
-				409,
-				{
-					details: { operationId: existing.operation_id, status: "failed" },
-				},
-			);
+			throw paddleOperationFailed({
+				id: existing.operation_id ?? "",
+				errorCode: existing.operation_error_code ?? null,
+			});
 		if (existing.closed_at)
 			throw new BillingError(
 				"Checkout reservation is closed; use its original receipt",
