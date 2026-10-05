@@ -129,6 +129,12 @@ idempotency key and can recover a saved result. An uncertain external outcome st
 it is not automatically rerun. `completed` means the operation returned successfully, which may
 mean a checkout link or queued job was created, not that payment or background processing finished.
 
+Approving or rejecting a proposal that is no longer pending applies nothing: a replaced proposal is
+`cancelled`, and others are `rejected`, `expired`, `applying`, `completed`, `failed`, `stale` or
+`needs_review`. The call still answers `200` with the proposal as it now stands, so a client must
+check `status` and never treat that response as an approval. Only a request whose `requestHash`
+differs from the proposal's answers `409 ACTION_MISMATCH`.
+
 Disabling the write flag prevents new proposals and approvals. Existing write-consented connections
 can inspect results and cancel pending proposals while their authorization remains valid.
 
