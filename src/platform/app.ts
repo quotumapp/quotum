@@ -2,7 +2,12 @@ import { Elysia } from "elysia";
 import { z } from "zod";
 import { readCappedText } from "../shared/body-limit";
 import { type ElysiaPluginLike, HTTP_APP_CONFIG, operationDetail } from "../shared/http";
-import { displayNameSchema, isStorableText } from "../shared/input-bounds";
+import {
+	displayNameSchema,
+	hasUnstorableText,
+	isStorableText,
+	urlHasEncodedNul,
+} from "../shared/input-bounds";
 import type { MerchantAuth } from "./auth";
 import { SIGNUP_COOKIE } from "./auth";
 import { merchantBillingRoute } from "./billing";
@@ -88,11 +93,16 @@ export async function merchantJson(request: Request): Promise<unknown> {
 	if (!(request.headers.get("content-type") ?? "").startsWith("application/json"))
 		throw new MerchantError("INVALID_REQUEST", "Send a JSON request.", 415);
 	const text = await readCappedText(request, MERCHANT_MAX_BODY_BYTES, tooLarge);
+	let value: unknown;
 	try {
-		return JSON.parse(text);
+		value = JSON.parse(text);
 	} catch {
 		throw new MerchantError("INVALID_REQUEST", "Send a valid JSON request.");
 	}
+	// Text Postgres cannot store would fail inside a query as a 503.
+	if (hasUnstorableText(value))
+		throw new MerchantError("INVALID_REQUEST", "Check the form fields and try again.");
+	return value;
 }
 
 function tooLarge(): MerchantError {
@@ -221,6 +231,8 @@ export function createMerchantApp({
 		set.headers["x-content-type-options"] = "nosniff";
 		if (!(await store.serviceAuthorized(request.headers.get("x-quotum-service-token") ?? null)))
 			throw new MerchantError("SERVICE_UNAUTHORIZED", "Request origin is not authorized.", 401);
+		if (urlHasEncodedNul(request.url))
+			throw new MerchantError("INVALID_REQUEST", "Check the request address and try again.");
 		if (request.method !== "GET" && request.method !== "HEAD") {
 			assertCsrf(request, store.config.origin);
 			idempotencyKey(request);

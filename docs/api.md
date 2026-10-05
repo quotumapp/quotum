@@ -44,6 +44,12 @@ than 64 levels deep; a NUL character or an unpaired surrogate in any body key or
 segment or query value; a numeric id beyond the signed 64-bit range; a date-time outside years 1 to
 9999; and a decimal with more than 19 digits before the decimal point.
 
+The merchant API (`/api`) and the remote MCP endpoints refuse the same text with
+`400 INVALID_REQUEST` (the OAuth endpoints answer `400 invalid_request`): an encoded NUL in the
+URL, and a NUL or unpaired surrogate in any JSON body key or string at any depth or in an OAuth
+form. An MCP tool argument that makes a path or query value unstorable returns that `400` as the
+tool's error.
+
 Where a `/v1` operation requires an `Idempotency-Key`, the key holds 1 to 200 characters after
 surrounding whitespace is trimmed; usage operations additionally reject surrounding whitespace
 instead of changing the caller's identity. Invalid keys answer `400 INVALID_REQUEST`. The contract lists

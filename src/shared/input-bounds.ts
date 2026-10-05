@@ -18,6 +18,36 @@ export function isStorableText(value: string): boolean {
 	return !value.includes("\u0000") && value.isWellFormed();
 }
 
+/** A request URL whose path or query decodes to a NUL character, which Postgres cannot store. */
+export function urlHasEncodedNul(url: string): boolean {
+	return /%00/i.test(url);
+}
+
+/**
+ * Whether a parsed JSON value holds a key or string Postgres cannot store. The walk is iterative,
+ * so the depth of a body the size cap admits is no limit.
+ */
+export function hasUnstorableText(value: unknown): boolean {
+	const pending: unknown[] = [value];
+	while (pending.length > 0) {
+		const next = pending.pop();
+		if (typeof next === "string") {
+			if (!isStorableText(next)) return true;
+			continue;
+		}
+		if (typeof next !== "object" || next === null) continue;
+		if (Array.isArray(next)) {
+			for (const item of next) pending.push(item);
+			continue;
+		}
+		for (const [key, child] of Object.entries(next)) {
+			if (!isStorableText(key)) return true;
+			pending.push(child);
+		}
+	}
+	return false;
+}
+
 /** An instant a Postgres `timestamptz` round-trips: finite, with a year from 1 to 9999. */
 export function isStorableInstant(date: Date): boolean {
 	if (!Number.isFinite(date.getTime())) return false;

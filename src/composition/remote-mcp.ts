@@ -23,6 +23,7 @@ import type { MerchantStore } from "../platform/store";
 import { BillingApiError, BillingClient } from "../sdk/client";
 import { readCappedText } from "../shared/body-limit";
 import { type ElysiaPluginLike, HTTP_APP_CONFIG } from "../shared/http";
+import { hasUnstorableText, urlHasEncodedNul } from "../shared/input-bounds";
 import { prepareBillingChangeSchema } from "./billing-change-actions";
 import { createMcpPortFetch } from "./mcp-port-fetch";
 import { remoteMcpOpenApi } from "./remote-mcp-openapi";
@@ -124,6 +125,8 @@ export function createRemoteMcpApp(options: {
 		const requestOrigin = request.headers.get("origin");
 		if (requestOrigin && requestOrigin !== origin && requestOrigin !== store.config.origin)
 			return new Response("Invalid Origin", { status: 403 });
+		if (urlHasEncodedNul(request.url))
+			return Response.json({ error: "invalid_request" }, { status: 400 });
 		await store.rateLimit(
 			`mcp:ip:${server?.requestIP(request)?.address ?? "unknown"}`,
 			300,
@@ -245,6 +248,9 @@ export function createRemoteMcpApp(options: {
 					16 * 1024,
 					() => new MerchantError("REQUEST_TOO_LARGE", "The request is too large.", 413),
 				);
+				const submitted = new URLSearchParams(body);
+				if (hasUnstorableText([...submitted.keys(), ...submitted.values()]))
+					return Response.json({ error: "invalid_request" }, { status: 400 });
 				if (endpoint === "revoke") {
 					const form = new URLSearchParams(body);
 					const token = form.get("token"),
