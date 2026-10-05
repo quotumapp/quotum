@@ -295,7 +295,8 @@ subscription lineage; no token is invented or attached to an unclaimed purchase.
 codes are not available from the verified transaction. Retiring a mapping stops new signing while
 retaining attribution; disable the offer separately in App Store Connect. Pricing, eligibility and
 availability are managed there, so the merchant UI labels mappings **Linked**, not synchronized.
-See [Apple subscription offers](api.md#apple-subscription-offers) for requests and retry semantics.
+See [Apple subscription offers](promotions.md#apple-subscription-offers) for requests and retry
+semantics.
 
 ## Google Play Billing
 

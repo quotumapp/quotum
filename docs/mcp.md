@@ -77,8 +77,10 @@ with current MCP messages and the SDK's older-protocol fallback; it keeps no cro
 ## Propose billing changes
 
 Remote writes are separately opt-in: set `QUOTUM_MCP_WRITES_ENABLED=true` only after deploying
-matching schema, API and merchant UI. Clients must request `quotum.billing.write` alongside
-`quotum.read` and `offline_access` and complete fresh consent. Existing grants retain their saved
+matching schema, API and merchant UI. The first-party console proxies the proposal read and decision
+routes but does not yet serve the review page that the returned URL opens, so keep the flag off
+until a console release does. Clients must request `quotum.billing.write` alongside `quotum.read`
+and `offline_access` and complete fresh consent. Existing grants retain their saved
 scopes; enabling the flag does not upgrade them. Stdio remains read-only, even with a sandbox key.
 
 Write-consented connections gain these tools:

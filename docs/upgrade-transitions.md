@@ -161,8 +161,8 @@ with the data-only restore of [stored job provider identity](#stored-job-provide
    [stored job provider identity](#stored-job-provider-identity). Skip its step 3: the v0.19.x data
    already carries every provider column.
 4. **Start v0.20.0**, API and workers, and confirm `/ready`. Then deploy the console pinned to the
-   release and pass its `bun run check:deployment`. A v0.19.0 console keeps working against
-   v0.20.0, but only the new one manages Apple offers.
+   release and pass `bun run check:deployment` from the UI repository. A v0.19.0 console keeps
+   working against v0.20.0, but only the new one manages Apple offers.
 
 A rollback restores the pre-upgrade backup with the v0.19.x image and loses what was written since.
 
@@ -205,8 +205,8 @@ stopped-service transition, in this order:
 6. **Verify**: `quotum usage scopes verify --baseline pre-scope.json` must exit `0`. If it does not,
    start the old release on its untouched database and investigate.
 7. **Start v0.19.0**, API and workers, and confirm `/ready`. Deploy the console re-pinned to the
-   release and pass its `bun run check:deployment`; an older console cannot read the canonical
-   catalog or the compact usage results.
+   release and pass `bun run check:deployment` from the UI repository; an older console cannot read
+   the canonical catalog or the compact usage results.
 8. **Resume callers** on the new contract, and preview again any catalog previewed before the
    upgrade: such a preview answers `409 CATALOG_PREVIEW_MISMATCH`.
 

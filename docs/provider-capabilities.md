@@ -87,13 +87,13 @@ A Stripe-backed route whose Stripe service lacks the method it needs returns
 | `POST /v1/billing-accounts/:billingAccountId/subscriptions/:subscriptionId/changes` | `commercial.requestChange` |
 | `POST /v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions/:sessionId/expire` | `checkout.expire` |
 
-The merchant billing proxy returns the same code and `details` for its billing-account,
-commercial preview and commercial action operations. On `/v1`, commercial execution and
-subscription changes reject a missing `Idempotency-Key` with `400` before this check. When the
-provider has no connection at all, `BILLING_PROVIDER_NOT_CONFIGURED` carries no `details` (`503`
-for Stripe, `501` for Apple and Google). `503 STRIPE_NOT_CONFIGURED` is narrower: only the Stripe
-service returns it, when its Stripe client or billing storage lacks a dependency of subscription
-changes, commercial actions, checkout expiry, or recurring pricing.
+The merchant billing proxy returns the same code and `details` for its billing-account, commercial
+preview and commercial action operations. On `/v1`, commercial execution and subscription changes
+reject a missing `Idempotency-Key` with `400` before this check. When the provider has no connection
+at all, `BILLING_PROVIDER_NOT_CONFIGURED` carries no `details` (`503` for Stripe and Paddle, `501`
+for Apple and Google). `503 STRIPE_NOT_CONFIGURED` is narrower: only the Stripe service returns it,
+when its Stripe client or billing storage lacks a dependency of subscription changes, commercial
+actions, checkout expiry, or recurring pricing.
 
 ## Provider capabilities and available actions
 
@@ -112,9 +112,9 @@ members with `billing.read` in active environments, as
 `GET /api/billing/admin/billing-accounts/:billingAccountId/available-actions`.
 
 Both reads use persisted state only: connection rows and billing records. They never call a
-provider, refresh a token, or decrypt a secret. They list the admitted providers (`apple`,
-`google`, `stripe`); planned providers never appear. Every entry is a verdict with the shape
-described in [Provider capability errors](#provider-capability-errors), whose `outcome` is
+provider, refresh a token, or decrypt a secret. They list the admitted providers (`apple`, `google`,
+`stripe`, `paddle`); a provider the contract only plans never appears. Every entry is a verdict with
+the shape described in [Provider capability errors](#provider-capability-errors), whose `outcome` is
 `available`, `blocked`, or `undetermined`.
 
 The capabilities read returns one entry per provider with its `channel`, `connectionKind`,
@@ -309,8 +309,8 @@ bindings on `catalog.topup`. A catalog that binds a provider whose connection is
 disabled reports `PROVIDER_CAPABILITY_NOT_CONFIGURED` with reason `CONNECTION_DISABLED`.
 Undetermined verdicts are left out. Requests do not check these connection conditions yet: a
 request to a provider without a usable connection still fails with
-`BILLING_PROVIDER_NOT_CONFIGURED` (`501` for Apple and Google, `503` for Stripe), and catalog
-publish does not look at connections. An excerpt:
+`BILLING_PROVIDER_NOT_CONFIGURED` (`501` for Apple and Google, `503` for Stripe and Paddle), and
+catalog publish does not look at connections. An excerpt:
 
 ```json
 "blockerDetails": [
