@@ -19,6 +19,7 @@ import {
 import {
 	ensureCustomer,
 	findCustomerBySubscription,
+	getRecordedStripeStoreProduct,
 	getStripeStoreProduct,
 	resolveStripeCustomer,
 	upsertProviderCustomer,
@@ -1129,10 +1130,21 @@ export class StripeBillingRepository extends RepositoryModule {
 				});
 			}
 
-			const storeProduct = await getStripeStoreProduct(tx, projectId, {
-				externalProductId: input.externalProductId,
-				externalPriceId: input.externalPriceId,
-			});
+			// A new subscription needs a mapping that is on sale. An existing one keeps following its
+			// recorded product and price after that mapping is retired, so a renewal, a cancellation
+			// or a reconciliation still applies instead of being skipped.
+			const storeProduct =
+				(await getStripeStoreProduct(tx, projectId, {
+					externalProductId: input.externalProductId,
+					externalPriceId: input.externalPriceId,
+				})) ??
+				(existingSubscription === null
+					? null
+					: await getRecordedStripeStoreProduct(tx, projectId, {
+							storeProductId: existingSubscription.store_product_id,
+							externalProductId: input.externalProductId,
+							externalPriceId: input.externalPriceId,
+						}));
 			if (storeProduct === null) {
 				await recordStripeSkippedEventInTransaction(tx, projectId, {
 					eventType: input.eventType,

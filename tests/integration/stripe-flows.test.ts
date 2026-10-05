@@ -3383,6 +3383,174 @@ localDescribe("Stripe route flows integration", () => {
 		await expectTableCounts(context.sql, { subscriptions: 1, billing_invoices: 1 });
 	});
 
+	// An existing subscription follows the product and price recorded for it, not whether that
+	// price is still on sale: retiring the mapping must not strand a paid renewal or a cancellation.
+	async function retireStripePrice(reason: "mapping" | "product", active: boolean): Promise<void> {
+		if (reason === "mapping")
+			await context.sql`UPDATE store_products SET active = ${active} WHERE provider = 'stripe' AND external_price_id = 'price_premium_monthly'`;
+		else await context.sql`UPDATE products SET active = ${active} WHERE key = 'premium_monthly'`;
+	}
+	async function stripeSubscriptionPeriodEnd(sql: SQL): Promise<Date | null> {
+		const rows = await sql<
+			Array<{ expires_at: Date | null }>
+		>`SELECT expires_at FROM subscriptions WHERE provider = 'stripe' AND external_subscription_id = 'sub_1'`;
+		return rows[0]?.expires_at ?? null;
+	}
+	async function skippedStripeEvents(sql: SQL): Promise<string[]> {
+		const rows = await sql<
+			Array<{ external_event_id: string }>
+		>`SELECT external_event_id FROM store_events WHERE provider = 'stripe' AND processing_status = 'skipped' ORDER BY external_event_id`;
+		return rows.map((row) => row.external_event_id);
+	}
+
+	for (const reason of ["mapping", "product"] as const) {
+		// capability: subscription.sync
+		it(`applies a renewal and a cancellation after the Stripe ${reason} was retired`, async () => {
+			const service = createVerifiedEventService();
+			const start = Math.floor(Date.now() / 1000) - 86_400;
+			const end = start + 30 * 86_400;
+			const renewedEnd = end + 30 * 86_400;
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.updated",
+					stripeSubscriptionObject(stripeSubscriptionPeriod(start, end)),
+					start + 100,
+					"evt_live",
+				),
+			);
+			expect(await stripeSubscriptionPeriodEnd(context.sql)).toEqual(new Date(end * 1000));
+
+			await retireStripePrice(reason, false);
+			const renewed = await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.updated",
+					stripeSubscriptionObject(stripeSubscriptionPeriod(end, renewedEnd)),
+					start + 200,
+					"evt_renewed",
+				),
+			);
+			expect(renewed).toMatchObject({ status: "processed" });
+			expect(await stripeSubscriptionPeriodEnd(context.sql)).toEqual(new Date(renewedEnd * 1000));
+
+			const canceled = await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.deleted",
+					stripeSubscriptionObject({
+						status: "canceled",
+						...stripeSubscriptionPeriod(end, renewedEnd),
+					}),
+					start + 300,
+					"evt_deleted",
+				),
+			);
+			expect(canceled).toMatchObject({ status: "processed" });
+			expect(await stripeSubscriptionLifecycle(context.sql)).toMatchObject({
+				status: "cancelled",
+				provider_status: "cancelled",
+				auto_renew: false,
+			});
+			expect(await skippedStripeEvents(context.sql)).toEqual([]);
+		});
+	}
+
+	// capability: subscription.sync
+	it("reconciles an existing Stripe subscription after its mapping was retired", async () => {
+		const start = Math.floor(Date.now() / 1000) - 86_400;
+		const end = start + 30 * 86_400;
+		const renewedEnd = end + 30 * 86_400;
+		const fake = createFakeStripeBillingClient();
+		let remote: Record<string, unknown> = stripeSubscriptionObject(
+			stripeSubscriptionPeriod(start, end),
+		);
+		const service = new StripeBillingService({
+			config: {
+				projectKey: "acme",
+				checkoutSuccessUrl:
+					"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
+				checkoutCancelUrl: "https://app.integration.test/billing",
+				portalReturnUrl: "https://app.integration.test/account/billing",
+			},
+			client: { ...fake.client, retrieveSubscription: async () => remote as never },
+			repository: context.repository.forProject(integrationProjectContext("acme")),
+		});
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent("customer.subscription.updated", remote, start + 100, "evt_live"),
+		);
+		const [row] = await context.sql<
+			Array<Parameters<StripeBillingService["reconcileSubscription"]>[0]>
+		>`SELECT * FROM subscriptions WHERE provider = 'stripe' AND external_subscription_id = 'sub_1'`;
+		if (!row) throw new Error("Missing subscription");
+
+		await retireStripePrice("mapping", false);
+		remote = stripeSubscriptionObject(stripeSubscriptionPeriod(end, renewedEnd));
+		expect(await service.reconcileSubscription(row)).toEqual({ status: "processed" });
+		expect(await stripeSubscriptionPeriodEnd(context.sql)).toEqual(new Date(renewedEnd * 1000));
+		remote = stripeSubscriptionObject({
+			status: "canceled",
+			...stripeSubscriptionPeriod(end, renewedEnd),
+		});
+		expect(await service.reconcileSubscription(row)).toEqual({ status: "processed" });
+		expect(await stripeSubscriptionLifecycle(context.sql)).toMatchObject({
+			status: "cancelled",
+			auto_renew: false,
+		});
+	});
+
+	// capability: subscription.sync
+	it("still needs an active mapping for a new subscription or for another price", async () => {
+		const service = createVerifiedEventService();
+		const start = Math.floor(Date.now() / 1000) - 86_400;
+		const end = start + 30 * 86_400;
+		await retireStripePrice("mapping", false);
+		// A subscription Quotum has never recorded cannot start on a retired price.
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.updated",
+				stripeSubscriptionObject(stripeSubscriptionPeriod(start, end)),
+				start + 100,
+				"evt_new",
+			),
+		);
+		expect(await context.sql`SELECT id FROM subscriptions WHERE provider = 'stripe'`).toHaveLength(
+			0,
+		);
+		expect(await skippedStripeEvents(context.sql)).toEqual(["evt_new"]);
+
+		// An existing subscription that reports a price other than its recorded one is not covered
+		// by the recorded identity either.
+		await retireStripePrice("mapping", true);
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.updated",
+				stripeSubscriptionObject(stripeSubscriptionPeriod(start, end)),
+				start + 200,
+				"evt_live",
+			),
+		);
+		await retireStripePrice("mapping", false);
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.updated",
+				stripeSubscriptionObject({
+					items: {
+						data: [
+							{
+								current_period_start: end,
+								current_period_end: end + 30 * 86_400,
+								id: "si_integration",
+								price: { id: "price_unknown", product: "prod_stripe_premium" },
+							},
+						],
+					},
+				}),
+				start + 300,
+				"evt_other_price",
+			),
+		);
+		expect(await skippedStripeEvents(context.sql)).toEqual(["evt_new", "evt_other_price"]);
+		expect(await stripeSubscriptionPeriodEnd(context.sql)).toEqual(new Date(end * 1000));
+	});
+
 	// capability: subscription.sync
 	it("moves a live subscription between payment states on invoice outcomes only", async () => {
 		const service = createVerifiedEventService();

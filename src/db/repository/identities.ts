@@ -373,3 +373,36 @@ export async function getStripeStoreProduct(
 	`,
 	);
 }
+
+/**
+ * The store product a Stripe subscription was recorded against, whether or not its mapping or
+ * product is still on sale. Selling is gated on `active`; an event for an existing subscription
+ * follows the identity already recorded for it, so retiring a mapping never strands a paid
+ * renewal or a cancellation. Only the recorded product and price pair is accepted.
+ */
+export async function getRecordedStripeStoreProduct(
+	executor: QueryExecutor,
+	projectId: string,
+	input: { storeProductId: string; externalProductId: string; externalPriceId: string },
+): Promise<StoreProductIdentityRow | null> {
+	return await executeOne<StoreProductIdentityRow>(
+		executor,
+		drizzleSql`
+		SELECT
+			sp.id,
+			sp.product_id,
+			p.key AS product_key,
+			p.type AS product_type,
+			p.credit_amount
+		FROM store_products sp
+		JOIN products p ON p.id = sp.product_id AND p.project_id = sp.project_id
+		WHERE sp.project_id = ${projectId}
+			AND sp.id = ${input.storeProductId}::uuid
+			AND sp.provider = 'stripe'
+			AND sp.channel = 'web'
+			AND sp.external_product_id = ${input.externalProductId}
+			AND sp.external_price_id = ${input.externalPriceId}
+		LIMIT 1
+	`,
+	);
+}
