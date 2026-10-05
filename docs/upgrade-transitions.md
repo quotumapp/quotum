@@ -66,6 +66,12 @@ Before restoring, compare the dump's `usage_events_YYYY_MM` data entries with th
 database's partitions. If an entry has no partition and the old partition held no rows, drop its
 `TABLE DATA` line from the restore list; if it held rows, stop and create the partition first.
 
+Step 2 above assumes a v0.21.0 source. From an older source the `provider_operations` table does
+not exist, so there is nothing to inventory: confirm that the source has no Paddle connection, then
+skip steps 2 and 3 and continue at step 4. Restored OAuth clients keep their old scopes, because
+the restore replaces the newly seeded clients with the old rows. Add the billing-write scope only
+through the opt-in [enabling MCP proposals](#enabling-mcp-proposals-after-the-upgrade) step.
+
 Rollback restores the pre-upgrade backup with the old binary and loses subsequent writes. Sandbox
 checks qualify the new behavior, not a populated production upgrade; rehearse the transformation
 and reconciliation against a restored copy before scheduling downtime.
