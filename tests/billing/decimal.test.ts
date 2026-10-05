@@ -5,6 +5,7 @@ import {
 	canonicalSignedDecimal,
 	databaseDecimal,
 	decimalToUnits,
+	legacyStableJson,
 	positiveDecimal,
 	sha256Hex,
 	signedDecimalToUnits,
@@ -180,6 +181,37 @@ describe("stableJson", () => {
 	it("sorts object keys with localeCompare", () => {
 		expect(stableJson({ b: 1, a: [{ d: 1, c: 2 }], Z: null, _u: "x" })).toBe(
 			'{"_u":"x","a":[{"c":2,"d":1}],"b":1,"Z":null}',
+		);
+	});
+
+	it("does not depend on insertion order when distinct keys compare equal under localeCompare", () => {
+		const precomposed = "\u00e9";
+		const decomposed = "e\u0301";
+		expect(precomposed.localeCompare(decomposed)).toBe(0);
+		const first = stableJson({ [precomposed]: 1, [decomposed]: 2 });
+		const second = stableJson({ [decomposed]: 2, [precomposed]: 1 });
+		expect(second).toBe(first);
+		// Ties fall back to code unit order; the keys stay distinct in the output.
+		expect(first).toBe(`{"${decomposed}":2,"${precomposed}":1}`);
+		expect(stableJson({ k: { [precomposed]: 1, [decomposed]: 2 } })).toBe(
+			stableJson({ k: { [decomposed]: 2, [precomposed]: 1 } }),
+		);
+	});
+
+	it("keeps the localeCompare order for every object without a tie, so stored hashes do not change", () => {
+		const value = { b: 1, B: 2, a: 3, A: 4, "a b": 5, _x: 6, Z: 7, é: 8, e: 9, f: { Y: 1, y: 2 } };
+		expect(stableJson(value)).toBe(legacyStableJson(value));
+		expect(stableJson({ B: 1, a: 2 })).toBe('{"a":2,"B":1}');
+	});
+
+	it("legacyStableJson keeps insertion order for tied keys, as hashes stored before the fix did", () => {
+		const precomposed = "\u00e9";
+		const decomposed = "e\u0301";
+		expect(legacyStableJson({ [precomposed]: 1, [decomposed]: 2 })).toBe(
+			`{"${precomposed}":1,"${decomposed}":2}`,
+		);
+		expect(legacyStableJson({ [decomposed]: 2, [precomposed]: 1 })).toBe(
+			`{"${decomposed}":2,"${precomposed}":1}`,
 		);
 	});
 

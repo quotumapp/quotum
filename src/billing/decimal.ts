@@ -90,17 +90,39 @@ export function sha256Hex(value: string): string {
 	return hasher.digest("hex");
 }
 
+/**
+ * Deterministic JSON for hashing: object keys are ordered with `localeCompare`, and keys that
+ * compare equal (canonically equivalent Unicode such as U+00E9 and U+0065 U+0301) fall back to code
+ * unit order, so the result never depends on insertion order. Objects without such a tie serialize
+ * exactly as before, which keeps every persisted hash valid.
+ */
 export function stableJson(value: unknown): string {
+	return serializeStable(value, true);
+}
+
+/**
+ * The serialization used before tied keys were ordered: they kept their insertion order. Only
+ * the replay of a usage operation stored by an earlier release needs it.
+ */
+export function legacyStableJson(value: unknown): string {
+	return serializeStable(value, false);
+}
+
+function serializeStable(value: unknown, breakTies: boolean): string {
 	if (value === null || typeof value !== "object") {
 		return JSON.stringify(value);
 	}
 	if (Array.isArray(value)) {
-		return `[${value.map((item) => stableJson(item)).join(",")}]`;
+		return `[${value.map((item) => serializeStable(item, breakTies)).join(",")}]`;
 	}
 
 	return `{${Object.entries(value as Record<string, unknown>)
-		.sort(([left], [right]) => left.localeCompare(right))
-		.map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
+		.sort(([left], [right]) => {
+			const order = left.localeCompare(right);
+			if (order !== 0 || !breakTies) return order;
+			return left < right ? -1 : 1;
+		})
+		.map(([key, child]) => `${JSON.stringify(key)}:${serializeStable(child, breakTies)}`)
 		.join(",")}}`;
 }
 
