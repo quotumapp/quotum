@@ -376,6 +376,14 @@ event ordering. Those commercial fields come from subscription events and reconc
 Paying an older invoice or a proration credit therefore cannot undo an upgrade. Invoice history
 retains its own event order, including invoices delivered after newer subscription events.
 
+A subscription event resolves its product and price to a store mapping that is on sale, except for
+a subscription Quotum already recorded: that one keeps following its recorded product and price
+after the mapping or the product is retired, for example when `catalog:provision` replaces a
+declared Stripe price. Renewals, status changes, cancellations and reconciliation therefore still
+apply, and the subscription stays on its plan version until the customer moves to another price. A
+subscription Quotum has never recorded, and an event that reports a price other than the recorded
+one, still need an active mapping and are otherwise skipped for replay.
+
 Hosted payment-method setup uses the commercial preview and execution pair with a `setup_payment`
 intent; see [Saving a payment method](subscriptions.md#saving-a-payment-method). Quotum creates a Checkout
 Session in `setup` mode, card-only for the requested currency, with a 23-hour lifetime, and on the
