@@ -73,6 +73,26 @@ function fixture(respond?: MerchantBillingPort["dispatch"]) {
 }
 
 describe("MCP billing port transport", () => {
+	it("refuses a path or query a tool argument made unstorable, before any port call", async () => {
+		const { commands, fetch } = fixture();
+		for (const path of [
+			"/v1/billing-accounts/%00/billing-summary",
+			"/v1/billing-accounts/account%2Fone/usage/events?entityId=%00",
+			"/v1/billing-accounts/account%2Fone/usage/events?cursor=a%00b",
+		]) {
+			const result = await fetch(`${baseUrl}${path}`);
+			expect({ path, status: result.status }).toEqual({ path, status: 400 });
+			expect(await result.json()).toMatchObject({
+				success: false,
+				error: { code: "INVALID_REQUEST" },
+			});
+		}
+		expect(commands).toHaveLength(0);
+		const stored = await fetch(`${baseUrl}/v1/billing-accounts/caf%C3%A9/billing-summary`);
+		expect(stored.status).toBe(200);
+		expect(commands).toHaveLength(1);
+	});
+
 	it("maps every allowed read to its billing operation and decodes each identifier once", async () => {
 		const { commands, fetch } = fixture();
 		for (const [method, pattern] of allowedRequests)

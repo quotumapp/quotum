@@ -48,10 +48,7 @@ export function queryHasCallerProjectSelector(params: URLSearchParams): boolean 
 	return false;
 }
 
-/** A request URL whose path or query decodes to a NUL character, which Postgres cannot store. */
-export function urlHasEncodedNul(url: string): boolean {
-	return /%00/i.test(url);
-}
+export { urlHasEncodedNul } from "../shared/input-bounds";
 
 export function projectSelectorRejectedError(): BillingError {
 	return new BillingError("Project is resolved from billing credentials", "INVALID_REQUEST", 400);

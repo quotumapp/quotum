@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	bigintIdSchema,
 	displayNameSchema,
+	hasUnstorableText,
 	isBigintId,
 	isDisplayName,
 	isStorableInstant,
@@ -9,9 +10,31 @@ import {
 	maxBigintId,
 	storableDateTimeSchema,
 	toDisplayName,
+	urlHasEncodedNul,
 } from "../../src/shared/input-bounds";
 
 describe("input bounds", () => {
+	it("finds a key or string Postgres cannot store anywhere in a parsed body", () => {
+		expect(
+			hasUnstorableText({ a: ["x", { b: "ok", c: [1, null, true] }], "caf\u00e9": "\u{1f600}" }),
+		).toBe(false);
+		expect(hasUnstorableText("a\u0000")).toBe(true);
+		expect(hasUnstorableText({ "\u0000": 1 })).toBe(true);
+		expect(hasUnstorableText({ a: [[{ b: "\ud800" }]] })).toBe(true);
+		expect(hasUnstorableText([1, 2, null, undefined, 3n])).toBe(false);
+		// A body deeper than any recursive walk survives is still inspected without a stack overflow.
+		let nested: unknown = "\u0000";
+		for (let depth = 0; depth < 50_000; depth += 1) nested = [nested];
+		expect(hasUnstorableText(nested)).toBe(true);
+	});
+
+	it("recognizes an encoded NUL in a request URL, in any case", () => {
+		expect(urlHasEncodedNul("https://x.test/a/%00")).toBe(true);
+		expect(urlHasEncodedNul("https://x.test/a?q=a%00b")).toBe(true);
+		expect(urlHasEncodedNul("https://x.test/a?q=%2500")).toBe(false);
+		expect(urlHasEncodedNul("https://x.test/caf%C3%A9?q=%E2%82%AC")).toBe(false);
+	});
+
 	it("accepts ids within the bigint range only", () => {
 		expect(isBigintId(maxBigintId.toString())).toBe(true);
 		expect(isBigintId("1")).toBe(true);

@@ -655,6 +655,7 @@
         "src/billing/errors.ts",
         "src/billing/payment-setup.ts",
         "src/composition/billing-changes.ts",
+        "src/composition/mcp-port-fetch.ts",
         "src/operations/admin.ts",
         "src/platform/app.ts",
         "src/platform/application/billing-port.ts",
