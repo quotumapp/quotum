@@ -4,7 +4,10 @@ import { createApp } from "../../src/app";
 import { executeCommercial, previewCommercial } from "../../src/app/commercial-actions";
 import type { CommercialActionIntent } from "../../src/billing/commercial";
 import { sha256Hex, stableJson } from "../../src/billing/decimal";
-import type { StoreEventReplayJobRow } from "../../src/db/repository";
+import type {
+	ProviderSubscriptionReconciliationRow,
+	StoreEventReplayJobRow,
+} from "../../src/db/repository";
 import { PaddleClient } from "../../src/providers/paddle/client";
 import type { PaddleSubscription } from "../../src/providers/paddle/schemas";
 import { PaddleBillingService } from "../../src/providers/paddle/service";
@@ -565,6 +568,152 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			(await context.repository.getEntitlementSnapshot(project, h.billingAccountId)).entitlements,
 		).toHaveLength(0);
 	});
+	// QA-01: the recorded checkout intent pins price and product identity, so retiring the store mapping
+	// or the product ends sales without stranding a paid subscription or its cancellation.
+	async function retireCatalog(reason: "mapping" | "product", active: boolean) {
+		if (reason === "mapping")
+			await context.sql`UPDATE store_products SET active=${active} WHERE project_id=${project.projectInstanceId} AND provider='paddle' AND external_price_id=${price.id}`;
+		else
+			await context.sql`UPDATE products SET active=${active} WHERE project_id=${project.projectInstanceId} AND key='paddle_test'`;
+	}
+	const activeAccess = async (billingAccountId: string) =>
+		(await context.repository.getEntitlementSnapshot(project, billingAccountId)).entitlements.some(
+			(entitlement) => entitlement.key === "paddle_access" && entitlement.active,
+		);
+
+	for (const reason of ["mapping", "product"] as const)
+		it(`revokes access on cancellation after the ${reason} was retired`, async () => {
+			const h = harness();
+			await h.create();
+			await h.deliver(h.rawEvent("subscription.activated"));
+			expect(await activeAccess(h.billingAccountId)).toBe(true);
+			try {
+				await retireCatalog(reason, false);
+				h.current = {
+					...h.current,
+					status: "canceled",
+					canceled_at: new Date().toISOString(),
+					updated_at: new Date().toISOString(),
+					current_billing_period: null,
+				};
+				expect(await h.deliver(h.rawEvent("subscription.canceled"))).toEqual({
+					status: "processed",
+				});
+				expect(await activeAccess(h.billingAccountId)).toBe(false);
+			} finally {
+				await retireCatalog(reason, true);
+			}
+		});
+
+	it("grants access to a checkout paid after its mapping was retired and reconciles it later", async () => {
+		const h = harness();
+		await h.create();
+		try {
+			await retireCatalog("mapping", false);
+			await h.deliver(h.rawEvent("transaction.completed"));
+			expect(await activeAccess(h.billingAccountId)).toBe(true);
+			h.current = {
+				...h.current,
+				status: "canceled",
+				canceled_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+				current_billing_period: null,
+			};
+			const [row] = await context.sql<
+				ProviderSubscriptionReconciliationRow[]
+			>`SELECT * FROM subscriptions WHERE project_id=${project.projectInstanceId} AND provider='paddle' AND external_subscription_id=${h.current.id}`;
+			expect(
+				await h.service.reconcileSubscription(row as ProviderSubscriptionReconciliationRow),
+			).toEqual({
+				status: "processed",
+			});
+			expect(await activeAccess(h.billingAccountId)).toBe(false);
+		} finally {
+			await retireCatalog("mapping", true);
+		}
+	});
+
+	const accessExpiry = async (billingAccountId: string) =>
+		(await context.repository.getEntitlementSnapshot(project, billingAccountId)).entitlements.find(
+			(entitlement) => entitlement.key === "paddle_access" && entitlement.active,
+		)?.expiresAt;
+	const renewal = (current: PaddleSubscription) => {
+		const startsAt = current.current_billing_period?.ends_at ?? "";
+		const endsAt = new Date(Date.parse(startsAt) + 30 * 86400_000).toISOString();
+		return {
+			endsAt,
+			subscription: {
+				...current,
+				updated_at: new Date().toISOString(),
+				current_billing_period: { starts_at: startsAt, ends_at: endsAt },
+				next_billed_at: endsAt,
+			},
+		};
+	};
+
+	for (const reason of ["mapping", "product"] as const)
+		it(`extends a paid period on renewal after the ${reason} was retired`, async () => {
+			const h = harness();
+			await h.create();
+			await h.deliver(h.rawEvent("subscription.activated"));
+			const before = await accessExpiry(h.billingAccountId);
+			try {
+				await retireCatalog(reason, false);
+				const renewed = renewal(h.current);
+				h.current = renewed.subscription;
+				expect(await h.deliver(h.rawEvent("subscription.updated"))).toEqual({
+					status: "processed",
+				});
+				expect(await accessExpiry(h.billingAccountId)).toBe(renewed.endsAt);
+				expect(renewed.endsAt).not.toBe(before);
+			} finally {
+				await retireCatalog(reason, true);
+			}
+		});
+
+	it("extends a paid period through reconciliation after the mapping was retired", async () => {
+		const h = harness();
+		await h.create();
+		await h.deliver(h.rawEvent("subscription.activated"));
+		try {
+			await retireCatalog("mapping", false);
+			const renewed = renewal(h.current);
+			h.current = renewed.subscription;
+			const [row] = await context.sql<
+				ProviderSubscriptionReconciliationRow[]
+			>`SELECT * FROM subscriptions WHERE project_id=${project.projectInstanceId} AND provider='paddle' AND external_subscription_id=${h.current.id}`;
+			expect(
+				await h.service.reconcileSubscription(row as ProviderSubscriptionReconciliationRow),
+			).toEqual({
+				status: "processed",
+			});
+			expect(await accessExpiry(h.billingAccountId)).toBe(renewed.endsAt);
+		} finally {
+			await retireCatalog("mapping", true);
+		}
+	});
+
+	it("still refuses an event whose price is not the recorded checkout price", async () => {
+		const h = harness();
+		await h.create();
+		await context.sql`UPDATE store_products SET active=false WHERE project_id=${project.projectInstanceId} AND provider='paddle' AND external_price_id=${price.id}`;
+		try {
+			h.current = {
+				...h.current,
+				items: h.current.items.map((item) => ({
+					...item,
+					price: { ...item.price, id: id("pri", "q") },
+				})),
+			};
+			await expect(h.deliver(h.rawEvent("subscription.activated"))).rejects.toMatchObject({
+				code: "PADDLE_FULFILLMENT_MISMATCH",
+			});
+			expect(await activeAccess(h.billingAccountId)).toBe(false);
+		} finally {
+			await retireCatalog("mapping", true);
+		}
+	});
+
 	it("recovers customer creation against its correlation before creating one checkout", async () => {
 		const h = harness();
 		h.loseCustomerResponse();

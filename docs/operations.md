@@ -437,6 +437,13 @@ Fulfillment closes the reservation in the transaction that grants access. A canc
 older checkout cannot close a newer reservation. These transitions never rewrite a completed
 commercial receipt. There is no new polling worker or public cancellation command.
 
+Fulfillment, renewal, cancellation and reconciliation follow the recorded checkout intent, not
+current sale state. A store mapping or product retired after the checkout was created still
+activates the paid subscription, still extends it when the provider reports a paid renewal and
+still revokes access when the provider reports cancellation, whether the signal arrives as a signed
+event or through reconciliation; only an event whose price, product or customer differs from the
+recorded intent fails with `PADDLE_FULFILLMENT_MISMATCH`.
+
 Reservations have no time-based expiry. An unavailable connection, ambiguous write or missing
 cancellation delivery keeps the account blocked; restore the recorded connection and replay the
 provider notification through the normal signed ingress/replay pipeline. Do not delete receipts
