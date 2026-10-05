@@ -93,6 +93,32 @@ export class McpChanges {
 			return { ...action, capability, available, approvalRequired: true };
 		});
 	}
+	/**
+	 * Row locks in the one order every writer of these rows uses: session, organization, membership,
+	 * authorization, then the change. Member administration locks organization and membership and,
+	 * through its revoke trigger, the authorization; credential resets lock sessions before grants.
+	 * Any other order deadlocks with those paths or with a concurrent proposal, replacement,
+	 * cancellation or approval on the same grant. These are blind locks: the checks that follow keep
+	 * their error precedence.
+	 */
+	private async lockProposal(
+		tx: MerchantSql,
+		input: {
+			sessionId?: string;
+			principalId: string;
+			organizationSlug: string;
+			authorizationId: string;
+			changeId?: string;
+		},
+	) {
+		if (input.sessionId !== undefined)
+			await tx`SELECT id FROM platform_merchant_sessions WHERE id=${input.sessionId} FOR UPDATE`;
+		await tx`SELECT id FROM platform_organizations WHERE slug=${input.organizationSlug} FOR UPDATE`;
+		await tx`SELECT m.id FROM platform_memberships m JOIN platform_organizations o ON o.id=m.organization_id WHERE m.principal_id=${input.principalId} AND o.slug=${input.organizationSlug} FOR UPDATE OF m`;
+		await tx`SELECT id FROM platform_mcp_authorizations WHERE id=${input.authorizationId} FOR UPDATE`;
+		if (input.changeId !== undefined)
+			await tx`SELECT id FROM platform_mcp_changes WHERE id=${input.changeId} FOR UPDATE`;
+	}
 	async prepare(
 		authorizationId: string,
 		input: BillingChangeInput & { requestKey: string; reason: string; replacesChangeId?: string },
@@ -128,6 +154,12 @@ export class McpChanges {
 			),
 		);
 		return this.store.sql.begin(async (tx) => {
+			await this.lockProposal(tx, {
+				principalId: access.grant.principal_id,
+				organizationSlug: access.scope.organizationSlug,
+				authorizationId,
+				changeId: input.replacesChangeId,
+			});
 			const grants =
 				await tx`SELECT id FROM platform_mcp_authorizations WHERE id=${authorizationId} AND revoked_at IS NULL AND expires_at>${this.store.now()} FOR UPDATE`;
 			if (!grants.length)
@@ -223,6 +255,12 @@ export class McpChanges {
 		await this.get(authorizationId, id);
 		const access = await this.access(authorizationId, false);
 		await this.store.sql.begin(async (tx) => {
+			await this.lockProposal(tx, {
+				principalId: access.grant.principal_id,
+				organizationSlug: access.scope.organizationSlug,
+				authorizationId,
+				changeId: id,
+			});
 			const rows =
 				await tx`UPDATE platform_mcp_changes SET status='cancelled' WHERE id=${id} AND authorization_id=${authorizationId} AND status='pending' RETURNING id`;
 			if (rows.length)
@@ -272,6 +310,13 @@ export class McpChanges {
 		const saved = await this.row(id);
 		const access = await this.access(saved.authorization_id, approve);
 		const claimed = await this.store.sql.begin(async (tx) => {
+			await this.lockProposal(tx, {
+				sessionId: identity.sessionId,
+				principalId: identity.principalId,
+				organizationSlug: saved.scope.organizationSlug,
+				authorizationId: saved.authorization_id,
+				changeId: id,
+			});
 			const [row] = await tx<
 				ChangeRow[]
 			>`SELECT * FROM platform_mcp_changes WHERE id=${id} FOR UPDATE`;

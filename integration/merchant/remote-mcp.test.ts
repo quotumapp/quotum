@@ -718,6 +718,100 @@ describe("MCP browser-approved writes", () => {
 		await f.sql`UPDATE platform_mcp_changes SET status='applying',result=NULL WHERE id=${change.id}`;
 		expect((await f.mcpChanges.get(grant.id, change.id)).status).toBe("completed");
 	});
+	/**
+	 * Holds the grant row so a proposal and a browser approval of another queue behind it, then
+	 * releases both at once: any lock order that differs between them deadlocks (SQLSTATE 40P01).
+	 */
+	async function proposalAndApprovalRace(replace: boolean) {
+		const browser = await owner();
+		await createBillingAccount();
+		await redeem(browser, merchantTestScope, true);
+		const [grant] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM platform_mcp_authorizations WHERE scopes ? 'quotum.billing.write' AND approved_at IS NOT NULL`;
+		const input = {
+			requestKey: "entity-a",
+			reason: "Team setup",
+			action: "entities.write",
+			parameters: ["customer-a"],
+			body: { externalId: "team-a", kind: "team" },
+		};
+		const change = await f.mcpChanges.prepare(grant.id, input);
+		const waiters = async (count: number) => {
+			const deadline = Date.now() + 10_000;
+			while (Date.now() < deadline) {
+				const [row] = await f.client<
+					{ n: number }[]
+				>`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock'`;
+				if ((row?.n ?? 0) >= count) return;
+				await Bun.sleep(20);
+			}
+			throw new Error(`Expected ${count} sessions waiting on a lock`);
+		};
+		let release = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let held = () => {};
+		const holding = new Promise<void>((resolve) => {
+			held = resolve;
+		});
+		const holder = f.client.begin(async (tx) => {
+			await tx`SELECT id FROM platform_mcp_authorizations WHERE id = ${grant.id} FOR UPDATE`;
+			held();
+			await gate;
+		});
+		await holding;
+		const settle = <T>(promise: Promise<T>) =>
+			promise.then(
+				(value) => ({ ok: true as const, value }),
+				(error: unknown) => ({ ok: false as const, error }),
+			);
+		const proposal = settle(
+			f.mcpChanges.prepare(grant.id, {
+				...input,
+				requestKey: "entity-b",
+				body: { externalId: "team-b", kind: "team" },
+				...(replace ? { replacesChangeId: change.id } : {}),
+			}),
+		);
+		await waiters(1);
+		const approval = settle(
+			browser.request(`/api/platform/mcp/changes/${change.id}/approve`, {
+				requestHash: change.requestHash,
+			}),
+		);
+		await waiters(2);
+		release();
+		await holder;
+		const [proposed, approved] = await Promise.all([proposal, approval]);
+		return { change, proposed, approved };
+	}
+
+	it("serializes a replacement and the approval of the proposal it replaces", async () => {
+		const { change, proposed, approved } = await proposalAndApprovalRace(true);
+		expect(proposed.ok).toBe(true);
+		// Never a 503 from a deadlock: the approval either applied first or finds it cancelled.
+		expect(approved.ok && approved.value.status).toBeLessThan(500);
+		const [row] = await f.sql<
+			{ status: string }[]
+		>`SELECT status FROM platform_mcp_changes WHERE id = ${change.id}`;
+		expect(["cancelled", "completed"]).toContain(row?.status as string);
+		expect(await f.sql`SELECT id FROM platform_mcp_changes WHERE status = 'pending'`).toHaveLength(
+			1,
+		);
+	});
+
+	it("serializes a new proposal and the approval of another proposal on the same grant", async () => {
+		const { change, proposed, approved } = await proposalAndApprovalRace(false);
+		expect(proposed.ok).toBe(true);
+		expect(approved.ok && approved.value.status).toBeLessThan(500);
+		const [row] = await f.sql<
+			{ status: string }[]
+		>`SELECT status FROM platform_mcp_changes WHERE id = ${change.id}`;
+		expect(row?.status).toBe("completed");
+	});
+
 	it("denies read-only grants, cancelled proposals, and expired proposals", async () => {
 		const browser = await owner();
 		await createBillingAccount();

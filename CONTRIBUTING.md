@@ -122,6 +122,12 @@ generated files.
   that references a customer (usage events, idempotency claims, allocations) takes a key-share
   lock on it through its foreign key; `FOR UPDATE` conflicts with that and deadlocks against
   concurrent usage, while `FOR NO KEY UPDATE` still serializes the writers that take it.
+- Every transaction that touches an MCP proposal locks the session, organization, membership,
+  authorization and change rows in that order, through `McpChanges.lockProposal`. Member
+  administration and its revoke trigger already run organization, membership, authorization, and any
+  other order deadlocks with them or with a concurrent proposal or approval. A new writer takes the
+  same order and adds a race that holds the grant row, like the ones in
+  `integration/merchant/remote-mcp.test.ts`.
 - Stripe test fixtures are written in the pinned API version's shape and checked with
   `satisfies DeepPartial<Stripe.X>` (`tests/helpers/deep-partial.ts`), so a field the version
   does not have fails to compile. Older shapes the normalizer still accepts belong in
