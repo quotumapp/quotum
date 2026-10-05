@@ -107,6 +107,11 @@ export class ProjectScopedBillingRepository {
 	linkPaddleCustomer(input: Parameters<PaddleBillingRepository["linkCustomer"]>[1]) {
 		return this.repository.paddle.linkCustomer(this.project, input);
 	}
+	claimExistingPaddleCustomer(
+		input: Parameters<PaddleBillingRepository["claimExistingCustomer"]>[1],
+	) {
+		return this.repository.paddle.claimExistingCustomer(this.project, input);
+	}
 	recordPaddleEvent(input: Parameters<PaddleBillingRepository["record"]>[1]) {
 		return this.repository.paddle.record(this.project, input);
 	}

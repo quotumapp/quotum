@@ -12,6 +12,8 @@ export class PaddleRequestRejected extends RejectedProviderWrite {
 		readonly status: number,
 		code: string,
 		readonly retryAfterMs: number | null,
+		/** Paddle's human-readable detail; never stored or returned, only parsed for an object id. */
+		readonly detail: string | null = null,
 	) {
 		super(code);
 	}
@@ -154,6 +156,7 @@ export class PaddleClient {
 					response.status,
 					response.status === 429 ? PADDLE_RATE_LIMITED : error.code,
 					retryMs,
+					typeof error.detail === "string" ? error.detail.slice(0, 500) : null,
 				);
 			}
 			throw new PaddleWriteUncertain();
