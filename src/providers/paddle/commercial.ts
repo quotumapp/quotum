@@ -74,16 +74,23 @@ export class PaddleCommercial {
 		const intent = normalize(stored.intent);
 		// Short, deterministic and disjoint from direct checkout keys. A retry uses the same intent.
 		const executionKey = `commercial:${input.previewToken}`;
-		const checkout = await this.write(
-			{
-				billingAccountId: input.billingAccountId,
-				email: intent.email,
-				idempotencyKey: executionKey,
-				previewToken: input.previewToken,
-			},
-			context.target.binding,
-			context.target.plan ?? undefined,
-		);
+		const checkoutInput = {
+			billingAccountId: input.billingAccountId,
+			email: intent.email,
+			idempotencyKey: executionKey,
+			previewToken: input.previewToken,
+		};
+		let checkout: Awaited<ReturnType<Writer>>;
+		try {
+			checkout = await this.write(
+				checkoutInput,
+				context.target.binding,
+				context.target.plan ?? undefined,
+			);
+		} catch (error) {
+			await this.repository.rejectUnboundPaddleCheckout(checkoutInput);
+			throw error;
+		}
 		return this.repository.completeCommercialActionExecution({
 			...input,
 			result: { kind: "checkout", ...checkout },
@@ -120,6 +127,12 @@ export class PaddleCommercial {
 				"Email is required to create the Paddle customer",
 				"PADDLE_CUSTOMER_EMAIL_REQUIRED",
 				400,
+			);
+		if (!customerId)
+			await this.repository.assertPaddleCustomerIntent(
+				billingAccountId,
+				this.config.accountIdentity,
+				intent.email ?? null,
 			);
 		await this.gateway.validatePrices([target.binding], true);
 		const context = {

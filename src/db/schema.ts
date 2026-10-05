@@ -2115,7 +2115,7 @@ export const providerPriceBindings = pgTable(
 	(table): PgTableExtraConfigValue[] => [
 		check(
 			"provider_price_bindings_provider_check",
-			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text, 'paddle'::text])))`,
 		),
 		check(
 			"provider_price_bindings_channel_check",
@@ -2454,7 +2454,7 @@ export const providerPlanBindings = pgTable(
 	(table): PgTableExtraConfigValue[] => [
 		check(
 			"provider_plan_bindings_provider_check",
-			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text, 'paddle'::text])))`,
 		),
 		check(
 			"provider_plan_bindings_channel_check",

@@ -76,6 +76,18 @@ export class ProjectScopedBillingRepository {
 	getPaddleCustomer(billingAccountId: string, accountIdentity: string) {
 		return this.repository.paddle.customer(this.project, billingAccountId, accountIdentity);
 	}
+	assertPaddleCustomerIntent(
+		billingAccountId: string,
+		accountIdentity: string,
+		email: string | null,
+	) {
+		return this.repository.paddle.assertCustomerIntent(
+			this.project,
+			billingAccountId,
+			accountIdentity,
+			email,
+		);
+	}
 	getPaddleBinding(productKey: string) {
 		return this.repository.paddle.binding(this.project, productKey);
 	}
@@ -90,6 +102,9 @@ export class ProjectScopedBillingRepository {
 	}
 	reservePaddleCheckout(input: Parameters<PaddleCheckoutRepository["reserve"]>[1]) {
 		return this.repository.paddleCheckouts.reserve(this.project, input);
+	}
+	rejectUnboundPaddleCheckout(input: Parameters<PaddleCheckoutRepository["rejectUnbound"]>[1]) {
+		return this.repository.paddleCheckouts.rejectUnbound(this.project, input);
 	}
 	bindPaddleCheckoutOperation(
 		reservationId: string,

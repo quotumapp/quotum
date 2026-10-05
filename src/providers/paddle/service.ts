@@ -25,7 +25,12 @@ import { buildPaddleConfig } from "./config";
 import { assertPaddleCustomer, PaddleGateway } from "./gateway";
 import { normalizePaddleEvent } from "./normalizer";
 import { normalizePaddleEmail, type PaddlePlanPin } from "./plan";
-import { type PaddleTransaction, paddleEventSchema, paddleId } from "./schemas";
+import {
+	type PaddleTransaction,
+	paddleCorrelationSchema,
+	paddleEventSchema,
+	paddleId,
+} from "./schemas";
 import { verifyPaddleSignature } from "./webhook";
 
 const customerSchema = z.object({
@@ -127,6 +132,12 @@ export class PaddleBillingService implements WebBillingService {
 				"PADDLE_CUSTOMER_EMAIL_REQUIRED",
 				400,
 			);
+		if (!customerId)
+			await this.repository.assertPaddleCustomerIntent(
+				input.billingAccountId,
+				this.config.accountIdentity,
+				email,
+			);
 		const reservationId = await this.repository.reservePaddleCheckout({
 			billingAccountId: input.billingAccountId,
 			idempotencyKey: input.idempotencyKey,
@@ -135,75 +146,80 @@ export class PaddleBillingService implements WebBillingService {
 			connectionVersionId: this.config.versionId,
 			target: { binding, plan: plan ?? null },
 		});
-		const beforeDispatch = (operation: ProviderOperation) =>
-			this.repository.bindPaddleCheckoutOperation(reservationId, operation);
-		if (customerId === null) {
-			const request = { email };
-			const operation = await executeProviderOperation({
-				beforeDispatch,
-				project: this.project,
-				store: this.operations,
-				intent: {
+		try {
+			const beforeDispatch = (operation: ProviderOperation) =>
+				this.repository.bindPaddleCheckoutOperation(reservationId, operation);
+			if (customerId === null) {
+				const request = { email };
+				const operation = await executeProviderOperation({
+					beforeDispatch,
+					project: this.project,
+					store: this.operations,
+					intent: {
+						billingAccountId: input.billingAccountId,
+						provider: "paddle",
+						providerAccountId: this.config.accountIdentity,
+						connectionVersionId: this.config.versionId,
+						idempotencyKey: `customer:${sha256Hex(input.billingAccountId)}`,
+						resourceKey: `customer:${sha256Hex(input.billingAccountId)}`,
+						operation: "customer.create",
+						requestHash: sha256Hex(stableJson(request)),
+						request,
+					},
+					write: async (operation) => {
+						if (operation.connectionVersionId !== this.config.versionId)
+							throw new Error("Resolve the recorded connection before dispatch");
+						const response = await this.client.write("POST", "/customers", {
+							email,
+							custom_data: paddleCorrelation({
+								operationId: operation.id,
+								requestHash: operation.requestHash,
+							}),
+						});
+						const customer = customerSchema.parse(response.data);
+						if (
+							customer.email !== email ||
+							stableJson(customer.custom_data) !==
+								stableJson(
+									paddleCorrelation({
+										operationId: operation.id,
+										requestHash: operation.requestHash,
+									}),
+								)
+						)
+							throw new Error("Paddle customer email differs");
+						return { providerObjectId: customer.id, result: { customerId: customer.id } };
+					},
+				});
+				if (operation.status === "failed")
+					await this.repository.rejectPaddleCheckout(reservationId, operation);
+				if (operation.status !== "succeeded" || !operation.providerObjectId) pending(operation);
+				customerId = operation.providerObjectId;
+				await this.repository.linkPaddleCustomer({
 					billingAccountId: input.billingAccountId,
-					provider: "paddle",
+					customerId,
 					providerAccountId: this.config.accountIdentity,
-					connectionVersionId: this.config.versionId,
-					idempotencyKey: `customer:${sha256Hex(input.billingAccountId)}`,
-					resourceKey: `customer:${sha256Hex(input.billingAccountId)}`,
-					operation: "customer.create",
-					requestHash: sha256Hex(stableJson(request)),
-					request,
-				},
-				write: async (operation) => {
-					if (operation.connectionVersionId !== this.config.versionId)
-						throw new Error("Resolve the recorded connection before dispatch");
-					const response = await this.client.write("POST", "/customers", {
-						email,
-						custom_data: paddleCorrelation({
-							operationId: operation.id,
-							requestHash: operation.requestHash,
-						}),
-					});
-					const customer = customerSchema.parse(response.data);
-					if (
-						customer.email !== email ||
-						stableJson(customer.custom_data) !==
-							stableJson(
-								paddleCorrelation({
-									operationId: operation.id,
-									requestHash: operation.requestHash,
-								}),
-							)
-					)
-						throw new Error("Paddle customer email differs");
-					return { providerObjectId: customer.id, result: { customerId: customer.id } };
-				},
+				});
+			}
+			const operation = await this.checkout.create({
+				beforeDispatch,
+				billingAccountId: input.billingAccountId,
+				idempotencyKey: input.idempotencyKey,
+				customerId,
+				bindings: [binding],
+				...(plan ? { plan } : {}),
 			});
 			if (operation.status === "failed")
 				await this.repository.rejectPaddleCheckout(reservationId, operation);
-			if (operation.status !== "succeeded" || !operation.providerObjectId) pending(operation);
-			customerId = operation.providerObjectId;
-			await this.repository.linkPaddleCustomer({
-				billingAccountId: input.billingAccountId,
-				customerId,
-				providerAccountId: this.config.accountIdentity,
-			});
+			if (operation.status !== "succeeded") pending(operation);
+			return {
+				...z.object({ sessionId: paddleId("txn"), url: z.url() }).parse(operation.result),
+				duplicate: false,
+			};
+		} catch (error) {
+			await this.repository.rejectUnboundPaddleCheckout(input);
+			throw error;
 		}
-		const operation = await this.checkout.create({
-			beforeDispatch,
-			billingAccountId: input.billingAccountId,
-			idempotencyKey: input.idempotencyKey,
-			customerId,
-			bindings: [binding],
-			...(plan ? { plan } : {}),
-		});
-		if (operation.status === "failed")
-			await this.repository.rejectPaddleCheckout(reservationId, operation);
-		if (operation.status !== "succeeded") pending(operation);
-		return {
-			...z.object({ sessionId: paddleId("txn"), url: z.url() }).parse(operation.result),
-			duplicate: false,
-		};
 	}
 
 	async observeOperation(
@@ -318,6 +334,11 @@ export class PaddleBillingService implements WebBillingService {
 			);
 			if (transaction.status !== "canceled")
 				return { status: "ignored", reason: "Paddle transaction is not currently canceled" };
+			if (
+				transaction.origin !== "api" ||
+				!paddleCorrelationSchema.safeParse(transaction.custom_data).success
+			)
+				return { status: "ignored", reason: "Paddle transaction is not a Quotum checkout create" };
 			await this.repository.recordPaddleCancellation({
 				providerAccountId: this.config.accountIdentity,
 				transaction,

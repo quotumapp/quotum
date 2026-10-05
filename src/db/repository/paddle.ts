@@ -1,14 +1,16 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
+import { sha256Hex, stableJson } from "../../billing/decimal";
 import { BillingError } from "../../billing/errors";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { type PaddlePriceBinding, paddlePriceBindingSchema } from "../../providers/paddle/catalog";
 import type { NormalizedPaddleEvent } from "../../providers/paddle/normalizer";
 import { type PaddleCommercialTarget, paddlePlanPinSchema } from "../../providers/paddle/plan";
-import type {
-	PaddleSubscription,
-	PaddleTransaction,
-	PaddleTransactionIdentity,
+import {
+	paddleCorrelationSchema as correlationSchema,
+	type PaddleSubscription,
+	type PaddleTransaction,
+	type PaddleTransactionIdentity,
 } from "../../providers/paddle/schemas";
 import { RepositoryModule } from "./base";
 import { materializeSubscriptionAllocations } from "./catalog-allocations";
@@ -21,13 +23,55 @@ import { executeOne } from "./query";
 import { recordStoreEventProcessingResult } from "./store-events";
 import type { StoreProductIdentityRow } from "./types";
 
-const correlationSchema = z.object({
-	quotum: z.object({ operationId: z.uuid(), requestHash: z.string() }),
-});
 type SubscriptionEvent = Extract<NormalizedPaddleEvent, { kind: "subscription" }>;
 
 /** Persists the initial fixed-price sandbox scope through the normal entitlement/projection path. */
 export class PaddleBillingRepository extends RepositoryModule {
+	/** Read-only preflight; dispatch still rechecks the immutable intent under its key lock. */
+	async assertCustomerIntent(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		providerAccountId: string,
+		email: string | null,
+	) {
+		const key = `customer:${sha256Hex(billingAccountId)}`;
+		const existing = await executeOne<{
+			id: string;
+			request_hash: string;
+			request: Record<string, unknown>;
+			provider_account_id: string;
+			operation: string;
+			resource_key: string;
+			status: string;
+		}>(
+			this.database,
+			sql`SELECT id, request_hash, request, provider_account_id, operation, resource_key, status
+				FROM provider_operations WHERE project_id = ${project.projectInstanceId}
+				AND billing_account_id = ${billingAccountId} AND provider = 'paddle' AND idempotency_key = ${key}`,
+		);
+		if (!existing) return;
+		const request = stableJson({ email });
+		if (
+			existing.request_hash !== sha256Hex(request) ||
+			stableJson(existing.request) !== request ||
+			existing.provider_account_id !== providerAccountId ||
+			existing.operation !== "customer.create" ||
+			existing.resource_key !== key
+		)
+			throw new BillingError(
+				"This idempotency key belongs to a different provider operation",
+				"IDEMPOTENCY_CONFLICT",
+				409,
+			);
+		if (existing.status === "failed")
+			throw new BillingError(
+				"Paddle rejected this customer operation; inspect its terminal receipt",
+				"PROVIDER_OPERATION_FAILED",
+				409,
+				{ details: { operationId: existing.id, status: existing.status } },
+			);
+	}
+
 	async recordCancellation(
 		project: ProjectInstanceContext,
 		input: {

@@ -55,15 +55,19 @@ Two previews may coexist, but only one can execute. A competing execution return
 `409 PADDLE_CHECKOUT_PENDING`, with the owning `previewToken` and/or `operationId` when available;
 the losing preview remains unclaimed. Resume the original checkout using its token/key. A successful
 transaction-create receipt does not release the reservation: the transaction may still be payable.
-The reservation closes only after definitive provider rejection, authenticated transaction
-cancellation, or committed fulfillment. Preview expiry, browser closure and credential rotation do
-not release it. Once access is active, `BASE_PLAN_ALREADY_ACTIVE` prevents another purchase.
+The reservation closes after definitive provider rejection, authenticated transaction
+cancellation, committed fulfillment, or a local failure before any operation was bound for dispatch.
+Preview expiry, browser closure and credential rotation do not release it. Once access is active,
+`BASE_PLAN_ALREADY_ACTIVE` prevents another purchase.
 
 Malformed email returns `400 INVALID_REQUEST`; missing email for a new customer returns
 `400 PADDLE_CUSTOMER_EMAIL_REQUIRED`. Invalid stored Paddle context returns
 `409 COMMERCIAL_PREVIEW_STALE` before execution is claimed. Completed receipts remain replayable
-without reading that context. Merchant same-key replay returns the stored HTTP 200 result,
-including production step-up receipt replay; a different key cannot reuse that authorization.
+without reading that context. Preview and execution check the retained customer creation intent
+before any checkout reservation: a different email returns `409 IDEMPOTENCY_CONFLICT`; the same
+failed intent returns `409 PROVIDER_OPERATION_FAILED`. Changing the checkout key cannot reset that
+receipt. Merchant same-key replay returns the stored HTTP 200 result, including production step-up
+receipt replay; a different key cannot reuse that authorization.
 
 Verified server events grant the purchased plan version and its price component, even if a newer
 catalog version was published while payment was open. The browser callback and checkout receipt

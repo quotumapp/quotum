@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import { createHmac } from "node:crypto";
 import { createApp } from "../../src/app";
 import { executeCommercial, previewCommercial } from "../../src/app/commercial-actions";
@@ -156,7 +156,7 @@ localDescribe("Paddle fixed subscription persistence", () => {
 				StoreEventReplayJobRow[]
 			>`SELECT * FROM store_events WHERE project_id=${project.projectInstanceId} AND external_event_id=${event.event_id}`;
 			if (!row) throw new Error("Event was not persisted");
-			await service.replayStoreEvent(row);
+			return service.replayStoreEvent(row);
 		};
 		return {
 			service,
@@ -964,6 +964,26 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		expect(h.writes).toBe(1);
 	});
 
+	it("ignores canceled renewals and transactions without valid checkout correlation", async () => {
+		const h = harness();
+		await h.create();
+		const created = h.remote;
+		for (const change of [
+			{ origin: "subscription_recurring" as const },
+			{ custom_data: null },
+			{ custom_data: { quotum: { operationId: "invalid", requestHash: "invalid" } } },
+		]) {
+			h.remote = { ...created, status: "canceled", ...change };
+			expect(await h.deliver(h.rawEvent("transaction.canceled"))).toMatchObject({
+				status: "ignored",
+			});
+			const [hold] =
+				await context.sql`SELECT closed_at FROM paddle_checkout_reservations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${h.billingAccountId}`;
+			expect(hold.closed_at).toBeNull();
+		}
+		expect(h.writes).toBe(1);
+	});
+
 	it("blocks fresh checkout keys when a populated restore omitted legacy reservations", async () => {
 		const h = harness();
 		const receipt = await h.create();
@@ -1095,7 +1115,10 @@ localDescribe("Paddle fixed subscription persistence", () => {
 				idempotencyKey: "corrected",
 			}),
 		).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
-		// Retrying the same customer intent returns its terminal receipt and closes the new owner too.
+		expect(
+			await context.sql`SELECT id FROM paddle_checkout_reservations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${h.billingAccountId} AND closed_at IS NULL`,
+		).toHaveLength(0);
+		// The same customer intent keeps returning its terminal receipt without reserving a checkout.
 		await expect(
 			h.service.createCheckoutSession({
 				billingAccountId: h.billingAccountId,
@@ -1107,6 +1130,99 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		expect(
 			await context.sql`SELECT id FROM paddle_checkout_reservations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${h.billingAccountId} AND closed_at IS NULL`,
 		).toHaveLength(0);
+		expect([h.writes, h.customerWrites]).toEqual([0, 1]);
+	});
+
+	it("refuses customer conflicts and terminal receipts before preview or execution can reserve", async () => {
+		const h = harness();
+		const corrected = commercial(h, {
+			kind: "checkout_product",
+			productKey: "paddle_test",
+			email: "corrected@example.com",
+		});
+		const original = commercial(h, {
+			kind: "checkout_product",
+			productKey: "paddle_test",
+			email: `${h.billingAccountId}@example.com`,
+		});
+		const preview = await corrected.preview();
+		const sameEmailPreview = await original.preview();
+		h.rejectCustomer();
+		await expect(h.create()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_FAILED" });
+		await expect(corrected.preview()).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+		await expect(corrected.execute(preview.previewToken)).rejects.toMatchObject({
+			code: "IDEMPOTENCY_CONFLICT",
+		});
+		await expect(original.preview()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_FAILED" });
+		await expect(original.execute(sameEmailPreview.previewToken)).rejects.toMatchObject({
+			code: "PROVIDER_OPERATION_FAILED",
+		});
+		const stored = await context.repository.getCommercialActionPreview(
+			project,
+			h.billingAccountId,
+			preview.previewToken,
+		);
+		expect(stored.status).toBe("previewed");
+		expect(stored.executionIdempotencyKey).toBeNull();
+		expect(
+			await context.sql`SELECT id FROM paddle_checkout_reservations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${h.billingAccountId} AND closed_at IS NULL`,
+		).toHaveLength(0);
+		expect([h.writes, h.customerWrites]).toEqual([0, 1]);
+	});
+
+	it("closes unbound reservations after preparation fails for common and direct checkout", async () => {
+		for (const common of [true, false]) {
+			const h = harness();
+			const flow = commercial(h, {
+				kind: "checkout_product",
+				productKey: "paddle_test",
+				email: "payer@example.com",
+			});
+			const preview = await flow.preview();
+			const prepare = spyOn(context.repository.providerOperations, "prepare").mockRejectedValueOnce(
+				new Error("Preparation failed before dispatch"),
+			);
+			try {
+				await expect(common ? flow.execute(preview.previewToken) : h.create()).rejects.toThrow(
+					"Preparation failed before dispatch",
+				);
+			} finally {
+				prepare.mockRestore();
+			}
+			const [hold] =
+				await context.sql`SELECT operation_id, closure_reason FROM paddle_checkout_reservations WHERE project_id=${project.projectInstanceId} AND billing_account_id=${h.billingAccountId}`;
+			expect(hold).toMatchObject({ operation_id: null, closure_reason: "rejected" });
+			expect([h.writes, h.customerWrites]).toEqual([0, 0]);
+			const replacement = await flow.preview();
+			expect(await flow.execute(replacement.previewToken)).toHaveProperty("sessionId");
+			expect([h.writes, h.customerWrites]).toEqual([1, 1]);
+		}
+	});
+
+	it("closes an already-claimed unbound preview when customer preflight fails", async () => {
+		const h = harness();
+		const flow = commercial(h, {
+			kind: "checkout_product",
+			productKey: "paddle_test",
+			email: "corrected@example.com",
+		});
+		const preview = await flow.preview();
+		h.rejectCustomer();
+		await expect(h.create()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_FAILED" });
+		// Reproduce an executing preview retained by an older runtime after customer preparation failed.
+		await context.repository.beginCommercialActionExecution(project, {
+			billingAccountId: h.billingAccountId,
+			previewToken: preview.previewToken,
+			intentHash: preview.intentHash,
+			stateFingerprint: preview.stateFingerprint,
+			idempotencyKey: "execute",
+		});
+		await expect(flow.execute(preview.previewToken, "execute")).rejects.toMatchObject({
+			code: "IDEMPOTENCY_CONFLICT",
+		});
+		const [hold] =
+			await context.sql`SELECT operation_id, closure_reason FROM paddle_checkout_reservations WHERE project_id=${project.projectInstanceId} AND preview_token=${preview.previewToken}`;
+		expect(hold).toMatchObject({ operation_id: null, closure_reason: "rejected" });
 		expect([h.writes, h.customerWrites]).toEqual([0, 1]);
 	});
 });

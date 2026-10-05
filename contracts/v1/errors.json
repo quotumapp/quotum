@@ -567,6 +567,7 @@
         "src/db/repository/balance-adjustments.ts",
         "src/db/repository/commercial-actions.ts",
         "src/db/repository/paddle-checkouts.ts",
+        "src/db/repository/paddle.ts",
         "src/db/repository/plan-grants.ts",
         "src/db/repository/promotions.ts",
         "src/db/repository/provider-operations.ts",
@@ -1253,7 +1254,8 @@
     {
       "code": "PROVIDER_OPERATION_FAILED",
       "sources": [
-        "src/db/repository/paddle-checkouts.ts"
+        "src/db/repository/paddle-checkouts.ts",
+        "src/db/repository/paddle.ts"
       ]
     },
     {

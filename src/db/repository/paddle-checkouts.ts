@@ -31,6 +31,20 @@ interface ReservationRow {
 }
 
 export class PaddleCheckoutRepository extends RepositoryModule {
+	/** No dispatch can have begun without binding an operation; race safely with that bind. */
+	async rejectUnbound(
+		project: ProjectInstanceContext,
+		input: Pick<ReservePaddleCheckout, "billingAccountId" | "idempotencyKey" | "previewToken">,
+	) {
+		await this.database.execute(sql`
+			UPDATE paddle_checkout_reservations SET closed_at = now(), closure_reason = 'rejected', updated_at = now()
+			WHERE project_id = ${project.projectInstanceId} AND billing_account_id = ${input.billingAccountId}
+				AND idempotency_key = ${input.idempotencyKey} AND owner_kind = ${input.previewToken ? "commercial" : "direct"}
+				AND preview_token IS NOT DISTINCT FROM ${input.previewToken ?? null}::uuid
+				AND operation_id IS NULL AND closed_at IS NULL
+		`);
+	}
+
 	reserve(project: ProjectInstanceContext, input: ReservePaddleCheckout) {
 		return this.transaction((tx) =>
 			reservePaddleCheckoutInTx(tx, project.projectInstanceId, input),

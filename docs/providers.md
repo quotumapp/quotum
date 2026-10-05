@@ -67,6 +67,8 @@ not claim receipt of an event; sandbox commit is permitted and real delivery mus
 The required event set includes `transaction.canceled` so unpaid checkout reservations can close;
 add it to existing notification settings before enabling this runtime. Losing that delivery keeps
 the reservation open until the notification is replayed and authenticated state proves cancellation.
+Canceled renewals and transactions without valid Quotum checkout correlation are ignored; conflicting
+evidence for a correlated checkout still fails without releasing its reservation.
 There is no Paddle draft-event setup receiver or production activation path in this increment.
 
 Host Paddle.js on the approved `paymentPageUrl`, initialize it with the sandbox client token, and
