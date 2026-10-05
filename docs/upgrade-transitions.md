@@ -10,6 +10,66 @@ moves to a changed baseline by restoring its data into a freshly migrated databa
 the later sections name the steps they reuse and add what their own change needs. A release's pull requests name the baselines it changes under
 `Upgrade notes`.
 
+## Upgrading a populated deployment to v0.22.0
+
+v0.22.0 adds the common Paddle checkout and changes two baselines relative to v0.21.0:
+
+- `migrations/002_billing_core.sql` adds `paddle_checkout_reservations`, with one open reservation per
+  project/billing account and retained closed-owner history.
+- `migrations/003_metering_and_pricing.sql` adds
+  `commercial_action_previews.provider_context`, a non-null JSON object with default `{}`. It stores
+  the private Paddle connection, price and plan snapshot; the public response never includes it.
+
+Keep the matching Drizzle mirror and generated contracts with the runtime. No environment
+variables change. Recreate disposable databases. For a populated v0.21.0 database:
+
+1. Stop API traffic and workers; take and verify a backup. Migrate an empty database and restore
+   data using the [stored job provider identity](#stored-job-provider-identity) procedure. Skip its
+   provider-column relaxation/backfill because v0.21.0 already has those columns. Never edit
+   recorded checksums. Restore older previews with the new column's default `{}`; Stripe previews
+   remain usable, while invalid unfinished Paddle previews fail stale. Preserve any already-present
+   valid Paddle context and completed result when upgrading an earlier follow-up build.
+2. Before starting the runtime, inventory **every** retained Paddle `checkout.hosted` operation
+   whose status is not `failed`, grouped by project/billing account. Reconstruct reservation history
+   for every such operation, including already fulfilled/canceled checkouts. Copy project, account,
+   provider-account identity, connection version, provider idempotency key and operation ID from the
+   receipt; derive `target` as `{binding: request.bindings[0], plan: request.plan ?? null}`. Use
+   `owner_kind = commercial` and its preview token only for an account/project-matching Paddle
+   preview whose provider key equals `commercial:<previewToken>`; otherwise use `direct` and a null
+   preview token. Preserve original timestamps and validate the retained binding/plan shape against
+   the runtime schemas; do not substitute current catalog or connection values.
+3. Mark a reconstructed row `fulfilled` only with committed correlated purchase/subscription
+   evidence, or `canceled` only after an authenticated read through its recorded connection proves
+   cancellation and matches the receipt's customer, transaction and correlation. Store a non-null
+   `closed_at` with that reason and retain the evidence with the upgrade record. Otherwise leave
+   both closure columns null. **A succeeded create receipt is not payment or cancellation proof.**
+   Prepared, uncertain and review-required operations need open holds until resolved. Multiple
+   potentially payable operations for one account require explicit provider reconciliation before
+   constructing the unique open hold; do not choose one and discard the others. If any snapshot or
+   proof cannot be reconstructed, keep checkout traffic disabled and reconcile it before proceeding.
+4. Verify that every nonfailed historical checkout operation has a matching reservation and that
+   every account has at most one open row. The runtime fails closed with
+   `PADDLE_CHECKOUT_PENDING` on new keys when retained nonfailed operations lack reservation history;
+   existing completed receipts still replay. This guard is not a substitute for the stopped restore.
+5. Retain referenced encrypted connection versions. Add `transaction.canceled` to the existing
+   notification setting without changing its identity, verify signed delivery, and verify counts,
+   foreign keys and migration status before enabling traffic and workers. Replay pending provider
+   notifications after startup; do not release unknown reservations by age or preview expiry.
+
+**Skipping releases and calendar months.** An upgrade that skips releases follows this procedure
+once: run each skipped release's pre-checks (for example the Apple provider-row check in the v0.20.0
+section), migrate an empty database with the target image and restore the data; the intermediate
+releases' stopped-service steps are not repeated. The baseline creates the monthly `usage_events`
+partitions from the month before it runs, so a database migrated in a different calendar month than
+the dump can lack a partition the dump lists, and `pg_restore` then stops with a missing relation.
+Before restoring, compare the dump's `usage_events_YYYY_MM` data entries with the migrated
+database's partitions. If an entry has no partition and the old partition held no rows, drop its
+`TABLE DATA` line from the restore list; if it held rows, stop and create the partition first.
+
+Rollback restores the pre-upgrade backup with the old binary and loses subsequent writes. Sandbox
+checks qualify the new behavior, not a populated production upgrade; rehearse the transformation
+and reconciliation against a restored copy before scheduling downtime.
+
 ## Upgrading a populated deployment to v0.21.0
 
 v0.21.0 combines sandbox Paddle and browser-approved MCP proposals. All four baselines change:

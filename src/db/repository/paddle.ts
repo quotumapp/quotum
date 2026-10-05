@@ -1,26 +1,176 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
+import { sha256Hex, stableJson } from "../../billing/decimal";
 import { BillingError } from "../../billing/errors";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { type PaddlePriceBinding, paddlePriceBindingSchema } from "../../providers/paddle/catalog";
 import type { NormalizedPaddleEvent } from "../../providers/paddle/normalizer";
-import type { PaddleSubscription, PaddleTransaction } from "../../providers/paddle/schemas";
+import { type PaddleCommercialTarget, paddlePlanPinSchema } from "../../providers/paddle/plan";
+import {
+	paddleCorrelationSchema as correlationSchema,
+	type PaddleSubscription,
+	type PaddleTransaction,
+	type PaddleTransactionIdentity,
+} from "../../providers/paddle/schemas";
 import { RepositoryModule } from "./base";
 import { materializeSubscriptionAllocations } from "./catalog-allocations";
 import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
 import { ensureCustomer, upsertProviderCustomer } from "./identities";
 import { upsertPurchase, upsertSubscription } from "./mutations";
+import { closePaddleCheckoutInTx, lockPaddleCheckoutAccount } from "./paddle-checkouts";
+import { paddlePlanTarget } from "./paddle-plans";
 import { executeOne } from "./query";
 import { recordStoreEventProcessingResult } from "./store-events";
 import type { StoreProductIdentityRow } from "./types";
 
-const correlationSchema = z.object({
-	quotum: z.object({ operationId: z.uuid(), requestHash: z.string() }),
-});
 type SubscriptionEvent = Extract<NormalizedPaddleEvent, { kind: "subscription" }>;
 
 /** Persists the initial fixed-price sandbox scope through the normal entitlement/projection path. */
 export class PaddleBillingRepository extends RepositoryModule {
+	/** Read-only preflight; dispatch still rechecks the immutable intent under its key lock. */
+	async assertCustomerIntent(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		providerAccountId: string,
+		email: string | null,
+	) {
+		const key = `customer:${sha256Hex(billingAccountId)}`;
+		const existing = await executeOne<{
+			id: string;
+			request_hash: string;
+			request: Record<string, unknown>;
+			provider_account_id: string;
+			operation: string;
+			resource_key: string;
+			status: string;
+		}>(
+			this.database,
+			sql`SELECT id, request_hash, request, provider_account_id, operation, resource_key, status
+				FROM provider_operations WHERE project_id = ${project.projectInstanceId}
+				AND billing_account_id = ${billingAccountId} AND provider = 'paddle' AND idempotency_key = ${key}`,
+		);
+		if (!existing) return;
+		const request = stableJson({ email });
+		if (
+			existing.request_hash !== sha256Hex(request) ||
+			stableJson(existing.request) !== request ||
+			existing.provider_account_id !== providerAccountId ||
+			existing.operation !== "customer.create" ||
+			existing.resource_key !== key
+		)
+			throw new BillingError(
+				"This idempotency key belongs to a different provider operation",
+				"IDEMPOTENCY_CONFLICT",
+				409,
+			);
+		if (existing.status === "failed")
+			throw new BillingError(
+				"Paddle rejected this customer operation; inspect its terminal receipt",
+				"PROVIDER_OPERATION_FAILED",
+				409,
+				{ details: { operationId: existing.id, status: existing.status } },
+			);
+	}
+
+	async recordCancellation(
+		project: ProjectInstanceContext,
+		input: {
+			providerAccountId: string;
+			transaction: PaddleTransactionIdentity;
+			externalEventId: string;
+			rawPayload: Record<string, unknown>;
+			replayStoreEventId?: string;
+		},
+	): Promise<void> {
+		await this.transaction(async (tx) => {
+			const projectId = project.projectInstanceId;
+			const transaction = input.transaction;
+			if (
+				transaction.status !== "canceled" ||
+				transaction.origin !== "api" ||
+				transaction.collection_mode !== "automatic"
+			)
+				mismatch();
+			const correlation = correlationSchema.parse(transaction.custom_data).quotum;
+			const operation = await executeOne<{ billing_account_id: string; customer_id: string }>(
+				tx,
+				sql`
+				SELECT o.billing_account_id, c.id AS customer_id FROM provider_operations o
+				JOIN customers c ON c.project_id = o.project_id AND c.billing_account_id = o.billing_account_id
+				JOIN provider_customers pc ON pc.project_id = c.project_id AND pc.customer_id = c.id
+				WHERE o.project_id = ${projectId} AND o.id = ${correlation.operationId}
+					AND o.provider = 'paddle' AND o.provider_account_id = ${input.providerAccountId}
+					AND o.operation = 'checkout.hosted' AND o.status <> 'failed'
+					AND o.request_hash = ${correlation.requestHash}
+					AND o.request->>'customerId' = ${transaction.customer_id}
+					AND (o.provider_object_id IS NULL OR o.provider_object_id = ${transaction.id})
+					AND pc.provider = 'paddle' AND pc.provider_account_id = o.provider_account_id
+					AND pc.external_customer_id = ${transaction.customer_id}
+			`,
+			);
+			if (!operation) mismatch();
+			await lockPaddleCheckoutAccount(tx, projectId, operation.billing_account_id);
+			await recordStoreEventProcessingResult(tx, projectId, {
+				provider: "paddle",
+				channel: "web",
+				externalEventId: input.externalEventId,
+				eventType: "transaction.canceled",
+				customerId: operation.customer_id,
+				storeProductId: null,
+				transactionId: transaction.id,
+				purchaseKind: null,
+				processingStatus: "processed",
+				processingError: null,
+				rawPayload: input.rawPayload,
+				raiseIdentityMismatch: true,
+				replayStoreEventId: input.replayStoreEventId,
+			});
+			await closePaddleCheckoutInTx(
+				tx,
+				projectId,
+				operation.billing_account_id,
+				correlation.operationId,
+				"canceled",
+			);
+		});
+	}
+
+	async operationId(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		idempotencyKey: string,
+		accountIdentity: string,
+	) {
+		const row = await executeOne<{ id: string }>(
+			this.database,
+			sql`SELECT id FROM provider_operations WHERE project_id = ${project.projectInstanceId} AND billing_account_id = ${billingAccountId} AND provider = 'paddle' AND provider_account_id = ${accountIdentity} AND idempotency_key = ${idempotencyKey} AND operation = 'checkout.hosted'`,
+		);
+		return row?.id ?? null;
+	}
+	plan(project: ProjectInstanceContext, billingAccountId: string, planKey: string) {
+		return paddlePlanTarget(this.database, project.projectInstanceId, billingAccountId, planKey);
+	}
+	async product(
+		project: ProjectInstanceContext,
+		productKey: string,
+	): Promise<PaddleCommercialTarget> {
+		const row = await executeOne<{ id: string; name: string }>(
+			this.database,
+			sql`
+			SELECT sp.id, p.name FROM store_products sp JOIN products p ON p.project_id = sp.project_id AND p.id = sp.product_id
+			WHERE sp.project_id = ${project.projectInstanceId} AND sp.provider = 'paddle' AND sp.channel = 'web' AND sp.active = true AND p.active = true AND p.key = ${productKey} AND p.type = 'subscription'
+		`,
+		);
+		if (!row) mismatch();
+		return {
+			productKey,
+			name: row.name,
+			priceKey: productKey,
+			storeProductId: row.id,
+			binding: await this.binding(project, productKey),
+			plan: null,
+		};
+	}
 	async customer(
 		project: ProjectInstanceContext,
 		billingAccountId: string,
@@ -124,6 +274,7 @@ export class PaddleBillingRepository extends RepositoryModule {
 				request: {
 					customerId: string;
 					bindings: PaddlePriceBinding[];
+					plan?: unknown;
 				};
 			}>(
 				tx,
@@ -135,6 +286,7 @@ export class PaddleBillingRepository extends RepositoryModule {
 			`,
 			);
 			if (!intent || intent.request.customerId !== sub.customer_id) mismatch();
+			await lockPaddleCheckoutAccount(tx, projectId, intent.billing_account_id);
 			const customer = await executeOne<{ id: string; billing_account_id: string }>(
 				tx,
 				sql`
@@ -237,7 +389,33 @@ export class PaddleBillingRepository extends RepositoryModule {
 					updateProduct: false,
 					identityError: "Paddle subscription identity mismatch",
 				});
+				if (intent.request.plan !== undefined) {
+					const pin = paddlePlanPinSchema.parse(intent.request.plan);
+					if (pin.storeProductId !== product.id) mismatch();
+					const pinned = await executeOne(
+						tx,
+						sql`
+						UPDATE subscriptions s SET plan_version_id = pv.id, catalog_revision_id = pv.catalog_revision_id
+						FROM plan_versions pv JOIN price_components pc ON pc.project_id = pv.project_id AND pc.plan_version_id = pv.id
+						WHERE s.project_id = ${projectId} AND s.id = ${subscriptionId} AND pv.project_id = s.project_id
+						AND pv.id = ${pin.planVersionId}::bigint AND pv.catalog_revision_id = ${pin.catalogRevisionId}::bigint AND pc.id = ${pin.priceComponentId}::bigint
+						AND (s.plan_version_id IS NULL OR s.plan_version_id = pv.id) RETURNING s.id
+					`,
+					);
+					if (!pinned) mismatch();
+					await executeOne(
+						tx,
+						sql`
+						INSERT INTO subscription_items(project_id, subscription_id, price_component_id, quantity, unit_amount_minor, currency, active, starts_at)
+						SELECT ${projectId}, ${subscriptionId}, pc.id, 1, pc.unit_amount_minor, pc.currency, true, ${start.toISOString()}
+						FROM price_components pc WHERE pc.project_id = ${projectId} AND pc.id = ${pin.priceComponentId}::bigint
+						ON CONFLICT(project_id, subscription_id, price_component_id) DO UPDATE SET quantity=1, active=true, ends_at=NULL, updated_at=now()
+						RETURNING id
+					`,
+					);
+				}
 				await materializeSubscriptionAllocations(tx, {
+					preservePlanVersion: intent.request.plan !== undefined,
 					projectId,
 					customerId: customer.id,
 					storeProductId: product.id,
@@ -273,6 +451,13 @@ export class PaddleBillingRepository extends RepositoryModule {
 					currency: payment.currency_code,
 					identityError: "Paddle transaction identity mismatch",
 				});
+			await closePaddleCheckoutInTx(
+				tx,
+				projectId,
+				customer.billing_account_id,
+				correlation.operationId,
+				"fulfilled",
+			);
 			const entitlements = await recomputeCustomerEntitlements(
 				tx,
 				projectId,

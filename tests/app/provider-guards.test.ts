@@ -5,6 +5,7 @@ import type { StripeBillingServiceLike } from "../../src/app/types";
 import { NotConfiguredError } from "../../src/billing/errors";
 import type { FixtureBillingEnv as BillingEnv } from "../../src/testing/connection-fixtures";
 import { fixtureConnections } from "../../src/testing/connection-fixtures";
+import { storedCommercialPreview } from "../helpers/commercial-preview";
 import { testRequest, withOpenApiAssertions } from "../helpers/openapi";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
@@ -84,6 +85,9 @@ function appWith(stripeBillingService: StripeBillingServiceLike) {
 				credentials: { secret: "acme" },
 			}),
 			stripeBillingService,
+			commercialPreviewReader: {
+				getCommercialActionPreview: async () => storedCommercialPreview(),
+			},
 		}),
 	);
 }

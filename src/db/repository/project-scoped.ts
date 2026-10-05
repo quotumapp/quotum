@@ -24,6 +24,7 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import type { StripeCatalog } from "../../providers/stripe/types";
 import type { BillingRepository } from "../repository";
 import type { PaddleBillingRepository } from "./paddle";
+import type { PaddleCheckoutRepository } from "./paddle-checkouts";
 import type {
 	PaymentSetupReservation,
 	PaymentSetupRow,
@@ -58,8 +59,34 @@ export class ProjectScopedBillingRepository {
 		private readonly project: ProjectInstanceContext,
 	) {}
 
+	findPaddleOperation(billingAccountId: string, idempotencyKey: string, accountIdentity: string) {
+		return this.repository.paddle.operationId(
+			this.project,
+			billingAccountId,
+			idempotencyKey,
+			accountIdentity,
+		);
+	}
+	getPaddlePlan(billingAccountId: string, planKey: string) {
+		return this.repository.paddle.plan(this.project, billingAccountId, planKey);
+	}
+	getPaddleProduct(productKey: string) {
+		return this.repository.paddle.product(this.project, productKey);
+	}
 	getPaddleCustomer(billingAccountId: string, accountIdentity: string) {
 		return this.repository.paddle.customer(this.project, billingAccountId, accountIdentity);
+	}
+	assertPaddleCustomerIntent(
+		billingAccountId: string,
+		accountIdentity: string,
+		email: string | null,
+	) {
+		return this.repository.paddle.assertCustomerIntent(
+			this.project,
+			billingAccountId,
+			accountIdentity,
+			email,
+		);
 	}
 	getPaddleBinding(productKey: string) {
 		return this.repository.paddle.binding(this.project, productKey);
@@ -69,6 +96,27 @@ export class ProjectScopedBillingRepository {
 	}
 	recordPaddleEvent(input: Parameters<PaddleBillingRepository["record"]>[1]) {
 		return this.repository.paddle.record(this.project, input);
+	}
+	recordPaddleCancellation(input: Parameters<PaddleBillingRepository["recordCancellation"]>[1]) {
+		return this.repository.paddle.recordCancellation(this.project, input);
+	}
+	reservePaddleCheckout(input: Parameters<PaddleCheckoutRepository["reserve"]>[1]) {
+		return this.repository.paddleCheckouts.reserve(this.project, input);
+	}
+	rejectUnboundPaddleCheckout(input: Parameters<PaddleCheckoutRepository["rejectUnbound"]>[1]) {
+		return this.repository.paddleCheckouts.rejectUnbound(this.project, input);
+	}
+	bindPaddleCheckoutOperation(
+		reservationId: string,
+		operation: Parameters<PaddleCheckoutRepository["bindOperation"]>[2],
+	) {
+		return this.repository.paddleCheckouts.bindOperation(this.project, reservationId, operation);
+	}
+	rejectPaddleCheckout(
+		reservationId: string,
+		operation: Parameters<PaddleCheckoutRepository["rejected"]>[2],
+	) {
+		return this.repository.paddleCheckouts.rejected(this.project, reservationId, operation);
 	}
 
 	async getEntitlementSnapshot(billingAccountId: string): Promise<EntitlementSnapshot> {

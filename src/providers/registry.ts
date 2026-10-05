@@ -77,6 +77,10 @@ export interface ProviderRegistry {
 		provider: P,
 		purpose?: ProviderPurpose,
 	): Promise<ProviderServiceTypes[P] | null>;
+	paddleServiceVersion?(
+		project: ProjectInstanceContext,
+		versionId: string,
+	): Promise<ProviderServiceTypes["paddle"] | null>;
 	adapter<P extends BillingProvider>(
 		project: ProjectInstanceContext,
 		provider: P,
@@ -242,6 +246,20 @@ export function createProviderRegistry({
 		label: (provider) => entryFor(provider).label,
 		async service(project, provider, purpose = "new") {
 			return (await resolve(project, provider, purpose)).service;
+		},
+		async paddleServiceVersion(project, versionId) {
+			const entry = entryFor("paddle");
+			const override = overrideFor(project, entry);
+			if (override !== undefined) return override;
+			const config = await connections.resolvePaddleVersion?.(project, versionId);
+			if (!config) return null;
+			return entry.build({
+				project,
+				config,
+				repository: getRepository().forProject(project),
+				providerOperations: getRepository().providerOperations,
+				clientFactories,
+			});
 		},
 		adapter,
 		async require(project, provider, operation, purpose = "new") {

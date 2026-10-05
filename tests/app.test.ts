@@ -23,6 +23,7 @@ import { AppleStoreKitService } from "../src/providers/apple/service";
 import { createProviderRegistry } from "../src/providers/registry";
 import type { FixtureBillingEnv as BillingEnv } from "../src/testing/connection-fixtures";
 import { fixtureConnections } from "../src/testing/connection-fixtures";
+import { storedCommercialPreview } from "./helpers/commercial-preview";
 import {
 	databaseFailure,
 	diagnosticParameters,
@@ -1842,7 +1843,13 @@ describe("billing app", () => {
 	});
 
 	it("previews and executes a token-bound commercial action", async () => {
-		const app = createApp({ env, stripeBillingService });
+		const app = createApp({
+			env,
+			stripeBillingService,
+			commercialPreviewReader: {
+				getCommercialActionPreview: async () => storedCommercialPreview(),
+			},
+		});
 		const headers = { authorization: "Bearer secret", "content-type": "application/json" };
 		const preview = await testRequest(
 			app,

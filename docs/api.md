@@ -130,6 +130,11 @@ assert payment collection or grant entitlements. `failed` records a definitive p
 Never turn an unresolved receipt into a new charge with a different key; see
 [provider write recovery](operations.md#provider-write-recovery-foundation).
 
+`commercial.preview(billingAccountId, intent, "paddle")` selects sandbox Paddle for `checkout_plan`
+or `checkout_product`; omitting the third argument retains Stripe. Execute the returned token with
+`commercial.execute(billingAccountId, previewToken, idempotencyKey)`. The server reads the provider
+from the account-scoped preview. See [fixed-plan scope and examples](subscriptions.md#paddle-fixed-plan-checkout).
+
 `commercial.createPaddleCheckout(billingAccountId, { productKey, email }, idempotencyKey)` calls
 `POST /v1/billing-accounts/:billingAccountId/providers/paddle/checkout-sessions`. It requires a full
 project credential and `Idempotency-Key`. `email` is required until a Paddle customer is linked.

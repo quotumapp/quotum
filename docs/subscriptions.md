@@ -7,12 +7,73 @@ POST /v1/billing-accounts/:billingAccountId/commercial-actions/preview
 POST /v1/billing-accounts/:billingAccountId/commercial-actions
 ```
 
-Commercial preview accepts one complete Stripe intent (`checkout_plan`, `checkout_product`,
+Commercial preview accepts an optional `provider` (`stripe` by default, or `paddle`) and one complete intent. Stripe accepts (`checkout_plan`, `checkout_product`,
 `subscription_change`, `cancel`, `uncancel`, or `setup_payment`) and returns exact or
 provider-calculated amounts
 valid for 15 minutes. Execution accepts only the `previewToken` with an `Idempotency-Key` and
 rejects expired previews, catalog or customer drift, or a changed target. A durable
 subscription-change result is HTTP 202; every other result, including a cancellation, is HTTP 200.
+
+## Paddle fixed-plan checkout
+
+Paddle is sandbox-only and accepts `checkout_plan` and `checkout_product` through the same routes.
+For a fixed plan, publish an account-visible base plan with one flat base price component bound to
+an active Paddle subscription mapping. Both remote price quantity bounds must be one. Trials,
+additional paid items, paid overage, entity-scoped allocations, promotions, explicit expiry and
+custom success/cancel URLs are refused. A new Paddle customer needs an email. An account already
+holding an active base plan cannot start another common checkout.
+
+```json
+{"provider":"paddle","intent":{"kind":"checkout_plan","planKey":"pro-monthly","quantities":{},"email":"buyer@example.com"}}
+```
+
+The preview returns `provider: "paddle"`, `action: "checkout_plan"`, one quantity-one line and
+`toPlanVersionId`. Its subtotal is the catalog amount; `amountStatus: "provider_calculated"`,
+`estimatedTotalMinor: null` and a null line total leave final tax to Paddle. The private connection,
+price binding and plan snapshot are never returned. Execution sends only the token, with the same
+`Idempotency-Key` on every retry:
+
+```json
+{"previewToken":"11111111-1111-4111-8111-111111111111"}
+```
+
+A successful execution returns HTTP 200:
+
+```json
+{"success":true,"data":{"kind":"checkout","sessionId":"txn_<id>","url":"https://merchant.example/pay?_ptxn=txn_<id>","duplicate":false}}
+```
+
+The stored preview selects the provider. Before execution starts, catalog, customer or connection
+drift makes the token stale, and the 15-minute expiry applies. Once claimed, an interrupted Paddle
+execution can resume with the same token/key after that expiry, using its recorded connection
+version and immutable target. `409 PROVIDER_OPERATION_PENDING` exposes an operation ID for the
+[receipt and recovery flow](operations.md#provider-write-recovery-foundation); it does not invite a replacement key or checkout.
+Completed results replay without a provider call and remain immutable across concurrent completions.
+
+Common and direct Paddle checkout share one durable reservation per project/billing account.
+Two previews may coexist, but only one can execute. A competing execution returns
+`409 PADDLE_CHECKOUT_PENDING`, with the owning `previewToken` and/or `operationId` when available;
+the losing preview remains unclaimed. Resume the original checkout using its token/key. A successful
+transaction-create receipt does not release the reservation: the transaction may still be payable.
+The reservation closes after definitive provider rejection, authenticated transaction
+cancellation, committed fulfillment, or a local failure before any operation was bound for dispatch.
+Preview expiry, browser closure and credential rotation do not release it. Once access is active,
+`BASE_PLAN_ALREADY_ACTIVE` prevents another purchase.
+
+Malformed email returns `400 INVALID_REQUEST`; missing email for a new customer returns
+`400 PADDLE_CUSTOMER_EMAIL_REQUIRED`. Invalid stored Paddle context returns
+`409 COMMERCIAL_PREVIEW_STALE` before execution is claimed. Completed receipts remain replayable
+without reading that context. Preview and execution check the retained customer creation intent
+before any checkout reservation: a different email returns `409 IDEMPOTENCY_CONFLICT`; the same
+failed intent returns `409 PROVIDER_OPERATION_FAILED`. Changing the checkout key cannot reset that
+receipt. Merchant same-key replay returns the stored HTTP 200 result, including production step-up
+receipt replay; a different key cannot reuse that authorization.
+
+Verified server events grant the purchased plan version and its price component, even if a newer
+catalog version was published while payment was open. The browser callback and checkout receipt
+do not grant access. Merchant billing API dispatch uses the same routing and validation; merchant
+UI provider selection is a separate increment. The SDK accepts
+`client.commercial.preview(accountId, intent, "paddle")`; execution is unchanged.
 
 ## Allowances across a plan change
 

@@ -233,6 +233,7 @@ describe("error inventory", () => {
 			"PROVIDER_ACTION_REQUIRED",
 			"PROVIDER_CAPABILITY_NOT_CONFIGURED",
 			"PROVIDER_CAPABILITY_UNSUPPORTED",
+			"PROVIDER_OPERATION_FAILED",
 			"PROVIDER_OPERATION_LEASE_LOST",
 			"PROVIDER_OPERATION_PENDING",
 		]);
@@ -285,6 +286,7 @@ describe("error inventory", () => {
 			"src/providers/stripe/service.ts",
 		]);
 		expect(codes.get("BILLING_PROVIDER_NOT_CONFIGURED")).toEqual([
+			"src/app/commercial-actions.ts",
 			"src/app/provider-services.ts",
 			"src/billing/errors.ts",
 		]);

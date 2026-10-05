@@ -2060,17 +2060,21 @@
           }
         },
         "checkout.plan": {
+          "composedVia": "checkout.hosted",
           "conditions": [],
-          "level": "native",
-          "notes": "Paddle creates subscriptions only from paid recurring transactions or issued recurring invoices; it has no direct create-subscription operation.",
+          "level": "quotum_composed",
+          "notes": "Sandbox fixed subscription scope. The stored commercial preview pins the provider connection and plan version; fulfillment awaits signed provider events.",
           "verification": {
             "evidence": {
               "questions": [],
               "scenarios": [],
-              "tests": []
+              "tests": [
+                "tests/integration/paddle-flows.test.ts"
+              ]
             },
-            "status": "planned",
-            "trackedBy": "P4"
+            "note": "Sandbox common preview/execute only; one fixed base-plan component at quantity one without trial or promotion.",
+            "status": "conditional",
+            "verifiedOn": "2026-10-03"
           }
         },
         "event.replay": {

@@ -79,6 +79,7 @@ import { GoogleBillingRepository } from "./repository/google";
 import { BillingInsightsRepository } from "./repository/insights";
 import { type GrantAllocationInput, MeteringBillingRepository } from "./repository/metering";
 import { PaddleBillingRepository } from "./repository/paddle";
+import { PaddleCheckoutRepository } from "./repository/paddle-checkouts";
 import {
 	PaymentSetupRepository,
 	type PaymentSetupReservation,
@@ -207,6 +208,7 @@ export class BillingRepository {
 	readonly promotionProviders: PromotionProviderObjectRepository;
 	readonly providerOperations: ProviderOperationRepository;
 	readonly paddle: PaddleBillingRepository;
+	readonly paddleCheckouts: PaddleCheckoutRepository;
 
 	private readonly database: TransactionalQueryExecutor;
 
@@ -237,6 +239,7 @@ export class BillingRepository {
 		this.promotionProviders = new PromotionProviderObjectRepository(database);
 		this.providerOperations = new ProviderOperationRepository(database);
 		this.paddle = new PaddleBillingRepository(database);
+		this.paddleCheckouts = new PaddleCheckoutRepository(database);
 	}
 
 	administrationTarget(projectId: string, action: string, parameters: string[], body: unknown) {

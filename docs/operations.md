@@ -408,6 +408,43 @@ project authentication, `X-Billing-Operator-Key` and `X-Billing-Actor`. The requ
 time and prior status to `review_requests` before recovery. Terminal receipts stay terminal; this
 endpoint never redispatches, forces success/failure or releases an unresolved resource. Keep the
 original credentials and provider evidence available; do not clear rows to make a replacement run.
+Common Paddle preview/execute uses the same ledger. Retry the original token/key while the receipt
+is unresolved, including after preview expiry once execution was claimed. Recovery resolves the
+recorded connection version; an unavailable version fails closed. Completed commercial receipts
+replay without a provider call, and concurrent completions preserve the first result.
+Paddle checkout also owns a durable `paddle_checkout_reservations` row. One open row per
+project/billing account covers common and direct checkout, including the time after transaction
+creation succeeds but before payment. Competing callers receive `409 PADDLE_CHECKOUT_PENDING`;
+the conflict details identify the available original preview/operation. Keep the original key.
+A `failed` checkout receipt stays terminal (`409 PROVIDER_OPERATION_FAILED`), while its reservation
+closes so a corrected request with a new key can proceed. A retry repairs an interrupted local
+reservation cleanup only when the retained operation proves definitive rejection.
+Before reserving a checkout, customer creation checks its retained account-scoped intent: a changed
+email returns `409 IDEMPOTENCY_CONFLICT`, and the same failed intent returns
+`409 PROVIDER_OPERATION_FAILED`. A new checkout key does not reset a terminal customer receipt.
+If local preparation fails after reservation, cleanup closes only a reservation with no bound
+operation, recording `rejected`; binding is required before dispatch. Bound or ambiguous writes
+keep their reservation. A locally rejected owner cannot dispatch again; start a fresh preview or
+checkout key after correcting the local failure.
+
+A signed `transaction.canceled` event is persisted and processed by the existing store-event replay
+worker. Before closing the matching reservation, it fetches the transaction with a matching provider-account
+connection and verifies canceled status, account/customer identity and operation correlation.
+Non-API transactions (including renewals) and transactions without valid Quotum checkout
+correlation are ignored. Correlated but conflicting customer or operation evidence still fails
+with `PADDLE_FULFILLMENT_MISMATCH` and cannot release a reservation.
+Fulfillment closes the reservation in the transaction that grants access. A cancellation of an
+older checkout cannot close a newer reservation. These transitions never rewrite a completed
+commercial receipt. There is no new polling worker or public cancellation command.
+
+Reservations have no time-based expiry. An unavailable connection, ambiguous write or missing
+cancellation delivery keeps the account blocked; restore the recorded connection and replay the
+provider notification through the normal signed ingress/replay pipeline. Do not delete receipts
+or reservations to permit another checkout. `PADDLE_CHECKOUT_CLOSED` means an already-closed owner
+cannot dispatch again; use its retained receipt when one exists. A restored nonfailed legacy
+checkout without a reservation also blocks new keys until its history is reconstructed under the
+[upgrade procedure](upgrade-transitions.md#upgrading-a-populated-deployment-to-v0220).
+
 Existing Stripe workflows retain their own recovery and do not produce these receipts.
 
 ### Hosted payment setup recovery

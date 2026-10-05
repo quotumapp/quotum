@@ -104,7 +104,7 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 				"setup_payment",
 				"none",
 			]),
-			provider: z.literal("stripe"),
+			provider: z.enum(["stripe", "paddle"]),
 			lineItems: z.array(
 				z.object({
 					key: z.string(),

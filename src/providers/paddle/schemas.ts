@@ -2,6 +2,9 @@ import { z } from "zod";
 
 export const paddleId = (prefix: string) =>
 	z.string().regex(new RegExp(`^${prefix}_[a-z0-9]{26}$`));
+export const paddleCorrelationSchema = z.object({
+	quotum: z.object({ operationId: z.uuid(), requestHash: z.string() }),
+});
 const date = z.iso.datetime({ offset: true });
 const money = z.string().regex(/^\d+$/);
 // Subscription changes can create credit lines with negative quantities and totals.
@@ -104,6 +107,18 @@ export const paddleTransactionSchema = z
 	})
 	.passthrough();
 export type PaddleTransaction = z.infer<typeof paddleTransactionSchema>;
+
+// Canceled drafts can lack calculated totals. Their authenticated identity proves cancellation.
+export const paddleTransactionIdentitySchema = paddleTransactionSchema.pick({
+	id: true,
+	origin: true,
+	status: true,
+	customer_id: true,
+	subscription_id: true,
+	collection_mode: true,
+	custom_data: true,
+});
+export type PaddleTransactionIdentity = z.infer<typeof paddleTransactionIdentitySchema>;
 
 export const paddleAdjustmentSchema = z
 	.object({

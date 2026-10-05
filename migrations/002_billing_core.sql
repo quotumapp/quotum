@@ -60,6 +60,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_operations_active_resource
 CREATE INDEX IF NOT EXISTS idx_provider_operations_recovery
 	ON provider_operations (project_id, status, lease_until);
 
+-- A successful create receipt does not mean its checkout is no longer payable.
+CREATE TABLE IF NOT EXISTS paddle_checkout_reservations (
+	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	billing_account_id TEXT NOT NULL CHECK (char_length(billing_account_id) BETWEEN 1 AND 200),
+	owner_kind TEXT NOT NULL CHECK (owner_kind IN ('commercial', 'direct')),
+	idempotency_key TEXT NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 200),
+	preview_token UUID,
+	provider_account_id TEXT NOT NULL,
+	connection_version_id UUID NOT NULL,
+	target JSONB NOT NULL CHECK (jsonb_typeof(target) = 'object'),
+	operation_id UUID REFERENCES provider_operations(id) ON DELETE RESTRICT,
+	closed_at TIMESTAMPTZ,
+	closure_reason TEXT CHECK (closure_reason IN ('rejected', 'canceled', 'fulfilled')),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT paddle_checkout_reservations_owner_check CHECK ((owner_kind = 'commercial') = (preview_token IS NOT NULL)),
+	CONSTRAINT paddle_checkout_reservations_closure_check CHECK ((closed_at IS NULL) = (closure_reason IS NULL)),
+	CONSTRAINT paddle_checkout_reservations_owner_unique UNIQUE (project_id, billing_account_id, owner_kind, idempotency_key)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_paddle_checkout_reservations_open
+	ON paddle_checkout_reservations (project_id, billing_account_id) WHERE closed_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS customers (
 	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
