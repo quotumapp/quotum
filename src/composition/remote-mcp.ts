@@ -24,6 +24,7 @@ import { BillingApiError, BillingClient } from "../sdk/client";
 import { readCappedText } from "../shared/body-limit";
 import { type ElysiaPluginLike, HTTP_APP_CONFIG } from "../shared/http";
 import { hasUnstorableText, urlHasEncodedNul } from "../shared/input-bounds";
+import { hasMediaType } from "../shared/media-type";
 import { prepareBillingChangeSchema } from "./billing-change-actions";
 import { createMcpPortFetch } from "./mcp-port-fetch";
 import { remoteMcpOpenApi } from "./remote-mcp-openapi";
@@ -237,11 +238,7 @@ export function createRemoteMcpApp(options: {
 		app.post(
 			`/oauth/${endpoint}`,
 			async ({ request, server }) => {
-				if (
-					!(request.headers.get("content-type") ?? "").startsWith(
-						"application/x-www-form-urlencoded",
-					)
-				)
+				if (!hasMediaType(request.headers.get("content-type"), "application/x-www-form-urlencoded"))
 					return Response.json({ error: "invalid_request" }, { status: 415 });
 				const body = await readCappedText(
 					request,
