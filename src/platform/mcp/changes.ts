@@ -383,6 +383,16 @@ export class McpChanges {
 							? "needs_review"
 							: "failed";
 			await this.store.sql.begin(async (tx) => {
+				// The audit event needs the organization row. Updating the change first would hold
+				// it while waiting for a concurrent approval that locked the organization and waits
+				// for the change.
+				await this.lockProposal(tx, {
+					sessionId: identity.sessionId,
+					principalId: identity.principalId,
+					organizationSlug: saved.scope.organizationSlug,
+					authorizationId: saved.authorization_id,
+					changeId: id,
+				});
 				await tx`UPDATE platform_mcp_changes SET status=${status},result=${JSON.stringify(result)}::jsonb,applied_at=now() WHERE id=${id}`;
 				await this.store.audit(
 					tx,
