@@ -371,11 +371,11 @@ Stripe (network, rate limit, missing connection or configuration) is the kind a 
 Find parked jobs with:
 
 ```sql
-SELECT 'subscription-change' AS kind, id, attempts, last_error, updated_at
+SELECT 'subscription-change' AS kind, id::text AS id, attempts, last_error, updated_at
 FROM subscription_changes WHERE status = 'failed'
-UNION ALL SELECT 'usage-invoice-period', id, attempts, last_error, updated_at
+UNION ALL SELECT 'usage-invoice-period', id::text, attempts, last_error, updated_at
 FROM usage_invoice_periods WHERE status = 'failed'
-UNION ALL SELECT 'usage-invoice-adjustment', id, attempts, last_error, updated_at
+UNION ALL SELECT 'usage-invoice-adjustment', id::text, attempts, last_error, updated_at
 FROM usage_invoice_adjustments WHERE status = 'failed';
 ```
 

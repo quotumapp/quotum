@@ -313,7 +313,8 @@ years. Controls counted in the same window compete however their cadence is spel
 (account, contract and plan default): they are two scopes, and the entity's usage counts in both
 windows. A stricter entity limit therefore narrows that entity without letting its usage past the
 account-wide limit, and a looser one never raises it; a request is refused when either window is
-full, and the refusal names the control (`entity` or `account`) that stopped it. Holds count in both
+full, and the refusal's `control.source` names the one that stopped it (`entity`, or `account`,
+`contract` or `plan_default` for the account's). Holds count in both
 windows, and a correction lowers both. Windows already open when this rule shipped (v0.22.2) hold
 only the usage counted under the old rule: an account window can miss the earlier usage of an entity
 whose own limit was tighter until it rolls (a lifetime window never recovers), and new usage counts
