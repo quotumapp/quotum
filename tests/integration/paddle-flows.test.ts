@@ -840,7 +840,7 @@ localDescribe("Paddle fixed subscription persistence", () => {
 					email: `${h.billingAccountId}@example.com`,
 					idempotencyKey: "another",
 				}),
-			).rejects.toMatchObject({ code: "PADDLE_FULFILLMENT_MISMATCH" });
+			).rejects.toMatchObject({ code: "BILLING_PRODUCT_NOT_FOUND", status: 404 });
 		} finally {
 			await retireCatalog("mapping", true);
 		}
@@ -1164,6 +1164,173 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			).status,
 		).toBe(200);
 		expect(h.writes).toBe(1);
+	});
+
+	it("replays a succeeded direct checkout after a replacement mapping took the retired one's place", async () => {
+		// Both physical row orders: an unordered lookup used to compare the first row it met.
+		for (const [replacementFirst, replacementPriceId] of [
+			[true, unique("pri")],
+			[false, unique("pri")],
+		] as const) {
+			const h = harness();
+			const original = await h.create();
+			const insertReplacement = async () => {
+				await context.sql`INSERT INTO store_products(project_id,product_id,provider,channel,external_product_id,external_price_id,billing_period,currency,price_amount,active)
+					SELECT ${project.projectInstanceId},product_id,'paddle','web',external_product_id,${replacementPriceId},'month','USD',1500,true
+					FROM store_products WHERE project_id=${project.projectInstanceId} AND provider='paddle' AND external_price_id=${price.id}`;
+			};
+			try {
+				if (replacementFirst) {
+					await insertReplacement();
+					await retireCatalog("mapping", false);
+				} else {
+					await retireCatalog("mapping", false);
+					await insertReplacement();
+				}
+				for (let repeat = 0; repeat < 3; repeat += 1) {
+					expect(await h.create()).toEqual({ ...original, duplicate: true });
+				}
+				expect(h.writes).toBe(1);
+			} finally {
+				await context.sql`DELETE FROM store_products WHERE project_id=${project.projectInstanceId} AND provider='paddle' AND external_price_id=${replacementPriceId}`;
+				await retireCatalog("mapping", true);
+			}
+		}
+	});
+
+	it("answers an unknown or retired product with 404 BILLING_PRODUCT_NOT_FOUND", async () => {
+		const h = harness();
+		const email = `${h.billingAccountId}@example.com`;
+		await expect(
+			h.service.createCheckoutSession({
+				billingAccountId: h.billingAccountId,
+				productKey: "no_such_product",
+				email,
+				idempotencyKey: "unknown-product",
+			}),
+		).rejects.toMatchObject({ code: "BILLING_PRODUCT_NOT_FOUND", status: 404 });
+		await expect(
+			commercial(h, { kind: "checkout_product", productKey: "no_such_product", email }).preview(),
+		).rejects.toMatchObject({ code: "BILLING_PRODUCT_NOT_FOUND", status: 404 });
+		expect([h.writes, h.customerWrites]).toEqual([0, 0]);
+	});
+
+	it("validates the checkout Idempotency-Key like the Stripe route does", async () => {
+		const h = harness();
+		const app = withOpenApiAssertions(
+			createApp({
+				env: context.env,
+				projectContextResolver: context.projectContextResolver,
+				projectProviderServices: {
+					[project.projectInstanceKey]: { paddleBillingService: h.service },
+				},
+				providerOperationStore: context.repository.providerOperations,
+			}),
+		);
+		const send = (key: string) =>
+			testRequest(
+				app,
+				`/v1/billing-accounts/${h.billingAccountId}/providers/paddle/checkout-sessions`,
+				{
+					method: "POST",
+					headers: {
+						authorization: `Bearer ${integrationProjectCredential(project.projectInstanceKey)}`,
+						"idempotency-key": key,
+					},
+					body: JSON.stringify({
+						productKey: "paddle_test",
+						email: `${h.billingAccountId}@example.com`,
+					}),
+				},
+			);
+		for (const key of ["k".repeat(201), "two words", "slash/key", "k".repeat(1000)]) {
+			const response = await send(key);
+			expect(response.status, key.slice(0, 20)).toBe(400);
+			expect((await response.json()).error.code).toBe("INVALID_IDEMPOTENCY_KEY");
+		}
+		expect([h.writes, h.customerWrites]).toEqual([0, 0]);
+		expect((await send("k".repeat(200))).status).toBe(200);
+		expect(h.writes).toBe(1);
+	});
+
+	it("answers a signed but malformed webhook body 400 and queues nothing", async () => {
+		const h = harness();
+		const app = withOpenApiAssertions(
+			createApp({
+				env: context.env,
+				projectContextResolver: context.projectContextResolver,
+				projectProviderServices: {
+					[project.projectInstanceKey]: { paddleBillingService: h.service },
+				},
+				providerOperationStore: context.repository.providerOperations,
+			}),
+		);
+		const webhook = `/v1/projects/${project.projectInstanceKey}/webhooks/paddle`;
+		const send = (raw: string) => {
+			const ts = Math.floor(Date.now() / 1000);
+			const signature = `ts=${ts};h1=${createHmac("sha256", config.webhookSecret).update(`${ts}:${raw}`).digest("hex")}`;
+			return testRequest(app, webhook, {
+				method: "POST",
+				headers: { "paddle-signature": signature },
+				body: raw,
+			});
+		};
+		const queued = async () =>
+			Number(
+				(
+					await context.sql<
+						{ n: number }[]
+					>`SELECT count(*)::int AS n FROM store_events WHERE project_id=${project.projectInstanceId} AND provider='paddle'`
+				)[0]?.n,
+			);
+		const event = {
+			event_id: unique("evt"),
+			event_type: "subscription.updated",
+			occurred_at: new Date().toISOString(),
+			data: {},
+		};
+		const before = await queued();
+		for (const raw of [
+			"{",
+			"{}",
+			"[]",
+			"null",
+			JSON.stringify({ ...event, event_id: "evt_short" }),
+			JSON.stringify({ ...event, occurred_at: "yesterday" }),
+			JSON.stringify({ ...event, data: [] }),
+			JSON.stringify({ ...event, event_type: "x".repeat(100_000) }),
+			JSON.stringify({ ...event, event_type: "subscription.updated\u0000" }),
+			JSON.stringify({ ...event, data: { note: "a\u0000b" } }),
+		]) {
+			const response = await send(raw);
+			expect(response.status, raw.slice(0, 40)).toBe(400);
+			expect((await response.json()).error.code).toBe("INVALID_REQUEST");
+		}
+		expect(await queued()).toBe(before);
+		expect((await send(JSON.stringify(event))).status).toBe(200);
+		expect(await queued()).toBe(before + 1);
+	});
+
+	it("ignores subscription and one-off events Quotum did not create instead of retrying them", async () => {
+		const h = harness();
+		h.current = { ...h.current, custom_data: { existing: "preserved" } };
+		expect(await h.deliver(h.rawEvent("subscription.created"))).toEqual({
+			status: "ignored",
+			reason: "Paddle subscription is not a Quotum checkout",
+		});
+		h.remote = { ...h.remote, subscription_id: null, custom_data: null };
+		expect(await h.deliver(h.rawEvent("transaction.completed"))).toEqual({
+			status: "ignored",
+			reason: "Paddle transaction is not a Quotum checkout",
+		});
+		// A Quotum checkout whose subscription is not visible yet stays retryable.
+		h.remote = {
+			...h.remote,
+			custom_data: { quotum: { operationId: crypto.randomUUID(), requestHash: "a".repeat(64) } },
+		};
+		await expect(h.deliver(h.rawEvent("transaction.completed"))).rejects.toThrow(
+			"Paddle transaction is not a completed subscription purchase",
+		);
 	});
 
 	it("reserves one checkout across competing previews and direct calls without claiming the loser", async () => {
@@ -1611,6 +1778,7 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		h.coolDown(45_000);
 		const limited = await send();
 		expect(limited.status).toBe(503);
+		expect(limited.headers.get("retry-after")).toBe("45");
 		expect((await limited.json()).error).toMatchObject({
 			code: "BILLING_PROVIDER_UNAVAILABLE",
 			details: { retryAfterSeconds: 45 },
@@ -1619,6 +1787,8 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		h.makePriceUnavailable();
 		const down = await send();
 		expect(down.status).toBe(503);
+		// An outage names no wait, so there is nothing to put in a header.
+		expect(down.headers.get("retry-after")).toBeNull();
 		expect((await down.json()).error.code).toBe("BILLING_PROVIDER_UNAVAILABLE");
 	});
 

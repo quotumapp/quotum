@@ -77,6 +77,14 @@ do not grant access. Merchant billing API dispatch uses the same routing and val
 UI provider selection is a separate increment. The SDK accepts
 `client.commercial.preview(accountId, intent, "paddle")`; execution is unchanged.
 
+The direct route `POST /v1/billing-accounts/:billingAccountId/providers/paddle/checkout-sessions`
+validates its `Idempotency-Key` like Stripe's: 1 to 200 letters, digits and `._:-`, otherwise
+`400 INVALID_IDEMPOTENCY_KEY` before anything is reserved or sent. A product key that is unknown,
+inactive or has no active web mapping answers `404 BILLING_PRODUCT_NOT_FOUND` on both routes;
+`PADDLE_FULFILLMENT_MISMATCH` stays for server events that disagree with the recorded checkout. A
+completed receipt replays against the price it recorded, so a replacement mapping the product gained
+since cannot turn the replay into a conflict.
+
 ## Allowances across a plan change
 
 When a subscription moves to another plan version, the quantity the outgoing version granted ends

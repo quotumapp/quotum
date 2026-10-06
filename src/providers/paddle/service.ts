@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { sha256Hex, stableJson } from "../../billing/decimal";
 import { BillingError } from "../../billing/errors";
+import { parseIdempotencyKey } from "../../billing/idempotency-key";
 import {
 	executeProviderOperation,
 	type ProviderOperation,
@@ -34,7 +35,7 @@ import {
 	paddleEventSchema,
 	paddleId,
 } from "./schemas";
-import { verifyPaddleSignature } from "./webhook";
+import { parsePaddleEvent, verifyPaddleSignature } from "./webhook";
 
 const customerSchema = z.object({
 	id: paddleId("ctm"),
@@ -74,13 +75,11 @@ export class PaddleBillingService implements WebBillingService {
 				400,
 			);
 		}
-		const replayed = await this.replaySucceededCheckout({
-			...input,
-			idempotencyKey: input.idempotencyKey,
-		});
+		const idempotencyKey = parseIdempotencyKey(input.idempotencyKey);
+		const replayed = await this.replaySucceededCheckout({ ...input, idempotencyKey });
 		if (replayed) return replayed;
 		const binding = await this.repository.getPaddleBinding(input.productKey);
-		return this.createFixedCheckout({ ...input, idempotencyKey: input.idempotencyKey }, binding);
+		return this.createFixedCheckout({ ...input, idempotencyKey }, binding);
 	}
 
 	/**
@@ -100,8 +99,16 @@ export class PaddleBillingService implements WebBillingService {
 		if (!existingId) return null;
 		const existing = await this.operations.get(this.project, input.billingAccountId, existingId);
 		if (existing.status !== "succeeded") return null;
-		const binding = await this.repository.findPaddleBindingIncludingRetired(input.productKey);
 		const request = existing.request as { bindings?: unknown; plan?: unknown };
+		// The recorded price decides which mapping is compared: a replacement mapping the product
+		// gained since must not stand in for the retired one the checkout was created against.
+		const recordedPriceId = Array.isArray(request.bindings)
+			? (request.bindings[0] as { priceId?: unknown } | undefined)?.priceId
+			: undefined;
+		const binding =
+			typeof recordedPriceId === "string"
+				? await this.repository.findPaddleBindingIncludingRetired(input.productKey, recordedPriceId)
+				: null;
 		if (
 			!binding ||
 			stableJson(request.bindings) !== stableJson([binding]) ||
@@ -399,7 +406,7 @@ export class PaddleBillingService implements WebBillingService {
 			signature: input.signatureHeader,
 			secret: this.config.webhookSecret,
 		});
-		const event = paddleEventSchema.parse(JSON.parse(input.rawBody));
+		const event = parsePaddleEvent(input.rawBody);
 		await this.repository.enqueueProviderStoreEvent({
 			provider: "paddle",
 			channel: "web",
@@ -450,6 +457,12 @@ export class PaddleBillingService implements WebBillingService {
 		let subscriptionId: string;
 		if (event.event_type === "transaction.completed") {
 			transaction = await this.gateway.transaction(paddleId("txn").parse(event.data.id));
+			// A one-off purchase this account made for something else is not Quotum's to fulfill.
+			if (
+				!transaction.subscription_id &&
+				!paddleCorrelationSchema.safeParse(transaction.custom_data).success
+			)
+				return { status: "ignored", reason: "Paddle transaction is not a Quotum checkout" };
 			if (transaction.status !== "completed" || !transaction.subscription_id)
 				throw new Error("Paddle transaction is not a completed subscription purchase");
 			subscriptionId = transaction.subscription_id;
@@ -462,6 +475,9 @@ export class PaddleBillingService implements WebBillingService {
 			};
 		// Always observe current authenticated state; delayed deliveries cannot restore old access.
 		const subscription = await this.gateway.subscription(subscriptionId);
+		// A subscription without Quotum's correlation was created elsewhere and can never match one.
+		if (!paddleCorrelationSchema.safeParse(subscription.custom_data).success)
+			return { status: "ignored", reason: "Paddle subscription is not a Quotum checkout" };
 		const normalized = normalizePaddleEvent({
 			...event,
 			event_type: "subscription.updated",

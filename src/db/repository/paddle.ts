@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { sha256Hex, stableJson } from "../../billing/decimal";
-import { BillingError } from "../../billing/errors";
+import { BillingError, NotFoundBillingError } from "../../billing/errors";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { type PaddlePriceBinding, paddlePriceBindingSchema } from "../../providers/paddle/catalog";
 import {
@@ -213,7 +213,7 @@ export class PaddleBillingRepository extends RepositoryModule {
 			WHERE sp.project_id = ${project.projectInstanceId} AND sp.provider = 'paddle' AND sp.channel = 'web' AND sp.active = true AND p.active = true AND p.key = ${productKey} AND p.type = 'subscription'
 		`,
 		);
-		if (!row) mismatch();
+		if (!row) throw productNotFound(productKey);
 		return {
 			productKey,
 			name: row.name,
@@ -241,17 +241,22 @@ export class PaddleBillingRepository extends RepositoryModule {
 	}
 	async binding(project: ProjectInstanceContext, productKey: string) {
 		const binding = await this.bindingRow(project, productKey, false);
-		if (!binding) mismatch();
+		if (!binding) throw productNotFound(productKey);
 		return binding;
 	}
-	/** The product's price binding even after its mapping or product was retired; null when none exists. */
-	bindingIncludingRetired(project: ProjectInstanceContext, productKey: string) {
-		return this.bindingRow(project, productKey, true);
+	/**
+	 * The product's price binding even after its mapping or product was retired; null when none
+	 * exists. With `priceId` it is the binding of that provider price, so a replacement mapping that
+	 * the product gained since cannot stand in for the one a checkout recorded.
+	 */
+	bindingIncludingRetired(project: ProjectInstanceContext, productKey: string, priceId?: string) {
+		return this.bindingRow(project, productKey, true, priceId);
 	}
 	private async bindingRow(
 		project: ProjectInstanceContext,
 		productKey: string,
 		includeRetired: boolean,
+		priceId?: string,
 	) {
 		const row = await executeOne<{
 			external_product_id: string;
@@ -267,7 +272,10 @@ export class PaddleBillingRepository extends RepositoryModule {
 			FROM store_products sp JOIN products p ON p.id = sp.product_id AND p.project_id = sp.project_id
 			WHERE sp.project_id = ${project.projectInstanceId} AND sp.provider = 'paddle' AND sp.channel = 'web'
 			${includeRetired ? sql`` : sql`AND sp.active = true AND p.active = true`}
+			${priceId === undefined ? sql`` : sql`AND sp.external_price_id = ${priceId}`}
 			AND p.type = 'subscription' AND p.key = ${productKey}
+			ORDER BY sp.active DESC, sp.created_at ASC, sp.id ASC
+			LIMIT 1
 		`,
 		);
 		if (!row) return null;
@@ -615,6 +623,13 @@ function assertFixedSubscription(sub: PaddleSubscription, bindings: PaddlePriceB
 		item.price.trial_period !== null
 	)
 		mismatch();
+}
+/** A product key that is unknown, inactive or has no active web mapping cannot be checked out. */
+function productNotFound(productKey: string): NotFoundBillingError {
+	return new NotFoundBillingError(
+		`Active Paddle web product ${productKey} was not found`,
+		"BILLING_PRODUCT_NOT_FOUND",
+	);
 }
 function mismatch(): never {
 	throw new BillingError(

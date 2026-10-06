@@ -454,8 +454,9 @@ blocks new keys.
 While the process-wide Paddle rate-limit cooldown is active (set by any 429, including another
 project's, because all projects share one egress IP), a checkout is refused before it reserves or
 prepares anything, and so is a price read: `503 BILLING_PROVIDER_UNAVAILABLE` with
-`details.retryAfterSeconds`. No receipt records that refusal, so the same Idempotency-Key is retried
-unchanged once the interval has passed. A price read that Paddle cannot answer (`5xx`, timeout) is
+`details.retryAfterSeconds`, repeated in a `Retry-After` header (also through the console proxy).
+No receipt records that refusal, so the same Idempotency-Key is retried unchanged once the
+interval has passed. A price read that Paddle cannot answer (`5xx`, timeout) is
 reported the same way instead of as `500 INTERNAL_ERROR`. A cooldown that begins in the few
 milliseconds between that check and the write itself still refuses the write locally, and that
 refusal is a failed receipt like any other definitive rejection: retry with a new key.
@@ -463,6 +464,11 @@ If local preparation fails after reservation, cleanup closes only a reservation 
 operation, recording `rejected`; binding is required before dispatch. Bound or ambiguous writes
 keep their reservation. A locally rejected owner cannot dispatch again; start a fresh preview or
 checkout key after correcting the local failure.
+
+A signed body that is not a Paddle event (not JSON, a missing envelope field, an event type over
+200 characters, or a NUL character) answers `400 INVALID_REQUEST` and queues nothing. Subscription
+events and completed one-off transactions that carry no Quotum correlation, such as another product
+on the same Paddle account, are ignored rather than retried.
 
 A signed `transaction.canceled` event is persisted and processed by the existing store-event replay
 worker. Before closing the matching reservation, it fetches the transaction with a matching provider-account
