@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { EntitlementService } from "../billing/entitlements";
 import { BillingError, isBillingError } from "../billing/errors";
+import { requireIdempotencyKey } from "../billing/idempotency-key";
 import { projectScopedRateLimitGuard } from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
@@ -351,10 +352,7 @@ export function registerCustomerRoutes({
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/commercial-actions",
 		async ({ params, body, request, set, project }) => {
-			const idempotencyKey = request.headers.get("idempotency-key")?.trim();
-			if (idempotencyKey === undefined || idempotencyKey === "" || idempotencyKey.length > 200) {
-				throw new BillingError("Invalid commercial action execution", "INVALID_REQUEST", 400);
-			}
+			const idempotencyKey = requireIdempotencyKey(request.headers.get("idempotency-key"));
 			const result = await executeCommercial({
 				project: privateProject(project),
 				services: providerServices,
@@ -585,14 +583,7 @@ export function registerCustomerRoutes({
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/subscriptions/:subscriptionId/changes",
 		async ({ params, body, request, set, project }) => {
-			const idempotencyKey = request.headers.get("idempotency-key")?.trim();
-			if (idempotencyKey === undefined || idempotencyKey === "" || idempotencyKey.length > 200) {
-				throw new BillingError(
-					"Invalid Stripe subscription change request",
-					"INVALID_REQUEST",
-					400,
-				);
-			}
+			const idempotencyKey = requireIdempotencyKey(request.headers.get("idempotency-key"));
 			const requestSubscriptionChange = requireProviderMethod(
 				requireStripeBillingService(
 					await providerServices.stripeBillingService(privateProject(project)),

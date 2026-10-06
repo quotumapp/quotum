@@ -50,10 +50,13 @@ URL, and a NUL or unpaired surrogate in any JSON body key or string at any depth
 form. An MCP tool argument that makes a path or query value unstorable returns that `400` as the
 tool's error.
 
-Where a `/v1` operation requires an `Idempotency-Key`, the key holds 1 to 200 characters after
-surrounding whitespace is trimmed; usage operations additionally reject surrounding whitespace
-instead of changing the caller's identity. Invalid keys answer `400 INVALID_REQUEST`. The contract lists
-every query parameter an operation reads, including the admin list filters.
+Where a `/v1` operation requires an `Idempotency-Key`, the key holds 1 to 200 characters and is
+taken exactly as sent. A key with surrounding whitespace is refused on every operation, never
+trimmed: the trimmed key would be another caller identity. Invalid keys answer
+`400 INVALID_REQUEST`. The Stripe and Paddle checkout routes narrow the key to letters, digits and
+`._:-` and answer `400 INVALID_IDEMPOTENCY_KEY`
+(see [subscriptions](subscriptions.md#paddle-fixed-plan-checkout)). The contract lists every query
+parameter an operation reads, including the admin list filters.
 
 A `/v1` path that exists answers another method with `405 METHOD_NOT_ALLOWED` and an `Allow`
 header listing the methods it accepts (`HEAD` wherever `GET` is); a path that does not exist answers

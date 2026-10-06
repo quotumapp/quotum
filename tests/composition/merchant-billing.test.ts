@@ -132,6 +132,34 @@ describe("merchant billing port", () => {
 			body: { error: { code: "IDEMPOTENCY_CONFLICT" } },
 		});
 	});
+	it("refuses a missing or padded idempotency key as /v1 does, without trimming it", async () => {
+		const stored = storedCommercialPreview("paddle");
+		const billing = port({
+			stripe: null,
+			paddle: null,
+			repository: { getCommercialActionPreview: async () => stored },
+		});
+		for (const idempotencyKey of [null, "", "\u00a0purchase", "purchase\u000b", "k".repeat(201)]) {
+			expect(
+				await billing.dispatch(
+					command("commercial.execute", {
+						body: { previewToken: stored.preview.previewToken },
+						idempotencyKey,
+					}),
+				),
+			).toMatchObject({
+				status: 400,
+				body: {
+					error: {
+						code: "INVALID_REQUEST",
+						message:
+							"Idempotency-Key header must contain between 1 and 200 characters with no surrounding whitespace",
+					},
+				},
+			});
+		}
+	});
+
 	it("preserves and strictly validates the entity scope of an operation lookup", async () => {
 		const calls: unknown[] = [];
 		const outcome = {

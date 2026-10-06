@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { InvalidRequestError } from "../billing/errors";
+import { requireIdempotencyKey } from "../billing/idempotency-key";
 import { type TrialServiceLike, trialDurationMaxDays } from "../billing/plan-grants";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { decimalDigitsQuery } from "../shared/input-bounds";
 import * as responses from "./contracts/trial-responses";
-import { requirePromotionIdempotencyKey } from "./promotion-routes";
 import { privateProject, rejectCallerProjectSelectorBody } from "./request-context";
 import type { BillingElysia } from "./types";
 
@@ -58,7 +58,7 @@ export function registerTrialRoutes({ app, service }: TrialRoutesDependencies): 
 				planKey: body.planKey,
 				durationDays: body.durationDays ?? null,
 				metadata: body.metadata ?? {},
-				idempotencyKey: requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+				idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
 				actor: optionalActor(request.headers),
 			});
 			set.status = result.duplicate ? 200 : 201;
@@ -137,7 +137,7 @@ export function registerTrialRoutes({ app, service }: TrialRoutesDependencies): 
 				billingAccountId: params.billingAccountId,
 				trialId: params.trialId,
 				reason: body?.reason ?? null,
-				idempotencyKey: requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+				idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
 				actor: optionalActor(request.headers),
 			}),
 		}),

@@ -4,11 +4,11 @@ import {
 	administrativeDebitMaxAllocations,
 	type BalanceAdjustmentServiceLike,
 } from "../billing/balance-adjustments";
+import { requireIdempotencyKey } from "../billing/idempotency-key";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { decimalDigitsQuery, isBigintId, storableDateTimeSchema } from "../shared/input-bounds";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/balance-adjustment-responses";
-import { requirePromotionIdempotencyKey } from "./promotion-routes";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
 import type { BillingElysia, PostAuthGuard } from "./types";
 
@@ -91,7 +91,7 @@ export function registerBalanceAdjustmentRoutes({
 					body.expiresAt === undefined || body.expiresAt === null ? null : new Date(body.expiresAt),
 				reason: body.reason,
 				actor: requireActor(request.headers),
-				idempotencyKey: requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+				idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
 			});
 			set.status = result.duplicate ? 200 : 201;
 			return { success: true, data: result };
@@ -169,7 +169,7 @@ export function registerBalanceAdjustmentRoutes({
 				grantId: params.grantId,
 				reason: body.reason,
 				actor: requireActor(request.headers),
-				idempotencyKey: requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+				idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
 			}),
 		}),
 		{
@@ -196,7 +196,7 @@ export function registerBalanceAdjustmentRoutes({
 				allocations: body.allocations,
 				reason: body.reason,
 				actor: requireActor(request.headers),
-				idempotencyKey: requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+				idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
 			});
 			set.status = result.duplicate ? 200 : 201;
 			return { success: true, data: result };
