@@ -39,6 +39,15 @@ seconds, also repeated as `error.retryAfter`. Responses are sent with `Cache-Con
 `X-Content-Type-Options: nosniff`: billing state is private to the caller and changes with every
 write.
 
+A `/v1` request that fails its schema answers `400 INVALID_REQUEST` and names what was refused:
+the message carries the first issue, such as
+`Request validation failed: body.plans.1.tierRank: Invalid input: expected number, received string (2 more)`,
+and `error.details.issues` lists up to ten as `{ path, message }`. A path starts with the part of
+the request (`body`, `query`, `params`) and an issue on the whole part, such as an unrecognized key,
+is named by the part alone. The input itself is never repeated, and each text is cut at 200
+characters. Malformed JSON keeps the plain `Request validation failed`. Merchant billing operations
+name the first issue the same way after `Invalid billing operation input`.
+
 `/v1` refuses, with `400 INVALID_REQUEST`, input the database could not store: a body nested more
 than 64 levels deep; a NUL character or an unpaired surrogate in any body key or string, path
 segment or query value; a numeric id beyond the signed 64-bit range; a date-time outside years 1 to
