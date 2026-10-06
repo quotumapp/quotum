@@ -339,6 +339,11 @@ class EmptyCatalogDatabase {
 	}
 
 	private answer(text: string): Record<string, unknown>[] {
+		if (text.includes("FROM projects WHERE id") && text.includes("FOR UPDATE")) {
+			return [{ id: projectInstanceContext().projectInstanceId }];
+		}
+		if (text.includes("SELECT key, kind, meter_kind")) return [];
+		if (text.includes("FROM plan_versions version")) return [];
 		if (text.includes("SELECT p.id, cr.id AS revision_id")) {
 			return [
 				{ id: projectInstanceContext().projectInstanceId, revision_id: null, revision: null },
@@ -398,6 +403,84 @@ function summarized(entries: CatalogProviderCompatibility[]) {
 }
 
 type SummarizedEntry = ReturnType<typeof summarized>[number];
+
+describe("catalog control plane integer and price key bounds", () => {
+	const price = (key: string, overrides: Partial<CatalogPriceIntent> = {}): CatalogPriceIntent => ({
+		key,
+		currency: "USD",
+		unitAmountMinor: 1000,
+		billingUnits: "1",
+		billingInterval: "month",
+		minimumQuantity: 1,
+		maximumQuantity: null,
+		taxBehavior: "exclusive",
+		pricingModel: "flat",
+		tiers: [],
+		providerBindings: [stripeBinding],
+		...overrides,
+	});
+	const tooLarge = 2 ** 31;
+
+	it("refuses an integer that no Postgres column holds before touching the database", async () => {
+		const cases: Array<[Partial<CatalogPlanIntent>, string]> = [
+			[{ version: tooLarge }, `Plan pro version cannot exceed ${2 ** 31 - 1}`],
+			[
+				{ tierRank: tooLarge },
+				`Plan pro tierRank must be a whole number from ${-(2 ** 31)} to ${2 ** 31 - 1}`,
+			],
+			[
+				{ tierRank: -tooLarge - 1 },
+				`Plan pro tierRank must be a whole number from ${-(2 ** 31)} to ${2 ** 31 - 1}`,
+			],
+			[
+				{ basePrice: price("pro", { minimumQuantity: tooLarge }) },
+				`base price quantities cannot exceed ${2 ** 31 - 1}`,
+			],
+			[
+				{ basePrice: price("pro", { maximumQuantity: tooLarge }) },
+				`base price quantities cannot exceed ${2 ** 31 - 1}`,
+			],
+		];
+		for (const [overrides, message] of cases) {
+			const refused = await previewError({
+				plans: [plan({ providerBindings: [stripeBinding], ...overrides })],
+			});
+			expect((refused as InvalidRequestError).message).toBe(message);
+		}
+	});
+
+	it("names a price key a plan uses twice", async () => {
+		const seats: CatalogFeatureIntent = {
+			...feature,
+			key: "seats",
+			meterKind: "non_consumable",
+		};
+		const refused = await previewError({
+			features: [feature, seats],
+			plans: [
+				plan({
+					basePrice: price("pro"),
+					providerBindings: [stripeBinding],
+					items: [
+						{
+							featureKey: "seats",
+							itemKind: "licensed_quantity",
+							quantity: "5",
+							resetInterval: null,
+							expiresAfterSeconds: null,
+							overagePolicy: "blocked",
+							allocationScope: "license_pool",
+							price: price("pro", { providerBindings: [appleBinding] }),
+						},
+					],
+				}),
+			],
+		});
+		expect((refused as InvalidRequestError).message).toBe(
+			"Plan pro uses price key pro more than once",
+		);
+	});
+});
 
 describe("catalog control plane preview binding cadence", () => {
 	it("refuses a plan whose binding sells another cadence than the plan bills", async () => {
@@ -543,6 +626,22 @@ class StoredCatalogDatabase {
 	}
 
 	private answer(text: string): Record<string, unknown>[] {
+		if (text.includes("FROM projects WHERE id") && text.includes("FOR UPDATE")) {
+			return [{ id: projectInstanceContext().projectInstanceId }];
+		}
+		if (text.includes("SELECT key, kind, meter_kind")) {
+			return this.stored.features.map((feature) => ({
+				key: feature.key,
+				kind: feature.kind,
+				meter_kind: feature.meterKind,
+				unit: feature.unit,
+				credit_scale: feature.creditScale,
+				filter_dimensions: feature.filterDimensions,
+			}));
+		}
+		if (text.includes("FROM plan_versions version")) {
+			return this.stored.plans.map(({ key, version }) => ({ key, version }));
+		}
 		if (text.includes("SELECT p.id, cr.id AS revision_id")) {
 			return [{ id: projectInstanceContext().projectInstanceId, revision_id: "7", revision: 1 }];
 		}

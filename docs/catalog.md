@@ -8,6 +8,14 @@ and operator authentication plus `X-Billing-Actor`. Provider bindings adopt pre-
 products and must all be ready before the active pointer advances. Previously active features,
 plans, and top-ups must be retained or listed explicitly for retirement; omission is not deletion.
 Retiring a plan removes it from new selection without rewriting pinned subscriptions.
+Preview refuses what publish would refuse against the database, so a revision it accepts is one
+publish can write: a plan version number that already exists (`409 PLAN_VERSION_CONFLICT`), a
+feature whose unit, kind, scale or filter dimensions changed (`409 FEATURE_IDENTITY_CONFLICT`), a
+custom plan for an unknown billing account, and a provider binding that is not ready. A plan
+`version` and `tierRank` and a price's `minimumQuantity` and `maximumQuantity` are Postgres
+integers (at most 2,147,483,647), and a plan uses each price `key` once. Publishes are serialized
+per project: of concurrent publishes over the same `expectedRevision` one wins, and the others
+answer `409 CATALOG_REVISION_CONFLICT` naming the revision that now exists.
 `GET /v1/admin/catalog` returns the active intent and needs project authentication only. It
 returns the [canonical intent](#canonical-intent), with every default spelled out and `tiers: []`
 on a flat price or rate card, and the hash of that canonical intent. Preview accepts that output

@@ -868,6 +868,22 @@ class PublishedCatalogDatabase {
 	private async answer(text: string): Promise<Record<string, unknown>[]> {
 		this.readingStoredIntent =
 			text.includes("SELECT revision.intent_hash") || text.includes("SELECT draft.intent");
+		if (text.includes("FROM projects WHERE id") && text.includes("FOR UPDATE")) {
+			return [{ id: projectInstanceContext().projectInstanceId }];
+		}
+		if (text.includes("SELECT key, kind, meter_kind")) {
+			return this.published.features.map((feature) => ({
+				key: feature.key,
+				kind: feature.kind,
+				meter_kind: feature.meterKind,
+				unit: feature.unit,
+				credit_scale: feature.creditScale,
+				filter_dimensions: feature.filterDimensions,
+			}));
+		}
+		if (text.includes("FROM plan_versions version")) {
+			return this.published.plans.map(({ key, version }) => ({ key, version }));
+		}
 		if (text.includes("SELECT p.id, cr.id AS revision_id")) {
 			return [{ id: projectInstanceContext().projectInstanceId, revision_id: "7", revision: 1 }];
 		}
@@ -1008,6 +1024,9 @@ class PublishDraftDatabase {
 		if (/^\s*(INSERT|UPDATE|DELETE)\b/i.test(text)) {
 			this.writes.push(text);
 			return [];
+		}
+		if (text.includes("FROM projects WHERE id") && text.includes("FOR UPDATE")) {
+			return [{ id: projectInstanceContext().projectInstanceId }];
 		}
 		if (text.includes("SELECT p.id, cr.id AS revision_id")) {
 			return [{ id: projectInstanceContext().projectInstanceId, revision_id: "7", revision: 1 }];
