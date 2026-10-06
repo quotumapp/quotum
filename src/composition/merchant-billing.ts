@@ -47,6 +47,7 @@ import {
 	InvalidRequestError,
 	isBillingError,
 } from "../billing/errors";
+import { requireIdempotencyKey } from "../billing/idempotency-key";
 import { encodeUsageCursor } from "../billing/insights";
 import { MeteringService } from "../billing/metering";
 import { providerOperationReceipt } from "../billing/provider-operations";
@@ -573,7 +574,5 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 	return result.data;
 }
 function requireKey(command: MerchantBillingCommand): string {
-	const key = command.idempotencyKey?.trim();
-	if (!key || key.length > 200) throw new InvalidRequestError("Invalid idempotency key");
-	return key;
+	return requireIdempotencyKey(command.idempotencyKey);
 }

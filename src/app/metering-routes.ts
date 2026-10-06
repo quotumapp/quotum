@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { InvalidRequestError } from "../billing/errors";
+import { requireIdempotencyKey } from "../billing/idempotency-key";
 import type { MeteringServiceLike } from "../billing/metering";
 import { publicOperationLookup, type UsageApiServiceLike } from "../billing/usage-api";
 import { usageOperationKinds } from "../billing/usage-operations";
@@ -375,16 +375,6 @@ export function usageInput(body: z.infer<typeof usageBodySchema>) {
 
 function dateOrNull(value: string | null): Date | null {
 	return value === null ? null : new Date(value);
-}
-
-function requireIdempotencyKey(value: string | null): string {
-	const key = value?.trim();
-	if (key === undefined || key === "" || key.length > 200 || key !== value) {
-		throw new InvalidRequestError(
-			"Idempotency-Key header must contain between 1 and 200 characters",
-		);
-	}
-	return key;
 }
 
 export function publicUsageInput(body: z.infer<typeof checkBodySchema>) {

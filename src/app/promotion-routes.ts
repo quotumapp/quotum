@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ApplePromotionSigner } from "../billing/apple-promotions";
 import { InvalidRequestError } from "../billing/errors";
+import { requireIdempotencyKey } from "../billing/idempotency-key";
 import type {
 	CreatePromotionInput,
 	PromotionCodeInput,
@@ -208,16 +209,6 @@ const accountRedemptionParams = z
 	.object({ billingAccountId: z.string().trim().min(1).max(200), redemptionId: z.uuid() })
 	.strict();
 
-export function requirePromotionIdempotencyKey(value: string | null): string {
-	const key = value?.trim();
-	if (key === undefined || key === "" || key.length > 200) {
-		throw new InvalidRequestError(
-			"Idempotency-Key header must contain between 1 and 200 characters",
-		);
-	}
-	return key;
-}
-
 function optionalActor(headers: Headers): string | null {
 	const actor = headers.get("x-billing-actor")?.trim();
 	if (actor === undefined || actor === "") return null;
@@ -371,7 +362,7 @@ export function registerPromotionRoutes({
 					context,
 					params.billingAccountId,
 					params.redemptionId,
-					requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+					requireIdempotencyKey(request.headers.get("idempotency-key")),
 					await signer(context),
 				),
 			};
@@ -648,9 +639,7 @@ export function registerPromotionRoutes({
 								...body,
 								billingAccountId: params.billingAccountId,
 								actor: optionalActor(request.headers),
-								idempotencyKey: requirePromotionIdempotencyKey(
-									request.headers.get("idempotency-key"),
-								),
+								idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
 							},
 							await signer(context),
 						);
@@ -659,7 +648,7 @@ export function registerPromotionRoutes({
 						billingAccountId: params.billingAccountId,
 						code: body.code,
 						channel: body.channel,
-						idempotencyKey: requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+						idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
 						actor: optionalActor(request.headers),
 					})),
 		}),
@@ -734,7 +723,7 @@ export function registerPromotionRoutes({
 				redemptionId: params.redemptionId,
 				reason: body.reason,
 				actor: requireActor(request.headers),
-				idempotencyKey: requirePromotionIdempotencyKey(request.headers.get("idempotency-key")),
+				idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
 			}),
 		}),
 		{

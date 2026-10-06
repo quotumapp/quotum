@@ -186,12 +186,12 @@ describe("Stripe method guards", () => {
 			[
 				"/v1/billing-accounts/user_1/commercial-actions",
 				{ previewToken },
-				"Invalid commercial action execution",
+				"Idempotency-Key header must contain between 1 and 200 characters with no surrounding whitespace",
 			],
 			[
 				"/v1/billing-accounts/user_1/subscriptions/sub_1/changes",
 				{ targetPlanKey: "pro" },
-				"Invalid Stripe subscription change request",
+				"Idempotency-Key header must contain between 1 and 200 characters with no surrounding whitespace",
 			],
 		] as const) {
 			const response = await testRequest(app, path, {
@@ -215,12 +215,12 @@ describe("Stripe method guards", () => {
 			[
 				"/v1/billing-accounts/user_1/commercial-actions",
 				{ previewToken },
-				"Invalid commercial action execution",
+				"Idempotency-Key header must contain between 1 and 200 characters with no surrounding whitespace",
 			],
 			[
 				"/v1/billing-accounts/user_1/subscriptions/sub_1/changes",
 				{ targetPlanKey: "pro" },
-				"Invalid Stripe subscription change request",
+				"Idempotency-Key header must contain between 1 and 200 characters with no surrounding whitespace",
 			],
 		] as const) {
 			const response = await testRequest(app, path, {
