@@ -6,6 +6,32 @@ const f = merchantFixture();
 beforeEach(() => f.reset());
 afterAll(() => f.sql.close());
 describe("real Better Auth merchant authentication", () => {
+	it("answers the library's own sign-up rate limit in the platform error envelope", async () => {
+		let limited: Response | undefined;
+		for (let attempt = 0; attempt < 5 && limited === undefined; attempt++) {
+			const browser = new MerchantBrowser(f);
+			await browser.json("/api/platform/config");
+			await browser.json("/api/platform/signup-intent", {
+				accepted: true,
+				termsVersion: testConfig.termsVersion,
+				privacyVersion: testConfig.privacyVersion,
+			});
+			const response = await browser.request("/api/auth/sign-up/email", {
+				name: "Merchant",
+				email: `owner-${attempt}@example.com`,
+				password,
+			});
+			if (response.status === 429) limited = response;
+		}
+		expect(limited).toBeDefined();
+		expect(limited?.headers.get("content-type")).toContain("application/json");
+		expect(Number(limited?.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+		expect(await limited?.json()).toMatchObject({
+			success: false,
+			error: { code: "RATE_LIMITED", message: "Too many attempts. Please try again later." },
+		});
+	});
+
 	it("requires verification, password, and OTP before custom session exchange", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.json("/api/platform/config");

@@ -662,6 +662,7 @@
         "src/platform/application/billing-port.ts",
         "src/platform/connections/service.ts",
         "src/platform/mcp/authorization.ts",
+        "src/platform/mcp/changes.ts",
         "src/providers/apple/service.ts",
         "src/providers/google/pubsub.ts",
         "src/providers/google/service.ts",
@@ -1308,6 +1309,7 @@
       "code": "RATE_LIMITED",
       "sources": [
         "src/http/rate-limit.ts",
+        "src/platform/security.ts",
         "src/platform/store.ts"
       ]
     },
@@ -1494,6 +1496,12 @@
       "code": "STRIPE_CATALOG_ACCESS",
       "sources": [
         "src/composition/connection-validation.ts"
+      ]
+    },
+    {
+      "code": "STRIPE_CHECKOUT_SESSION_ACCOUNT_MISMATCH",
+      "sources": [
+        "src/providers/stripe/service.ts"
       ]
     },
     {

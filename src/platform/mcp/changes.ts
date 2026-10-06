@@ -1,3 +1,4 @@
+import { hasUnstorableText } from "../../shared/input-bounds";
 import type {
 	BillingChangeInput,
 	BillingChangePreview,
@@ -123,6 +124,13 @@ export class McpChanges {
 		authorizationId: string,
 		input: BillingChangeInput & { requestKey: string; reason: string; replacesChangeId?: string },
 	) {
+		// Text Postgres cannot store would fail the insert below as a 503, so the proposal is
+		// refused up front whatever caller built it.
+		if (hasUnstorableText(input))
+			throw new MerchantError(
+				"INVALID_REQUEST",
+				"Proposal text cannot contain NUL or unpaired surrogate characters.",
+			);
 		const access = await this.access(authorizationId);
 		const action = this.port.actions.find((a) => a.action === input.action);
 		if (!action) throw new MerchantError("ACTION_REJECTED", "Unsupported billing change.");

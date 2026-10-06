@@ -1338,7 +1338,7 @@ describe("StripeBillingService", () => {
 		await expect(
 			service.getCheckoutSessionStatus({ billingAccountId: "user_1", sessionId: "cs_conflict" }),
 		).rejects.toMatchObject({
-			code: "INVALID_REQUEST",
+			code: "STRIPE_CHECKOUT_SESSION_ACCOUNT_MISMATCH",
 			status: 403,
 		});
 	});
@@ -1385,7 +1385,7 @@ describe("StripeBillingService", () => {
 		await expect(
 			service.getCheckoutSessionStatus({ billingAccountId: "user_1", sessionId: "cs_789" }),
 		).rejects.toMatchObject({
-			code: "INVALID_REQUEST",
+			code: "STRIPE_CHECKOUT_SESSION_ACCOUNT_MISMATCH",
 			status: 403,
 		});
 	});
@@ -1402,7 +1402,7 @@ describe("StripeBillingService", () => {
 		await expect(
 			service.getCheckoutSessionStatus({ billingAccountId: "user_1", sessionId: "cs_no_owner" }),
 		).rejects.toMatchObject({
-			code: "INVALID_REQUEST",
+			code: "STRIPE_CHECKOUT_SESSION_ACCOUNT_MISMATCH",
 			status: 403,
 		});
 	});
@@ -2310,7 +2310,7 @@ describe("checkout expiration", () => {
 			service.expireCheckoutSession({ billingAccountId: "user_1", sessionId: "cs_123" }),
 		).rejects.toMatchObject({
 			message: "Stripe Checkout session does not belong to customer",
-			code: "INVALID_REQUEST",
+			code: "STRIPE_CHECKOUT_SESSION_ACCOUNT_MISMATCH",
 			status: 403,
 		});
 		expect(

@@ -25,7 +25,7 @@ import {
 import { endTrialBodySchema, startTrialBodySchema } from "../app/trial-routes";
 import type { BillingChangeDescriptor } from "../platform/application/billing-changes";
 import type { MerchantBillingOperation } from "../platform/application/billing-port";
-import { bigintIdSchema } from "../shared/input-bounds";
+import { bigintIdSchema, hasUnstorableText } from "../shared/input-bounds";
 
 const text = z.string().trim().min(1).max(200);
 const none = z.tuple([]);
@@ -127,4 +127,8 @@ export const prepareBillingChangeSchema = z
 			),
 		),
 	})
-	.strict();
+	.strict()
+	// Text Postgres cannot store would fail the proposal insert as if the API were unreachable.
+	.refine((proposal) => !hasUnstorableText(proposal), {
+		message: "Proposal text cannot contain NUL or unpaired surrogate characters",
+	});

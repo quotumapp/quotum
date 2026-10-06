@@ -18,13 +18,14 @@ import {
 	McpAuthorizations,
 } from "../platform/mcp/authorization";
 import { McpChanges } from "../platform/mcp/changes";
-import { MerchantError } from "../platform/security";
+import { authRateLimitError, MerchantError } from "../platform/security";
 import type { MerchantStore } from "../platform/store";
 import { BillingApiError, BillingClient } from "../sdk/client";
 import { readCappedText } from "../shared/body-limit";
 import { type ElysiaPluginLike, HTTP_APP_CONFIG } from "../shared/http";
 import { hasUnstorableText, urlHasEncodedNul } from "../shared/input-bounds";
 import { hasMediaType } from "../shared/media-type";
+import { routeMethodIndex } from "../shared/route-methods";
 import { prepareBillingChangeSchema } from "./billing-change-actions";
 import { createMcpPortFetch } from "./mcp-port-fetch";
 import { remoteMcpOpenApi } from "./remote-mcp-openapi";
@@ -92,7 +93,24 @@ export function createRemoteMcpApp(options: {
 		string,
 		{ get?: DocumentDecoration; post?: DocumentDecoration }
 	>;
-	app.onError(({ error, request, route, set }) => {
+	const routeMethods = routeMethodIndex(() => app.routes);
+	app.onError(({ error, request, route, set, code }) => {
+		if (code === "NOT_FOUND" && !(error instanceof MerchantError)) {
+			// A scanner's wrong method or unknown path is the caller's mistake, not an outage.
+			const allowed = routeMethods.allowed(
+				URL.parse(request.url, "http://unknown.invalid")?.pathname ?? "/",
+			);
+			if (allowed.length === 0) {
+				set.status = 404;
+				return { error: "not_found", error_description: "Route not found." };
+			}
+			set.status = 405;
+			set.headers.allow = allowed.join(", ");
+			return {
+				error: "invalid_request",
+				error_description: `This endpoint accepts ${allowed.join(", ")}.`,
+			};
+		}
 		const known = error instanceof MerchantError;
 		set.status = known ? error.status : 503;
 		if (known && error.retryAfter !== undefined)
@@ -299,6 +317,8 @@ export function createRemoteMcpApp(options: {
 				const response = await auth.handler(
 					new Request(`${authBase}/oauth2/${endpoint}`, { method: "POST", headers, body }),
 				);
+				const rateLimited = authRateLimitError(response);
+				if (rateLimited !== null) throw rateLimited;
 				const safe = new Headers(response.headers);
 				safe.delete("set-cookie");
 				safe.set("cache-control", "no-store");
