@@ -20,6 +20,30 @@ export function receiptId(id: string, recordedAt: string): string {
 	return `ur_${Buffer.from(JSON.stringify([id, recordedAt])).toString("base64url")}`;
 }
 
+const recordedAtPattern =
+	/^(?<year>\d{4})-(?<month>\d\d)-(?<day>\d\d)[ T](?<hour>\d\d):(?<minute>\d\d):(?<second>\d\d)(?:\.\d{1,6})?(?:Z|[+-](?<offsetHour>\d\d)(?::?(?<offsetMinute>\d\d))?)$/;
+
+/** A timestamp `timestamptz` accepts: a real calendar day, a time of day and an offset within ±15:59. */
+function isStorableRecordedAt(value: string): boolean {
+	const parts = recordedAtPattern.exec(value)?.groups;
+	if (parts === undefined) return false;
+	const field = (name: string) => Number(parts[name] ?? 0);
+	const year = field("year");
+	const month = field("month");
+	const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+	const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 0;
+	return (
+		year >= 1 &&
+		field("day") >= 1 &&
+		field("day") <= daysInMonth &&
+		field("hour") <= 23 &&
+		field("minute") <= 59 &&
+		field("second") <= 59 &&
+		field("offsetHour") <= 15 &&
+		field("offsetMinute") <= 59
+	);
+}
+
 export function parseReceiptId(value: string): { id: string; recordedAt: string } {
 	try {
 		if (!/^ur_[A-Za-z0-9_-]{1,500}$/.test(value)) throw new Error();
@@ -30,9 +54,7 @@ export function parseReceiptId(value: string): { id: string; recordedAt: string 
 			typeof id !== "string" ||
 			!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id) ||
 			typeof recordedAt !== "string" ||
-			!/^\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|[+-]\d\d(?::?\d\d)?)$/.test(
-				recordedAt,
-			) ||
+			!isStorableRecordedAt(recordedAt) ||
 			!Number.isFinite(Date.parse(recordedAt)) ||
 			receiptId(id, recordedAt) !== value
 		)

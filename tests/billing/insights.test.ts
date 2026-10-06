@@ -59,4 +59,28 @@ describe("usage insight cursors", () => {
 			),
 		).toBeNull();
 	});
+
+	it("round trips a cursor with the exact microsecond", () => {
+		const cursor = {
+			recordedAt: "2026-08-28T12:00:00.123456Z",
+			id: "11111111-1111-4111-8111-111111111111",
+		};
+		expect(decodeUsageCursor(encodeUsageCursor(cursor))).toEqual(cursor);
+	});
+
+	it("rejects a microsecond timestamp that is not a real instant or not canonical", () => {
+		for (const recordedAt of [
+			"2026-02-31T12:00:00.123456Z",
+			"0000-01-01T00:00:00.123456Z",
+			"2026-08-28T12:00:00.12345Z",
+			"2026-08-28T12:00:00.1234567Z",
+			"2026-08-28T12:00:00.123456+00:00",
+			"2026-08-28 12:00:00.123456Z",
+		]) {
+			const cursor = Buffer.from(
+				JSON.stringify({ recordedAt, id: "11111111-1111-4111-8111-111111111111" }),
+			).toString("base64url");
+			expect(decodeUsageCursor(cursor)).toBeNull();
+		}
+	});
 });

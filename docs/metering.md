@@ -82,10 +82,11 @@ actions and deduction arrays are absent.
 Receipt detail is immutable, with operation and caller identity, account/entity scope, exact
 quantities, occurred/recorded times, balance after usage, catalog-rating reference and deduction
 count. Its deductions are a separate cursor-paginated child collection, default 50 and maximum 100.
-An entity receipt requires `?entityId=<external entity ID>` on both reads. Cursors are bound to their
-receipt; receipt IDs and cursors are opaque. These reads require project authentication and admit
-read-only credentials. The snapshot, event, deductions, billing effect and recovery result commit
-in one transaction.
+An entity receipt requires `?entityId=<external entity ID>` on both reads. Cursors are bound to
+their receipt; receipt IDs and cursors are opaque, and a receipt ID that does not decode to a real
+instant answers `400 INVALID_REQUEST`. The deductions `limit` takes decimal digits only. These reads
+require project authentication and admit read-only credentials. The snapshot, event, deductions,
+billing effect and recovery result commit in one transaction.
 
 The independently versioned [`@quotum/sdk`](https://github.com/quotumapp/quotum-js) preview uses these
 account/entity handles. Its release must pin the exact public API revision containing this contract.
@@ -95,27 +96,29 @@ coordinated pre-1.0 increment; the public SDK does not expose placeholder method
 
 ## Reservations and related operations
 
-Quantities are decimal strings. A check is side-effect-free, consume records an immutable receipt,
-and reservation finalization is atomic. Usage mutations require `Idempotency-Key`; corrections,
-controls, alerts, automatic top-ups, and license assignments also require `X-Billing-Actor`.
-Confirming more than the reserved quantity returns `RESERVATION_QUANTITY_EXCEEDED`, a changed
-confirmation returns `RESERVATION_ALREADY_CONFIRMED`, and using a newly published meter absent from
-the account's purchased catalog returns `METER_RATE_NOT_ACTIVATED`. Omitted `expiresInSeconds` on a
-reservation defaults to 300. A reservation's expiry, and whether a correction or confirmation may
-still use an allocation, are decided on the database clock, so an application host whose clock
-drifts never expires a live hold or refuses a valid refund. An open reservation keeps its hold on
-an allocation that ends while it waits (revoked, expired, or a plan allowance that ended): balance
-reads, the billing summary and projections keep counting that hold as `held`, and list the
-allocation in the breakdown with nothing `available`, until the reservation settles. A confirmation
-still consumes from the hold. What a release or a smaller confirmation frees never becomes
-spendable again: on an expired allocation it stays expired (and follows the allowance's rollover
-rules), and on a revoked operator grant it is revoked too (see [Operator grants](grants.md#operator-grants-and-administrative-debits)).
-License pools follow the purchased subscription-item quantity: an
-entity license check honors active assignments in assignment order up to that capacity, so a seat
-downgrade stops authorizing the assignments beyond it until they are revoked. The entity license
-check's optional `quantity` query parameter accepts decimal digits only, defaults to 1, and must
-be between 1 and 1,000,000 inclusive. Hexadecimal, exponent and decimal-point notation, signs,
-whitespace, empty values, and out-of-range quantities return `400 INVALID_REQUEST`.
+Quantities are decimal strings, and a reservation's `quantity` takes no surrounding whitespace. A
+check is side-effect-free, consume records an immutable receipt, and reservation finalization is
+atomic. Usage mutations require `Idempotency-Key`; corrections, controls, alerts, automatic top-ups,
+and license assignments also require `X-Billing-Actor`. Confirming more than the reserved quantity
+returns `RESERVATION_QUANTITY_EXCEEDED`, a changed confirmation returns
+`RESERVATION_ALREADY_CONFIRMED`, and using a newly published meter absent from the account's
+purchased catalog returns `METER_RATE_NOT_ACTIVATED`. Omitted `expiresInSeconds` on a reservation
+defaults to 300. A reservation's expiry, and whether a correction or confirmation may still use an
+allocation, are decided on the database clock, so an application host whose clock drifts never
+expires a live hold or refuses a valid refund. An open reservation keeps its hold on an allocation
+that ends while it waits (revoked, expired, or a plan allowance that ended): balance reads, the
+billing summary and projections keep counting that hold as `held`, and list the allocation in the
+breakdown with nothing `available`, until the reservation settles. A confirmation still consumes
+from the hold. What a release or a smaller confirmation frees never becomes spendable again: on an
+expired allocation it stays expired (and follows the allowance's rollover rules), and on a revoked
+operator grant it is revoked too (see
+[Operator grants](grants.md#operator-grants-and-administrative-debits)). License pools follow the
+purchased subscription-item quantity: an entity license check honors active assignments in
+assignment order up to that capacity, so a seat downgrade stops authorizing the assignments beyond
+it until they are revoked. The entity license check's optional `quantity` query parameter accepts
+decimal digits only, defaults to 1, and must be between 1 and 1,000,000 inclusive. Hexadecimal,
+exponent and decimal-point notation, signs, whitespace, empty values, and out-of-range quantities
+return `400 INVALID_REQUEST`.
 
 ## Automatic top-ups
 
@@ -328,8 +331,10 @@ uses a new idempotency key; replaying the denied operation returns its recorded 
 ## Usage reads
 
 Usage reads default to the last 30 days, reject ranges over 90 days, and page with an opaque cursor
-(default 50, maximum 200). Series support `hour` or `day` buckets. These reads and `billing-summary`
-never authorize work; product projections are display caches and cannot replace the metering calls.
+(default 50, maximum 200). The cursor names the last event's exact `recorded_at` and ID, so events
+that share a millisecond are neither skipped nor repeated between pages. Series support `hour` or
+`day` buckets. These reads and `billing-summary` never authorize work; product projections are
+display caches and cannot replace the metering calls.
 
 ## Usage operation recovery
 

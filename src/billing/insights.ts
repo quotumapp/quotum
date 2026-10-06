@@ -2,6 +2,11 @@ import type { SubscriptionPendingChange } from "../providers/capability-read-typ
 import { isStorableInstant } from "../shared/input-bounds";
 import type { BillingChannel, BillingProvider, SubscriptionStatus } from "./types";
 
+/**
+ * `recordedAt` is the exact `recorded_at` of the last event on the page, to the microsecond, so a
+ * page boundary inside one millisecond neither skips nor repeats events. Cursors issued before
+ * that carry milliseconds only and still decode; they resume at the truncated instant.
+ */
 export interface UsageEventCursor {
 	recordedAt: string;
 	id: string;
@@ -143,6 +148,7 @@ export interface AvailableActionFacts {
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
+const microsecondInstantPattern = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\d{3}Z$/;
 
 export function encodeUsageCursor(cursor: UsageEventCursor): string {
 	return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
@@ -159,17 +165,22 @@ export function decodeUsageCursor(value: string): UsageEventCursor | null {
 			parsed !== null &&
 			"recordedAt" in parsed &&
 			typeof parsed.recordedAt === "string" &&
-			canonicalDate(parsed.recordedAt) &&
+			canonicalCursorInstant(parsed.recordedAt) &&
 			"id" in parsed &&
 			typeof parsed.id === "string" &&
 			uuidPattern.test(parsed.id)
 		) {
-			return { recordedAt: new Date(parsed.recordedAt).toISOString(), id: parsed.id };
+			return { recordedAt: parsed.recordedAt, id: parsed.id };
 		}
 	} catch {
 		return null;
 	}
 	return null;
+}
+
+function canonicalCursorInstant(value: string): boolean {
+	const microseconds = microsecondInstantPattern.exec(value);
+	return canonicalDate(microseconds === null ? value : `${microseconds[1]}Z`);
 }
 
 function canonicalDate(value: string): boolean {
