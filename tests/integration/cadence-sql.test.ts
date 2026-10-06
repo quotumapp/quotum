@@ -17,6 +17,7 @@ import {
 	type CadenceUnit,
 	cadenceSplits,
 	cadenceUnits,
+	maxExpirySeconds,
 } from "../../src/shared/cadence";
 import {
 	createLocalPostgresContext,
@@ -177,6 +178,10 @@ localDescribe("cadence SQL", () => {
 					[
 						...expiries,
 						{ seconds: 31_536_000, unit: null, count: 1 },
+						{ seconds: maxExpirySeconds, unit: null, count: 1 },
+						{ seconds: maxExpirySeconds + 1, unit: null, count: 1 },
+						{ seconds: 9_000_000_000_000, unit: null, count: 1 },
+						{ seconds: Number.MAX_SAFE_INTEGER, unit: null, count: 1 },
 						{ seconds: null, unit: null, count: 1 },
 					].map(
 						({ seconds, unit, count }) =>
@@ -186,7 +191,7 @@ localDescribe("cadence SQL", () => {
 				)}) AS item(expires_after_seconds, expiry_interval, expiry_interval_count)
 			`,
 		);
-		expect(rows).toHaveLength(anchors.length * (expiries.length + 2));
+		expect(rows).toHaveLength(anchors.length * (expiries.length + 6));
 		for (const row of rows) {
 			const anchor = new Date(row.anchor);
 			const expected = storedExpiresAt(anchor, row);
@@ -221,5 +226,9 @@ localDescribe("cadence SQL", () => {
 		expect(at("2026-08-31T06:00:00.000Z", "quarter", 1)).toBe("2026-11-30T06:00:00.000Z");
 		expect(at("2026-01-15T09:30:00.000Z", "week", 2)).toBe("2026-01-29T09:30:00.000Z");
 		expect(at("2026-01-15T09:30:00.000Z", null, 1)).toBeUndefined();
+		// A stored duration beyond ten years expires at ten years, in the database and here alike.
+		expect(at("2026-01-15T09:30:00.000Z", null, 1, 9_000_000_000_000)).toBe(
+			new Date(Date.parse("2026-01-15T09:30:00.000Z") + maxExpirySeconds * 1000).toISOString(),
+		);
 	});
 });

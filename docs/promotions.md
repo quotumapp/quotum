@@ -65,8 +65,8 @@ automatic top-ups are billed at list price.
 purchase. It needs project authentication, an `Idempotency-Key`, and a body with `code` and the
 `channel` where the customer entered it; `X-Billing-Actor` is optional and defaults to the billing
 account. A `feature_grant` code takes one use and returns `kind: "granted"` with one reward
-allocation per feature. Rewards expire `expiresAfterSeconds` after redemption, are spent like any
-other allocation, and trigger a coalesced `usage_changed` projection. On web and Android a `discount` code takes no use
+allocation per feature. Rewards expire `expiresAfterSeconds` after redemption (at most 315,619,200
+seconds, ten years), are spent like any other allocation, and trigger a coalesced `usage_changed` projection. On web and Android a `discount` code takes no use
 and returns `kind: "requires_commercial_action"`; pass it as `promotionCode` to a commercial action.
 On iOS, discount codes require a linked Apple promotional offer and the existing subscription;
 they return a signed StoreKit action, described below. Direct iOS feature or plan grants remain

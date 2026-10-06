@@ -6,6 +6,7 @@ import {
 	cadenceFitsWithin,
 	describeCadence,
 	isCalendarUnit,
+	maxExpirySeconds,
 } from "../shared/cadence";
 import type {
 	CatalogPlanIntent,
@@ -32,8 +33,9 @@ export function expiryCadence(source: {
 
 /**
  * A calendar expiry is a published unit with a count from 1 to 1,000, spans at most ten years and
- * can be hourly: it is a point in time, not a window maintenance grants. It cannot be combined with
- * an exact duration, and a count needs an interval.
+ * can be hourly: it is a point in time, not a window maintenance grants. An exact duration is a
+ * positive whole number of seconds that spans at most the same ten years. The two cannot be
+ * combined, and a count needs an interval.
  */
 function assertExpiry(
 	source: {
@@ -43,6 +45,15 @@ function assertExpiry(
 	},
 	label: string,
 ): void {
+	const seconds = source.expiresAfterSeconds;
+	if (
+		seconds !== null &&
+		(!Number.isSafeInteger(seconds) || seconds < 1 || seconds > maxExpirySeconds)
+	) {
+		throw new InvalidRequestError(
+			`${label} expiry must be a whole number of seconds from 1 to ${maxExpirySeconds} (ten years)`,
+		);
+	}
 	const cadence = expiryCadence(source);
 	if (cadence === null) {
 		if (source.expiryIntervalCount !== undefined && source.expiryIntervalCount !== null) {

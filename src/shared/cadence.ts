@@ -36,6 +36,13 @@ export interface Cadence {
 /** The largest count a stored cadence accepts; spans are bounded further where a cadence is used. */
 export const maxCadenceCount = 1000;
 
+/**
+ * The longest exact-duration expiry, in seconds: ten calendar years at their longest (three leap
+ * days), the same span a calendar expiry may cover. Longer values leave the range of a JavaScript
+ * date, so the database never stores them as an expiry.
+ */
+export const maxExpirySeconds = 3653 * 24 * 60 * 60;
+
 const calendarUnitMonths: Partial<Record<CadenceUnit, number>> = {
 	month: 1,
 	quarter: 3,

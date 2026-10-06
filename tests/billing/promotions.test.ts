@@ -8,6 +8,7 @@ import {
 	type PromotionCodeAvailability,
 	promotionCodeUnavailability,
 } from "../../src/billing/promotions";
+import { maxExpirySeconds } from "../../src/shared/cadence";
 
 function discountInput(overrides: Partial<CreatePromotionInput> = {}): CreatePromotionInput {
 	return {
@@ -173,6 +174,14 @@ describe("promotion terms", () => {
 				},
 			}),
 			discountInput({
+				effect: {
+					kind: "feature_grant",
+					items: [
+						{ featureKey: "credits", quantity: "5", expiresAfterSeconds: maxExpirySeconds + 1 },
+					],
+				},
+			}),
+			discountInput({
 				effect: { kind: "plan_grant", planKey: "pro", durationUnit: "month", durationCount: 25 },
 			}),
 			discountInput({
@@ -189,6 +198,20 @@ describe("promotion terms", () => {
 		for (const input of invalid) {
 			expect(errorCode(() => normalizeCreatePromotionInput(input))).toBe("PROMOTION_TERMS_INVALID");
 		}
+	});
+
+	it("accepts a feature grant that expires after exactly ten years", () => {
+		const normalized = normalizeCreatePromotionInput(
+			discountInput({
+				effect: {
+					kind: "feature_grant",
+					items: [{ featureKey: "credits", quantity: "5", expiresAfterSeconds: maxExpirySeconds }],
+				},
+			}),
+		);
+		expect(normalized.effect).toMatchObject({
+			items: [{ featureKey: "credits", expiresAfterSeconds: maxExpirySeconds }],
+		});
 	});
 
 	it("limits hosted Checkout entry to limits Stripe can enforce", () => {

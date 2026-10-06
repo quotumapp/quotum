@@ -10,6 +10,7 @@ import type {
 import type { ApplePromotionRepository } from "../db/repository/apple-promotions";
 import { projectScopedRateLimitGuard, type RateLimiter } from "../http/rate-limit";
 import type { ProjectInstanceContext } from "../projects/context";
+import { maxExpirySeconds } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { decimalDigitsQuery, storableDateTimeSchema } from "../shared/input-bounds";
 import { operatorApiKeyGuard } from "./admin-routes";
@@ -84,7 +85,10 @@ const effectBodySchema = z.discriminatedUnion("kind", [
 						.object({
 							featureKey: keySchema,
 							quantity: z.string().trim().min(1).max(40),
-							expiresAfterSeconds: positiveIntegerSchema.nullable().optional(),
+							expiresAfterSeconds: positiveIntegerSchema
+								.max(maxExpirySeconds)
+								.nullable()
+								.optional(),
 						})
 						.strict(),
 				)
