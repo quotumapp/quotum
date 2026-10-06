@@ -838,6 +838,21 @@ describe("MCP browser-approved writes", () => {
 			})
 		).json();
 		expect(prepared.result.isError).toBeUndefined();
+		// Stored as JSON, not as text that holds JSON: a prepared statement types a bound string by
+		// its cast, and the driver would encode a string bound straight to jsonb a second time.
+		const [stored] = await f.sql<Record<string, string>[]>`
+			SELECT jsonb_typeof(c.parameters) AS parameters, jsonb_typeof(c.body) AS body,
+				jsonb_typeof(c.preview) AS preview, jsonb_typeof(c.scope) AS scope,
+				jsonb_typeof(g.scopes) AS scopes
+			FROM platform_mcp_changes c
+			JOIN platform_mcp_authorizations g ON g.id = c.authorization_id`;
+		expect(stored).toEqual({
+			parameters: "array",
+			body: "object",
+			preview: "object",
+			scope: "object",
+			scopes: "array",
+		});
 		const change = await f.mcpChanges.prepare(grant.id, input);
 		expect(JSON.parse(prepared.result.content[0].text).id).toBe(change.id);
 		expect(await f.sql`SELECT id FROM entities`).toHaveLength(0);
@@ -866,8 +881,15 @@ describe("MCP browser-approved writes", () => {
 		const receipt =
 			await f.sql`SELECT response FROM billing_administration_receipts WHERE operation_key=${`mcp:${change.id}`}`;
 		expect(receipt).toHaveLength(1);
+		expect(
+			await f.sql`SELECT jsonb_typeof(result) AS result FROM platform_mcp_changes WHERE id=${change.id}`,
+		).toEqual([{ result: "object" }]);
 		await f.sql`UPDATE platform_mcp_changes SET status='applying',result=NULL WHERE id=${change.id}`;
 		expect((await f.mcpChanges.get(grant.id, change.id)).status).toBe("completed");
+		// The recovered result is stored the same way as an applied one.
+		expect(
+			await f.sql`SELECT jsonb_typeof(result) AS result FROM platform_mcp_changes WHERE id=${change.id}`,
+		).toEqual([{ result: "object" }]);
 	});
 	async function until(condition: () => boolean | Promise<boolean>, what: string) {
 		const deadline = Date.now() + 10_000;

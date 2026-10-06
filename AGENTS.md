@@ -144,8 +144,10 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
   with a `project_id` column without mentioning `project_id`. Scope the statement, or add an
   allowlist entry with its reason; an entry that no longer matches fails too.
 - Bind JSON as text and cast on the server (the `jsonb()` helper in `src/db/repository/query.ts`);
-  a bare `::jsonb` cast on a string parameter is encoded twice. `CONTRIBUTING.md` also sets the
-  ordering rules for `Promise.all` inside a transaction.
+  a bare `::jsonb` cast on a string parameter is encoded twice. Platform SQL writes
+  `${JSON.stringify(value)}::text::jsonb`; `tests/platform/jsonb-binding.test.ts` rejects a bare
+  cast, and the merchant lane runs prepared statements, the only mode that shows it.
+  `CONTRIBUTING.md` also sets the ordering rules for `Promise.all` inside a transaction.
 - `src/migrate.ts` takes a Postgres advisory lock, verifies SHA-256 checksums of already-applied
   files, and runs `CREATE INDEX CONCURRENTLY` files outside a transaction. Before 1.0 the domain
   baselines evolve in place and disposable databases are recreated; incremental migrations start

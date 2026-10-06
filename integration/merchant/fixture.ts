@@ -81,7 +81,9 @@ export function merchantFixture(
 		throw new Error(
 			"Run with bun run test:merchant:integration; a disposable database is required",
 		);
-	const client = new SQL(process.env.POSTGRES_URI, { max: 10, idleTimeout: 5, prepare: false });
+	// Prepared statements, as the runtime uses them: a statement that binds JSON straight to jsonb
+	// stores it encoded twice only in this mode, and would pass here without it.
+	const client = new SQL(process.env.POSTGRES_URI, { max: 10, idleTimeout: 5 });
 	const sql = Object.assign(merchantSql(client), { close: () => client.close() });
 	const mailer = new CaptureMailer();
 	let timeOffset = 0;
