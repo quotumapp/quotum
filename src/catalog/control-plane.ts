@@ -322,6 +322,21 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				);
 			}
 			if (draft.status === "published" && draft.published_revision_id !== null) {
+				// A retry repeats the request that was published. Another revision or catalog under
+				// its token is a different request, and that success is not its answer.
+				if (input.expectedRevision !== draft.base_revision) {
+					const base =
+						draft.base_revision === null
+							? "an empty catalog"
+							: `revision ${String(draft.base_revision)}`;
+					throw new PersistenceConflictError(
+						`Expected catalog revision ${String(input.expectedRevision)}, but this preview was published from ${base}`,
+						"CATALOG_REVISION_CONFLICT",
+					);
+				}
+				if (stableJson(draft.intent) !== stableJson(parsed.canonical)) {
+					throw catalogPreviewMismatch();
+				}
 				return await readPublishedResult(
 					tx,
 					projectState.id,
@@ -352,10 +367,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				draft.intent_hash !== intentHash ||
 				stableJson(draft.intent) !== stableJson(parsed.canonical)
 			) {
-				throw new PersistenceConflictError(
-					"Catalog publish intent differs from its preview",
-					"CATALOG_PREVIEW_MISMATCH",
-				);
+				throw catalogPreviewMismatch();
 			}
 
 			await validateCatalogLifecycle(tx, projectState.id, parsed.canonical, this.capabilities);
@@ -543,6 +555,13 @@ async function readProjectCatalog(
 	);
 	if (row === null) throw new Error(`Billing project ${project.projectInstanceKey} was not found`);
 	return row;
+}
+
+function catalogPreviewMismatch(): PersistenceConflictError {
+	return new PersistenceConflictError(
+		"Catalog publish intent differs from its preview",
+		"CATALOG_PREVIEW_MISMATCH",
+	);
 }
 
 function assertExpectedRevision(expected: number | null, actual: number | null): void {
