@@ -197,7 +197,7 @@ export class McpChanges {
 						409,
 					);
 			}
-			await tx`INSERT INTO platform_mcp_changes(authorization_id,principal_id,project_instance_id,request_key,request_hash,action,parameters,body,reason,preview,capability,step_up_action,sensitive,scope,expires_at) VALUES(${authorizationId},${access.grant.principal_id},${access.grant.project_instance_id},${input.requestKey},${hash},${input.action},${JSON.stringify(preview.input.parameters)}::jsonb,${JSON.stringify(preview.input.body)}::jsonb,${input.reason},${JSON.stringify(preview)}::jsonb,${capability},${action.stepUpAction},${access.scope.environment === "production" || action.alwaysSensitive},${JSON.stringify(access.scope)}::jsonb,${expiry}) ON CONFLICT(authorization_id,request_key) DO NOTHING`;
+			await tx`INSERT INTO platform_mcp_changes(authorization_id,principal_id,project_instance_id,request_key,request_hash,action,parameters,body,reason,preview,capability,step_up_action,sensitive,scope,expires_at) VALUES(${authorizationId},${access.grant.principal_id},${access.grant.project_instance_id},${input.requestKey},${hash},${input.action},${JSON.stringify(preview.input.parameters)}::text::jsonb,${JSON.stringify(preview.input.body)}::text::jsonb,${input.reason},${JSON.stringify(preview)}::text::jsonb,${capability},${action.stepUpAction},${access.scope.environment === "production" || action.alwaysSensitive},${JSON.stringify(access.scope)}::text::jsonb,${expiry}) ON CONFLICT(authorization_id,request_key) DO NOTHING`;
 			const [row] = await tx<
 				ChangeRow[]
 			>`SELECT * FROM platform_mcp_changes WHERE authorization_id=${authorizationId} AND request_key=${input.requestKey}`;
@@ -298,7 +298,7 @@ export class McpChanges {
 		);
 		if (result) {
 			await this.store
-				.sql`UPDATE platform_mcp_changes SET status=${result.status < 400 ? "completed" : "failed"},result=${JSON.stringify(result)}::jsonb WHERE id=${row.id} AND status IN ('applying','needs_review')`;
+				.sql`UPDATE platform_mcp_changes SET status=${result.status < 400 ? "completed" : "failed"},result=${JSON.stringify(result)}::text::jsonb WHERE id=${row.id} AND status IN ('applying','needs_review')`;
 			return this.row(row.id);
 		}
 		if (row.status === "applying" && row.expires_at <= this.store.now()) {
@@ -393,7 +393,7 @@ export class McpChanges {
 					authorizationId: saved.authorization_id,
 					changeId: id,
 				});
-				await tx`UPDATE platform_mcp_changes SET status=${status},result=${JSON.stringify(result)}::jsonb,applied_at=now() WHERE id=${id}`;
+				await tx`UPDATE platform_mcp_changes SET status=${status},result=${JSON.stringify(result)}::text::jsonb,applied_at=now() WHERE id=${id}`;
 				await this.store.audit(
 					tx,
 					identity.principalId,

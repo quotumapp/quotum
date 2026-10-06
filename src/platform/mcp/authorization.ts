@@ -25,6 +25,24 @@ export interface McpGrant {
 	revoked_at: Date | null;
 }
 
+/**
+ * A grant's scopes as a list. Grants written before the JSON was bound as text hold them as a JSON
+ * string, because the driver encoded the bound text again; they stay valid for up to 30 days.
+ */
+export function grantScopes(stored: unknown): string[] {
+	let scopes = stored;
+	if (typeof stored === "string") {
+		try {
+			scopes = JSON.parse(stored);
+		} catch {
+			return [];
+		}
+	}
+	return Array.isArray(scopes)
+		? scopes.filter((scope): scope is string => typeof scope === "string")
+		: [];
+}
+
 /** Continuation signatures/timestamps change between steps; authorization parameters do not. */
 export function authorizationFingerprint(query: string | URLSearchParams): string {
 	const params = typeof query === "string" ? new URLSearchParams(query) : query;
@@ -151,7 +169,7 @@ export class McpAuthorizations {
 			>`SELECT COALESCE(name,client_id) AS name FROM platform_auth_oauth_clients WHERE client_id=${clientId} AND disabled IS NOT TRUE`;
 			if (!client)
 				throw new MerchantError("INVALID_REQUEST", "Restart authorization in your AI client.");
-			await tx`INSERT INTO platform_mcp_authorizations(principal_id,organization_id,project_instance_id,client_id,client_name,scopes,proof_session_id,created_at,expires_at) VALUES(${principal.id},${access.organizationId},${access.projectInstanceId},${clientId},${client.name},${JSON.stringify(this.requestedScopes(query))}::jsonb,${sessionId},${this.store.now()},${new Date(this.store.now().getTime() + MCP_GRANT_MS)}) ON CONFLICT(proof_session_id) DO NOTHING`;
+			await tx`INSERT INTO platform_mcp_authorizations(principal_id,organization_id,project_instance_id,client_id,client_name,scopes,proof_session_id,created_at,expires_at) VALUES(${principal.id},${access.organizationId},${access.projectInstanceId},${clientId},${client.name},${JSON.stringify(this.requestedScopes(query))}::text::jsonb,${sessionId},${this.store.now()},${new Date(this.store.now().getTime() + MCP_GRANT_MS)}) ON CONFLICT(proof_session_id) DO NOTHING`;
 			const [grant] = await tx<
 				McpGrant[]
 			>`SELECT * FROM platform_mcp_authorizations WHERE proof_session_id=${sessionId}`;
@@ -220,7 +238,7 @@ export class McpAuthorizations {
 		requireCapability(member.role, "billing.read");
 		if (member.organization_id !== grant.organization_id)
 			throw new MerchantError("FORBIDDEN", "The environment is unavailable.", 403);
-		return { ...grant, userId: principal.auth_user_id };
+		return { ...grant, scopes: grantScopes(grant.scopes), userId: principal.auth_user_id };
 	}
 
 	async byId(id: string) {
@@ -360,7 +378,7 @@ export class McpAuthorizations {
 				id: r.id,
 				clientId: r.client_id,
 				clientName: r.client_name,
-				scopes: r.scopes,
+				scopes: grantScopes(r.scopes),
 				createdAt: r.created_at.toISOString(),
 				expiresAt: r.expires_at.toISOString(),
 			})),
