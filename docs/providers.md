@@ -432,8 +432,12 @@ saved card rather than losing it.
 Subscription changes are queued with
 `POST /v1/billing-accounts/:billingAccountId/subscriptions/:subscriptionId/changes`; upgrades and
 quantity changes apply immediately by default, downgrades at period end. Base and licensed prices
-are Checkout line items; metered overage is invoiced by the recurring billing worker after the period
-closes. Add-ons use a separate subscription and require an active base plan.
+are Checkout line items; metered overage is invoiced by the recurring billing worker after the
+period closes. Add-ons use a separate subscription and require an active base plan, so a change
+keeps the plan kind: a base subscription that names an add-on as its target, or an add-on that names
+a base plan, is refused with `409 SUBSCRIPTION_CHANGE_PLAN_KIND_MISMATCH`, while a target the
+project does not have, or a subscription the account does not hold, is
+`404 SUBSCRIPTION_CHANGE_TARGET_NOT_FOUND`.
 
 Refunds and disputes reverse credits proportionally to the cumulative reversed amount paid and are
 deduplicated by refund id. Configure Stripe to send `refund.created` and `refund.updated`;

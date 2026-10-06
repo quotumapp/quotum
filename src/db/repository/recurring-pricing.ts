@@ -52,8 +52,10 @@ interface ChangeContextRow {
 	external_subscription_id: string;
 	from_plan_version_id: string | number | bigint;
 	from_tier_rank: number;
+	from_plan_kind: "base" | "addon";
 	to_plan_version_id: string | number | bigint;
 	to_tier_rank: number;
+	to_plan_kind: "base" | "addon";
 	current_period_end: Date | string | null;
 	upgrade_proration_behavior: "always_invoice" | "create_prorations" | "none";
 	downgrade_proration_behavior: "always_invoice" | "create_prorations" | "none";
@@ -1430,8 +1432,10 @@ async function changeContext(
 				subscription.external_subscription_id,
 				current_version.id AS from_plan_version_id,
 				current_version.tier_rank AS from_tier_rank,
+				current_version.plan_kind AS from_plan_kind,
 				target_version.id AS to_plan_version_id,
 				target_version.tier_rank AS to_tier_rank,
+				target_version.plan_kind AS to_plan_kind,
 				subscription.current_period_end,
 				subscription.status AS subscription_status,
 				subscription.updated_at AS subscription_updated_at,
@@ -1459,7 +1463,6 @@ async function changeContext(
 					OR COALESCE(subscription.expires_at, subscription.current_period_end) > now()
 				)
 				AND target.active = true AND target_version.status = 'published'
-				AND current_version.plan_kind = target_version.plan_kind
 			LIMIT 1
 			FOR UPDATE OF subscription
 		`,
@@ -1470,7 +1473,18 @@ async function changeContext(
 			"SUBSCRIPTION_CHANGE_TARGET_NOT_FOUND",
 		);
 	}
+	// Both exist: a base plan and an add-on are different subscriptions, not versions of one.
+	if (row.from_plan_kind !== row.to_plan_kind) {
+		throw new PersistenceConflictError(
+			`Plan ${input.targetPlanKey} is ${planKindName(row.to_plan_kind)}; a subscription to ${planKindName(row.from_plan_kind)} cannot change to it`,
+			"SUBSCRIPTION_CHANGE_PLAN_KIND_MISMATCH",
+		);
+	}
 	return row;
+}
+
+function planKindName(kind: "base" | "addon"): string {
+	return kind === "base" ? "a base plan" : "an add-on";
 }
 
 /**
