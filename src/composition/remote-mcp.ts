@@ -4,6 +4,7 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { type DocumentDecoration, Elysia } from "elysia";
 import { createLocalJWKSet, jwtVerify } from "jose";
 import { BillingError } from "../billing/errors";
+import { requestIp } from "../http/rate-limit";
 import { createContractStore } from "../mcp/contracts";
 import { createGuardedFetch } from "../mcp/guarded-fetch";
 import { omitKeys } from "../mcp/results";
@@ -44,8 +45,11 @@ export function createRemoteMcpApp(options: {
 	port: MerchantBillingPort;
 	requestObservabilityMiddleware?: ElysiaPluginLike;
 	onUnexpectedError?: (error: unknown, report: McpUnexpectedErrorReport) => void;
+	/** `BILLING_TRUST_PROXY_HEADERS`: key the per-client limits on the forwarded client. */
+	trustProxyHeaders?: boolean;
 }) {
 	const { auth, store, port } = options;
+	const keyOptions = { trustProxyHeaders: options.trustProxyHeaders };
 	const origin = store.config.mcp?.origin;
 	if (!origin) throw new Error("Remote MCP is not enabled");
 	const resource = `${origin}/mcp`;
@@ -146,11 +150,7 @@ export function createRemoteMcpApp(options: {
 			return new Response("Invalid Origin", { status: 403 });
 		if (urlHasEncodedNul(request.url))
 			return Response.json({ error: "invalid_request" }, { status: 400 });
-		await store.rateLimit(
-			`mcp:ip:${server?.requestIP(request)?.address ?? "unknown"}`,
-			300,
-			60_000,
-		);
+		await store.rateLimit(`mcp:ip:${requestIp({ request, server }, keyOptions)}`, 300, 60_000);
 	});
 	app.all(
 		"/mcp",
@@ -308,7 +308,7 @@ export function createRemoteMcpApp(options: {
 				}
 				const headers = new Headers({
 					"content-type": "application/x-www-form-urlencoded",
-					"x-quotum-client-ip": server?.requestIP(request)?.address ?? "unknown",
+					"x-quotum-client-ip": requestIp({ request, server }, keyOptions),
 				});
 				for (const name of ["authorization", "dpop"]) {
 					const value = request.headers.get(name);

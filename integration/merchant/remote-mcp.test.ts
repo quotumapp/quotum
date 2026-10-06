@@ -696,6 +696,56 @@ describe("remote MCP protocol errors", () => {
 			error_description: "Too many attempts. Please try again later.",
 		});
 	});
+
+	it("limits each forwarded client on its own only when proxy headers are trusted", async () => {
+		const proxied = createRemoteMcpApp({
+			auth: f.auth,
+			store: f.store,
+			port: f.billingPort,
+			trustProxyHeaders: true,
+		});
+		const post = (app: typeof remote, client: string, path: string, body: string) =>
+			app.handle(
+				new Request(`${origin}${path}`, {
+					method: "POST",
+					headers: {
+						"content-type":
+							path === "/mcp" ? "application/json" : "application/x-www-form-urlencoded",
+						"x-forwarded-for": client,
+					},
+					body,
+				}),
+			);
+		const garbage = (attempt: number) =>
+			new URLSearchParams({
+				client_id: clientId,
+				resource,
+				grant_type: "refresh_token",
+				refresh_token: `invalid-${attempt}`,
+			}).toString();
+		// The sign-in library's token limit: one client's failures do not lock out the next.
+		let limited = false;
+		for (let attempt = 0; attempt < 150 && !limited; attempt++) {
+			limited =
+				(await post(proxied, "203.0.113.7", "/oauth/token", garbage(attempt))).status === 429;
+		}
+		expect(limited).toBe(true);
+		expect((await post(proxied, "203.0.113.8", "/oauth/token", garbage(0))).status).not.toBe(429);
+		// The endpoints' own limit of 300 requests a minute, which the token requests counted in.
+		limited = false;
+		for (let attempt = 0; attempt < 301 && !limited; attempt++) {
+			limited = (await post(proxied, "203.0.113.7", "/mcp", "{}")).status === 429;
+		}
+		expect(limited).toBe(true);
+		expect((await post(proxied, "203.0.113.8", "/mcp", "{}")).status).toBe(401);
+		// Without the setting a forwarding header is the caller's own claim and is ignored: every
+		// request counts against the connecting address, whatever the header names.
+		const last = { status: 0 };
+		for (let attempt = 0; attempt < 301; attempt++) {
+			last.status = (await post(remote, `198.51.100.${attempt % 250}`, "/mcp", "{}")).status;
+		}
+		expect(last.status).toBe(429);
+	}, 60_000);
 });
 
 describe("MCP browser-approved writes", () => {
