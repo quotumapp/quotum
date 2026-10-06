@@ -187,9 +187,12 @@ test("documents request bodies, required headers and the named schemas clients i
 		"/v1/billing-accounts/{billingAccountId}/usage-alert-events",
 		"get",
 	);
-	expect(alertEvents.parameters).toContainEqual(
-		expect.objectContaining({ in: "query", name: "limit" }),
-	);
+	expect(alertEvents.parameters).toContainEqual({
+		in: "query",
+		name: "limit",
+		required: false,
+		schema: { type: "integer", minimum: 1, maximum: 500, default: 100 },
+	});
 
 	const signup = operation("/api/platform/signup-intent", "post");
 	expect(jsonBody(signup)).toMatchObject({

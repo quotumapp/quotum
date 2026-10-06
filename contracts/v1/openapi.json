@@ -82087,10 +82087,10 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "type": [
-                "number",
-                "null"
-              ]
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
