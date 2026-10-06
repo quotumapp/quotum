@@ -23,7 +23,7 @@ import {
 	type ProviderCapabilityLookup,
 	providerCapabilityCatalog,
 } from "../providers/capabilities";
-import { type CadenceUnit, isCadenceUnit, sameCadence } from "../shared/cadence";
+import { type CadenceUnit, describeCadence, isCadenceUnit, sameCadence } from "../shared/cadence";
 import { toIso } from "../shared/date";
 import {
 	assertPlanCadences,
@@ -224,6 +224,15 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 			const projectState = await readProjectCatalog(tx, project, false);
 			assertExpectedRevision(input.expectedRevision, projectState.revision);
 			await validateCatalogLifecycle(tx, projectState.id, parsed.canonical, this.capabilities);
+			const changedKeys = changedPlanKeys(
+				await readCurrentCatalogIntent(tx, projectState.id, this.capabilities),
+				parsed.canonical,
+			);
+			await assertPlanBindingsReady(
+				tx,
+				projectState.id,
+				parsed.working.plans.filter((plan) => changedKeys.has(plan.key)),
+			);
 			const intentHash = sha256Hex(stableJson(parsed.canonical));
 			const nextRevision = (projectState.revision ?? 0) + 1;
 			const previewToken = sha256Hex(
@@ -1868,6 +1877,75 @@ async function resolveCustomPlanCustomerId(
 	return customer.id;
 }
 
+/** A binding the catalog cannot publish: its store product is missing, or sells something else. */
+function bindingNotReady(message: string): BillingError {
+	return new BillingError(message, "PROVIDER_BINDING_NOT_READY", 409, {
+		classification: "persistence_conflict",
+	});
+}
+
+/** What a store product sells, as the binding messages spell it. */
+function describeSold(period: string | null, count: number): string {
+	return isCadenceUnit(period)
+		? `every ${describeCadence({ unit: period, count })}`
+		: `${period ?? "no billing period"}`;
+}
+
+/**
+ * The active subscription store product a plan-level binding names. A plan billed on a cadence
+ * needs a product that sells that cadence: a provider prices its own products, so a yearly plan on
+ * a monthly product would grant a year's allowance every month.
+ */
+async function resolvePlanBinding(
+	executor: QueryExecutor,
+	projectId: string,
+	plan: Pick<CatalogPlanIntent, "key" | "billingInterval" | "billingIntervalCount">,
+	binding: CatalogProviderBindingIntent,
+): Promise<{ id: string }> {
+	const label = `${binding.provider}/${binding.channel}/${binding.productKey}`;
+	const storeProduct = await executeOne<{
+		id: string;
+		billing_period: string | null;
+		billing_period_count: number;
+	}>(
+		executor,
+		drizzleSql`
+			SELECT sp.id, sp.billing_period, sp.billing_period_count
+			FROM store_products sp
+			JOIN products p ON p.project_id = sp.project_id AND p.id = sp.product_id
+			WHERE sp.project_id = ${projectId}
+				AND p.key = ${normalizedKey(binding.productKey, "provider product key")}
+				AND sp.provider = ${binding.provider}
+				AND sp.channel = ${binding.channel}
+				AND sp.active = true
+				AND p.active = true
+				AND p.type = 'subscription'
+			LIMIT 1
+		`,
+	);
+	if (storeProduct === null) {
+		throw bindingNotReady(
+			`Provider binding ${label} for plan ${plan.key} is not ready: no active subscription product is mapped`,
+		);
+	}
+	const billing = planBillingCadence(plan);
+	if (
+		billing !== null &&
+		!(
+			isCadenceUnit(storeProduct.billing_period) &&
+			sameCadence(
+				{ unit: storeProduct.billing_period, count: storeProduct.billing_period_count },
+				billing,
+			)
+		)
+	) {
+		throw bindingNotReady(
+			`Provider binding ${label} sells ${describeSold(storeProduct.billing_period, storeProduct.billing_period_count)} but plan ${plan.key} bills every ${describeCadence(billing)}`,
+		);
+	}
+	return storeProduct;
+}
+
 async function publishProviderBindings(
 	executor: QueryExecutor,
 	projectId: string,
@@ -1877,30 +1955,7 @@ async function publishProviderBindings(
 ): Promise<void> {
 	for (const plan of catalog.plans) {
 		for (const binding of planProductBindings(plan)) {
-			const storeProduct = await executeOne<{ id: string }>(
-				executor,
-				drizzleSql`
-					SELECT sp.id
-					FROM store_products sp
-					JOIN products p ON p.project_id = sp.project_id AND p.id = sp.product_id
-					WHERE sp.project_id = ${projectId}
-						AND p.key = ${normalizedKey(binding.productKey, "provider product key")}
-						AND sp.provider = ${binding.provider}
-						AND sp.channel = ${binding.channel}
-						AND sp.active = true
-						AND p.active = true
-						AND p.type = 'subscription'
-					LIMIT 1
-				`,
-			);
-			if (storeProduct === null) {
-				throw new BillingError(
-					`Provider binding ${binding.provider}/${binding.channel}/${binding.productKey} is not ready`,
-					"PROVIDER_BINDING_NOT_READY",
-					409,
-					{ classification: "persistence_conflict" },
-				);
-			}
+			const storeProduct = await resolvePlanBinding(executor, projectId, plan, binding);
 			await recordProviderAdoption(executor, {
 				projectId,
 				revisionId,
@@ -1933,6 +1988,81 @@ async function publishProviderBindings(
 	}
 }
 
+/** The active subscription store product a price binding names, which must sell that exact price. */
+async function resolvePriceBinding(
+	executor: QueryExecutor,
+	projectId: string,
+	plan: Pick<CatalogPlanIntent, "key">,
+	price: CatalogPriceIntent,
+	binding: CatalogProviderBindingIntent,
+): Promise<{ id: string }> {
+	const storeProduct = await executeOne<{
+		id: string;
+		price_amount: number | string | null;
+		currency: string | null;
+		billing_period: string | null;
+		billing_period_count: number;
+	}>(
+		executor,
+		drizzleSql`
+			SELECT sp.id, sp.price_amount, sp.currency, sp.billing_period, sp.billing_period_count
+			FROM store_products sp
+			JOIN products p ON p.project_id = sp.project_id AND p.id = sp.product_id
+			WHERE sp.project_id = ${projectId}
+				AND p.key = ${binding.productKey}
+				AND sp.provider = ${binding.provider}
+				AND sp.channel = ${binding.channel}
+				AND sp.active = true
+				AND p.active = true
+				AND p.type = 'subscription'
+			LIMIT 1
+		`,
+	);
+	if (
+		storeProduct === null ||
+		((price.pricingModel ?? "flat") === "flat" &&
+			Number(storeProduct.price_amount) !== price.unitAmountMinor) ||
+		storeProduct.currency?.toUpperCase() !== price.currency ||
+		!isCadenceUnit(storeProduct.billing_period) ||
+		!sameCadence(
+			{ unit: storeProduct.billing_period, count: storeProduct.billing_period_count },
+			priceBillingCadence(price),
+		)
+	) {
+		throw bindingNotReady(
+			`Price binding ${binding.provider}/${binding.channel}/${binding.productKey} does not match ${plan.key}/${price.key}`,
+		);
+	}
+	return storeProduct;
+}
+
+/**
+ * Refuses, before anything is stored, a changed plan whose bindings publish would refuse: a preview
+ * must not promise a revision the publish step cannot write.
+ */
+async function assertPlanBindingsReady(
+	executor: QueryExecutor,
+	projectId: string,
+	plans: readonly CatalogPlanIntent[],
+): Promise<void> {
+	for (const plan of plans) {
+		for (const binding of planProductBindings(plan)) {
+			await resolvePlanBinding(executor, projectId, plan, binding);
+		}
+		const prices = [
+			...(plan.basePrice === undefined || plan.basePrice === null ? [] : [plan.basePrice]),
+			...plan.items.flatMap((item) =>
+				item.price === undefined || item.price === null ? [] : [item.price],
+			),
+		];
+		for (const price of prices) {
+			for (const binding of price.providerBindings) {
+				await resolvePriceBinding(executor, projectId, plan, price, binding);
+			}
+		}
+	}
+}
+
 async function publishProviderPriceBindings(
 	executor: QueryExecutor,
 	projectId: string,
@@ -1949,46 +2079,7 @@ async function publishProviderPriceBindings(
 		];
 		for (const price of prices) {
 			for (const binding of price.providerBindings) {
-				const storeProduct = await executeOne<{
-					id: string;
-					price_amount: number | string | null;
-					currency: string | null;
-					billing_period: string | null;
-					billing_period_count: number;
-				}>(
-					executor,
-					drizzleSql`
-						SELECT sp.id, sp.price_amount, sp.currency, sp.billing_period, sp.billing_period_count
-						FROM store_products sp
-						JOIN products p ON p.project_id = sp.project_id AND p.id = sp.product_id
-						WHERE sp.project_id = ${projectId}
-							AND p.key = ${binding.productKey}
-							AND sp.provider = ${binding.provider}
-							AND sp.channel = ${binding.channel}
-							AND sp.active = true
-							AND p.active = true
-							AND p.type = 'subscription'
-						LIMIT 1
-					`,
-				);
-				if (
-					storeProduct === null ||
-					((price.pricingModel ?? "flat") === "flat" &&
-						Number(storeProduct.price_amount) !== price.unitAmountMinor) ||
-					storeProduct.currency?.toUpperCase() !== price.currency ||
-					!isCadenceUnit(storeProduct.billing_period) ||
-					!sameCadence(
-						{ unit: storeProduct.billing_period, count: storeProduct.billing_period_count },
-						priceBillingCadence(price),
-					)
-				) {
-					throw new BillingError(
-						`Price binding ${binding.provider}/${binding.channel}/${binding.productKey} does not match ${plan.key}/${price.key}`,
-						"PROVIDER_BINDING_NOT_READY",
-						409,
-						{ classification: "persistence_conflict" },
-					);
-				}
+				const storeProduct = await resolvePriceBinding(executor, projectId, plan, price, binding);
 				await recordProviderAdoption(executor, {
 					projectId,
 					revisionId,

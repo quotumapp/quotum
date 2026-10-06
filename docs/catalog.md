@@ -34,6 +34,10 @@ carry no price either, is unpriced:
   (required), a `billingIntervalCount` and its `providerBindings`, and no amount. When a plan has
   both blocks they bill on the same cadence, and a binding appears in only one of them. The plan's
   products are both blocks' bindings together, so a subscription to any of them finds the plan.
+  Each binding must name an active subscription product that sells the plan's cadence, such as
+  every month or every 3 months; preview and publish answer `409 PROVIDER_BINDING_NOT_READY`
+  naming the plan, the product and both cadences, or the missing product, before anything is
+  stored. Only plans the intent changes are checked.
 - A plan's currency is its `basePrice`'s. A plan priced only by its items, such as a seat-only plan
   or a meter limit with priced overage, records no plan currency or amount; each item price keeps
   its own currency, which is what Checkout and invoicing charge. Its billing cadence is the one its
