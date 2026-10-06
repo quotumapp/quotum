@@ -177,6 +177,41 @@ describe("merchant billing port", () => {
 		]);
 	});
 
+	it("refuses an empty entity on a balance read instead of reading the account's", async () => {
+		const calls: unknown[] = [];
+		const balance = { featureKey: "credits", available: "10" };
+		const billing = port({
+			repository: {
+				async getMeteringBalance(_project, billingAccountId, featureKey, entityId) {
+					calls.push({ billingAccountId, featureKey, entityId });
+					return balance as never;
+				},
+			},
+		});
+		const parameters = ["user_1", "credits"];
+		const accepted: Record<string, string>[] = [
+			{},
+			{ entityId: "workspace/1" },
+			{ entityId: " workspace/1 " },
+		];
+		for (const query of accepted) {
+			expect(await billing.dispatch(command("usage.balance", { parameters, query }))).toEqual({
+				status: 200,
+				body: { success: true, data: balance },
+			});
+		}
+		for (const query of [{ entityId: "" }, { entityId: "  " }, { entityId: "x".repeat(257) }]) {
+			expect(await billing.dispatch(command("usage.balance", { parameters, query }))).toMatchObject(
+				{ status: 400, body: { error: { code: "INVALID_REQUEST" } } },
+			);
+		}
+		expect(calls).toEqual([
+			{ billingAccountId: "user_1", featureKey: "credits", entityId: undefined },
+			{ billingAccountId: "user_1", featureKey: "credits", entityId: "workspace/1" },
+			{ billingAccountId: "user_1", featureKey: "credits", entityId: "workspace/1" },
+		]);
+	});
+
 	it("rejects each operation whose Stripe service lacks the method as not configured", async () => {
 		const billing = port({
 			repository: { getCommercialActionPreview: async () => storedCommercialPreview() },
