@@ -113,9 +113,14 @@ function issuePath(issue: z.core.$ZodIssue): string {
 }
 
 async function catalogCommand(argv: readonly string[], env: Environment): Promise<unknown> {
-	const [command, file] = argv;
+	const [command, ...rest] = argv;
 	if (command !== "status" && command !== "diff" && command !== "push")
 		throw new CliUsageError(`Unknown catalog command: ${command}.`);
+	const unknown = rest.find(
+		(arg) => arg.startsWith("--") && !(command === "push" && arg === "--force"),
+	);
+	if (unknown !== undefined) throw new CliUsageError(`Unknown option ${unknown}.`);
+	const [file] = rest.filter((arg) => !arg.startsWith("--"));
 	const writes = command !== "status";
 	const client = new BillingClient({
 		baseUrl: requiredEnv(env, "BILLING_BASE_URL"),
@@ -137,14 +142,24 @@ async function catalogCommand(argv: readonly string[], env: Environment): Promis
 		expectedRevision,
 		catalog: source.catalog,
 	});
+	const changed = current.intentHash !== preview.intentHash;
 	if (command === "diff")
 		return {
-			changed: current.intentHash !== preview.intentHash,
+			changed,
 			currentRevision: current.revision,
 			nextRevision: preview.nextRevision,
 			intentHash: preview.intentHash,
 			expiresAt: preview.expiresAt,
 			impact: preview.impact,
+		};
+	// Publishing the catalog that is already published would still add a revision and write every
+	// top-up option again, so a deploy that pushes on every run would add one each time.
+	if (!changed && !rest.includes("--force"))
+		return {
+			changed: false,
+			published: false,
+			revision: current.revision,
+			intentHash: current.intentHash,
 		};
 	return await client.catalog.publish({
 		expectedRevision,
@@ -220,7 +235,8 @@ const help = `quotum catalog <command> [catalog.ts]
 Commands:
   status                       Print the currently published catalog intent and revision
   diff <catalog.ts>            Validate and preview a catalog-as-code change
-  push <catalog.ts>            Preview, then publish the unchanged catalog intent
+  push <catalog.ts> [--force]  Preview, then publish the previewed catalog intent; a catalog
+                               that is already published is left alone unless --force is given
   format <file> [--write]      Print a .ts, .js or .json catalog in the canonical spelling,
                                or rewrite the file with --write; calls no API
 

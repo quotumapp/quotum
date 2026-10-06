@@ -99,6 +99,46 @@ export const catalog = { features: [], plans: [], topups: [], rateCards: [] };
 		});
 	});
 
+	it("leaves an already published catalog alone on push unless forced", async () => {
+		const fixture = catalogServer({ unchanged: true });
+		const directory = await mkdtemp(join(tmpdir(), "billing-catalog-test-"));
+		temporaryDirectories.push(directory);
+		const catalogPath = join(directory, "catalog.ts");
+		await writeFile(
+			catalogPath,
+			"export const catalog = { features: [], plans: [], topups: [], rateCards: [] };\n",
+			"utf8",
+		);
+		const requests = () => fixture.calls.map((call) => `${call.method} ${call.pathname}`);
+
+		const push = await runCli(["push", catalogPath], fixture.baseUrl);
+		expect(push.exitCode).toBe(0);
+		expect(JSON.parse(push.stdout)).toEqual({
+			changed: false,
+			published: false,
+			revision: 3,
+			intentHash: "current-hash",
+		});
+		expect(requests()).toEqual(["GET /v1/admin/catalog", "POST /v1/admin/catalog/preview"]);
+
+		fixture.calls.length = 0;
+		const forced = await runCli(["push", catalogPath, "--force"], fixture.baseUrl);
+		expect(forced.exitCode).toBe(0);
+		expect(JSON.parse(forced.stdout)).toMatchObject({ revision: 8, duplicate: false });
+		expect(requests()).toEqual([
+			"GET /v1/admin/catalog",
+			"POST /v1/admin/catalog/preview",
+			"POST /v1/admin/catalog/publish",
+		]);
+
+		fixture.calls.length = 0;
+		const misspelled = await runCli(["push", catalogPath, "--forced"], fixture.baseUrl);
+		expect(misspelled.exitCode).toBe(64);
+		expect(misspelled.stderr).toContain("Unknown option --forced.");
+		expect((await runCli(["diff", catalogPath, "--force"], fixture.baseUrl)).exitCode).toBe(64);
+		expect(requests()).toEqual([]);
+	});
+
 	it("expects the declared revision, null included, and the current one only when none is declared", () => {
 		expect(expectedRevisionFor(null, 3)).toBeNull();
 		expect(expectedRevisionFor(7, 3)).toBe(7);
@@ -163,7 +203,7 @@ export const catalog = { features: [], plans: [], topups: [], rateCards: [] };
 	});
 });
 
-function catalogServer(options: { previewConflict?: boolean } = {}): {
+function catalogServer(options: { previewConflict?: boolean; unchanged?: boolean } = {}): {
 	baseUrl: string;
 	calls: RecordedCall[];
 } {
@@ -203,7 +243,7 @@ function catalogServer(options: { previewConflict?: boolean } = {}): {
 					success: true,
 					data: {
 						previewToken: "preview-token",
-						intentHash: "next-hash",
+						intentHash: options.unchanged === true ? "current-hash" : "next-hash",
 						nextRevision: 8,
 						expiresAt: "2026-08-30T12:15:00.000Z",
 						impact: { plansCreated: 1 },
