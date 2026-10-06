@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { InvalidRequestError } from "../../src/billing/errors";
 import { assertPlanCadences, assertTopupCadences } from "../../src/catalog/cadence-rules";
 import type { CatalogPlanItemIntent, CatalogTopupIntent } from "../../src/catalog/types";
+import { maxExpirySeconds } from "../../src/shared/cadence";
 
 const topup: CatalogTopupIntent = {
 	key: "credits_1000",
@@ -80,5 +81,34 @@ describe("calendar expiry rules", () => {
 		).toThrow(
 			new InvalidRequestError("Top-up credits_1000 expiry cannot span more than 10 × year"),
 		);
+	});
+});
+
+describe("exact-duration expiry rules", () => {
+	it("accepts a duration up to ten years on a top-up and an allocation", () => {
+		expect(() => assertTopupCadences({ ...topup, expiresAfterSeconds: 1 })).not.toThrow();
+		expect(() =>
+			assertTopupCadences({ ...topup, expiresAfterSeconds: maxExpirySeconds }),
+		).not.toThrow();
+		expect(() =>
+			assertPlanCadences(plan({ ...allocation, expiresAfterSeconds: maxExpirySeconds })),
+		).not.toThrow();
+	});
+
+	it("refuses a duration longer than ten years, below one second or not whole", () => {
+		const tooLong = `expiry must be a whole number of seconds from 1 to ${maxExpirySeconds} (ten years)`;
+		for (const seconds of [maxExpirySeconds + 1, 9_000_000_000_000, Number.MAX_SAFE_INTEGER]) {
+			expect(() => assertTopupCadences({ ...topup, expiresAfterSeconds: seconds })).toThrow(
+				new InvalidRequestError(`Top-up credits_1000 ${tooLong}`),
+			);
+			expect(() =>
+				assertPlanCadences(plan({ ...allocation, expiresAfterSeconds: seconds })),
+			).toThrow(new InvalidRequestError(`Plan pro item credits ${tooLong}`));
+		}
+		for (const seconds of [0, -5, 1.5, Number.NaN, 2 ** 53]) {
+			expect(() => assertTopupCadences({ ...topup, expiresAfterSeconds: seconds })).toThrow(
+				InvalidRequestError,
+			);
+		}
 	});
 });

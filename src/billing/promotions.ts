@@ -1,5 +1,10 @@
 import type { ProjectInstanceContext } from "../projects/context";
-import { type Cadence, canonicalCadence, minCalendarSpanHours } from "../shared/cadence";
+import {
+	type Cadence,
+	canonicalCadence,
+	maxExpirySeconds,
+	minCalendarSpanHours,
+} from "../shared/cadence";
 import type { AppleOfferInput, ApplePromotionAction } from "./apple-promotions";
 import { canonicalDecimal, positiveDecimal, sha256Hex, stableJson } from "./decimal";
 import { BillingError } from "./errors";
@@ -642,10 +647,7 @@ function normalizeEffect(effect: PromotionEffect): PromotionEffect {
 				.map((item) => ({
 					featureKey: requiredText(item.featureKey, "featureKey", 120),
 					quantity: grantQuantity(item.quantity),
-					expiresAfterSeconds: optionalPositiveInteger(
-						item.expiresAfterSeconds,
-						"expiresAfterSeconds",
-					),
+					expiresAfterSeconds: optionalExpirySeconds(item.expiresAfterSeconds),
 				}))
 				.sort((left, right) => compareText(left.featureKey, right.featureKey));
 			if (new Set(items.map((item) => item.featureKey)).size !== items.length) {
@@ -788,6 +790,14 @@ function requiredPositiveInteger(value: number | null | undefined, field: string
 
 function optionalPositiveInteger(value: number | null | undefined, field: string): number | null {
 	return value === undefined || value === null ? null : requiredPositiveInteger(value, field);
+}
+
+function optionalExpirySeconds(value: number | null | undefined): number | null {
+	const seconds = optionalPositiveInteger(value, "expiresAfterSeconds");
+	if (seconds !== null && seconds > maxExpirySeconds) {
+		throw invalidTerms(`expiresAfterSeconds cannot exceed ${maxExpirySeconds} seconds (ten years)`);
+	}
+	return seconds;
 }
 
 function optionalTimestamp(value: string | null | undefined, field: string): string | null {

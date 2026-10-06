@@ -31958,7 +31958,8 @@
                                                     "type": "string"
                                                   },
                                                   "seconds": {
-                                                    "exclusiveMinimum": 0,
+                                                    "maximum": 315619200,
+                                                    "minimum": 1,
                                                     "type": "integer"
                                                   }
                                                 },
@@ -32559,7 +32560,8 @@
                                         "type": "string"
                                       },
                                       "expiresAfterSeconds": {
-                                        "exclusiveMinimum": 0,
+                                        "maximum": 315619200,
+                                        "minimum": 1,
                                         "type": [
                                           "integer",
                                           "null"
@@ -33148,7 +33150,8 @@
                           "additionalProperties": false,
                           "properties": {
                             "expiresAfterSeconds": {
-                              "exclusiveMinimum": 0,
+                              "maximum": 315619200,
+                              "minimum": 1,
                               "type": [
                                 "integer",
                                 "null"
@@ -33215,7 +33218,8 @@
                                       "type": "string"
                                     },
                                     "seconds": {
-                                      "exclusiveMinimum": 0,
+                                      "maximum": 315619200,
+                                      "minimum": 1,
                                       "type": "integer"
                                     }
                                   },
@@ -34231,7 +34235,8 @@
                                                     "type": "string"
                                                   },
                                                   "seconds": {
-                                                    "exclusiveMinimum": 0,
+                                                    "maximum": 315619200,
+                                                    "minimum": 1,
                                                     "type": "integer"
                                                   }
                                                 },
@@ -34832,7 +34837,8 @@
                                         "type": "string"
                                       },
                                       "expiresAfterSeconds": {
-                                        "exclusiveMinimum": 0,
+                                        "maximum": 315619200,
+                                        "minimum": 1,
                                         "type": [
                                           "integer",
                                           "null"
@@ -35421,7 +35427,8 @@
                           "additionalProperties": false,
                           "properties": {
                             "expiresAfterSeconds": {
-                              "exclusiveMinimum": 0,
+                              "maximum": 315619200,
+                              "minimum": 1,
                               "type": [
                                 "integer",
                                 "null"
@@ -35488,7 +35495,8 @@
                                       "type": "string"
                                     },
                                     "seconds": {
-                                      "exclusiveMinimum": 0,
+                                      "maximum": 315619200,
+                                      "minimum": 1,
                                       "type": "integer"
                                     }
                                   },
@@ -40003,6 +40011,7 @@
                               "properties": {
                                 "expiresAfterSeconds": {
                                   "exclusiveMinimum": 0,
+                                  "maximum": 315619200,
                                   "type": [
                                     "integer",
                                     "null"
@@ -58699,7 +58708,8 @@
                                                     "type": "string"
                                                   },
                                                   "seconds": {
-                                                    "exclusiveMinimum": 0,
+                                                    "maximum": 315619200,
+                                                    "minimum": 1,
                                                     "type": "integer"
                                                   }
                                                 },
@@ -59300,7 +59310,8 @@
                                         "type": "string"
                                       },
                                       "expiresAfterSeconds": {
-                                        "exclusiveMinimum": 0,
+                                        "maximum": 315619200,
+                                        "minimum": 1,
                                         "type": [
                                           "integer",
                                           "null"
@@ -59889,7 +59900,8 @@
                           "additionalProperties": false,
                           "properties": {
                             "expiresAfterSeconds": {
-                              "exclusiveMinimum": 0,
+                              "maximum": 315619200,
+                              "minimum": 1,
                               "type": [
                                 "integer",
                                 "null"
@@ -59956,7 +59968,8 @@
                                       "type": "string"
                                     },
                                     "seconds": {
-                                      "exclusiveMinimum": 0,
+                                      "maximum": 315619200,
+                                      "minimum": 1,
                                       "type": "integer"
                                     }
                                   },
@@ -60892,7 +60905,8 @@
                                                     "type": "string"
                                                   },
                                                   "seconds": {
-                                                    "exclusiveMinimum": 0,
+                                                    "maximum": 315619200,
+                                                    "minimum": 1,
                                                     "type": "integer"
                                                   }
                                                 },
@@ -61493,7 +61507,8 @@
                                         "type": "string"
                                       },
                                       "expiresAfterSeconds": {
-                                        "exclusiveMinimum": 0,
+                                        "maximum": 315619200,
+                                        "minimum": 1,
                                         "type": [
                                           "integer",
                                           "null"
@@ -62082,7 +62097,8 @@
                           "additionalProperties": false,
                           "properties": {
                             "expiresAfterSeconds": {
-                              "exclusiveMinimum": 0,
+                              "maximum": 315619200,
+                              "minimum": 1,
                               "type": [
                                 "integer",
                                 "null"
@@ -62149,7 +62165,8 @@
                                       "type": "string"
                                     },
                                     "seconds": {
-                                      "exclusiveMinimum": 0,
+                                      "maximum": 315619200,
+                                      "minimum": 1,
                                       "type": "integer"
                                     }
                                   },
@@ -68105,6 +68122,7 @@
                               "properties": {
                                 "expiresAfterSeconds": {
                                   "exclusiveMinimum": 0,
+                                  "maximum": 315619200,
                                   "type": [
                                     "integer",
                                     "null"

@@ -2,7 +2,12 @@ import { z } from "zod";
 import { BillingError } from "../billing/errors";
 import { billingProviders } from "../billing/types";
 import type { CatalogControlPlaneLike } from "../catalog/types";
-import { billingCadenceUnits, cadenceUnits, maxCadenceCount } from "../shared/cadence";
+import {
+	billingCadenceUnits,
+	cadenceUnits,
+	maxCadenceCount,
+	maxExpirySeconds,
+} from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/catalog-responses";
@@ -15,6 +20,9 @@ export interface CatalogRoutesDependencies {
 	catalogControlPlane: CatalogControlPlaneLike;
 	registerPostAuthGuard: (guard: PostAuthGuard) => void;
 }
+
+/** An exact-duration expiry: whole seconds, at most ten years. */
+const expirySecondsSchema = z.number().int().min(1).max(maxExpirySeconds);
 
 const featureSchema = z
 	.object({
@@ -70,7 +78,7 @@ const legacyPlanItemSchema = z
 		quantity: z.string().trim().min(1).max(80).nullable(),
 		resetInterval: z.enum(cadenceUnits).nullable(),
 		resetIntervalCount: z.number().int().min(1).max(maxCadenceCount).nullable().optional(),
-		expiresAfterSeconds: z.number().int().positive().nullable(),
+		expiresAfterSeconds: expirySecondsSchema.nullable(),
 		overagePolicy: z.enum(["blocked", "allowed"]),
 		allocationScope: z.enum(["account", "entity", "license_pool"]).optional(),
 		rollover: z
@@ -118,7 +126,7 @@ const expirySchema = z.discriminatedUnion("mode", [
 			intervalCount: z.number().int().min(1).max(maxCadenceCount),
 		})
 		.strict(),
-	z.object({ mode: z.literal("after_seconds"), seconds: z.number().int().positive() }).strict(),
+	z.object({ mode: z.literal("after_seconds"), seconds: expirySecondsSchema }).strict(),
 ]);
 
 const canonicalRolloverSchema = z
@@ -257,7 +265,7 @@ const topupSchema = z
 		featureKey: z.string().trim().min(1).max(120),
 		quantity: z.string().trim().min(1).max(80),
 		expiry: expirySchema.optional(),
-		expiresAfterSeconds: z.number().int().positive().nullable().optional(),
+		expiresAfterSeconds: expirySecondsSchema.nullable().optional(),
 		providerBindings: z.array(providerBindingSchema).min(1).max(20),
 	})
 	.strict();

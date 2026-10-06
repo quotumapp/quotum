@@ -45,6 +45,7 @@ import {
 } from "../../billing/promotions";
 import type { BillingProvider } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
+import { maxExpirySeconds } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import { allocationSpendOrderSql } from "./allocation-order";
 import { linkAppleOfferInTx } from "./apple-promotions";
@@ -875,7 +876,7 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 						item.quantity,
 						CASE
 							WHEN item.expires_after_seconds IS NULL THEN NULL
-							ELSE now() + item.expires_after_seconds * interval '1 second'
+							ELSE now() + LEAST(item.expires_after_seconds, ${maxExpirySeconds}::bigint) * interval '1 second'
 						END
 					FROM promotion_grant_items item
 					JOIN features feature

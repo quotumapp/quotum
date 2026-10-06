@@ -3,6 +3,7 @@ import {
 	addCadence,
 	type CadenceUnit,
 	cadenceUnits,
+	maxExpirySeconds,
 	unitHours,
 	unitMonths,
 } from "../../shared/cadence";
@@ -100,7 +101,7 @@ export function expiresAtSql(anchor: SQL, alias: string): SQL {
 		WHEN ${drizzleSql.raw(`${alias}.expiry_interval`)} IS NOT NULL
 			THEN ((${anchor} AT TIME ZONE 'UTC') + ${interval}) AT TIME ZONE 'UTC'
 		WHEN ${drizzleSql.raw(`${alias}.expires_after_seconds`)} IS NOT NULL
-			THEN ${anchor} + ${drizzleSql.raw(`${alias}.expires_after_seconds`)} * interval '1 second'
+			THEN ${anchor} + LEAST(${drizzleSql.raw(`${alias}.expires_after_seconds`)}, ${maxExpirySeconds}::bigint) * interval '1 second'
 	END)`;
 }
 
@@ -120,7 +121,9 @@ export function storedExpiresAt(anchor: Date, expiry: StoredExpiry): Date | null
 		});
 	}
 	if (expiry.expires_after_seconds !== null) {
-		return new Date(anchor.getTime() + Number(expiry.expires_after_seconds) * 1000);
+		return new Date(
+			anchor.getTime() + Math.min(Number(expiry.expires_after_seconds), maxExpirySeconds) * 1000,
+		);
 	}
 	return null;
 }

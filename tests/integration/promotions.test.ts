@@ -4,6 +4,7 @@ import type { ReservePromotionRedemptionInput } from "../../src/db/repository/pr
 import { syncPromotionStripeObject } from "../../src/providers/stripe/promotions";
 import { StripeBillingService } from "../../src/providers/stripe/service";
 import { createFakeStripePromotions } from "../../src/providers/stripe/testing/fake-promotions";
+import { maxExpirySeconds } from "../../src/shared/cadence";
 import { PromotionMaintenanceWorker } from "../../src/workers/promotion-maintenance";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
@@ -130,6 +131,48 @@ localDescribe("promotion repository", () => {
 				}),
 			),
 		).toBe("PROMOTION_TERMS_INVALID");
+	});
+
+	it("bounds a grant's exact expiry and credits a stored longer one at ten years", async () => {
+		expect(
+			await captureCode(
+				context.repository.promotions.createPromotion(
+					project,
+					grantPromotion({
+						effect: {
+							kind: "feature_grant",
+							items: [
+								{
+									featureKey: "ai_credits",
+									quantity: "10",
+									expiresAfterSeconds: maxExpirySeconds + 1,
+								},
+							],
+						},
+					}),
+				),
+			),
+		).toBe("PROMOTION_TERMS_INVALID");
+		await context.repository.promotions.createPromotion(
+			project,
+			grantPromotion({ codes: [{ code: "LONG" }] }),
+		);
+		// A promotion stored before the bound existed can hold any positive duration.
+		await context.sql`UPDATE promotion_grant_items SET expires_after_seconds = 9000000000000`;
+		const redeemed = await context.repository.promotions.redeemPromotionCode(project, {
+			billingAccountId: "reviewer",
+			code: "LONG",
+			channel: "web",
+			idempotencyKey: "redeem-long",
+			actor: "user:7",
+		});
+		expect(redeemed.kind).toBe("granted");
+		const [granted] = await context.sql<Array<{ lifetime_seconds: string }>>`
+			SELECT round(extract(epoch FROM expires_at - now()))::bigint::text AS lifetime_seconds
+			FROM balance_allocations WHERE source_kind = 'reward'
+		`;
+		expect(Number(granted?.lifetime_seconds)).toBeGreaterThan(maxExpirySeconds - 60);
+		expect(Number(granted?.lifetime_seconds)).toBeLessThanOrEqual(maxExpirySeconds);
 	});
 
 	it("adds, replays and deactivates codes with case-insensitive uniqueness", async () => {

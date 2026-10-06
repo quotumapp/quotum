@@ -114,8 +114,10 @@ overage is invoiced once per closed window; a daily or weekly meter limit is a h
 expiry is `{ "mode": "after", "interval": "week", "intervalCount": 2 }` or `{ "mode": "forever" }`
 and spans at most ten years; the earlier `{ "mode": "months", "months": 3 }` is still accepted and
 is returned as `after` with a month interval. An allocation's or top-up's calendar `expiry` takes a
-count from 1 to 1,000 of any cadence unit, `hour` included, and spans at most ten years too. A plan
-bills every `billingInterval` (`day`, `week`, `month`, `quarter`, `semi_annual` or `year`) times
+count from 1 to 1,000 of any cadence unit, `hour` included, and spans at most ten years too. An
+exact duration (`after_seconds`) is a whole number of seconds from 1 to 315,619,200, the 3,653 days
+of the longest ten calendar years; a catalog published before that bound with a longer duration
+still credits what was bought, expiring it after ten years. A plan bills every `billingInterval` (`day`, `week`, `month`, `quarter`, `semi_annual` or `year`) times
 `billingIntervalCount` (default 1, at most three years), and every price on it recurs at the same
 interval however it is spelled: `quarter` and
 `month` × 3 agree. Only then do they check each provider binding against
