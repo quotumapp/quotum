@@ -105,3 +105,43 @@ it("refuses a list limit that is not written in decimal digits before any servic
 	}
 	expect(calls).toEqual([]);
 });
+
+it("publishes the receipt deductions page size it applies", async () => {
+	const inputs: Array<{ limit?: number }> = [];
+	const app = withOpenApiAssertions(
+		createApp({
+			env,
+			connections: fixtureConnections(env.connectionFixtures),
+			projectContextResolver: projectContextResolver({
+				contexts: [projectInstanceContext("acme")],
+				credentials: { secret: "acme" },
+			}),
+			usageApiService: {
+				listReceiptDeductions: async (_project: unknown, input: { limit?: number }) => {
+					inputs.push(input);
+					return { items: [], nextCursor: null };
+				},
+			} as unknown as NonNullable<AppDependencies["usageApiService"]>,
+		}),
+	);
+	const path = "/v1/billing-accounts/{billingAccountId}/usage/receipts/{receiptId}/deductions";
+	const route = path.replace(/\{[A-Za-z]+\}/g, "acct_1");
+	for (const query of ["", "?limit=7"]) {
+		const response = await testRequest(app, `${route}${query}`, {
+			headers: { authorization: "Bearer secret" },
+		});
+		expect(response.status, query).toBe(200);
+	}
+	// An omitted limit reaches the service as the documented default, not as an absent value.
+	expect(inputs.map((input) => input.limit)).toEqual([50, 7]);
+
+	const document = await generateOpenApi("0.0.0-test");
+	const paths = document.paths ?? {};
+	const item = paths[path] as { get: { parameters: object[] } };
+	expect(item.get.parameters).toContainEqual({
+		in: "query",
+		name: "limit",
+		required: false,
+		schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+	});
+});
