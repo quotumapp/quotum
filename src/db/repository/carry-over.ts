@@ -411,10 +411,13 @@ async function carryOverUsage(executor: QueryExecutor, input: CarryOverInput): P
  * as consumed quantity on the incoming allowance. The copies are taken back where they sit, so the
  * customer is not charged on the new plan for usage that was corrected.
  *
- * The event belongs to the portion that the first carry out of its allowance after the event
- * introduced. That portion shrinks by the correction, from its end. A holder that received only a
- * prefix of it, because a carry was capped, keeps what it received until the portion falls below
- * that prefix. The carries that moved the portion give back the same quantity in
+ * The event belongs to the portions that the carries out of its allowance after the event
+ * introduced: the first one took as much of the allowance's uncarried use as its target could hold,
+ * and when that carry was capped, a later carry out of the same allowance introduced the rest as a
+ * portion of its own. The correction shrinks them oldest first, each from its end, so an event
+ * recorded later, which only the later portions can hold, still finds its usage there. A holder that
+ * received only a prefix of a portion, because a carry was capped, keeps what it received until the
+ * portion falls below that prefix. The carries that moved a portion give back the same quantity in
  * `applied_quantity`, which keeps later carries from counting usage the customer no longer owes,
  * and a carry never gives back more than its `applied_quantity`, so the part a capped carry
  * forgave is never refunded.
@@ -464,32 +467,45 @@ export async function followCarriedUsage(
 		applied: allocationUnits(row.applied),
 	}));
 	const replay = replayCarries(edges);
-	const portion = rows.findIndex(
-		(row, index) =>
-			row.after_event &&
-			edges[index]?.from === input.allocationId &&
-			(replay.sizes.get(index) ?? 0n) > 0n,
+	const portions = rows.flatMap((row, index) =>
+		row.after_event &&
+		edges[index]?.from === input.allocationId &&
+		(replay.sizes.get(index) ?? 0n) > 0n
+			? [index]
+			: [],
 	);
-	if (portion < 0) return;
+	if (portions.length === 0) return;
 	const quantity = allocationUnits(input.quantity);
 	if (input.closedSource) {
 		const reduced = await reduceCopy(executor, input.projectId, input.allocationId, quantity);
 		if (reduced === null) return;
 	}
-	const size = replay.sizes.get(portion) ?? 0n;
-	const cap = size - (quantity < size ? quantity : size);
+	// What is left of each portion once the correction is taken from them, oldest first.
+	const caps = new Map<number, bigint>();
+	let remaining = quantity;
+	for (const portion of portions) {
+		if (remaining === 0n) break;
+		const size = replay.sizes.get(portion) ?? 0n;
+		const taken = remaining < size ? remaining : size;
+		caps.set(portion, size - taken);
+		remaining -= taken;
+	}
 	for (const [allocationId, held] of replay.holdings) {
-		const quantityHeld = held.get(portion) ?? 0n;
-		if (allocationId === input.allocationId || quantityHeld <= cap) continue;
-		await reduceCopy(executor, input.projectId, allocationId, quantityHeld - cap);
+		if (allocationId === input.allocationId) continue;
+		let excess = 0n;
+		for (const [portion, cap] of caps) {
+			const quantityHeld = held.get(portion) ?? 0n;
+			if (quantityHeld > cap) excess += quantityHeld - cap;
+		}
+		if (excess > 0n) await reduceCopy(executor, input.projectId, allocationId, excess);
 	}
 	for (const [index, moves] of replay.moves.entries()) {
-		const returned = moves
-			.filter((move) => move.portion === portion)
-			.reduce((sum, move) => {
-				const kept = move.before + move.moved <= cap ? move.moved : cap - move.before;
-				return sum + move.moved - (kept > 0n ? kept : 0n);
-			}, 0n);
+		const returned = moves.reduce((sum, move) => {
+			const cap = caps.get(move.portion);
+			if (cap === undefined) return sum;
+			const kept = move.before + move.moved <= cap ? move.moved : cap - move.before;
+			return sum + move.moved - (kept > 0n ? kept : 0n);
+		}, 0n);
 		if (returned <= 0n) continue;
 		await executeOne(
 			executor,

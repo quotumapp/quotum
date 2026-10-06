@@ -166,10 +166,10 @@ by what remains, and correcting the rest of the usage returns the remainder, so 
 return exactly what was charged. Usage that an immediate plan change carried into a new plan is
 returned there: the correction gives the quantity back on the allowance that now holds the copy,
 never more than that carry charged, so usage corrected after a switch, or after a round trip through
-other plans, stops counting where it was carried. Units a cap forgave and a later switch carried
-again can stay counted after a correction until the allowance ends. A correction's `quantity`
-follows the same rule as consume: it may carry no more decimal places than the meter's
-`creditScale`, or it answers `400 INVALID_REQUEST`.
+other plans, stops counting where it was carried. That includes units a capped carry left behind
+and a later switch carried: the correction takes those back too. A correction's `quantity` follows
+the same rule as consume: it may carry no more decimal places than the meter's `creditScale`, or it
+answers `400 INVALID_REQUEST`.
 
 ## Meter limits
 

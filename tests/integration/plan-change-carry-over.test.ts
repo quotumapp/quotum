@@ -674,6 +674,73 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		}
 	}, 120_000);
 
+	it("gives back the whole correction when a capped carry left part of the event for a later one", async () => {
+		// Allowances of 60, 25 and 80 on the first, other and third plan.
+		await threePlans(["60", "25", "80"]);
+		await sync(1);
+		await spendEvent(4, "split-e1");
+		await commercialSwitch("third-plan", "split-to-third", { usages: ["ai_credits"] });
+		await sync(3);
+		await spendEvent(15, "split-e2");
+		await commercialSwitch("migration-plan", "split-to-first", { usages: ["ai_credits"] });
+		await sync(1);
+		const event = await spendEvent(14, "split-e3");
+		expect(await usage()).toEqual({ consumed: "33", available: "27" });
+		// The other plan holds 25 of the 33: 19 carried before and 6 of the 14 just spent.
+		await commercialSwitch("other-plan", "split-to-other", { usages: ["ai_credits"] });
+		await sync(2);
+		expect(await usage()).toEqual({ consumed: "25", available: "0" });
+		await commercialSwitch("migration-plan", "split-back", { usages: ["ai_credits"] });
+		await sync(1);
+		// The third plan has room for everything, so the other 8 of the 14 arrive with this carry.
+		await commercialSwitch("third-plan", "split-to-third-again", { usages: ["ai_credits"] });
+		await sync(3);
+		expect(await usage()).toEqual({ consumed: "33", available: "47" });
+
+		await correctEvent(event, "10", "split-fix-1");
+		expect(await usage()).toEqual({ consumed: "23", available: "57" });
+		await correctEvent(event, "4", "split-fix-2");
+		expect(await usage()).toEqual({ consumed: "19", available: "61" });
+		expect((await carriedUsage()).map((row) => Number(row.applied))).toEqual([4, 15, 19, 0]);
+	}, 120_000);
+
+	it("leaves a later event's usage for its own correction when an earlier one spills over", async () => {
+		for (const order of [
+			["earlier", "later"],
+			["later", "earlier"],
+		] as const) {
+			const run = order.join("-");
+			await resetForSecondRun();
+			await threePlans(["60", "10", "80"]);
+			await sync(1);
+			const earlier = await spendEvent(14, `${run}-e1`);
+			// The other plan holds 10 of the 14.
+			await commercialSwitch("other-plan", `${run}-out`, { usages: ["ai_credits"] });
+			await sync(2);
+			await commercialSwitch("migration-plan", `${run}-back`, { usages: ["ai_credits"] });
+			await sync(1);
+			const later = await spendEvent(5, `${run}-e2`);
+			// One carry brings the third plan the 10, the 4 left behind and the 5 spent since.
+			await commercialSwitch("third-plan", `${run}-on`, { usages: ["ai_credits"] });
+			await sync(3);
+			expect(await usage()).toEqual({ consumed: "19", available: "61" });
+
+			const events = { earlier: [earlier, "14"], later: [later, "5"] } as const;
+			let consumed = 19;
+			for (const which of order) {
+				const [event, quantity] = events[which];
+				await correctEvent(event, quantity, `${run}-fix-${which}`);
+				consumed -= Number(quantity);
+				expect({ run, which, ...(await usage()) }).toEqual({
+					run,
+					which,
+					consumed: String(consumed),
+					available: String(80 - consumed),
+				});
+			}
+		}
+	}, 120_000);
+
 	it("keeps the net usage on the live allowance through random spends, corrections and switches", async () => {
 		for (const seed of [11, 29, 47, 211]) {
 			await resetForSecondRun();
@@ -772,7 +839,7 @@ async function separatePlans(): Promise<void> {
  * migration plan become `migration-plan` and `other-plan`, and a third version, with its own Stripe
  * prices, becomes `third-plan`.
  */
-async function threePlans(quantity: string): Promise<void> {
+async function threePlans(quantity: string | readonly [string, string, string]): Promise<void> {
 	await context.sql`
 		INSERT INTO plan_versions (
 			project_id, plan_id, catalog_revision_id, version, status, currency,
@@ -854,7 +921,9 @@ async function threePlans(quantity: string): Promise<void> {
 			ON binding.project_id = price.project_id AND binding.price_component_id = price.id
 		WHERE price.key = 'base' AND version.version = 3
 	`;
-	for (const version of [1, 2, 3]) await addAllowance(version, quantity);
+	for (const [index, version] of [1, 2, 3].entries()) {
+		await addAllowance(version, typeof quantity === "string" ? quantity : (quantity[index] ?? "0"));
+	}
 	await context.sql`
 		INSERT INTO plans (project_id, key, name, active)
 		SELECT plan.project_id, added.key, added.name, true
