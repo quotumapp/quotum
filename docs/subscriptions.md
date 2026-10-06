@@ -65,9 +65,11 @@ Malformed email returns `400 INVALID_REQUEST`; missing email for a new customer 
 `409 COMMERCIAL_PREVIEW_STALE` before execution is claimed. Completed receipts remain replayable
 without reading that context. Preview and execution check the retained customer creation intent
 before any checkout reservation: a different email returns `409 IDEMPOTENCY_CONFLICT`; the same
-failed intent returns `409 PROVIDER_OPERATION_FAILED`. Changing the checkout key cannot reset that
-receipt. Merchant same-key replay returns the stored HTTP 200 result, including production step-up
-receipt replay; a different key cannot reuse that authorization.
+failed intent returns `409 PROVIDER_OPERATION_FAILED`. That receipt stays terminal for its own key;
+a new checkout key creates the customer once after a definitive rejection (see
+[provider write recovery](operations.md#provider-write-recovery-foundation)). Merchant same-key
+replay returns the stored HTTP 200 result, including production step-up receipt replay; a different
+key cannot reuse that authorization.
 
 Verified server events grant the purchased plan version and its price component, even if a newer
 catalog version was published while payment was open. The browser callback and checkout receipt

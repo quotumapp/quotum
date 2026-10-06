@@ -289,7 +289,8 @@ retains its existing independent configuration.
 Browser-approved billing changes additionally require `QUOTUM_MCP_WRITES_ENABLED=true` (default
 false). The baseline changes touch `003_metering_and_pricing.sql` (atomic billing receipts) and
 `004_merchant.sql` (grant scopes and proposals). Follow the same reviewed schema transition, deploy
-API with writes disabled, deploy UI/BFF review and decision routes, then enable writes. Clients
+API with writes disabled, deploy UI/BFF review and decision routes, then enable writes once the
+console serves the review page (see [MCP server](mcp.md#propose-billing-changes)). Clients
 must reconnect requesting `quotum.billing.write`; existing grants remain read-only. Turn off only
 the writes flag to block proposals/approvals while retaining read access and outcome inspection.
 
