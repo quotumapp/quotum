@@ -142,7 +142,10 @@ An immediate `subscription_change` intent can carry some of that over, per consu
   80 consumed and 20 available when every plan grants 100 in the same window. Switching
   A → B → A → C → B and consuming 1 before each switch leaves B with 4 consumed. Each carry
   preserves the portions of usage already shared by the allowances, up to the quantity actually
-  applied by earlier carries. A carry of nothing is not recorded in `carried_usages`.
+  applied by earlier carries. A carry of nothing is not recorded in `carried_usages`. Correcting
+  usage that was carried takes it back from the new allowance too, and reduces
+  `applied_quantity` by what the correction returned, so `requested_quantity` minus
+  `applied_quantity` is no longer only what the cap forgave.
 - The preview reports `carryOver.features[]`, with each feature's current unused balance and the
   usage the switch would carry, and whether it carries. Those figures are indicative: the switch carries what the allowances hold
   when Quotum records the provider's update. When the provider reports the new version before the

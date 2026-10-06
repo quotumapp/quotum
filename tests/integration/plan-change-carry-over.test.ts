@@ -588,6 +588,137 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		expect(await projects()).toMatchObject({ granted: "5", consumed: "4", available: "1" });
 		expect(await projectAllowances()).toEqual([[1, "5.000000000", "4.000000000", false]]);
 	});
+
+	it("gives a correction of carried usage back on the allowance that now holds it", async () => {
+		await addAllowance(1, "100");
+		await addAllowance(2, "300");
+		await sync(1);
+		const original = await spendEvent(30, "spend-then-carry");
+		await commercialSwitch("migration-plan", "carry-then-correct", {
+			balances: ["ai_credits"],
+			usages: ["ai_credits"],
+		});
+		await sync(2);
+		expect(await usage()).toEqual({ consumed: "30", available: "340" });
+
+		// The original usage sits on version 1's ended allowance; the carry copied it to version 2's.
+		await correctEvent(original, "10", "carried-fix-1");
+		expect(await usage()).toEqual({ consumed: "20", available: "350" });
+		await correctEvent(original, "20", "carried-fix-2");
+		expect(await usage()).toEqual({ consumed: "0", available: "370" });
+		expect(await carriedUsage()).toEqual([{ requested: "30.000000000", applied: "0.000000000" }]);
+		// Version 2 can spend its whole allowance again, and nothing more.
+		await spend(300, "spend-everything");
+		expect(await usage()).toEqual({ consumed: "300", available: "70" });
+		await expect(correctEvent(original, "1", "carried-fix-3")).rejects.toMatchObject({
+			code: "CORRECTION_EXCEEDS_USAGE",
+		});
+	});
+
+	it("never gives back more than the capped carry charged", async () => {
+		await addAllowance(1, "100");
+		await addAllowance(2, "20");
+		await sync(1);
+		const original = await spendEvent(30, "spend-before-cap");
+		await commercialSwitch("migration-plan", "capped-carry", { usages: ["ai_credits"] });
+		await sync(2);
+		// 30 were used, but the new allowance holds 20, so 20 are charged and 10 forgiven.
+		expect(await usage()).toEqual({ consumed: "20", available: "0" });
+		await correctEvent(original, "10", "capped-fix-1");
+		expect(await usage()).toEqual({ consumed: "10", available: "10" });
+		await correctEvent(original, "20", "capped-fix-2");
+		// The correction totals 30, but only the 20 that were charged come back.
+		expect(await usage()).toEqual({ consumed: "0", available: "20" });
+		expect(await carriedUsage()).toEqual([{ requested: "30.000000000", applied: "0.000000000" }]);
+		expect((await allowances()).every((row) => Number(row.consumed) >= 0)).toBe(true);
+	});
+
+	it("gives back usage corrected after it travelled to another plan and returned", async () => {
+		for (const order of [
+			["second", "first"],
+			["first", "second"],
+		] as const) {
+			await resetForSecondRun();
+			await addAllowance(1, "100");
+			await addAllowance(2, "300");
+			await separatePlans();
+			await sync(1);
+			const first = await spendEvent(30, `${order.join("-")}-e1`);
+			await commercialSwitch("other-plan", `${order.join("-")}-out`, { usages: ["ai_credits"] });
+			await sync(2);
+			const second = await spendEvent(50, `${order.join("-")}-e2`);
+			await commercialSwitch("migration-plan", `${order.join("-")}-back`, {
+				usages: ["ai_credits"],
+			});
+			await sync(1);
+			expect(await usage()).toEqual({ consumed: "80", available: "20" });
+
+			const events = { first: [first, "30"], second: [second, "50"] } as const;
+			let consumed = 80;
+			for (const which of order) {
+				const [event, quantity] = events[which];
+				await correctEvent(event, quantity, `${order.join("-")}-fix-${which}`);
+				consumed -= Number(quantity);
+				expect(await usage()).toEqual({
+					consumed: String(consumed),
+					available: String(100 - consumed),
+				});
+			}
+			expect(consumed).toBe(0);
+			// Going to the other plan again carries nothing the first one no longer used.
+			await commercialSwitch("other-plan", `${order.join("-")}-out-again`, {
+				usages: ["ai_credits"],
+			});
+			await sync(2);
+			expect(await usage()).toEqual({ consumed: "0", available: "300" });
+		}
+	}, 120_000);
+
+	it("keeps the net usage on the live allowance through random spends, corrections and switches", async () => {
+		for (const seed of [11, 29, 47, 211]) {
+			await resetForSecondRun();
+			await threePlans("1000");
+			await sync(1);
+			const random = seeded(seed);
+			const plans = [
+				["migration-plan", 1],
+				["other-plan", 2],
+				["third-plan", 3],
+			] as const;
+			let current = 0;
+			let net = 0;
+			const events: Array<{ id: string; recordedAt: string; left: number }> = [];
+			for (let step = 0; step < 40; step++) {
+				const roll = random();
+				const trace = `seed ${seed} step ${step}`;
+				if (roll < 0.4) {
+					const credits = 1 + Math.floor(random() * 9);
+					events.push({ ...(await spendEvent(credits, `walk-${seed}-${step}`)), left: credits });
+					net += credits;
+				} else if (roll < 0.7) {
+					const open = events.filter((event) => event.left > 0);
+					const event = open[Math.floor(random() * open.length)];
+					if (event === undefined) continue;
+					const credits = 1 + Math.floor(random() * event.left);
+					await correctEvent(event, String(credits), `walk-fix-${seed}-${step}`);
+					event.left -= credits;
+					net -= credits;
+				} else {
+					let next = Math.floor(random() * plans.length);
+					if (next === current) next = (next + 1) % plans.length;
+					const [key, version] = plans[next] ?? plans[0];
+					await commercialSwitch(key, `walk-switch-${seed}-${step}`, { usages: ["ai_credits"] });
+					await sync(version);
+					current = next;
+				}
+				expect({ trace, ...(await usage()) }).toEqual({
+					trace,
+					consumed: String(net),
+					available: String(1000 - net),
+				});
+			}
+		}
+	}, 600_000);
 });
 
 function changeIntent(effectiveMode: "immediate" | "period_end") {
@@ -1132,4 +1263,69 @@ async function projectAllowances() {
 		ORDER BY allocation.id
 	`;
 	return rows.map((row) => [row.version, row.quantity, row.consumed, row.ended]);
+}
+
+/** A spend that keeps the identity a later correction names. */
+async function spendEvent(
+	credits: number,
+	key: string,
+): Promise<{ id: string; recordedAt: string; left: number }> {
+	const result = await context.repository.consumeUsage(project, {
+		billingAccountId: "migration-stripe",
+		featureKey: "model_tokens",
+		quantity: String(credits),
+		idempotencyKey: key,
+	});
+	expect(result.allowed).toBe(true);
+	return {
+		id: result.usageEventId ?? "",
+		recordedAt: result.recordedAtExact ?? result.recordedAt ?? "",
+		left: credits,
+	};
+}
+
+async function correctEvent(
+	event: { id: string; recordedAt: string },
+	quantity: string,
+	key: string,
+) {
+	return await context.repository.correctUsage(project, {
+		billingAccountId: "migration-stripe",
+		originalUsageEventId: event.id,
+		originalRecordedAt: new Date(event.recordedAt),
+		quantity,
+		idempotencyKey: key,
+		actor: "integration-test",
+		reason: "carried usage correction",
+	});
+}
+
+/** A second scenario in one test: the seeded account and catalog start over. */
+async function resetForSecondRun(): Promise<void> {
+	await resetAndSeedIntegrationData(context.sql);
+	await seedPhase3ControlCatalog(context.sql);
+	await seedPhase3CatalogMigration(context.sql);
+	eventOrder = 100;
+	await context.sql`
+		INSERT INTO provider_plan_bindings (
+			project_id, plan_version_id, store_product_id, provider, channel, status
+		)
+		SELECT price.project_id, price.plan_version_id, binding.store_product_id,
+			'stripe', 'web', 'published'
+		FROM price_components price
+		JOIN provider_price_bindings binding
+			ON binding.project_id = price.project_id AND binding.price_component_id = price.id
+		WHERE price.key = 'base'
+	`;
+}
+
+/** A small seeded generator so a failing walk replays. */
+function seeded(seed: number): () => number {
+	let state = seed >>> 0;
+	return () => {
+		state = (state + 0x6d2b79f5) >>> 0;
+		let value = Math.imul(state ^ (state >>> 15), state | 1);
+		value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+		return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+	};
 }

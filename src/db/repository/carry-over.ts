@@ -132,25 +132,33 @@ export interface CarriedUsageEdge {
 	applied: bigint;
 }
 
+/** What replaying the carries in order shows: who holds which usage, and how it got there. */
+interface CarryReplay {
+	/** Each allowance's holding of each portion: the length of the prefix of it that it received. */
+	holdings: Map<string, Map<number, bigint>>;
+	/** The portions each carry copied (`before`: the target's prefix first) and the one it introduced. */
+	moves: Array<Array<{ portion: number; before: bigint; moved: bigint }>>;
+	/** The size of each portion, held in full by the allowance whose carry introduced it. */
+	sizes: Map<number, bigint>;
+}
+
 /**
- * Usage two allowances already share. Replay carries in change order: each allowance holds a
- * quantity of each distinct usage portion, identified by the edge that first carried it. A carry
- * copies only portions its target lacks; any remainder is previously uncarried use of its source.
- * A capped carry copies a prefix of a portion, so later overlap is the smaller held quantity.
+ * Replays carries in change order: each allowance holds a quantity of each distinct usage portion,
+ * identified by the carry that first introduced it. A carry copies only portions its target lacks;
+ * any remainder is previously uncarried use of its source and becomes a portion of its own. A
+ * capped carry copies a prefix of a portion, so later overlap is the smaller held quantity.
  * Summing paths instead loses this identity when carries form cycles or share a common ancestor.
  */
-export function sharedCarriedUsage(
-	edges: readonly CarriedUsageEdge[],
-	origin: string,
-	target: string,
-): bigint {
-	const holdings = new Map<string, Map<number, bigint>>();
+function replayCarries(edges: readonly CarriedUsageEdge[]): CarryReplay {
+	const replay: CarryReplay = { holdings: new Map(), moves: [], sizes: new Map() };
 	for (const [portion, edge] of edges.entries()) {
+		const moves: CarryReplay["moves"][number] = [];
+		replay.moves.push(moves);
 		if (edge.applied <= 0n) continue;
-		const from = holdings.get(edge.from) ?? new Map<number, bigint>();
-		const to = holdings.get(edge.to) ?? new Map<number, bigint>();
-		holdings.set(edge.from, from);
-		holdings.set(edge.to, to);
+		const from = replay.holdings.get(edge.from) ?? new Map<number, bigint>();
+		const to = replay.holdings.get(edge.to) ?? new Map<number, bigint>();
+		replay.holdings.set(edge.from, from);
+		replay.holdings.set(edge.to, to);
 		let remaining = edge.applied;
 		for (const [id, quantity] of from) {
 			const held = to.get(id) ?? 0n;
@@ -158,14 +166,27 @@ export function sharedCarriedUsage(
 			if (missing <= 0n) continue;
 			const copied = missing < remaining ? missing : remaining;
 			to.set(id, held + copied);
+			moves.push({ portion: id, before: held, moved: copied });
 			remaining -= copied;
 			if (remaining === 0n) break;
 		}
 		if (remaining > 0n) {
 			from.set(portion, remaining);
 			to.set(portion, remaining);
+			moves.push({ portion, before: 0n, moved: remaining });
+			replay.sizes.set(portion, remaining);
 		}
 	}
+	return replay;
+}
+
+/** Usage two allowances already share: what the carries put in both. */
+export function sharedCarriedUsage(
+	edges: readonly CarriedUsageEdge[],
+	origin: string,
+	target: string,
+): bigint {
+	const { holdings } = replayCarries(edges);
 	let shared = 0n;
 	const incoming = holdings.get(target);
 	for (const [portion, quantity] of holdings.get(origin) ?? []) {
@@ -382,6 +403,155 @@ async function carryOverUsage(executor: QueryExecutor, input: CarryOverInput): P
 		);
 		edges.push({ from: String(origin.id), to: String(target.id), applied });
 	}
+}
+
+/**
+ * A correction takes `quantity` of usage back from the allowance `allocationId` that an event spent
+ * on, and plan changes may have copied that usage onward: each carry in `carried_usages` wrote it
+ * as consumed quantity on the incoming allowance. The copies are taken back where they sit, so the
+ * customer is not charged on the new plan for usage that was corrected.
+ *
+ * The event belongs to the portion that the first carry out of its allowance after the event
+ * introduced. That portion shrinks by the correction, from its end. A holder that received only a
+ * prefix of it, because a carry was capped, keeps what it received until the portion falls below
+ * that prefix. The carries that moved the portion give back the same quantity in
+ * `applied_quantity`, which keeps later carries from counting usage the customer no longer owes,
+ * and a carry never gives back more than its `applied_quantity`, so the part a capped carry
+ * forgave is never refunded.
+ *
+ * With `closedSource` the allowance the correction named is itself reduced, since a plan change
+ * ended it and the usual restoring skipped it. An allowance that is reversed, or expired with its
+ * rollover still to run, is left alone, as every other correction leaves such an allowance.
+ */
+export async function followCarriedUsage(
+	executor: QueryExecutor,
+	input: {
+		projectId: string;
+		subscriptionId: string;
+		allocationId: string;
+		eventRecordedAt: string;
+		quantity: string;
+		closedSource: boolean;
+	},
+): Promise<void> {
+	const rows = await executeRows<{
+		subscription_change_id: string;
+		from_allocation_id: string | number;
+		to_allocation_id: string | number;
+		applied: string;
+		after_event: boolean;
+	}>(
+		executor,
+		drizzleSql`
+			SELECT carried.subscription_change_id, carried.from_allocation_id, carried.to_allocation_id,
+				carried.applied_quantity::text AS applied,
+				carried.created_at > ${input.eventRecordedAt}::timestamptz AS after_event
+			FROM carried_usages carried
+			JOIN subscription_changes change
+				ON change.project_id = carried.project_id AND change.id = carried.subscription_change_id
+			JOIN balance_allocations allocation
+				ON allocation.project_id = carried.project_id
+				AND allocation.id = carried.to_allocation_id
+			WHERE carried.project_id = ${input.projectId}
+				AND allocation.subscription_id = ${input.subscriptionId}
+			ORDER BY change.created_at, change.id, carried.from_allocation_id
+			FOR UPDATE OF carried
+		`,
+	);
+	const edges: CarriedUsageEdge[] = rows.map((row) => ({
+		from: String(row.from_allocation_id),
+		to: String(row.to_allocation_id),
+		applied: allocationUnits(row.applied),
+	}));
+	const replay = replayCarries(edges);
+	const portion = rows.findIndex(
+		(row, index) =>
+			row.after_event &&
+			edges[index]?.from === input.allocationId &&
+			(replay.sizes.get(index) ?? 0n) > 0n,
+	);
+	if (portion < 0) return;
+	const quantity = allocationUnits(input.quantity);
+	if (input.closedSource) {
+		const reduced = await reduceCopy(executor, input.projectId, input.allocationId, quantity);
+		if (reduced === null) return;
+	}
+	const size = replay.sizes.get(portion) ?? 0n;
+	const cap = size - (quantity < size ? quantity : size);
+	for (const [allocationId, held] of replay.holdings) {
+		const quantityHeld = held.get(portion) ?? 0n;
+		if (allocationId === input.allocationId || quantityHeld <= cap) continue;
+		await reduceCopy(executor, input.projectId, allocationId, quantityHeld - cap);
+	}
+	for (const [index, moves] of replay.moves.entries()) {
+		const returned = moves
+			.filter((move) => move.portion === portion)
+			.reduce((sum, move) => {
+				const kept = move.before + move.moved <= cap ? move.moved : cap - move.before;
+				return sum + move.moved - (kept > 0n ? kept : 0n);
+			}, 0n);
+		if (returned <= 0n) continue;
+		await executeOne(
+			executor,
+			drizzleSql`
+				UPDATE carried_usages
+				SET applied_quantity = applied_quantity - ${unitsToDecimal(returned, allocationScale)}::numeric
+				WHERE project_id = ${input.projectId}
+					AND subscription_change_id = ${rows[index]?.subscription_change_id}::uuid
+					AND from_allocation_id = ${edges[index]?.from}::bigint
+				RETURNING from_allocation_id
+			`,
+		);
+	}
+}
+
+/**
+ * Takes up to `units` off an allowance's consumed quantity and returns what it took, or null when
+ * the allowance is reversed or expired with its rollover still to run: giving quantity back to it
+ * would refund a refunded plan or inflate what it is about to roll over.
+ */
+async function reduceCopy(
+	executor: QueryExecutor,
+	projectId: string,
+	allocationId: string,
+	units: bigint,
+): Promise<bigint | null> {
+	const allocation = await executeOne<{
+		consumed: string;
+		reversed_at: Date | string | null;
+		expires_at: Date | string | null;
+		rollover_processed_at: Date | string | null;
+		db_now: Date | string;
+	}>(
+		executor,
+		drizzleSql`
+			SELECT consumed_quantity::text AS consumed, reversed_at, expires_at, rollover_processed_at,
+				clock_timestamp() AS db_now
+			FROM balance_allocations
+			WHERE project_id = ${projectId} AND id = ${allocationId}::bigint
+			FOR UPDATE
+		`,
+	);
+	if (allocation === null || allocation.reversed_at !== null) return null;
+	const expired =
+		allocation.expires_at !== null &&
+		new Date(allocation.expires_at).getTime() <= new Date(allocation.db_now).getTime();
+	if (expired && allocation.rollover_processed_at === null) return null;
+	const consumed = allocationUnits(allocation.consumed);
+	const reduced = units < consumed ? units : consumed;
+	if (reduced > 0n) {
+		await executeOne(
+			executor,
+			drizzleSql`
+				UPDATE balance_allocations
+				SET consumed_quantity = consumed_quantity - ${unitsToDecimal(reduced, allocationScale)}::numeric,
+					updated_at = now()
+				WHERE project_id = ${projectId} AND id = ${allocationId}::bigint
+				RETURNING id
+			`,
+		);
+	}
+	return reduced;
 }
 
 function allocationUnits(value: string): bigint {
