@@ -2229,4 +2229,158 @@ localDescribe("Paddle fixed subscription persistence", () => {
 		expect(hold).toMatchObject({ operation_id: null, closure_reason: "rejected" });
 		expect([h.writes, h.customerWrites]).toEqual([0, 0]);
 	});
+
+	/** The same account on a replaced connection: the runtime after a credential rotation. */
+	const rotated = (h: ReturnType<typeof harness>) =>
+		new PaddleBillingService(
+			project,
+			{ ...h.config, versionId: crypto.randomUUID() },
+			context.repository.forProject(project),
+			context.repository.providerOperations,
+			h.client,
+		);
+	/** A request that died after preparing its customer write and before dispatching it. */
+	const dieBeforeDispatch = async (h: ReturnType<typeof harness>) => {
+		const claim = spyOn(
+			context.repository.providerOperations,
+			"claimDispatch",
+		).mockRejectedValueOnce(new Error("connection reset"));
+		try {
+			await expect(h.create()).rejects.toThrow("connection reset");
+		} finally {
+			claim.mockRestore();
+		}
+		expect([h.writes, h.customerWrites]).toEqual([0, 0]);
+	};
+	/** Makes everything the account left behind look older than any live request. */
+	const age = async (billingAccountId: string) => {
+		await context.sql`UPDATE provider_operations SET updated_at = now() - interval '6 minutes'
+			WHERE project_id=${project.projectInstanceId} AND billing_account_id=${billingAccountId}`;
+		await context.sql`UPDATE paddle_checkout_reservations SET updated_at = now() - interval '6 minutes'
+			WHERE project_id=${project.projectInstanceId} AND billing_account_id=${billingAccountId}`;
+	};
+	const reservations = (billingAccountId: string) =>
+		context.sql<
+			{ idempotency_key: string; closure_reason: string | null }[]
+		>`SELECT idempotency_key, closure_reason FROM paddle_checkout_reservations
+			WHERE project_id=${project.projectInstanceId} AND billing_account_id=${billingAccountId} ORDER BY created_at`;
+
+	it("releases a write prepared before a connection rotation and finishes the checkout under a new key", async () => {
+		const h = harness();
+		await dieBeforeDispatch(h);
+		const after = rotated(h);
+		const request = (idempotencyKey: string) =>
+			after.createCheckoutSession({
+				billingAccountId: h.billingAccountId,
+				productKey: "paddle_test",
+				email: `${h.billingAccountId}@example.com`,
+				idempotencyKey,
+			});
+		// Nothing was sent under the old connection and nothing can be now: the key is terminal.
+		await expect(request("initial")).rejects.toMatchObject({
+			code: "PROVIDER_OPERATION_FAILED",
+			details: { status: "failed", errorCode: "PROVIDER_OPERATION_NEVER_SENT" },
+		});
+		expect([h.writes, h.customerWrites]).toEqual([0, 0]);
+		expect(await request("after-rotation")).toMatchObject({
+			sessionId: h.remote.id,
+			duplicate: false,
+		});
+		expect([h.writes, h.customerWrites]).toEqual([1, 1]);
+		expect(
+			(await customerOperations(h.billingAccountId)).map((operation) => [
+				operation.status,
+				operation.error_code,
+			]),
+		).toEqual([
+			["failed", "PROVIDER_OPERATION_NEVER_SENT"],
+			["succeeded", null],
+		]);
+		expect(await reservations(h.billingAccountId)).toEqual([
+			{ idempotency_key: "initial", closure_reason: "rejected" },
+			{ idempotency_key: "after-rotation", closure_reason: null },
+		]);
+	});
+
+	it("resumes a prepared write for its own key and releases it for another key only once it is idle", async () => {
+		// The request's own retry dispatches what it prepared, however late.
+		const resumed = harness();
+		await dieBeforeDispatch(resumed);
+		await age(resumed.billingAccountId);
+		expect(await resumed.create()).toMatchObject({ sessionId: resumed.remote.id });
+		expect([resumed.writes, resumed.customerWrites]).toEqual([1, 1]);
+
+		const h = harness();
+		await dieBeforeDispatch(h);
+		// The first request may still be running: another key waits.
+		await expect(checkout(h, "second")).rejects.toMatchObject({
+			code: "PROVIDER_OPERATION_PENDING",
+		});
+		expect(await openReservations(h.billingAccountId)).toHaveLength(1);
+		await age(h.billingAccountId);
+		expect(await checkout(h, "second")).toMatchObject({ sessionId: h.remote.id });
+		expect([h.writes, h.customerWrites]).toEqual([1, 1]);
+		// The first key's write can no longer be dispatched by a late retry.
+		await expect(h.create()).rejects.toMatchObject({ status: 409 });
+		expect([h.writes, h.customerWrites]).toEqual([1, 1]);
+		expect(await reservations(h.billingAccountId)).toEqual([
+			{ idempotency_key: "initial", closure_reason: "rejected" },
+			{ idempotency_key: "second", closure_reason: null },
+		]);
+	});
+
+	it("releases a reservation orphaned before any write, for a new key and for a preview", async () => {
+		const orphan = async (h: ReturnType<typeof harness>) => {
+			// What a hard kill leaves between reserving and preparing: no operation, nothing sent.
+			await context.sql`INSERT INTO paddle_checkout_reservations (project_id, billing_account_id, owner_kind,
+				idempotency_key, provider_account_id, connection_version_id, target)
+				VALUES (${project.projectInstanceId}, ${h.billingAccountId}, 'direct', 'lost-key', ${accountIdentity},
+				${h.config.versionId}, ${JSON.stringify({ binding: {}, plan: null })}::text::jsonb)`;
+		};
+		const h = harness();
+		await orphan(h);
+		await expect(checkout(h, "fresh")).rejects.toMatchObject({ code: "PADDLE_CHECKOUT_PENDING" });
+		await age(h.billingAccountId);
+		expect(await checkout(h, "fresh")).toMatchObject({ sessionId: h.remote.id });
+		expect(await reservations(h.billingAccountId)).toEqual([
+			{ idempotency_key: "lost-key", closure_reason: "rejected" },
+			{ idempotency_key: "fresh", closure_reason: null },
+		]);
+
+		const previewed = harness();
+		await orphan(previewed);
+		await age(previewed.billingAccountId);
+		const flow = commercial(previewed, {
+			kind: "checkout_product",
+			productKey: "paddle_test",
+			email: "payer@example.com",
+		});
+		const preview = await flow.preview();
+		expect(await flow.execute(preview.previewToken)).toHaveProperty("sessionId");
+		expect([previewed.writes, previewed.customerWrites]).toEqual([1, 1]);
+	});
+
+	it("never releases a write that was dispatched, however old or whatever the connection", async () => {
+		const h = harness();
+		h.loseCustomerResponse();
+		await expect(h.create()).rejects.toMatchObject({ code: "PROVIDER_OPERATION_PENDING" });
+		expect(h.customerWrites).toBe(1);
+		await age(h.billingAccountId);
+		await expect(checkout(h, "second")).rejects.toMatchObject({
+			code: "PROVIDER_OPERATION_PENDING",
+		});
+		await expect(
+			rotated(h).createCheckoutSession({
+				billingAccountId: h.billingAccountId,
+				productKey: "paddle_test",
+				email: `${h.billingAccountId}@example.com`,
+				idempotencyKey: "third",
+			}),
+		).rejects.toMatchObject({ code: "PROVIDER_OPERATION_PENDING" });
+		expect(h.customerWrites).toBe(1);
+		expect(
+			(await customerOperations(h.billingAccountId)).map((operation) => operation.status),
+		).toEqual(["reconciling"]);
+		expect(await openReservations(h.billingAccountId)).toHaveLength(1);
+	});
 });

@@ -47,6 +47,57 @@ export class PaddleCheckoutRepository extends RepositoryModule {
 		`);
 	}
 
+	/**
+	 * Releases what a dead request left behind before it dispatched anything: a write still
+	 * `prepared`, and the account's open reservation when it has no operation or only that write.
+	 * Nothing reached Paddle, so nothing can be lost. The request is taken for dead when its
+	 * connection was replaced (no retry can dispatch under the recorded one), or when it has been
+	 * idle far longer than the local steps between reserving and dispatching take and another key
+	 * now asks. A prepared write is marked failed first: a late retry then finds a terminal receipt
+	 * and cannot dispatch it. A retry of the same key on the same connection still resumes.
+	 */
+	async releaseNeverSent(
+		project: ProjectInstanceContext,
+		input: {
+			billingAccountId: string;
+			connectionVersionId: string;
+			/** Operation and reservation keys the caller's own retry would resume. */
+			resumableKeys: readonly string[];
+		},
+	): Promise<void> {
+		const projectId = project.projectInstanceId;
+		const resumable = jsonb([...input.resumableKeys]);
+		await this.transaction(async (tx) => {
+			await lockPaddleCheckoutAccount(tx, projectId, input.billingAccountId);
+			await tx.execute(sql`
+				UPDATE provider_operations SET status = 'failed', error_code = 'PROVIDER_OPERATION_NEVER_SENT',
+					updated_at = clock_timestamp()
+				WHERE project_id = ${projectId} AND billing_account_id = ${input.billingAccountId}
+					AND provider = 'paddle' AND status = 'prepared'
+					AND (connection_version_id <> ${input.connectionVersionId}::uuid
+						OR (updated_at < clock_timestamp() - interval '5 minutes'
+							AND idempotency_key NOT IN (SELECT jsonb_array_elements_text(${resumable}))))
+			`);
+			// A reservation is released with its write, or when it never had one. One that the failed
+			// write did not belong to, such as a dispatched checkout, is left alone.
+			await tx.execute(sql`
+				UPDATE paddle_checkout_reservations r SET closed_at = now(), closure_reason = 'rejected', updated_at = now()
+				WHERE r.project_id = ${projectId} AND r.billing_account_id = ${input.billingAccountId}
+					AND r.closed_at IS NULL
+					AND (
+						EXISTS (SELECT 1 FROM provider_operations o
+							WHERE o.project_id = r.project_id AND o.billing_account_id = r.billing_account_id
+								AND o.id = r.operation_id AND o.status = 'failed'
+								AND o.error_code = 'PROVIDER_OPERATION_NEVER_SENT')
+						OR (r.operation_id IS NULL
+							AND (r.connection_version_id <> ${input.connectionVersionId}::uuid
+								OR (r.updated_at < now() - interval '5 minutes'
+									AND r.idempotency_key NOT IN (SELECT jsonb_array_elements_text(${resumable})))))
+					)
+			`);
+		});
+	}
+
 	reserve(project: ProjectInstanceContext, input: ReservePaddleCheckout) {
 		return this.transaction((tx) =>
 			reservePaddleCheckoutInTx(tx, project.projectInstanceId, input),

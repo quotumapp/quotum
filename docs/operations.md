@@ -439,6 +439,16 @@ after ten recovery attempts they require review. Ambiguous, absent or mismatched
 require review immediately. Unavailable projects are deferred so they cannot starve eligible work.
 `prepared` operations are dispatched only by a matching caller retry; automatic recovery never writes.
 
+A Paddle write that is still `prepared` was never sent, so it can be released without asking
+Paddle. The next checkout or preview for the account releases it, together with the account's open
+checkout reservation when that has no operation or only this write, in two cases: the connection was
+replaced since (a retry cannot dispatch under the recorded connection), or it has been idle for five
+minutes and the request carries another key. The write is first marked `failed` with
+`PROVIDER_OPERATION_NEVER_SENT`, so a late retry of its key finds a terminal receipt
+(`409 PROVIDER_OPERATION_FAILED`) and can no longer dispatch it; the reservation closes as
+`rejected`. A retry of the same key on the same connection still resumes the write, and a write
+that was dispatched (`in_flight`, `reconciling`, `requires_review`) is never released this way.
+
 `GET /v1/billing-accounts/:billingAccountId/provider-operations/:operationId` returns a safe receipt,
 including to read-only credentials. An operator can request another observation with
 `POST /v1/admin/billing-accounts/:billingAccountId/provider-operations/:operationId/reconcile`, using
