@@ -819,6 +819,25 @@ describe("MCP browser-approved writes", () => {
 		await f.sql`UPDATE platform_mcp_changes SET status='applying',result=NULL WHERE id=${change.id}`;
 		expect((await f.mcpChanges.get(grant.id, change.id)).status).toBe("completed");
 	});
+	async function until(condition: () => boolean | Promise<boolean>, what: string) {
+		const deadline = Date.now() + 10_000;
+		while (!(await condition())) {
+			if (Date.now() > deadline) throw new Error(`Expected ${what}`);
+			await Bun.sleep(20);
+		}
+	}
+
+	/** How many database sessions wait on a lock. */
+	async function lockWaiters() {
+		const [row] = await f.client<
+			{ n: number }[]
+		>`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock'`;
+		return row?.n ?? 0;
+	}
+
+	const waiters = (count: number) =>
+		until(async () => (await lockWaiters()) >= count, `${count} sessions waiting on a lock`);
+
 	/**
 	 * Holds the grant row so a proposal and a browser approval of another queue behind it, then
 	 * releases both at once: any lock order that differs between them deadlocks (SQLSTATE 40P01).
@@ -838,17 +857,6 @@ describe("MCP browser-approved writes", () => {
 			body: { externalId: "team-a", kind: "team" },
 		};
 		const change = await f.mcpChanges.prepare(grant.id, input);
-		const waiters = async (count: number) => {
-			const deadline = Date.now() + 10_000;
-			while (Date.now() < deadline) {
-				const [row] = await f.client<
-					{ n: number }[]
-				>`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock'`;
-				if ((row?.n ?? 0) >= count) return;
-				await Bun.sleep(20);
-			}
-			throw new Error(`Expected ${count} sessions waiting on a lock`);
-		};
 		let release = () => {};
 		const gate = new Promise<void>((resolve) => {
 			release = resolve;
@@ -911,6 +919,107 @@ describe("MCP browser-approved writes", () => {
 			{ status: string }[]
 		>`SELECT status FROM platform_mcp_changes WHERE id = ${change.id}`;
 		expect(row?.status).toBe("completed");
+	});
+
+	it("serializes a second approval behind one that is recording its result", async () => {
+		const browser = await owner();
+		await createBillingAccount();
+		await redeem(browser, merchantTestScope, true);
+		const [grant] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM platform_mcp_authorizations WHERE scopes ? 'quotum.billing.write' AND approved_at IS NOT NULL`;
+		const change = await f.mcpChanges.prepare(grant.id, {
+			requestKey: "entity-a",
+			reason: "Team setup",
+			action: "entities.write",
+			parameters: ["customer-a"],
+			body: { externalId: "team-a", kind: "team" },
+		});
+		const port = f.billingPort.changes;
+		if (!port) throw new Error("Billing change port missing");
+		/** A point where the first approval stops until the test lets it continue. */
+		const stop = () => {
+			let resume = () => {};
+			const resumed = new Promise<void>((resolve) => {
+				resume = resolve;
+			});
+			const point = { reached: false, resume, resumed };
+			return point;
+		};
+		const applying = stop();
+		const recording = stop();
+		const apply = port.apply.bind(port);
+		const audit = f.store.audit.bind(f.store);
+		const spies = [
+			// Before the change is applied: the proposal is claimed, nothing is locked.
+			spyOn(port, "apply").mockImplementationOnce(async (...args) => {
+				applying.reached = true;
+				await applying.resumed;
+				return await apply(...args);
+			}),
+			// Inside the transaction that records the result, before its audit event, which needs
+			// the organization row.
+			spyOn(f.store, "audit").mockImplementation(async (...args) => {
+				if (args[3] === "mcp.change_result") {
+					recording.reached = true;
+					await recording.resumed;
+				}
+				await audit(...args);
+			}),
+		];
+		try {
+			const approve = () =>
+				browser.request(`/api/platform/mcp/changes/${change.id}/approve`, {
+					requestHash: change.requestHash,
+				});
+			const first = approve();
+			await until(() => applying.reached, "the first approval to apply the change");
+			let release = () => {};
+			const released = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			let held = false;
+			const holder = f.client.begin(async (tx) => {
+				await tx`SELECT id FROM platform_mcp_authorizations WHERE id = ${grant.id} FOR UPDATE`;
+				held = true;
+				await released;
+			});
+			await until(() => held, "the grant row to be held");
+			// The second approval takes the session, organization and membership rows and waits
+			// for the grant.
+			let answered = false;
+			const second = approve().finally(() => {
+				answered = true;
+			});
+			await waiters(1);
+			// The first one now records its result: it either queues behind the second, or, taking
+			// the change row first, goes on to need the organization row the second holds.
+			applying.resume();
+			await until(
+				async () => recording.reached || (await lockWaiters()) >= 2,
+				"the first approval to record its result or wait",
+			);
+			release();
+			await holder;
+			await until(() => recording.reached, "the first approval to record its result");
+			await until(
+				async () => answered || (await lockWaiters()) >= 1,
+				"the second approval to finish or wait",
+			);
+			recording.resume();
+			const responses = await Promise.all([first, second]);
+			// Never a 503 from a deadlock (SQLSTATE 40P01).
+			expect(responses.map((response) => response.status)).toEqual([200, 200]);
+			const [row] = await f.sql<
+				{ status: string }[]
+			>`SELECT status FROM platform_mcp_changes WHERE id = ${change.id}`;
+			expect(row?.status).toBe("completed");
+			expect(
+				await f.sql`SELECT response FROM billing_administration_receipts WHERE operation_key=${`mcp:${change.id}`}`,
+			).toHaveLength(1);
+		} finally {
+			for (const spy of spies) spy.mockRestore();
+		}
 	});
 
 	it("denies read-only grants, cancelled proposals, and expired proposals", async () => {
