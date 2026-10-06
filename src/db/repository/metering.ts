@@ -2151,6 +2151,8 @@ async function confirmWithinTransaction(
 		}
 		throw error;
 	}
+	// No `now`: which limits are active and which window counts is read from the database clock,
+	// as consume, reserve and a meter-limit confirmation read it.
 	const controls = await confirmControlHolds(tx, {
 		projectId,
 		customerId: customer.id,
@@ -2160,7 +2162,6 @@ async function confirmWithinTransaction(
 		usageDelta: quantity,
 		spendMinorDelta: "0",
 		currency: null,
-		now: new Date(),
 		reservationId: reservation.id,
 	});
 	if (controls.denial !== null) {
