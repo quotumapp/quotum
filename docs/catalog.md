@@ -70,6 +70,12 @@ A plan item takes only the fields of its `itemKind`:
 | `licensed_quantity` | `featureKey`, `quantity`, `price` (required), `allocationScope` (`account` or `license_pool`) |
 | `unlimited_usage` | `featureKey` (a metered feature); lifts its quota cap, see [meter limits](metering.md#meter-limits) |
 
+Every kind except `access` takes a metered feature, and `licensed_quantity` a non-consumable one;
+a boolean feature is granted with `access`. A rate card's meter is a metered feature and its wallet
+a consumable one, and a plan `controls` spend limit names its currency as three letters. A new
+intent that breaks one of these answers `400 INVALID_REQUEST` naming the plan and the feature; a
+catalog published before a rule existed stays readable.
+
 An allocation or top-up `expiry` is `{ "mode": "forever" }`, a calendar cadence such as
 `{ "mode": "after", "interval": "year", "intervalCount": 1 }`, or an exact duration such as
 `{ "mode": "after_seconds", "seconds": 86400 }`. An allocation's expiry counts from its window
