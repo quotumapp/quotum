@@ -23,8 +23,9 @@ const allocationFundingStatuses = new Set<SubscriptionStatus>([
 
 /**
  * What the provider's snapshot says about the product the subscription is on, for providers whose
- * snapshot decides the plan version (Stripe). Other providers omit it and keep the rule that only
- * a product of another plan moves a subscription.
+ * snapshot decides the plan version (Stripe). Other providers omit it: their subscriptions keep the
+ * product they were recorded on (`upsertSubscription` refuses another), so a binding that names
+ * another version is a retargeted binding and never moves them.
  */
 export interface ProviderSnapshotContext {
 	/** The store product the subscription held before this sync; null when it had none. */
@@ -75,10 +76,8 @@ async function resolveSubscriptionPlanVersion(
 	const row = await executeOne<{
 		current_version_id: string | number | bigint | null;
 		current_revision_id: string | number | bigint | null;
-		current_plan_id: string | number | bigint | null;
 		binding_version_id: string | number | bigint | null;
 		binding_revision_id: string | number | bigint | null;
-		binding_plan_id: string | number | bigint | null;
 		change_id: string | null;
 		change_synchronized_at: Date | string | null;
 		change_version_id: string | number | bigint | null;
@@ -100,10 +99,8 @@ async function resolveSubscriptionPlanVersion(
 			SELECT
 				subscription.plan_version_id AS current_version_id,
 				current_version.catalog_revision_id AS current_revision_id,
-				current_version.plan_id AS current_plan_id,
 				binding_version.id AS binding_version_id,
 				binding_version.catalog_revision_id AS binding_revision_id,
-				binding_version.plan_id AS binding_plan_id,
 				applied_change.id AS change_id,
 				applied_change.synchronized_at AS change_synchronized_at,
 				change_version.id AS change_version_id,
@@ -304,19 +301,19 @@ async function resolveSubscriptionPlanVersion(
 			providerSwitch: false,
 		};
 	}
-	// 4. A provider-side switch applies the version the reported product is bound to: a product of
-	// another plan, or, where the provider's snapshot decides, a product the pinned version does
-	// not sell. A retargeted binding alone keeps the subscription on its pinned version: its own
-	// price is still one of that version's, or, for a version without prices, it has not changed.
+	// 4. A provider-side switch applies the version the reported product is bound to, where the
+	// provider's snapshot decides: a product the pinned version does not sell, or, for a version
+	// without prices, another product than the subscription held. A retargeted binding alone keeps
+	// the subscription on its pinned version, whether the binding moved to a newer version of the
+	// plan or to another plan that took over the product: publishing moves nobody.
 	if (
 		binding !== null &&
 		binding.planVersionId !== current.planVersionId &&
-		(String(row.binding_plan_id) !== String(row.current_plan_id) ||
-			(input.snapshot !== undefined &&
-				(row.current_priced
-					? !row.current_shown
-					: input.snapshot.previousStoreProductId !== null &&
-						input.snapshot.previousStoreProductId !== input.storeProductId)))
+		input.snapshot !== undefined &&
+		(row.current_priced
+			? !row.current_shown
+			: input.snapshot.previousStoreProductId !== null &&
+				input.snapshot.previousStoreProductId !== input.storeProductId)
 	) {
 		return {
 			...binding,

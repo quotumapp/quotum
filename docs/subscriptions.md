@@ -168,6 +168,9 @@ Stripe's view of a subscription decides its plan version. When Quotum records a 
   another plan's price, or to another published version of the same plan that has its own price,
   moves the subscription to that version with the allowance handling above and no carry-over. A
   newer version that reuses the same price leaves existing subscriptions on their pinned version.
+  So does another plan that takes over the price, for example after its own plan was retired:
+  publishing moves nobody, on Stripe or in an app store, and only new purchases of the product
+  get the plan it is now bound to.
   The switch is read from the subscription's first Stripe item, the item whose product the plan
   binding names: the base price's, or the seat price's for a plan
   [priced only by its seats](catalog.md#canonical-intent). A subscription whose first item is an
