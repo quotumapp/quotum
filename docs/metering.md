@@ -351,6 +351,13 @@ correction can therefore make confirmation return `control_limit_exceeded`. A de
 keeps its reservation active and can still be released. A new confirmation after conditions change
 uses a new idempotency key; replaying the denied operation returns its recorded denial.
 
+A correction re-rates the charge, and the account's spend window follows it up or down. An entity's
+own spend window follows it too, with one bound: the corrected event and its corrections never
+leave more there than the uncorrected share of what the event added, and nothing once the event is
+fully corrected. A unit that lowered a volume charge while the entity's window was empty therefore
+does not come back as that entity's spend when it is corrected, and usage that other entities
+re-priced later does not leave a remainder behind.
+
 ## Usage reads
 
 Usage reads default to the last 30 days, reject ranges over 90 days, and page with an opaque cursor

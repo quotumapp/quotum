@@ -641,6 +641,9 @@ export async function correctControlConsumption(
 		correctionUsageEventId: string;
 		correctionUsageEventRecordedAt: Date | string;
 		usageReduction: string;
+		/** The original event's quantity and how much of it earlier corrections took back. */
+		originalQuantity: string;
+		correctedQuantityBefore: string;
 		spendMinorReduction: string;
 		currency: string | null;
 	},
@@ -671,11 +674,28 @@ export async function correctControlConsumption(
 		consumed_value: unknown;
 		control_kind: "usage_limit" | "spend_limit";
 		currency: string | null;
+		entity_scoped: boolean;
+		entry_value: unknown;
+		corrected_value: unknown;
 	}>(
 		executor,
 		drizzleSql`
 		SELECT entry.control_window_id AS entry_window_id, identity_window.id AS control_window_id,
-			identity_window.consumed_value::text AS consumed_value, policy.control_kind, policy.currency
+			identity_window.consumed_value::text AS consumed_value, policy.control_kind, policy.currency,
+			policy.entity_id IS NOT NULL AS entity_scoped, entry.value::text AS entry_value,
+			COALESCE((
+				SELECT sum(prior.value)
+				FROM usage_events correction
+				JOIN usage_event_control_entries prior
+					ON prior.project_id = correction.project_id
+					AND prior.usage_event_recorded_at = correction.recorded_at
+					AND prior.usage_event_id = correction.id
+					AND prior.control_window_id = identity_window.id
+				WHERE correction.project_id = entry.project_id
+					AND correction.original_event_id = entry.usage_event_id
+					AND correction.original_event_recorded_at = entry.usage_event_recorded_at
+					AND correction.operation = 'correction'
+			), 0)::text AS corrected_value
 		FROM usage_event_control_entries entry
 		JOIN control_windows control_window
 			ON control_window.project_id = entry.project_id
@@ -698,21 +718,45 @@ export async function correctControlConsumption(
 		WHERE entry.project_id = ${input.projectId}
 			AND entry.usage_event_id = ${input.originalUsageEventId}
 			AND entry.usage_event_recorded_at = ${new Date(input.originalUsageEventRecordedAt).toISOString()}
-		ORDER BY identity_window.id, entry.control_window_id
+		ORDER BY identity_window.id, (entry.control_window_id = identity_window.id) DESC,
+			entry.control_window_id
 		FOR UPDATE OF identity_window
 	`,
 	);
+	const originalUnits = decimalToUnits(input.originalQuantity, 9);
+	const uncorrectedUnits =
+		originalUnits -
+		decimalToUnits(input.correctedQuantityBefore, 9) -
+		decimalToUnits(input.usageReduction, 9);
 	const corrected = new Set<string>();
 	for (const window of windows) {
 		const windowId = String(window.control_window_id);
 		if (corrected.has(windowId)) continue;
 		corrected.add(windowId);
-		const reductionUnits =
+		let reductionUnits =
 			window.control_kind === "usage_limit"
 				? decimalToUnits(input.usageReduction, 9)
 				: window.currency === input.currency
 					? signedDecimalToUnits(input.spendMinorReduction, 9)
 					: 0n;
+		if (
+			window.control_kind === "spend_limit" &&
+			window.currency === input.currency &&
+			window.entity_scoped
+		) {
+			// The account's window follows the charge as it is re-rated. An entity's window holds
+			// what its own events added: re-rating moves it too, but the event and its corrections
+			// may not leave more there than the uncorrected share of what the event added, and
+			// nothing once it is fully corrected. Otherwise a falling charge that found the window
+			// empty, or one that later usage re-priced, would come back as spend nobody incurred.
+			const addedUnits = signedDecimalToUnits(String(window.entry_value), 9);
+			const heldUnits = addedUnits + signedDecimalToUnits(String(window.corrected_value), 9);
+			const mostUnits =
+				addedUnits > 0n && uncorrectedUnits > 0n
+					? (addedUnits * uncorrectedUnits) / originalUnits
+					: 0n;
+			if (heldUnits - reductionUnits > mostUnits) reductionUnits = heldUnits - mostUnits;
+		}
 		if (reductionUnits === 0n) continue;
 		const currentUnits = decimalToUnits(String(window.consumed_value), 9);
 		const desiredNext = currentUnits - reductionUnits;
