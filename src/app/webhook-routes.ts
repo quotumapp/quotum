@@ -22,6 +22,7 @@ import {
 import {
 	appleStoreKitNotConfigured,
 	googlePlayNotConfigured,
+	paddleNotConfigured,
 	stripeNotConfigured,
 } from "./provider-services";
 import type {
@@ -271,7 +272,7 @@ export function registerWebhookRoutes(input: {
 			return withWebhookFailureRecording("paddle", "Paddle webhook failed", project, async () => {
 				const service = connected(
 					(await providerServices.paddleBillingService?.(project, "recovery")) ?? null,
-					stripeNotConfigured,
+					paddleNotConfigured,
 					unverified,
 				);
 				return {
