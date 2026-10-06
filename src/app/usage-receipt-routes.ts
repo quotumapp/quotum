@@ -80,7 +80,7 @@ export function registerUsageReceiptRoutes(app: BillingElysia, service: UsageApi
 				.object({
 					entityId: publicIdSchema.optional(),
 					cursor: z.string().max(1024).optional(),
-					limit: decimalDigitsQuery(z.coerce.number().int().min(1).max(100).optional()),
+					limit: decimalDigitsQuery(z.coerce.number().int().min(1).max(100).default(50)),
 				})
 				.strict(),
 			detail: operationDetail({
