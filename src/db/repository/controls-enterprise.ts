@@ -40,6 +40,7 @@ import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
 import { readDefaultPlanTarget } from "./default-plan-grants";
 import { defaultPlanReadVersionSql } from "./default-plan-sql";
+import { featureNotMetered } from "./feature-errors";
 import { ensureCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -1719,12 +1720,18 @@ async function requireFeature(
 	projectId: string,
 	key: string,
 ): Promise<{ id: string | number | bigint; key: string; credit_scale: number }> {
-	const row = await executeOne<{ id: string | number | bigint; key: string; credit_scale: number }>(
+	const row = await executeOne<{
+		id: string | number | bigint;
+		key: string;
+		credit_scale: number;
+		kind: "boolean" | "metered";
+	}>(
 		executor,
-		drizzleSql`SELECT id, key, credit_scale FROM features WHERE project_id = ${projectId} AND key = ${requiredText(key, "featureKey", 120)} AND kind = 'metered' AND active = true LIMIT 1`,
+		drizzleSql`SELECT id, key, credit_scale, kind FROM features WHERE project_id = ${projectId} AND key = ${requiredText(key, "featureKey", 120)} AND active = true LIMIT 1`,
 	);
 	if (row === null)
 		throw new NotFoundBillingError("Metered feature was not found", "FEATURE_NOT_FOUND");
+	if (row.kind !== "metered") throw featureNotMetered(row.key);
 	return row;
 }
 

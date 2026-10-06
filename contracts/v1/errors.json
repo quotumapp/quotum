@@ -498,6 +498,7 @@
     {
       "code": "FEATURE_OPERATION_UNSUPPORTED",
       "sources": [
+        "src/db/repository/feature-errors.ts",
         "src/db/repository/usage-api.ts"
       ]
     },

@@ -335,4 +335,58 @@ localDescribe("public usage SDK contract", () => {
 			await context.sql`SELECT count(*)::int AS events FROM usage_events WHERE project_id = ${project.projectInstanceId}`;
 		expect(rows?.events).toBe(0);
 	});
+
+	it("refuses usage on a feature that is not metered without calling it missing", async () => {
+		await context.sql`INSERT INTO features (project_id, key, name, kind, unit, credit_scale) VALUES (${project.projectInstanceId}, 'premium_access', 'Access', 'boolean', 'access', 0)`;
+		await context.repository.usageApi.createAccount(project, "payer");
+		const { app, authHeaders } = createIntegrationApp(context);
+		const send = async (method: string, path: string, body?: unknown, key?: string) => {
+			const response = await testRequest(app, `/v1/billing-accounts/payer${path}`, {
+				method,
+				headers: {
+					...authHeaders(),
+					"content-type": "application/json",
+					"x-billing-actor": "usage-test",
+					...(key === undefined ? {} : { "idempotency-key": key }),
+				},
+				body: body === undefined ? undefined : JSON.stringify(body),
+			});
+			const { error } = await response.json();
+			return { status: response.status, code: error?.code, message: error?.message };
+		};
+		const unsupported = {
+			status: 400,
+			code: "FEATURE_OPERATION_UNSUPPORTED",
+			message: "Feature premium_access is not metered: it has no balance and takes no usage",
+		};
+		const flag = { featureKey: "premium_access", quantity: "1" };
+
+		expect(
+			await send("POST", "/usage/consume", { featureId: "premium_access", value: "1" }, "c1"),
+		).toEqual(unsupported);
+		expect(await send("POST", "/usage/reservations", flag, "r1")).toEqual(unsupported);
+		expect(await send("GET", "/balances/premium_access")).toEqual(unsupported);
+		expect(
+			await send("PUT", "/controls", {
+				controlKind: "usage_limit",
+				featureKey: "premium_access",
+				limitValue: "5",
+				interval: "day",
+			}),
+		).toEqual(unsupported);
+		// A key that names no active feature is still the one that is not found.
+		expect(
+			await send("POST", "/usage/consume", { featureId: "no_such_feature", value: "1" }, "c2"),
+		).toMatchObject({ status: 404, code: "FEATURE_NOT_FOUND" });
+		expect(await send("GET", "/balances/no_such_feature")).toMatchObject({
+			status: 404,
+			code: "FEATURE_NOT_FOUND",
+		});
+
+		const [rows] = await context.sql`
+			SELECT (SELECT count(*)::int FROM usage_events WHERE project_id = ${project.projectInstanceId}) AS events,
+				(SELECT count(*)::int FROM reservations WHERE project_id = ${project.projectInstanceId}) AS holds,
+				(SELECT count(*)::int FROM control_policies WHERE project_id = ${project.projectInstanceId}) AS controls`;
+		expect(rows).toEqual({ events: 0, holds: 0, controls: 0 });
+	});
 });
