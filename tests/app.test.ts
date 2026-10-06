@@ -20,6 +20,7 @@ import { type BillingMetrics, createInMemoryBillingMetrics } from "../src/observ
 import { BillingAdminOperations } from "../src/operations/admin";
 import { AppleStoreKitClient, buildAppleStoreKitConfig } from "../src/providers/apple/client";
 import { AppleStoreKitService } from "../src/providers/apple/service";
+import { verifyGooglePubSubAuthorization } from "../src/providers/google/pubsub";
 import { createProviderRegistry } from "../src/providers/registry";
 import type { FixtureBillingEnv as BillingEnv } from "../src/testing/connection-fixtures";
 import { fixtureConnections } from "../src/testing/connection-fixtures";
@@ -3501,6 +3502,78 @@ describe("billing app", () => {
 				requestId: expect.any(String),
 			},
 		});
+	});
+
+	it("answers a Google connection without push settings like an unknown project", async () => {
+		const metrics = createInMemoryBillingMetrics();
+		const { logger, errors } = createRecordingLogger();
+		let called = false;
+		const app = createApp({
+			env,
+			metrics,
+			logger,
+			googlePlayBillingService: {
+				...googlePlayBillingService,
+				// What the real service does for a connection saved without its push settings.
+				verifyRtdnAuthorization: (authorizationHeader) =>
+					verifyGooglePubSubAuthorization(
+						{ authorizationHeader },
+						{
+							packageName: "com.acme.app",
+							serviceAccountCredentials: {},
+							obfuscatedAccountIdSecret: "account-link-secret",
+							previousObfuscatedAccountIdSecrets: [],
+							rtdnAudience: null,
+							rtdnServiceAccountEmail: null,
+							rtdnAuthorizedParty: null,
+							enablePublisherMutations: false,
+						},
+					),
+				handleRtdn() {
+					called = true;
+					return Promise.reject(new Error("an unverified push must not be handled"));
+				},
+			},
+		});
+		const push = async (projectKey: string) => {
+			const response = await testRequest(app, `/v1/projects/${projectKey}/webhooks/google`, {
+				method: "POST",
+				headers: { authorization: "Bearer any-token", "content-type": "application/json" },
+				body: "{}",
+			});
+			const body = (await response.json()) as {
+				success: boolean;
+				error: { code: string; message: string; requestId?: string };
+			};
+			delete body.error.requestId;
+			return { status: response.status, body };
+		};
+
+		const known = await push("acme");
+		expect(known).toEqual({
+			status: 401,
+			body: {
+				success: false,
+				error: {
+					code: "GOOGLE_PLAY_RTDN_UNAUTHORIZED",
+					message: "Google Pub/Sub push token is invalid",
+				},
+			},
+		});
+		expect(await push("unknown-project")).toEqual(known);
+		expect(called).toBe(false);
+		expect(errors).toHaveLength(1);
+		expect(errors[0]?.context).toEqual({
+			provider: "google",
+			code: "BILLING_PROVIDER_NOT_CONFIGURED",
+			projectKey: "acme",
+		});
+		expect(errors[0]?.error).toMatchObject({
+			message: "googlePlay.rtdnAudience is required for Google Play RTDN",
+		});
+		expect(metrics.renderPrometheus()).toContain(
+			'billing_webhook_failures_total{code="BILLING_PROVIDER_NOT_CONFIGURED",provider="google"} 1',
+		);
 	});
 
 	it("rejects oversized public webhook bodies", async () => {

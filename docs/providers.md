@@ -449,9 +449,11 @@ without a connection for that provider, answer exactly what a request failing th
 verification gets, after the same body and header checks (Stripe
 `400 STRIPE_WEBHOOK_SIGNATURE_INVALID`, or `400 INVALID_REQUEST` without a `Stripe-Signature`; Apple
 `400 APPLE_SIGNED_DATA_INVALID`; Google `401 GOOGLE_PLAY_RTDN_UNAUTHORIZED`; Paddle
-`400 PADDLE_SIGNATURE_INVALID`). For a known project
-the log keeps the real reason, `BILLING_PROVIDER_NOT_CONFIGURED`. An inactive environment still
-answers `403 ENVIRONMENT_INACTIVE`. Connection setup also exposes the version-specific route
+`400 PADDLE_SIGNATURE_INVALID`). A Google connection saved without its push settings
+(`rtdnAudience`, `rtdnServiceAccountEmail`, `rtdnAuthorizedParty`) cannot verify a sender and
+answers the same way. For a known project the log keeps the real reason,
+`BILLING_PROVIDER_NOT_CONFIGURED`. An inactive environment still answers
+`403 ENVIRONMENT_INACTIVE`. Connection setup also exposes the version-specific route
 `/v1/projects/:projectKey/connections/:versionId/webhooks/:provider` to verify the draft connection
 for Apple, Google and Stripe. Paddle uses the committed sandbox connection and its regular route.
 Stripe App OAuth events instead use `/v1/stripe-app/webhooks/test` or `/v1/stripe-app/webhooks/live`

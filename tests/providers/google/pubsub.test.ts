@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { BillingError } from "../../../src/billing/errors";
+import { BillingError, NotConfiguredError } from "../../../src/billing/errors";
 import type { GooglePlayConfig } from "../../../src/providers/google/config";
 import { verifyGooglePubSubPush } from "../../../src/providers/google/pubsub";
 import type { GoogleDeveloperNotification } from "../../../src/providers/google/types";
@@ -218,7 +218,29 @@ describe("Google Pub/Sub RTDN push verification", () => {
 					throw new Error("verifier should not run");
 				},
 			),
-		).rejects.toMatchObject({ code: "INVALID_REQUEST", status: 500 });
+		).rejects.toMatchObject({ code: "BILLING_PROVIDER_NOT_CONFIGURED", status: 501 });
+	});
+
+	it("reports each missing push setting as an unconfigured provider", async () => {
+		for (const missing of [
+			"rtdnAudience",
+			"rtdnServiceAccountEmail",
+			"rtdnAuthorizedParty",
+		] as const) {
+			const failure = await verifyGooglePubSubPush(
+				{ authorizationHeader: "Bearer token", body: envelope(encode(notification)) },
+				{ ...config, [missing]: null },
+				async () => {
+					throw new Error("verifier should not run");
+				},
+			).catch((error: unknown) => error);
+			expect(failure).toBeInstanceOf(NotConfiguredError);
+			expect(failure).toMatchObject({
+				code: "BILLING_PROVIDER_NOT_CONFIGURED",
+				status: 501,
+				message: `googlePlay.${missing} is required for Google Play RTDN`,
+			});
+		}
 	});
 
 	it("accepts lowercase bearer and rejects other schemes", async () => {

@@ -1,5 +1,5 @@
 import { OAuth2Client } from "google-auth-library";
-import { BillingError } from "../../billing/errors";
+import { BillingError, NotConfiguredError } from "../../billing/errors";
 import type { GooglePlayConfig } from "./config";
 import type {
 	GoogleDeveloperNotification,
@@ -153,9 +153,10 @@ async function verifyGoogleOidcToken(idToken: string, audience: string): Promise
 	return await createGoogleOidcVerifier()(idToken, audience);
 }
 
+/** A connection saved without its push settings cannot verify a sender: it is not configured. */
 function requireRtdnConfig(value: string | null, name: string): string {
 	if (value === null) {
-		throw new BillingError(`${name} is required for Google Play RTDN`, "INVALID_REQUEST", 500);
+		throw new NotConfiguredError(`${name} is required for Google Play RTDN`);
 	}
 
 	return value;
