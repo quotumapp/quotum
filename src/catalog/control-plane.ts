@@ -589,6 +589,7 @@ function assertNewCatalogIntent(
 	assertPriceSpellingsAgree(legacyPriceView(authored, parsed.submitted), parsed.normalized);
 	assertBaseAmountHasCurrency(parsed.normalized);
 	assertItemPricesCharge(parsed.normalized);
+	assertFeatureKinds(parsed.normalized);
 	// Usage windows and plan allocations reset within the provider period, so an item that resets
 	// less often than its plan bills would silently reset every period: a yearly limit on a monthly
 	// plan would become a monthly one.
@@ -597,6 +598,38 @@ function assertNewCatalogIntent(
 	// One definition of "unpriced": no base price, no provider-priced products, no item price.
 	assertDefaultPlan(parsed.working);
 	assertCatalogProviderCompatibility(parsed.working, capabilities);
+}
+
+/**
+ * A boolean feature has no quantity and refuses usage, so an allocation of one, or a rate card that
+ * meters one, would publish and never apply. A spend limit's currency is matched against the
+ * currency usage is priced in, so a code that is no currency never limits anything.
+ */
+function assertFeatureKinds(catalog: CatalogIntent): void {
+	const kinds = new Map(catalog.features.map((feature) => [feature.key, feature.kind]));
+	for (const plan of catalog.plans) {
+		for (const item of plan.items) {
+			if (item.itemKind === "allocation" && kinds.get(item.featureKey) !== "metered") {
+				throw new InvalidRequestError(
+					`Plan ${plan.key} allocation ${item.featureKey} requires a metered feature; a boolean feature takes an access item`,
+				);
+			}
+		}
+		for (const control of plan.controls ?? []) {
+			if (control.controlKind === "spend_limit" && !/^[A-Z]{3}$/.test(control.currency ?? "")) {
+				throw new InvalidRequestError(
+					`Plan ${plan.key} spend-limit currency must be a three-letter code`,
+				);
+			}
+		}
+	}
+	for (const entry of catalog.rateCards) {
+		if (kinds.get(entry.meterFeatureKey) !== "metered") {
+			throw new InvalidRequestError(
+				`Rate-card meter ${entry.meterFeatureKey} must be a metered feature`,
+			);
+		}
+	}
 }
 
 /** A calendar expiry's columns spelled out: an interval with its count, or neither. */

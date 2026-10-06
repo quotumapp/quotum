@@ -802,6 +802,128 @@ describe("catalog control plane reset intervals", () => {
 	});
 });
 
+describe("catalog control plane feature kinds", () => {
+	const flag: CatalogFeatureIntent = {
+		key: "sso",
+		name: "SSO",
+		kind: "boolean",
+		meterKind: null,
+		unit: "flag",
+		creditScale: 0,
+		filterDimensions: [],
+	};
+	const wallet: CatalogFeatureIntent = { ...feature, key: "wallet", name: "Wallet" };
+	const messageOf = async (catalog: Partial<CatalogIntent>) => {
+		try {
+			await new CatalogControlPlane(sentinelDatabase).preview({} as never, {
+				expectedRevision: null,
+				actor: "test",
+				catalog: {
+					features: [feature, flag, wallet],
+					plans: [],
+					topups: [],
+					rateCards: [],
+					...catalog,
+				},
+			});
+		} catch (error) {
+			if (error === passedNormalization) return "normalized";
+			if (error instanceof InvalidRequestError) return error.message;
+			throw error;
+		}
+		throw new Error("Catalog preview resolved without reaching its transaction");
+	};
+	const allocation = (featureKey: string): CatalogPlanItemIntent => ({
+		...resettingItem("allocation", "month"),
+		featureKey,
+		quantity: "1",
+	});
+
+	it("refuses an allocation of a boolean feature and points to the access item", async () => {
+		expect(await messageOf({ plans: [plan({ items: [allocation("sso")] })] })).toBe(
+			"Plan pro allocation sso requires a metered feature; a boolean feature takes an access item",
+		);
+		expect(await messageOf({ plans: [plan({ items: [allocation("credits")] })] })).toBe(
+			"normalized",
+		);
+		expect(
+			await messageOf({
+				plans: [
+					plan({
+						items: [
+							{ ...allocation("sso"), itemKind: "access", quantity: null, resetInterval: null },
+						],
+					}),
+				],
+			}),
+		).toBe("normalized");
+	});
+
+	it("refuses a rate card that meters a boolean feature", async () => {
+		const card = (meterFeatureKey: string) => ({
+			rateCards: [{ meterFeatureKey, walletFeatureKey: "wallet", ratePerUnit: "1" }],
+		});
+		expect(await messageOf(card("sso"))).toBe("Rate-card meter sso must be a metered feature");
+		expect(await messageOf(card("credits"))).toBe("normalized");
+	});
+
+	it("takes only letters as a spend limit's currency", async () => {
+		const limited = (currency: string) =>
+			messageOf({
+				plans: [
+					plan({
+						items: [allocation("credits")],
+						controls: [
+							{
+								controlKind: "spend_limit",
+								featureKey: null,
+								currency,
+								limitValue: "5000",
+								interval: "month",
+							},
+						],
+					}),
+				],
+			});
+		for (const currency of ["123", "U_D", "US1"]) {
+			expect(await limited(currency)).toBe(
+				"Plan pro spend-limit currency must be a three-letter code",
+			);
+		}
+		expect(await limited("usd")).toBe("normalized");
+	});
+
+	it("keeps a catalog published before these rules readable", async () => {
+		const stored: CatalogIntent = {
+			features: [feature, flag, wallet],
+			plans: [
+				plan({
+					items: [allocation("sso")],
+					controls: [
+						{
+							controlKind: "spend_limit",
+							featureKey: null,
+							currency: "123",
+							limitValue: "5000",
+							interval: "month",
+						},
+					],
+				}),
+			],
+			topups: [],
+			rateCards: [{ meterFeatureKey: "sso", walletFeatureKey: "wallet", ratePerUnit: "1" }],
+		};
+		const current = await new CatalogControlPlane(new StoredCatalogDatabase(stored)).getPublished(
+			projectInstanceContext(),
+		);
+		expect(current.catalog?.plans[0]?.items[0]).toMatchObject({
+			itemKind: "allocation",
+			featureKey: "sso",
+		});
+		expect(current.catalog?.rateCards[0]?.meterFeatureKey).toBe("sso");
+	});
+});
+
 describe("catalog control plane cadences", () => {
 	const item = (overrides: Partial<CatalogPlanItemIntent>): CatalogPlanItemIntent => ({
 		...resettingItem("meter_limit", "month"),
