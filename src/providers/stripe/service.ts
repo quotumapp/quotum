@@ -19,6 +19,7 @@ import {
 	NotFoundBillingError,
 	ProviderUnavailableError,
 } from "../../billing/errors";
+import { parseIdempotencyKey } from "../../billing/idempotency-key";
 import {
 	normalizePaymentSetupCurrency,
 	type PaymentSetupSession,
@@ -3146,10 +3147,7 @@ function parseOptionalIdempotencyKey(value: string | null | undefined): string |
 	if (value === undefined || value === null) {
 		return null;
 	}
-	if (!/^[A-Za-z0-9._:-]{1,200}$/u.test(value)) {
-		throw new BillingError("Idempotency-Key is invalid", "INVALID_IDEMPOTENCY_KEY", 400);
-	}
-	return value;
+	return parseIdempotencyKey(value);
 }
 
 /** A plan's own trial applies unless the account already had a trial of that plan. */

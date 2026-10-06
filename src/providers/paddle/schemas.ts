@@ -153,7 +153,7 @@ export type PaddleAdjustment = z.infer<typeof paddleAdjustmentSchema>;
 export const paddleEventSchema = z
 	.object({
 		event_id: paddleId("evt"),
-		event_type: z.string().min(1),
+		event_type: z.string().min(1).max(200),
 		occurred_at: date,
 		data: z.record(z.string(), z.unknown()),
 	})

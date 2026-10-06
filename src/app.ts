@@ -425,6 +425,17 @@ export function createApp({
 			// RFC 9110 requires a challenge on 401; project credentials are bearer tokens.
 			headers["www-authenticate"] = 'Bearer realm="quotum"';
 		}
+		const retryAfterSeconds = classified.details?.retryAfterSeconds;
+		if (
+			classified.status === 503 &&
+			classified.code === "BILLING_PROVIDER_UNAVAILABLE" &&
+			typeof retryAfterSeconds === "number" &&
+			Number.isInteger(retryAfterSeconds) &&
+			retryAfterSeconds > 0
+		) {
+			// The same wait as `details.retryAfterSeconds`, for clients that only read headers.
+			headers["retry-after"] = String(retryAfterSeconds);
+		}
 		return billingJsonResponse(
 			request,
 			classified.status,

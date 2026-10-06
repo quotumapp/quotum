@@ -170,7 +170,7 @@ export function createMerchantBilling(store: MerchantStore, billing: MerchantBil
 		// Actionable GETs still require write capability, but do not require mutation idempotency.
 		if (route.readOnly || request.method === "GET") {
 			const result = await dispatch();
-			return Response.json(result.body, { status: result.status });
+			return billingResultResponse(result);
 		}
 		const authorize = async (tx: MerchantSql) => {
 			const latest = await store.membership(tx, identity.principalId, scope.organizationSlug, true);
@@ -209,6 +209,29 @@ export function createMerchantBilling(store: MerchantStore, billing: MerchantBil
 			authorize,
 			dispatch,
 		);
-		return Response.json(result.body, { status: result.status });
+		return billingResultResponse(result);
 	};
+}
+
+/** The billing answer as the console proxy returns it: a provider outage keeps its wait in `retry-after`. */
+export function billingResultResponse(result: { status: number; body: unknown }): Response {
+	const seconds = providerRetryAfterSeconds(result);
+	return Response.json(result.body, {
+		status: result.status,
+		...(seconds === null ? {} : { headers: { "retry-after": String(seconds) } }),
+	});
+}
+
+function providerRetryAfterSeconds(result: { status: number; body: unknown }): number | null {
+	if (result.status !== 503 || typeof result.body !== "object" || result.body === null) return null;
+	const error = (
+		result.body as { error?: { code?: unknown; details?: { retryAfterSeconds?: unknown } } }
+	).error;
+	const seconds = error?.details?.retryAfterSeconds;
+	return error?.code === "BILLING_PROVIDER_UNAVAILABLE" &&
+		typeof seconds === "number" &&
+		Number.isInteger(seconds) &&
+		seconds > 0
+		? seconds
+		: null;
 }

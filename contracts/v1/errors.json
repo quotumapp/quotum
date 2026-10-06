@@ -195,6 +195,7 @@
         "src/db/repository/apple.ts",
         "src/db/repository/google.ts",
         "src/db/repository/identities.ts",
+        "src/db/repository/paddle.ts",
         "src/db/repository/stripe.ts"
       ]
     },
@@ -627,7 +628,7 @@
     {
       "code": "INVALID_IDEMPOTENCY_KEY",
       "sources": [
-        "src/providers/stripe/service.ts"
+        "src/billing/idempotency-key.ts"
       ]
     },
     {
@@ -664,6 +665,7 @@
         "src/providers/apple/service.ts",
         "src/providers/google/pubsub.ts",
         "src/providers/google/service.ts",
+        "src/providers/paddle/webhook.ts",
         "src/providers/stripe/saved-card-plan.ts",
         "src/providers/stripe/service.ts",
         "src/providers/validation.ts"

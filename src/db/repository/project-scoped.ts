@@ -101,8 +101,8 @@ export class ProjectScopedBillingRepository {
 	getPaddleBinding(productKey: string) {
 		return this.repository.paddle.binding(this.project, productKey);
 	}
-	findPaddleBindingIncludingRetired(productKey: string) {
-		return this.repository.paddle.bindingIncludingRetired(this.project, productKey);
+	findPaddleBindingIncludingRetired(productKey: string, priceId?: string) {
+		return this.repository.paddle.bindingIncludingRetired(this.project, productKey, priceId);
 	}
 	linkPaddleCustomer(input: Parameters<PaddleBillingRepository["linkCustomer"]>[1]) {
 		return this.repository.paddle.linkCustomer(this.project, input);
