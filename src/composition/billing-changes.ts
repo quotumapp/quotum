@@ -15,6 +15,17 @@ import { canonicalJson } from "../platform/step-up";
 import { billingChangeActions } from "./billing-change-actions";
 
 const hash = (value: unknown) => createHash("sha256").update(canonicalJson(value)).digest("hex");
+
+/**
+ * A read without the time it was generated. `generatedAt` says when the answer was produced, not
+ * what it holds; kept in the reviewed snapshot, no later read could match its fingerprint, and
+ * every change reviewed through such a read (the account summary) would be refused as stale.
+ */
+function withoutReadTime(body: unknown): unknown {
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return body;
+	const { generatedAt: _ignored, ...rest } = body as Record<string, unknown>;
+	return "data" in rest ? { ...rest, data: withoutReadTime(rest.data) } : rest;
+}
 export function createBillingChangesPort(
 	repo: BillingRepository,
 	makePort: (repository: BillingRepository) => MerchantBillingPort,
@@ -70,7 +81,8 @@ export function createBillingChangesPort(
 			input.parameters,
 			input.body,
 		);
-		return target === null ? result.body : { configuration: result.body, target };
+		const configuration = withoutReadTime(result.body);
+		return target === null ? configuration : { configuration, target };
 	};
 	const prepare = async (
 		context: BillingChangeContext,
