@@ -631,6 +631,8 @@ export class MeteringBillingRepository extends RepositoryModule {
 					correctionUsageEventId: event.id,
 					correctionUsageEventRecordedAt: event.recorded_at,
 					usageReduction: correctionQuantity,
+					originalQuantity,
+					correctedQuantityBefore: corrected.quantity,
 					spendMinorReduction:
 						meterLimitBalanceAfterCorrection?.spendMinorReduction ??
 						closedPeriodCorrection?.spendMinorReduction ??
