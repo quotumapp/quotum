@@ -68,13 +68,17 @@ Signs, exponent notation, whitespace and zero usage are rejected; feature scale 
 still apply. Public responses contain canonical decimal strings.
 
 Metered results contain `featureId`, exact `entityId` (null for account scope), `usage` and `rated`
-quantities (`featureId`, `unit`, `value`), and a bounded `balance` with `featureId`, `unit`, `granted`,
-`consumed`, `held` and `available`. An unlimited quota reports `unlimited: true` with `granted` and
-`available` null; a meter limit also reports `scope`, `windowStartAt` and `windowEndAt`, the window
-counting the usage and when it resets. Boolean checks omit those quantities and balance. Consume also
-returns `operation: "consume"` and the caller's `operationId` from `Idempotency-Key`. Successful
-consumption includes `receiptId`, `usageEventId` and `recordedAt`; denial includes none of them.
-`usageEventId` and `recordedAt` are what a correction needs:
+quantities (`featureId`, `unit`, `value`), and a bounded `balance` with `featureId`, `unit`,
+`granted`, `consumed`, `held` and `available`. An unlimited quota reports `unlimited: true` with
+`granted` and `available` null; a meter limit also reports `scope`, `windowStartAt` and
+`windowEndAt`, the window counting the usage and when it resets. Boolean checks omit those
+quantities and balance. Only a check takes a boolean feature: consume, a reservation, a balance
+read, a limit, an alert, an automatic top-up or a license check that names an active feature which
+is not metered answers `400 FEATURE_OPERATION_UNSUPPORTED`, and a key that names no active feature
+answers `404 FEATURE_NOT_FOUND`. Consume also returns `operation: "consume"` and the caller's
+`operationId` from `Idempotency-Key`. Successful consumption includes `receiptId`, `usageEventId`
+and `recordedAt`; denial includes none of them. `usageEventId` and `recordedAt` are what a
+correction needs:
 `POST /v1/billing-accounts/:billingAccountId/usage/events/:usageEventId/corrections` with
 `originalRecordedAt` set to the consume's `recordedAt`. Allocation rows, rate-card tiers, purchase
 actions and deduction arrays are absent.

@@ -38,6 +38,7 @@ import {
 } from "./controls-runtime";
 import { defaultPlanAllowanceEndingSql } from "./default-plan-sql";
 import { enqueueUsageProjection } from "./entitlements";
+import { featureNotMetered } from "./feature-errors";
 import { shrinkKeptLevels } from "./kept-levels";
 import {
 	governingMeterLimitScope,
@@ -211,7 +212,7 @@ export async function requireMeteredFeature(
 	key: string,
 ): Promise<FeatureRow> {
 	const row = await requireActiveFeature(executor, projectId, key);
-	if (row.kind !== "metered") throw meteredFeatureNotFound(row.key);
+	if (row.kind !== "metered") throw featureNotMetered(row.key);
 	return row;
 }
 
