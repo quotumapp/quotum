@@ -31675,14 +31675,16 @@
                                   "type": "string"
                                 },
                                 "maximumQuantity": {
-                                  "exclusiveMinimum": 0,
+                                  "maximum": 2147483647,
+                                  "minimum": 1,
                                   "type": [
                                     "integer",
                                     "null"
                                   ]
                                 },
                                 "minimumQuantity": {
-                                  "exclusiveMinimum": 0,
+                                  "maximum": 2147483647,
+                                  "minimum": 1,
                                   "type": "integer"
                                 },
                                 "pricingModel": {
@@ -32223,14 +32225,16 @@
                                                         "type": "string"
                                                       },
                                                       "maximumQuantity": {
-                                                        "exclusiveMinimum": 0,
+                                                        "maximum": 2147483647,
+                                                        "minimum": 1,
                                                         "type": [
                                                           "integer",
                                                           "null"
                                                         ]
                                                       },
                                                       "minimumQuantity": {
-                                                        "exclusiveMinimum": 0,
+                                                        "maximum": 2147483647,
+                                                        "minimum": 1,
                                                         "type": "integer"
                                                       },
                                                       "pricingModel": {
@@ -32441,14 +32445,16 @@
                                                 "type": "string"
                                               },
                                               "maximumQuantity": {
-                                                "exclusiveMinimum": 0,
+                                                "maximum": 2147483647,
+                                                "minimum": 1,
                                                 "type": [
                                                   "integer",
                                                   "null"
                                                 ]
                                               },
                                               "minimumQuantity": {
-                                                "exclusiveMinimum": 0,
+                                                "maximum": 2147483647,
+                                                "minimum": 1,
                                                 "type": "integer"
                                               },
                                               "pricingModel": {
@@ -32665,14 +32671,16 @@
                                             "type": "string"
                                           },
                                           "maximumQuantity": {
-                                            "exclusiveMinimum": 0,
+                                            "maximum": 2147483647,
+                                            "minimum": 1,
                                             "type": [
                                               "integer",
                                               "null"
                                             ]
                                           },
                                           "minimumQuantity": {
-                                            "exclusiveMinimum": 0,
+                                            "maximum": 2147483647,
+                                            "minimum": 1,
                                             "type": "integer"
                                           },
                                           "pricingModel": {
@@ -33045,6 +33053,8 @@
                               ]
                             },
                             "tierRank": {
+                              "maximum": 2147483647,
+                              "minimum": -2147483648,
                               "type": "integer"
                             },
                             "trialDays": {
@@ -33074,7 +33084,8 @@
                               "type": "string"
                             },
                             "version": {
-                              "exclusiveMinimum": 0,
+                              "maximum": 2147483647,
+                              "minimum": 1,
                               "type": "integer"
                             },
                             "visibility": {
@@ -33952,14 +33963,16 @@
                                   "type": "string"
                                 },
                                 "maximumQuantity": {
-                                  "exclusiveMinimum": 0,
+                                  "maximum": 2147483647,
+                                  "minimum": 1,
                                   "type": [
                                     "integer",
                                     "null"
                                   ]
                                 },
                                 "minimumQuantity": {
-                                  "exclusiveMinimum": 0,
+                                  "maximum": 2147483647,
+                                  "minimum": 1,
                                   "type": "integer"
                                 },
                                 "pricingModel": {
@@ -34500,14 +34513,16 @@
                                                         "type": "string"
                                                       },
                                                       "maximumQuantity": {
-                                                        "exclusiveMinimum": 0,
+                                                        "maximum": 2147483647,
+                                                        "minimum": 1,
                                                         "type": [
                                                           "integer",
                                                           "null"
                                                         ]
                                                       },
                                                       "minimumQuantity": {
-                                                        "exclusiveMinimum": 0,
+                                                        "maximum": 2147483647,
+                                                        "minimum": 1,
                                                         "type": "integer"
                                                       },
                                                       "pricingModel": {
@@ -34718,14 +34733,16 @@
                                                 "type": "string"
                                               },
                                               "maximumQuantity": {
-                                                "exclusiveMinimum": 0,
+                                                "maximum": 2147483647,
+                                                "minimum": 1,
                                                 "type": [
                                                   "integer",
                                                   "null"
                                                 ]
                                               },
                                               "minimumQuantity": {
-                                                "exclusiveMinimum": 0,
+                                                "maximum": 2147483647,
+                                                "minimum": 1,
                                                 "type": "integer"
                                               },
                                               "pricingModel": {
@@ -34942,14 +34959,16 @@
                                             "type": "string"
                                           },
                                           "maximumQuantity": {
-                                            "exclusiveMinimum": 0,
+                                            "maximum": 2147483647,
+                                            "minimum": 1,
                                             "type": [
                                               "integer",
                                               "null"
                                             ]
                                           },
                                           "minimumQuantity": {
-                                            "exclusiveMinimum": 0,
+                                            "maximum": 2147483647,
+                                            "minimum": 1,
                                             "type": "integer"
                                           },
                                           "pricingModel": {
@@ -35322,6 +35341,8 @@
                               ]
                             },
                             "tierRank": {
+                              "maximum": 2147483647,
+                              "minimum": -2147483648,
                               "type": "integer"
                             },
                             "trialDays": {
@@ -35351,7 +35372,8 @@
                               "type": "string"
                             },
                             "version": {
-                              "exclusiveMinimum": 0,
+                              "maximum": 2147483647,
+                              "minimum": 1,
                               "type": "integer"
                             },
                             "visibility": {
@@ -58425,14 +58447,16 @@
                                   "type": "string"
                                 },
                                 "maximumQuantity": {
-                                  "exclusiveMinimum": 0,
+                                  "maximum": 2147483647,
+                                  "minimum": 1,
                                   "type": [
                                     "integer",
                                     "null"
                                   ]
                                 },
                                 "minimumQuantity": {
-                                  "exclusiveMinimum": 0,
+                                  "maximum": 2147483647,
+                                  "minimum": 1,
                                   "type": "integer"
                                 },
                                 "pricingModel": {
@@ -58973,14 +58997,16 @@
                                                         "type": "string"
                                                       },
                                                       "maximumQuantity": {
-                                                        "exclusiveMinimum": 0,
+                                                        "maximum": 2147483647,
+                                                        "minimum": 1,
                                                         "type": [
                                                           "integer",
                                                           "null"
                                                         ]
                                                       },
                                                       "minimumQuantity": {
-                                                        "exclusiveMinimum": 0,
+                                                        "maximum": 2147483647,
+                                                        "minimum": 1,
                                                         "type": "integer"
                                                       },
                                                       "pricingModel": {
@@ -59191,14 +59217,16 @@
                                                 "type": "string"
                                               },
                                               "maximumQuantity": {
-                                                "exclusiveMinimum": 0,
+                                                "maximum": 2147483647,
+                                                "minimum": 1,
                                                 "type": [
                                                   "integer",
                                                   "null"
                                                 ]
                                               },
                                               "minimumQuantity": {
-                                                "exclusiveMinimum": 0,
+                                                "maximum": 2147483647,
+                                                "minimum": 1,
                                                 "type": "integer"
                                               },
                                               "pricingModel": {
@@ -59415,14 +59443,16 @@
                                             "type": "string"
                                           },
                                           "maximumQuantity": {
-                                            "exclusiveMinimum": 0,
+                                            "maximum": 2147483647,
+                                            "minimum": 1,
                                             "type": [
                                               "integer",
                                               "null"
                                             ]
                                           },
                                           "minimumQuantity": {
-                                            "exclusiveMinimum": 0,
+                                            "maximum": 2147483647,
+                                            "minimum": 1,
                                             "type": "integer"
                                           },
                                           "pricingModel": {
@@ -59795,6 +59825,8 @@
                               ]
                             },
                             "tierRank": {
+                              "maximum": 2147483647,
+                              "minimum": -2147483648,
                               "type": "integer"
                             },
                             "trialDays": {
@@ -59824,7 +59856,8 @@
                               "type": "string"
                             },
                             "version": {
-                              "exclusiveMinimum": 0,
+                              "maximum": 2147483647,
+                              "minimum": 1,
                               "type": "integer"
                             },
                             "visibility": {
@@ -60622,14 +60655,16 @@
                                   "type": "string"
                                 },
                                 "maximumQuantity": {
-                                  "exclusiveMinimum": 0,
+                                  "maximum": 2147483647,
+                                  "minimum": 1,
                                   "type": [
                                     "integer",
                                     "null"
                                   ]
                                 },
                                 "minimumQuantity": {
-                                  "exclusiveMinimum": 0,
+                                  "maximum": 2147483647,
+                                  "minimum": 1,
                                   "type": "integer"
                                 },
                                 "pricingModel": {
@@ -61170,14 +61205,16 @@
                                                         "type": "string"
                                                       },
                                                       "maximumQuantity": {
-                                                        "exclusiveMinimum": 0,
+                                                        "maximum": 2147483647,
+                                                        "minimum": 1,
                                                         "type": [
                                                           "integer",
                                                           "null"
                                                         ]
                                                       },
                                                       "minimumQuantity": {
-                                                        "exclusiveMinimum": 0,
+                                                        "maximum": 2147483647,
+                                                        "minimum": 1,
                                                         "type": "integer"
                                                       },
                                                       "pricingModel": {
@@ -61388,14 +61425,16 @@
                                                 "type": "string"
                                               },
                                               "maximumQuantity": {
-                                                "exclusiveMinimum": 0,
+                                                "maximum": 2147483647,
+                                                "minimum": 1,
                                                 "type": [
                                                   "integer",
                                                   "null"
                                                 ]
                                               },
                                               "minimumQuantity": {
-                                                "exclusiveMinimum": 0,
+                                                "maximum": 2147483647,
+                                                "minimum": 1,
                                                 "type": "integer"
                                               },
                                               "pricingModel": {
@@ -61612,14 +61651,16 @@
                                             "type": "string"
                                           },
                                           "maximumQuantity": {
-                                            "exclusiveMinimum": 0,
+                                            "maximum": 2147483647,
+                                            "minimum": 1,
                                             "type": [
                                               "integer",
                                               "null"
                                             ]
                                           },
                                           "minimumQuantity": {
-                                            "exclusiveMinimum": 0,
+                                            "maximum": 2147483647,
+                                            "minimum": 1,
                                             "type": "integer"
                                           },
                                           "pricingModel": {
@@ -61992,6 +62033,8 @@
                               ]
                             },
                             "tierRank": {
+                              "maximum": 2147483647,
+                              "minimum": -2147483648,
                               "type": "integer"
                             },
                             "trialDays": {
@@ -62021,7 +62064,8 @@
                               "type": "string"
                             },
                             "version": {
-                              "exclusiveMinimum": 0,
+                              "maximum": 2147483647,
+                              "minimum": 1,
                               "type": "integer"
                             },
                             "visibility": {

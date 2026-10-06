@@ -9,6 +9,7 @@ import {
 	maxExpirySeconds,
 } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
+import { maxInt4, minInt4 } from "../shared/input-bounds";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/catalog-responses";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
@@ -60,8 +61,8 @@ const priceSchema = z
 		billingUnits: z.string().trim().min(1).max(80),
 		billingInterval: z.enum(billingCadenceUnits),
 		billingIntervalCount: z.number().int().min(1).max(maxCadenceCount).optional(),
-		minimumQuantity: z.number().int().positive(),
-		maximumQuantity: z.number().int().positive().nullable(),
+		minimumQuantity: z.number().int().min(1).max(maxInt4),
+		maximumQuantity: z.number().int().min(1).max(maxInt4).nullable(),
 		taxBehavior: z.enum(["inclusive", "exclusive", "unspecified"]),
 		pricingModel: z.enum(["flat", "graduated", "volume"]).optional(),
 		// Empty for a flat price, which is how the published catalog returns one.
@@ -216,10 +217,10 @@ const planSchema = z
 	.object({
 		key: z.string().trim().min(1).max(120),
 		name: z.string().trim().min(1).max(200),
-		version: z.number().int().positive(),
+		version: z.number().int().min(1).max(maxInt4),
 		trialDays: z.number().int().min(0).max(730).nullable().optional(),
 		kind: z.enum(["base", "addon"]).optional(),
-		tierRank: z.number().int().optional(),
+		tierRank: z.number().int().min(minInt4).max(maxInt4).optional(),
 		trialRequiresPaymentMethod: z.boolean().optional(),
 		trialEndBehavior: z.enum(["cancel", "pause"]).optional(),
 		upgradeProrationBehavior: z.enum(["always_invoice", "create_prorations", "none"]).optional(),

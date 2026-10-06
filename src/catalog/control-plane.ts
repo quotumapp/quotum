@@ -25,6 +25,7 @@ import {
 } from "../providers/capabilities";
 import { type CadenceUnit, describeCadence, isCadenceUnit, sameCadence } from "../shared/cadence";
 import { toIso } from "../shared/date";
+import { maxInt4, minInt4 } from "../shared/input-bounds";
 import {
 	assertPlanCadences,
 	assertTopupCadences,
@@ -73,6 +74,7 @@ import type {
 	CatalogPublishInput,
 	CatalogPublishResult,
 	CatalogScopeImpact,
+	CatalogTopupIntent,
 	PublishedCatalog,
 } from "./types";
 
@@ -228,11 +230,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				await readCurrentCatalogIntent(tx, projectState.id, this.capabilities),
 				parsed.canonical,
 			);
-			await assertPlanBindingsReady(
-				tx,
-				projectState.id,
-				parsed.working.plans.filter((plan) => changedKeys.has(plan.key)),
-			);
+			await assertPublishable(tx, projectState.id, parsed.working, changedKeys);
 			const intentHash = sha256Hex(stableJson(parsed.canonical));
 			const nextRevision = (projectState.revision ?? 0) + 1;
 			const previewToken = sha256Hex(
@@ -522,6 +520,16 @@ async function readProjectCatalog(
 	lock: boolean,
 ): Promise<ProjectCatalogRow> {
 	const projectId = project.projectInstanceId;
+	// Lock in a statement of its own. Under READ COMMITTED a statement that waited for the lock
+	// re-checks only the locked row against the winner's commit and keeps the joined revision row
+	// of its own snapshot, so a publish that lost the race would read the revision before the
+	// winner's (null for a first publish) and fail with a unique violation or a wrong conflict.
+	if (lock) {
+		await executeOne(
+			executor,
+			drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
+		);
+	}
 	const row = await executeOne<ProjectCatalogRow>(
 		executor,
 		drizzleSql`
@@ -531,7 +539,6 @@ async function readProjectCatalog(
 				ON cr.project_id = p.id
 				AND cr.id = p.published_catalog_revision_id
 			WHERE p.id = ${projectId}
-			${lock ? drizzleSql`FOR UPDATE OF p` : drizzleSql``}
 		`,
 	);
 	if (row === null) throw new Error(`Billing project ${project.projectInstanceKey} was not found`);
@@ -705,6 +712,14 @@ function normalizeCatalog(
 		if (!Number.isInteger(plan.version) || plan.version < 1) {
 			throw new InvalidRequestError(`Plan ${plan.key} version must be a positive integer`);
 		}
+		if (plan.version > maxInt4) {
+			throw new InvalidRequestError(`Plan ${plan.key} version cannot exceed ${maxInt4}`);
+		}
+		if (!Number.isInteger(plan.tierRank) || plan.tierRank < minInt4 || plan.tierRank > maxInt4) {
+			throw new InvalidRequestError(
+				`Plan ${plan.key} tierRank must be a whole number from ${minInt4} to ${maxInt4}`,
+			);
+		}
 		if ((plan.visibility === "customer_specific") !== (plan.customerBillingAccountId !== null)) {
 			throw new InvalidRequestError(
 				`Plan ${plan.key} customer-specific visibility requires one billing account`,
@@ -809,6 +824,16 @@ function normalizeCatalog(
 					`License-pool scope for ${item.featureKey} requires licensed quantity pricing`,
 				);
 			}
+		}
+		// A plan version keeps one price component per key.
+		const priceKeys = [plan.basePrice ?? null, ...plan.items.map((item) => item.price ?? null)]
+			.filter((price): price is CatalogPriceIntent => price !== null)
+			.map(({ key }) => key);
+		const repeatedPriceKey = priceKeys.find((key, index) => priceKeys.indexOf(key) !== index);
+		if (repeatedPriceKey !== undefined) {
+			throw new InvalidRequestError(
+				`Plan ${plan.key} uses price key ${repeatedPriceKey} more than once`,
+			);
 		}
 		assertUnique(
 			plan.providerBindings.map(providerBindingIdentity),
@@ -1010,6 +1035,10 @@ function normalizePrice(
 		(!Number.isSafeInteger(price.maximumQuantity) || price.maximumQuantity < price.minimumQuantity)
 	) {
 		throw new InvalidRequestError(`${label} maximumQuantity must be at least minimumQuantity`);
+	}
+	// Quantities are stored as a Postgres integer.
+	if (price.minimumQuantity > maxInt4 || (price.maximumQuantity ?? 0) > maxInt4) {
+		throw new InvalidRequestError(`${label} quantities cannot exceed ${maxInt4}`);
 	}
 	const providerBindings = price.providerBindings
 		.map((binding) => normalizeProviderBinding(binding, capabilities))
@@ -2037,6 +2066,139 @@ async function resolvePriceBinding(
 }
 
 /**
+ * Refuses, before anything is stored, what the publish step would refuse against the database: a
+ * preview must not promise a revision it cannot write. Only the plans the intent changes are
+ * checked, as publish writes only those; features and top-ups are written every time.
+ */
+async function assertPublishable(
+	executor: QueryExecutor,
+	projectId: string,
+	catalog: CatalogIntent,
+	changedKeys: ReadonlySet<string>,
+): Promise<void> {
+	const changedPlans = catalog.plans.filter((plan) => changedKeys.has(plan.key));
+	await assertFeatureIdentities(executor, projectId, catalog.features);
+	await assertPlanVersionsAvailable(executor, projectId, changedPlans);
+	for (const plan of changedPlans) {
+		await resolveCustomPlanCustomerId(
+			executor,
+			projectId,
+			plan.visibility ?? "public",
+			plan.customerBillingAccountId ?? null,
+		);
+	}
+	await assertPlanBindingsReady(executor, projectId, changedPlans);
+	for (const topup of catalog.topups) {
+		for (const binding of topup.providerBindings) {
+			await resolveTopupBinding(executor, projectId, topup, binding);
+		}
+	}
+}
+
+/** Refuses a feature whose meter semantics differ from the stored feature of the same key. */
+async function assertFeatureIdentities(
+	executor: QueryExecutor,
+	projectId: string,
+	features: readonly CatalogFeatureIntent[],
+): Promise<void> {
+	if (features.length === 0) return;
+	const stored = await executeRows<{
+		key: string;
+		kind: string;
+		meter_kind: string | null;
+		unit: string;
+		credit_scale: number;
+		filter_dimensions: string[];
+	}>(
+		executor,
+		drizzleSql`
+			SELECT key, kind, meter_kind, unit, credit_scale, filter_dimensions
+			FROM features
+			WHERE project_id = ${projectId}
+				AND key IN (SELECT jsonb_array_elements_text(${jsonb(features.map(({ key }) => key))}))
+		`,
+	);
+	const byKey = new Map(stored.map((row) => [row.key, row]));
+	for (const feature of features) {
+		const existing = byKey.get(feature.key);
+		if (
+			existing !== undefined &&
+			!(
+				existing.kind === feature.kind &&
+				existing.meter_kind === feature.meterKind &&
+				existing.unit === feature.unit &&
+				Number(existing.credit_scale) === feature.creditScale &&
+				stableJson(existing.filter_dimensions) === stableJson(feature.filterDimensions)
+			)
+		) {
+			throw new PersistenceConflictError(
+				`Feature ${feature.key} changes immutable meter semantics`,
+				"FEATURE_IDENTITY_CONFLICT",
+			);
+		}
+	}
+}
+
+/** Refuses a changed plan that reuses a version number its plan already has. */
+async function assertPlanVersionsAvailable(
+	executor: QueryExecutor,
+	projectId: string,
+	plans: readonly CatalogPlanIntent[],
+): Promise<void> {
+	if (plans.length === 0) return;
+	const rows = await executeRows<{ key: string; version: number }>(
+		executor,
+		drizzleSql`
+			SELECT plan.key, version.version
+			FROM plan_versions version
+			JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+			WHERE version.project_id = ${projectId}
+				AND plan.key IN (SELECT jsonb_array_elements_text(${jsonb(plans.map(({ key }) => key))}))
+		`,
+	);
+	const taken = new Set(rows.map((row) => `${row.key}:${Number(row.version)}`));
+	for (const plan of plans) {
+		if (taken.has(`${plan.key}:${plan.version}`)) {
+			throw new PersistenceConflictError(
+				`Plan ${plan.key} version ${plan.version} already exists`,
+				"PLAN_VERSION_CONFLICT",
+			);
+		}
+	}
+}
+
+/** The active consumable store product a top-up binding names. */
+async function resolveTopupBinding(
+	executor: QueryExecutor,
+	projectId: string,
+	topup: Pick<CatalogTopupIntent, "key">,
+	binding: CatalogProviderBindingIntent,
+): Promise<{ id: string }> {
+	const storeProduct = await executeOne<{ id: string }>(
+		executor,
+		drizzleSql`
+			SELECT sp.id
+			FROM store_products sp
+			JOIN products p ON p.project_id = sp.project_id AND p.id = sp.product_id
+			WHERE sp.project_id = ${projectId}
+				AND p.key = ${binding.productKey}
+				AND sp.provider = ${binding.provider}
+				AND sp.channel = ${binding.channel}
+				AND sp.active = true
+				AND p.active = true
+				AND p.type = 'consumable'
+			LIMIT 1
+		`,
+	);
+	if (storeProduct === null) {
+		throw bindingNotReady(
+			`Top-up binding ${binding.provider}/${binding.channel}/${binding.productKey} for top-up ${topup.key} is not ready: no active consumable product is mapped`,
+		);
+	}
+	return storeProduct;
+}
+
+/**
  * Refuses, before anything is stored, a changed plan whose bindings publish would refuse: a preview
  * must not promise a revision the publish step cannot write.
  */
@@ -2156,30 +2318,7 @@ async function publishTopupProviderBindings(
 ): Promise<void> {
 	for (const topup of catalog.topups) {
 		for (const binding of topup.providerBindings) {
-			const storeProduct = await executeOne<{ id: string }>(
-				executor,
-				drizzleSql`
-					SELECT sp.id
-					FROM store_products sp
-					JOIN products p ON p.project_id = sp.project_id AND p.id = sp.product_id
-					WHERE sp.project_id = ${projectId}
-						AND p.key = ${binding.productKey}
-						AND sp.provider = ${binding.provider}
-						AND sp.channel = ${binding.channel}
-						AND sp.active = true
-						AND p.active = true
-						AND p.type = 'consumable'
-					LIMIT 1
-				`,
-			);
-			if (storeProduct === null) {
-				throw new BillingError(
-					`Top-up binding ${binding.provider}/${binding.channel}/${binding.productKey} is not ready`,
-					"PROVIDER_BINDING_NOT_READY",
-					409,
-					{ classification: "persistence_conflict" },
-				);
-			}
+			const storeProduct = await resolveTopupBinding(executor, projectId, topup, binding);
 			await recordProviderAdoption(executor, {
 				projectId,
 				revisionId,

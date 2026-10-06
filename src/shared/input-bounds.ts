@@ -8,6 +8,10 @@ import { z } from "zod";
 /** The largest value of a Postgres `bigint`, the type of every numeric id. */
 export const maxBigintId = 9_223_372_036_854_775_807n;
 
+/** The range of a Postgres `integer` column. */
+export const maxInt4 = 2_147_483_647;
+export const minInt4 = -2_147_483_648;
+
 /** Digits only and within the signed 64-bit range a Postgres `bigint` id can hold. */
 export function isBigintId(value: string): boolean {
 	return /^\d{1,19}$/.test(value) && BigInt(value) <= maxBigintId;
