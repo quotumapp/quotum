@@ -48,6 +48,7 @@ import { addCadence, type CadenceUnit } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
 import { requireBillingAccount } from "./billing-accounts";
+import { followCarriedUsage } from "./carry-over";
 import type { ControlDenial, UsageAlertRow } from "./controls-runtime";
 import {
 	checkControls,
@@ -1287,11 +1288,13 @@ async function reverseOriginalDeductions(
 			expires_at: Date | string | null;
 			reversed_at: Date | string | null;
 			source_kind: string;
+			subscription_id: string | null;
 			db_now: Date | string;
 		}>(
 			executor,
 			drizzleSql`
-				SELECT consumed_quantity, expires_at, reversed_at, source_kind, clock_timestamp() AS db_now
+				SELECT consumed_quantity, expires_at, reversed_at, source_kind, subscription_id,
+					clock_timestamp() AS db_now
 				FROM balance_allocations
 				WHERE project_id = ${projectId}
 					AND id = ${deduction.allocationId}::bigint
@@ -1327,6 +1330,18 @@ async function reverseOriginalDeductions(
 				throw new Error("Correction receipt exceeds the allocation's consumed quantity");
 			}
 			await shrinkKeptLevels(executor, projectId, [deduction.allocationId]);
+		}
+		// An immediate plan change may have copied this usage onto the incoming allowance; take the
+		// copy back too, or the customer stays charged for usage that was corrected.
+		if (allocation?.subscription_id != null) {
+			await followCarriedUsage(executor, {
+				projectId,
+				subscriptionId: allocation.subscription_id,
+				allocationId: deduction.allocationId,
+				eventRecordedAt: original.recorded_at_exact,
+				quantity: rendered,
+				closedSource: !eligible,
+			});
 		}
 		receipt.push({ ...deduction, quantity: negativeDecimal(rendered) });
 		remaining -= restored;
