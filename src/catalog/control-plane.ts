@@ -1300,19 +1300,36 @@ async function calculateImpact(
 	const currentCatalog = await readCurrentCatalogIntent(executor, projectId, capabilities);
 	const changedKeys = changedPlanKeys(currentCatalog, catalog);
 	const planVersionsCreated = changedKeys.size;
-	const currentTopups = new Set((currentCatalog?.topups ?? []).map(({ key }) => key));
+	const currentTopups = new Map(
+		(currentCatalog?.topups ?? []).map((topup) => [topup.key, stableJson(topup)]),
+	);
 	const retiredFeatures = new Set(catalog.retiredFeatureKeys);
 	const retiredPlans = new Set(catalog.retiredPlanKeys);
 	const retiredTopups = new Set(catalog.retiredTopupKeys);
-	const grandfathered = await executeOne<{ count: number | string }>(
-		executor,
-		drizzleSql`
-			SELECT count(*)::text AS count
-			FROM subscriptions
-			WHERE project_id = ${projectId}
-				AND plan_version_id IS NOT NULL
-		`,
-	);
+	// Subscriptions that keep the version they hold while their plan moves on: the live ones on a
+	// plan this revision gives a new version or retires.
+	const leftBehind = [
+		...changedKeys,
+		...planRows.filter(({ key, active }) => active && retiredPlans.has(key)).map(({ key }) => key),
+	];
+	const grandfathered =
+		leftBehind.length === 0
+			? null
+			: await executeOne<{ count: number | string }>(
+					executor,
+					drizzleSql`
+						SELECT count(*)::text AS count
+						FROM subscriptions subscription
+						JOIN plan_versions version
+							ON version.project_id = subscription.project_id
+							AND version.id = subscription.plan_version_id
+						JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+						WHERE subscription.project_id = ${projectId}
+							AND plan.key IN (SELECT jsonb_array_elements_text(${jsonb(leftBehind)}))
+							AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+							AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
+					`,
+				);
 	const marksDefaultPlan = (intent: CanonicalCatalog | null) =>
 		intent?.defaultPlan !== undefined && intent.defaultPlan !== null;
 	// The accounts without a base plan: those the marked default plan covers, or, when this
@@ -1337,8 +1354,11 @@ async function calculateImpact(
 		plansCreated: catalog.plans.filter(({ key }) => !existingPlans.has(key)).length,
 		planVersionsCreated,
 		plansRetired: planRows.filter(({ key, active }) => active && retiredPlans.has(key)).length,
-		topupOptionsCreated: catalog.topups.length,
-		topupsRetired: [...currentTopups].filter((key) => retiredTopups.has(key)).length,
+		// Publish writes every top-up again; the ones that are new or changed are what it adds.
+		topupOptionsCreated: catalog.topups.filter(
+			(topup) => currentTopups.get(topup.key) !== stableJson(topup),
+		).length,
+		topupsRetired: [...currentTopups.keys()].filter((key) => retiredTopups.has(key)).length,
 		providerBindingsValidated: parsed.working.plans
 			.filter((plan) => changedKeys.has(plan.key))
 			.reduce(

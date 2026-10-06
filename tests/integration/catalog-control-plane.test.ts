@@ -501,6 +501,84 @@ localDescribe("catalog control plane", () => {
 		expect((await publicCatalog.json()).data.plans).toEqual([]);
 	});
 
+	it("reports in the impact only what a revision changes", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = operatorHeaders(authHeaders());
+		const published = catalogIntent(1, "0.005");
+		const first = await previewCatalog(app, headers, null, published);
+		expect(first.impact).toMatchObject({
+			topupOptionsCreated: 1,
+			existingSubscriptionsGrandfathered: 0,
+		});
+		await publishCatalog(app, headers, null, first.previewToken, published);
+		const periodStart = new Date();
+		const periodEnd = new Date(periodStart.getTime() + 30 * 86_400_000);
+		await context.repository.recordStripeSubscriptionAndEnqueueProjection(
+			integrationProjectContext(),
+			{
+				billingAccountId: "impact-account",
+				stripeCustomerId: "cus_impact",
+				stripeSubscriptionId: "sub_impact",
+				invoiceId: null,
+				externalProductId: "prod_stripe_premium",
+				externalPriceId: "price_premium_monthly",
+				subscriptionStatus: "active",
+				purchasedAt: periodStart,
+				startsAt: periodStart,
+				expiresAt: periodEnd,
+				currentPeriodStart: periodStart,
+				currentPeriodEnd: periodEnd,
+				autoRenew: true,
+				rawPayload: {},
+				eventType: "customer.subscription.updated",
+				externalEventId: "evt_impact_purchase",
+				projectionReason: "provider_webhook",
+				projectionIdempotencyKey: "evt_impact_purchase:projection",
+				providerEventCreated: 1,
+			},
+		);
+		const impactOf = async (intent: ReturnType<typeof catalogIntent>) =>
+			(await previewCatalog(app, headers, 1, intent)).impact;
+
+		// The same catalog again, or one that only changes a rate: no plan gets a new version, so
+		// nobody is left on an older one, and the top-up is the one already on sale.
+		for (const unchangedPlans of [published, catalogIntent(1, "0.01")]) {
+			expect(await impactOf(unchangedPlans)).toMatchObject({
+				planVersionsCreated: 0,
+				topupOptionsCreated: 0,
+				existingSubscriptionsGrandfathered: 0,
+			});
+		}
+
+		const nextVersion = catalogIntent(2, "0.005");
+		nextVersion.plans[0].items[0].quantity = "500";
+		expect(await impactOf(nextVersion)).toMatchObject({
+			planVersionsCreated: 1,
+			topupOptionsCreated: 0,
+			existingSubscriptionsGrandfathered: 1,
+		});
+		const changedTopup = catalogIntent(1, "0.005");
+		changedTopup.topups[0].quantity = "20";
+		expect(await impactOf(changedTopup)).toMatchObject({
+			planVersionsCreated: 0,
+			topupOptionsCreated: 1,
+			existingSubscriptionsGrandfathered: 0,
+		});
+
+		// A subscription that has ended holds no version any more.
+		await context.sql`
+			UPDATE subscriptions SET status = 'expired', expires_at = now() - interval '1 day'
+			WHERE external_subscription_id = 'sub_impact'
+		`;
+		expect(await impactOf(nextVersion)).toMatchObject({
+			planVersionsCreated: 1,
+			existingSubscriptionsGrandfathered: 0,
+		});
+	});
+
 	it("keeps grandfathered subscriptions pinned through ordinary provider syncs", async () => {
 		const errors: unknown[] = [];
 		const { app, authHeaders } = createIntegrationApp({
