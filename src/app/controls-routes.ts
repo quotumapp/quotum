@@ -1,6 +1,5 @@
 import { z } from "zod";
 import type { ControlsEnterpriseRepositoryLike } from "../billing/controls";
-import { InvalidRequestError } from "../billing/errors";
 import { billingProviders } from "../billing/types";
 import { cadenceUnits, maxCadenceCount } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
@@ -121,6 +120,9 @@ const autoTopupQuerySchema = z
 		entityId: z.string().trim().min(1).max(200).optional(),
 	})
 	.strict();
+const usageAlertEventsQuerySchema = z.object({
+	limit: decimalDigitsQuery(z.coerce.number().int().min(1).max(500).default(100)),
+});
 const effectiveControlsQuerySchema = z
 	.object({ entityId: z.string().trim().min(1).max(200).optional() })
 	.strict();
@@ -315,23 +317,19 @@ export function registerControlsRoutes({
 
 	app.get(
 		"/v1/billing-accounts/:billingAccountId/usage-alert-events",
-		async ({ params, project, request }) => {
-			const rawLimit = new URL(request.url).searchParams.get("limit");
-			// Decimal digits only: `Number()` would also read `0x2` or `1e1`.
-			if (rawLimit !== null && !/^\d+$/.test(rawLimit))
-				throw new InvalidRequestError("limit must be between 1 and 500");
-			const limit = rawLimit === null ? 100 : Number(rawLimit);
+		async ({ params, project, query }) => {
 			return {
 				success: true,
 				data: await service.listUsageAlertEvents(
 					privateProject(project),
 					params.billingAccountId,
-					limit,
+					query.limit,
 				),
 			};
 		},
 		{
 			params: accountParams,
+			query: usageAlertEventsQuerySchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdUsageAlertEvents",
 				credentialAccess: "read_only",
@@ -340,7 +338,6 @@ export function registerControlsRoutes({
 				responses: {
 					200: responses.getV1BillingAccountsByBillingAccountIdUsageAlertEventsResponse200Schema,
 				},
-				request: { query: z.object({ limit: z.coerce.number().nullable().optional() }) },
 			}),
 		},
 	);

@@ -328,7 +328,8 @@ recorded in the current window, and if that usage has already reached the thresh
 its `threshold_crossed` event when it is created. A correction counts in the window of the usage it
 corrects. After that window has ended, the correction does not change the alert's current count.
 Once a window has ended, `GET /usage-alerts` reports `currentValue` 0 and `crossed` false until
-usage opens the next window.
+usage opens the next window. `GET /usage-alert-events` returns the newest events first, 100 unless
+`limit` asks for another count from 1 to 500, in decimal digits.
 
 Spend-control activation and window boundaries use the database clock by default, so API clock
 skew cannot bypass a newly active policy. Spend controls rate committed usage independently of pending reservations: held quantities never
