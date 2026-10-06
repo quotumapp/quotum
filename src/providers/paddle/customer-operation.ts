@@ -15,3 +15,11 @@ export function paddleCustomerResourceKey(billingAccountId: string): string {
 export function paddleCustomerAttemptKey(billingAccountId: string, checkoutKey: string): string {
 	return `${paddleCustomerResourceKey(billingAccountId)}:${sha256Hex(checkoutKey)}`;
 }
+
+/**
+ * The operation and reservation keys a retry of this checkout key resumes: the checkout's own and
+ * its customer attempt's. A write prepared under any other key belongs to another request.
+ */
+export function paddleResumableKeys(billingAccountId: string, checkoutKey: string): string[] {
+	return [checkoutKey, paddleCustomerAttemptKey(billingAccountId, checkoutKey)];
+}

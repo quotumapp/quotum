@@ -121,6 +121,11 @@ export class ProjectScopedBillingRepository {
 	reservePaddleCheckout(input: Parameters<PaddleCheckoutRepository["reserve"]>[1]) {
 		return this.repository.paddleCheckouts.reserve(this.project, input);
 	}
+	releaseNeverSentPaddleCheckout(
+		input: Parameters<PaddleCheckoutRepository["releaseNeverSent"]>[1],
+	) {
+		return this.repository.paddleCheckouts.releaseNeverSent(this.project, input);
+	}
 	rejectUnboundPaddleCheckout(input: Parameters<PaddleCheckoutRepository["rejectUnbound"]>[1]) {
 		return this.repository.paddleCheckouts.rejectUnbound(this.project, input);
 	}

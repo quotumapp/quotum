@@ -24,7 +24,7 @@ import { paddleCorrelation } from "./commands";
 import { PaddleCommercial } from "./commercial";
 import { buildPaddleConfig } from "./config";
 import { adoptExistingPaddleCustomer, paddleCustomerIdFromDetail } from "./customer-adoption";
-import { paddleCustomerResourceKey } from "./customer-operation";
+import { paddleCustomerResourceKey, paddleResumableKeys } from "./customer-operation";
 import { assertPaddleCustomer, PaddleGateway } from "./gateway";
 import { normalizePaddleEvent } from "./normalizer";
 import { paddleOperationFailed } from "./operation-errors";
@@ -142,6 +142,11 @@ export class PaddleBillingService implements WebBillingService {
 		binding: PaddlePriceBinding,
 		plan?: PaddlePlanPin,
 	) {
+		await this.repository.releaseNeverSentPaddleCheckout({
+			billingAccountId: input.billingAccountId,
+			connectionVersionId: this.config.versionId,
+			resumableKeys: paddleResumableKeys(input.billingAccountId, input.idempotencyKey),
+		});
 		const existingId = await this.repository.findPaddleOperation(
 			input.billingAccountId,
 			input.idempotencyKey,

@@ -4,6 +4,7 @@ import { BillingError } from "../../billing/errors";
 import type { ProjectScopedBillingRepository } from "../../db/repository";
 import type { RuntimeConnectionConfigs } from "../../projects/connections";
 import type { PaddlePriceBinding } from "./catalog";
+import { paddleResumableKeys } from "./customer-operation";
 import type { PaddleGateway } from "./gateway";
 import { normalizePaddleEmail, type PaddlePlanPin, parsePaddleCommercialContext } from "./plan";
 
@@ -29,6 +30,8 @@ export class PaddleCommercial {
 	) {}
 
 	async preview(input: { billingAccountId: string; intent: CommercialActionIntent }) {
+		// A preview resumes nothing: what a dead request left before dispatching is released.
+		await this.releaseNeverSent(input.billingAccountId, []);
 		return this.repository.createCommercialActionPreview(
 			await this.draft(input.billingAccountId, input.intent),
 		);
@@ -62,6 +65,12 @@ export class PaddleCommercial {
 				"COMMERCIAL_PREVIEW_STALE",
 				409,
 			);
+		// Short, deterministic and disjoint from direct checkout keys. A retry uses the same intent.
+		const executionKey = `commercial:${input.previewToken}`;
+		await this.releaseNeverSent(
+			input.billingAccountId,
+			paddleResumableKeys(input.billingAccountId, executionKey),
+		);
 		if (stored.status === "previewed") {
 			const current = await this.draft(input.billingAccountId, stored.intent, true);
 			stored = await this.repository.beginCommercialActionExecution({
@@ -72,8 +81,6 @@ export class PaddleCommercial {
 			if (stored.status === "executed" && stored.executionResult) return stored.executionResult;
 		}
 		const intent = normalize(stored.intent);
-		// Short, deterministic and disjoint from direct checkout keys. A retry uses the same intent.
-		const executionKey = `commercial:${input.previewToken}`;
 		const checkoutInput = {
 			billingAccountId: input.billingAccountId,
 			email: intent.email,
@@ -94,6 +101,14 @@ export class PaddleCommercial {
 		return this.repository.completeCommercialActionExecution({
 			...input,
 			result: { kind: "checkout", ...checkout },
+		});
+	}
+
+	private releaseNeverSent(billingAccountId: string, resumableKeys: readonly string[]) {
+		return this.repository.releaseNeverSentPaddleCheckout({
+			billingAccountId,
+			connectionVersionId: this.config.versionId,
+			resumableKeys,
 		});
 	}
 
