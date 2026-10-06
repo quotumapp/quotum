@@ -55,11 +55,10 @@ export class BillingInsightsRepository extends RepositoryModule {
 			filterKey: row.filter_key,
 			metadata: row.metadata,
 		}));
-		const last = items.at(-1);
+		const lastRow = pageRows.at(-1);
 		return {
 			items,
-			nextCursor:
-				hasMore && last !== undefined ? { recordedAt: last.recordedAt, id: last.id } : null,
+			nextCursor: hasMore && lastRow !== undefined ? usageEventCursor(lastRow) : null,
 		};
 	}
 
@@ -102,11 +101,10 @@ export class BillingInsightsRepository extends RepositoryModule {
 			billingAccountId: row.billing_account_id,
 			customerEmail: row.customer_email,
 		}));
-		const last = items.at(-1);
+		const lastRow = pageRows.at(-1);
 		return {
 			items,
-			nextCursor:
-				hasMore && last !== undefined ? { recordedAt: last.recordedAt, id: last.id } : null,
+			nextCursor: hasMore && lastRow !== undefined ? usageEventCursor(lastRow) : null,
 		};
 	}
 
@@ -395,6 +393,7 @@ export class BillingInsightsRepository extends RepositoryModule {
 interface UsageEventRow {
 	id: string;
 	recorded_at: Date | string;
+	cursor_recorded_at: string;
 	occurred_at: Date | string | null;
 	effective_at: Date | string;
 	operation: "consume" | "confirm" | "correction";
@@ -408,6 +407,10 @@ interface UsageEventRow {
 	customer_id: string;
 	billing_account_id: string;
 	customer_email: string | null;
+}
+
+function usageEventCursor(row: UsageEventRow): { recordedAt: string; id: string } {
+	return { recordedAt: row.cursor_recorded_at, id: row.id };
 }
 
 async function queryUsageEventRows(
@@ -427,7 +430,10 @@ async function queryUsageEventRows(
 	return await executeRows<UsageEventRow>(
 		executor,
 		drizzleSql`
-			SELECT event.id, event.recorded_at, event.occurred_at, event.effective_at,
+			SELECT event.id, event.recorded_at,
+				to_char(event.recorded_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+					AS cursor_recorded_at,
+				event.occurred_at, event.effective_at,
 				event.operation, feature.key AS feature_key, feature.unit AS feature_unit,
 				entity.external_id AS entity_external_id, event.quantity::text AS quantity,
 				event.wallet_quantity::text AS wallet_quantity, event.filter_key, event.metadata,
@@ -449,7 +455,7 @@ async function queryUsageEventRows(
 				${
 					input.cursor === null
 						? drizzleSql``
-						: drizzleSql`AND (event.recorded_at, event.id) < (${input.cursor.recordedAt}, ${input.cursor.id}::uuid)`
+						: drizzleSql`AND (event.recorded_at, event.id) < (${input.cursor.recordedAt}::timestamptz, ${input.cursor.id}::uuid)`
 				}
 			ORDER BY event.recorded_at DESC, event.id DESC
 			LIMIT ${input.limit + 1}

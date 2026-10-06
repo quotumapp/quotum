@@ -83920,6 +83920,7 @@
                   "quantity": {
                     "maxLength": 80,
                     "minLength": 1,
+                    "pattern": "^\\S+$",
                     "type": "string"
                   }
                 },

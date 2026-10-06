@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { UsageApiServiceLike } from "../billing/usage-api";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
+import { decimalDigitsQuery } from "../shared/input-bounds";
 import {
 	accountParamsSchema,
 	accountSchema,
@@ -79,7 +80,7 @@ export function registerUsageReceiptRoutes(app: BillingElysia, service: UsageApi
 				.object({
 					entityId: publicIdSchema.optional(),
 					cursor: z.string().max(1024).optional(),
-					limit: z.coerce.number().int().min(1).max(100).optional(),
+					limit: decimalDigitsQuery(z.coerce.number().int().min(1).max(100).optional()),
 				})
 				.strict(),
 			detail: operationDetail({

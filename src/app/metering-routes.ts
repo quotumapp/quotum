@@ -60,7 +60,7 @@ const filtersSchema = z.record(
 export const usageBodySchema = z
 	.object({
 		featureKey: z.string().trim().min(1).max(120),
-		quantity: z.string().trim().min(1).max(80),
+		quantity: z.string().min(1).max(80).regex(/^\S+$/u),
 		entityId: z.string().trim().min(1).max(256).nullable().optional(),
 		filters: filtersSchema.optional(),
 		occurredAt: storableDateTimeSchema().nullable().optional(),
