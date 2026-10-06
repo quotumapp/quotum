@@ -9,9 +9,12 @@ products and must all be ready before the active pointer advances. Previously ac
 plans, and top-ups must be retained or listed explicitly for retirement; omission is not deletion.
 Retiring a plan removes it from new selection without rewriting pinned subscriptions.
 Preview refuses what publish would refuse against the database, so a revision it accepts is one
-publish can write: a plan version number that already exists (`409 PLAN_VERSION_CONFLICT`), a
+publish can write: a plan version number that already exists, or one below a version the plan
+already has (`409 PLAN_VERSION_CONFLICT`), a
 feature whose unit, kind, scale or filter dimensions changed (`409 FEATURE_IDENTITY_CONFLICT`), a
-custom plan for an unknown billing account, and a provider binding that is not ready. A plan
+custom plan for an unknown billing account, and a provider binding that is not ready. A changed
+plan takes a version above every version it has had; numbers may skip, and an unchanged plan keeps
+its version. A plan
 `version` and `tierRank` and a price's `minimumQuantity` and `maximumQuantity` are Postgres
 integers (at most 2,147,483,647), and a plan uses each price `key` once. Publishes are serialized
 per project: of concurrent publishes over the same `expectedRevision` one wins, and the others
@@ -144,6 +147,11 @@ preview still compares a new intent against it. Publish checks reset intervals, 
 capabilities after it finds the preview token, so retrying a publish that already succeeded returns
 its stored result with `duplicate: true`. A successful preview also reports `providerCompatibility`;
 see [Catalog preview compatibility](provider-capabilities.md#catalog-preview-compatibility).
+
+Publish answers `409 CATALOG_PREVIEW_NOT_FOUND` for a token the project never issued,
+`409 CATALOG_PREVIEW_EXPIRED` once the preview's 30 minutes have passed, and
+`409 CATALOG_PREVIEW_STALE` when another revision was published since the preview; preview again
+in each case.
 
 A retry repeats the request that was published. The same token with another `expectedRevision`
 answers `409 CATALOG_REVISION_CONFLICT`, and with another catalog `409 CATALOG_PREVIEW_MISMATCH`:

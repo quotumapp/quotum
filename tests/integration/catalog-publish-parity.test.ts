@@ -233,6 +233,33 @@ localDescribe("catalog preview and publish parity", () => {
 		}
 	});
 
+	it("refuses a changed plan under a version below one the plan already has", async () => {
+		const { preview, publish } = operator();
+		const publishNext = async (body: Json, expectedRevision: number | null) => {
+			const previewed = await preview(body, expectedRevision);
+			expect(previewed.status).toBe(200);
+			return await publish(body, previewed.body.data.previewToken, expectedRevision);
+		};
+		expect((await publishNext(catalog(1), null)).status).toBe(200);
+		// Version numbers may skip.
+		expect((await publishNext(catalog(5, "5000"), 1)).status).toBe(200);
+		const refused = await preview(catalog(2, "2000"), 2);
+		expect(refused.status).toBe(409);
+		expect(refused.body.error).toMatchObject({
+			code: "PLAN_VERSION_CONFLICT",
+			message:
+				"Plan premium version 2 is below its latest version 5; a changed plan takes a higher version",
+		});
+		const [active] = await context.sql<Array<{ version: number }>>`
+			SELECT version.version
+			FROM plans plan
+			JOIN plan_versions version ON version.id = plan.active_version_id
+			WHERE plan.key = 'premium'
+		`;
+		expect(active?.version).toBe(5);
+		expect((await publishNext(catalog(6, "2000"), 2)).status).toBe(200);
+	});
+
 	it("refuses at preview a plan version that already exists with other content", async () => {
 		const { preview, publish } = operator();
 		const first = catalog(1);

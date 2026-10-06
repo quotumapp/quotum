@@ -2158,7 +2158,11 @@ async function assertFeatureIdentities(
 	}
 }
 
-/** Refuses a changed plan that reuses a version number its plan already has. */
+/**
+ * Refuses a changed plan that reuses a version number its plan already has, or takes one below a
+ * version it has: the version just published becomes the active one, so a lower number would put
+ * the plan's newest terms under an older-looking version.
+ */
 async function assertPlanVersionsAvailable(
 	executor: QueryExecutor,
 	projectId: string,
@@ -2176,10 +2180,21 @@ async function assertPlanVersionsAvailable(
 		`,
 	);
 	const taken = new Set(rows.map((row) => `${row.key}:${Number(row.version)}`));
+	const latest = new Map<string, number>();
+	for (const row of rows) {
+		latest.set(row.key, Math.max(latest.get(row.key) ?? 0, Number(row.version)));
+	}
 	for (const plan of plans) {
 		if (taken.has(`${plan.key}:${plan.version}`)) {
 			throw new PersistenceConflictError(
 				`Plan ${plan.key} version ${plan.version} already exists`,
+				"PLAN_VERSION_CONFLICT",
+			);
+		}
+		const highest = latest.get(plan.key);
+		if (highest !== undefined && plan.version < highest) {
+			throw new PersistenceConflictError(
+				`Plan ${plan.key} version ${plan.version} is below its latest version ${highest}; a changed plan takes a higher version`,
 				"PLAN_VERSION_CONFLICT",
 			);
 		}
