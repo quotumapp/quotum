@@ -377,6 +377,13 @@ Checkout flow:
    once paid, and the endpoint never grants access. `POST .../checkout-sessions/:sessionId/expire`
    expires open sessions. A session id Stripe does not know answers `404 NOT_FOUND` on both.
 
+A plan with no published Stripe price, such as a free plan or one sold only through an app store,
+cannot be bought or switched to through Stripe: `checkout-sessions`, the `checkout_plan`,
+`setup_payment` and `subscription_change` previews and a direct plan change answer
+`409 PLAN_NOT_PURCHASABLE_VIA_STRIPE` naming the plan. A consumable or non-consumable Stripe product
+stored without a price amount and currency answers `409 PRODUCT_NOT_PURCHASABLE_VIA_STRIPE`. Fix the
+catalog or the Stripe mapping; the request is not retried.
+
 A plan's `trialDays` becomes the Checkout subscription's trial only for an account that has not had
 a trial of that plan before, through a [Quotum trial](grants.md#trials) or a provider subscription
 that recorded trial bounds; otherwise the subscription starts paid and the `checkout_plan` preview

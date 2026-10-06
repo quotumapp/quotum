@@ -6,6 +6,7 @@ import type {
 } from "../../../src/billing/commercial";
 import { BillingError, isBillingError } from "../../../src/billing/errors";
 import type { StripeRecurringCheckoutPlan } from "../../../src/db/repository";
+import { planNotPurchasableViaStripe } from "../../../src/db/repository/stripe-purchasability";
 import {
 	applyPaymentSetupEvent,
 	createPaymentSetup,
@@ -1424,6 +1425,26 @@ describe("setup that starts a plan", () => {
 			plan_status: "not_eligible",
 			plan_failure_code: "BILLING_PLAN_NOT_FOUND",
 			plan_failure_message: "Plan not found",
+		});
+		expect(subscriptions.creates).toHaveLength(0);
+	});
+
+	it("records not_eligible when the plan lost its Stripe price before the setup finished", async () => {
+		const { ctx, subscriptions, failPlanLookup } = planSetup();
+		const creation = await create(ctx, { parameters: planRequest });
+		failPlanLookup(planNotPurchasableViaStripe("pro"));
+		expect(
+			await reconcilePaymentSetup(ctx, {
+				setupId: creation.setupId,
+				workerId: "worker-a",
+				attempts: 0,
+			}),
+		).toEqual({ status: "processed" });
+		expect(ctx.store.only()).toMatchObject({
+			status: "completed",
+			plan_status: "not_eligible",
+			plan_failure_code: "PLAN_NOT_PURCHASABLE_VIA_STRIPE",
+			plan_failure_message: "Plan pro has no Stripe price",
 		});
 		expect(subscriptions.creates).toHaveLength(0);
 	});

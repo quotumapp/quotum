@@ -1030,6 +1030,12 @@
       ]
     },
     {
+      "code": "PLAN_NOT_PURCHASABLE_VIA_STRIPE",
+      "sources": [
+        "src/db/repository/stripe-purchasability.ts"
+      ]
+    },
+    {
       "code": "PLAN_VERSION_CONFLICT",
       "sources": [
         "src/catalog/control-plane.ts"
@@ -1040,6 +1046,12 @@
       "sources": [
         "src/platform/app.ts",
         "src/platform/auth.ts"
+      ]
+    },
+    {
+      "code": "PRODUCT_NOT_PURCHASABLE_VIA_STRIPE",
+      "sources": [
+        "src/db/repository/stripe-purchasability.ts"
       ]
     },
     {

@@ -44,6 +44,10 @@ import {
 	recordStoreEventProcessingResult,
 	recordStripeSkippedEventInTransaction,
 } from "./store-events";
+import {
+	planNotPurchasableViaStripe,
+	productNotPurchasableViaStripe,
+} from "./stripe-purchasability";
 import { claimStripeTrialEndingNotice } from "./trials";
 import type {
 	CompleteStripeCheckoutRequestInput,
@@ -522,9 +526,7 @@ export class StripeBillingRepository extends RepositoryModule {
 			(row.product_type === "consumable" || row.product_type === "non_consumable") &&
 			(row.price_amount === null || typeof row.currency !== "string" || row.currency.trim() === "")
 		) {
-			throw new Error(
-				`Stripe consumable product price_amount and currency are required for ${productKey}`,
-			);
+			throw productNotPurchasableViaStripe(productKey);
 		}
 		return parseStripeWebStoreProductRow((row as { value: unknown }).value);
 	}
@@ -645,7 +647,7 @@ export class StripeBillingRepository extends RepositoryModule {
 			`,
 		);
 		if (!rows.some((row) => row.component_kind !== "metered_overage")) {
-			throw new Error(`Plan ${planKey} has no Stripe Checkout price`);
+			throw planNotPurchasableViaStripe(planKey);
 		}
 		return {
 			planVersionId: String(plan.plan_version_id),

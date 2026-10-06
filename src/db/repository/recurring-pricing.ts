@@ -36,6 +36,7 @@ import {
 	reservePromotionRedemptionInTx,
 } from "./promotions";
 import { executeOne, executeRows, jsonb } from "./query";
+import { planNotPurchasableViaStripe } from "./stripe-purchasability";
 import type { QueryExecutor } from "./types";
 import { materializeUsageInvoicePeriod } from "./usage-invoice-periods";
 
@@ -1610,7 +1611,12 @@ async function resolveSubscriptionChange(
 			upgrade: context.upgrade_proration_behavior,
 			downgrade: context.downgrade_proration_behavior,
 		});
-	const prices = await changePrices(executor, context.to_plan_version_id, quantities);
+	const prices = await changePrices(
+		executor,
+		input.targetPlanKey,
+		context.to_plan_version_id,
+		quantities,
+	);
 	const stateFingerprint = sha256Hex(
 		stableJson({
 			subscriptionId: context.subscription_id,
@@ -1679,6 +1685,7 @@ async function currentLicensedQuantities(
 
 async function changePrices(
 	executor: QueryExecutor,
+	targetPlanKey: string,
 	toPlanVersionId: string | number | bigint,
 	quantities: Record<string, number>,
 ): Promise<ChangePriceRow[]> {
@@ -1705,7 +1712,7 @@ async function changePrices(
 			ORDER BY CASE price.component_kind WHEN 'base' THEN 0 ELSE 1 END, price.id
 		`,
 	);
-	if (rows.length === 0) throw new Error("Target plan has no Stripe recurring prices");
+	if (rows.length === 0) throw planNotPurchasableViaStripe(targetPlanKey);
 	for (const row of rows) {
 		const quantity = row.component_kind === "base" ? 1 : quantities[row.feature_key ?? ""];
 		if (
