@@ -70,9 +70,13 @@ issuance, including an issuance rejected by the final access check. Refresh cred
 deletion of the transient proof.
 
 Remote requests reject unexpected Host/Origin headers, cap MCP bodies at 256 KiB and token forms at
-16 KiB, and apply limits of 300 requests per minute per connecting IP and 120 authenticated MCP
-requests per minute per principal. The proxy must preserve the configured Host and pass Bun's
-server object to the runtime so its connection address is available. These checks run only on
+16 KiB, and apply limits of 300 requests per minute per client IP and 120 authenticated MCP
+requests per minute per principal. The client IP is the connecting address, so the proxy must
+preserve the configured Host and the runtime must receive Bun's server object. Behind a reverse
+proxy that address is the proxy's and every client shares one budget, including the sign-in
+library's limit on the token endpoint: set
+[`BILLING_TRUST_PROXY_HEADERS=true`](deployment.md#rate-limits) there, so these limits count the
+forwarded client as the `/v1` limits do. These checks run only on
 the remote MCP and OAuth endpoints; staff, merchant and health routes use their own policies.
 The transport is stateless,
 with current MCP messages and the SDK's older-protocol fallback; it keeps no cross-request session.

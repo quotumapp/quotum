@@ -390,7 +390,8 @@ read it that way. Buckets never include a path value the caller chooses:
 Each limiter keeps its counts in process memory and tracks up to 10,000 keys per window. Beyond
 that it forgets the least recently used key, so a flood of distinct clients can reset an idle
 client's count but never rejects another client. `BILLING_TRUST_PROXY_HEADERS` decides which
-address counts as the client IP for all of these limits.
+address counts as the client IP for all of these limits, and for the per-client limits of the
+[remote MCP and OAuth endpoints](mcp.md#connect-in-a-browser), which are kept in the database.
 
 ### Sentry (optional)
 

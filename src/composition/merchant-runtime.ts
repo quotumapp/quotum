@@ -59,7 +59,10 @@ export function attachMerchantRuntime(
 		merchantRequestScope?: MerchantRequestScope;
 		mcpRequestScope?: MerchantRequestScope;
 		onMerchantUnexpectedError?: (error: unknown, report: MerchantUnexpectedErrorReport) => void;
-		/** `BILLING_TRUST_PROXY_HEADERS`: key the setup ingress limiters on the forwarded client. */
+		/**
+		 * `BILLING_TRUST_PROXY_HEADERS`: key the setup ingress and remote MCP limiters on the
+		 * forwarded client.
+		 */
 		trustProxyHeaders?: boolean;
 	},
 ): QuotumApp {
@@ -108,6 +111,7 @@ export function attachMerchantRuntime(
 				port: billing,
 				requestObservabilityMiddleware: options.mcpRequestScope?.plugin,
 				onUnexpectedError: options.onMcpUnexpectedError,
+				trustProxyHeaders: options.trustProxyHeaders,
 			})
 		: undefined;
 	return composeRuntimeApp({
