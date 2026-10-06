@@ -1578,6 +1578,12 @@
       ]
     },
     {
+      "code": "SUBSCRIPTION_CHANGE_PLAN_KIND_MISMATCH",
+      "sources": [
+        "src/db/repository/recurring-pricing.ts"
+      ]
+    },
+    {
       "code": "SUBSCRIPTION_CHANGE_TARGET_NOT_FOUND",
       "sources": [
         "src/db/repository/recurring-pricing.ts"
