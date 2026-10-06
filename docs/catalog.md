@@ -96,6 +96,12 @@ and a `message`. It reports `advisories` separately: valid shapes worth reconsid
 imply removal. The one advisory is a Stripe binding in `providerPriced`: "Use `basePrice` when
 Quotum should model the price." Provider-owned Stripe pricing has no retirement plan.
 
+Preview and publish report an `impact`. Its counts describe what the revision changes, not what
+it contains: `planVersionsCreated` the plans that get a new version, `topupOptionsCreated` the
+top-ups that are new or changed, and `existingSubscriptionsGrandfathered` the live subscriptions on
+a plan that gets a new version or is retired, which keep the version they hold. Previewing the
+published catalog again reports none of them.
+
 A preview also reports `scopeImpact`: for each feature a meter limit caps, the `allocationScope`
 each plan in the intent declares (`scopes`), and the plan versions live subscriptions stay pinned to
 with a different scope (`pinnedVersions`, with their subscription counts). Publishing does not move
