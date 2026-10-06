@@ -18,6 +18,7 @@ import {
 } from "../app/insights-routes";
 import {
 	balanceParamsSchema,
+	balanceQuerySchema,
 	correctionBodySchema,
 	operationParamsSchema,
 	publicUsageInput,
@@ -131,7 +132,7 @@ export function createMerchantBillingPort(input: {
 						project,
 						params.billingAccountId,
 						params.featureKey,
-						query.get("entityId"),
+						parse(balanceQuerySchema, command.query).entityId,
 					),
 				);
 			}

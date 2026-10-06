@@ -26736,6 +26736,8 @@
             "name": "entityId",
             "required": false,
             "schema": {
+              "maxLength": 256,
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -73924,6 +73926,8 @@
             "name": "entityId",
             "required": false,
             "schema": {
+              "maxLength": 256,
+              "minLength": 1,
               "type": "string"
             }
           }

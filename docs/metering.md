@@ -10,7 +10,7 @@ GET    /v1/billing-accounts/:billingAccountId
 GET    /v1/billing-accounts/:billingAccountId/usage/receipts/:receiptId
 GET    /v1/billing-accounts/:billingAccountId/usage/receipts/:receiptId/deductions
 GET    /v1/billing-accounts/:billingAccountId/entities/:entityId
-GET    /v1/billing-accounts/:billingAccountId/balances/:featureKey
+GET    /v1/billing-accounts/:billingAccountId/balances/:featureKey[?entityId=:entityId]
 GET    /v1/billing-accounts/:billingAccountId/billing-summary
 GET    /v1/billing-accounts/:billingAccountId/usage/events
 GET    /v1/billing-accounts/:billingAccountId/usage/series
@@ -82,11 +82,13 @@ actions and deduction arrays are absent.
 Receipt detail is immutable, with operation and caller identity, account/entity scope, exact
 quantities, occurred/recorded times, balance after usage, catalog-rating reference and deduction
 count. Its deductions are a separate cursor-paginated child collection, default 50 and maximum 100.
-An entity receipt requires `?entityId=<external entity ID>` on both reads. Cursors are bound to
-their receipt; receipt IDs and cursors are opaque, and a receipt ID that does not decode to a real
-instant answers `400 INVALID_REQUEST`. The deductions `limit` takes decimal digits only. These reads
-require project authentication and admit read-only credentials. The snapshot, event, deductions,
-billing effect and recovery result commit in one transaction.
+An entity receipt requires `?entityId=<external entity ID>` on both reads. A balance read takes the
+same optional `?entityId=`: omitted, it reads the account's own balance, and an empty value answers
+`400 INVALID_REQUEST`, never the account's balance. Cursors are bound to their receipt; receipt IDs
+and cursors are opaque, and a receipt ID that does not decode to a real instant answers
+`400 INVALID_REQUEST`. The deductions `limit` takes decimal digits only. These reads require project
+authentication and admit read-only credentials. The snapshot, event, deductions, billing effect and
+recovery result commit in one transaction.
 
 The independently versioned [`@quotum/sdk`](https://github.com/quotumapp/quotum-js) preview uses these
 account/entity handles. Its release must pin the exact public API revision containing this contract.

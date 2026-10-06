@@ -44,6 +44,11 @@ export const balanceParamsSchema = subjectParamsSchema.extend({
 	featureKey: z.string().trim().min(1).max(120),
 });
 
+/** Omitted, the balance is the account's own; an empty `entityId` is refused, never read as omitted. */
+export const balanceQuerySchema = z.object({
+	entityId: z.string().trim().min(1).max(256).optional(),
+});
+
 const reservationParamsSchema = subjectParamsSchema.extend({
 	reservationId: z.uuid(),
 });
@@ -130,24 +135,23 @@ export function registerMeteringRoutes({
 
 	app.get(
 		"/v1/billing-accounts/:billingAccountId/balances/:featureKey",
-		async ({ params, request, project }) => {
+		async ({ params, query, project }) => {
 			const balance = await meteringService.getBalance(
 				privateProject(project),
 				params.billingAccountId,
 				params.featureKey,
-				new URL(request.url).searchParams.get("entityId"),
+				query.entityId,
 			);
 			return { success: true, data: balance };
 		},
 		{
 			params: balanceParamsSchema,
+			query: balanceQuerySchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsByBillingAccountIdBalancesByFeatureKey",
 				credentialAccess: "read_only",
 				tags: ["metering"],
 				path: "/v1/billing-accounts/:billingAccountId/balances/:featureKey",
-				// The handler reads `entityId` itself; omitted, the balance is the account's own.
-				request: { query: z.object({ entityId: z.string().optional() }) },
 				responses: {
 					200: responses.getV1BillingAccountsByBillingAccountIdBalancesByFeatureKeyResponse200Schema,
 				},
