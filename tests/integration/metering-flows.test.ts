@@ -1814,6 +1814,41 @@ localDescribe("authoritative metering flows", () => {
 			UPDATE usage_events SET recorded_at = now() - INTERVAL '401 days'
 		`;
 
+		// Four catalog previews: one that just ran out, one that expired yesterday, one that
+		// expired eight days ago, and an old one whose preview was published.
+		const [revision] = await context.sql<Array<{ id: string }>>`
+			SELECT revision.id::text AS id
+			FROM catalog_revisions revision
+			JOIN projects project ON project.id = revision.project_id
+			WHERE project.key = 'acme'
+			ORDER BY revision.revision DESC
+			LIMIT 1
+		`;
+		for (const [token, status, age, published] of [
+			["a", "previewed", "1 minute", false],
+			["b", "expired", "1 day", false],
+			["c", "expired", "8 days", false],
+			["d", "published", "30 days", true],
+		] as const) {
+			await context.sql`
+				INSERT INTO catalog_drafts (
+					project_id, base_revision, next_revision, intent_hash, preview_token, intent,
+					created_by, status, expires_at, published_revision_id
+				)
+				SELECT id, NULL, 1, repeat(${token}, 64), repeat(${token}, 64), '{}'::jsonb,
+					'integration-test', ${status}, now() - ${age}::interval,
+					${published ? (revision?.id ?? null) : null}::bigint
+				FROM projects WHERE key = 'acme'
+			`;
+		}
+		const draftTokens = async () =>
+			(
+				await context.sql<Array<{ token: string; status: string }>>`
+					SELECT left(preview_token, 1) AS token, status FROM catalog_drafts
+					WHERE created_by = 'integration-test' ORDER BY preview_token
+				`
+			).map((draft) => `${draft.token}:${draft.status}`);
+
 		const result = await context.repository.runMeteringMaintenance(50);
 		expect(result).toEqual({
 			expiredReservations: 1,
@@ -1823,9 +1858,12 @@ localDescribe("authoritative metering flows", () => {
 			closedPeriods: 1,
 			deletedClientClaims: 2,
 			deletedWorkerClaims: 1,
-			expiredCatalogDrafts: 0,
+			expiredCatalogDrafts: 1,
+			deletedCatalogDrafts: 1,
 			deletedRawUsageEvents: 1,
 		});
+		// Only the preview that expired more than a week ago is gone; a published one never goes.
+		expect(await draftTokens()).toEqual(["a:expired", "b:expired", "d:published"]);
 		expect(await countRows(context.sql, "usage_events")).toBe(0);
 		expect(await countRows(context.sql, "client_idempotency_claims")).toBe(0);
 		expect(await countRows(context.sql, "worker_delivery_claims")).toBe(0);

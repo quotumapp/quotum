@@ -13,6 +13,7 @@ const maintenanceResult: MeteringMaintenanceResult = {
 	deletedClientClaims: 4,
 	deletedWorkerClaims: 5,
 	expiredCatalogDrafts: 1,
+	deletedCatalogDrafts: 2,
 	deletedRawUsageEvents: 6,
 };
 
