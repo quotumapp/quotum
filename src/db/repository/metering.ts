@@ -895,6 +895,25 @@ export class MeteringBillingRepository extends RepositoryModule {
 					RETURNING drafts.id
 				`,
 			);
+			// An expired preview can never be published; a week later nobody is still looking for
+			// it. Published drafts hold the revisions' intents and are kept.
+			const deletedDrafts = await executeRows<{ id: string }>(
+				tx,
+				drizzleSql`
+					WITH targets AS (
+						SELECT id
+						FROM catalog_drafts
+						WHERE status = 'expired' AND expires_at <= now() - INTERVAL '7 days'
+						ORDER BY expires_at, id
+						LIMIT ${limit}
+						FOR UPDATE SKIP LOCKED
+					)
+					DELETE FROM catalog_drafts drafts
+					USING targets
+					WHERE drafts.id = targets.id
+					RETURNING drafts.id
+				`,
+			);
 			const deletedRawUsage = await executeRows<{ id: string }>(
 				tx,
 				drizzleSql`
@@ -930,6 +949,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 				deletedClientClaims,
 				deletedWorkerClaims,
 				expiredCatalogDrafts: expiredDrafts.length,
+				deletedCatalogDrafts: deletedDrafts.length,
 				deletedRawUsageEvents: deletedRawUsage.length,
 			};
 		});

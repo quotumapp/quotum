@@ -165,8 +165,11 @@ capabilities after it finds the preview token, so retrying a publish that alread
 its stored result with `duplicate: true`. A successful preview also reports `providerCompatibility`;
 see [Catalog preview compatibility](provider-capabilities.md#catalog-preview-compatibility).
 
-Publish answers `409 CATALOG_PREVIEW_NOT_FOUND` for a token the project never issued,
-`409 CATALOG_PREVIEW_EXPIRED` once the preview's 30 minutes have passed, and
+A preview lasts 30 minutes. Metering maintenance marks it expired after that and deletes it a week
+later; the previews that were published are kept, since they hold each revision's intent.
+
+Publish answers `409 CATALOG_PREVIEW_EXPIRED` for a preview older than its 30 minutes,
+`409 CATALOG_PREVIEW_NOT_FOUND` for a token the project never issued or one already deleted, and
 `409 CATALOG_PREVIEW_STALE` when another revision was published since the preview; preview again
 in each case.
 

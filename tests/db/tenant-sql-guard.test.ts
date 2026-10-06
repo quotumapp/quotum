@@ -20,6 +20,10 @@ const allowlisted = [
 		reason: "maintenance sweep",
 	},
 	{
+		snippet: "SELECT id FROM catalog_drafts WHERE status = 'expired'",
+		reason: "maintenance sweep",
+	},
+	{
 		snippet: "UPDATE balance_allocations SET",
 		reason: "PK write after a scoped allocation read in the same transaction",
 	},

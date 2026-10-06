@@ -203,6 +203,7 @@ export interface MeteringMaintenanceResult {
 	deletedClientClaims: number;
 	deletedWorkerClaims: number;
 	expiredCatalogDrafts: number;
+	deletedCatalogDrafts: number;
 	deletedRawUsageEvents: number;
 }
 
