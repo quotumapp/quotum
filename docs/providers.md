@@ -375,7 +375,9 @@ Checkout flow:
 4. Success pages may poll `GET .../providers/stripe/checkout-sessions/:sessionId`, which returns
    `{sessionId,status,paymentStatus,customerEmail,productKey}`; email and product key appear only
    once paid, and the endpoint never grants access. `POST .../checkout-sessions/:sessionId/expire`
-   expires open sessions. A session id Stripe does not know answers `404 NOT_FOUND` on both.
+   expires open sessions. A session id Stripe does not know answers `404 NOT_FOUND` on both, and a
+   session that belongs to another billing account answers
+   `403 STRIPE_CHECKOUT_SESSION_ACCOUNT_MISMATCH`.
 
 A plan with no published Stripe price, such as a free plan or one sold only through an app store,
 cannot be bought or switched to through Stripe: `checkout-sessions`, the `checkout_plan`,

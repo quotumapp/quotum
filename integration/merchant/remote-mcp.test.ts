@@ -645,7 +645,108 @@ describe("remote MCP browser authorization", () => {
 	});
 });
 
+describe("remote MCP protocol errors", () => {
+	it("answers a wrong method with 405 and Allow, and an unknown path with 404, without a report", async () => {
+		const reports: unknown[] = [];
+		const quiet = createRemoteMcpApp({
+			auth: f.auth,
+			store: f.store,
+			port: f.billingPort,
+			onUnexpectedError: (error) => reports.push(error),
+		});
+		for (const [method, path, allow] of [
+			["GET", "/oauth/token", "POST"],
+			["PUT", "/oauth/token", "POST"],
+			["GET", "/oauth/revoke", "POST"],
+			["POST", "/oauth/jwks", "GET, HEAD"],
+			["POST", "/.well-known/oauth-authorization-server", "GET, HEAD"],
+			["DELETE", "/.well-known/oauth-protected-resource", "GET, HEAD"],
+		] as const) {
+			const response = await quiet.handle(new Request(`${origin}${path}`, { method }));
+			expect(response.status, `${method} ${path}`).toBe(405);
+			expect(response.headers.get("allow"), `${method} ${path}`).toBe(allow);
+			expect(await response.json()).toEqual({
+				error: "invalid_request",
+				error_description: `This endpoint accepts ${allow}.`,
+			});
+		}
+		const unknown = await quiet.handle(new Request(`${origin}/oauth/unknown`));
+		expect(unknown.status).toBe(404);
+		expect(await unknown.json()).toEqual({
+			error: "not_found",
+			error_description: "Route not found.",
+		});
+		expect(reports).toEqual([]);
+	});
+
+	it("answers Better Auth's own token rate limit in the OAuth error shape", async () => {
+		let limited: Response | undefined;
+		for (let attempt = 0; attempt < 150 && limited === undefined; attempt++) {
+			const response = await token({
+				grant_type: "refresh_token",
+				refresh_token: `invalid-${attempt}`,
+			});
+			if (response.status === 429) limited = response;
+		}
+		expect(limited).toBeDefined();
+		expect(limited?.headers.get("content-type")).toContain("application/json");
+		expect(Number(limited?.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+		expect(await limited?.json()).toEqual({
+			error: "RATE_LIMITED",
+			error_description: "Too many attempts. Please try again later.",
+		});
+	});
+});
+
 describe("MCP browser-approved writes", () => {
+	it("refuses proposal text Postgres cannot store as invalid input, not as an outage", async () => {
+		const browser = await owner();
+		const tokens = await redeem(browser, merchantTestScope, true);
+		await createBillingAccount();
+		const [grant] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		const proposal = {
+			requestKey: "entity-nul",
+			reason: "Allocate credits to a team",
+			change: {
+				action: "entities.write",
+				parameters: ["customer-a"],
+				body: { externalId: "team-a", kind: "team" },
+			},
+		};
+		const attempts = {
+			requestKey: { ...proposal, requestKey: "entity\u0000nul" },
+			reason: { ...proposal, reason: "Allocate\u0000credits" },
+			parameter: { ...proposal, change: { ...proposal.change, parameters: ["customer\u0000a"] } },
+			body: {
+				...proposal,
+				change: { ...proposal.change, body: { externalId: "team\u0000a", kind: "team" } },
+			},
+			surrogate: { ...proposal, reason: "Allocate \ud800 credits" },
+		};
+		for (const [name, args] of Object.entries(attempts)) {
+			const reply = await (
+				await rpc(tokens.access_token, "tools/call", {
+					name: "prepare_billing_change",
+					arguments: args,
+				})
+			).json();
+			expect(reply.result.isError, name).toBe(true);
+			expect(JSON.stringify(reply.result), name).not.toContain("BILLING_API_UNAVAILABLE");
+		}
+		await expect(
+			f.mcpChanges.prepare(grant.id, {
+				requestKey: "entity-nul",
+				reason: "Allocate credits",
+				action: "entities.write",
+				parameters: ["customer-a"],
+				body: { externalId: "team\u0000a", kind: "team" },
+			}),
+		).rejects.toMatchObject({ code: "INVALID_REQUEST", status: 400 });
+		expect(await f.sql`SELECT id FROM platform_mcp_changes`).toHaveLength(0);
+	});
+
 	it("requires write consent and applies an immutable entity proposal only once", async () => {
 		const browser = await owner();
 		const tokens = await redeem(browser, merchantTestScope, true);

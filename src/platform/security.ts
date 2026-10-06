@@ -11,6 +11,23 @@ export class MerchantError extends Error {
 		super(message);
 	}
 }
+/**
+ * Better Auth answers its own rate limit with a bare `429`, an `X-Retry-After` header and a
+ * `{ message }` body. Callers rethrow this so the limit reaches clients in the response shape of
+ * the surface they used, with `Retry-After`. A plugin's own `429`, such as the OTP lockout, has
+ * no such header and keeps its `code`.
+ */
+export function authRateLimitError(response: Response): MerchantError | null {
+	const retryAfter = response.headers.get("x-retry-after");
+	if (response.status !== 429 || retryAfter === null) return null;
+	const seconds = Number(retryAfter);
+	return new MerchantError(
+		"RATE_LIMITED",
+		"Too many attempts. Please try again later.",
+		429,
+		Number.isSafeInteger(seconds) && seconds >= 1 ? seconds : undefined,
+	);
+}
 export const SESSION_COOKIE = "__Host-quotum_session";
 export const CSRF_COOKIE = "__Host-quotum_csrf";
 export const IDLE_MS = 30 * 60_000;

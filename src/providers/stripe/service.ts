@@ -1951,7 +1951,7 @@ export class StripeBillingService
 		) {
 			throw new BillingError(
 				"Stripe Checkout session does not belong to customer",
-				"INVALID_REQUEST",
+				"STRIPE_CHECKOUT_SESSION_ACCOUNT_MISMATCH",
 				403,
 			);
 		}

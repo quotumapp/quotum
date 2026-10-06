@@ -58,7 +58,10 @@ selection stay behind the BFF's exact route allowlist, service identity, Origin 
 The token and revoke endpoints read only `application/x-www-form-urlencoded` bodies, and the
 merchant API reads only `application/json`: the media type matches exactly, ignoring case and
 allowing parameters such as `charset`, so `application/jsonx` and `application/json-seq` answer
-`415`.
+`415`. A wrong method on these or the discovery endpoints answers `405` with `Allow`, and an unknown
+path `404`; neither is reported as an outage. The sign-in library's own rate limit answers
+`429 RATE_LIMITED` with `Retry-After`, as `{error, error_description}` on `/oauth/token` and in the
+merchant error envelope on `/api/auth/*`.
 An auth proof belongs to one OAuth request and cannot be exchanged for a console session or
 step-up grant. Environment selection and consent require a proof issued within five minutes.
 An accepted authorization code has its own five-minute redemption window. The transient session
@@ -92,6 +95,9 @@ Write-consented connections gain these tools:
 | `prepare_billing_change` | Saves a typed proposal and returns a browser review URL. Does not apply it. |
 | `get_billing_change` / `list_billing_changes` | Read proposal status and recorded outcome. |
 | `cancel_billing_change` | Withdraws a pending proposal. |
+
+A proposal's text (request key, reason, parameters and body) cannot contain NUL or unpaired
+surrogate characters; `prepare_billing_change` refuses it as invalid input.
 
 Account-scoped changes retain the trusted API's account requirements. Before preparing an entity,
 the product backend must create its billing account with

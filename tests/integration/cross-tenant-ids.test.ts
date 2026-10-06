@@ -384,7 +384,16 @@ localDescribe("Cross-tenant identifiers", () => {
 			},
 		);
 		expect(mismatched.status).toBe(403);
-		expect((await mismatched.json()).error.code).toBe("INVALID_REQUEST");
+		expect((await mismatched.json()).error.code).toBe("STRIPE_CHECKOUT_SESSION_ACCOUNT_MISMATCH");
+		const mismatchedRead = await testRequest(
+			app,
+			"/v1/billing-accounts/other-account/providers/stripe/checkout-sessions/cs_test_integration",
+			{ headers: authHeaders("acme") },
+		);
+		expect(mismatchedRead.status).toBe(403);
+		expect((await mismatchedRead.json()).error.code).toBe(
+			"STRIPE_CHECKOUT_SESSION_ACCOUNT_MISMATCH",
+		);
 		await expectTableCounts(context.sql, {
 			purchases: 0,
 			customers: 0,

@@ -22,6 +22,7 @@ import { MerchantOnboarding } from "./onboarding";
 import * as responses from "./platform-responses";
 import {
 	assertCsrf,
+	authRateLimitError,
 	CSRF_COOKIE,
 	cookieValue,
 	csrfCookie,
@@ -957,6 +958,8 @@ export function createMerchantApp({
 				body: JSON.stringify(input),
 			}),
 		);
+		const rateLimited = authRateLimitError(response);
+		if (rateLimited !== null) throw rateLimited;
 		const headers = new Headers(response.headers);
 		const payload: unknown = await response.json().catch(() => null);
 		// The library's duplicate-email fast path is generic, but a concurrent insert
