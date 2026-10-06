@@ -503,6 +503,12 @@
       ]
     },
     {
+      "code": "FEATURE_RETIREMENT_BLOCKED",
+      "sources": [
+        "src/catalog/control-plane.ts"
+      ]
+    },
+    {
       "code": "FORBIDDEN",
       "sources": [
         "src/platform/mcp/authorization.ts",
