@@ -123,10 +123,12 @@ return `400 INVALID_REQUEST`.
 ## Automatic top-ups
 
 An automatic top-up policy belongs to the account or to one entity. The account's policy keeps the
-shared pool topped up: it is evaluated after account usage, and after entity usage that spent some of
-the pool, against what is left in the pool, and what it buys goes to the pool. An entity's policy is
-evaluated after that entity's usage against everything the entity can spend, its own allocations and
-the pool, and what it buys is credited to the entity. One write can trigger both.
+shared pool topped up: it is evaluated after account usage, and after entity usage that spent some
+of the pool, against what is left in the pool, and what it buys goes to the pool. An entity's policy
+is evaluated after that entity's usage against everything the entity can spend, its own allocations
+and the pool, and what it buys is credited to the entity. One write can trigger both.
+`GET /auto-topup` answers `null` when the feature has no policy for that account or entity, and
+`404 FEATURE_NOT_FOUND` for a feature key the project does not have, as the write does.
 
 ## Spending order
 
