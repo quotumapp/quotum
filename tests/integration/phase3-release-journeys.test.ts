@@ -147,6 +147,57 @@ localDescribe("Phase 3 release journeys", () => {
 		});
 	});
 
+	it("answers an automatic top-up read for an unknown feature as the write does", async () => {
+		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+		const account = "topup-read";
+		await context.repository.grantAllocation(project, {
+			billingAccountId: account,
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:topup-read",
+		});
+		const read = async (featureKey: string) => {
+			const response = await testRequest(
+				fixture.app,
+				`/v1/billing-accounts/${account}/auto-topup?featureKey=${featureKey}`,
+				{ headers: fixture.authHeaders() },
+			);
+			return { status: response.status, body: await response.json() };
+		};
+		const policy = {
+			topupKey: "credits_10",
+			provider: "stripe",
+			thresholdQuantity: "5",
+		};
+
+		// A feature the project has, with no policy yet: an answer, not an error.
+		expect(await read("ai_credits")).toEqual({ status: 200, body: { success: true, data: null } });
+		const unknownWrite = await putJson(
+			fixture.app,
+			`/v1/billing-accounts/${account}/auto-topup`,
+			actorHeaders(fixture.authHeaders()),
+			{ ...policy, featureKey: "no_such_feature" },
+		);
+		expect(unknownWrite.status).toBe(404);
+		const unknownRead = await read("no_such_feature");
+		const { code, message } = (await unknownWrite.json()).error;
+		expect(unknownRead).toMatchObject({ status: 404, body: { error: { code, message } } });
+		expect(code).toBe("FEATURE_NOT_FOUND");
+
+		const written = await putJson(
+			fixture.app,
+			`/v1/billing-accounts/${account}/auto-topup`,
+			actorHeaders(fixture.authHeaders()),
+			{ ...policy, featureKey: "ai_credits" },
+		);
+		expect(written.status).toBe(200);
+		expect((await read("ai_credits")).body.data).toMatchObject({
+			featureKey: "ai_credits",
+			thresholdQuantity: "5",
+		});
+	});
+
 	// capability: topup.automatic
 	it("runs automatic top-ups through the real repository, worker, and Stripe service", async () => {
 		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });

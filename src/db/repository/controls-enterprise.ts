@@ -594,9 +594,13 @@ export class ControlsEnterpriseRepository
 				AND policy.entity_id IS NOT DISTINCT FROM ${entity?.id ?? null}::bigint LIMIT 1
 		`,
 		);
-		return row === null
-			? null
-			: await requireAutoTopupPolicy(this.database, projectId, customer.id, String(row.id));
+		if (row === null) {
+			// "No policy" is an answer about a feature the project has; an unknown key is refused as
+			// the write refuses it.
+			await requireFeature(this.database, projectId, featureKey);
+			return null;
+		}
+		return await requireAutoTopupPolicy(this.database, projectId, customer.id, String(row.id));
 	}
 
 	async resetAutoTopupCircuit(
