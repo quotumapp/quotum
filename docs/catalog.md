@@ -145,6 +145,12 @@ capabilities after it finds the preview token, so retrying a publish that alread
 its stored result with `duplicate: true`. A successful preview also reports `providerCompatibility`;
 see [Catalog preview compatibility](provider-capabilities.md#catalog-preview-compatibility).
 
+A retry repeats the request that was published. The same token with another `expectedRevision`
+answers `409 CATALOG_REVISION_CONFLICT`, and with another catalog `409 CATALOG_PREVIEW_MISMATCH`:
+neither is answered with the earlier publish. Contract and catalog-migration publishes replay the
+same way, and another intent under a published token answers `409 CONTRACT_PREVIEW_MISMATCH` or
+`409 MIGRATION_PREVIEW_MISMATCH`.
+
 A legacy plan can spell its price twice: the plan-level `currency`, `baseAmountMinor`,
 `billingInterval`, `billingIntervalCount` and `providerBindings`, and the `basePrice` object. When
 a plan has a `basePrice`, every plan-level value it also sends must agree with it, or preview and

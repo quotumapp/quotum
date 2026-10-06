@@ -751,8 +751,17 @@ export class ControlsEnterpriseRepository
 					"Contract preview was not found",
 					"CONTRACT_PREVIEW_NOT_FOUND",
 				);
-			if (row.status === "published")
+			const intentDiffers = row.intent_hash !== sha256Hex(stableJson(context.intent));
+			const mismatch = () =>
+				new PersistenceConflictError(
+					"Contract intent differs from preview",
+					"CONTRACT_PREVIEW_MISMATCH",
+				);
+			if (row.status === "published") {
+				// A retry repeats the published request; another intent under its token is not one.
+				if (intentDiffers) throw mismatch();
 				return await requireContract(tx, context.projectId, String(row.id));
+			}
 			if (
 				row.status !== "draft" ||
 				typeof row.terms.previewExpiresAt !== "string" ||
@@ -763,12 +772,7 @@ export class ControlsEnterpriseRepository
 					"CONTRACT_PREVIEW_EXPIRED",
 				);
 			}
-			if (row.intent_hash !== sha256Hex(stableJson(context.intent))) {
-				throw new PersistenceConflictError(
-					"Contract intent differs from preview",
-					"CONTRACT_PREVIEW_MISMATCH",
-				);
-			}
+			if (intentDiffers) throw mismatch();
 			await executeOne(
 				tx,
 				drizzleSql`
@@ -932,7 +936,15 @@ export class ControlsEnterpriseRepository
 				),
 				expiresAt: toIso(draft.expires_at),
 			};
+			const intentDiffers = draft.intent_hash !== sha256Hex(stableJson(context.intent));
+			const mismatch = () =>
+				new PersistenceConflictError(
+					"Migration intent differs from preview",
+					"MIGRATION_PREVIEW_MISMATCH",
+				);
 			if (draft.status === "published") {
+				// A retry repeats the published request; another intent under its token is not one.
+				if (intentDiffers) throw mismatch();
 				const count = await executeOne<{ count: string }>(
 					tx,
 					drizzleSql`SELECT count(*)::text AS count FROM catalog_migration_jobs WHERE project_id = ${context.projectId} AND draft_id = ${draft.id}`,
@@ -944,11 +956,7 @@ export class ControlsEnterpriseRepository
 					"Migration preview has expired",
 					"MIGRATION_PREVIEW_EXPIRED",
 				);
-			if (draft.intent_hash !== sha256Hex(stableJson(context.intent)))
-				throw new PersistenceConflictError(
-					"Migration intent differs from preview",
-					"MIGRATION_PREVIEW_MISMATCH",
-				);
+			if (intentDiffers) throw mismatch();
 			const inserted = await executeRows(
 				tx,
 				drizzleSql`

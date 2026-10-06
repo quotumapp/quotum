@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { z } from "zod";
 import { CatalogProviderCompatibilitySchema } from "../../src/app/contracts/provider-responses";
 import { CapabilityError, classifyBillingError } from "../../src/billing/errors";
-import { CatalogControlPlane } from "../../src/catalog/control-plane";
+import { CatalogControlPlane, parseAuthoredIntent } from "../../src/catalog/control-plane";
 import {
 	assertCatalogProviderCompatibility,
 	catalogCapabilityTargets,
@@ -1061,22 +1061,50 @@ describe("publish retries after a declaration changes", () => {
 		catalog: trialCatalog,
 	};
 
+	// A draft stores the canonical intent its preview read, under the declarations of that time.
+	const publishedDraft = {
+		intent_hash: "b".repeat(64),
+		intent: parseAuthoredIntent(trialCatalog).canonical,
+		base_revision: 1,
+		next_revision: 2,
+		status: "published",
+		expires_at: "2026-09-01T00:15:00.000Z",
+		published_revision_id: "8",
+	};
+
 	it("replays an already published draft instead of re-checking capabilities", async () => {
-		const database = new PublishDraftDatabase({
-			intent_hash: "b".repeat(64),
-			intent: trialCatalog,
-			base_revision: 1,
-			next_revision: 2,
-			status: "published",
-			expires_at: "2026-09-01T00:15:00.000Z",
-			published_revision_id: "8",
-		});
+		const database = new PublishDraftDatabase(publishedDraft);
 		const controlPlane = new CatalogControlPlane(database, { capabilities: withoutStripeTrials });
 
 		const result = await controlPlane.publish(projectInstanceContext(), publishInput);
 
 		expect(result).toMatchObject({ revisionId: "8", revision: 2, duplicate: true });
 		expect(database.writes).toEqual([]);
+	});
+
+	it("refuses a replay that names another revision or catalog than the published request", async () => {
+		const rejection = async (input: typeof publishInput) => {
+			const database = new PublishDraftDatabase(publishedDraft);
+			const error = await new CatalogControlPlane(database)
+				.publish(projectInstanceContext(), input)
+				.then(() => null)
+				.catch((caught: unknown) => caught);
+			expect(database.writes).toEqual([]);
+			return error;
+		};
+
+		expect(await rejection({ ...publishInput, expectedRevision: 9999 })).toMatchObject({
+			code: "CATALOG_REVISION_CONFLICT",
+			status: 409,
+			message: "Expected catalog revision 9999, but this preview was published from revision 1",
+		});
+		const otherCatalog = catalogOf([
+			plan("pro", { trialDays: 7, basePrice: flatPrice("pro-monthly", [stripe("pro-web")]) }),
+		]);
+		expect(await rejection({ ...publishInput, catalog: otherCatalog })).toMatchObject({
+			code: "CATALOG_PREVIEW_MISMATCH",
+			status: 409,
+		});
 	});
 
 	it("rejects a draft that has not been published yet before writing anything", async () => {

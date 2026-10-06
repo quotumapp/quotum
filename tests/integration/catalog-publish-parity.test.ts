@@ -300,4 +300,38 @@ localDescribe("catalog preview and publish parity", () => {
 				"Top-up binding stripe/web/unmapped_pack for top-up ai_credits_10 is not ready: no active consumable product is mapped",
 		});
 	});
+
+	it("replays a publish only for the request that was published", async () => {
+		const { preview, publish } = operator();
+		const body = catalog();
+		const token = (await preview(body)).body.data.previewToken as string;
+		const first = await publish(body, token);
+		expect(first.status).toBe(200);
+		expect(first.body.data).toMatchObject({ revision: 1, duplicate: false });
+
+		// A retry of the same request is answered with that publish.
+		const retry = await publish(body, token);
+		expect(retry.status).toBe(200);
+		expect(retry.body.data).toMatchObject({
+			revisionId: first.body.data.revisionId,
+			revision: 1,
+			duplicate: true,
+		});
+
+		// Another expected revision or another catalog under the token is not that request.
+		const otherRevision = await publish(body, token, 9999);
+		expect(otherRevision.status).toBe(409);
+		expect(otherRevision.body.error).toMatchObject({
+			code: "CATALOG_REVISION_CONFLICT",
+			message:
+				"Expected catalog revision 9999, but this preview was published from an empty catalog",
+		});
+		const otherCatalog = await publish(catalog(2, "9"), token);
+		expect(otherCatalog.status).toBe(409);
+		expect(otherCatalog.body.error.code).toBe("CATALOG_PREVIEW_MISMATCH");
+
+		const [state] = await context.sql`
+			SELECT count(*)::int AS revisions, max(revision)::int AS latest FROM catalog_revisions`;
+		expect(state).toEqual({ revisions: 1, latest: 1 });
+	});
 });

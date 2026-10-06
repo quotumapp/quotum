@@ -499,6 +499,23 @@ localDescribe("Phase 3 release journeys", () => {
 			previewToken: preview.previewToken,
 		});
 		expect(publish.status).toBe(200);
+		// A retry of the published request is answered with that contract; another intent under
+		// its token is a different request.
+		const contractBody = { ...contractIntent, previewToken: preview.previewToken };
+		const contractRetry = await postJson(
+			fixture.app,
+			"/v1/admin/contracts/publish",
+			operator,
+			contractBody,
+		);
+		expect(contractRetry.status).toBe(200);
+		expect((await contractRetry.json()).data).toEqual((await publish.json()).data);
+		const otherContract = await postJson(fixture.app, "/v1/admin/contracts/publish", operator, {
+			...contractBody,
+			controls: [{ ...contractIntent.controls[0], limitValue: "700" }],
+		});
+		expect(otherContract.status).toBe(409);
+		expect((await otherContract.json()).error.code).toBe("CONTRACT_PREVIEW_MISMATCH");
 		const contracts = await testRequest(fixture.app, "/v1/admin/contracts/migration-stripe", {
 			headers: operator,
 		});
@@ -561,14 +578,31 @@ localDescribe("Phase 3 release journeys", () => {
 		);
 		const migrationPreview = (await migrationPreviewResponse.json()).data;
 		expect(migrationPreview.matchingSubscriptions).toBe(2);
-		expect(
-			(
-				await postJson(fixture.app, "/v1/admin/catalog-migrations/publish", operator, {
-					...migrationIntent,
-					previewToken: migrationPreview.previewToken,
-				})
-			).status,
-		).toBe(200);
+		const migrationBody = { ...migrationIntent, previewToken: migrationPreview.previewToken };
+		const migrationPublish = await postJson(
+			fixture.app,
+			"/v1/admin/catalog-migrations/publish",
+			operator,
+			migrationBody,
+		);
+		expect(migrationPublish.status).toBe(200);
+		const published = (await migrationPublish.json()).data;
+		expect(published).toMatchObject({ queued: 2, duplicate: false });
+		const migrationRetry = await postJson(
+			fixture.app,
+			"/v1/admin/catalog-migrations/publish",
+			operator,
+			migrationBody,
+		);
+		expect((await migrationRetry.json()).data).toEqual({ ...published, duplicate: true });
+		const otherMigration = await postJson(
+			fixture.app,
+			"/v1/admin/catalog-migrations/publish",
+			operator,
+			{ ...migrationBody, effectiveMode: "period_end" },
+		);
+		expect(otherMigration.status).toBe(409);
+		expect((await otherMigration.json()).error.code).toBe("MIGRATION_PREVIEW_MISMATCH");
 
 		const worker = new RecurringBillingWorker({
 			projectContextResolver: context.projectContextResolver,
