@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { EntitlementService } from "../billing/entitlements";
-import { BillingError, isBillingError, NotConfiguredError } from "../billing/errors";
+import { BillingError, isBillingError } from "../billing/errors";
 import { projectScopedRateLimitGuard } from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
@@ -12,6 +12,7 @@ import {
 } from "./commercial-actions";
 import * as responses from "./contracts/customer-responses";
 import {
+	paddleNotConfigured,
 	requireAppleStoreKitService,
 	requireGooglePlayBillingService,
 	requireProviderMethod,
@@ -463,8 +464,7 @@ export function registerCustomerRoutes({
 		"/v1/billing-accounts/:billingAccountId/providers/paddle/checkout-sessions",
 		async ({ params, body, request, project }) => {
 			const service = await providerServices.paddleBillingService?.(privateProject(project));
-			if (!service)
-				throw new NotConfiguredError("Paddle provider is not configured", undefined, 503);
+			if (!service) throw paddleNotConfigured();
 			return {
 				success: true,
 				data: await service.createCheckoutSession({

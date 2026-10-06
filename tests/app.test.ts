@@ -2665,6 +2665,12 @@ describe("billing app", () => {
 				status: 401,
 				code: "GOOGLE_PLAY_RTDN_UNAUTHORIZED",
 			},
+			{
+				provider: "paddle",
+				init: { headers: { "paddle-signature": "ts=1;h1=00" }, body: "{}" },
+				status: 400,
+				code: "PADDLE_SIGNATURE_INVALID",
+			},
 		];
 		for (const { provider, init, status, code } of cases) {
 			const unknown = await answer(await post("unknown-project", provider, init));
@@ -2677,17 +2683,25 @@ describe("billing app", () => {
 		expect(await answer(await post("unknown-project", "stripe", oversized))).toEqual(
 			await answer(await post("acme", "stripe", oversized)),
 		);
-		expect(
-			errors
-				.filter((entry) => entry.context?.code === "BILLING_PROVIDER_NOT_CONFIGURED")
-				.map((entry) => entry.context),
-		).toEqual([
+		const unconfigured = errors.filter(
+			(entry) => entry.context?.code === "BILLING_PROVIDER_NOT_CONFIGURED",
+		);
+		expect(unconfigured.map((entry) => entry.context)).toEqual([
 			// Both Stripe cases reach the connection check; a malformed Apple body or a missing
 			// Google token is refused first, as it is for a connected project.
 			{ provider: "stripe", code: "BILLING_PROVIDER_NOT_CONFIGURED", projectKey: "acme" },
 			{ provider: "stripe", code: "BILLING_PROVIDER_NOT_CONFIGURED", projectKey: "acme" },
 			{ provider: "apple", code: "BILLING_PROVIDER_NOT_CONFIGURED", projectKey: "acme" },
 			{ provider: "google", code: "BILLING_PROVIDER_NOT_CONFIGURED", projectKey: "acme" },
+			{ provider: "paddle", code: "BILLING_PROVIDER_NOT_CONFIGURED", projectKey: "acme" },
+		]);
+		// The logged reason names the provider the webhook was for.
+		expect(unconfigured.map((entry) => (entry.error as Error).message)).toEqual([
+			"Stripe provider is not configured",
+			"Stripe provider is not configured",
+			"Apple StoreKit provider is not configured",
+			"Google Play provider is not configured",
+			"Paddle provider is not configured",
 		]);
 	});
 

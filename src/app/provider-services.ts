@@ -52,6 +52,15 @@ export function stripeNotConfigured(): NotConfiguredError {
 	);
 }
 
+/** The error a request gets when the project has no Paddle connection. */
+export function paddleNotConfigured(): NotConfiguredError {
+	return new NotConfiguredError(
+		"Paddle provider is not configured",
+		"BILLING_PROVIDER_NOT_CONFIGURED",
+		503,
+	);
+}
+
 export function requireAppleStoreKitService(
 	service: AppleStoreKitServiceLike | null,
 ): AppleStoreKitServiceLike {
