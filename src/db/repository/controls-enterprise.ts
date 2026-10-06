@@ -271,13 +271,12 @@ export class ControlsEnterpriseRepository
 			}
 			let evaluatedThreshold = threshold;
 			if (input.thresholdType === "percentage") {
-				const control = (
+				const control = tightestControl(
 					await resolveEffectiveControls(tx, {
 						projectId,
 						customerId: customer.id,
 						entityId: entity?.id ?? null,
-					})
-				).find(
+					}),
 					(item) =>
 						item.controlKind === "usage_limit" &&
 						item.featureKey === feature.key &&
@@ -1397,13 +1396,17 @@ export async function resolveEffectiveControls(
 	`,
 	);
 	// Controls with the same window compete, whichever way the cadence is spelled: a quarter and
-	// three months are one window.
+	// three months are one window. An entity's own control does not compete with the account's
+	// (account, contract and plan default): they are two scopes, and the entity's usage counts in
+	// both windows, so a stricter entity limit narrows that entity without exempting its usage from
+	// the account-wide limit.
 	const controlIdentity = (row: EffectiveControlRow) =>
 		[
 			row.control_kind,
 			row.feature_key ?? "",
 			row.currency ?? "",
 			controlWindowKey(row.interval, row.interval_count),
+			row.source_type === "entity" ? "entity" : "account",
 		].join(":");
 	const replacedPlanDefaults = new Set(
 		rows[0]?.contract_replaces_defaults === true
@@ -1469,12 +1472,14 @@ export async function resolveEffectiveControls(
 			remainingValue: unitsToDecimal(remaining > 0n ? remaining : 0n, 9),
 		});
 	}
+	// An entity's control lists before the account's that counts the same usage.
 	const sortKey = (control: EffectiveControl) =>
 		[
 			control.controlKind,
 			control.featureKey ?? "",
 			control.currency ?? "",
 			controlWindowKey(control.interval, control.intervalCount),
+			control.source === "entity" ? "0" : "1",
 		].join(":");
 	return result.sort((left, right) => sortKey(left).localeCompare(sortKey(right)));
 }
@@ -1510,6 +1515,27 @@ export function sameControlWindow(
 		controlWindowKey(control.interval, control.intervalCount) ===
 		controlWindowKey(interval, cadence?.count ?? null)
 	);
+}
+
+/**
+ * The control with the lowest limit among those that match: an entity can have its own limit and
+ * the account's both counting its usage, and a percentage follows the one it reaches first.
+ */
+export function tightestControl(
+	controls: readonly EffectiveControl[],
+	matches: (control: EffectiveControl) => boolean,
+): EffectiveControl | undefined {
+	let tightest: EffectiveControl | undefined;
+	for (const control of controls) {
+		if (!matches(control)) continue;
+		if (
+			tightest === undefined ||
+			decimalToUnits(control.limitValue, 9) < decimalToUnits(tightest.limitValue, 9)
+		) {
+			tightest = control;
+		}
+	}
+	return tightest;
 }
 
 function compareControlRows(left: EffectiveControlRow, right: EffectiveControlRow): number {

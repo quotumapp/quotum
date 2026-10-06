@@ -17,6 +17,7 @@ import {
 	readControlClock,
 	resolveEffectiveControls,
 	sameControlWindow,
+	tightestControl,
 } from "./controls-enterprise";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -807,7 +808,8 @@ export async function recordUsageAlertDelta(
 				entityId: alert.entity_id === null ? null : String(alert.entity_id),
 				now,
 			});
-			const limit = controls.find(
+			const limit = tightestControl(
+				controls,
 				(control) =>
 					control.controlKind === "usage_limit" &&
 					control.featureKey === alert.feature_key &&

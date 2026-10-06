@@ -301,18 +301,27 @@ for every account and five-hour windows do not restart at midnight. Every window
 kept as a row of about 450 bytes with its indexes, so an hourly limit adds up to 24 rows a day for
 each account that uses it. Windows follow the calendar, not the subscription, and span at most three
 years. Controls counted in the same window compete however their cadence is spelled: a contract
-`month` × 3 replaces a plan `quarter`. An account or entity holds one limit per kind, feature and
-currency, so a new one replaces the previous one whatever its window; stacked windows, such as a
-daily and a monthly limit, belong on the plan. A replacing limit keeps counting the window the one
-it replaced counted: a new account limit, a republished plan's limit and a contract limit that takes
-over from a plan default all start from the usage already recorded in the current window, never
-from zero. Open holds count against it too: a reservation taken under the replaced limit keeps its
-capacity, settles once against the replacing limit when confirmed and frees it when released or
-expired. A correction of usage counted before the replacement lowers the replacing limit's count as
-well. `GET /controls` reports each limit's `windowStartAt`
-and `windowEndAt` (both `null` for `lifetime`). A percentage alert follows the usage limit counted
-in its own window, and a hold stays in the window it was taken in: confirming after the window rolls
-charges the earlier window.
+`month` × 3 replaces a plan `quarter`. An entity's own limit does not compete with the account's
+(account, contract and plan default): they are two scopes, and the entity's usage counts in both
+windows. A stricter entity limit therefore narrows that entity without letting its usage past the
+account-wide limit, and a looser one never raises it; a request is refused when either window is
+full, and the refusal names the control (`entity` or `account`) that stopped it. Holds count in both
+windows, and a correction lowers both. Windows already open when this rule shipped (v0.22.2) hold
+only the usage counted under the old rule: an account window can miss the earlier usage of an entity
+whose own limit was tighter until it rolls (a lifetime window never recovers), and new usage counts
+in both. `GET /controls?entityId=` lists the entity's limit and the account's that also counts its
+usage, the entity's first; a percentage alert follows the lower of them. An account or entity holds
+one limit per kind, feature and currency, so a new one replaces the previous one whatever its
+window; stacked windows, such as a daily and a monthly limit, belong on the plan. A replacing limit
+keeps counting the window the one it replaced counted: a new account limit, a republished plan's
+limit and a contract limit that takes over from a plan default all start from the usage already
+recorded in the current window, never from zero. Open holds count against it too: a reservation
+taken under the replaced limit keeps its capacity, settles once against the replacing limit when
+confirmed and frees it when released or expired. A correction of usage counted before the
+replacement lowers the replacing limit's count as well. `GET /controls` reports each limit's
+`windowStartAt` and `windowEndAt` (both `null` for `lifetime`). A percentage alert follows the usage
+limit counted in its own window, and a hold stays in the window it was taken in: confirming after
+the window rolls charges the earlier window.
 
 A usage alert counts its window from the window's start: a new alert starts from the usage already
 recorded in the current window, and if that usage has already reached the threshold, the alert records
