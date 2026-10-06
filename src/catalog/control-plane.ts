@@ -1386,6 +1386,70 @@ async function validateCatalogLifecycle(
 		}
 	}
 	assertScopesAgreeWithPinnedVersions(catalog, await readPinnedMeterLimits(executor, projectId));
+	await assertRetiringFeaturesAreNotHeld(
+		executor,
+		projectId,
+		featureRows
+			.filter((row) => row.active && retiredFeatureKeys.has(row.key))
+			.map(({ key }) => key),
+	);
+}
+
+/**
+ * Refuses to retire a feature that live subscriptions still hold through the plan version they
+ * are pinned to. Publishing does not move them, and a retired feature can no longer be read,
+ * checked or consumed, so the retirement would take away something a customer pays for. A catalog
+ * migration moves them first. Only a feature this intent retires is checked: one retired by an
+ * earlier revision stays retired.
+ */
+async function assertRetiringFeaturesAreNotHeld(
+	executor: QueryExecutor,
+	projectId: string,
+	featureKeys: readonly string[],
+): Promise<void> {
+	if (featureKeys.length === 0) return;
+	const rows = await executeRows<{
+		feature_key: string;
+		plan_key: string;
+		version: number;
+		subscriptions: number | string;
+	}>(
+		executor,
+		drizzleSql`
+			SELECT
+				feature.key AS feature_key,
+				plan.key AS plan_key,
+				version.version,
+				count(DISTINCT subscription.id)::integer AS subscriptions
+			FROM subscriptions subscription
+			JOIN plan_versions version
+				ON version.project_id = subscription.project_id
+				AND version.id = subscription.plan_version_id
+			JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+			JOIN plan_items item
+				ON item.project_id = version.project_id AND item.plan_version_id = version.id
+			JOIN features feature ON feature.project_id = item.project_id AND feature.id = item.feature_id
+			WHERE subscription.project_id = ${projectId}
+				AND feature.key IN (SELECT jsonb_array_elements_text(${jsonb([...featureKeys])}))
+				AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+				AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
+			GROUP BY feature.key, plan.key, version.version
+			ORDER BY feature.key, plan.key, version.version
+		`,
+	);
+	const [first] = rows;
+	if (first === undefined) return;
+	const held = rows.filter((row) => row.feature_key === first.feature_key);
+	const subscriptions = held.reduce((total, row) => total + Number(row.subscriptions), 0);
+	const versions = held.map((row) => `${row.plan_key} version ${row.version}`).join(", ");
+	throw new PersistenceConflictError(
+		`Feature ${first.feature_key} cannot be retired: ${
+			subscriptions === 1
+				? "1 live subscription still holds"
+				: `${subscriptions} live subscriptions still hold`
+		} it through plan ${versions}; migrate them to a version without it, or retire it after they end`,
+		"FEATURE_RETIREMENT_BLOCKED",
+	);
 }
 
 interface PinnedMeterLimit {

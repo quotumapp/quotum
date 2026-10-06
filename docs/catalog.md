@@ -8,6 +8,11 @@ and operator authentication plus `X-Billing-Actor`. Provider bindings adopt pre-
 products and must all be ready before the active pointer advances. Previously active features,
 plans, and top-ups must be retained or listed explicitly for retirement; omission is not deletion.
 Retiring a plan removes it from new selection without rewriting pinned subscriptions.
+Those subscriptions still hold the plan's features, so a feature cannot be retired while a live
+subscription is pinned to a version that grants it: preview and publish answer
+`409 FEATURE_RETIREMENT_BLOCKED` naming the feature, the plan versions and how many subscriptions
+hold it. Move them with a [catalog migration](#catalog-migrations), or retire the feature after
+they end.
 Preview refuses what publish would refuse against the database, so a revision it accepts is one
 publish can write: a plan version number that already exists (`409 PLAN_VERSION_CONFLICT`), a
 feature whose unit, kind, scale or filter dimensions changed (`409 FEATURE_IDENTITY_CONFLICT`), a
