@@ -13,9 +13,12 @@ rows. The development import (`quotum catalog provision`, or `bun run catalog:pr
 checkout) currently creates Stripe/web mappings only and skips instances with a published catalog.
 Apple/iOS and Google/Android mappings require separate operator provisioning; there is no
 native-store provisioning command in the current service. A store product records its billing
-period as `billing_period` (`one_time` or a billing unit) and `billing_period_count`, and a price
-binding adopts it only when that period spans the same time as the price's interval. The import
-takes `interval` and an optional `intervalCount` per subscription entry.
+period as `billing_period` (`one_time` or a billing unit) and `billing_period_count`. A price
+binding adopts it only when that period spans the same time as the price's interval, and so does a
+`providerPriced` binding, whose provider owns the amount: a yearly plan on a monthly store product
+would grant a year's allowance every month, so preview and publish refuse it with
+`409 PROVIDER_BINDING_NOT_READY` naming both periods. The import takes `interval` and an optional
+`intervalCount` per subscription entry.
 
 ## Paddle qualification work
 

@@ -350,6 +350,10 @@ class EmptyCatalogDatabase {
 		if (text.includes("SELECT DISTINCT key FROM topup_options")) return [];
 		if (text.includes("FROM subscriptions")) return [{ count: "0" }];
 		if (text.includes("INSERT INTO catalog_drafts")) return [{ id: "1" }];
+		// A monthly store product behind every binding, as the plans below are billed.
+		if (text.includes("FROM store_products sp")) {
+			return [{ id: "1", billing_period: "month", billing_period_count: 1 }];
+		}
 		throw new Error(`Unscripted query: ${text}`);
 	}
 }
@@ -394,6 +398,24 @@ function summarized(entries: CatalogProviderCompatibility[]) {
 }
 
 type SummarizedEntry = ReturnType<typeof summarized>[number];
+
+describe("catalog control plane preview binding cadence", () => {
+	it("refuses a plan whose binding sells another cadence than the plan bills", async () => {
+		// The database answers with a monthly store product behind every binding.
+		await expect(
+			preview([plan({ billingInterval: "year", providerBindings: [stripeBinding] })], []),
+		).rejects.toMatchObject({
+			code: "PROVIDER_BINDING_NOT_READY",
+			status: 409,
+			message: "Provider binding stripe/web/pro sells every month but plan pro bills every year",
+		});
+		const accepted = await preview(
+			[plan({ billingInterval: "month", providerBindings: [stripeBinding] })],
+			[],
+		);
+		expect(accepted.impact.planVersionsCreated).toBe(1);
+	});
+});
 
 describe("catalog control plane preview provider compatibility", () => {
 	const trialPlan = plan({ trialDays: 7, providerBindings: [stripeBinding] });
@@ -559,6 +581,10 @@ class StoredCatalogDatabase {
 		}
 		if (text.includes("SELECT DISTINCT key FROM topup_options")) return [];
 		if (text.includes("FROM subscriptions")) return [{ count: "0" }];
+		// A monthly store product behind every binding, as the plans below are billed.
+		if (text.includes("FROM store_products sp")) {
+			return [{ id: "1", billing_period: "month", billing_period_count: 1 }];
+		}
 		throw new Error(`Unscripted query: ${text}`);
 	}
 }

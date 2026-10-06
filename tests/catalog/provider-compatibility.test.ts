@@ -891,6 +891,18 @@ class PublishedCatalogDatabase {
 			return this.published.topups.map(({ key }) => ({ key }));
 		}
 		if (text.includes("FROM subscriptions")) return [{ count: "0" }];
+		// A store product behind every binding that sells what `flatPrice` and the plans declare.
+		if (text.includes("FROM store_products sp")) {
+			return [
+				{
+					id: "1",
+					price_amount: 1000,
+					currency: "usd",
+					billing_period: "month",
+					billing_period_count: 1,
+				},
+			];
+		}
 		if (text.includes("INSERT INTO catalog_drafts")) {
 			this.drafts.push(text);
 			return [{ id: "1" }];
