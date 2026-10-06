@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BillingError, isBillingError } from "../billing/errors";
+import { BillingError, isBillingError, NotConfiguredError } from "../billing/errors";
 import type { BillingProvider } from "../billing/types";
 import {
 	type RateLimiter,
@@ -175,6 +175,15 @@ export function registerWebhookRoutes(input: {
 		if (service === null) throw new ConcealedWebhookFailure(reason(), answer);
 		return service;
 	};
+	/** A connection that lacks what verification needs answers like a missing one. */
+	const concealUnconfigured = async (run: () => unknown, answer: BillingError): Promise<void> => {
+		try {
+			await run();
+		} catch (error) {
+			if (error instanceof NotConfiguredError) throw new ConcealedWebhookFailure(error, answer);
+			throw error;
+		}
+	};
 	const readAppleNotification = async (request: Request) => {
 		const body = await parseCappedJson(request, publicWebhookMaxBodyBytes, tooLargeError);
 		const parsed = appleWebhookSchema.safeParse(body);
@@ -224,7 +233,10 @@ export function registerWebhookRoutes(input: {
 				googlePlayNotConfigured,
 				googleUnverified(),
 			);
-			await service.verifyRtdnAuthorization?.(authorizationHeader);
+			await concealUnconfigured(
+				() => service.verifyRtdnAuthorization?.(authorizationHeader),
+				googleUnverified(),
+			);
 
 			const body = await parseCappedJson(request, publicWebhookMaxBodyBytes, tooLargeError);
 			const parsed = googleWebhookSchema.safeParse(body);

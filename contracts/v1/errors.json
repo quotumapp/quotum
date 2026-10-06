@@ -664,7 +664,6 @@
         "src/platform/mcp/authorization.ts",
         "src/platform/mcp/changes.ts",
         "src/providers/apple/service.ts",
-        "src/providers/google/pubsub.ts",
         "src/providers/google/service.ts",
         "src/providers/paddle/webhook.ts",
         "src/providers/stripe/saved-card-plan.ts",
