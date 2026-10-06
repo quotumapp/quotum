@@ -353,6 +353,43 @@ it stops early with `locked`, `lock_timeout`, `blocked` or `forbidden`. Both rea
 Automatic top-up failures require resolving the payment/configuration cause before a protected
 circuit reset. Use replay/retry routes for durable work; do not manually advance job state.
 
+### Recurring billing retries
+
+The recurring billing worker applies due subscription changes and invoices closed usage windows
+(periods and late adjustments). A job that fails goes back to `pending` with its reason in
+`last_error` and waits before the next attempt: 1, 2, 4, 8, 16 and 32 minutes, then one hour. After
+20 attempts, about 14 hours after the first failure, it is parked as `failed`. Parking a
+subscription change releases the promotion use it reserved and fails the catalog migration job
+waiting on it.
+
+The window is deliberately shorter than the 24 hours Stripe keeps idempotency keys. Inside it every
+retry repeats the keyed calls of the first attempt, so an invoice is created once. Stripe also
+replays the first result of a key, an error included, for that long: a retry cannot see a recovery
+on a call that already answered with a `5xx` or a card decline, and a failure that never reached
+Stripe (network, rate limit, missing connection or configuration) is the kind a retry fixes.
+
+Find parked jobs with:
+
+```sql
+SELECT 'subscription-change' AS kind, id, attempts, last_error, updated_at
+FROM subscription_changes WHERE status = 'failed'
+UNION ALL SELECT 'usage-invoice-period', id, attempts, last_error, updated_at
+FROM usage_invoice_periods WHERE status = 'failed'
+UNION ALL SELECT 'usage-invoice-adjustment', id, attempts, last_error, updated_at
+FROM usage_invoice_adjustments WHERE status = 'failed';
+```
+
+Fix the cause, then put a job back with a fresh budget through the operator routes
+(`X-Billing-Operator-Key`): `POST /v1/admin/subscription-changes/:changeId/retry`,
+`/v1/admin/usage-invoice-periods/:periodId/retry` or
+`/v1/admin/usage-invoice-adjustments/:adjustmentId/retry`. Another project's job, or none, answers
+`404`; one that is not `failed` answers `409 RECURRING_JOB_NOT_FAILED`. A parked change that carried
+a promotion or a catalog migration, or whose subscription has a newer pending change, answers
+`409 SUBSCRIPTION_CHANGE_NOT_RETRYABLE`: request the change again. A retry more than about ten hours
+after parking runs after Stripe forgot the keys, so a usage invoice that had been created is created
+again; void the earlier invoice, whose metadata names `usageInvoicePeriodId`. Jobs parked by an
+earlier release after eight attempts can be requeued the same way.
+
 ### Default-plan passes
 
 Every account without a paid base plan holds a default-plan grant: one grant row and one

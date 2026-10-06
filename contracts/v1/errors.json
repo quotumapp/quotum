@@ -1326,6 +1326,18 @@
       ]
     },
     {
+      "code": "RECURRING_JOB_NOT_FAILED",
+      "sources": [
+        "src/db/repository/recurring-pricing.ts"
+      ]
+    },
+    {
+      "code": "RECURRING_JOB_NOT_FOUND",
+      "sources": [
+        "src/db/repository/recurring-pricing.ts"
+      ]
+    },
+    {
       "code": "REQUEST_BODY_TOO_LARGE",
       "sources": [
         "src/app.ts",
@@ -1550,6 +1562,12 @@
       "sources": [
         "src/app/webhook-routes.ts",
         "src/providers/stripe/service.ts"
+      ]
+    },
+    {
+      "code": "SUBSCRIPTION_CHANGE_NOT_RETRYABLE",
+      "sources": [
+        "src/db/repository/recurring-pricing.ts"
       ]
     },
     {

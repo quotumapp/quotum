@@ -1,8 +1,11 @@
 import { BillingError } from "../billing/errors";
+import type { RecurringJobKind } from "../billing/recurring";
 import type { ProjectInstanceContext } from "../projects/context";
 import type { SubscriptionReconciliationRunResult } from "../workers/subscription-reconciliation";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Usage invoice adjustments are numbered; the pattern keeps the id inside bigint. */
+const adjustmentIdPattern = /^[1-9][0-9]{0,17}$/;
 
 export interface BillingAdminReplayWorker {
 	runOne(
@@ -25,23 +28,35 @@ export interface BillingAdminProjectionRepository {
 	): Promise<{ jobId: string; status: "pending" }>;
 }
 
+export interface BillingAdminRecurringJobRepository {
+	retryRecurringJob(
+		project: ProjectInstanceContext,
+		jobKind: RecurringJobKind,
+		jobId: string,
+	): Promise<{ jobKind: RecurringJobKind; jobId: string; status: "pending" }>;
+}
+
 export class BillingAdminOperations {
 	private readonly replayWorker: BillingAdminReplayWorker;
 	private readonly reconciliationWorker: BillingAdminReconciliationWorker;
 	private readonly projectionRepository: BillingAdminProjectionRepository | null;
+	private readonly recurringJobRepository: BillingAdminRecurringJobRepository | null;
 
 	constructor({
 		replayWorker,
 		reconciliationWorker,
 		projectionRepository = null,
+		recurringJobRepository = null,
 	}: {
 		replayWorker: BillingAdminReplayWorker;
 		reconciliationWorker: BillingAdminReconciliationWorker;
 		projectionRepository?: BillingAdminProjectionRepository | null;
+		recurringJobRepository?: BillingAdminRecurringJobRepository | null;
 	}) {
 		this.replayWorker = replayWorker;
 		this.reconciliationWorker = reconciliationWorker;
 		this.projectionRepository = projectionRepository;
+		this.recurringJobRepository = recurringJobRepository;
 	}
 
 	async replayStoreEvent(project: ProjectInstanceContext, eventId: string) {
@@ -71,5 +86,25 @@ export class BillingAdminOperations {
 		}
 
 		return this.projectionRepository.retryProjectionSyncJob(project, trimmedJobId);
+	}
+
+	retryRecurringJob(project: ProjectInstanceContext, jobKind: RecurringJobKind, jobId: string) {
+		const trimmedJobId = jobId.trim();
+		if (
+			!(jobKind === "usage-invoice-adjustment" ? adjustmentIdPattern : uuidPattern).test(
+				trimmedJobId,
+			)
+		) {
+			throw new BillingError("Invalid recurring billing job id", "INVALID_REQUEST", 400);
+		}
+		if (this.recurringJobRepository === null) {
+			throw new BillingError(
+				"Recurring billing recovery is not configured",
+				"BILLING_ADMIN_NOT_CONFIGURED",
+				501,
+			);
+		}
+
+		return this.recurringJobRepository.retryRecurringJob(project, jobKind, trimmedJobId);
 	}
 }

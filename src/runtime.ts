@@ -264,6 +264,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		replayWorker: storeEventReplayWorker,
 		reconciliationWorker: subscriptionReconciliationWorker,
 		projectionRepository: billingRepository,
+		recurringJobRepository: billingRepository,
 	});
 
 	jobs.push({

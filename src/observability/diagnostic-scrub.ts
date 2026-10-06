@@ -66,8 +66,11 @@ const COLLECTIONS = new Set([
 	"receipts",
 	"step-up",
 	"store-events",
+	"subscription-changes",
 	"subscriptions",
 	"trials",
+	"usage-invoice-adjustments",
+	"usage-invoice-periods",
 ]);
 
 /** Path segments followed by two identifiers, e.g. `contracts/:billingAccountId/:contractId`. */

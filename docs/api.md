@@ -204,4 +204,8 @@ Operator routes:
   `409 STORE_EVENT_NOT_REPLAYABLE`.
 - `POST /v1/admin/reconciliation/subscriptions/run`.
 - `POST /v1/admin/projection-jobs/:jobId/retry`.
+- `POST /v1/admin/subscription-changes/:changeId/retry`,
+  `POST /v1/admin/usage-invoice-periods/:periodId/retry` and
+  `POST /v1/admin/usage-invoice-adjustments/:adjustmentId/retry` requeue a parked recurring billing
+  job; see [Recurring billing retries](operations.md#recurring-billing-retries).
 - `GET /v1/admin/metrics`.

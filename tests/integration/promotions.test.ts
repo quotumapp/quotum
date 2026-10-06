@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { CreatePromotionInput, PromotionCodeInput } from "../../src/billing/promotions";
 import type { ReservePromotionRedemptionInput } from "../../src/db/repository/promotions";
+import { RECURRING_JOB_MAX_ATTEMPTS } from "../../src/db/repository/recurring-retry";
 import { syncPromotionStripeObject } from "../../src/providers/stripe/promotions";
 import { StripeBillingService } from "../../src/providers/stripe/service";
 import { createFakeStripePromotions } from "../../src/providers/stripe/testing/fake-promotions";
@@ -1537,7 +1538,11 @@ localDescribe("promotion subscription changes", () => {
 			},
 		);
 		const changeId = (await executed.json()).data.changeId;
-		await context.sql`UPDATE subscription_changes SET attempts = 7 WHERE id = ${changeId}`;
+		await context.sql`
+			UPDATE subscription_changes
+			SET attempts = ${RECURRING_JOB_MAX_ATTEMPTS - 1}, updated_at = now() - INTERVAL '2 hours'
+			WHERE id = ${changeId}
+		`;
 		await context.repository.claimSubscriptionChanges("change-worker", 10);
 		await context.repository.markSubscriptionChangeFailed(
 			project.projectInstanceId,
@@ -1552,6 +1557,50 @@ localDescribe("promotion subscription changes", () => {
 			JOIN promotion_codes c ON c.id = r.promotion_code_id
 		`;
 		expect(released).toEqual({ status: "released", reserved_count: 0 });
+	});
+
+	it("keeps the reserved use while a failing change is still retried", async () => {
+		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+		const headers = { ...fixture.authHeaders("acme"), "content-type": "application/json" };
+		const preview = (
+			await (
+				await testRequest(
+					fixture.app,
+					"/v1/billing-accounts/migration-stripe/commercial-actions/preview",
+					{ method: "POST", headers, body: JSON.stringify({ intent: intent("UPGRADE") }) },
+				)
+			).json()
+		).data;
+		const executed = await testRequest(
+			fixture.app,
+			"/v1/billing-accounts/migration-stripe/commercial-actions",
+			{
+				method: "POST",
+				headers: { ...headers, "idempotency-key": "upgrade-retried" },
+				body: JSON.stringify({ previewToken: preview.previewToken }),
+			},
+		);
+		const changeId = (await executed.json()).data.changeId;
+		await context.repository.claimSubscriptionChanges("change-worker", 10);
+		await context.repository.markSubscriptionChangeFailed(
+			project.projectInstanceId,
+			changeId,
+			"Stripe is unavailable",
+			"change-worker",
+		);
+
+		const [reserved] = await context.sql<Array<{ status: string; reserved_count: number }>>`
+			SELECT r.status, c.reserved_count
+			FROM promotion_redemptions r
+			JOIN promotion_codes c ON c.id = r.promotion_code_id
+		`;
+		expect(reserved).toEqual({ status: "reserved", reserved_count: 1 });
+		const [change] = await context.sql<
+			Array<{ status: string; attempts: number; last_error: string | null }>
+		>`
+			SELECT status, attempts, last_error FROM subscription_changes WHERE id = ${changeId}
+		`;
+		expect(change).toEqual({ status: "pending", attempts: 1, last_error: "Stripe is unavailable" });
 	});
 });
 

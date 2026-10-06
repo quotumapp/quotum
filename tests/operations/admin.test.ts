@@ -170,4 +170,75 @@ describe("BillingAdminOperations", () => {
 		);
 		expect(calls).toEqual([{ project, jobId: validProjectionJobId }]);
 	});
+
+	it("requeues recurring jobs through the project-scoped repository and validates ids", async () => {
+		const calls: Array<{ kind: string; jobId: string }> = [];
+		const operations = new BillingAdminOperations({
+			replayWorker: {
+				runOne() {
+					throw new Error("Unexpected replay run");
+				},
+			},
+			reconciliationWorker: {
+				runOnce() {
+					throw new Error("Unexpected reconciliation run");
+				},
+			},
+			recurringJobRepository: {
+				retryRecurringJob(_project, jobKind, jobId) {
+					calls.push({ kind: jobKind, jobId });
+					return Promise.resolve({ jobKind, jobId, status: "pending" as const });
+				},
+			},
+		});
+
+		await expect(
+			operations.retryRecurringJob(project, "usage-invoice-period", ` ${validProjectionJobId} `),
+		).resolves.toEqual({
+			jobKind: "usage-invoice-period",
+			jobId: validProjectionJobId,
+			status: "pending",
+		});
+		await expect(
+			operations.retryRecurringJob(project, "usage-invoice-adjustment", "42"),
+		).resolves.toMatchObject({ jobId: "42" });
+		expect(calls).toEqual([
+			{ kind: "usage-invoice-period", jobId: validProjectionJobId },
+			{ kind: "usage-invoice-adjustment", jobId: "42" },
+		]);
+
+		// Adjustments are numbered and stay inside bigint; the other jobs are UUIDs.
+		for (const [kind, id] of [
+			["usage-invoice-adjustment", validProjectionJobId],
+			["usage-invoice-adjustment", "0"],
+			["usage-invoice-adjustment", "9999999999999999999"],
+			["usage-invoice-adjustment", "1e3"],
+			["subscription-change", "42"],
+			["usage-invoice-period", "not-a-uuid"],
+		] as const) {
+			expect(() => operations.retryRecurringJob(project, kind, id)).toThrow(
+				"Invalid recurring billing job id",
+			);
+		}
+		expect(calls).toHaveLength(2);
+	});
+
+	it("reports recurring job recovery as not configured without a repository", () => {
+		const operations = new BillingAdminOperations({
+			replayWorker: {
+				runOne() {
+					throw new Error("Unexpected replay run");
+				},
+			},
+			reconciliationWorker: {
+				runOnce() {
+					throw new Error("Unexpected reconciliation run");
+				},
+			},
+		});
+
+		expect(() =>
+			operations.retryRecurringJob(project, "subscription-change", validProjectionJobId),
+		).toThrow("Recurring billing recovery is not configured");
+	});
 });
