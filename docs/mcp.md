@@ -84,9 +84,12 @@ with current MCP messages and the SDK's older-protocol fallback; it keeps no cro
 ## Propose billing changes
 
 Remote writes are separately opt-in: set `QUOTUM_MCP_WRITES_ENABLED=true` only after deploying
-matching schema, API and merchant UI. The first-party console proxies the proposal read and decision
-routes but does not yet serve the review page that the returned URL opens, so keep the flag off
-until a console release does. Clients must request `quotum.billing.write` alongside `quotum.read`
+matching schema, API and merchant UI. Proposals need API v0.22.4 or later: earlier versions stored
+a proposal in a form that could not be approved, and refused every usage correction, automatic
+top-up reset and commercial action as stale. The first-party console serves the review page that
+the returned URL opens, `/mcp/changes/{id}`, from the release that pins the v0.22.4 contract; an
+older console answers that URL with "Page not found", so deploy the console before turning the flag
+on. Clients must request `quotum.billing.write` alongside `quotum.read`
 and `offline_access` and complete fresh consent. Existing grants retain their saved
 scopes; enabling the flag does not upgrade them. Stdio remains read-only, even with a sandbox key.
 
@@ -128,7 +131,9 @@ environment administration, global reconciliation and usage consumption are excl
 
 Every effective change requires the same connected merchant to open the returned URL, review it,
 and choose **Approve and apply**, including in sandbox. Production and sensitive recovery/correction
-actions also require the existing step-up authentication. The backend rechecks the live session,
+actions also require the existing step-up authentication: the console opens a challenge bound to
+`POST /api/platform/mcp/changes/{id}/approve` and the proposal's hash, and sends the approval with
+the grant once the identity is confirmed. The backend rechecks the live session,
 connection and role. The agent must present the URL to the user, never approve it itself. There is
 no MCP execute tool and no arbitrary HTTP passthrough.
 
