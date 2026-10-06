@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { recurringJobKinds } from "../../billing/recurring";
 import { billingProviderValues } from "./provider-enum";
 import { ProviderEnvironmentCapabilitiesSchema } from "./provider-responses";
 
@@ -993,6 +994,22 @@ export const postV1AdminProjectionJobsByJobIdRetryResponse200Schema = z.object({
 	success: z.literal(true),
 	data: z.object({ jobId: z.string(), status: z.literal("pending") }),
 });
+
+const recurringJobRetryResponse200Schema = z.object({
+	success: z.literal(true),
+	data: z.object({
+		jobKind: z.enum(recurringJobKinds),
+		jobId: z.string(),
+		status: z.literal("pending"),
+	}),
+});
+
+export const postV1AdminSubscriptionChangesByChangeIdRetryResponse200Schema =
+	recurringJobRetryResponse200Schema;
+export const postV1AdminUsageInvoicePeriodsByPeriodIdRetryResponse200Schema =
+	recurringJobRetryResponse200Schema;
+export const postV1AdminUsageInvoiceAdjustmentsByAdjustmentIdRetryResponse200Schema =
+	recurringJobRetryResponse200Schema;
 
 export const getV1AdminProvidersCapabilitiesResponse200Schema = z.object({
 	success: z.literal(true),

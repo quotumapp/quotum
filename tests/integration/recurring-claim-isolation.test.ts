@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { RECURRING_JOB_MAX_ATTEMPTS } from "../../src/db/repository/recurring-retry";
 import type { OperationTiming } from "../../src/providers/contract";
 import { wrapStripeService } from "../../src/providers/stripe/adapter";
 import { StripeBillingService } from "../../src/providers/stripe/service";
@@ -9,6 +10,9 @@ import {
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import { createFakeStripeBillingClient } from "./helpers/fake-provider-clients";
 import {
+	makeSubscriptionChangeRetryDue,
+	makeUsageInvoiceAdjustmentRetryDue,
+	makeUsageInvoicePeriodRetryDue,
 	setSubscriptionChangeAttempts,
 	setUsageInvoiceAdjustmentAttempts,
 	setUsageInvoicePeriodAttempts,
@@ -70,12 +74,21 @@ localDescribe("Recurring billing claim isolation", () => {
 		});
 		const poisoned = await periodId("iso-apple");
 		expect(failures).toEqual([`Usage invoice period ${poisoned} cannot be invoiced`]);
+		// The failure stays visible while the job is retried, and the retry waits out its delay.
 		expect(await periodRows()).toEqual([
-			{ account: "iso-apple", status: "pending", attempts: 1, last_error: null },
+			{
+				account: "iso-apple",
+				status: "pending",
+				attempts: 1,
+				last_error: `Usage invoice period ${poisoned} cannot be invoiced`,
+			},
 			{ account: "iso-stripe", status: "invoiced", attempts: 1, last_error: null },
 		]);
+		expect(await runWorkerOnce(failures)).toMatchObject({ usageInvoicesCreated: 0, failed: 0 });
+		expect(failures).toEqual([]);
 
-		await setUsageInvoicePeriodAttempts(context.sql, poisoned, 7);
+		await setUsageInvoicePeriodAttempts(context.sql, poisoned, RECURRING_JOB_MAX_ATTEMPTS - 1);
+		await makeUsageInvoicePeriodRetryDue(context.sql, poisoned);
 		expect(await runWorkerOnce(failures)).toMatchObject({
 			materializedUsagePeriods: 0,
 			usageInvoicesCreated: 0,
@@ -85,7 +98,7 @@ localDescribe("Recurring billing claim isolation", () => {
 			{
 				account: "iso-apple",
 				status: "failed",
-				attempts: 8,
+				attempts: RECURRING_JOB_MAX_ATTEMPTS,
 				last_error: `Usage invoice period ${poisoned} cannot be invoiced`,
 			},
 			{ account: "iso-stripe", status: "invoiced", attempts: 1, last_error: null },
@@ -132,12 +145,33 @@ localDescribe("Recurring billing claim isolation", () => {
 			{ account: "iso-flat", amount_minor: "-10", status: "invoiced", attempts: 1 },
 			{ account: "iso-volume", amount_minor: "8", status: "pending", attempts: 1 },
 		]);
+		expect(await runWorkerOnce(failures)).toMatchObject({ usageAdjustmentsCreated: 0, failed: 0 });
 
-		await setUsageInvoiceAdjustmentAttempts(context.sql, poisoned, 7);
+		await setUsageInvoiceAdjustmentAttempts(context.sql, poisoned, RECURRING_JOB_MAX_ATTEMPTS - 1);
+		await makeUsageInvoiceAdjustmentRetryDue(context.sql, poisoned);
 		expect(await runWorkerOnce(failures)).toMatchObject({ usageAdjustmentsCreated: 0, failed: 1 });
 		expect(await adjustmentRows()).toEqual([
 			{ account: "iso-flat", amount_minor: "-10", status: "invoiced", attempts: 1 },
-			{ account: "iso-volume", amount_minor: "8", status: "failed", attempts: 8 },
+			{
+				account: "iso-volume",
+				amount_minor: "8",
+				status: "failed",
+				attempts: RECURRING_JOB_MAX_ATTEMPTS,
+			},
+		]);
+
+		// An operator puts the parked adjustment back in the queue with a fresh budget.
+		expect(
+			await context.repository.retryRecurringJob(project, "usage-invoice-adjustment", poisoned),
+		).toEqual({ jobKind: "usage-invoice-adjustment", jobId: poisoned, status: "pending" });
+		expect(await adjustmentRows()).toEqual([
+			{ account: "iso-flat", amount_minor: "-10", status: "invoiced", attempts: 1 },
+			{ account: "iso-volume", amount_minor: "8", status: "pending", attempts: 0 },
+		]);
+		expect(await runWorkerOnce(failures)).toMatchObject({ usageAdjustmentsCreated: 0, failed: 1 });
+		expect(await adjustmentRows()).toEqual([
+			{ account: "iso-flat", amount_minor: "-10", status: "invoiced", attempts: 1 },
+			{ account: "iso-volume", amount_minor: "8", status: "pending", attempts: 1 },
 		]);
 	});
 
@@ -237,22 +271,28 @@ localDescribe("Recurring billing claim isolation", () => {
 		expect(await changeRow(poisonChangeId)).toEqual({
 			status: "pending",
 			attempts: 1,
-			last_error: null,
+			last_error: "Target plan has no Stripe recurring prices",
 		});
 		expect(await changeRow(healthyChangeId)).toEqual({
 			status: "applied",
 			attempts: 1,
 			last_error: null,
 		});
+		expect(await runWorkerOnce(failures)).toMatchObject({ failed: 0 });
 
-		await setSubscriptionChangeAttempts(context.sql, poisonChangeId, 7);
+		await setSubscriptionChangeAttempts(
+			context.sql,
+			poisonChangeId,
+			RECURRING_JOB_MAX_ATTEMPTS - 1,
+		);
+		await makeSubscriptionChangeRetryDue(context.sql, poisonChangeId);
 		expect(await runWorkerOnce(failures)).toMatchObject({
 			subscriptionChangesApplied: 0,
 			failed: 1,
 		});
 		expect(await changeRow(poisonChangeId)).toEqual({
 			status: "failed",
-			attempts: 8,
+			attempts: RECURRING_JOB_MAX_ATTEMPTS,
 			last_error: "Target plan has no Stripe recurring prices",
 		});
 		expect(await changeRow(healthyChangeId)).toEqual({

@@ -27,6 +27,7 @@ import {
 } from "../admin/query";
 import type { AdminBillingReader, AdminListResult } from "../admin/types";
 import { BillingError } from "../billing/errors";
+import type { RecurringJobKind } from "../billing/recurring";
 import { projectScopedRateLimitGuard } from "../http/rate-limit";
 import { type BillingLogger, safelyLogInfo } from "../observability/logger";
 import type { BillingAdminOperations } from "../operations/admin";
@@ -38,7 +39,7 @@ import { privateProject } from "./request-context";
 import type { BillingElysia, PostAuthGuard } from "./types";
 
 const OPERATOR_PATH_PATTERN =
-	/^\/v1\/admin\/(billing-accounts\/[^/]+\/provider-operations\/[^/]+\/reconcile|store-events\/[^/]+\/replay|projection-jobs\/[^/]+\/retry|reconciliation\/subscriptions\/run|metrics)$/;
+	/^\/v1\/admin\/(billing-accounts\/[^/]+\/provider-operations\/[^/]+\/reconcile|store-events\/[^/]+\/replay|projection-jobs\/[^/]+\/retry|subscription-changes\/[^/]+\/retry|usage-invoice-periods\/[^/]+\/retry|usage-invoice-adjustments\/[^/]+\/retry|reconciliation\/subscriptions\/run|metrics)$/;
 
 /** Customer-scoped lists take the customer from the path; a `customerId` query value is ignored. */
 const customerScoped = { customerId: true } as const;
@@ -523,6 +524,77 @@ export function registerAdminRoutes({
 				tags: ["admin"],
 				path: "/v1/admin/projection-jobs/:jobId/retry",
 				responses: { 200: responses.postV1AdminProjectionJobsByJobIdRetryResponse200Schema },
+			}),
+		},
+	);
+
+	const retryRecurringJob = async (
+		project: Parameters<typeof privateProject>[0],
+		jobKind: RecurringJobKind,
+		jobId: string,
+	) => {
+		const scopedProject = privateProject(project);
+		safelyLogInfo(billingLogger, "Billing admin recurring job retry requested", {
+			projectKey: scopedProject.projectInstanceKey,
+			jobKind,
+			jobId,
+		});
+		const result = await requireBillingAdminOperations(adminOperations).retryRecurringJob(
+			scopedProject,
+			jobKind,
+			jobId,
+		);
+		return { success: true, data: result };
+	};
+
+	app.post(
+		"/v1/admin/subscription-changes/:changeId/retry",
+		({ params, project }) => retryRecurringJob(project, "subscription-change", params.changeId),
+		{
+			parse: "none",
+			params: z.object({ changeId: z.string().min(1) }),
+			detail: operationDetail({
+				operationId: "postV1AdminSubscriptionChangesByChangeIdRetry",
+				tags: ["admin"],
+				path: "/v1/admin/subscription-changes/:changeId/retry",
+				responses: {
+					200: responses.postV1AdminSubscriptionChangesByChangeIdRetryResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.post(
+		"/v1/admin/usage-invoice-periods/:periodId/retry",
+		({ params, project }) => retryRecurringJob(project, "usage-invoice-period", params.periodId),
+		{
+			parse: "none",
+			params: z.object({ periodId: z.string().min(1) }),
+			detail: operationDetail({
+				operationId: "postV1AdminUsageInvoicePeriodsByPeriodIdRetry",
+				tags: ["admin"],
+				path: "/v1/admin/usage-invoice-periods/:periodId/retry",
+				responses: {
+					200: responses.postV1AdminUsageInvoicePeriodsByPeriodIdRetryResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.post(
+		"/v1/admin/usage-invoice-adjustments/:adjustmentId/retry",
+		({ params, project }) =>
+			retryRecurringJob(project, "usage-invoice-adjustment", params.adjustmentId),
+		{
+			parse: "none",
+			params: z.object({ adjustmentId: z.string().min(1) }),
+			detail: operationDetail({
+				operationId: "postV1AdminUsageInvoiceAdjustmentsByAdjustmentIdRetry",
+				tags: ["admin"],
+				path: "/v1/admin/usage-invoice-adjustments/:adjustmentId/retry",
+				responses: {
+					200: responses.postV1AdminUsageInvoiceAdjustmentsByAdjustmentIdRetryResponse200Schema,
+				},
 			}),
 		},
 	);

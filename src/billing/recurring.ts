@@ -118,6 +118,14 @@ export interface UsageInvoiceJob {
 	currency: string;
 }
 
+/** The recurring billing jobs an operator can put back in the queue once they are parked. */
+export const recurringJobKinds = [
+	"subscription-change",
+	"usage-invoice-period",
+	"usage-invoice-adjustment",
+] as const;
+export type RecurringJobKind = (typeof recurringJobKinds)[number];
+
 export interface RecurringBillingRunResult {
 	materializedUsagePeriods: number;
 	subscriptionChangesApplied: number;

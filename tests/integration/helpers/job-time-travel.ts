@@ -181,3 +181,31 @@ export async function makeSubscriptionExpired(
 			AND subscriptions.external_subscription_id = ${externalSubscriptionId}
 	`;
 }
+
+/** Moves a failed attempt into the past so the retry delay has passed. */
+export async function makeSubscriptionChangeRetryDue(sql: SQL, changeId: string): Promise<void> {
+	await sql`
+		UPDATE subscription_changes
+		SET updated_at = now() - INTERVAL '2 hours'
+		WHERE id = ${changeId}::uuid
+	`;
+}
+
+export async function makeUsageInvoicePeriodRetryDue(sql: SQL, periodId: string): Promise<void> {
+	await sql`
+		UPDATE usage_invoice_periods
+		SET updated_at = now() - INTERVAL '2 hours'
+		WHERE id = ${periodId}::uuid
+	`;
+}
+
+export async function makeUsageInvoiceAdjustmentRetryDue(
+	sql: SQL,
+	adjustmentId: string,
+): Promise<void> {
+	await sql`
+		UPDATE usage_invoice_adjustments
+		SET updated_at = now() - INTERVAL '2 hours'
+		WHERE id = ${adjustmentId}::bigint
+	`;
+}

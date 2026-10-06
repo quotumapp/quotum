@@ -18,6 +18,7 @@ import {
 	stripeProrationForChange,
 } from "../../billing/pricing";
 import type {
+	RecurringJobKind,
 	SubscriptionCancellationContext,
 	SubscriptionChangeInput,
 	SubscriptionChangeOperation,
@@ -36,6 +37,7 @@ import {
 	reservePromotionRedemptionInTx,
 } from "./promotions";
 import { executeOne, executeRows, jsonb } from "./query";
+import { RECURRING_JOB_MAX_ATTEMPTS, recurringRetryDue } from "./recurring-retry";
 import { planNotPurchasableViaStripe } from "./stripe-purchasability";
 import type { QueryExecutor } from "./types";
 import { materializeUsageInvoicePeriod } from "./usage-invoice-periods";
@@ -467,7 +469,10 @@ export class RecurringPricingRepository extends RepositoryModule {
 				WITH due AS (
 					SELECT id
 					FROM subscription_changes
-					WHERE (status = 'pending' AND effective_at <= now())
+					WHERE (
+						status = 'pending' AND effective_at <= now()
+						AND ${recurringRetryDue("subscription_changes")}
+					)
 						OR (status = 'processing' AND locked_at < now() - interval '5 minutes')
 					ORDER BY effective_at, created_at
 					LIMIT ${limit}
@@ -609,8 +614,8 @@ export class RecurringPricingRepository extends RepositoryModule {
 				tx,
 				drizzleSql`
 					UPDATE subscription_changes
-					SET status = CASE WHEN attempts >= 8 THEN 'failed' ELSE 'pending' END,
-						last_error = CASE WHEN attempts >= 8 THEN ${error} ELSE NULL END,
+					SET status = CASE WHEN attempts >= ${RECURRING_JOB_MAX_ATTEMPTS} THEN 'failed' ELSE 'pending' END,
+						last_error = ${error},
 						locked_at = NULL, locked_by = NULL, updated_at = now()
 					WHERE project_id = ${projectInstanceId} AND id = ${changeId}
 						AND status = 'processing' AND locked_by = ${workerId}
@@ -635,6 +640,121 @@ export class RecurringPricingRepository extends RepositoryModule {
 					`,
 				);
 			}
+		});
+	}
+
+	/**
+	 * Puts a parked job back in the queue with a fresh attempt budget. `last_error` stays, so the
+	 * reason it was parked remains visible until the job succeeds. A subscription change that carried
+	 * a promotion redemption or came from a catalog migration is refused: parking released that
+	 * redemption and failed that migration job, so applying the change again would skip the discount
+	 * or leave the migration marked failed.
+	 */
+	async retryRecurringJob(
+		project: ProjectInstanceContext,
+		jobKind: RecurringJobKind,
+		jobId: string,
+	): Promise<{ jobKind: RecurringJobKind; jobId: string; status: "pending" }> {
+		const projectId = project.projectInstanceId;
+		return await this.transaction(async (tx) => {
+			const current = await executeOne<{ status: string }>(
+				tx,
+				jobKind === "subscription-change"
+					? drizzleSql`
+						SELECT status FROM subscription_changes
+						WHERE project_id = ${projectId} AND id = ${jobId}::uuid
+						FOR UPDATE
+					`
+					: jobKind === "usage-invoice-period"
+						? drizzleSql`
+							SELECT status FROM usage_invoice_periods
+							WHERE project_id = ${projectId} AND id = ${jobId}::uuid
+							FOR UPDATE
+						`
+						: drizzleSql`
+							SELECT status FROM usage_invoice_adjustments
+							WHERE project_id = ${projectId} AND id = ${jobId}::bigint
+							FOR UPDATE
+						`,
+			);
+			if (current === null) {
+				throw new NotFoundBillingError(
+					`Recurring billing job ${jobKind} ${jobId} was not found`,
+					"RECURRING_JOB_NOT_FOUND",
+				);
+			}
+			if (current.status !== "failed") {
+				throw new PersistenceConflictError(
+					`Recurring billing job ${jobKind} ${jobId} is ${current.status}; only failed jobs can be retried`,
+					"RECURRING_JOB_NOT_FAILED",
+				);
+			}
+			if (jobKind === "subscription-change") {
+				const sideEffects = await executeOne(
+					tx,
+					drizzleSql`
+						SELECT 1 AS found
+						WHERE EXISTS (
+							SELECT 1 FROM promotion_redemptions
+							WHERE project_id = ${projectId} AND subscription_change_id = ${jobId}::uuid
+						) OR EXISTS (
+							SELECT 1 FROM catalog_migration_jobs
+							WHERE project_id = ${projectId} AND subscription_change_id = ${jobId}::uuid
+						)
+					`,
+				);
+				if (sideEffects !== null) {
+					throw new PersistenceConflictError(
+						`Subscription change ${jobId} carried a promotion or a catalog migration that its failure ended; request the change again instead`,
+						"SUBSCRIPTION_CHANGE_NOT_RETRYABLE",
+					);
+				}
+				// At most one change per subscription may wait or run; a newer one takes the place.
+				const newer = await executeOne(
+					tx,
+					drizzleSql`
+						SELECT 1 AS found
+						FROM subscription_changes parked
+						JOIN subscription_changes other
+							ON other.project_id = parked.project_id
+							AND other.subscription_id = parked.subscription_id
+							AND other.id <> parked.id
+							AND other.status IN ('pending', 'processing')
+						WHERE parked.project_id = ${projectId} AND parked.id = ${jobId}::uuid
+						LIMIT 1
+					`,
+				);
+				if (newer !== null) {
+					throw new PersistenceConflictError(
+						`Subscription change ${jobId} cannot be retried while a newer change for its subscription is pending`,
+						"SUBSCRIPTION_CHANGE_NOT_RETRYABLE",
+					);
+				}
+			}
+			await executeRows(
+				tx,
+				jobKind === "subscription-change"
+					? drizzleSql`
+						UPDATE subscription_changes
+						SET status = 'pending', attempts = 0, locked_at = NULL, locked_by = NULL,
+							updated_at = now()
+						WHERE project_id = ${projectId} AND id = ${jobId}::uuid
+					`
+					: jobKind === "usage-invoice-period"
+						? drizzleSql`
+							UPDATE usage_invoice_periods
+							SET status = 'pending', attempts = 0, locked_at = NULL, locked_by = NULL,
+								updated_at = now()
+							WHERE project_id = ${projectId} AND id = ${jobId}::uuid
+						`
+						: drizzleSql`
+							UPDATE usage_invoice_adjustments
+							SET status = 'pending', attempts = 0, locked_at = NULL, locked_by = NULL,
+								updated_at = now()
+							WHERE project_id = ${projectId} AND id = ${jobId}::bigint
+						`,
+			);
+			return { jobKind, jobId, status: "pending" };
 		});
 	}
 
@@ -756,7 +876,7 @@ export class RecurringPricingRepository extends RepositoryModule {
 				drizzleSql`
 					WITH due AS (
 						SELECT id FROM usage_invoice_periods
-						WHERE status = 'pending'
+						WHERE (status = 'pending' AND ${recurringRetryDue("usage_invoice_periods")})
 							OR (status = 'processing' AND locked_at < now() - interval '5 minutes')
 						ORDER BY period_end_at, created_at
 						LIMIT ${limit}
@@ -793,7 +913,7 @@ export class RecurringPricingRepository extends RepositoryModule {
 							ON period.project_id = adjustment.project_id
 							AND period.id = adjustment.closed_period_id
 						WHERE (
-							adjustment.status = 'pending'
+							(adjustment.status = 'pending' AND ${recurringRetryDue("adjustment")})
 							OR (
 								adjustment.status = 'processing'
 								AND adjustment.locked_at < now() - interval '5 minutes'
@@ -900,8 +1020,8 @@ export class RecurringPricingRepository extends RepositoryModule {
 			jobKind === "period"
 				? drizzleSql`
 					UPDATE usage_invoice_periods
-					SET status = CASE WHEN attempts >= 8 THEN 'failed' ELSE 'pending' END,
-						last_error = CASE WHEN attempts >= 8 THEN ${error} ELSE NULL END,
+					SET status = CASE WHEN attempts >= ${RECURRING_JOB_MAX_ATTEMPTS} THEN 'failed' ELSE 'pending' END,
+						last_error = ${error},
 						locked_at = NULL, locked_by = NULL, updated_at = now()
 					WHERE project_id = ${projectInstanceId} AND id = ${jobId}::uuid
 						AND status = 'processing' AND locked_by = ${workerId}
@@ -909,8 +1029,8 @@ export class RecurringPricingRepository extends RepositoryModule {
 				`
 				: drizzleSql`
 					UPDATE usage_invoice_adjustments
-					SET status = CASE WHEN attempts >= 8 THEN 'failed' ELSE 'pending' END,
-						last_error = CASE WHEN attempts >= 8 THEN ${error} ELSE NULL END,
+					SET status = CASE WHEN attempts >= ${RECURRING_JOB_MAX_ATTEMPTS} THEN 'failed' ELSE 'pending' END,
+						last_error = ${error},
 						locked_at = NULL, locked_by = NULL, updated_at = now()
 					WHERE project_id = ${projectInstanceId} AND id = ${jobId}::bigint
 						AND status = 'processing' AND locked_by = ${workerId}

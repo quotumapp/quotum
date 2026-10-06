@@ -40,6 +40,7 @@ import type {
 } from "../billing/metering";
 import type { PaymentSetupCard, PaymentSetupSession } from "../billing/payment-setup";
 import type {
+	RecurringJobKind,
 	SubscriptionCancellationContext,
 	SubscriptionChangeInput,
 	SubscriptionChangeOperation,
@@ -844,6 +845,14 @@ export class BillingRepository {
 			externalInvoiceId,
 			workerId,
 		);
+	}
+
+	async retryRecurringJob(
+		project: ProjectInstanceContext,
+		jobKind: RecurringJobKind,
+		jobId: string,
+	): Promise<{ jobKind: RecurringJobKind; jobId: string; status: "pending" }> {
+		return await this.recurringPricing.retryRecurringJob(project, jobKind, jobId);
 	}
 
 	async markUsageInvoiceFailed(

@@ -867,6 +867,9 @@ describe("billing app", () => {
 			`/v1/admin/store-events/${validStoreEventId}/replay`,
 			"/v1/admin/reconciliation/subscriptions/run",
 			`/v1/admin/projection-jobs/${validProjectionJobId}/retry`,
+			`/v1/admin/subscription-changes/${validProjectionJobId}/retry`,
+			`/v1/admin/usage-invoice-periods/${validProjectionJobId}/retry`,
+			"/v1/admin/usage-invoice-adjustments/12/retry",
 		]) {
 			const missing = await testRequest(app, path, {
 				method: "POST",
@@ -1348,6 +1351,70 @@ describe("billing app", () => {
 		});
 	});
 
+	it("requeues parked recurring billing jobs through the operator routes", async () => {
+		const calls: Array<{ projectKey: string; jobKind: string; jobId: string }> = [];
+		const app = createApp({
+			env,
+			adminOperations: new BillingAdminOperations({
+				replayWorker: {
+					runOne() {
+						throw new Error("Unexpected replay run");
+					},
+				},
+				reconciliationWorker: {
+					runOnce() {
+						throw new Error("Unexpected reconciliation run");
+					},
+				},
+				recurringJobRepository: {
+					retryRecurringJob(project, jobKind, jobId) {
+						calls.push({ projectKey: project.projectInstanceKey, jobKind, jobId });
+						return Promise.resolve({ jobKind, jobId, status: "pending" as const });
+					},
+				},
+			}),
+		});
+		const headers = {
+			authorization: "Bearer secret",
+			"x-billing-operator-key": "operator-secret-key",
+		};
+
+		for (const [path, jobKind, jobId] of [
+			[
+				`/v1/admin/subscription-changes/${validProjectionJobId}/retry`,
+				"subscription-change",
+				validProjectionJobId,
+			],
+			[
+				`/v1/admin/usage-invoice-periods/${validProjectionJobId}/retry`,
+				"usage-invoice-period",
+				validProjectionJobId,
+			],
+			["/v1/admin/usage-invoice-adjustments/12/retry", "usage-invoice-adjustment", "12"],
+		] as const) {
+			const response = await testRequest(app, path, { method: "POST", headers });
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual({
+				success: true,
+				data: { jobKind, jobId, status: "pending" },
+			});
+			expect(calls.at(-1)).toEqual({ projectKey: "acme", jobKind, jobId });
+		}
+		expect(calls).toHaveLength(3);
+
+		const invalid = await testRequest(
+			app,
+			"/v1/admin/usage-invoice-adjustments/not-a-number/retry",
+			{
+				method: "POST",
+				headers,
+			},
+		);
+		expect(invalid.status).toBe(400);
+		expect((await invalid.json()).error.code).toBe("INVALID_REQUEST");
+		expect(calls).toHaveLength(3);
+	});
+
 	it("returns not-configured errors for admin routes without injected operations", async () => {
 		const app = createApp({ env });
 
@@ -1355,6 +1422,9 @@ describe("billing app", () => {
 			`/v1/admin/store-events/${validStoreEventId}/replay`,
 			"/v1/admin/reconciliation/subscriptions/run",
 			`/v1/admin/projection-jobs/${validProjectionJobId}/retry`,
+			`/v1/admin/subscription-changes/${validProjectionJobId}/retry`,
+			`/v1/admin/usage-invoice-periods/${validProjectionJobId}/retry`,
+			"/v1/admin/usage-invoice-adjustments/12/retry",
 		]) {
 			const response = await testRequest(app, path, {
 				method: "POST",
