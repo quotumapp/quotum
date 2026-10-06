@@ -2163,12 +2163,14 @@ describe("billing app", () => {
 				headers: { authorization: "Bearer secret" },
 			});
 
+			const key = query.split("=")[0];
 			expect(response.status).toBe(400);
 			expect(await response.json()).toEqual({
 				success: false,
 				error: {
 					code: "INVALID_REQUEST",
-					message: "Request validation failed",
+					message: `Request validation failed: query: Unrecognized key: "${key}"`,
+					details: { issues: [{ path: "query", message: `Unrecognized key: "${key}"` }] },
 					requestId: expect.any(String),
 				},
 			});
@@ -2840,11 +2842,16 @@ describe("billing app", () => {
 
 		expect(response.status).toBe(400);
 		expect(called).toBe(false);
+		const issue = {
+			path: "body.productKey",
+			message: "Too small: expected string to have >=1 characters",
+		};
 		expect(await response.json()).toEqual({
 			success: false,
 			error: {
 				code: "INVALID_REQUEST",
-				message: "Request validation failed",
+				message: `Request validation failed: ${issue.path}: ${issue.message}`,
+				details: { issues: [issue] },
 				requestId: expect.any(String),
 			},
 		});

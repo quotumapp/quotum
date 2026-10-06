@@ -139,6 +139,70 @@ function meteredStream(totalBytes: number, chunkBytes = 64 * 1024) {
 	return { stream, pulled: () => pulled };
 }
 
+describe("request schema failures", () => {
+	const consume = async (body: unknown, path = consumePath) => {
+		const metering = recordingMeteringService();
+		const { app } = createApp({
+			usageApiService: metering.usage,
+			meteringService: metering.service,
+		});
+		const response = await send(app, path, {
+			method: "POST",
+			headers: { ...auth, "idempotency-key": "issues", "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+		expect(response.status).toBe(400);
+		expect(metering.calls).toEqual([]);
+		const text = await response.text();
+		return { text, error: JSON.parse(text).error };
+	};
+
+	it("names the refused field and why, and never repeats the input", async () => {
+		const { text, error } = await consume({
+			featureId: "api_calls",
+			value: 12,
+			occurredAt: "sk_live_do_not_echo",
+		});
+		expect(error).toEqual({
+			code: "INVALID_REQUEST",
+			message:
+				"Request validation failed: body.value: Invalid input: expected string, received number (2 more)",
+			details: {
+				issues: [
+					{ path: "body.value", message: "Invalid input: expected string, received number" },
+					{ path: "body.occurredAt", message: "Invalid ISO datetime" },
+					{ path: "body.occurredAt", message: "Date must fall in years 1 to 9999" },
+				],
+			},
+			requestId: expect.any(String),
+		});
+		expect(text).not.toContain("sk_live_do_not_echo");
+	});
+
+	it("names an issue on the whole body by its part and bounds what it repeats", async () => {
+		const unknownKey = "k".repeat(5000);
+		const { error } = await consume({ featureId: "api_calls", value: "1", [unknownKey]: true });
+		expect(error.details.issues).toHaveLength(1);
+		expect(error.details.issues[0].path).toBe("body");
+		expect(error.details.issues[0].message).toHaveLength(201);
+		expect(error.message.length).toBeLessThan(300);
+	});
+
+	it("lists at most ten issues and counts the rest", async () => {
+		const extra = Object.fromEntries(Array.from({ length: 30 }, (_, index) => [`f${index}`, 1]));
+		const { error } = await consume({
+			featureId: 1,
+			value: 2,
+			occurredAt: 3,
+			entityId: 4,
+			properties: 5,
+			...extra,
+		});
+		expect(error.details.issues.length).toBeLessThanOrEqual(10);
+		expect(error.message).toMatch(/^Request validation failed: body\.featureId: .* \(\d+ more\)$/);
+	});
+});
+
 describe("private request bodies", () => {
 	it("rejects non-finite JSON filter numbers before invoking metering", async () => {
 		const metering = recordingMeteringService();
@@ -153,13 +217,9 @@ describe("private request bodies", () => {
 				body: `{"featureKey":"api_calls","quantity":"1","filters":{"size":${value}}}`,
 			});
 			expect(response.status).toBe(400);
-			expect(await response.json()).toEqual({
+			expect(await response.json()).toMatchObject({
 				success: false,
-				error: {
-					code: "INVALID_REQUEST",
-					message: "Request validation failed",
-					requestId: expect.any(String),
-				},
+				error: { code: "INVALID_REQUEST", requestId: expect.any(String) },
 			});
 		}
 		expect(metering.calls).toEqual([]);

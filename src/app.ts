@@ -74,6 +74,7 @@ import {
 	lenientJsonParser,
 	routedPath,
 } from "./shared/http";
+import { describeRequestIssues, type RequestIssue, requestIssues } from "./shared/request-issues";
 import { routeMethodIndex } from "./shared/route-methods";
 
 export type { AppDependencies } from "./app/types";
@@ -341,12 +342,20 @@ export function createApp({
 
 		if (code === "VALIDATION" || (typeof code === "string" && code === "PARSE")) {
 			set.status = 400;
+			const refused = code === "VALIDATION" ? schemaIssues(error) : null;
 			return billingJsonResponse(
 				request,
 				400,
 				{
 					success: false,
-					error: { code: "INVALID_REQUEST", message: "Request validation failed" },
+					error: {
+						code: "INVALID_REQUEST",
+						message:
+							refused === null
+								? "Request validation failed"
+								: describeRequestIssues("Request validation failed", refused.issues, refused.total),
+						...(refused === null ? {} : { details: { issues: refused.issues } }),
+					},
 				},
 				headers,
 			);
@@ -737,6 +746,30 @@ function resolveGatewayProject(
 		}
 		return { project: resolution.context, credentialAccess };
 	})();
+}
+
+const validatedRequestParts = new Set(["body", "query", "params", "headers"]);
+
+/**
+ * The issues of a request schema failure, from the router's validation error. It carries the whole
+ * input beside each issue; only the path and the validator's message leave this function. A
+ * response that fails its own schema is not the caller's doing and names nothing.
+ */
+function schemaIssues(error: unknown): { issues: RequestIssue[]; total: number } | null {
+	try {
+		const failure = error as { type?: unknown; all?: unknown };
+		const part = failure.type;
+		if (typeof part !== "string" || !validatedRequestParts.has(part)) return null;
+		if (!Array.isArray(failure.all)) return null;
+		const found = failure.all.flatMap((issue: { path?: unknown; message?: unknown }) =>
+			typeof issue?.path === "string" && typeof issue.message === "string"
+				? [{ path: issue.path === "root" ? [] : [issue.path], message: issue.message }]
+				: [],
+		);
+		return found.length === 0 ? null : { issues: requestIssues(part, found), total: found.length };
+	} catch {
+		return null;
+	}
 }
 
 function parseBearerToken(authorization: string | null): string | null {

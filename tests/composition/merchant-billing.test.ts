@@ -195,6 +195,16 @@ describe("merchant billing port", () => {
 				await billing.dispatch(command("usage.operation", { parameters, query })),
 			).toMatchObject({ status: 400, body: { error: { code: "INVALID_REQUEST" } } });
 		}
+		// The refusal names what was refused, not only that something was.
+		expect(
+			await billing.dispatch(
+				command("usage.operation", { parameters, query: { entityId: "w", extra: "no" } }),
+			),
+		).toMatchObject({
+			body: {
+				error: { message: 'Invalid billing operation input: request: Unrecognized key: "extra"' },
+			},
+		});
 		expect(calls).toEqual([
 			{
 				billingAccountId: "user_1",

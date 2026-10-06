@@ -61,6 +61,7 @@ import type {
 } from "../platform/application/billing-port";
 import { isTenantTrafficEligible, type ProjectInstanceContextResolver } from "../projects/context";
 import type { ProviderCapabilityReads } from "../providers/capability-read-types";
+import { describeRequestIssues, requestIssues } from "../shared/request-issues";
 import { createBillingChangesPort } from "./billing-changes";
 import { dispatchExtendedBilling } from "./merchant-billing-extended";
 
@@ -571,7 +572,16 @@ export function createMerchantBillingPort(input: {
 }
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 	const result = schema.safeParse(value);
-	if (!result.success) throw new InvalidRequestError("Invalid billing operation input");
+	if (!result.success) {
+		const { issues } = result.error;
+		throw new InvalidRequestError(
+			describeRequestIssues(
+				"Invalid billing operation input",
+				requestIssues(null, issues),
+				issues.length,
+			),
+		);
+	}
 	return result.data;
 }
 function requireKey(command: MerchantBillingCommand): string {
