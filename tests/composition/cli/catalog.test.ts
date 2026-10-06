@@ -163,7 +163,7 @@ export const catalog = { features: [], plans: [], topups: [], rateCards: [] };
 	});
 });
 
-function catalogServer(options: { previewConflict?: boolean } = {}): {
+function catalogServer(options: { previewConflict?: boolean; unchanged?: boolean } = {}): {
 	baseUrl: string;
 	calls: RecordedCall[];
 } {
@@ -203,7 +203,7 @@ function catalogServer(options: { previewConflict?: boolean } = {}): {
 					success: true,
 					data: {
 						previewToken: "preview-token",
-						intentHash: "next-hash",
+						intentHash: options.unchanged === true ? "current-hash" : "next-hash",
 						nextRevision: 8,
 						expiresAt: "2026-08-30T12:15:00.000Z",
 						impact: { plansCreated: 1 },
@@ -319,6 +319,51 @@ describe("catalog command in process", () => {
 			duplicate: false,
 		});
 		expect(fixture.calls.at(-1)?.headers.get("x-billing-actor")).toBe("catalog-cli");
+	});
+
+	it("leaves an already published catalog alone on push unless forced", async () => {
+		const fixture = catalogServer({ unchanged: true });
+		const directory = await mkdtemp(join(tmpdir(), "billing-catalog-test-"));
+		temporaryDirectories.push(directory);
+		const catalogPath = join(directory, "catalog.ts");
+		await writeFile(
+			catalogPath,
+			"export const catalog = { features: [], plans: [], topups: [], rateCards: [] };\n",
+			"utf8",
+		);
+		const operatorEnv = env(fixture, { BILLING_OPERATOR_API_KEY: "operator-secret" });
+		const requests = () => fixture.calls.map((call) => `${call.method} ${call.pathname}`);
+		const run = async (args: string[]) => {
+			fixture.calls.length = 0;
+			const result = captured();
+			const exitCode = await runCatalogCommand(args, operatorEnv, result.output);
+			return { exitCode, out: result.out.join("\n"), err: result.err };
+		};
+
+		const push = await run(["push", catalogPath]);
+		expect(push.exitCode).toBe(0);
+		expect(JSON.parse(push.out)).toEqual({
+			changed: false,
+			published: false,
+			revision: 3,
+			intentHash: "current-hash",
+		});
+		expect(requests()).toEqual(["GET /v1/admin/catalog", "POST /v1/admin/catalog/preview"]);
+
+		const forced = await run(["push", catalogPath, "--force"]);
+		expect(forced.exitCode).toBe(0);
+		expect(JSON.parse(forced.out)).toMatchObject({ revision: 8, duplicate: false });
+		expect(requests()).toEqual([
+			"GET /v1/admin/catalog",
+			"POST /v1/admin/catalog/preview",
+			"POST /v1/admin/catalog/publish",
+		]);
+
+		const misspelled = await run(["push", catalogPath, "--forced"]);
+		expect(misspelled.exitCode).toBe(64);
+		expect(misspelled.err.join("\n")).toContain("Unknown option --forced.");
+		expect((await run(["diff", catalogPath, "--force"])).exitCode).toBe(64);
+		expect(requests()).toEqual([]);
 	});
 
 	it("reports an API refusal on one line with its code", async () => {

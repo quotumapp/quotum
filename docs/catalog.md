@@ -263,7 +263,10 @@ the container to diff or push it. `status` needs only the base URL and a project
 and may export `expectedRevision`: a revision number to publish only over that revision, or `null`
 to publish only while no catalog is published. Without the export, `diff` and `push` expect the
 current revision. `diff` compares canonical intents, so a file that spells the published catalog the
-legacy way still reports `changed: false`.
+legacy way still reports `changed: false`. `push` publishes nothing for such a file: it prints
+`{ "changed": false, "published": false }` with the current revision and exits 0, so a deploy that
+pushes on every run adds a revision only when the catalog changed. `push --force` publishes it
+anyway, as a new revision that writes every top-up option again.
 
 `bun run catalog format <file>` (`quotum catalog format` in the image) prints a `.ts`, `.js` or
 `.json` catalog file in the canonical spelling, with every default spelled out, and `--write`
