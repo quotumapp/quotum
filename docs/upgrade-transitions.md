@@ -788,3 +788,34 @@ The Stripe App example manifest now requests Setup Intents Read and Payment Meth
 saved-card expansion. Existing OAuth installations need the updated permissions before these
 checks can pass; publish the matching Stripe App permission update and complete any required
 reauthorization before validating those connections.
+
+## PostgreSQL 18 and UUID key defaults
+
+Quotum now requires PostgreSQL 18. Three baselines change, and only in their defaults:
+
+- `migrations/001_platform.sql` no longer creates the `uuid-ossp` extension. Its four keys that
+  used `uuid_generate_v4()` now default to `gen_random_uuid()`, like the other platform tables.
+- `migrations/002_billing_core.sql` and `migrations/003_metering_and_pricing.sql` default every
+  UUID key to `uuidv7()`.
+
+Every existing row keeps its id, so the move needs no manual SQL: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity), and create the empty database on a
+PostgreSQL 18 server. The same dump and restore moves a deployment from an older major version;
+restore it with the PostgreSQL 18 `pg_restore`. Afterwards confirm that
+
+```sql
+SELECT count(*) FROM pg_extension WHERE extname = 'uuid-ossp';
+```
+
+returns 0. Restored rows keep their version 4 ids, and billing rows created afterwards get
+version 7 ids, so one table holds both. A version 7 id is ordered by creation time and discloses
+that time to the millisecond; clients must keep treating ids as opaque UUIDs. Platform ids,
+including project instance and credential ids, stay random.
+
+Every pooled connection now sends `transaction_timeout` as a startup parameter. Behind PgBouncer,
+add `transaction_timeout` to `ignore_startup_parameters` before starting the new version;
+otherwise PgBouncer refuses every connection with `unsupported startup parameter` and the service
+never becomes ready. [Postgres](deployment.md#postgres) lists the session limits.
+
+The older image's migration check rejects the new ledger, so a rollback restores the pre-upgrade
+backup with the old binary and loses writes made since.

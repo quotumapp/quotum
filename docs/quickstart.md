@@ -6,7 +6,8 @@ This guide runs the real service against a local Postgres, publishes a catalog, 
 purchase through the guarded fake Stripe boundary, meters usage, and then publishes a set of plan
 examples. No provider account is needed. It takes about five minutes. The fixtures it uses are in [`examples/quickstart/`](../examples/quickstart/).
 
-Prerequisites: [Bun](https://bun.sh) 1.4.x, Docker, `curl`, `jq`, and `openssl`.
+Prerequisites: [Bun](https://bun.sh) 1.4.x, Docker, `curl`, `jq`, and `openssl`. Quotum needs
+PostgreSQL 18 or newer; the first step starts one in Docker.
 
 ## 1. Start Postgres and apply migrations
 

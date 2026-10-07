@@ -143,6 +143,11 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
 - `tests/db/tenant-sql-guard.test.ts` fails when a tagged SQL template in `src/db` touches a table
   with a `project_id` column without mentioning `project_id`. Scope the statement, or add an
   allowlist entry with its reason; an entry that no longer matches fails too.
+- PostgreSQL 18 is the minimum ([docs/deployment.md](docs/deployment.md#postgres)). UUID keys
+  default to `uuidv7()` in the billing baselines and to `gen_random_uuid()` in platform tables,
+  whose ids `src/composition/project-instance-persistence.ts` matches against UUID versions 1 to
+  5; nothing installs `uuid-ossp`. `src/db/client.ts` ends a pooled transaction after two minutes
+  (`transaction_timeout`); a deliberate whole-table read lifts that with `startSnapshotRead`.
 - Bind JSON as text and cast on the server (the `jsonb()` helper in `src/db/repository/query.ts`);
   a bare `::jsonb` cast on a string parameter is encoded twice. Platform SQL writes
   `${JSON.stringify(value)}::text::jsonb`; `tests/platform/jsonb-binding.test.ts` rejects a bare

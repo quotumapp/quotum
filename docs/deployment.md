@@ -104,7 +104,7 @@ required value is missing or unsafe for the selected environment.
 
 | Variable | Purpose |
 | --- | --- |
-| `POSTGRES_URI` | Direct Postgres connection string. Neon-compatible Postgres works. |
+| `POSTGRES_URI` | Direct connection string for [PostgreSQL 18 or newer](#postgres). Neon-compatible Postgres works. |
 | `BILLING_ENV` | `development`, `test`, or `production` (default). Production requires the operator key. Projection receivers and Stripe return URLs need HTTPS in every environment; only a headless deployment can approve [private receivers](providers.md#private-receivers-headless-only). The merchant settings below are required in every environment unless `QUOTUM_MERCHANT_ENABLED=false`. |
 | `BILLING_OPERATOR_API_KEY` | Operator credential for catalog publication, replay, reconciliation, and admin metrics. At least 16 characters, separate from project credentials. Required in production. |
 | `QUOTUM_SECRETS_KEY_ID`, `QUOTUM_SECRETS_KEY_BASE64` | Identifier and base64 32-byte AES key that encrypts stored provider and projection connections. Keep the key outside Postgres and its backups. Rotate with `quotum connections rotate-secrets`. |
@@ -203,6 +203,30 @@ renaming must not rotate sessions or token HMACs. Remove retired keys from the n
 injected environment, and retain the previous configuration securely for rollback with the old
 image. If the deployment uses a shared mutable Secret, coordinate the switch so old instances
 cannot restart against new-only settings. This change needs no database migration.
+
+## Postgres
+
+Quotum requires PostgreSQL 18 or newer: the billing baselines default their UUID keys to
+`uuidv7()`. On an older server `quotum migrate` fails at the first billing baseline. The only
+extension is `pg_trgm`, which the platform baseline creates.
+
+The service bounds every pooled session with three limits:
+
+| Setting | Limit | When it is exceeded |
+| --- | --- | --- |
+| `statement_timeout` | 30 seconds | The statement is cancelled; the session continues. |
+| `idle_in_transaction_session_timeout` | 30 seconds | The server ends the session. |
+| `transaction_timeout` | 2 minutes | The server ends the session. |
+
+A session that the server ends reaches the service as a closed connection, and the transaction
+rolls back; the Postgres log names the limit. `quotum usage scopes` reads whole tables in one
+snapshot and lifts the transaction limit for it. `quotum migrate` runs without a statement limit
+and sets no transaction limit.
+
+The driver sends the three settings as startup parameters. PgBouncer refuses a connection that
+carries a startup parameter it does not track, with `unsupported startup parameter`, so list all
+three in its `ignore_startup_parameters`. PgBouncer then drops them, and sessions behind it run
+without these limits unless the database or its role sets them.
 
 ## First start
 
@@ -337,7 +361,7 @@ Defaults in parentheses.
   driver pipeline the independent statements the metering path issues together. Set `false` only
   behind a transaction-mode pooler that cannot hold prepared statements, such as PgBouncer before
   1.21 or one configured without `max_prepared_statements`; the hot path then runs its statements
-  one round trip at a time.
+  one round trip at a time. A pooler must also accept the [session limits](#postgres).
 - `BILLING_WORKER_ID` (generated).
 - `BILLING_WORKER_POLL_INTERVAL_MS` (`5000`).
 - `BILLING_PROJECTION_SYNC_MAX_ATTEMPTS` (`10`).
