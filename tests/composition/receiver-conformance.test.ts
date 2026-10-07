@@ -136,4 +136,32 @@ describe("receiver diagnostics and conformance", () => {
 			expect(JSON.stringify(error)).not.toContain("PRIVATE");
 		}
 	});
+
+	it("names the violated rule without echoing submitted values", () => {
+		const validator = createConnectionValidation();
+		const rejection = (...args: Parameters<typeof validator.normalize>) => {
+			try {
+				validator.normalize(...args);
+			} catch (error) {
+				return error;
+			}
+			throw new Error("expected rejection");
+		};
+		const insecure = rejection("stripe", "sandbox", {
+			settings: {
+				checkoutSuccessUrl: "http://example.com/{CHECKOUT_SESSION_ID}",
+				checkoutCancelUrl: "https://example.com/cancel",
+				portalReturnUrl: "https://example.com/portal",
+			},
+			secrets: { secretKey: "rk_test_PRIVATE", webhookSecret: "whsec_PRIVATE" },
+		});
+		expect(insecure).toMatchObject({
+			code: "INVALID_CONNECTION",
+			details: { checks: [{ check: "configuration", reason: "HTTPS return URLs required" }] },
+		});
+		expect(JSON.stringify(insecure)).not.toContain("PRIVATE");
+		expect(rejection("paddle", "production", { settings: {}, secrets: {} })).toMatchObject({
+			details: { checks: [{ check: "configuration", reason: "Paddle sandbox required" }] },
+		});
+	});
 });

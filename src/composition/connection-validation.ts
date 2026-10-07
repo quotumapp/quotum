@@ -39,6 +39,13 @@ const projectionSchema = z
 		usageDelivery: z.enum(["coalesced", "off"]).optional(),
 	})
 	.strict();
+/** A rule violation whose reason is safe to show: it names the rule, never the submitted value. */
+class InvalidConfiguration extends Error {
+	constructor(readonly reason: string) {
+		super(reason);
+	}
+}
+
 export interface ConnectionValidationOptions {
 	/** Where projection receivers may be. The merchant platform keeps the public HTTPS default. */
 	destinationPolicy?: DestinationPolicy;
@@ -68,7 +75,7 @@ export function createConnectionValidation({
 			let parsed: Record<string, unknown>;
 			try {
 				if (kind === "paddle") {
-					if (environment !== "sandbox") throw new Error("Paddle sandbox required");
+					if (environment !== "sandbox") throw new InvalidConfiguration("Paddle sandbox required");
 					parsed = paddleConfigSchema.extend({ webhookUrl: z.url() }).parse(combined);
 				} else if (kind === "stripe") {
 					parsed = stripeProjectConfigSchema.parse(combined);
@@ -103,10 +110,10 @@ export function createConnectionValidation({
 					for (const value of [...returns, ...(origins ?? [])]) {
 						const url = new URL(String(value));
 						if (url.username || url.password || url.protocol !== "https:")
-							throw new Error("HTTPS return URLs required");
+							throw new InvalidConfiguration("HTTPS return URLs required");
 					}
 					if (origins && returns.some((value) => !origins.includes(new URL(String(value)).origin)))
-						throw new Error("Return origin mismatch");
+						throw new InvalidConfiguration("Return origin mismatch");
 				} else if (kind === "apple") {
 					parsed = appleProjectConfigSchema.parse({
 						...combined,
@@ -119,7 +126,7 @@ export function createConnectionValidation({
 						key.asymmetricKeyType !== "ec" ||
 						key.asymmetricKeyDetails?.namedCurve !== "prime256v1"
 					)
-						throw new Error("Apple requires P-256 key");
+						throw new InvalidConfiguration("Apple requires P-256 key");
 				} else if (kind === "google") {
 					parsed = googlePlayProjectConfigSchema.parse({
 						...combined,
@@ -132,7 +139,7 @@ export function createConnectionValidation({
 						typeof serviceAccount.private_key !== "string" ||
 						typeof serviceAccount.client_email !== "string"
 					)
-						throw new Error("Invalid service account");
+						throw new InvalidConfiguration("Invalid service account");
 					if (
 						serviceAccount.token_uri !== "https://oauth2.googleapis.com/token" ||
 						(serviceAccount.universe_domain &&
@@ -140,13 +147,13 @@ export function createConnectionValidation({
 						!serviceAccount.client_email.endsWith(".iam.gserviceaccount.com") ||
 						createPrivateKey(serviceAccount.private_key).asymmetricKeyType !== "rsa"
 					)
-						throw new Error("Unsupported service account");
+						throw new InvalidConfiguration("Unsupported service account");
 					if (
 						!parsed.rtdnAudience ||
 						!parsed.rtdnServiceAccountEmail ||
 						!parsed.rtdnAuthorizedParty
 					)
-						throw new Error("RTDN configuration required");
+						throw new InvalidConfiguration("RTDN configuration required");
 				} else {
 					parsed = projectionSchema.parse(combined);
 					const url = new URL(String(parsed.projectionUrl));
@@ -154,7 +161,7 @@ export function createConnectionValidation({
 						url.protocol === "https:" ||
 						(url.protocol === "http:" && destinationPolicy.allowInsecureHttp);
 					if (!scheme || url.username || url.password || url.search || url.hash)
-						throw new Error("Invalid receiver URL");
+						throw new InvalidConfiguration("Invalid receiver URL");
 				}
 			} catch (error) {
 				if (error instanceof MerchantError) throw error;
@@ -169,20 +176,10 @@ export function createConnectionValidation({
 								{
 									check: "configuration",
 									reason:
-										error instanceof SyntaxError
-											? "Invalid credential JSON"
-											: error instanceof Error &&
-													[
-														"HTTPS return URLs required",
-														"Return origin mismatch",
-														"Invalid receiver URL",
-														"Paddle sandbox required",
-														"RTDN configuration required",
-														"Apple requires P-256 key",
-														"Invalid service account",
-														"Unsupported service account",
-													].includes(error.message)
-												? error.message
+										error instanceof InvalidConfiguration
+											? error.reason
+											: error instanceof SyntaxError
+												? "Invalid credential JSON"
 												: "Invalid credential or configuration",
 								},
 							];
