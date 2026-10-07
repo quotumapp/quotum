@@ -61,6 +61,48 @@ localDescribe("local Postgres billing integration", () => {
 		await expect(createBillingReadinessCheck(context.sql)()).resolves.toBe(true);
 	});
 
+	it("bounds statements, idle transactions and whole transactions", async () => {
+		const limits = await context.sql<{ statement: string; idle: string; transaction: string }[]>`
+			SELECT current_setting('statement_timeout') AS statement,
+				current_setting('idle_in_transaction_session_timeout') AS idle,
+				current_setting('transaction_timeout') AS transaction
+		`;
+
+		expect(limits).toEqual([{ statement: "30s", idle: "30s", transaction: "2min" }]);
+	});
+
+	it("generates billing keys as UUIDv7 and platform keys as random UUIDs", async () => {
+		const defaults = await context.sql<{ platform: boolean; expression: string }[]>`
+			SELECT (relation.relname LIKE 'platform\\_%' OR relation.relname = 'projects') AS platform,
+				pg_get_expr(defaults.adbin, defaults.adrelid) AS expression
+			FROM pg_attrdef defaults
+			JOIN pg_attribute attribute
+				ON attribute.attrelid = defaults.adrelid AND attribute.attnum = defaults.adnum
+			JOIN pg_class relation ON relation.oid = defaults.adrelid
+			WHERE relation.relnamespace = current_schema()::regnamespace
+				AND attribute.attname = 'id'
+				AND attribute.atttypid = 'uuid'::regtype
+			GROUP BY 1, 2
+			ORDER BY 1, 2
+		`;
+		const created = await context.sql<{ version: number; extensions: number }[]>`
+			WITH account AS (
+				INSERT INTO customers (project_id, billing_account_id)
+				SELECT id, 'uuid-default' FROM projects WHERE key = 'acme'
+				RETURNING id
+			)
+			SELECT uuid_extract_version(account.id)::int AS version,
+				(SELECT count(*)::int FROM pg_extension WHERE extname = 'uuid-ossp') AS extensions
+			FROM account
+		`;
+
+		expect(defaults).toEqual([
+			{ platform: false, expression: "uuidv7()" },
+			{ platform: true, expression: "gen_random_uuid()" },
+		]);
+		expect(created).toEqual([{ version: 7, extensions: 0 }]);
+	});
+
 	it("seeds public projects and catalog rows", async () => {
 		const rows = await context.sql<{ key: string; name: string }[]>`
 			SELECT key, name

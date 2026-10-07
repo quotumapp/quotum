@@ -1,8 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { sql as drizzleSql } from "drizzle-orm";
 import type { CatalogIntent, CatalogPlanIntent } from "../../src/catalog/types";
 import { runUsageScopesCommand } from "../../src/composition/cli/usage-scopes";
+import { executeRows } from "../../src/db/repository/query";
 import type { TransactionalQueryExecutor } from "../../src/db/repository/types";
-import type { UsageScopesReport } from "../../src/db/repository/usage-scopes-report";
+import {
+	startSnapshotRead,
+	type UsageScopesReport,
+} from "../../src/db/repository/usage-scopes-report";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
@@ -210,6 +215,24 @@ localDescribe("declared meter-limit scope report", () => {
 		expect(unknown.code).toBe(64);
 		expect(unknown.stderr).toEqual([
 			'No project instance "initech". Run `quotum usage scopes --help` for usage.',
+		]);
+	});
+
+	it("reads its snapshot without the session's transaction timeout", async () => {
+		const settings = drizzleSql`
+			SELECT current_setting('transaction_isolation') AS isolation,
+				current_setting('transaction_read_only') AS read_only,
+				current_setting('transaction_timeout') AS timeout
+		`;
+		const database = context.db as unknown as TransactionalQueryExecutor;
+		const snapshot = await database.transaction(async (tx) => {
+			await startSnapshotRead(tx);
+			return await executeRows(tx, settings);
+		});
+
+		expect(snapshot).toEqual([{ isolation: "repeatable read", read_only: "on", timeout: "0" }]);
+		expect(await executeRows(database, settings)).toEqual([
+			{ isolation: "read committed", read_only: "off", timeout: "2min" },
 		]);
 	});
 });

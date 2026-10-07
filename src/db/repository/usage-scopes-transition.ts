@@ -13,7 +13,11 @@ import {
 } from "./meter-limit-sources";
 import { executeRows } from "./query";
 import type { QueryExecutor, TransactionalQueryExecutor } from "./types";
-import { type MixedScopeAccount, readMixedScopeAccounts } from "./usage-scopes-report";
+import {
+	type MixedScopeAccount,
+	readMixedScopeAccounts,
+	startSnapshotRead,
+} from "./usage-scopes-report";
 
 /**
  * The stopped-service transition to declared meter-limit scope (PC-04). `snapshot` runs on the
@@ -122,7 +126,7 @@ export async function readUsageScopesSnapshot(
 	database: TransactionalQueryExecutor,
 ): Promise<UsageScopesSnapshot> {
 	return await database.transaction(async (tx) => {
-		await executeRows(tx, drizzleSql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`);
+		await startSnapshotRead(tx);
 		const [clock] = await executeRows<{ now: Date | string }>(tx, drizzleSql`SELECT now() AS now`);
 		const takenAt = iso(clock?.now ?? new Date());
 		return {
@@ -167,7 +171,7 @@ export async function verifyUsageScopesTransition(
 	baseline: UsageScopesSnapshot,
 ): Promise<UsageScopesVerification> {
 	return await database.transaction(async (tx) => {
-		await executeRows(tx, drizzleSql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`);
+		await startSnapshotRead(tx);
 		const windows = await readWindows(tx);
 		const scoped = await readScopedOpenWindows(tx);
 		const governing = await governingScopes(tx, scoped);
