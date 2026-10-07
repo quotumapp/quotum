@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import Stripe from "stripe";
+import type Stripe from "stripe";
 import { z } from "zod";
 import { sha256Hex, stableJson } from "../billing/decimal";
 import { BillingError } from "../billing/errors";
@@ -45,11 +45,11 @@ export interface CatalogBindingsLike {
 }
 
 export class CatalogBindings extends RepositoryModule implements CatalogBindingsLike {
+	/** Composition supplies the Stripe client, so this module never constructs provider clients. */
 	constructor(
 		database: TransactionalQueryExecutor,
 		private readonly connections: RuntimeConnectionResolver,
-		private readonly clientFactory = (key: string) =>
-			new Stripe(key, { timeout: 10_000, maxNetworkRetries: 0 }),
+		private readonly clientFactory: (secretKey: string) => Stripe,
 	) {
 		super(database);
 	}
@@ -169,7 +169,9 @@ export class CatalogBindings extends RepositoryModule implements CatalogBindings
 			if (!productRow) throw new Error("Product insert returned no row");
 			const mapping = await executeOne<{ id: string; product_id: string; active: boolean }>(
 				tx,
-				sql`SELECT id, product_id, active FROM store_products WHERE project_id = ${projectId} AND provider = 'stripe' AND (external_price_id = ${input.externalPriceId} OR product_id = ${productRow.id})`,
+				// The exact mapping sorts first: a product can also hold a retired mapping, and an exact
+				// repeat must not be judged against whichever row the scan returns first.
+				sql`SELECT id, product_id, active FROM store_products WHERE project_id = ${projectId} AND provider = 'stripe' AND (external_price_id = ${input.externalPriceId} OR product_id = ${productRow.id}) ORDER BY (product_id = ${productRow.id} AND external_product_id = ${input.externalProductId} AND external_price_id = ${input.externalPriceId} AND active) DESC, id LIMIT 1`,
 			);
 			if (mapping) {
 				const match = await executeOne(

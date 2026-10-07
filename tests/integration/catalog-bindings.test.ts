@@ -76,6 +76,15 @@ localDescribe("operator binding adoption", () => {
 			bindings.adopt(project, { ...input, entitlementKey: "changed" }, "operator", "adopt-3"),
 		).rejects.toMatchObject({ details: { reason: "product_identity_conflict" } });
 	});
+	it("accepts an exact repeat when the product also holds a retired mapping", async () => {
+		const bindings = service();
+		const project = integrationProjectContext();
+		const result = await bindings.adopt(project, input, "operator", "adopt-1");
+		await context.sql`INSERT INTO store_products (project_id, product_id, provider, channel, external_product_id, external_price_id, billing_period, billing_period_count, currency, price_amount, active) VALUES (${project.projectInstanceId}, ${result.productId}, 'stripe', 'web', ${input.externalProductId}, 'price_retired', 'month', 1, 'usd', 500, false)`;
+		// Rewriting the exact row moves it behind the retired one in heap order.
+		await context.sql`UPDATE store_products SET updated_at = now() WHERE id = ${result.storeProductId}`;
+		expect(await bindings.adopt(project, input, "operator", "adopt-2")).toEqual(result);
+	});
 	it("refuses a live price for a sandbox instance", async () => {
 		await expect(
 			service().adopt(

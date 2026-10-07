@@ -38,12 +38,10 @@ import {
 	isBillingError,
 } from "./billing/errors";
 import { MeteringService } from "./billing/metering";
-import { CatalogBindings } from "./catalog/bindings";
 import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
 import { AdminBillingRepository } from "./db/admin-repository";
-import { db as bindingsDatabase, checkPostgresHealth } from "./db/client";
+import { checkPostgresHealth } from "./db/client";
 import { BillingRepository } from "./db/repository";
-import type { TransactionalQueryExecutor } from "./db/repository/types";
 import { registerOperationalRoutes } from "./http/operational-routes";
 import {
 	createFixedWindowRateLimiter,
@@ -60,7 +58,6 @@ import {
 	safelyIncrementBillingMetric,
 } from "./observability/metrics";
 import { createPrometheusMetricsRenderer } from "./observability/prometheus-metrics";
-import { noRuntimeConnections } from "./projects/connections";
 import {
 	isTenantTrafficEligible,
 	type ProjectInstanceContext,
@@ -611,12 +608,7 @@ export function createApp({
 		app,
 		operatorApiKey: env.operatorApiKey,
 		catalogControlPlane: catalogService,
-		catalogBindings:
-			catalogBindings ??
-			new CatalogBindings(
-				bindingsDatabase as unknown as TransactionalQueryExecutor,
-				connections ?? noRuntimeConnections,
-			),
+		catalogBindings,
 		registerPostAuthGuard,
 	});
 	registerPromotionRoutes({
