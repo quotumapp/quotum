@@ -26,7 +26,7 @@ export async function ensureCustomer(
 		ON CONFLICT (project_id, billing_account_id) DO UPDATE SET
 			email = COALESCE(${email}, customers.email),
 			updated_at = now()
-		RETURNING id, billing_account_id, (xmax = 0) AS created
+		RETURNING id, billing_account_id, (old.id IS NULL) AS created
 	`,
 	);
 	if (row === null) {
