@@ -5715,7 +5715,7 @@ export type PlanGrantRow = typeof planGrants.$inferSelect;
 export const promotionAppleSignatureAttempts = pgTable(
 	"promotion_apple_signature_attempts",
 	{
-		id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),

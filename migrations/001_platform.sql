@@ -1,12 +1,10 @@
 -- Baseline schema. Before 1.0 these files evolve in place; recreate databases instead of migrating.
 -- Platform: organizations, logical projects, project instances, credentials, and customer connections.
 
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE platform_organizations (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	slug TEXT COLLATE "C" NOT NULL,
 	name TEXT NOT NULL,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -28,7 +26,7 @@ CREATE UNIQUE INDEX idx_platform_organizations_slug
 	ON platform_organizations (slug);
 
 CREATE TABLE platform_projects (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	organization_id UUID NOT NULL REFERENCES platform_organizations(id) ON DELETE RESTRICT,
 	key TEXT COLLATE "C" NOT NULL,
 	name TEXT NOT NULL,
@@ -49,7 +47,7 @@ CREATE INDEX idx_platform_projects_organization
 	ON platform_projects (organization_id);
 
 CREATE TABLE IF NOT EXISTS projects (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	key TEXT NOT NULL,
 	name TEXT NOT NULL,
 	metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -94,7 +92,7 @@ CREATE INDEX idx_billing_projects_platform_project
 	ON projects (platform_project_id);
 
 CREATE TABLE platform_project_api_credentials (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	project_instance_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	audience TEXT COLLATE "C" NOT NULL DEFAULT 'billing_api',
 	access TEXT COLLATE "C" NOT NULL DEFAULT 'full',

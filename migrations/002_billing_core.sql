@@ -5,7 +5,7 @@
 -- Remote writes are reserved before dispatch. An expired in-flight lease authorizes
 -- reconciliation only: it never authorizes sending the same money-moving request again.
 CREATE TABLE IF NOT EXISTS provider_operations (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	billing_account_id TEXT NOT NULL,
 	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_provider_operations_recovery
 
 -- A successful create receipt does not mean its checkout is no longer payable.
 CREATE TABLE IF NOT EXISTS paddle_checkout_reservations (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	billing_account_id TEXT NOT NULL CHECK (char_length(billing_account_id) BETWEEN 1 AND 200),
 	owner_kind TEXT NOT NULL CHECK (owner_kind IN ('commercial', 'direct')),
@@ -84,7 +84,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_paddle_checkout_reservations_open
 	ON paddle_checkout_reservations (project_id, billing_account_id) WHERE closed_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS customers (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	billing_account_id TEXT NOT NULL,
 	email TEXT,
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS customers (
 );
 
 CREATE TABLE IF NOT EXISTS products (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	key TEXT NOT NULL,
 	entitlement_key TEXT NOT NULL,
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS products (
 );
 
 CREATE TABLE IF NOT EXISTS store_products (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
 	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
@@ -138,7 +138,7 @@ CREATE TABLE IF NOT EXISTS store_products (
 );
 
 CREATE TABLE IF NOT EXISTS provider_customers (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS provider_customers (
 );
 
 CREATE TABLE IF NOT EXISTS subscriptions (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
@@ -214,7 +214,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 
 CREATE TABLE IF NOT EXISTS purchases (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
@@ -248,7 +248,7 @@ CREATE TABLE IF NOT EXISTS purchases (
 );
 
 CREATE TABLE IF NOT EXISTS entitlements (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	entitlement_key TEXT NOT NULL,
@@ -269,7 +269,7 @@ CREATE TABLE IF NOT EXISTS entitlements (
 );
 
 CREATE TABLE IF NOT EXISTS store_events (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
 	channel TEXT NOT NULL CHECK (channel IN ('ios', 'android', 'web')),
@@ -299,7 +299,7 @@ CREATE TABLE IF NOT EXISTS store_events (
 );
 
 CREATE TABLE IF NOT EXISTS projection_sync_jobs (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	idempotency_key TEXT NOT NULL,
@@ -499,7 +499,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_entitlements_entitlement_key_trgm
 	ON entitlements USING gin (entitlement_key gin_trgm_ops);
 
 CREATE TABLE IF NOT EXISTS checkout_requests (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	store_product_id UUID REFERENCES store_products(id) ON DELETE RESTRICT,
@@ -535,7 +535,7 @@ CREATE TABLE IF NOT EXISTS checkout_requests (
 );
 
 CREATE TABLE IF NOT EXISTS credit_grants (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL,
@@ -563,7 +563,7 @@ CREATE TABLE IF NOT EXISTS credit_grants (
 );
 
 CREATE TABLE IF NOT EXISTS credit_grant_provider_objects (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	grant_id UUID NOT NULL REFERENCES credit_grants(id) ON DELETE CASCADE,
 	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
@@ -576,7 +576,7 @@ CREATE TABLE IF NOT EXISTS credit_grant_provider_objects (
 );
 
 CREATE TABLE IF NOT EXISTS credit_reversals (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	grant_id UUID NOT NULL REFERENCES credit_grants(id) ON DELETE RESTRICT,
@@ -598,7 +598,7 @@ CREATE TABLE IF NOT EXISTS credit_reversals (
 );
 
 CREATE TABLE IF NOT EXISTS billing_invoices (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL,
