@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { BillingError } from "../billing/errors";
+import { requireIdempotencyKey } from "../billing/idempotency-key";
 import { billingProviders } from "../billing/types";
+import {
+	bindingAdoptionSchema,
+	bindingResultSchema,
+	type CatalogBindingsLike,
+} from "../catalog/bindings";
 import type { CatalogControlPlaneLike } from "../catalog/types";
 import {
 	billingCadenceUnits,
@@ -19,6 +25,7 @@ export interface CatalogRoutesDependencies {
 	app: BillingElysia;
 	operatorApiKey: string | null;
 	catalogControlPlane: CatalogControlPlaneLike;
+	catalogBindings?: CatalogBindingsLike;
 	registerPostAuthGuard: (guard: PostAuthGuard) => void;
 }
 
@@ -310,12 +317,59 @@ export function registerCatalogRoutes({
 	app,
 	operatorApiKey,
 	catalogControlPlane,
+	catalogBindings,
 	registerPostAuthGuard,
 }: CatalogRoutesDependencies): void {
 	registerPostAuthGuard(
 		// Reading the published catalog needs project authentication only; every other catalog
 		// route, reads included, stays behind the operator key.
 		operatorApiKeyGuard(operatorApiKey, (p) => /^\/v1\/admin\/catalog\/.+$/.test(p)),
+	);
+
+	app.get(
+		"/v1/admin/catalog/bindings",
+		async ({ project }) => {
+			if (!catalogBindings)
+				throw new BillingError("Binding operations unavailable", "NOT_CONFIGURED", 503);
+			return { success: true, data: await catalogBindings.list(privateProject(project)) };
+		},
+		{
+			detail: operationDetail({
+				operationId: "getV1AdminCatalogBindings",
+				tags: ["catalog"],
+				path: "/v1/admin/catalog/bindings",
+				responses: {
+					200: z.object({ success: z.literal(true), data: z.array(bindingResultSchema) }),
+				},
+			}),
+		},
+	);
+	app.post(
+		"/v1/admin/catalog/bindings/adopt",
+		async ({ project, body, request }) => {
+			if (!catalogBindings)
+				throw new BillingError("Binding operations unavailable", "NOT_CONFIGURED", 503);
+			return {
+				success: true,
+				data: await catalogBindings.adopt(
+					privateProject(project),
+					body,
+					requireActor(request.headers),
+					requireIdempotencyKey(request.headers.get("idempotency-key")),
+				),
+			};
+		},
+		{
+			parse: [LENIENT_JSON_PARSE],
+			body: bindingAdoptionSchema,
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1AdminCatalogBindingsAdopt",
+				tags: ["catalog"],
+				path: "/v1/admin/catalog/bindings/adopt",
+				responses: { 200: z.object({ success: z.literal(true), data: bindingResultSchema }) },
+			}),
+		},
 	);
 
 	app.get(

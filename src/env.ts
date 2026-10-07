@@ -270,7 +270,7 @@ export function loadPostgresPreparedStatements(
 	return parsed.BILLING_POSTGRES_PREPARED_STATEMENTS !== "false";
 }
 
-function parseProjectionReceivers(
+export function parseProjectionReceivers(
 	networks: string | undefined,
 	allowInsecureHttp: boolean,
 ): DestinationPolicy | undefined {

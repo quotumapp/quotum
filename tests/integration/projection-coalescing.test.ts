@@ -91,6 +91,87 @@ localDescribe("usage projection coalescing", () => {
 		});
 	});
 
+	it("retries the identical snapshot after a lost acknowledgment and delivers subsequent usage separately", async () => {
+		const project = integrationProjectContext();
+		const billingAccountId = "immutable-retry";
+		await context.repository.grantAllocation(project, {
+			billingAccountId,
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "credit_grant",
+			sourceKey: "retry",
+		});
+		const consume = (key: string) =>
+			context.repository.consumeUsage(project, {
+				billingAccountId,
+				featureKey: "model_tokens",
+				quantity: "100",
+				idempotencyKey: key,
+			});
+		await consume("first");
+		const first = createRecordingProjectionFetch(new Error("acknowledgment lost"));
+		await runProjectionWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			fetch: first.fetch,
+		});
+		await consume("second");
+		await context.sql`UPDATE projection_sync_jobs SET next_attempt_at = now() WHERE reason = 'usage_changed'`;
+		const retry = createRecordingProjectionFetch();
+		await runProjectionWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			fetch: retry.fetch,
+		});
+		expect(retry.requests[0]?.rawBody).toBe(first.requests[0]?.rawBody);
+		const next = createRecordingProjectionFetch();
+		await runProjectionWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			fetch: next.fetch,
+		});
+		expect(next.requests).toHaveLength(1);
+		expect(next.requests[0]?.body.sequence).toBe(2);
+		expect(next.requests[0]?.body.idempotencyKey).not.toBe(first.requests[0]?.body.idempotencyKey);
+		const receiver = new Map<string, unknown>();
+		for (const request of [...first.requests, ...retry.requests, ...next.requests])
+			if (!receiver.has(String(request.body.idempotencyKey)))
+				receiver.set(String(request.body.idempotencyKey), request.body);
+		expect(receiver.size).toBe(2);
+	});
+
+	it("persists the payload across a worker crash and refuses materialization after lease loss", async () => {
+		const project = integrationProjectContext();
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "crash",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "credit_grant",
+			sourceKey: "crash",
+		});
+		await context.repository.consumeUsage(project, {
+			billingAccountId: "crash",
+			featureKey: "model_tokens",
+			quantity: "100",
+			idempotencyKey: "crash-consume",
+		});
+		const [job] = await context.repository.claimProjectionSyncJobs("crashed", 1);
+		if (!job) throw new Error("expected usage job");
+		const payload = await context.repository.buildUsageProjection(job.project_id, job.customer_id, {
+			jobId: job.id,
+			workerId: "crashed",
+		});
+		await context.sql`UPDATE projection_sync_jobs SET locked_at = now() - interval '6 minutes' WHERE id = ${job.id}`;
+		const [reclaimed] = await context.repository.claimProjectionSyncJobs("replacement", 1);
+		expect(reclaimed?.payload).toEqual(payload);
+		await expect(
+			context.repository.buildUsageProjection(job.project_id, job.customer_id, {
+				jobId: job.id,
+				workerId: "crashed",
+			}),
+		).rejects.toThrow();
+	});
+
 	it("holds a usage job back for the project's debounce before it becomes claimable", async () => {
 		await setUsageDebounce(5000);
 		const project = integrationProjectContext();

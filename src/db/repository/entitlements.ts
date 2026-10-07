@@ -11,6 +11,7 @@ import type {
 	ProjectionPayload,
 	ProjectionSyncReason,
 } from "../../billing/types";
+import { usageProjectionKey } from "../../billing/usage-projection-key";
 import { addUtcMonths } from "../../shared/cadence";
 import { reconcileDefaultPlanGrant } from "./default-plan-grants";
 import {
@@ -263,12 +264,8 @@ export async function nextProjectionSequence(
 	return { sequence: Number(row.projection_sequence), billingAccountId: row.billing_account_id };
 }
 
-export function usageProjectionKey(customerId: string): string {
-	return `usage:${customerId}`;
-}
-
 /**
- * Coalesces usage-driven projections: one job per customer, without a stored payload, delivered
+ * Coalesces usage-driven projections: one job per customer, materialized before delivery, delivered
  * after the project's debounce with the state current at delivery. A pending job keeps its earlier
  * due time (or its backoff when retrying); a processing job is flagged for one follow-up delivery.
  */
@@ -299,9 +296,9 @@ export async function enqueueUsageProjection(
 				WHEN projection_sync_jobs.status = 'processing' THEN 'processing'
 				ELSE 'pending'
 			END,
-			reprojection_requested = projection_sync_jobs.status = 'processing',
+			reprojection_requested = projection_sync_jobs.status = 'processing' OR projection_sync_jobs.payload IS NOT NULL OR projection_sync_jobs.reprojection_requested,
 			attempts = CASE
-				WHEN projection_sync_jobs.status = 'pending' THEN projection_sync_jobs.attempts
+				WHEN projection_sync_jobs.status IN ('pending', 'processing') THEN projection_sync_jobs.attempts
 				ELSE 0
 			END,
 			last_error = CASE
@@ -370,7 +367,11 @@ export async function recomputeCustomerEntitlements(
 					'provider', s.provider,
 					'channel', s.channel,
 					'productId', s.product_id,
-					'storeProductId', s.store_product_id
+					'storeProductId', s.store_product_id,
+					'subscriptionId', s.id,
+					'externalSubscriptionId', s.external_subscription_id,
+					'productKey', p.key,
+					'planKey', (SELECT pl.key FROM plan_versions pv JOIN plans pl ON pl.id = pv.plan_id AND pl.project_id = pv.project_id WHERE pv.id = s.plan_version_id AND pv.project_id = s.project_id)
 				) || CASE
 					-- Trial bounds are provider facts kept after the trial ends, so a receiver compares
 					-- trialEndsAt with its own clock instead of relying on a stored trialing flag.

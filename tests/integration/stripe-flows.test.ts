@@ -2172,6 +2172,19 @@ localDescribe("Stripe route flows integration", () => {
 			"stripe:subscription:sub_1:customer.subscription.created:evt_subscription_created:projection",
 		);
 		expect(projectionJob.payload.purchase).toBeUndefined();
+		expect(projectionJob.payload.subscription).toMatchObject({
+			externalSubscriptionId: "sub_1",
+			productKey: "premium_monthly",
+			provider: "stripe",
+			channel: "web",
+			status: "active",
+			cancellationReason: null,
+		});
+		expect(body.data.entitlements.entitlements[0].metadata).toMatchObject({
+			subscriptionId: projectionJob.payload.subscription?.subscriptionId,
+			externalSubscriptionId: "sub_1",
+			productKey: "premium_monthly",
+		});
 		expect(projectionJob.payload.reversal).toBeUndefined();
 
 		const entitlements = await testRequest(
@@ -3319,6 +3332,7 @@ localDescribe("Stripe route flows integration", () => {
 				"customer.subscription.deleted",
 				stripeSubscriptionObject({
 					status: "canceled",
+					cancellation_details: { reason: "cancellation_requested" },
 					items: {
 						data: [
 							{
@@ -3338,6 +3352,15 @@ localDescribe("Stripe route flows integration", () => {
 			status: "expired",
 			provider_status: "cancelled",
 			auto_renew: false,
+		});
+
+		const [fact] = await context.sql<
+			Array<{ payload: ProjectionPayload }>
+		>`SELECT payload FROM projection_sync_jobs WHERE payload->'subscription'->>'externalSubscriptionId' = 'sub_1' ORDER BY created_at DESC LIMIT 1`;
+		expect(fact?.payload.subscription).toMatchObject({
+			status: "expired",
+			providerStatus: "cancelled",
+			cancellationReason: "cancellation_requested",
 		});
 
 		await service.handleVerifiedAppEvent(

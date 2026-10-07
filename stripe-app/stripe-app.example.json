@@ -58,6 +58,14 @@
 		{
 			"permission": "promotion_code_write",
 			"purpose": "Create and deactivate promotion codes for merchant promotions."
+		},
+		{
+			"permission": "setup_intent_read",
+			"purpose": "Resolve saved-card setup sessions."
+		},
+		{
+			"permission": "payment_method_read",
+			"purpose": "Read saved payment methods expanded from setup intents and customers."
 		}
 	]
 }

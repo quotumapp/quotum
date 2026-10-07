@@ -1,6 +1,7 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError, PersistenceConflictError } from "../../billing/errors";
 import type { ProjectionJobPayload, ProjectionSyncStatus } from "../../billing/types";
+import { usageKeySqlPrefix } from "../../billing/usage-projection-key";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import {
@@ -9,9 +10,14 @@ import {
 	readProjectionBalances,
 } from "./entitlements";
 import { parseProjectionSyncJobRow } from "./parsers";
-import { assertUpdated, executeOne, executeRows } from "./query";
+import { assertUpdated, executeOne, executeRows, jsonb } from "./query";
 import type { ProjectionSyncJobRow } from "./types";
 import { requireNonBlank, requirePositiveLimit } from "./validation";
+
+/** The coalescing usage job of a customer: its payload is materialized per delivery, then cleared. */
+const usageJob = drizzleSql`(jobs.idempotency_key = ${drizzleSql.raw(usageKeySqlPrefix)} || jobs.customer_id::text)`;
+/** A flagged follow-up restarts a non-usage job at once; a usage job keeps its payload and backoff. */
+const restartsAtOnce = drizzleSql`(jobs.reprojection_requested AND NOT ${usageJob})`;
 
 export class ProjectionJobBillingRepository extends RepositoryModule {
 	async claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]> {
@@ -91,7 +97,11 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 	}
 
 	/** Builds a usage-driven projection at delivery time and advances the customer's sequence. */
-	async buildUsageProjection(projectId: string, customerId: string): Promise<ProjectionJobPayload> {
+	async buildUsageProjection(
+		projectId: string,
+		customerId: string,
+		claim?: { jobId: string; workerId: string },
+	): Promise<ProjectionJobPayload> {
 		return await this.transaction(async (tx) => {
 			// The sequence advance is issued first; the reads behind it are pipelined in order.
 			const [customer, entitlements, balances] = await Promise.all([
@@ -100,7 +110,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 				readProjectionBalances(tx, projectId, customerId),
 			]);
 			const generatedAt = new Date().toISOString();
-			return {
+			const payload: ProjectionJobPayload = {
 				billingAccountId: customer.billingAccountId,
 				generatedAt,
 				entitlements: { billingAccountId: customer.billingAccountId, generatedAt, entitlements },
@@ -108,6 +118,19 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 				reason: "usage_changed",
 				sequence: customer.sequence,
 			};
+			if (claim) {
+				await assertUpdated(
+					tx,
+					drizzleSql`
+					UPDATE projection_sync_jobs SET payload = ${jsonb(payload)}, reprojection_requested = false, updated_at = now()
+					WHERE project_id = ${projectId} AND customer_id = ${customerId} AND id = ${claim.jobId}
+					AND status = 'processing' AND locked_by = ${claim.workerId} AND payload IS NULL
+					RETURNING id
+				`,
+					`projection sync job ${claim.jobId} is not available to materialize`,
+				);
+			}
+			return payload;
 		});
 	}
 
@@ -128,6 +151,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 				locked_at = NULL,
 				locked_by = NULL,
 				last_error = NULL,
+				payload = CASE WHEN ${usageJob} THEN NULL ELSE jobs.payload END,
 				reprojection_requested = false,
 				attempts = CASE
 					WHEN jobs.reprojection_requested THEN 0
@@ -164,21 +188,24 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 			UPDATE projection_sync_jobs jobs
 			SET
 				status = CASE
-					WHEN jobs.reprojection_requested THEN 'pending'
+					WHEN ${restartsAtOnce} THEN 'pending'
 					WHEN ${nextAttemptAtIso}::timestamptz IS NULL THEN 'failed'
 					ELSE 'pending'
 				END,
 				attempts = CASE
-					WHEN jobs.reprojection_requested THEN 0
+					WHEN ${restartsAtOnce} THEN 0
 					ELSE LEAST(jobs.attempts::bigint + 1, 2147483647)::integer
 				END,
 				last_error = CASE
-					WHEN jobs.reprojection_requested THEN NULL
+					WHEN ${restartsAtOnce} THEN NULL
 					ELSE ${lastError}
 				END,
-				reprojection_requested = false,
+				reprojection_requested = CASE
+					WHEN ${usageJob} THEN jobs.reprojection_requested
+					ELSE false
+				END,
 				next_attempt_at = CASE
-					WHEN jobs.reprojection_requested THEN now()
+					WHEN ${restartsAtOnce} THEN now()
 					ELSE COALESCE(${nextAttemptAtIso}::timestamptz, jobs.next_attempt_at)
 				END,
 				locked_at = NULL,
@@ -207,7 +234,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 					status = 'pending',
 					attempts = 0,
 					last_error = NULL,
-					reprojection_requested = false,
+					reprojection_requested = CASE WHEN ${usageJob} THEN jobs.reprojection_requested ELSE false END,
 					next_attempt_at = now(),
 					locked_at = NULL,
 					locked_by = NULL,

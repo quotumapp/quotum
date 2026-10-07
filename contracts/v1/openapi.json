@@ -46137,6 +46137,12 @@
                         },
                         "identity": {
                           "type": "string"
+                        },
+                        "unverifiedPermissions": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
                         }
                       },
                       "required": [
@@ -58283,6 +58289,496 @@
         "summary": "POST /v1/admin/catalog-migrations/publish",
         "tags": [
           "controls"
+        ]
+      }
+    },
+    "/v1/admin/catalog/bindings": {
+      "get": {
+        "operationId": "getV1AdminCatalogBindings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "properties": {
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "externalPriceId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "externalProductId": {
+                            "type": "string"
+                          },
+                          "productId": {
+                            "format": "uuid",
+                            "type": "string"
+                          },
+                          "productKey": {
+                            "type": "string"
+                          },
+                          "storeProductId": {
+                            "format": "uuid",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "productId",
+                          "storeProductId",
+                          "productKey",
+                          "externalProductId",
+                          "externalPriceId",
+                          "active"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "GET /v1/admin/catalog/bindings",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/v1/admin/catalog/bindings/adopt": {
+      "post": {
+        "operationId": "postV1AdminCatalogBindingsAdopt",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Billing-Actor",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "credits": {
+                    "maximum": 100000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "entitlementKey": {
+                    "maxLength": 120,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "externalPriceId": {
+                    "pattern": "^price_[A-Za-z0-9]+$",
+                    "type": "string"
+                  },
+                  "externalProductId": {
+                    "pattern": "^prod_[A-Za-z0-9]+$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "subscription",
+                      "topup"
+                    ],
+                    "type": "string"
+                  },
+                  "name": {
+                    "maxLength": 120,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "productKey": {
+                    "maxLength": 120,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "productKey",
+                  "name",
+                  "kind",
+                  "entitlementKey",
+                  "credits",
+                  "externalProductId",
+                  "externalPriceId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "externalPriceId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "externalProductId": {
+                          "type": "string"
+                        },
+                        "productId": {
+                          "format": "uuid",
+                          "type": "string"
+                        },
+                        "productKey": {
+                          "type": "string"
+                        },
+                        "storeProductId": {
+                          "format": "uuid",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "productId",
+                        "storeProductId",
+                        "productKey",
+                        "externalProductId",
+                        "externalPriceId",
+                        "active"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "POST /v1/admin/catalog/bindings/adopt",
+        "tags": [
+          "catalog"
         ]
       }
     },

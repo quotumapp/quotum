@@ -232,6 +232,7 @@ export function registerConnectionRoutes(
 							identity: z.string(),
 							eventVerified: z.boolean(),
 							checks: z.array(z.object({ code: z.string(), passed: z.boolean() })),
+							unverifiedPermissions: z.array(z.string()).optional(),
 						}),
 					),
 				},

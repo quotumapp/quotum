@@ -312,7 +312,7 @@ export function reportOperatorFailure(error: unknown, help: string, output: Comm
  */
 export function describeOperatorError(error: unknown): string {
 	if (error instanceof MerchantError || error instanceof BillingApiError)
-		return `${error.code}: ${error.message}`;
+		return `${error.code}: ${error.message}${error.details === undefined ? "" : ` ${JSON.stringify(error.details)}`}`;
 	const reason =
 		error instanceof DrizzleQueryError && error.cause !== undefined ? error.cause : error;
 	const message = reason instanceof Error ? reason.message : String(reason);

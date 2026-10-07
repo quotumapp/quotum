@@ -95,6 +95,21 @@ export interface ProjectionTrialPayload {
 	autoRenew: boolean;
 }
 
+export const projectionSubscriptionSchema = z.object({
+	subscriptionId: z.string().uuid(),
+	externalSubscriptionId: z.string().min(1),
+	provider: z.enum(billingProviders),
+	channel: z.enum(billingChannels),
+	productKey: z.string().min(1),
+	planKey: z.string().nullable(),
+	status: z.enum(subscriptionStatuses),
+	providerStatus: z.string().nullable(),
+	expiresAt: z.iso.datetime({ offset: true }).nullable(),
+	cancelAtPeriodEnd: z.boolean(),
+	cancellationReason: z.string().nullable(),
+});
+export type ProjectionSubscriptionPayload = z.infer<typeof projectionSubscriptionSchema>;
+
 export interface ProjectionPayload {
 	billingAccountId: string;
 	generatedAt: string;
@@ -126,6 +141,7 @@ export interface ProjectionPayload {
 	};
 	reversal?: ProjectionReversalPayload;
 	trial?: ProjectionTrialPayload;
+	subscription?: ProjectionSubscriptionPayload;
 	/** Per-account order of state snapshots; receivers may ignore a lower value. */
 	sequence?: number;
 }
@@ -232,6 +248,7 @@ export const projectionPayloadSchema = z
 			.optional(),
 		reversal: projectionReversalPayloadSchema.optional(),
 		trial: projectionTrialPayloadSchema.optional(),
+		subscription: projectionSubscriptionSchema.optional(),
 		sequence: z.number().int().nonnegative().optional(),
 	})
 	.superRefine((payload, context) => {

@@ -290,3 +290,51 @@ historical migration. Stripe subscription-item IDs can remain unchanged across p
 Quotum transfers their live association to the target price component and retains the inactive
 source component rows and existing license-pool references. Returning to an earlier version reuses
 its component rows.
+
+## Adopt existing Stripe products from a headless deployment
+
+Use `quotum catalog bindings list` to inspect Stripe mappings, and
+`quotum catalog bindings adopt binding.json` to validate and adopt an existing product and price.
+Both need `BILLING_BASE_URL`, project authentication and `BILLING_OPERATOR_API_KEY`; adoption
+uses `BILLING_ACTOR` (default `catalog-cli`). The instance must have an active Stripe connection.
+
+```json
+{
+  "productKey": "premium-monthly",
+  "name": "Premium monthly",
+  "kind": "subscription",
+  "entitlementKey": "premium",
+  "credits": 100,
+  "externalProductId": "prod_example",
+  "externalPriceId": "price_example"
+}
+```
+
+`kind` is `subscription` or `topup`; credits are nonnegative integers for subscriptions and
+positive integers for top-ups. The price must be active,
+fixed per-unit, in the instance's environment, and belong to the named active product. Subscriptions
+use licensed recurring prices; top-ups use one-time prices. Metered, tiered, transformed and custom
+amount prices are refused. Amount, currency and cadence are read from Stripe.
+
+Adoption works before or after the first catalog publish. It is additive: an exact repeat returns
+the same IDs; an existing mapping or product identity cannot be rewritten, retired or reactivated.
+Use a new product key for a different mapping, then preview/publish the catalog intent that selects
+it. Existing subscribers retain their pinned versions. No Stripe objects are created.
+
+The API equivalents are `GET /v1/admin/catalog/bindings` and
+`POST /v1/admin/catalog/bindings/adopt`; POST takes the JSON above, `X-Billing-Actor` and an
+`Idempotency-Key`. Its response is `{ "success": true, "data": { "productId": "<uuid>",
+"storeProductId": "<uuid>", "productKey": "premium-monthly", "externalProductId": "prod_example",
+"externalPriceId": "price_example", "active": true } }`. Receipts retain actor and request identity.
+The CLI derives its request key from the canonical input; retrying the same file is safe.
+
+`catalog provision` remains a development bootstrap import. It now refuses production instances
+and already-published catalogs explicitly. It is listed in `quotum catalog --help`.
+
+### Entitlement keys versus catalog features
+
+A subscription entitlement key comes from the product's `entitlementKey` (for example `premium`),
+not a catalog feature key. Catalog features define boolean/metered capabilities, such as
+`exports` or `model_tokens`; a catalog still requires at least one feature. A product can grant
+`premium` while its associated plan contains the `exports` feature. Plan-grant entitlement keys
+are configured separately. Use the metering API for access decisions, not the projection cache.

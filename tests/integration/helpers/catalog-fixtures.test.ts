@@ -63,6 +63,7 @@ describe("integration catalog fixtures", () => {
 			"plans",
 			"features",
 			"catalog_audit_log",
+			"catalog_binding_adoptions",
 			"catalog_drafts",
 			"catalog_revisions",
 			"projection_sync_jobs",

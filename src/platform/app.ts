@@ -218,6 +218,7 @@ export function createMerchantApp({
 			error: {
 				code: failure.code,
 				message: failure.message,
+				...(failure.details === undefined ? {} : { details: failure.details }),
 				...(failure.retryAfter === undefined ? {} : { retryAfter: failure.retryAfter }),
 				...(requestId === undefined ? {} : { requestId }),
 			},

@@ -1,8 +1,10 @@
+import Stripe from "stripe";
 import { createApp } from "./app";
 import { projectProviderServiceResolver } from "./app/provider-services";
 import type { AppDependencies } from "./app/types";
 import { EntitlementService } from "./billing/entitlements";
 import { reconcileProviderOperation } from "./billing/provider-operations";
+import { CatalogBindings } from "./catalog/bindings";
 import {
 	createConnectionRepository,
 	createRuntimeConnectionResolver,
@@ -23,8 +25,15 @@ import {
 } from "./composition/runtime-lifecycle";
 import { createWorkerProviderSelectors } from "./composition/worker-providers";
 import { AdminBillingRepository } from "./db/admin-repository";
-import { closePool, configureDefaultConnection, initializePostgresHealth, sql } from "./db/client";
+import {
+	closePool,
+	configureDefaultConnection,
+	db as defaultDatabase,
+	initializePostgresHealth,
+	sql,
+} from "./db/client";
 import { BillingRepository } from "./db/repository";
+import type { TransactionalQueryExecutor } from "./db/repository/types";
 import {
 	ProjectionSyncJobRepository,
 	ProviderSubscriptionReconciliationRepository,
@@ -315,6 +324,12 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const sentryRequestScope = sentry && createSentryRequestScope(sentry, { service: "billing" });
 	const staff = createApp({
 		env,
+		connections,
+		catalogBindings: new CatalogBindings(
+			defaultDatabase as unknown as TransactionalQueryExecutor,
+			connections,
+			(secretKey) => new Stripe(secretKey, { timeout: 10_000, maxNetworkRetries: 0 }),
+		),
 		entitlementService: new EntitlementService(billingRepository),
 		usageApiService: billingRepository.usageApi,
 		projectContextResolver,

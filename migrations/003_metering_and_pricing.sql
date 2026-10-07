@@ -2790,3 +2790,14 @@ CREATE TABLE billing_administration_receipts (
  created_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(project_id, operation_key)
 );
+
+-- Immutable operator adoption receipts also retain actor attribution before first publication.
+CREATE TABLE IF NOT EXISTS catalog_binding_adoptions (
+ project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+ request_key TEXT NOT NULL,
+ request_hash TEXT NOT NULL,
+ actor TEXT NOT NULL,
+ result JSONB NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ PRIMARY KEY (project_id, request_key)
+);

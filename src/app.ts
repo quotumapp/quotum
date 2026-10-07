@@ -116,6 +116,7 @@ export function createApp({
 	trialService,
 	balanceAdjustmentService,
 	catalogControlPlane,
+	catalogBindings,
 	billingInsightsService,
 	appleStoreKitService,
 	googlePlayBillingService,
@@ -607,6 +608,7 @@ export function createApp({
 		app,
 		operatorApiKey: env.operatorApiKey,
 		catalogControlPlane: catalogService,
+		catalogBindings,
 		registerPostAuthGuard,
 	});
 	registerPromotionRoutes({

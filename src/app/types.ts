@@ -18,6 +18,7 @@ import type { PromotionServiceLike } from "../billing/promotions";
 import type { ProviderOperationStore } from "../billing/provider-operations";
 import type { UsageApiServiceLike } from "../billing/usage-api";
 import type { WebBillingService } from "../billing/web-provider";
+import type { CatalogBindingsLike } from "../catalog/bindings";
 import type { CatalogControlPlaneLike } from "../catalog/types";
 import type { BillingEnv } from "../env";
 import type { BillingLogger } from "../observability/logger";
@@ -150,6 +151,7 @@ export interface AppDependencies {
 	trialService?: TrialServiceLike;
 	balanceAdjustmentService?: BalanceAdjustmentServiceLike;
 	catalogControlPlane?: CatalogControlPlaneLike;
+	catalogBindings?: CatalogBindingsLike;
 	billingInsightsService?: BillingInsightsServiceLike;
 	appleStoreKitService?: AppleStoreKitServiceLike | null;
 	googlePlayBillingService?: GooglePlayBillingServiceLike | null;

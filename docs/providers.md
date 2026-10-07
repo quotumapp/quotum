@@ -342,7 +342,7 @@ resubscription starts without the previous token's trial.
 
 ## Stripe
 
-- For a restricted-key connection, write-only `stripe.secretKey` (`rk_test_` for sandbox or
+- Manual connections require a restricted key; standard `sk_test_` and `sk_live_` keys are rejected. Supply write-only `stripe.secretKey` (`rk_test_` for sandbox or
   `rk_live_` for production) and `stripe.webhookSecret`.
 - `stripe.checkoutSuccessUrl` (must contain `{CHECKOUT_SESSION_ID}`), `stripe.checkoutCancelUrl`,
   `stripe.portalReturnUrl`, and `stripe.allowedReturnOrigins` for request-level overrides.
@@ -504,13 +504,15 @@ the entitlement and exact-string balance snapshot to the connection's projection
 with backoff. Verify `X-Billing-Signature` and `X-Billing-Timestamp`, and treat the projection as a
 read model: authorization decisions must use the metering API. Order snapshots per billing account
 by `sequence`, and record `purchase`, `reversal` and `trial` facts idempotently by their key.
-`idempotencyKey` identifies the job, not a delivery: retries resend it, and every usage-driven
-delivery for an account reuses one key, so discarding a payload whose key was already seen drops
-newer usage snapshots. [`scripts/projection-receiver.ts`](../scripts/projection-receiver.ts) is a
+Usage deliveries have immutable content and an `idempotencyKey` of
+`usage:<customerId>:<sequence>`; retries retain the payload, sequence and key, and subsequent
+usage receives a new key. The internal coalescing job still uses `usage:<customerId>`.
+Deduplicate deliveries by project and key, and compare sequence to prevent out-of-order state updates. [`scripts/projection-receiver.ts`](../scripts/projection-receiver.ts) is a
 reference receiver.
 
 Each entitlement's `metadata` names its source. A subscription source carries `status`,
-`provider`, `channel`, `productId` and `storeProductId`, plus `trialStartsAt` and `trialEndsAt`
+`provider`, `channel`, `productId`, `storeProductId`, `subscriptionId`,
+`externalSubscriptionId`, `productKey` and nullable `planKey`, plus `trialStartsAt` and `trialEndsAt`
 (UTC ISO timestamps) when the subscription has a trial. A trialing Stripe subscription reports
 `status: "active"`, and both bounds stay after the trial ends, so treat the subscription as
 trialing while `trialEndsAt` is in the future. Apple and Google trials are store offers that the
@@ -525,7 +527,20 @@ that source still runs without granting the key. The latter is a key the default
 dropped, or a subscription or trial whose end passed before Quotum recorded it. An inactive
 entitlement never reports a running status such as `active`; use `active` to decide access.
 
-A payload carries at most one fact: `purchase`, `reversal` or `trial`. A `trial` fact with
+Stripe subscription processing also carries a `subscription` fact, including reconciliation.
+It names Quotum's `subscriptionId`, `provider`, `channel`, `externalSubscriptionId`, `productKey`
+and nullable pinned `planKey`, with `status`, `providerStatus`, `expiresAt`, `cancelAtPeriodEnd`
+and nullable `cancellationReason`. A provider cancellation reason such as `cancellation_requested`
+explains an ending without changing access-oriented status: ended access can still be `expired`.
+Unknown historical reasons are null. This fact can accompany a trial fact. It is not a complete
+subscription inventory or historical backfill.
+
+Key subscription rows by `(projectKey, subscriptionId)`, or by
+`(projectKey, provider, channel, externalSubscriptionId)`. Never use event/delivery IDs as row
+identity. Entitlements select one source per key, so key their cache by account and entitlement key;
+they cannot enumerate every subscription. A `planKey` comes from the pinned version, not today's catalog.
+
+A payload carries at most one of the existing facts: `purchase`, `reversal` or `trial`. A `trial` fact with
 `event: "ending"` arrives once per trial, about three days before its end: for Stripe from
 `customer.subscription.trial_will_end` (reason `provider_webhook`), and for Apple and Google, which
 send no such notification, from the subscription reconciliation worker (reason
@@ -628,3 +643,50 @@ every resolved address is in an approved network. Public receivers always need H
    `topup.customer_initiated`, and a commercial preview reports the provider whose declaration
    implements that action's operation. Express a provider difference as a declared support level or
    condition instead of a branch.
+
+### Manual Stripe restricted-key recipe
+
+Create a restricted API key in the Stripe Dashboard for the target sandbox or live account.
+Use `rk_test_` for sandbox and `rk_live_` for production. Restrict it to the following resources;
+Write includes the reads used for those resources. OAuth installs are a separate connection method.
+
+| Resource | Access | Why Quotum needs it |
+| --- | --- | --- |
+| Accounts | Read (`connected_account_read`) | Verify account identity, prevent conflicting connections and detect account changes |
+| Products | Read | Validate adopted products |
+| Prices | Read (`plan_read`) | Validate adopted prices and catalog access |
+| Customers | Write | Create customers and set their default payment method |
+| Checkout Sessions | Write | Create, read and expire checkout/setup sessions |
+| Customer Portal | Write | Create portal sessions |
+| Subscriptions | Write | Read, create, change and cancel subscriptions |
+| Invoices | Write | Create, add lines, finalize, pay and void invoices |
+| Payment Intents | Read | Resolve payment state |
+| Setup Intents | Read | Resolve saved-card setup |
+| Payment Methods | Read | Expand the saved method on Setup Intents and Customers |
+| Coupons | Write | Create and read promotion coupons |
+| Promotion Codes | Write | Create, read and deactivate codes |
+
+Validation runs bounded read probes and reports all detected failures in `error.details.checks`
+with `check`, `reason`, and, where relevant, `missingPermission` and `httpStatus`.
+`missingPermissions` deduplicates detected missing permissions. Successful reads do not prove write
+access: `unverifiedPermissions` lists write requirements to check in the Dashboard. Validation
+never creates Stripe objects. This recipe covers the manual billing adapter; the Stripe App
+manifest has additional installation/event permissions.
+
+Projection verification reports the receiver's HTTP status, including 401, 404 and 503, or an
+invalid acknowledgment/challenge reason for an HTTP 200. A status is a diagnostic clue, not proof
+that the secret or route is wrong. Receiver bodies and credential values are not returned.
+
+To test a receiver without drafting or committing a connection:
+
+```sh
+quotum projections check-receiver https://backend.example --project-key example-sandbox --secret-file receiver-secret.txt
+```
+
+The file contains the raw shared secret (or use `--secret-file -` for stdin). The command appends
+`/internal/billing/projections/verify` to the base URL and checks a valid challenge, wrong bearer,
+invalid signature and expired timestamp. Negative authentication checks must return 401 or 403.
+It prints each result, exits nonzero on failure, and sends no billing snapshots. Public HTTPS
+receivers are the default. Headless operators may use the existing
+`BILLING_PROJECTION_ALLOWED_NETWORKS` / `BILLING_PROJECTION_ALLOW_INSECURE_HTTP` policy with
+`QUOTUM_MERCHANT_ENABLED=false`. The reference receiver implements the same handshake.

@@ -475,3 +475,11 @@ refuses external provider traffic and keeps merchant mail in memory instead of s
 `BILLING_TEST_FAKE_STRIPE_DEFAULT_PAYMENT_METHOD=missing`, and
 `BILLING_TEST_FAKE_STRIPE_PRICE_AMOUNTS_JSON` for deterministic worker scenarios. Never set
 `BILLING_TEST_*` or `MERCHANT_TEST_MODE` in a deployed service.
+
+### Integration operator diagnostics
+
+`quotum catalog bindings list` and `quotum catalog bindings adopt <file>` provide supported Stripe
+binding adoption before or after publication; see [catalog adoption](catalog.md#adopt-existing-stripe-products-from-a-headless-deployment).
+`quotum projections check-receiver <url> --project-key <key> --secret-file <path|->` tests receiver
+verification and authentication without committing a connection; see [projections](providers.md#projections).
+Connection validation errors retain structured check details in CLI output.

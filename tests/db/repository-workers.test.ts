@@ -203,8 +203,12 @@ describe("BillingRepository workers", () => {
 		);
 
 		expect(database.queries[0]).toContain("LEAST(jobs.attempts::bigint + 1, 2147483647)");
-		expect(database.queries[0]).toContain("WHEN jobs.reprojection_requested THEN 0");
-		expect(database.queries[0]).toContain("reprojection_requested = false");
+		// A flagged follow-up restarts only a non-usage job; a usage job keeps its flag and payload.
+		const usageJob = "(jobs.idempotency_key = 'usage:' || jobs.customer_id::text)";
+		expect(database.queries[0]).toContain(
+			`WHEN (jobs.reprojection_requested AND NOT ${usageJob}) THEN 'pending'`,
+		);
+		expect(database.queries[0]).toContain(`WHEN ${usageJob} THEN jobs.reprojection_requested`);
 		expect(database.queries[0]).toContain("locked_by =");
 		expect(database.queries[0]).toContain("jobs.project_id =");
 		expect(database.queries[0]).toContain('"project-id"');

@@ -5770,3 +5770,18 @@ export const billingAdministrationReceipts = pgTable(
 	},
 	(table) => [primaryKey({ columns: [table.projectId, table.operationKey] })],
 );
+
+export const catalogBindingAdoptions = pgTable(
+	"catalog_binding_adoptions",
+	{
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		requestKey: text("request_key").notNull(),
+		requestHash: text("request_hash").notNull(),
+		actor: text("actor").notNull(),
+		result: jsonb("result").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table) => [primaryKey({ columns: [table.projectId, table.requestKey] })],
+);

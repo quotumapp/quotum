@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
+import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { z } from "zod";
 import { previewSchema } from "../../app/catalog-routes";
+import { bindingAdoptionSchema } from "../../catalog/bindings";
 import { checkNewCatalogIntent } from "../../catalog/control-plane";
 import { type CatalogFileLanguage, catalogFileText } from "../../catalog/format";
 import type { AuthoredCatalogIntent, CatalogAdvisory } from "../../catalog/types";
@@ -114,7 +116,11 @@ function issuePath(issue: z.core.$ZodIssue): string {
 
 async function catalogCommand(argv: readonly string[], env: Environment): Promise<unknown> {
 	const [command, ...rest] = argv;
-	if (command !== "status" && command !== "diff" && command !== "push")
+	if (command === "provision")
+		throw new CliUsageError(
+			"provision reads the database directly; run `quotum catalog provision` or `bun run catalog:provision`.",
+		);
+	if (command !== "status" && command !== "diff" && command !== "push" && command !== "bindings")
 		throw new CliUsageError(`Unknown catalog command: ${command}.`);
 	const unknown = rest.find(
 		(arg) => arg.startsWith("--") && !(command === "push" && arg === "--force"),
@@ -133,6 +139,14 @@ async function catalogCommand(argv: readonly string[], env: Environment): Promis
 				}
 			: {}),
 	});
+	if (command === "bindings") {
+		if (rest.length === 1 && rest[0] === "list") return await client.catalog.bindings.list();
+		if (rest.length !== 2 || rest[0] !== "adopt")
+			throw new CliUsageError("Use bindings list or bindings adopt <file>.");
+		const input = bindingAdoptionSchema.parse(await Bun.file(rest[1] ?? "").json());
+		const key = `binding:${createHash("sha256").update(JSON.stringify(input)).digest("hex")}`;
+		return await client.catalog.bindings.adopt(input, key);
+	}
 	if (command === "status") return await client.catalog.status();
 	if (file === undefined) throw new CliUsageError(`${command} requires a catalog TypeScript file.`);
 	const source = await loadCatalog(file);
@@ -233,6 +247,10 @@ function requiredEnv(env: Environment, name: string, purpose?: string): string {
 const help = `quotum catalog <command> [catalog.ts]
 
 Commands:
+  provision                    Development import before first publish; refuses production
+                               (reads the database: run it as quotum catalog provision)
+  bindings list                List Stripe product/price mappings
+  bindings adopt <file>        Adopt existing Stripe product/price IDs from JSON
   status                       Print the currently published catalog intent and revision
   diff <catalog.ts>            Validate and preview a catalog-as-code change
   push <catalog.ts> [--force]  Preview, then publish the previewed catalog intent; a catalog
@@ -242,7 +260,7 @@ Commands:
 
 Environment:
   BILLING_BASE_URL, BILLING_PROJECT_API_KEY (or BILLING_PROJECT_KEY);
-  diff and push also need BILLING_OPERATOR_API_KEY, and take an optional BILLING_ACTOR`;
+  diff, push and bindings also need BILLING_OPERATOR_API_KEY, and take an optional BILLING_ACTOR`;
 
 // Last, so every declaration above is initialized before the command runs.
 if (import.meta.main) {

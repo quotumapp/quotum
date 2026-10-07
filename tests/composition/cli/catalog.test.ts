@@ -40,6 +40,35 @@ describe("catalog CLI", () => {
 		expect(fixture.calls[0]?.headers.has("x-billing-actor")).toBe(false);
 	});
 
+	it("adopts bindings with operator attribution and a stable request key", async () => {
+		const fixture = catalogServer();
+		const directory = await mkdtemp(join(tmpdir(), "billing-binding-test-"));
+		temporaryDirectories.push(directory);
+		const file = join(directory, "binding.json");
+		await writeFile(
+			file,
+			JSON.stringify({
+				productKey: "premium",
+				name: "Premium",
+				kind: "subscription",
+				entitlementKey: "premium",
+				credits: 100,
+				externalProductId: "prod_test",
+				externalPriceId: "price_test",
+			}),
+		);
+		const first = await runCli(["bindings", "adopt", file], fixture.baseUrl);
+		const retry = await runCli(["bindings", "adopt", file], fixture.baseUrl);
+		expect(first.exitCode).toBe(0);
+		expect(retry.exitCode).toBe(0);
+		expect(fixture.calls).toHaveLength(2);
+		expect(fixture.calls[0]?.headers.get("idempotency-key")).toBe(
+			fixture.calls[1]?.headers.get("idempotency-key"),
+		);
+		expect(fixture.calls[0]?.headers.get("x-billing-operator-key")).toBe("operator-secret");
+		expect(fixture.calls[0]?.headers.get("x-billing-actor")).toBeTruthy();
+	});
+
 	it("runs the same command through `quotum catalog`", async () => {
 		const fixture = catalogServer();
 		const result = await runCli(["status"], fixture.baseUrl, ["src/cli.ts", "catalog"]);
@@ -180,6 +209,19 @@ function catalogServer(options: { previewConflict?: boolean; unchanged?: boolean
 				headers: request.headers,
 				body,
 			});
+			if (url.pathname === "/v1/admin/catalog/bindings/adopt")
+				return Response.json({
+					success: true,
+					data: {
+						productId: "00000000-0000-4000-8000-000000000001",
+						storeProductId: "00000000-0000-4000-8000-000000000002",
+						productKey: "premium",
+						externalProductId: "prod_test",
+						externalPriceId: "price_test",
+						active: true,
+					},
+				});
+
 			if (request.method === "GET" && url.pathname === "/v1/admin/catalog") {
 				return Response.json({
 					success: true,
@@ -390,12 +432,17 @@ describe("catalog command in process", () => {
 	it("prints help and refuses unknown commands with exit 64", async () => {
 		const help = captured();
 		expect(await runCatalogCommand([], {}, help.output)).toBe(0);
-		expect(help.out.join("\n")).toContain("diff and push also need BILLING_OPERATOR_API_KEY");
+		expect(help.out.join("\n")).toContain(
+			"diff, push and bindings also need BILLING_OPERATOR_API_KEY",
+		);
 		const unknown = captured();
 		expect(await runCatalogCommand(["publish"], {}, unknown.output)).toBe(64);
 		expect(unknown.err).toEqual([
 			"Unknown catalog command: publish. Run `quotum catalog --help` for usage.",
 		]);
+		const provision = captured();
+		expect(await runCatalogCommand(["provision"], {}, provision.output)).toBe(64);
+		expect(provision.err.join("\n")).toContain("quotum catalog provision");
 		const missingFile = captured();
 		expect(
 			await runCatalogCommand(
