@@ -406,8 +406,12 @@ export class BillingRepository {
 		return await this.projectionJobs.claimProjectionSyncJobs(workerId, limit);
 	}
 
-	async buildUsageProjection(projectId: string, customerId: string): Promise<ProjectionJobPayload> {
-		return await this.projectionJobs.buildUsageProjection(projectId, customerId);
+	async buildUsageProjection(
+		projectId: string,
+		customerId: string,
+		claim?: { jobId: string; workerId: string },
+	): Promise<ProjectionJobPayload> {
+		return await this.projectionJobs.buildUsageProjection(projectId, customerId, claim);
 	}
 
 	async markProjectionSyncJobSucceeded(

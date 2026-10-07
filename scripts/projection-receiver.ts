@@ -208,7 +208,10 @@ const server = Bun.serve({
 			await persist();
 			return new Response("ok");
 		}
-		if (url.pathname !== "/internal/billing/projections") {
+		if (
+			url.pathname !== "/internal/billing/projections" &&
+			url.pathname !== "/internal/billing/projections/verify"
+		) {
 			return new Response("not found", { status: 404 });
 		}
 		const body = await request.text();
@@ -246,6 +249,16 @@ const server = Bun.serve({
 			});
 			await persist();
 			return new Response("unauthorized", { status: 401 });
+		}
+		if (url.pathname.endsWith("/internal/billing/projections/verify")) {
+			try {
+				const input = JSON.parse(body);
+				if (typeof input.challenge !== "string" || typeof input.projectKey !== "string")
+					return new Response("invalid challenge", { status: 400 });
+				return Response.json({ success: true, challenge: input.challenge });
+			} catch {
+				return new Response("invalid JSON", { status: 400 });
+			}
 		}
 		if (args.fail > 0) {
 			args.fail -= 1;

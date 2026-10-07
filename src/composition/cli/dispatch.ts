@@ -26,6 +26,15 @@ const none = (args: readonly string[]) => args.length === 0;
 
 export const quotumCommands: readonly QuotumCommand[] = [
 	{
+		path: ["projections"],
+		file: "composition/cli/projections.ts",
+		usage: "projections check-receiver <url> --project-key <key> --secret-file <path|->",
+		summary: "Check receiver handshake and authentication without committing a connection",
+		environment:
+			"optional headless BILLING_PROJECTION_ALLOWED_NETWORKS, BILLING_PROJECTION_ALLOW_INSECURE_HTTP, QUOTUM_MERCHANT_ENABLED",
+		accepts: (args) => args[0] === "check-receiver",
+	},
+	{
 		path: ["migrate"],
 		file: "migrate.ts",
 		usage: "migrate [status]",
@@ -91,11 +100,15 @@ export const quotumCommands: readonly QuotumCommand[] = [
 	{
 		path: ["catalog"],
 		file: "composition/cli/catalog.ts",
-		usage: "catalog status | diff <file> | push <file> | format <file> [--write]",
+		usage:
+			"catalog status | diff <file> | push <file> | format <file> [--write] | provision | bindings list|adopt <file>",
 		summary: "Read, preview or publish the catalog through the API, or print a file canonically",
 		environment:
-			"BILLING_BASE_URL, BILLING_PROJECT_API_KEY (or BILLING_PROJECT_KEY); diff and push also BILLING_OPERATOR_API_KEY and optional BILLING_ACTOR; format needs none",
+			"BILLING_BASE_URL, BILLING_PROJECT_API_KEY (or BILLING_PROJECT_KEY); diff, push and bindings also BILLING_OPERATOR_API_KEY and optional BILLING_ACTOR; format needs none",
 		accepts: (args) =>
+			(args[0] === "bindings" &&
+				((args.length === 2 && args[1] === "list") ||
+					(args.length === 3 && args[1] === "adopt"))) ||
 			(args.length === 1 && args[0] === "status") ||
 			(args.length === 2 && (args[0] === "diff" || args[0] === "push")) ||
 			(args[0] === "format" &&

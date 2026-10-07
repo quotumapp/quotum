@@ -353,6 +353,7 @@
     {
       "code": "CONNECTION_UNAVAILABLE",
       "sources": [
+        "src/catalog/bindings.ts",
         "src/composition/connections.ts"
       ]
     },
@@ -1493,12 +1494,6 @@
       ]
     },
     {
-      "code": "STRIPE_ACCOUNT",
-      "sources": [
-        "src/composition/connection-validation.ts"
-      ]
-    },
-    {
       "code": "STRIPE_ACCOUNT_CONFLICT",
       "sources": [
         "src/platform/connections/lifecycle.ts"
@@ -1511,9 +1506,9 @@
       ]
     },
     {
-      "code": "STRIPE_CATALOG_ACCESS",
+      "code": "STRIPE_BINDING_INVALID",
       "sources": [
-        "src/composition/connection-validation.ts"
+        "src/catalog/bindings.ts"
       ]
     },
     {
@@ -1532,7 +1527,7 @@
     {
       "code": "STRIPE_CONNECTION_INVALID",
       "sources": [
-        "src/composition/connection-validation.ts"
+        "src/composition/stripe-connection-validation.ts"
       ]
     },
     {

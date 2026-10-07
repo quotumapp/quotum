@@ -17,6 +17,7 @@ export interface BillingProjectionInput {
 	purchase?: ProjectionPayload["purchase"];
 	reversal?: ProjectionPayload["reversal"];
 	trial?: ProjectionPayload["trial"];
+	subscription?: ProjectionPayload["subscription"];
 	/** Per-account order of state snapshots; receivers may ignore a lower value. */
 	sequence?: number;
 }

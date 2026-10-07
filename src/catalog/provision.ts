@@ -41,7 +41,7 @@ export async function syncConfiguredCatalog(
 				// published a revision, the database catalog is authoritative and bootstrap input cannot
 				// rewrite or reactivate its provider rows.
 				if (rows[0]?.published_catalog_revision_id !== null) {
-					continue;
+					throw new Error("Catalog is already published; use quotum catalog bindings adopt.");
 				}
 
 				for (const declaration of project.catalog) {

@@ -23,6 +23,7 @@ import {
 	postToDestination,
 	publicDestinationPolicy,
 } from "../shared/safe-http";
+import { validateStripeAccess } from "./stripe-connection-validation";
 
 const secretFields: Record<ConnectionKind, string[]> = {
 	stripe: ["secretKey", "webhookSecret"],
@@ -59,6 +60,9 @@ export function createConnectionValidation({
 				throw new MerchantError(
 					"INVALID_CONNECTION",
 					"Submit credentials only in the secret fields.",
+					400,
+					undefined,
+					{ checks: [{ check: "secret_fields", reason: "invalid_secret_placement" }] },
 				);
 			const combined = { ...input.settings, ...input.secrets };
 			let parsed: Record<string, unknown>;
@@ -73,7 +77,23 @@ export function createConnectionValidation({
 							environment === "production" ? "rk_live_" : "rk_test_",
 						)
 					)
-						throw new Error("Restricted key mode mismatch");
+						throw new MerchantError(
+							"INVALID_CONNECTION",
+							"Stripe requires a restricted rk_test_ key for sandbox or rk_live_ key for production; standard sk_ keys are not accepted.",
+							400,
+							undefined,
+							{
+								checks: [
+									{
+										check: "stripe_key",
+										field: "secretKey",
+										reason: String(parsed.secretKey).startsWith("sk_")
+											? "restricted_key_required"
+											: "restricted_key_environment_mismatch",
+									},
+								],
+							},
+						);
 					const returns = [
 						parsed.checkoutSuccessUrl,
 						parsed.checkoutCancelUrl,
@@ -136,10 +156,42 @@ export function createConnectionValidation({
 					if (!scheme || url.username || url.password || url.search || url.hash)
 						throw new Error("Invalid receiver URL");
 				}
-			} catch {
+			} catch (error) {
+				if (error instanceof MerchantError) throw error;
+				const checks =
+					error instanceof z.ZodError
+						? error.issues.map((issue) => ({
+								check: "configuration",
+								field: issue.path.join("."),
+								reason: issue.code === "custom" ? issue.message : issue.code,
+							}))
+						: [
+								{
+									check: "configuration",
+									reason:
+										error instanceof SyntaxError
+											? "Invalid credential JSON"
+											: error instanceof Error &&
+													[
+														"HTTPS return URLs required",
+														"Return origin mismatch",
+														"Invalid receiver URL",
+														"Paddle sandbox required",
+														"RTDN configuration required",
+														"Apple requires P-256 key",
+														"Invalid service account",
+														"Unsupported service account",
+													].includes(error.message)
+												? error.message
+												: "Invalid credential or configuration",
+								},
+							];
 				throw new MerchantError(
 					"INVALID_CONNECTION",
-					"Check the integration fields and environment.",
+					"Connection configuration is invalid; inspect details.checks.",
+					400,
+					undefined,
+					{ checks },
 				);
 			}
 			return {
@@ -211,13 +263,21 @@ export function createConnectionValidation({
 						"PROJECTION_RECEIVER_UNREACHABLE",
 						"Quotum could not reach the receiver. Check that its address is allowed and that it answers within 10 seconds.",
 						422,
+						undefined,
+						{
+							checks: [
+								{ check: "projection_verification", reason: "receiver_unreachable_or_disallowed" },
+							],
+						},
 					);
 				}
 				let result: unknown;
+				let invalidJson = false;
 				try {
 					result = JSON.parse(response.body);
 				} catch {
 					result = null;
+					invalidJson = true;
 				}
 				if (
 					response.status !== 200 ||
@@ -228,8 +288,28 @@ export function createConnectionValidation({
 				)
 					throw new MerchantError(
 						"PROJECTION_VERIFICATION_FAILED",
-						"Install the verification endpoint and current secret on your receiver.",
+						`Receiver verification failed (HTTP ${response.status}).`,
 						422,
+						undefined,
+						{
+							checks: [
+								{
+									check: "projection_verification",
+									httpStatus: response.status,
+									reason:
+										response.status !== 200
+											? "http_status"
+											: invalidJson
+												? "invalid_json"
+												: typeof result === "object" &&
+														result !== null &&
+														"challenge" in result &&
+														result.challenge !== challenge
+													? "challenge_mismatch"
+													: "invalid_acknowledgment",
+								},
+							],
+						},
 					);
 				return {
 					identity: new URL(String(input.settings.projectionUrl)).origin,
@@ -238,28 +318,12 @@ export function createConnectionValidation({
 				};
 			}
 			if (kind === "stripe") {
-				try {
-					const client = new Stripe(input.secrets.accessToken ?? input.secrets.secretKey ?? "", {
+				return await validateStripeAccess(
+					new Stripe(input.secrets.accessToken ?? input.secrets.secretKey ?? "", {
 						timeout: 10_000,
 						maxNetworkRetries: 0,
-					});
-					const account = await client.accounts.retrieve(null);
-					await client.prices.list({ limit: 1 });
-					return {
-						identity: account.id,
-						eventVerified: false,
-						checks: [
-							{ code: "STRIPE_ACCOUNT", passed: true },
-							{ code: "STRIPE_CATALOG_ACCESS", passed: true },
-						],
-					};
-				} catch {
-					throw new MerchantError(
-						"STRIPE_CONNECTION_INVALID",
-						"Check the restricted key permissions and account.",
-						422,
-					);
-				}
+					}),
+				);
 			}
 			try {
 				if (kind === "apple") {

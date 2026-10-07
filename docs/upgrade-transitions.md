@@ -765,3 +765,26 @@ only widen, so every existing row passes them and the move needs no manual SQL: 
 unlimited item, so balances and decisions are unchanged until a catalog publishes one. An older
 image cannot read the new baseline, so a rollback restores the pre-upgrade backup and loses catalogs
 published since.
+
+## Integration diagnostics and immutable projection deliveries
+
+This change adds `catalog_binding_adoptions` in baseline `003_metering_and_pricing.sql` for
+operator adoption receipts. Disposable databases can be recreated. For a populated deployment,
+follow the [stopped-service backup/restore procedure](#stored-job-provider-identity): migrate a new
+empty database with the target image, restore existing data while retaining the new migration
+ledger, and leave the new receipt table empty. Do not edit old migration checksums or apply the
+changed baseline to the populated old database. No receipt backfill is required.
+
+Stop/drain old projection workers before starting the new version: usage deliveries now persist
+an immutable payload before sending, and use `usage:<customerId>:<sequence>` externally. Old
+workers must not run concurrently with this behavior. New optional subscription fields retain
+`schemaVersion: 1`; update strict receivers to accept them before upgrading the producer. Existing
+stored event payloads are delivered unchanged; historical subscription facts are not regenerated.
+
+Production and already-published instances must use `catalog bindings adopt` instead of the
+legacy development `catalog provision` import. No new environment settings are required.
+
+The Stripe App example manifest now requests Setup Intents Read and Payment Methods Read for
+saved-card expansion. Existing OAuth installations need the updated permissions before these
+checks can pass; publish the matching Stripe App permission update and complete any required
+reauthorization before validating those connections.

@@ -18,7 +18,11 @@ import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface ProjectionSyncRepository {
 	claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]>;
-	buildUsageProjection(projectId: string, customerId: string): Promise<ProjectionJobPayload>;
+	buildUsageProjection(
+		projectId: string,
+		customerId: string,
+		claim?: { jobId: string; workerId: string },
+	): Promise<ProjectionJobPayload>;
 	markProjectionSyncJobSucceeded(projectId: string, jobId: string, workerId: string): Promise<void>;
 	markProjectionSyncJobFailed(
 		projectId: string,
@@ -116,13 +120,17 @@ export class ProjectionSyncWorker {
 		project: ProjectInstanceContext,
 	): Promise<"delivered" | "skipped"> {
 		let payload: ProjectionJobPayload | null = job.payload;
-		if (payload === null) {
-			// Usage-driven jobs carry no stored payload: the receiver may have turned them off, and
-			// otherwise the state is read at delivery so one delivery covers every usage since the last.
+		if (payload === null || job.idempotency_key === `usage:${job.customer_id}`) {
+			// Honor delivery preferences even when a retry already has a materialized snapshot.
 			const mode =
 				(await this.delivery.usageDeliveryMode?.(project.projectInstanceKey)) ?? "coalesced";
 			if (mode === "off") return "skipped";
-			payload = await this.repository.buildUsageProjection(job.project_id, job.customer_id);
+		}
+		if (payload === null) {
+			payload = await this.repository.buildUsageProjection(job.project_id, job.customer_id, {
+				jobId: job.id,
+				workerId: this.workerId,
+			});
 		}
 		const {
 			billingAccountId,
@@ -133,13 +141,17 @@ export class ProjectionSyncWorker {
 			purchase,
 			reversal,
 			trial,
+			subscription,
 			sequence,
 		} = payload;
 		await this.delivery.deliver({
 			schemaVersion: 1,
 			projectKey: project.projectInstanceKey,
 			jobId: job.id,
-			idempotencyKey: job.idempotency_key,
+			idempotencyKey:
+				job.idempotency_key === `usage:${job.customer_id}`
+					? `${job.idempotency_key}:${payload.sequence}`
+					: job.idempotency_key,
 			billingAccountId,
 			generatedAt,
 			entitlements,
@@ -148,6 +160,7 @@ export class ProjectionSyncWorker {
 			...(purchase ? { purchase } : {}),
 			...(reversal ? { reversal } : {}),
 			...(trial ? { trial } : {}),
+			...(subscription ? { subscription } : {}),
 			...(sequence === undefined ? {} : { sequence }),
 		});
 		return "delivered";

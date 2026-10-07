@@ -590,7 +590,13 @@ describe("ProjectionSyncWorker", () => {
 	it("builds usage-driven jobs at delivery time and forwards the sequence", async () => {
 		const delivered: Array<Record<string, unknown>> = [];
 		const built: string[] = [];
-		const usageJob = { ...job, id: "job_usage", reason: "usage_changed", payload: null } as const;
+		const usageJob = {
+			...job,
+			id: "job_usage",
+			idempotency_key: `usage:${job.customer_id}`,
+			reason: "usage_changed",
+			payload: null,
+		} as const;
 		const worker = new ProjectionSyncWorker({
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
@@ -637,10 +643,11 @@ describe("ProjectionSyncWorker", () => {
 
 		await expect(worker.runOnce()).resolves.toEqual({ claimed: 1, succeeded: 1, failed: 0 });
 		expect(built).toEqual(["project_1:customer_1"]);
+		expect(delivered[0]?.idempotencyKey).toBe("usage:customer_1:7");
 		expect(delivered).toHaveLength(1);
 		expect(delivered[0]).toMatchObject({
 			jobId: "job_usage",
-			idempotencyKey: job.idempotency_key,
+			idempotencyKey: "usage:customer_1:7",
 			reason: "usage_changed",
 			sequence: 7,
 			balances: [{ featureKey: "ai_credits", available: "9.5" }],
@@ -649,7 +656,13 @@ describe("ProjectionSyncWorker", () => {
 
 	it("marks usage-driven jobs succeeded without delivering when the receiver turned them off", async () => {
 		const calls: string[] = [];
-		const usageJob = { ...job, id: "job_usage", reason: "usage_changed", payload: null } as const;
+		const usageJob = {
+			...job,
+			id: "job_usage",
+			idempotency_key: `usage:${job.customer_id}`,
+			reason: "usage_changed",
+			payload: null,
+		} as const;
 		const worker = new ProjectionSyncWorker({
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",

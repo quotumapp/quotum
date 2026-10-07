@@ -48,6 +48,7 @@ import {
 	planNotPurchasableViaStripe,
 	productNotPurchasableViaStripe,
 } from "./stripe-purchasability";
+import { readSubscriptionProjection } from "./subscription-projection";
 import { claimStripeTrialEndingNotice } from "./trials";
 import type {
 	CompleteStripeCheckoutRequestInput,
@@ -1229,6 +1230,7 @@ export class StripeBillingRepository extends RepositoryModule {
 						reason: input.projectionReason,
 						entitlements: snapshot,
 						...(staleTrial === null ? {} : { trial: staleTrial }),
+						subscription: await readSubscriptionProjection(tx, projectId, existingSubscription.id),
 					},
 				});
 				return processedStripeRecordingResult(resolved.billing_account_id, snapshot);
@@ -1311,6 +1313,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				rawState: stripNulls({
 					stripeCustomerId: input.stripeCustomerId,
 					stripeSubscriptionId: input.stripeSubscriptionId,
+					cancellationReason: stripeCancellationReason(input.rawPayload),
 					invoiceId: input.invoiceId,
 					payload: input.rawPayload,
 				}),
@@ -1395,6 +1398,7 @@ export class StripeBillingRepository extends RepositoryModule {
 					reason: input.projectionReason,
 					entitlements: snapshot,
 					...(trial === null ? {} : { trial }),
+					subscription: await readSubscriptionProjection(tx, projectId, subscriptionRecordId),
 				},
 			});
 			return processedStripeRecordingResult(resolved.billing_account_id, snapshot);
@@ -1805,6 +1809,7 @@ async function recordExistingSubscriptionInvoice(
 			billingAccountId: fact.billingAccountId,
 			reason: input.projectionReason,
 			entitlements: snapshot,
+			subscription: await readSubscriptionProjection(executor, projectId, subscription.id),
 		},
 	});
 	return processedStripeRecordingResult(fact.billingAccountId, snapshot);
@@ -2132,4 +2137,14 @@ function isoTimestamp(value: Date | string | null): string | null {
 
 function requiredIsoTimestamp(value: Date | string): string {
 	return new Date(value).toISOString();
+}
+
+function stripeCancellationReason(payload: Record<string, unknown>): string | null {
+	const details = payload.cancellation_details;
+	if (!details || typeof details !== "object") return null;
+	const reason = (details as Record<string, unknown>).reason;
+	return typeof reason === "string" &&
+		["cancellation_requested", "payment_disputed", "payment_failed"].includes(reason)
+		? reason
+		: null;
 }

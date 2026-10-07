@@ -9,6 +9,7 @@ export interface ConnectionValidation {
 	identity: string;
 	eventVerified: boolean;
 	checks: { code: string; passed: boolean }[];
+	unverifiedPermissions?: string[];
 }
 /** Composition implements provider I/O; the platform never imports billing repositories or clients. */
 export interface ConnectionValidationPort {

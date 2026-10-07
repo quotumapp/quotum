@@ -164,6 +164,9 @@ store-event replay, subscription reconciliation, metering maintenance, recurring
 top-up, promotion maintenance, provider operation recovery, usage partition upkeep (`src/workers/usage-partition-upkeep.ts`,
 which adds monthly `usage_events` partitions ahead of time; `quotum partitions` runs it on demand),
 plus Stripe App event processing when Apps OAuth is configured.
+Usage projection jobs retain an immutable payload through retries; their internal coalescing key
+is `usage:<customerId>` and their delivery key includes `:<sequence>`. Drain old workers before
+upgrading this delivery behavior.
 Workers lease job rows by `worker_id` (`locked_by` columns, refreshed by
 `src/workers/lease-heartbeat.ts`) and retry with `src/workers/backoff.ts`, so a worker must only
 touch rows it holds. Auto-topup and recurring billing use `src/workers/job-leases.ts` to renew
@@ -232,6 +235,11 @@ Use Bun `>=1.4.0 <1.5.0`. Docker is required for every Postgres-backed lane.
 - `bun run platform:bootstrap`, `catalog:provision` and `catalog` for operator workflows (see
   [docs/quickstart.md](docs/quickstart.md)); `bun run connections:rotate-secrets` re-encrypts
   stored connection secrets with the active key.
+- `bun run quotum catalog bindings list` and `catalog bindings adopt <file>` inspect/adopt existing
+  Stripe products and prices before or after catalog publication; adoption requires operator
+  authentication and records an immutable actor-attributed receipt. `catalog provision` is only
+  for non-production instances before publication. `quotum projections check-receiver <url>
+  --project-key <key> --secret-file <path|->` checks receiver authentication without a connection commit.
 - `bun run mcp` starts the read-only stdio MCP server against `QUOTUM_MCP_BASE_URL` with a
   read-only or sandbox `QUOTUM_MCP_API_KEY`; see [docs/mcp.md](docs/mcp.md).
 - `bun run test:coverage` runs the unit suite against its local coverage minimum.

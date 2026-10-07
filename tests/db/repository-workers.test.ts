@@ -203,8 +203,8 @@ describe("BillingRepository workers", () => {
 		);
 
 		expect(database.queries[0]).toContain("LEAST(jobs.attempts::bigint + 1, 2147483647)");
-		expect(database.queries[0]).toContain("WHEN jobs.reprojection_requested THEN 0");
-		expect(database.queries[0]).toContain("reprojection_requested = false");
+		expect(database.queries[0]).not.toContain("WHEN jobs.reprojection_requested THEN 0");
+		expect(database.queries[0]).not.toContain("reprojection_requested = false");
 		expect(database.queries[0]).toContain("locked_by =");
 		expect(database.queries[0]).toContain("jobs.project_id =");
 		expect(database.queries[0]).toContain('"project-id"');

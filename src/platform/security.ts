@@ -7,6 +7,7 @@ export class MerchantError extends Error {
 		message: string,
 		public status = 400,
 		public retryAfter?: number,
+		public details?: Record<string, unknown>,
 	) {
 		super(message);
 	}

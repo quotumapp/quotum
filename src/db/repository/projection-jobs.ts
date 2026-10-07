@@ -9,7 +9,7 @@ import {
 	readProjectionBalances,
 } from "./entitlements";
 import { parseProjectionSyncJobRow } from "./parsers";
-import { assertUpdated, executeOne, executeRows } from "./query";
+import { assertUpdated, executeOne, executeRows, jsonb } from "./query";
 import type { ProjectionSyncJobRow } from "./types";
 import { requireNonBlank, requirePositiveLimit } from "./validation";
 
@@ -91,7 +91,11 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 	}
 
 	/** Builds a usage-driven projection at delivery time and advances the customer's sequence. */
-	async buildUsageProjection(projectId: string, customerId: string): Promise<ProjectionJobPayload> {
+	async buildUsageProjection(
+		projectId: string,
+		customerId: string,
+		claim?: { jobId: string; workerId: string },
+	): Promise<ProjectionJobPayload> {
 		return await this.transaction(async (tx) => {
 			// The sequence advance is issued first; the reads behind it are pipelined in order.
 			const [customer, entitlements, balances] = await Promise.all([
@@ -100,7 +104,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 				readProjectionBalances(tx, projectId, customerId),
 			]);
 			const generatedAt = new Date().toISOString();
-			return {
+			const payload: ProjectionJobPayload = {
 				billingAccountId: customer.billingAccountId,
 				generatedAt,
 				entitlements: { billingAccountId: customer.billingAccountId, generatedAt, entitlements },
@@ -108,6 +112,19 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 				reason: "usage_changed",
 				sequence: customer.sequence,
 			};
+			if (claim) {
+				await assertUpdated(
+					tx,
+					drizzleSql`
+					UPDATE projection_sync_jobs SET payload = ${jsonb(payload)}, reprojection_requested = false, updated_at = now()
+					WHERE project_id = ${projectId} AND customer_id = ${customerId} AND id = ${claim.jobId}
+					AND status = 'processing' AND locked_by = ${claim.workerId} AND payload IS NULL
+					RETURNING id
+				`,
+					`projection sync job ${claim.jobId} is not available to materialize`,
+				);
+			}
+			return payload;
 		});
 	}
 
@@ -128,6 +145,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 				locked_at = NULL,
 				locked_by = NULL,
 				last_error = NULL,
+				payload = CASE WHEN jobs.idempotency_key = 'usage:' || jobs.customer_id::text THEN NULL ELSE jobs.payload END,
 				reprojection_requested = false,
 				attempts = CASE
 					WHEN jobs.reprojection_requested THEN 0
@@ -164,23 +182,14 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 			UPDATE projection_sync_jobs jobs
 			SET
 				status = CASE
-					WHEN jobs.reprojection_requested THEN 'pending'
+					WHEN jobs.reprojection_requested AND jobs.idempotency_key <> 'usage:' || jobs.customer_id::text THEN 'pending'
 					WHEN ${nextAttemptAtIso}::timestamptz IS NULL THEN 'failed'
 					ELSE 'pending'
 				END,
-				attempts = CASE
-					WHEN jobs.reprojection_requested THEN 0
-					ELSE LEAST(jobs.attempts::bigint + 1, 2147483647)::integer
-				END,
-				last_error = CASE
-					WHEN jobs.reprojection_requested THEN NULL
-					ELSE ${lastError}
-				END,
-				reprojection_requested = false,
-				next_attempt_at = CASE
-					WHEN jobs.reprojection_requested THEN now()
-					ELSE COALESCE(${nextAttemptAtIso}::timestamptz, jobs.next_attempt_at)
-				END,
+				attempts = CASE WHEN jobs.reprojection_requested AND jobs.idempotency_key <> 'usage:' || jobs.customer_id::text THEN 0 ELSE LEAST(jobs.attempts::bigint + 1, 2147483647)::integer END,
+				last_error = CASE WHEN jobs.reprojection_requested AND jobs.idempotency_key <> 'usage:' || jobs.customer_id::text THEN NULL ELSE ${lastError} END,
+				reprojection_requested = CASE WHEN jobs.idempotency_key = 'usage:' || jobs.customer_id::text THEN jobs.reprojection_requested ELSE false END,
+				next_attempt_at = CASE WHEN jobs.reprojection_requested AND jobs.idempotency_key <> 'usage:' || jobs.customer_id::text THEN now() ELSE COALESCE(${nextAttemptAtIso}::timestamptz, jobs.next_attempt_at) END,
 				locked_at = NULL,
 				locked_by = NULL,
 				updated_at = now()
@@ -207,7 +216,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 					status = 'pending',
 					attempts = 0,
 					last_error = NULL,
-					reprojection_requested = false,
+					reprojection_requested = CASE WHEN jobs.idempotency_key = 'usage:' || jobs.customer_id::text THEN jobs.reprojection_requested ELSE false END,
 					next_attempt_at = now(),
 					locked_at = NULL,
 					locked_by = NULL,

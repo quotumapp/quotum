@@ -5,6 +5,7 @@ import { RepositoryModule } from "./base";
 import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
 import { parseProviderSubscriptionReconciliationRow } from "./parsers";
 import { assertUpdated, executeRows } from "./query";
+import { readSubscriptionProjection } from "./subscription-projection";
 import { type SubscriptionTrialRow, subscriptionTrialFact } from "./trials";
 import type {
 	ExpiredSubscriptionReconciliationResult,
@@ -28,6 +29,7 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 				customer_id: string;
 				billing_account_id: string;
 				expires_at: unknown;
+				provider: string;
 			}>(
 				tx,
 				drizzleSql`
@@ -67,7 +69,7 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 				FROM due_subscriptions due
 				JOIN customers c ON c.id = due.customer_id
 				WHERE s.id = due.id
-				RETURNING s.id, s.project_id, s.customer_id, c.billing_account_id, s.expires_at
+				RETURNING s.id, s.project_id, s.customer_id, c.billing_account_id, s.expires_at, s.provider
 			`,
 			);
 
@@ -89,6 +91,9 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 						billingAccountId: row.billing_account_id,
 						reason: "expiry_reconciliation",
 						entitlements: snapshot,
+						...(row.provider === "stripe"
+							? { subscription: await readSubscriptionProjection(tx, row.project_id, row.id) }
+							: {}),
 					},
 				});
 				if (enqueued) {

@@ -315,6 +315,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const sentryRequestScope = sentry && createSentryRequestScope(sentry, { service: "billing" });
 	const staff = createApp({
 		env,
+		connections,
 		entitlementService: new EntitlementService(billingRepository),
 		usageApiService: billingRepository.usageApi,
 		projectContextResolver,

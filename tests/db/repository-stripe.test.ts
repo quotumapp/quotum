@@ -233,6 +233,23 @@ describe("BillingRepository Stripe", () => {
 				// No default plan the account reads as holding, and no default-plan key to deactivate.
 				[],
 				[],
+				[
+					{
+						fact: {
+							subscriptionId: "00000000-0000-4000-8000-000000000001",
+							externalSubscriptionId: "sub_test",
+							provider: "stripe",
+							channel: "web",
+							productKey: "premium_monthly",
+							planKey: null,
+							status: "active",
+							providerStatus: "active",
+							expiresAt: null,
+							cancelAtPeriodEnd: false,
+							cancellationReason: null,
+						},
+					},
+				],
 				[{ project_id: "project-id" }],
 				[{ projection_sequence: 1, billing_account_id: "user-1" }],
 				[],
@@ -255,7 +272,7 @@ describe("BillingRepository Stripe", () => {
 		});
 
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(21);
+		expect(database.queries).toHaveLength(22);
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("INSERT INTO subscriptions");
 		expect(queries).not.toContain("INSERT INTO purchases");
@@ -284,6 +301,23 @@ describe("BillingRepository Stripe", () => {
 			[{ id: "customer-id" }],
 			[],
 			[],
+			[
+				{
+					fact: {
+						subscriptionId: "00000000-0000-4000-8000-000000000001",
+						externalSubscriptionId: "sub_test",
+						provider: "stripe",
+						channel: "web",
+						productKey: "premium_monthly",
+						planKey: null,
+						status: "active",
+						providerStatus: "active",
+						expiresAt: null,
+						cancelAtPeriodEnd: false,
+						cancellationReason: null,
+					},
+				},
+			],
 			[{ project_id: "project-id" }],
 			[{ projection_sequence: 1, billing_account_id: "user-1" }],
 			[],

@@ -62,6 +62,7 @@ import type {
 	UsageOperationLookupInput,
 	UsageOperationLookupResult,
 } from "../billing/usage-operations";
+import type { BindingAdoption, BindingResult } from "../catalog/bindings";
 import type {
 	AuthoredCatalogIntent,
 	CatalogPreview,
@@ -149,6 +150,16 @@ export class BillingClient {
 		if (typeof this.requestFetch !== "function")
 			throw new Error("A fetch implementation is required");
 		this.catalog = {
+			bindings: {
+				list: () => this.request<BindingResult[]>("/v1/admin/catalog/bindings", { operator: true }),
+				adopt: (input: BindingAdoption, idempotencyKey: string) =>
+					this.request<BindingResult>("/v1/admin/catalog/bindings/adopt", {
+						method: "POST",
+						body: input,
+						operator: true,
+						idempotencyKey,
+					}),
+			},
 			/** The purchasable Stripe catalog; `STRIPE_NOT_CONFIGURED` without a Stripe connection. */
 			get: () => this.request<StripeCatalog>("/v1/catalog"),
 			/** The versioned catalog. Project authentication only; publishing still needs the operator key. */
