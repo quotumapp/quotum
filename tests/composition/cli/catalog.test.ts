@@ -440,6 +440,9 @@ describe("catalog command in process", () => {
 		expect(unknown.err).toEqual([
 			"Unknown catalog command: publish. Run `quotum catalog --help` for usage.",
 		]);
+		const provision = captured();
+		expect(await runCatalogCommand(["provision"], {}, provision.output)).toBe(64);
+		expect(provision.err.join("\n")).toContain("quotum catalog provision");
 		const missingFile = captured();
 		expect(
 			await runCatalogCommand(

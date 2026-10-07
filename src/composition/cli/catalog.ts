@@ -116,6 +116,10 @@ function issuePath(issue: z.core.$ZodIssue): string {
 
 async function catalogCommand(argv: readonly string[], env: Environment): Promise<unknown> {
 	const [command, ...rest] = argv;
+	if (command === "provision")
+		throw new CliUsageError(
+			"provision reads the database directly; run `quotum catalog provision` or `bun run catalog:provision`.",
+		);
 	if (command !== "status" && command !== "diff" && command !== "push" && command !== "bindings")
 		throw new CliUsageError(`Unknown catalog command: ${command}.`);
 	const unknown = rest.find(
@@ -244,6 +248,7 @@ const help = `quotum catalog <command> [catalog.ts]
 
 Commands:
   provision                    Development import before first publish; refuses production
+                               (reads the database: run it as quotum catalog provision)
   bindings list                List Stripe product/price mappings
   bindings adopt <file>        Adopt existing Stripe product/price IDs from JSON
   status                       Print the currently published catalog intent and revision
