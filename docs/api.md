@@ -62,8 +62,9 @@ tool's error.
 Where a `/v1` operation requires an `Idempotency-Key`, the key holds 1 to 200 characters and is
 taken exactly as sent. A key with surrounding whitespace is refused on every operation, never
 trimmed: the trimmed key would be another caller identity. Invalid keys answer
-`400 INVALID_REQUEST`. The Stripe and Paddle checkout routes narrow the key to letters, digits and
-`._:-` and answer `400 INVALID_IDEMPOTENCY_KEY`
+`400 INVALID_REQUEST`. The Paddle checkout route requires the key and the Stripe checkout route
+takes it optionally; both narrow it to letters, digits and `._:-` and answer
+`400 INVALID_IDEMPOTENCY_KEY`
 (see [subscriptions](subscriptions.md#paddle-fixed-plan-checkout)). The contract lists every query
 parameter an operation reads, including the admin list filters.
 
@@ -201,6 +202,9 @@ Operator routes:
 
 - `GET /v1/admin/catalog/products`, `GET /v1/admin/catalog/store-products`,
   `POST /v1/admin/catalog/preview`, `POST /v1/admin/catalog/publish`.
+- `GET /v1/admin/catalog/bindings` and `POST /v1/admin/catalog/bindings/adopt` list and adopt
+  Stripe product and price mappings; see
+  [catalog adoption](catalog.md#adopt-existing-stripe-products-from-a-headless-deployment).
 - `POST /v1/admin/contracts/preview`, `POST /v1/admin/contracts/publish`,
   `GET /v1/admin/contracts/:billingAccountId`,
   `DELETE /v1/admin/contracts/:billingAccountId/:contractId`.

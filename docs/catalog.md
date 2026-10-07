@@ -328,6 +328,16 @@ The API equivalents are `GET /v1/admin/catalog/bindings` and
 "externalPriceId": "price_example", "active": true } }`. Receipts retain actor and request identity.
 The CLI derives its request key from the canonical input; retrying the same file is safe.
 
+A refused adoption answers `STRIPE_BINDING_INVALID` or `CONNECTION_UNAVAILABLE`.
+`STRIPE_BINDING_INVALID` with `409` carries `details.check: "binding"` and a `details.reason`: `idempotency_key_reused` (the key was recorded
+for different input), `deleted_product`, `product_price_or_environment_mismatch` (an inactive
+price or product, a live-mode mismatch with the instance, or a price of another product),
+`unsupported_price_shape`, `product_identity_conflict` (the product key exists with other
+properties) or `binding_identity_conflict` (the price or the product key already has a different mapping). The
+same code with `422` and `details.reason: "provider_lookup_failed"` means Stripe could not return
+the product or price; `details.httpStatus` carries Stripe's status when it sent one.
+`CONNECTION_UNAVAILABLE` with `503` means the instance has no Stripe connection to read with.
+
 `catalog provision` remains a development bootstrap import. It now refuses production instances
 and already-published catalogs explicitly. It is listed in `quotum catalog --help`.
 
