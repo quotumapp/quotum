@@ -66,4 +66,26 @@ describe("Stripe permission validation", () => {
 		expect(result.checks).toHaveLength(12);
 		expect(result.unverifiedPermissions).toContain("subscription_write");
 	});
+	it("reads a permission Stripe names with its rak_ prefix and never echoes other text", async () => {
+		const { stripe } = client({
+			products: {
+				statusCode: 403,
+				message:
+					"The provided key 'rk_live_SECRET' does not have the required permissions for this endpoint on account 'acct_1'. Having the 'rak_plan_read' permission would allow this request to continue.",
+			},
+			customers: { statusCode: 403, message: "No permissions were named here." },
+		});
+		try {
+			await validateStripeAccess(stripe);
+			throw new Error("expected rejection");
+		} catch (error) {
+			expect(error).toMatchObject({
+				details: {
+					// A named permission wins; an unnamed one falls back to the failing probe.
+					missingPermissions: ["customer_read", "plan_read"],
+				},
+			});
+			expect(JSON.stringify(error)).not.toContain("SECRET");
+		}
+	});
 });

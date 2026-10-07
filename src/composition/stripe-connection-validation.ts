@@ -51,8 +51,11 @@ export async function validateStripeAccess(client: Stripe): Promise<ConnectionVa
 				} catch (error) {
 					const failure = error as { statusCode?: number; type?: string; message?: string };
 					const status = failure.statusCode;
-					// Extract only a permission token, never Stripe's free-form message or masked key.
-					const permission = failure.message?.match(/\b([a-z][a-z_]*(?:_read|_write))\b/u)?.[1];
+					// Extract only a permission token, never Stripe's free-form message or masked key. Stripe
+					// may name a permission with its `rak_` prefix.
+					const permission = failure.message
+						?.match(/\b([a-z][a-z_]*(?:_read|_write))\b/u)?.[1]
+						?.replace(/^rak_/u, "");
 					checks.push({
 						check,
 						reason:
