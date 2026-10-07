@@ -21,6 +21,10 @@ export interface PostgresHealthSnapshot {
 
 const postgresStatementTimeoutMs = 30_000;
 const postgresIdleInTransactionSessionTimeoutMs = 30_000;
+// Ends a transaction that keeps issuing short statements, which neither limit above does. It
+// stays above the statement timeout so that a slow statement is still cancelled on its own
+// instead of losing its session.
+const postgresTransactionTimeoutMs = 120_000;
 
 export function createBillingDatabaseConnection(
 	env: Pick<BillingEnv, "postgresUri"> & Partial<Pick<BillingEnv, "postgresPreparedStatements">>,
@@ -36,6 +40,7 @@ export function createBillingDatabaseConnection(
 		connection: {
 			statement_timeout: postgresStatementTimeoutMs,
 			idle_in_transaction_session_timeout: postgresIdleInTransactionSessionTimeoutMs,
+			transaction_timeout: postgresTransactionTimeoutMs,
 		},
 	});
 

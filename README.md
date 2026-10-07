@@ -43,7 +43,8 @@ not a published compatibility promise. The bundled `src/sdk` client and catalog 
 
 ## Development
 
-Use Bun from [package.json](package.json) and PostgreSQL. Follow the [quickstart](docs/quickstart.md)
+Use Bun from [package.json](package.json) and PostgreSQL 18 or newer. Follow the
+[quickstart](docs/quickstart.md)
 for a complete local run, or:
 
 ```sh

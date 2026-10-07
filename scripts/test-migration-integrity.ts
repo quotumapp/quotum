@@ -11,7 +11,6 @@ const schema = "migration_integrity_test";
 const admin = new SQL(postgresUri, { max: 1, prepare: false });
 
 try {
-	await admin.unsafe('CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public');
 	await admin.unsafe("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public");
 	await verifyChecksumDrift(admin);
 	await verifyMissingFile(admin);

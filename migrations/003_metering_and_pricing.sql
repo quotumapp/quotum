@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS catalog_revisions (
 );
 
 CREATE TABLE IF NOT EXISTS catalog_drafts (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	base_revision INTEGER,
 	next_revision INTEGER NOT NULL CHECK (next_revision > 0),
@@ -600,7 +600,7 @@ CREATE TABLE IF NOT EXISTS usage_windows (
 );
 
 CREATE TABLE IF NOT EXISTS reservations (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	entity_id BIGINT REFERENCES entities(id) ON DELETE CASCADE,
@@ -679,7 +679,7 @@ CREATE TABLE IF NOT EXISTS reservation_allocations (
 
 CREATE TABLE IF NOT EXISTS usage_events (
 	recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-	id UUID NOT NULL DEFAULT uuid_generate_v4(),
+	id UUID NOT NULL DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	entity_id BIGINT REFERENCES entities(id) ON DELETE SET NULL,
@@ -1045,7 +1045,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_subscription_items_subscription_active
 	ON subscription_items (subscription_id, active);
 
 CREATE TABLE IF NOT EXISTS subscription_changes (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	subscription_id UUID NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
@@ -1133,7 +1133,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_usage_windows_closed_unbilled
 	WHERE subscription_id IS NOT NULL AND anchor_plan_item_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS usage_invoice_periods (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	subscription_id UUID NOT NULL REFERENCES subscriptions(id) ON DELETE RESTRICT,
@@ -1607,7 +1607,7 @@ CREATE TABLE IF NOT EXISTS auto_topup_states (
 );
 
 CREATE TABLE IF NOT EXISTS auto_topup_jobs (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	policy_id BIGINT NOT NULL REFERENCES auto_topup_policies(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -1668,7 +1668,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_auto_topup_jobs_store_product
 	ON auto_topup_jobs (store_product_id);
 
 CREATE TABLE IF NOT EXISTS catalog_migration_drafts (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	from_plan_version_id BIGINT NOT NULL REFERENCES plan_versions(id) ON DELETE RESTRICT,
 	to_plan_version_id BIGINT NOT NULL REFERENCES plan_versions(id) ON DELETE RESTRICT,
@@ -1797,7 +1797,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_license_assignments_entity
 	WHERE revoked_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS commercial_action_previews (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 	billing_account_id TEXT COLLATE "C" NOT NULL CHECK (char_length(billing_account_id) BETWEEN 1 AND 200),
 	preview_token UUID NOT NULL,
@@ -1844,7 +1844,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_commercial_previews_account_created
 -- is which payment method the customer is charged by default. With a plan, completion starts that
 -- plan on the saved card and records the subscription from Stripe's response.
 CREATE TABLE IF NOT EXISTS payment_setup_sessions (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
 	billing_account_id TEXT COLLATE "C" NOT NULL CHECK (char_length(billing_account_id) BETWEEN 1 AND 200),
@@ -1986,7 +1986,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_payment_setup_account_created
 	ON payment_setup_sessions (project_id, billing_account_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS promotions (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	key TEXT COLLATE "C" NOT NULL CHECK (char_length(key) BETWEEN 1 AND 120),
 	name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 200),
@@ -2105,7 +2105,7 @@ CREATE TABLE IF NOT EXISTS promotion_grant_items (
 );
 
 CREATE TABLE IF NOT EXISTS promotion_codes (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	promotion_id UUID NOT NULL,
 	code TEXT COLLATE "C" NOT NULL CHECK (code ~ '^[A-Za-z0-9-]{3,64}$'),
@@ -2152,7 +2152,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_promotion_codes_promotion_created
 	ON promotion_codes (project_id, promotion_id, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS promotion_provider_objects (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	promotion_id UUID NOT NULL,
 	promotion_code_id UUID,
@@ -2255,7 +2255,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_due
 	WHERE status = 'pending' OR (status = 'ready' AND provider_active IS DISTINCT FROM desired_active);
 
 CREATE TABLE IF NOT EXISTS promotion_redemptions (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	promotion_id UUID NOT NULL,
 	promotion_code_id UUID,
@@ -2372,7 +2372,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_redemptions_apple_offer
 	WHERE provider = 'apple';
 
 CREATE TABLE IF NOT EXISTS promotion_apple_signature_attempts (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL,
 	redemption_id UUID NOT NULL,
@@ -2422,7 +2422,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_promotion_audit_events_promotion_created
 -- allowances are `reward` allocations linked to it, created for a reset window by the account's
 -- first write in it, and none outlives it.
 CREATE TABLE IF NOT EXISTS plan_grants (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL,
 	plan_id BIGINT NOT NULL,
@@ -2543,7 +2543,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_superseding_grant
 -- payment. Feature, entity, quantity and expiry live on that allocation. A revocation takes back
 -- only quantity that is unconsumed, unheld and unexpired.
 CREATE TABLE IF NOT EXISTS operator_grants (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL,
 	actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),
@@ -2586,7 +2586,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_operator_grants_customer_created
 -- An administrative debit takes quantity back from named allocations for a business reason. It is
 -- not usage: it raises each allocation's reversed quantity and never writes a usage event.
 CREATE TABLE IF NOT EXISTS administrative_debits (
-	id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
 	customer_id UUID NOT NULL,
 	actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),

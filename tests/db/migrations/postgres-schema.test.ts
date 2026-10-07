@@ -26,12 +26,25 @@ describe("baseline schema files", () => {
 			expect(read(file)).not.toMatch(/^\s*ALTER TABLE \w+\s+(ADD|DROP) COLUMN/m);
 	});
 
-	it("declares extensions and the billing projects table in the platform file", () => {
-		expect(platform).toContain('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+	it("declares its one extension and the billing projects table in the platform file", () => {
 		expect(platform).toContain("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+		expect(files.flatMap((file) => read(file).match(/CREATE EXTENSION/g) ?? [])).toHaveLength(1);
 		expect(platform).toMatch(/CREATE TABLE(?: IF NOT EXISTS)? projects \(/);
 		expect(platform).toContain("idx_billing_projects_key");
 		expect(platform).not.toContain("CREATE SCHEMA IF NOT EXISTS billing");
+	});
+
+	it("defaults billing keys to UUIDv7 and platform keys to random UUIDs", () => {
+		for (const file of files) expect(read(file)).not.toMatch(/uuid-ossp|uuid_generate_v/);
+		for (const billing of [billingCore, metering]) {
+			expect(billing).toContain("DEFAULT uuidv7()");
+			expect(billing).not.toContain("gen_random_uuid()");
+		}
+		// Project instance ids are matched against UUID versions 1 to 5 before they reach SQL.
+		for (const identity of [platform, merchant]) {
+			expect(identity).toContain("DEFAULT gen_random_uuid()");
+			expect(identity).not.toContain("uuidv7()");
+		}
 	});
 
 	it("creates the billing core tables without provider RPC functions or roles", () => {

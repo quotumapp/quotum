@@ -121,13 +121,22 @@ export interface UsageScopesReport {
 	warningItems: number;
 }
 
+/**
+ * Makes the transaction one read-only, repeatable-read snapshot. It reads whole tables, so it
+ * lifts the session's transaction timeout; every statement keeps its statement timeout.
+ */
+export async function startSnapshotRead(tx: QueryExecutor): Promise<void> {
+	await executeRows(tx, drizzleSql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`);
+	await executeRows(tx, drizzleSql`SET LOCAL transaction_timeout = 0`);
+}
+
 /** Reads the report inside one read-only, repeatable-read transaction. */
 export async function readUsageScopesReportSnapshot(
 	database: TransactionalQueryExecutor,
 	options: UsageScopesReportOptions,
 ): Promise<UsageScopesReport> {
 	return await database.transaction(async (tx) => {
-		await executeRows(tx, drizzleSql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`);
+		await startSnapshotRead(tx);
 		return await readUsageScopesReport(tx, options);
 	});
 }

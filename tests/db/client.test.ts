@@ -34,6 +34,7 @@ describe("billing database client", () => {
 		expect(source).toContain("connection:");
 		expect(source).toContain("statement_timeout");
 		expect(source).toContain("idle_in_transaction_session_timeout");
+		expect(source).toContain("transaction_timeout: postgresTransactionTimeoutMs");
 	});
 
 	it("caches a healthy startup check", async () => {

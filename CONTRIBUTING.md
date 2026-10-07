@@ -62,6 +62,9 @@ temporary report as before; credential directories are always removed.
   exclusions. Partition children and migration bookkeeping are excluded. The platform-owned
   project foreign key is asserted explicitly at the test's composition boundary so billing
   declares no platform table.
+- PostgreSQL 18 is the minimum version, so its SQL is available to migrations and queries. A new
+  UUID key defaults to `uuidv7()` in the billing baselines and to `gen_random_uuid()` in the
+  platform and merchant baselines; `tests/db/migrations/postgres-schema.test.ts` checks both.
 - Call out every schema change and every environment variable change in the pull request description,
   including upgrade order when workers must be drained first.
 - A pull request that changes a baseline `migrations/*.sql` file must name every changed file in
