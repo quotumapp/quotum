@@ -45,7 +45,7 @@ const timestampColumns = () => ({
 export const providerOperations = pgTable(
 	"provider_operations",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -117,7 +117,7 @@ export const providerOperations = pgTable(
 export const paddleCheckoutReservations = pgTable(
 	"paddle_checkout_reservations",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -228,7 +228,7 @@ export const projects = pgTable(
 export const customers = pgTable(
 	"customers",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -255,7 +255,7 @@ export const customers = pgTable(
 export const products = pgTable(
 	"products",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -283,7 +283,7 @@ export const products = pgTable(
 export const storeProducts = pgTable(
 	"store_products",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -335,7 +335,7 @@ export const storeProducts = pgTable(
 export const providerCustomers = pgTable(
 	"provider_customers",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -379,7 +379,7 @@ export const providerCustomers = pgTable(
 export const subscriptions = pgTable(
 	"subscriptions",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -540,7 +540,7 @@ export const subscriptions = pgTable(
 export const checkoutRequests = pgTable(
 	"checkout_requests",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -619,7 +619,7 @@ export const checkoutRequests = pgTable(
 export const creditGrants = pgTable(
 	"credit_grants",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -673,7 +673,7 @@ export const creditGrants = pgTable(
 export const creditGrantProviderObjects = pgTable(
 	"credit_grant_provider_objects",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -706,7 +706,7 @@ export const creditGrantProviderObjects = pgTable(
 export const creditReversals = pgTable(
 	"credit_reversals",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -751,7 +751,7 @@ export const creditReversals = pgTable(
 export const billingInvoices = pgTable(
 	"billing_invoices",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -801,7 +801,7 @@ export const billingInvoices = pgTable(
 export const purchases = pgTable(
 	"purchases",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -905,7 +905,7 @@ export const purchases = pgTable(
 export const entitlements = pgTable(
 	"entitlements",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -970,7 +970,7 @@ export const entitlements = pgTable(
 export const storeEvents = pgTable(
 	"store_events",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -1043,7 +1043,7 @@ export const storeEvents = pgTable(
 export const projectionSyncJobs = pgTable(
 	"projection_sync_jobs",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -1182,7 +1182,7 @@ export const catalogRevisions = pgTable(
 export const catalogDrafts = pgTable(
 	"catalog_drafts",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -1227,7 +1227,7 @@ export const catalogDrafts = pgTable(
 export const commercialActionPreviews = pgTable(
 	"commercial_action_previews",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "cascade" }),
@@ -1326,7 +1326,7 @@ export const commercialActionPreviews = pgTable(
 export const paymentSetupSessions = pgTable(
 	"payment_setup_sessions",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "cascade" }),
@@ -2202,7 +2202,7 @@ export const subscriptionItems = pgTable(
 export const subscriptionChanges = pgTable(
 	"subscription_changes",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -2995,7 +2995,7 @@ export const usageWindows = pgTable(
 export const reservations = pgTable(
 	"reservations",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -3156,7 +3156,7 @@ export const usageEvents = pgTable(
 	"usage_events",
 	{
 		recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
-		id: uuid("id").notNull().defaultRandom(),
+		id: uuid("id").notNull().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -3353,7 +3353,7 @@ export const usageEventRollups = pgTable(
 export const usageInvoicePeriods = pgTable(
 	"usage_invoice_periods",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -4166,7 +4166,7 @@ export const autoTopupStates = pgTable(
 export const autoTopupJobs = pgTable(
 	"auto_topup_jobs",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -4259,7 +4259,7 @@ export const autoTopupJobs = pgTable(
 export const catalogMigrationDrafts = pgTable(
 	"catalog_migration_drafts",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -4502,7 +4502,7 @@ export const licenseAssignments = pgTable(
 export const promotions = pgTable(
 	"promotions",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -4715,7 +4715,7 @@ export const promotionGrantItems = pgTable(
 export const promotionCodes = pgTable(
 	"promotion_codes",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -4797,7 +4797,7 @@ export const promotionCodes = pgTable(
 export const promotionProviderObjects = pgTable(
 	"promotion_provider_objects",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -4950,7 +4950,7 @@ export const promotionProviderObjects = pgTable(
 export const promotionRedemptions = pgTable(
 	"promotion_redemptions",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -5223,7 +5223,7 @@ export const promotionAuditEvents = pgTable(
 export const planGrants = pgTable(
 	"plan_grants",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -5421,7 +5421,7 @@ export const carriedUsages = pgTable(
 export const operatorGrants = pgTable(
 	"operator_grants",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
@@ -5499,7 +5499,7 @@ export const operatorGrants = pgTable(
 export const administrativeDebits = pgTable(
 	"administrative_debits",
 	{
-		id: uuid("id").primaryKey().defaultRandom(),
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "restrict" }),
