@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { stableJson } from "../billing/decimal";
+import { isUsageKey } from "../billing/usage-projection-key";
 import {
 	type BillingMetrics,
 	createNoopBillingMetrics,
@@ -72,9 +73,7 @@ export class ProjectionHttpClient implements ProjectionDelivery {
 	async deliver(input: BillingProjectionInput): Promise<void> {
 		const project = await this.projectFor(input.projectKey);
 		const url = projectionUrl(project);
-		const body = input.idempotencyKey.startsWith("usage:")
-			? stableJson(input)
-			: JSON.stringify(input);
+		const body = isUsageKey(input.idempotencyKey) ? stableJson(input) : JSON.stringify(input);
 
 		let response: Response;
 		try {

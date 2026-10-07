@@ -1,4 +1,5 @@
 import type { ProjectionJobPayload } from "../billing/types";
+import { usageDeliveryKey, usageProjectionKey } from "../billing/usage-projection-key";
 import type { ProjectionSyncJobRow } from "../db/repository";
 import {
 	type BillingLogger,
@@ -120,7 +121,8 @@ export class ProjectionSyncWorker {
 		project: ProjectInstanceContext,
 	): Promise<"delivered" | "skipped"> {
 		let payload: ProjectionJobPayload | null = job.payload;
-		if (payload === null || job.idempotency_key === `usage:${job.customer_id}`) {
+		const usageJob = job.idempotency_key === usageProjectionKey(job.customer_id);
+		if (payload === null || usageJob) {
 			// Honor delivery preferences even when a retry already has a materialized snapshot.
 			const mode =
 				(await this.delivery.usageDeliveryMode?.(project.projectInstanceKey)) ?? "coalesced";
@@ -148,10 +150,9 @@ export class ProjectionSyncWorker {
 			schemaVersion: 1,
 			projectKey: project.projectInstanceKey,
 			jobId: job.id,
-			idempotencyKey:
-				job.idempotency_key === `usage:${job.customer_id}`
-					? `${job.idempotency_key}:${payload.sequence}`
-					: job.idempotency_key,
+			idempotencyKey: usageJob
+				? usageDeliveryKey(job.customer_id, requiredSequence(payload))
+				: job.idempotency_key,
 			billingAccountId,
 			generatedAt,
 			entitlements,
@@ -271,4 +272,9 @@ function positiveIntegerOrDefault(value: number | undefined, fallback: number): 
 		throw new Error("projection sync concurrency must be greater than zero");
 	}
 	return value;
+}
+
+function requiredSequence(payload: ProjectionJobPayload): number {
+	if (payload.sequence === undefined) throw new Error("A usage projection payload has no sequence");
+	return payload.sequence;
 }

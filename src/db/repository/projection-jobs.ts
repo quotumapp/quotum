@@ -1,6 +1,7 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError, PersistenceConflictError } from "../../billing/errors";
 import type { ProjectionJobPayload, ProjectionSyncStatus } from "../../billing/types";
+import { usageKeySqlPrefix } from "../../billing/usage-projection-key";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
 import {
@@ -12,6 +13,11 @@ import { parseProjectionSyncJobRow } from "./parsers";
 import { assertUpdated, executeOne, executeRows, jsonb } from "./query";
 import type { ProjectionSyncJobRow } from "./types";
 import { requireNonBlank, requirePositiveLimit } from "./validation";
+
+/** The coalescing usage job of a customer: its payload is materialized per delivery, then cleared. */
+const usageJob = drizzleSql`(jobs.idempotency_key = ${drizzleSql.raw(usageKeySqlPrefix)} || jobs.customer_id::text)`;
+/** A flagged follow-up restarts a non-usage job at once; a usage job keeps its payload and backoff. */
+const restartsAtOnce = drizzleSql`(jobs.reprojection_requested AND NOT ${usageJob})`;
 
 export class ProjectionJobBillingRepository extends RepositoryModule {
 	async claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]> {
@@ -145,7 +151,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 				locked_at = NULL,
 				locked_by = NULL,
 				last_error = NULL,
-				payload = CASE WHEN jobs.idempotency_key = 'usage:' || jobs.customer_id::text THEN NULL ELSE jobs.payload END,
+				payload = CASE WHEN ${usageJob} THEN NULL ELSE jobs.payload END,
 				reprojection_requested = false,
 				attempts = CASE
 					WHEN jobs.reprojection_requested THEN 0
@@ -182,14 +188,26 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 			UPDATE projection_sync_jobs jobs
 			SET
 				status = CASE
-					WHEN jobs.reprojection_requested AND jobs.idempotency_key <> 'usage:' || jobs.customer_id::text THEN 'pending'
+					WHEN ${restartsAtOnce} THEN 'pending'
 					WHEN ${nextAttemptAtIso}::timestamptz IS NULL THEN 'failed'
 					ELSE 'pending'
 				END,
-				attempts = CASE WHEN jobs.reprojection_requested AND jobs.idempotency_key <> 'usage:' || jobs.customer_id::text THEN 0 ELSE LEAST(jobs.attempts::bigint + 1, 2147483647)::integer END,
-				last_error = CASE WHEN jobs.reprojection_requested AND jobs.idempotency_key <> 'usage:' || jobs.customer_id::text THEN NULL ELSE ${lastError} END,
-				reprojection_requested = CASE WHEN jobs.idempotency_key = 'usage:' || jobs.customer_id::text THEN jobs.reprojection_requested ELSE false END,
-				next_attempt_at = CASE WHEN jobs.reprojection_requested AND jobs.idempotency_key <> 'usage:' || jobs.customer_id::text THEN now() ELSE COALESCE(${nextAttemptAtIso}::timestamptz, jobs.next_attempt_at) END,
+				attempts = CASE
+					WHEN ${restartsAtOnce} THEN 0
+					ELSE LEAST(jobs.attempts::bigint + 1, 2147483647)::integer
+				END,
+				last_error = CASE
+					WHEN ${restartsAtOnce} THEN NULL
+					ELSE ${lastError}
+				END,
+				reprojection_requested = CASE
+					WHEN ${usageJob} THEN jobs.reprojection_requested
+					ELSE false
+				END,
+				next_attempt_at = CASE
+					WHEN ${restartsAtOnce} THEN now()
+					ELSE COALESCE(${nextAttemptAtIso}::timestamptz, jobs.next_attempt_at)
+				END,
 				locked_at = NULL,
 				locked_by = NULL,
 				updated_at = now()
@@ -216,7 +234,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 					status = 'pending',
 					attempts = 0,
 					last_error = NULL,
-					reprojection_requested = CASE WHEN jobs.idempotency_key = 'usage:' || jobs.customer_id::text THEN jobs.reprojection_requested ELSE false END,
+					reprojection_requested = CASE WHEN ${usageJob} THEN jobs.reprojection_requested ELSE false END,
 					next_attempt_at = now(),
 					locked_at = NULL,
 					locked_by = NULL,

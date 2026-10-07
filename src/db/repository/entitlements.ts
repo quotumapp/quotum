@@ -11,6 +11,7 @@ import type {
 	ProjectionPayload,
 	ProjectionSyncReason,
 } from "../../billing/types";
+import { usageProjectionKey } from "../../billing/usage-projection-key";
 import { addUtcMonths } from "../../shared/cadence";
 import { reconcileDefaultPlanGrant } from "./default-plan-grants";
 import {
@@ -261,10 +262,6 @@ export async function nextProjectionSequence(
 		throw new Error(`projection sequence customer ${customerId} was not found`);
 	}
 	return { sequence: Number(row.projection_sequence), billingAccountId: row.billing_account_id };
-}
-
-export function usageProjectionKey(customerId: string): string {
-	return `usage:${customerId}`;
 }
 
 /**
