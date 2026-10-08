@@ -62,9 +62,10 @@ tool's error.
 Where a `/v1` operation requires an `Idempotency-Key`, the key holds 1 to 200 characters and is
 taken exactly as sent. A key with surrounding whitespace is refused on every operation, never
 trimmed: the trimmed key would be another caller identity. Invalid keys answer
-`400 INVALID_REQUEST`. The Paddle checkout route requires the key and the Stripe checkout route
-takes it optionally; both narrow it to letters, digits and `._:-` and answer
-`400 INVALID_IDEMPOTENCY_KEY`
+`400 INVALID_REQUEST`, except on the two checkout routes. The Paddle checkout route requires the key
+and answers a missing one with `400 PADDLE_CHECKOUT_INVALID`; the Stripe checkout route takes it
+optionally. A key supplied to either checkout route must use only letters, digits and `._:-`, or it
+answers `400 INVALID_IDEMPOTENCY_KEY`
 (see [subscriptions](subscriptions.md#paddle-fixed-plan-checkout)). The contract lists every query
 parameter an operation reads, including the admin list filters.
 

@@ -457,8 +457,9 @@ period stay until the subscription ends. To end access with the refund, cancel t
 well, in Stripe or with an immediate [cancellation](subscriptions.md#cancelling-and-uncancelling-a-subscription).
 
 Quotum still records the event and tells your backend. Neither the refund nor its payment names an
-invoice, so Quotum asks Stripe which invoice the payment settled (`GET /v1/invoice_payments`) and
-matches it to a subscription invoice recorded from `invoice.paid`. The store event is then
+invoice, so Quotum asks Stripe which invoice the payment settled, through Stripe's invoice payments
+list filtered by the payment intent, and matches it to a subscription invoice recorded from
+`invoice.paid`. The store event is then
 `processed` against that subscription, and one projection per refund or dispute carries a
 `reversal` fact with `creditAmount: 0`, the refund or dispute id as `transactionId`, the payment
 intent as `originalTransactionId` and the subscription's `productKey`, next to the
