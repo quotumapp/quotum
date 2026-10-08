@@ -85,6 +85,25 @@ describe("fake Stripe subscription creation", () => {
 	});
 });
 
+describe("fake Stripe invoice payments", () => {
+	it("names the invoice a PaymentIntent settled", async () => {
+		const client = fakeClient();
+		const { id } = await client.createInvoice({ customer: "cus_1" }, "key_invoice");
+		const paid = (await client.payInvoice(id, "key_pay")) as {
+			payments: { data: Array<{ payment: { payment_intent: string } }> };
+		};
+		client.attachInvoicePayment("pi_subscription", "in_subscription");
+
+		expect(
+			await client.findInvoiceIdForPaymentIntent(paid.payments.data[0].payment.payment_intent),
+		).toBe(id);
+		expect(await client.findInvoiceIdForPaymentIntent("pi_subscription")).toBe("in_subscription");
+		expect(await client.findInvoiceIdForPaymentIntent("pi_one_time")).toBeNull();
+		client.failNext("findInvoiceIdForPaymentIntent", new Error("denied"));
+		await expect(client.findInvoiceIdForPaymentIntent("pi_subscription")).rejects.toThrow("denied");
+	});
+});
+
 describe("fake Stripe Checkout sessions", () => {
 	it("answers an unknown session id the way stripe-node does", async () => {
 		const client = fakeClient();

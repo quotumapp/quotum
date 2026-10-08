@@ -43,6 +43,7 @@ import type {
 	RecordStoreKitTransactionProjectionInput,
 	RecordStripeCreditPurchaseProjectionInput,
 	RecordStripeCreditReversalProjectionInput,
+	RecordStripeInvoiceReversalProjectionInput,
 	RecordStripeSkippedEventInput,
 	RecordStripeSubscriptionProjectionInput,
 	StoreKitRecordingResult,
@@ -417,6 +418,15 @@ export class ProjectScopedBillingRepository {
 		input: RecordStripeCreditReversalProjectionInput,
 	): Promise<StripeRecordingResult> {
 		return await this.repository.recordStripeCreditReversalAndEnqueueProjection(
+			this.project,
+			input,
+		);
+	}
+
+	async recordStripeInvoiceReversalAndEnqueueProjection(
+		input: RecordStripeInvoiceReversalProjectionInput,
+	): Promise<StripeRecordingResult> {
+		return await this.repository.recordStripeInvoiceReversalAndEnqueueProjection(
 			this.project,
 			input,
 		);

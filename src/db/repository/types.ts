@@ -378,6 +378,12 @@ export interface RecordStripeCreditReversalProjectionInput {
 	replayStoreEventId?: string;
 }
 
+/** A reversal of a payment that Stripe attributes to an invoice instead of a one-time purchase. */
+export interface RecordStripeInvoiceReversalProjectionInput
+	extends RecordStripeCreditReversalProjectionInput {
+	invoiceId: string;
+}
+
 export interface RecordStripeSkippedEventInput {
 	eventType: string;
 	externalEventId: string | null;
@@ -400,10 +406,23 @@ export interface GooglePlayRecordingResult {
 	entitlements: EntitlementSnapshot | null;
 }
 
+/**
+ * Why a refund or dispute could not be applied. The replay worker stores it as the event's
+ * processing error, so an event that exhausts its retries names its cause.
+ */
+export type StripeReversalSkipReason =
+	/** No one-time purchase is recorded for the payment, and Stripe reports no invoice for it. */
+	| "stripe_reversal_payment_unmatched"
+	/** The payment settled a Stripe invoice that is not recorded against a subscription. */
+	| "stripe_reversal_invoice_unmatched"
+	/** Stripe could not be asked which invoice the payment settled. */
+	| "stripe_reversal_invoice_lookup_failed";
+
 export interface StripeRecordingResult {
 	processingStatus: "processed" | "skipped" | "ignored";
 	billingAccountId: string | null;
 	entitlements: EntitlementSnapshot | null;
+	skipReason?: StripeReversalSkipReason;
 }
 
 export interface QueryExecutor {

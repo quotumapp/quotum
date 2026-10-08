@@ -48,6 +48,7 @@ import type {
 	ProviderSubscriptionReconciliationRow,
 	RecordStripeCreditPurchaseProjectionInput,
 	RecordStripeCreditReversalProjectionInput,
+	RecordStripeInvoiceReversalProjectionInput,
 	RecordStripeSkippedEventInput,
 	RecordStripeSubscriptionProjectionInput,
 	StoreEventReplayJobRow,
@@ -55,6 +56,7 @@ import type {
 	StripeCheckoutRequestState,
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,
+	StripeReversalSkipReason,
 	StripeWebStoreProductRow,
 } from "../../db/repository";
 import { paymentSetupReconcileEventType } from "../../db/repository/store-events";
@@ -141,6 +143,8 @@ export interface StripeBillingClientDependency extends PaymentSetupClientDepende
 	expireCheckoutSession?(sessionId: string): Promise<unknown>;
 	createPortalSession(params: Stripe.BillingPortal.SessionCreateParams): Promise<{ url: string }>;
 	retrievePaymentIntent(id: string): Promise<Pick<Stripe.PaymentIntent, "id" | "latest_charge">>;
+	/** The invoice a PaymentIntent settled, or null for a payment made outside an invoice. */
+	findInvoiceIdForPaymentIntent?(paymentIntentId: string): Promise<string | null>;
 	retrieveCheckoutSession(sessionId: string): Promise<{
 		id: string;
 		status: string | null;
@@ -312,6 +316,10 @@ interface StripeBillingRepositoryDependency extends PaymentSetupRepositoryDepend
 		input: RecordStripeCreditReversalProjectionInput,
 	): Promise<StripeRecordingResult>;
 
+	recordStripeInvoiceReversalAndEnqueueProjection?(
+		input: RecordStripeInvoiceReversalProjectionInput,
+	): Promise<StripeRecordingResult>;
+
 	recordStripeSkippedEvent(input: RecordStripeSkippedEventInput): Promise<StripeRecordingResult>;
 }
 
@@ -360,6 +368,11 @@ export interface StripeWebhookResult {
 	readonly status: "processed" | "skipped" | "ignored";
 	readonly eventType: string;
 	readonly entitlements: unknown | null;
+}
+
+/** A webhook result plus why its recording was skipped, which only the replay worker reads. */
+interface StripeEventOutcome extends StripeWebhookResult {
+	readonly skipReason?: StripeReversalSkipReason;
 }
 
 type StripeCheckoutMode = "payment" | "subscription";
@@ -2041,7 +2054,8 @@ export class StripeBillingService
 				"STRIPE_ACCOUNT_MISMATCH",
 				400,
 			);
-		return this.processEvent(event);
+		const { status, eventType, entitlements } = await this.processEvent(event);
+		return { status, eventType, entitlements };
 	}
 
 	async replayStoreEvent(
@@ -2075,7 +2089,7 @@ export class StripeBillingService
 			return { status: "ignored", reason: "stripe_store_event_not_recordable" };
 		}
 
-		return { status: "retryable", reason: "stripe_recording_skipped" };
+		return { status: "retryable", reason: result.skipReason ?? "stripe_recording_skipped" };
 	}
 
 	async reconcileSubscription(
@@ -2176,7 +2190,7 @@ export class StripeBillingService
 	private async processEvent(
 		event: unknown,
 		replayStoreEventId?: string,
-	): Promise<StripeWebhookResult> {
+	): Promise<StripeEventOutcome> {
 		const parsedEvent = parseStripeEvent(event);
 		const paymentSetup = normalizePaymentSetupEvent(parsedEvent);
 		if (paymentSetup !== null) {
@@ -2235,7 +2249,7 @@ export class StripeBillingService
 	private async recordCommand(
 		command: NormalizedStripeCommand,
 		replayStoreEventId?: string,
-	): Promise<StripeWebhookResult> {
+	): Promise<StripeEventOutcome> {
 		switch (command.kind) {
 			case "ignored":
 				return { status: "ignored", eventType: command.eventType, entitlements: null };
@@ -2285,7 +2299,7 @@ export class StripeBillingService
 			case "credit_reversal":
 				return recordingResultToWebhookResult(
 					command.eventType,
-					await this.dependencies.repository.recordStripeCreditReversalAndEnqueueProjection(
+					await this.recordReversal(
 						toStripeCreditReversalRepositoryInput(
 							command,
 							this.projectionContract(),
@@ -2294,6 +2308,47 @@ export class StripeBillingService
 					),
 				);
 		}
+	}
+
+	/**
+	 * Reverses a one-time purchase, or records a refund or dispute of an invoice payment. An invoice
+	 * payment has no purchase row and the event does not name its invoice, so only Stripe can say
+	 * that the payment settled one. The first recording stores the event as skipped; when the lookup
+	 * fails or finds nothing it stays that way and the replay worker tries again.
+	 */
+	private async recordReversal(
+		input: RecordStripeCreditReversalProjectionInput,
+	): Promise<StripeRecordingResult> {
+		const { client, repository } = this.dependencies;
+		const reversal = await repository.recordStripeCreditReversalAndEnqueueProjection(input);
+		if (
+			reversal.skipReason !== "stripe_reversal_payment_unmatched" ||
+			client.findInvoiceIdForPaymentIntent === undefined ||
+			repository.recordStripeInvoiceReversalAndEnqueueProjection === undefined
+		) {
+			return reversal;
+		}
+		let invoiceId: string | null;
+		try {
+			invoiceId = await client.findInvoiceIdForPaymentIntent(input.paymentIntentId);
+		} catch (error) {
+			const skipped = await repository.recordStripeSkippedEvent({
+				eventType: input.eventType,
+				externalEventId: input.externalEventId,
+				transactionId: input.reversalId,
+				purchaseKind: null,
+				// Only the status: Stripe's message can carry a masked key.
+				processingError: `Stripe invoice lookup for the reversed payment failed${stripeStatusSuffix(error)}`,
+				rawPayload: input.rawPayload,
+				replayStoreEventId: input.replayStoreEventId,
+			});
+			return { ...skipped, skipReason: "stripe_reversal_invoice_lookup_failed" };
+		}
+		if (invoiceId === null) return reversal;
+		return await repository.recordStripeInvoiceReversalAndEnqueueProjection({
+			...input,
+			invoiceId,
+		});
 	}
 
 	private async recordNormalizationFailure(
@@ -2382,12 +2437,19 @@ function normalizeSupportedEvent(event: ParsedStripeEvent): NormalizedStripeComm
 function recordingResultToWebhookResult(
 	eventType: string,
 	result: StripeRecordingResult,
-): StripeWebhookResult {
+): StripeEventOutcome {
 	return {
 		status: result.processingStatus,
 		eventType,
 		entitlements: result.entitlements,
+		...(result.skipReason === undefined ? {} : { skipReason: result.skipReason }),
 	};
+}
+
+function stripeStatusSuffix(error: unknown): string {
+	const status =
+		typeof error === "object" && error !== null && "statusCode" in error ? error.statusCode : null;
+	return typeof status === "number" ? ` with status ${status}` : "";
 }
 
 function toStripeCreditPurchaseRepositoryInput(

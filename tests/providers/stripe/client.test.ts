@@ -95,6 +95,34 @@ describe("StripeBillingClient", () => {
 		expect(calls).toEqual([{ method: "paymentIntents.retrieve", id: "pi_123" }]);
 	});
 
+	it("finds the invoice a PaymentIntent settled through its invoice payment", async () => {
+		const { calls, stripe } = stripeFixture();
+		const invoices: Array<string | { id: string }> = ["in_123", { id: "in_expanded" }];
+		const client = new StripeBillingClient(buildStripeConfig(stripeEnv), {
+			...stripe,
+			invoicePayments: {
+				list(params: Stripe.InvoicePaymentListParams) {
+					calls.push({ method: "invoicePayments.list", params });
+					const invoice = invoices.shift();
+					return Promise.resolve({
+						data: invoice === undefined ? [] : [{ invoice }],
+					} as Stripe.ApiList<Stripe.InvoicePayment>);
+				},
+			},
+		});
+
+		expect(await client.findInvoiceIdForPaymentIntent("pi_123")).toBe("in_123");
+		expect(await client.findInvoiceIdForPaymentIntent("pi_123")).toBe("in_expanded");
+		expect(await client.findInvoiceIdForPaymentIntent("pi_one_time")).toBeNull();
+		expect(calls[0]).toEqual({
+			method: "invoicePayments.list",
+			params: { payment: { type: "payment_intent", payment_intent: "pi_123" }, limit: 1 },
+		});
+		await expect(stripeFixture().client.findInvoiceIdForPaymentIntent("pi_123")).rejects.toThrow(
+			"Invoice payments are unavailable",
+		);
+	});
+
 	it("builds config from Stripe env", () => {
 		const config = buildStripeConfig(stripeEnv);
 

@@ -230,7 +230,8 @@ What a cancellation does, on Stripe and through the customer portal alike:
 - An **immediate** cancel ends the subscription and its access entitlements — boolean features,
   seats and postpaid overage — at once, and asks the provider for no proration credit.
 - Plan **allocations already granted** for the paid period stay spendable until their own expiry.
-  Allocations are reversed only when money goes back, through the existing `refund.sync` reversal.
+  [Refunding the subscription's payment](providers.md#refunds-of-subscription-payments) does not
+  reverse them either; `refund.sync` reverses the credits of one-time purchases only.
 - **Postpaid usage is not accelerated.** Overage accrued in the open period settles when that usage
   window ends, on the schedule it already had; the invoice is then billed to the customer against
   their saved default payment method, because the subscription is gone.
