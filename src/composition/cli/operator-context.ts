@@ -78,6 +78,20 @@ export function operatorActor(options: ParsedArguments["options"], env: Environm
 	return actor;
 }
 
+const memberOverrideReasonPattern = /^[^\p{Cc}]{1,200}$/u;
+
+/**
+ * Why a change reaches an organization whose members manage it: `--member-override-reason`. Audit
+ * events record it, and an organization with members is read-only to operators without it.
+ */
+export function memberOverrideReason(options: ParsedArguments["options"]): string | undefined {
+	const reason = options.get("member-override-reason")?.trim();
+	if (reason === undefined) return undefined;
+	if (!memberOverrideReasonPattern.test(reason))
+		throw new CliUsageError("--member-override-reason must be 1-200 printable characters.");
+	return reason;
+}
+
 /** `--request-key` makes a retry safe; without one, each run gets a new key and prints it. */
 export function requestKey(options: ParsedArguments["options"]): string {
 	const key = options.get("request-key") ?? `cli-${randomUUID()}`;
@@ -206,7 +220,11 @@ export interface OperatorContext {
 	readonly repository: ConnectionRepository;
 	readonly lifecycle: ConnectionLifecycle;
 	target(instanceKey: string): Promise<OperatorTarget>;
-	gate(target: OperatorTarget, actor: string): ConnectionGate;
+	gate(
+		target: OperatorTarget,
+		actor: string,
+		options?: { memberOverrideReason?: string },
+	): ConnectionGate;
 	close(): Promise<void>;
 }
 
@@ -267,8 +285,11 @@ export async function openOperatorContext(
 				environment: context.environment,
 			};
 		},
-		gate: (target, actor) =>
-			operatorConnectionGate(actor, target, { allowMemberOrganizations: !merchantEnabled }),
+		gate: (target, actor, options) =>
+			operatorConnectionGate(actor, target, {
+				allowMemberOrganizations: !merchantEnabled,
+				memberOverrideReason: options?.memberOverrideReason,
+			}),
 		close: () => client.close(),
 	};
 }

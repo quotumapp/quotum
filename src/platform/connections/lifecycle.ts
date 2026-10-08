@@ -15,10 +15,13 @@ import { type ConnectionKind, ConnectionRepository, type ConnectionVersion } fro
 /** How long a validation stays fresh enough to commit a version or activate an environment. */
 export const validationWindowMs = 900_000;
 
-/** Who changes a connection or credential: a merchant member, or a named operator command. */
+/**
+ * Who changes a connection or credential: a merchant member, or a named operator command, which
+ * may carry the reason it changed an organization whose members manage it.
+ */
 export type ConnectionActor =
 	| { kind: "principal"; principalId: string }
-	| { kind: "operator"; name: string };
+	| { kind: "operator"; name: string; memberOverrideReason?: string };
 
 /**
  * Access control for one target environment. The lifecycle calls each hook at a fixed point of
@@ -408,7 +411,16 @@ export class ConnectionLifecycle {
 			organizationId: await gate.organizationId(tx),
 			action,
 			target,
-			metadata: actor.kind === "principal" ? metadata : { ...metadata, operator: actor.name },
+			metadata:
+				actor.kind === "principal"
+					? metadata
+					: {
+							...metadata,
+							operator: actor.name,
+							...(actor.memberOverrideReason === undefined
+								? {}
+								: { memberOverrideReason: actor.memberOverrideReason }),
+						},
 		});
 	}
 }

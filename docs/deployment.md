@@ -38,6 +38,14 @@ working. Each command runs as its own process, reads its settings from the envir
 usage and the settings it reads without running it; an unknown command or unexpected arguments exit
 `64` before anything runs.
 
+This is the host operator's tool, not a merchant's: the commands that manage connections and
+credentials open the database directly and need its connection string and the service's secrets, so
+they belong wherever the service runs. While the merchant platform runs, an organization with
+members is managed by them in the merchant application. Operators may still read it with
+`quotum connections list` and `quotum credentials status`, and change it only by naming the reason
+with `--member-override-reason <why>`, which the audit event records beside `--actor`. A headless
+deployment has no members to defer to and needs no reason.
+
 | Command | Purpose |
 | --- | --- |
 | `quotum migrate` / `quotum migrate status` | Apply pending migrations, or verify the applied checksums. |
@@ -49,8 +57,8 @@ usage and the settings it reads without running it; an unknown command or unexpe
 | `quotum catalog provision` | Import the store products in `BILLING_CATALOG_IMPORT_JSON`. |
 | `quotum catalog status` / `diff <file>` / `push <file> [--force]` | [Catalog automation](catalog.md) over HTTP. |
 | `quotum catalog format <file> [--write]` | Print a catalog file in the [canonical spelling](catalog.md#canonical-intent), or rewrite it; needs no API or database. |
-| `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play, sandbox Paddle and projections. |
-| `quotum credentials status` / `rotate` / `revoke` | Inspect, [rotate](operations.md#project-credentials) or revoke an instance's project API keys. |
+| `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play, sandbox Paddle and projections. Changes to an organization with members need `--member-override-reason`. |
+| `quotum credentials status` / `rotate` / `revoke` | Inspect, [rotate](operations.md#project-credentials) or revoke an instance's project API keys. Changes to an organization with members need `--member-override-reason`. |
 | `quotum connections rotate-secrets` | [Encryption-key rotation](#encryption-key-rotation). |
 | `quotum merchant service-principal <name>` | The [merchant proxy service principal](#merchant-proxy-service-principal). Refused in headless mode. |
 | `quotum mcp` | The read-only [stdio MCP server](mcp.md#run-over-stdio). |

@@ -41,6 +41,15 @@ describe("quotum command resolution", () => {
 		}
 	});
 
+	it("documents the reason an operator gives for changing a member organization", () => {
+		for (const name of ["connections", "credentials"]) {
+			const details = quotumCommands.find(
+				(command) => command.path.length === 1 && command.path[0] === name,
+			)?.details;
+			expect(details?.join(" ")).toContain("--member-override-reason <why>");
+		}
+	});
+
 	it.each([
 		[["migrate"], "migrate.ts", []],
 		[["migrate", "status"], "migrate.ts", ["status"]],

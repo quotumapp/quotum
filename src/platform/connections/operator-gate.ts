@@ -10,22 +10,37 @@ export interface OperatorConnectionTarget {
 	environment: "sandbox" | "production";
 }
 
+export interface OperatorGateOptions {
+	/** A headless deployment has no merchants, so members never stand in an operator's way. */
+	allowMemberOrganizations: boolean;
+	/** Why the operator changes an organization its members manage; audited with each change. */
+	memberOverrideReason?: string;
+}
+
 /**
  * The gate for operator commands, which hold database access already, so nothing is confirmed.
  * Every transaction re-reads the instance with the merchant gate's filters and requires an active
  * organization. While the merchant platform runs, an organization that has members is managed by
- * them, so operators may act only on organizations nobody has joined.
+ * them: operators may read it, and change it only with a stated reason.
  */
 export function operatorConnectionGate(
 	operator: string,
 	target: OperatorConnectionTarget,
-	{ allowMemberOrganizations }: { allowMemberOrganizations: boolean },
+	{ allowMemberOrganizations, memberOverrideReason }: OperatorGateOptions,
 ): ConnectionGate {
+	const mayChangeMemberOrganizations =
+		allowMemberOrganizations || memberOverrideReason !== undefined;
 	return {
-		actor: { kind: "operator", name: operator },
+		actor: {
+			kind: "operator",
+			name: operator,
+			...(memberOverrideReason === undefined ? {} : { memberOverrideReason }),
+		},
 		environment: target.environment,
-		async instance(sql) {
-			await assertOperableOrganization(sql, target.organizationId, allowMemberOrganizations);
+		async instance(sql, write) {
+			await assertOperableOrganization(sql, target.organizationId, {
+				requireNoMembers: write && !mayChangeMemberOrganizations,
+			});
 			const instance = (await sql.instances.forProject(target.platformProjectId)).find(
 				(candidate) =>
 					candidate.id === target.instanceId &&
@@ -44,8 +59,8 @@ export function operatorConnectionGate(
 				throw new MerchantError("CONTEXT_UNAVAILABLE", "This environment is unavailable.", 404);
 			// Checked again under the lock: a membership accepted after instance() ran shows here, and
 			// a new one waits for this transaction, because its foreign key locks the organization row.
-			if (!allowMemberOrganizations)
-				await assertOperableOrganization(tx, target.organizationId, false);
+			if (!mayChangeMemberOrganizations)
+				await assertOperableOrganization(tx, target.organizationId, { requireNoMembers: true });
 		},
 		async confirm() {},
 		async organizationId() {
@@ -54,18 +69,22 @@ export function operatorConnectionGate(
 	};
 }
 
-async function assertOperableOrganization(
+/**
+ * Requires an active organization and, when `requireNoMembers` is set, one nobody has joined.
+ * Other operator commands that change what members manage use it with the same reason rule.
+ */
+export async function assertOperableOrganization(
 	sql: MerchantSql,
 	organizationId: string,
-	allowMemberOrganizations: boolean,
+	{ requireNoMembers }: { requireNoMembers: boolean },
 ): Promise<void> {
 	const [organization] = await sql<
 		{ status: string; has_members: boolean }[]
 	>`SELECT status, EXISTS (SELECT 1 FROM platform_memberships WHERE organization_id=${organizationId}) AS has_members FROM platform_organizations WHERE id=${organizationId}`;
 	if (organization?.status !== "active")
 		throw new MerchantError("CONTEXT_UNAVAILABLE", "This environment is unavailable.", 404);
-	if (organization.has_members && !allowMemberOrganizations)
+	if (organization.has_members && requireNoMembers)
 		throw new Error(
-			"This organization has members, who manage its connections and credentials in the merchant application",
+			"This organization has members, who manage its connections and credentials in the merchant application. Reads need no flag; to change it anyway pass --member-override-reason <why>.",
 		);
 }

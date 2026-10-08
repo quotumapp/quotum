@@ -105,7 +105,8 @@ lost response cannot be recovered; rotate instead.
 Rotate through merchant management: `POST /api/platform/provisioning/{id}/rotate` for onboarding
 sandbox credentials, or `POST /api/platform/environments/credentials/rotate` for either environment.
 Production rotation requires a fresh step-up grant. Without the merchant application, run
-`quotum credentials rotate <instance> --access full --credentials-out <new-file>` with `--actor`.
+`quotum credentials rotate <instance> --access full --credentials-out <new-file>` with `--actor`;
+an organization whose members manage it also needs `--member-override-reason <why>`.
 It writes the new key in the platform bootstrap's file format and never prints it. If the file
 cannot be written, nothing is rotated. Rotation revokes the previous credential in the same
 transaction, so the replaced key is rejected from the next request. The database clock dates both
