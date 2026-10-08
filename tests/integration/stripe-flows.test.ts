@@ -27,6 +27,7 @@ import {
 	stripeEvent,
 	stripeRefundedChargeObject,
 	stripeRefundObject,
+	stripeSubscriptionInvoiceObject,
 	stripeSubscriptionObject,
 	stripeSubscriptionPeriod,
 } from "./helpers/fake-provider-clients";
@@ -3852,48 +3853,6 @@ function verifiedStripeEvent(
 	id: string,
 ): Record<string, unknown> {
 	return { id, type, created, data: { object } };
-}
-
-/** A paid subscription invoice for sub_1 carrying the original Checkout metadata. */
-function stripeSubscriptionInvoiceObject(
-	period: { start: number; end: number },
-	overrides: DeepPartial<Stripe.Invoice> = {},
-) {
-	const metadata = {
-		billingAccountId: "integration_user",
-		externalProductId: "prod_stripe_premium",
-		externalPriceId: "price_premium_monthly",
-		productKey: "premium_monthly",
-		purchaseKind: "subscription",
-	};
-	return {
-		id: "in_subscription",
-		object: "invoice",
-		customer: "cus_integration",
-		status: "paid",
-		created: period.start,
-		amount_paid: 999,
-		currency: "usd",
-		parent: { subscription_details: { subscription: "sub_1", metadata } },
-		lines: {
-			data: [
-				{
-					id: "il_subscription",
-					parent: {
-						subscription_item_details: {
-							subscription: "sub_1",
-							subscription_item: "si_integration",
-						},
-					},
-					pricing: {
-						price_details: { product: "prod_stripe_premium", price: "price_premium_monthly" },
-					},
-					period,
-				},
-			],
-		},
-		...overrides,
-	} satisfies DeepPartial<Stripe.Invoice>;
 }
 
 async function stripeSubscriptionLifecycle(sql: SQL): Promise<{

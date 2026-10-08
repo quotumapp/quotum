@@ -39,6 +39,7 @@ describe("projection delivery contract", () => {
 			"stripe_subscription_cancel_scheduled",
 			"stripe_subscription_ended",
 			"stripe_subscription_purchase",
+			"stripe_subscription_refund",
 			"stripe_subscription_renewal",
 			"stripe_trial_ending",
 			"stripe_trial_started",

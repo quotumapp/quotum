@@ -93,7 +93,7 @@
       "projectKey": "acme",
       "reason": "provider_webhook",
       "schemaVersion": 1,
-      "sequence": 3,
+      "sequence": 4,
       "subscription": {
         "cancelAtPeriodEnd": true,
         "cancellationReason": "cancellation_requested",
@@ -143,7 +143,7 @@
       "projectKey": "acme",
       "reason": "provider_webhook",
       "schemaVersion": 1,
-      "sequence": 4,
+      "sequence": 5,
       "subscription": {
         "cancelAtPeriodEnd": false,
         "cancellationReason": "cancellation_requested",
@@ -209,6 +209,66 @@
       }
     },
     "description": "A new Stripe subscription is active after checkout. Deliveries about a subscription carry the subscription fact and no purchase fact. planKey is null here because this subscription is not on a catalog plan; one that is carries its pinned plan's key."
+  },
+  "stripe_subscription_refund": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [
+          {
+            "active": true,
+            "expiresAt": "2026-12-01T09:30:00.000Z",
+            "key": "premium",
+            "metadata": {
+              "channel": "web",
+              "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+              "planKey": null,
+              "productId": "0192f3a1-6b2d-7f40-8c11-2e3f4a5b6c7d",
+              "productKey": "premium_monthly",
+              "provider": "stripe",
+              "source": "subscription",
+              "status": "active",
+              "storeProductId": "0192f3a1-6b9f-7a52-b3c4-d5e6f7a8b9c0",
+              "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+            }
+          }
+        ],
+        "generatedAt": "2026-11-03T10:15:42.207Z"
+      },
+      "generatedAt": "2026-11-03T10:15:42.207Z",
+      "idempotencyKey": "stripe:refund:re_3QaK4ExampleAcme:reversal",
+      "jobId": "0192f3a2-0009-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "reason": "provider_webhook",
+      "reversal": {
+        "channel": "web",
+        "creditAmount": 0,
+        "originalTransactionId": "pi_3QaJ2ExampleAcme",
+        "productKey": "premium_monthly",
+        "provider": "stripe",
+        "reason": "refund",
+        "reversedAt": "2026-11-03T10:15:40.000Z",
+        "transactionId": "re_3QaK4ExampleAcme"
+      },
+      "schemaVersion": 1,
+      "sequence": 3,
+      "subscription": {
+        "cancelAtPeriodEnd": false,
+        "cancellationReason": null,
+        "channel": "web",
+        "expiresAt": "2026-12-01T09:30:00.000Z",
+        "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+        "planKey": null,
+        "productKey": "premium_monthly",
+        "provider": "stripe",
+        "providerStatus": "active",
+        "status": "active",
+        "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+      }
+    },
+    "description": "A payment of the subscription was refunded. Stripe keeps the subscription running, so nothing is revoked: the reversal carries creditAmount 0, names the refund and the payment intent, and arrives with the subscription fact. Cancel the subscription to end access."
   },
   "stripe_subscription_renewal": {
     "delivery": {
