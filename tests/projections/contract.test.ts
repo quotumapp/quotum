@@ -34,6 +34,9 @@ describe("projection delivery contract", () => {
 			JSON.parse(JSON.stringify(projectionDeliveryExamples)),
 		);
 		expect(Object.keys(publishedDeliveryExamples)).toEqual([
+			"apple_subscription_purchase",
+			"google_consumable_purchase",
+			"google_subscription_purchase",
 			"stripe_one_time_purchase",
 			"stripe_one_time_refund",
 			"stripe_subscription_cancel_scheduled",
@@ -43,6 +46,7 @@ describe("projection delivery contract", () => {
 			"stripe_subscription_renewal",
 			"stripe_trial_ending",
 			"stripe_trial_started",
+			"usage_snapshot",
 		]);
 	});
 
