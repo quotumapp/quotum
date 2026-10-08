@@ -114,6 +114,34 @@ export const projectionDeliveryExamples: Record<string, ProjectionDeliveryExampl
 			sequence: 2,
 		},
 	},
+	stripe_subscription_refund: {
+		description:
+			"A payment of the subscription was refunded. Stripe keeps the subscription running, so nothing is revoked: the reversal carries creditAmount 0, names the refund and the payment intent, and arrives with the subscription fact. Cancel the subscription to end access.",
+		delivery: {
+			schemaVersion: 1,
+			projectKey,
+			jobId: "0192f3a2-0009-7a10-8b20-c30d40e50f60",
+			idempotencyKey: "stripe:refund:re_3QaK4ExampleAcme:reversal",
+			...snapshot("2026-11-03T10:15:42.207Z", {
+				active: true,
+				expiresAt: "2026-12-01T09:30:00.000Z",
+				metadata: subscriptionSource("active"),
+			}),
+			reason: "provider_webhook",
+			reversal: {
+				provider: "stripe",
+				channel: "web",
+				reason: "refund",
+				transactionId: "re_3QaK4ExampleAcme",
+				originalTransactionId: "pi_3QaJ2ExampleAcme",
+				productKey: "premium_monthly",
+				creditAmount: 0,
+				reversedAt: "2026-11-03T10:15:40.000Z",
+			},
+			subscription: subscription({ expiresAt: "2026-12-01T09:30:00.000Z" }),
+			sequence: 3,
+		},
+	},
 	stripe_subscription_cancel_scheduled: {
 		description:
 			"The customer cancelled at period end. Access continues: status stays active, and cancelAtPeriodEnd and cancellationReason explain the pending end.",
@@ -133,7 +161,7 @@ export const projectionDeliveryExamples: Record<string, ProjectionDeliveryExampl
 				cancelAtPeriodEnd: true,
 				cancellationReason: "cancellation_requested",
 			}),
-			sequence: 3,
+			sequence: 4,
 		},
 	},
 	stripe_subscription_ended: {
@@ -156,7 +184,7 @@ export const projectionDeliveryExamples: Record<string, ProjectionDeliveryExampl
 				expiresAt: "2026-12-01T09:30:00.000Z",
 				cancellationReason: "cancellation_requested",
 			}),
-			sequence: 4,
+			sequence: 5,
 		},
 	},
 	stripe_trial_started: {

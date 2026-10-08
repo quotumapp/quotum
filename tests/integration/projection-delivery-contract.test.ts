@@ -10,6 +10,7 @@ import {
 	createFakeStripeBillingClient,
 	stripeCheckoutSessionObject,
 	stripeRefundObject,
+	stripeSubscriptionInvoiceObject,
 	stripeSubscriptionObject,
 	stripeSubscriptionPeriod,
 } from "./helpers/fake-provider-clients";
@@ -86,8 +87,11 @@ localDescribe("projection delivery contract", () => {
 		await context.sql.close();
 	});
 
-	/** Applies one Stripe event, delivers what it queued, and holds it to the published example. */
-	function stripeFlow() {
+	/**
+	 * `deliver` applies one Stripe event, delivers what it queued, and holds it to the published
+	 * example; `apply` does the same for an event that has no example of its own.
+	 */
+	function stripeFlow(clientOptions: Parameters<typeof createFakeStripeBillingClient>[0] = {}) {
 		const service = new StripeBillingService({
 			config: {
 				projectKey: "acme",
@@ -96,14 +100,14 @@ localDescribe("projection delivery contract", () => {
 				checkoutCancelUrl: "https://app.integration.test/billing",
 				portalReturnUrl: "https://app.integration.test/account/billing",
 			},
-			client: createFakeStripeBillingClient().client,
+			client: createFakeStripeBillingClient(clientOptions).client,
 			repository: context.repository.forProject(integrationProjectContext("acme")),
 		});
 		let created = Math.floor(Date.now() / 1000) - 3600;
-		return async (example: string, type: string, object: Delivery): Promise<Delivery> => {
+		const apply = async (name: string, type: string, object: Delivery): Promise<Delivery> => {
 			created += 10;
 			await service.handleVerifiedAppEvent({
-				id: `evt_${example}`,
+				id: `evt_${name}`,
 				type,
 				created,
 				data: { object },
@@ -114,8 +118,11 @@ localDescribe("projection delivery contract", () => {
 				repository: context.repository,
 				fetch: projection.fetch,
 			});
-			expect(projection.requests).toHaveLength(1);
-			const delivery = projection.requests[0].body;
+			expect([name, projection.requests.length]).toEqual([name, 1]);
+			return projection.requests[0].body;
+		};
+		const deliver = async (example: string, type: string, object: Delivery): Promise<Delivery> => {
+			const delivery = await apply(example, type, object);
 			const published = publishedDeliveryExamples[example].delivery;
 
 			validateDocumentedDelivery(delivery);
@@ -124,11 +131,14 @@ localDescribe("projection delivery contract", () => {
 			expect([example, facts(delivery)]).toEqual([example, facts(published)]);
 			return delivery;
 		};
+		return { apply, deliver };
 	}
 
 	// capability: subscription.sync
 	it("publishes what a Stripe subscription delivers from purchase to its end", async () => {
-		const deliver = stripeFlow();
+		const { apply, deliver } = stripeFlow({
+			invoicePayments: { pi_subscription: "in_subscription" },
+		});
 		const start = Math.floor(Date.now() / 1000) - 86_400;
 		const renewed = start + 30 * 86_400;
 		const period = stripeSubscriptionPeriod(start, renewed);
@@ -139,10 +149,21 @@ localDescribe("projection delivery contract", () => {
 			"customer.subscription.created",
 			stripeSubscriptionObject(period),
 		);
+		// The paid invoice is what a later refund of its payment is attributed to.
+		await apply(
+			"invoice_paid",
+			"invoice.paid",
+			stripeSubscriptionInvoiceObject({ start, end: renewed }),
+		);
 		const renewal = await deliver(
 			"stripe_subscription_renewal",
 			"customer.subscription.updated",
 			stripeSubscriptionObject(nextPeriod),
+		);
+		const refund = await deliver(
+			"stripe_subscription_refund",
+			"refund.created",
+			stripeRefundObject({ id: "re_subscription", payment_intent: "pi_subscription", amount: 999 }),
 		);
 		await deliver(
 			"stripe_subscription_cancel_scheduled",
@@ -166,7 +187,11 @@ localDescribe("projection delivery contract", () => {
 		expect(purchase.idempotencyKey).toBe(
 			"stripe:subscription:sub_1:customer.subscription.created:evt_stripe_subscription_purchase:projection",
 		);
-		expect([purchase.sequence, renewal.sequence, ended.sequence]).toEqual([1, 2, 4]);
+		expect([purchase.sequence, renewal.sequence, refund.sequence, ended.sequence]).toEqual([
+			1, 3, 4, 6,
+		]);
+		expect(refund.idempotencyKey).toBe("stripe:refund:re_subscription:reversal");
+		expect((refund.reversal as Delivery).originalTransactionId).toBe("pi_subscription");
 		expect((renewal.subscription as Delivery).expiresAt).toBe(
 			new Date((renewed + 30 * 86_400) * 1000).toISOString(),
 		);
@@ -174,7 +199,7 @@ localDescribe("projection delivery contract", () => {
 
 	// capability: catalog.trial
 	it("publishes what a Stripe trial delivers when it starts and before it ends", async () => {
-		const deliver = stripeFlow();
+		const { deliver } = stripeFlow();
 		const now = Math.floor(Date.now() / 1000);
 		const trialing = stripeSubscriptionObject({
 			status: "trialing",
@@ -197,7 +222,7 @@ localDescribe("projection delivery contract", () => {
 
 	// capability: refund.sync
 	it("publishes what a one-time Stripe purchase and its refund deliver", async () => {
-		const deliver = stripeFlow();
+		const { deliver } = stripeFlow();
 
 		const purchase = await deliver(
 			"stripe_one_time_purchase",
