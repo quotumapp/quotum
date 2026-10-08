@@ -124,6 +124,7 @@ import type {
 	RecordStoreKitTransactionProjectionInput,
 	RecordStripeCreditPurchaseProjectionInput,
 	RecordStripeCreditReversalProjectionInput,
+	RecordStripeInvoiceReversalProjectionInput,
 	RecordStripeSkippedEventInput,
 	RecordStripeSubscriptionProjectionInput,
 	StoreEventReplayJobRow,
@@ -173,6 +174,7 @@ export type {
 	RecordStoreKitTransactionProjectionInput,
 	RecordStripeCreditPurchaseProjectionInput,
 	RecordStripeCreditReversalProjectionInput,
+	RecordStripeInvoiceReversalProjectionInput,
 	RecordStripeSkippedEventInput,
 	RecordStripeSubscriptionProjectionInput,
 	StoreEventReplayJobRow,
@@ -181,6 +183,7 @@ export type {
 	StripeCheckoutRequestState,
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,
+	StripeReversalSkipReason,
 	StripeWebStoreProductRow,
 	TrialEndingNoticeResult,
 } from "./repository/types";
@@ -933,6 +936,13 @@ export class BillingRepository {
 		input: RecordStripeCreditReversalProjectionInput,
 	): Promise<StripeRecordingResult> {
 		return await this.stripe.recordStripeCreditReversalAndEnqueueProjection(project, input);
+	}
+
+	async recordStripeInvoiceReversalAndEnqueueProjection(
+		project: ProjectInstanceContext,
+		input: RecordStripeInvoiceReversalProjectionInput,
+	): Promise<StripeRecordingResult> {
+		return await this.stripe.recordStripeInvoiceReversalAndEnqueueProjection(project, input);
 	}
 
 	async recordStripeSkippedEvent(

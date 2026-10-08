@@ -54,6 +54,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	private readonly invoices = new Map<string, FakeInvoice>();
 	private readonly invoicesByIdempotencyKey = new Map<string, FakeInvoice>();
 	private readonly invoiceLineKeys = new Set<string>();
+	private readonly invoicePayments = new Map<string, string>();
 	private readonly setupIntents = new Map<string, FakeSetupIntent>();
 	/** Every default-payment-method write, so a test can assert exactly what was promoted. */
 	readonly defaultPaymentMethodWrites: Array<{
@@ -251,6 +252,19 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	async retrievePaymentIntent(id: string) {
 		this.throwIfFailed("retrievePaymentIntent");
 		return { id, latest_charge: `ch_fake_${digest(id).slice(0, 24)}` };
+	}
+
+	/** Declares that a PaymentIntent settled an invoice, as a subscription's payment does. */
+	attachInvoicePayment(paymentIntentId: string, invoiceId: string): void {
+		this.invoicePayments.set(paymentIntentId, invoiceId);
+	}
+
+	async findInvoiceIdForPaymentIntent(paymentIntentId: string): Promise<string | null> {
+		this.throwIfFailed("findInvoiceIdForPaymentIntent");
+		for (const invoice of this.invoices.values()) {
+			if (invoice.paymentIntentId === paymentIntentId) return invoice.id;
+		}
+		return this.invoicePayments.get(paymentIntentId) ?? null;
 	}
 
 	async retrieveCheckoutSession(sessionId: string) {

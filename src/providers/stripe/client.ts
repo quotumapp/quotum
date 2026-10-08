@@ -21,6 +21,9 @@ export type StripeCheckoutSessionCreateParams = Stripe.Checkout.SessionCreatePar
 
 interface StripeClientLike {
 	paymentIntents: { retrieve(id: string): Promise<Stripe.PaymentIntent> };
+	invoicePayments?: {
+		list(params: Stripe.InvoicePaymentListParams): Promise<Stripe.ApiList<Stripe.InvoicePayment>>;
+	};
 	customers: {
 		create(
 			params: Stripe.CustomerCreateParams,
@@ -239,6 +242,21 @@ export class StripeBillingClient {
 
 	retrievePaymentIntent(id: string) {
 		return this.stripe.paymentIntents.retrieve(id);
+	}
+
+	/**
+	 * The pinned API no longer names the invoice on a PaymentIntent, charge or refund; the invoice
+	 * payment that references the PaymentIntent does.
+	 * https://docs.stripe.com/changelog/basil/2025-03-31/add-support-for-multiple-partial-payments-on-invoices
+	 */
+	async findInvoiceIdForPaymentIntent(paymentIntentId: string): Promise<string | null> {
+		if (!this.stripe.invoicePayments) throw new Error("Invoice payments are unavailable");
+		const payments = await this.stripe.invoicePayments.list({
+			payment: { type: "payment_intent", payment_intent: paymentIntentId },
+			limit: 1,
+		});
+		const invoice = payments.data[0]?.invoice;
+		return typeof invoice === "string" ? invoice : (invoice?.id ?? null);
 	}
 
 	retrieveCheckoutSession(sessionId: string) {

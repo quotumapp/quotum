@@ -7,6 +7,7 @@ import type {
 	StoreEventReplayJobRow,
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,
+	StripeReversalSkipReason,
 	StripeWebStoreProductRow,
 } from "../../../src/db/repository";
 import { STRIPE_LIVE_READ_ORDER_MARGIN_SECONDS } from "../../../src/providers/stripe/normalizer";
@@ -76,6 +77,8 @@ function serviceFixture(
 		expireRace?: boolean;
 		retrievedSubscription?: Record<string, unknown>;
 		recordingResult?: "processed" | "skipped" | "ignored";
+		reversalSkipReason?: StripeReversalSkipReason;
+		paymentInvoice?: string | Error;
 		customerId?: string;
 		existingCustomerId?: string | null;
 		linkedCustomerId?: string;
@@ -159,6 +162,11 @@ function serviceFixture(
 					id,
 					latest_charge: overrides.latestCharge === undefined ? "ch_123" : overrides.latestCharge,
 				};
+			},
+			async findInvoiceIdForPaymentIntent(paymentIntentId) {
+				calls.push({ method: "findInvoiceIdForPaymentIntent", paymentIntentId });
+				if (overrides.paymentInvoice instanceof Error) throw overrides.paymentInvoice;
+				return overrides.paymentInvoice ?? null;
 			},
 			retrieveCheckoutSession(sessionId) {
 				calls.push({ method: "retrieveCheckoutSession", sessionId });
@@ -320,6 +328,20 @@ function serviceFixture(
 			},
 			recordStripeCreditReversalAndEnqueueProjection(input) {
 				calls.push({ method: "recordStripeCreditReversalAndEnqueueProjection", input });
+				repositoryInputs.push(input);
+				return Promise.resolve(
+					overrides.reversalSkipReason === undefined
+						? recordingResult()
+						: {
+								processingStatus: "skipped",
+								billingAccountId: null,
+								entitlements: null,
+								skipReason: overrides.reversalSkipReason,
+							},
+				);
+			},
+			recordStripeInvoiceReversalAndEnqueueProjection(input) {
+				calls.push({ method: "recordStripeInvoiceReversalAndEnqueueProjection", input });
 				repositoryInputs.push(input);
 				return Promise.resolve(recordingResult());
 			},
@@ -2079,6 +2101,102 @@ describe("StripeBillingService", () => {
 		expect(result).toEqual({
 			status: "retryable",
 			reason: "stripe_recording_skipped",
+		});
+	});
+
+	// capability: refund.sync
+	it("records a reversal against the invoice its payment settled", async () => {
+		const { calls, repositoryInputs, service } = serviceFixture({
+			webhookEvent: stripeEvent("refund.created", refundObject(), "evt_refund"),
+			reversalSkipReason: "stripe_reversal_payment_unmatched",
+			paymentInvoice: "in_123",
+		});
+
+		const result = await service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+
+		expect(result).toEqual({
+			status: "processed",
+			eventType: "refund.created",
+			entitlements: entitlementSnapshot,
+		});
+		expect(calls).toContainEqual({
+			method: "findInvoiceIdForPaymentIntent",
+			paymentIntentId: "pi_123",
+		});
+		expect(repositoryInputs[1]).toMatchObject({
+			invoiceId: "in_123",
+			reversalReason: "refund",
+			reversalId: "re_123",
+			paymentIntentId: "pi_123",
+			externalEventId: "evt_refund",
+			projectionIdempotencyKey: "stripe:refund:re_123:reversal",
+		});
+	});
+
+	// capability: refund.sync
+	it("asks Stripe for an invoice only when a reversal matched no purchase", async () => {
+		const matched = serviceFixture({
+			webhookEvent: stripeEvent("refund.created", refundObject(), "evt_refund"),
+			paymentInvoice: "in_123",
+		});
+		const invalid = serviceFixture({
+			webhookEvent: stripeEvent("refund.created", refundObject(), "evt_refund"),
+			recordingResult: "skipped",
+			paymentInvoice: "in_123",
+		});
+
+		await matched.service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+		const skipped = await invalid.service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+
+		expect(skipped).toEqual({ status: "skipped", eventType: "refund.created", entitlements: null });
+		for (const fixture of [matched, invalid]) {
+			expect(fixture.calls.map((call) => (call as { method: string }).method)).toEqual([
+				"constructWebhookEvent",
+				"recordStripeCreditReversalAndEnqueueProjection",
+			]);
+		}
+	});
+
+	// capability: event.replay
+	it("names the cause when a replayed reversal still matches nothing", async () => {
+		const refundEvent = storeEvent({
+			external_event_id: "evt_refund",
+			event_type: "refund.created",
+			transaction_id: "re_123",
+			raw_payload: stripeEvent("refund.created", refundObject(), "evt_refund"),
+		});
+		const noInvoice = serviceFixture({ reversalSkipReason: "stripe_reversal_payment_unmatched" });
+		const denied = serviceFixture({
+			reversalSkipReason: "stripe_reversal_payment_unmatched",
+			paymentInvoice: Object.assign(new Error("rk_test_masked lacks a permission"), {
+				statusCode: 403,
+			}),
+		});
+		const unavailable = serviceFixture({
+			reversalSkipReason: "stripe_reversal_payment_unmatched",
+			paymentInvoice: new Error("socket hang up"),
+		});
+
+		expect(await noInvoice.service.replayStoreEvent(refundEvent)).toEqual({
+			status: "retryable",
+			reason: "stripe_reversal_payment_unmatched",
+		});
+		expect(await denied.service.replayStoreEvent(refundEvent)).toEqual({
+			status: "retryable",
+			reason: "stripe_reversal_invoice_lookup_failed",
+		});
+		expect(denied.repositoryInputs[1]).toEqual({
+			eventType: "refund.created",
+			externalEventId: "evt_refund",
+			transactionId: "re_123",
+			purchaseKind: null,
+			processingError: "Stripe invoice lookup for the reversed payment failed with status 403",
+			rawPayload: refundObject(),
+			replayStoreEventId: refundEvent.id,
+		});
+		await unavailable.service.replayStoreEvent(refundEvent);
+		expect(unavailable.repositoryInputs[1]).toMatchObject({
+			processingError: "Stripe invoice lookup for the reversed payment failed",
 		});
 	});
 

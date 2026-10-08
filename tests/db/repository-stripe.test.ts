@@ -85,6 +85,57 @@ describe("BillingRepository Stripe", () => {
 		expect(queries).not.toContain("INSERT INTO projection_sync_jobs");
 	});
 
+	it("names an unmatched payment when a Stripe reversal has no one-time purchase", async () => {
+		const database = new FakeDatabase([[], [{ id: "store-event-id" }]]);
+		const repository = new BillingRepository(database as never);
+
+		await expect(
+			repository.recordStripeCreditReversalAndEnqueueProjection(
+				projectInstanceContext("globex"),
+				stripeReversalInput(),
+			),
+		).resolves.toEqual({
+			processingStatus: "skipped",
+			billingAccountId: null,
+			entitlements: null,
+			skipReason: "stripe_reversal_payment_unmatched",
+		});
+
+		const queries = database.queries.join("\n");
+		expect(queries).toContain("Stripe one-time purchase reversal target could not be resolved");
+		expect(queries).not.toContain("INSERT INTO projection_sync_jobs");
+	});
+
+	it("skips a Stripe invoice reversal whose invoice is not recorded for a subscription", async () => {
+		const database = new FakeDatabase([[], [{ id: "store-event-id" }]]);
+		const repository = new BillingRepository(database as never);
+
+		await expect(
+			repository.recordStripeInvoiceReversalAndEnqueueProjection(projectInstanceContext("globex"), {
+				...stripeReversalInput(),
+				invoiceId: "in_foreign",
+			}),
+		).resolves.toEqual({
+			processingStatus: "skipped",
+			billingAccountId: null,
+			entitlements: null,
+			skipReason: "stripe_reversal_invoice_unmatched",
+		});
+
+		expect(database.queries[0]).toContain("FROM billing_invoices invoices");
+		expect(database.queries[0]).toContain("invoices.project_id = $1");
+		expect(database.boundParameter("invoices.project_id", 0)).toBe(
+			projectInstanceContext("globex").projectInstanceId,
+		);
+		expect(database.boundParameter("invoices.external_invoice_id", 0)).toBe("in_foreign");
+		const queries = database.queries.join("\n");
+		expect(queries).toContain(
+			"Stripe invoice of the reversed payment is not recorded for a subscription",
+		);
+		expect(queries).not.toContain("UPDATE purchases");
+		expect(queries).not.toContain("INSERT INTO projection_sync_jobs");
+	});
+
 	it("records skipped Stripe reversal events for invalid original catalog amounts", async () => {
 		const database = new FakeDatabase([
 			[{ purchase_id: "purchase-id", customer_id: "customer-id" }],

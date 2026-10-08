@@ -439,13 +439,45 @@ a base plan, is refused with `409 SUBSCRIPTION_CHANGE_PLAN_KIND_MISMATCH`, while
 project does not have, or a subscription the account does not hold, is
 `404 SUBSCRIPTION_CHANGE_TARGET_NOT_FOUND`.
 
-Refunds and disputes reverse credits proportionally to the cumulative reversed amount paid and are
-deduplicated by refund id. Configure Stripe to send `refund.created` and `refund.updated`;
-`charge.refunded` is safely ignored. For promotion codes, also send `checkout.session.expired` and
+Refunds and disputes of a one-time purchase reverse its credits proportionally to the cumulative
+reversed amount paid and are deduplicated by refund id. Configure Stripe to send `refund.created`
+and `refund.updated`; `charge.refunded` is safely ignored. For promotion codes, also send
+`checkout.session.expired` and
 `checkout.session.async_payment_failed` so reserved uses are released promptly; the promotion
 maintenance worker releases them an hour after the session could have completed otherwise. Send
 `customer.subscription.trial_will_end` for [trial-ending facts](#projections); without it, Stripe
 trials get no ending notice.
+
+### Refunds of subscription payments
+
+A refund or dispute of a subscription's payment changes nothing in Quotum, because it changes
+nothing in Stripe: Stripe returns the money and leaves the subscription running, and Quotum mirrors
+the subscription's own state. Access entitlements and the plan allocations granted for the paid
+period stay until the subscription ends. To end access with the refund, cancel the subscription as
+well, in Stripe or with an immediate [cancellation](subscriptions.md#cancelling-and-uncancelling-a-subscription).
+
+Quotum still records the event and tells your backend. Neither the refund nor its payment names an
+invoice, so Quotum asks Stripe which invoice the payment settled (`GET /v1/invoice_payments`) and
+matches it to a subscription invoice recorded from `invoice.paid`. The store event is then
+`processed` against that subscription, and one projection per refund or dispute carries a
+`reversal` fact with `creditAmount: 0`, the refund or dispute id as `transactionId`, the payment
+intent as `originalTransactionId` and the subscription's `productKey`, next to the
+[`subscription` fact](#projections). A `reversal` that arrives with a `subscription` fact is a
+returned subscription payment; one without it reverses a one-time purchase.
+
+A refund or dispute Quotum cannot attribute is retried with backoff, because the purchase or
+invoice event may still be on its way. After `BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS` attempts
+(ten by default, about eight and a half hours) it stays `failed`, nothing was reversed, and its
+`processingError` names the cause:
+
+| `processingError` | Meaning |
+| --- | --- |
+| `stripe_reversal_payment_unmatched` | No one-time purchase is recorded for the payment and Stripe reports no invoice for it, as for a payment taken outside Quotum. |
+| `stripe_reversal_invoice_unmatched` | The payment settled an invoice that is not recorded for a subscription: a postpaid usage invoice, an invoice from outside Quotum, or a subscription whose `invoice.paid` never arrived. |
+| `stripe_reversal_invoice_lookup_failed` | Stripe refused or failed the invoice lookup. The first recording keeps the HTTP status; check that the connection can read invoices. |
+
+`GET /v1/admin/store-events?processingStatus=failed` lists them, and
+`POST /v1/admin/store-events/:eventId/replay` tries one again once its cause is fixed.
 
 Regular provider webhooks use `/v1/projects/:projectKey/webhooks/:provider`. The project key in the
 path is not a secret, so the answer never says whether it exists: an unknown key, and a project
@@ -540,7 +572,10 @@ Key subscription rows by `(projectKey, subscriptionId)`, or by
 identity. Entitlements select one source per key, so key their cache by account and entitlement key;
 they cannot enumerate every subscription. A `planKey` comes from the pinned version, not today's catalog.
 
-A payload carries at most one of the existing facts: `purchase`, `reversal` or `trial`. A `trial` fact with
+A payload carries at most one of the existing facts: `purchase`, `reversal` or `trial`. A `reversal` with
+`creditAmount: 0` and a `subscription` fact reports a
+[refunded or disputed subscription payment](#refunds-of-subscription-payments); it changes no
+entitlement. A `trial` fact with
 `event: "ending"` arrives once per trial, about three days before its end: for Stripe from
 `customer.subscription.trial_will_end` (reason `provider_webhook`), and for Apple and Google, which
 send no such notification, from the subscription reconciliation worker (reason

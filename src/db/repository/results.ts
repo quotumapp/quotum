@@ -3,6 +3,7 @@ import type {
 	GooglePlayRecordingResult,
 	StoreKitRecordingResult,
 	StripeRecordingResult,
+	StripeReversalSkipReason,
 } from "./types";
 
 export function skippedStoreKitRecordingResult(): StoreKitRecordingResult {
@@ -27,8 +28,15 @@ export function processedGooglePlayRecordingResult(
 	return { processingStatus: "processed", billingAccountId, entitlements };
 }
 
-export function skippedStripeRecordingResult(): StripeRecordingResult {
-	return { processingStatus: "skipped", billingAccountId: null, entitlements: null };
+export function skippedStripeRecordingResult(
+	skipReason?: StripeReversalSkipReason,
+): StripeRecordingResult {
+	return {
+		processingStatus: "skipped",
+		billingAccountId: null,
+		entitlements: null,
+		...(skipReason === undefined ? {} : { skipReason }),
+	};
 }
 
 export function processedStripeRecordingResult(

@@ -26,6 +26,7 @@ import {
 } from "./identities";
 import {
 	findStripeCreditReversalTarget,
+	lockCustomerRow,
 	minBigInt,
 	parseStripeAmountForComparison,
 	proratedReversedCreditAmount,
@@ -58,6 +59,7 @@ import type {
 	QueryExecutor,
 	RecordStripeCreditPurchaseProjectionInput,
 	RecordStripeCreditReversalProjectionInput,
+	RecordStripeInvoiceReversalProjectionInput,
 	RecordStripeSkippedEventInput,
 	RecordStripeSubscriptionProjectionInput,
 	StripeBillingAccountSummary,
@@ -1422,7 +1424,7 @@ export class StripeBillingRepository extends RepositoryModule {
 					rawPayload: input.rawPayload,
 					replayStoreEventId: input.replayStoreEventId,
 				});
-				return skippedStripeRecordingResult();
+				return skippedStripeRecordingResult("stripe_reversal_payment_unmatched");
 			}
 			const originalPriceAmount = parseStripeAmountForComparison(target.price_amount);
 			if (originalPriceAmount === null || originalPriceAmount <= 0n) {
@@ -1497,23 +1499,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				nextReversedCreditAmount - previousReversedCreditAmount,
 			);
 			const fullyReversed = nextReversedAmount >= originalPriceAmount;
-			const duplicateReversal = await executeOne<{ id: string }>(
-				tx,
-				drizzleSql`
-					SELECT events.id
-					FROM store_events events
-					WHERE events.project_id = ${projectId}
-						AND events.provider = 'stripe'
-						AND events.transaction_id = ${input.reversalId}
-						AND events.processing_status = 'processed'
-						AND events.external_event_id IS DISTINCT FROM ${input.externalEventId}
-						AND (
-							(${input.reversalReason} = 'refund' AND events.event_type IN ('refund.created', 'refund.updated'))
-							OR (${input.reversalReason} = 'dispute' AND events.event_type = 'charge.dispute.created')
-						)
-					LIMIT 1
-				`,
-			);
+			const duplicateReversal = await findProcessedStripeReversal(tx, projectId, input);
 
 			const storeEvent = await recordStoreEventProcessingResult(tx, projectId, {
 				provider: "stripe",
@@ -1605,6 +1591,101 @@ export class StripeBillingRepository extends RepositoryModule {
 		});
 	}
 
+	/**
+	 * Records a refund or dispute of a payment that settled a subscription invoice. Stripe keeps the
+	 * subscription running after money goes back, so nothing is revoked here: the event is recorded
+	 * against the subscription and the receiver gets a reversal fact with the subscription's state.
+	 */
+	async recordStripeInvoiceReversalAndEnqueueProjection(
+		project: ProjectInstanceContext,
+		input: RecordStripeInvoiceReversalProjectionInput,
+	): Promise<StripeRecordingResult> {
+		return await this.transaction(async (tx) => {
+			const projectId = project.projectInstanceId;
+			const target = await executeOne<{
+				customer_id: string;
+				billing_account_id: string;
+				subscription_id: string;
+				store_product_id: string;
+				product_key: string;
+			}>(
+				tx,
+				drizzleSql`
+					SELECT
+						invoices.customer_id,
+						c.billing_account_id,
+						s.id AS subscription_id,
+						s.store_product_id,
+						p.key AS product_key
+					FROM billing_invoices invoices
+					JOIN customers c ON c.id = invoices.customer_id AND c.project_id = invoices.project_id
+					JOIN subscriptions s ON s.id = invoices.subscription_id AND s.project_id = invoices.project_id
+					JOIN products p ON p.id = s.product_id AND p.project_id = s.project_id
+					WHERE invoices.project_id = ${projectId}
+						AND invoices.external_invoice_id = ${input.invoiceId}
+						AND s.provider = 'stripe'
+					LIMIT 1
+				`,
+			);
+			if (target === null) {
+				await recordStripeSkippedEventInTransaction(tx, projectId, {
+					eventType: input.eventType,
+					externalEventId: input.externalEventId,
+					transactionId: input.reversalId,
+					purchaseKind: null,
+					processingError:
+						"Stripe invoice of the reversed payment is not recorded for a subscription",
+					rawPayload: input.rawPayload,
+					replayStoreEventId: input.replayStoreEventId,
+				});
+				return skippedStripeRecordingResult("stripe_reversal_invoice_unmatched");
+			}
+			await lockCustomerRow(tx, projectId, target.customer_id);
+			const duplicateReversal = await findProcessedStripeReversal(tx, projectId, input);
+			const storeEvent = await recordStoreEventProcessingResult(tx, projectId, {
+				provider: "stripe",
+				channel: "web",
+				externalEventId: input.externalEventId,
+				eventType: input.eventType,
+				customerId: target.customer_id,
+				storeProductId: target.store_product_id,
+				transactionId: input.reversalId,
+				purchaseKind: "subscription",
+				processingStatus: "processed",
+				processingError: null,
+				rawPayload: input.rawPayload,
+				raiseIdentityMismatch: true,
+				replayStoreEventId: input.replayStoreEventId ?? null,
+			});
+			const snapshot = await getEntitlementSnapshot(tx, projectId, target.billing_account_id);
+			if (!storeEvent.applied || duplicateReversal !== null) {
+				return processedStripeRecordingResult(target.billing_account_id, snapshot);
+			}
+			await enqueueProjectionSyncJob(tx, {
+				customerId: target.customer_id,
+				idempotencyKey: input.projectionIdempotencyKey,
+				reason: "provider_webhook",
+				payload: {
+					billingAccountId: target.billing_account_id,
+					reason: "provider_webhook",
+					entitlements: snapshot,
+					reversal: {
+						provider: "stripe",
+						channel: "web",
+						reason: input.reversalReason,
+						transactionId: input.reversalId,
+						originalTransactionId: input.paymentIntentId,
+						productKey: target.product_key,
+						creditAmount: 0,
+						reversedAt: input.reversedAt.toISOString(),
+					},
+					subscription: await readSubscriptionProjection(tx, projectId, target.subscription_id),
+				},
+			});
+			return processedStripeRecordingResult(target.billing_account_id, snapshot);
+		});
+	}
+
 	async recordStripeSkippedEvent(
 		project: ProjectInstanceContext,
 		input: RecordStripeSkippedEventInput,
@@ -1614,6 +1695,34 @@ export class StripeBillingRepository extends RepositoryModule {
 			return skippedStripeRecordingResult();
 		});
 	}
+}
+
+/** Refund events repeat for one refund; only the first one processed applies it. */
+async function findProcessedStripeReversal(
+	executor: QueryExecutor,
+	projectId: string,
+	input: Pick<
+		RecordStripeCreditReversalProjectionInput,
+		"reversalId" | "reversalReason" | "externalEventId"
+	>,
+): Promise<{ id: string } | null> {
+	return await executeOne<{ id: string }>(
+		executor,
+		drizzleSql`
+			SELECT events.id
+			FROM store_events events
+			WHERE events.project_id = ${projectId}
+				AND events.provider = 'stripe'
+				AND events.transaction_id = ${input.reversalId}
+				AND events.processing_status = 'processed'
+				AND events.external_event_id IS DISTINCT FROM ${input.externalEventId}
+				AND (
+					(${input.reversalReason} = 'refund' AND events.event_type IN ('refund.created', 'refund.updated'))
+					OR (${input.reversalReason} = 'dispute' AND events.event_type = 'charge.dispute.created')
+				)
+			LIMIT 1
+		`,
+	);
 }
 
 interface CheckoutRequestRow {

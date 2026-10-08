@@ -2367,6 +2367,169 @@ localDescribe("Stripe route flows integration", () => {
 		expectProjectionReversal(projectionJob.payload);
 	});
 
+	// capability: refund.sync
+	it("records a refunded subscription payment and leaves the subscription running", async () => {
+		const service = createVerifiedEventService({
+			invoicePayments: { pi_subscription: "in_subscription" },
+		});
+		const start = Math.floor(Date.now() / 1000) - 86_400;
+		const period = { start, end: start + 30 * 86_400 };
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.updated",
+				stripeSubscriptionObject(stripeSubscriptionPeriod(period.start, period.end)),
+				start + 100,
+				"evt_live",
+			),
+		);
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"invoice.paid",
+				stripeSubscriptionInvoiceObject(period),
+				start + 101,
+				"evt_invoice_paid",
+			),
+		);
+		const lifecycle = await stripeSubscriptionLifecycle(context.sql);
+		const refund = stripeRefundObject({
+			id: "re_subscription",
+			payment_intent: "pi_subscription",
+			amount: 999,
+		});
+
+		const created = await service.handleVerifiedAppEvent(
+			verifiedStripeEvent("refund.created", refund, start + 200, "evt_subscription_refund"),
+		);
+		const updated = await service.handleVerifiedAppEvent(
+			verifiedStripeEvent("refund.updated", refund, start + 201, "evt_subscription_refunded"),
+		);
+
+		expect(created).toEqual({
+			status: "processed",
+			eventType: "refund.created",
+			entitlements: expect.objectContaining({ billingAccountId: "integration_user" }),
+		});
+		expect(updated.status).toBe("processed");
+		expect(await stripeSubscriptionLifecycle(context.sql)).toEqual(lifecycle);
+		expect(lifecycle.status).toBe("active");
+		expect(await reversalEvents("re_subscription")).toEqual([
+			{
+				event_type: "refund.created",
+				processing_status: "processed",
+				processing_error: null,
+				purchase_kind: "subscription",
+				attributed: true,
+			},
+			{
+				event_type: "refund.updated",
+				processing_status: "processed",
+				processing_error: null,
+				purchase_kind: "subscription",
+				attributed: true,
+			},
+		]);
+		await expectTableCounts(context.sql, { purchases: 0, subscriptions: 1 });
+		const job = await expectProjectionJobByKey(
+			context.sql,
+			"stripe:refund:re_subscription:reversal",
+		);
+		expect(job.reason).toBe("provider_webhook");
+		expect(job.payload.purchase).toBeUndefined();
+		expect(job.payload.reversal).toEqual({
+			provider: "stripe",
+			channel: "web",
+			reason: "refund",
+			transactionId: "re_subscription",
+			originalTransactionId: "pi_subscription",
+			productKey: "premium_monthly",
+			creditAmount: 0,
+			reversedAt: "2026-05-27T00:00:00.000Z",
+		});
+		expect(job.payload.subscription).toMatchObject({
+			provider: "stripe",
+			channel: "web",
+			externalSubscriptionId: "sub_1",
+			productKey: "premium_monthly",
+			status: "active",
+		});
+		expect(job.payload.entitlements.entitlements).toEqual([
+			expect.objectContaining({ key: "premium", active: true }),
+		]);
+	});
+
+	// capability: refund.sync
+	it("names why a refund it cannot attribute keeps retrying", async () => {
+		const stripe = createFakeStripeBillingClient({
+			invoicePayments: { pi_foreign_invoice: "in_foreign" },
+		});
+		const service = new StripeBillingService({
+			config: {
+				projectKey: "acme",
+				checkoutSuccessUrl:
+					"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
+				checkoutCancelUrl: "https://app.integration.test/billing",
+				portalReturnUrl: "https://app.integration.test/account/billing",
+			},
+			client: stripe.client,
+			repository: context.repository.forProject(integrationProjectContext("acme")),
+		});
+		const created = Math.floor(Date.now() / 1000);
+		const refundOf = (id: string, paymentIntent: string) =>
+			verifiedStripeEvent(
+				"refund.created",
+				stripeRefundObject({ id, payment_intent: paymentIntent }),
+				created,
+				`evt_${id}`,
+			);
+
+		expect(await service.handleVerifiedAppEvent(refundOf("re_no_payment", "pi_unknown"))).toEqual({
+			status: "skipped",
+			eventType: "refund.created",
+			entitlements: null,
+		});
+		await service.handleVerifiedAppEvent(refundOf("re_foreign_invoice", "pi_foreign_invoice"));
+		stripe.failNext(
+			"findInvoiceIdForPaymentIntent",
+			Object.assign(new Error("rk_test_masked lacks a permission"), { statusCode: 403 }),
+		);
+		await service.handleVerifiedAppEvent(refundOf("re_lookup_denied", "pi_denied"));
+		expect(await reversalEvents("re_lookup_denied")).toEqual([
+			{
+				event_type: "refund.created",
+				processing_status: "skipped",
+				processing_error: "Stripe invoice lookup for the reversed payment failed with status 403",
+				purchase_kind: null,
+				attributed: false,
+			},
+		]);
+
+		const run = await runStoreEventReplayWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: { apple: null, google: null, stripe: service },
+		});
+
+		expect(run).toMatchObject({ claimed: 3, retryable: 3, processed: 0, failed: 0 });
+		const retrying = async (refundId: string) => {
+			const [event] = await reversalEvents(refundId);
+			return [event?.processing_status, event?.processing_error];
+		};
+		expect(await retrying("re_no_payment")).toEqual([
+			"pending",
+			"stripe_reversal_payment_unmatched",
+		]);
+		expect(await retrying("re_foreign_invoice")).toEqual([
+			"pending",
+			"stripe_reversal_invoice_unmatched",
+		]);
+		// The lookup works on the retry, and the payment turns out to have settled no invoice.
+		expect(await retrying("re_lookup_denied")).toEqual([
+			"pending",
+			"stripe_reversal_payment_unmatched",
+		]);
+		await expectTableCounts(context.sql, { projection_sync_jobs: 0 });
+	});
+
 	it("records an invoice delivered after a newer subscription event", async () => {
 		const service = new StripeBillingService({
 			config: {
@@ -3647,7 +3810,9 @@ localDescribe("Stripe route flows integration", () => {
 	});
 });
 
-function createVerifiedEventService(): StripeBillingService {
+function createVerifiedEventService(
+	clientOptions: Parameters<typeof createFakeStripeBillingClient>[0] = {},
+): StripeBillingService {
 	return new StripeBillingService({
 		config: {
 			projectKey: "acme",
@@ -3656,9 +3821,28 @@ function createVerifiedEventService(): StripeBillingService {
 			checkoutCancelUrl: "https://app.integration.test/billing",
 			portalReturnUrl: "https://app.integration.test/account/billing",
 		},
-		client: createFakeStripeBillingClient().client,
+		client: createFakeStripeBillingClient(clientOptions).client,
 		repository: context.repository.forProject(integrationProjectContext("acme")),
 	});
+}
+
+/** The stored events of one refund or dispute, oldest first. */
+async function reversalEvents(reversalId: string): Promise<
+	Array<{
+		event_type: string;
+		processing_status: string;
+		processing_error: string | null;
+		purchase_kind: string | null;
+		attributed: boolean;
+	}>
+> {
+	return await context.sql`
+		SELECT event_type, processing_status, processing_error, purchase_kind,
+			customer_id IS NOT NULL AS attributed
+		FROM store_events
+		WHERE provider = 'stripe' AND transaction_id = ${reversalId}
+		ORDER BY created_at, event_type
+	`;
 }
 
 function verifiedStripeEvent(

@@ -64,6 +64,8 @@ interface FakeStripeBillingClientOptions {
 	createCustomerId?: (input: { billingAccountId: string; email: string | null }) => string;
 	createCheckoutSessionFailures?: number;
 	checkoutSession?: JsonRecord;
+	/** The invoice each PaymentIntent settled; a payment that is absent settled none. */
+	invoicePayments?: Record<string, string>;
 }
 
 export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOptions) {
@@ -477,6 +479,10 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			async retrievePaymentIntent(id: string) {
 				calls.push(`retrievePaymentIntent:${id}`);
 				return { id, latest_charge: "ch_integration" };
+			},
+			async findInvoiceIdForPaymentIntent(paymentIntentId: string) {
+				calls.push(`findInvoiceIdForPaymentIntent:${paymentIntentId}`);
+				return options.invoicePayments?.[paymentIntentId] ?? null;
 			},
 			async retrieveCheckoutSession(sessionId: string) {
 				calls.push(`retrieveCheckoutSession:${sessionId}`);
