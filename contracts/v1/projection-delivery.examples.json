@@ -1,0 +1,378 @@
+{
+  "stripe_one_time_purchase": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [],
+        "generatedAt": "2026-10-03T14:11:27.640Z"
+      },
+      "generatedAt": "2026-10-03T14:11:27.640Z",
+      "idempotencyKey": "stripe:payment:pi_3QZ9aExampleAcme:projection",
+      "jobId": "0192f3a2-0007-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "purchase": {
+        "channel": "web",
+        "creditAmount": 10,
+        "productKey": "credits_10",
+        "provider": "stripe",
+        "purchasedAt": "2026-10-03T14:11:25.000Z",
+        "purchaseKind": "consumable",
+        "quantity": 1,
+        "totalCreditAmount": 10,
+        "transactionId": "pi_3QZ9aExampleAcme"
+      },
+      "reason": "provider_webhook",
+      "schemaVersion": 1,
+      "sequence": 1
+    },
+    "description": "A one-time Stripe Checkout purchase of a credit pack. Record the purchase fact once by transactionId, the payment intent."
+  },
+  "stripe_one_time_refund": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [],
+        "generatedAt": "2026-10-05T08:45:10.921Z"
+      },
+      "generatedAt": "2026-10-05T08:45:10.921Z",
+      "idempotencyKey": "stripe:refund:re_3QZ9aExampleAcme:reversal",
+      "jobId": "0192f3a2-0008-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "reason": "provider_webhook",
+      "reversal": {
+        "channel": "web",
+        "creditAmount": 10,
+        "originalTransactionId": "pi_3QZ9aExampleAcme",
+        "productKey": "credits_10",
+        "provider": "stripe",
+        "quantity": 1,
+        "reason": "refund",
+        "reversedAt": "2026-10-05T08:45:08.000Z",
+        "totalCreditAmount": 10,
+        "transactionId": "re_3QZ9aExampleAcme"
+      },
+      "schemaVersion": 1,
+      "sequence": 2
+    },
+    "description": "That purchase was refunded in full. The reversal names the refund as transactionId and the purchase's payment intent as originalTransactionId; creditAmount is what this refund takes back."
+  },
+  "stripe_subscription_cancel_scheduled": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [
+          {
+            "active": true,
+            "expiresAt": "2026-12-01T09:30:00.000Z",
+            "key": "premium",
+            "metadata": {
+              "channel": "web",
+              "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+              "planKey": null,
+              "productId": "0192f3a1-6b2d-7f40-8c11-2e3f4a5b6c7d",
+              "productKey": "premium_monthly",
+              "provider": "stripe",
+              "source": "subscription",
+              "status": "active",
+              "storeProductId": "0192f3a1-6b9f-7a52-b3c4-d5e6f7a8b9c0",
+              "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+            }
+          }
+        ],
+        "generatedAt": "2026-11-12T16:02:41.305Z"
+      },
+      "generatedAt": "2026-11-12T16:02:41.305Z",
+      "idempotencyKey": "stripe:subscription:sub_1QZ8xExampleAcme:customer.subscription.updated:evt_1QbT5CancelSet:projection",
+      "jobId": "0192f3a2-0003-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "reason": "provider_webhook",
+      "schemaVersion": 1,
+      "sequence": 3,
+      "subscription": {
+        "cancelAtPeriodEnd": true,
+        "cancellationReason": "cancellation_requested",
+        "channel": "web",
+        "expiresAt": "2026-12-01T09:30:00.000Z",
+        "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+        "planKey": null,
+        "productKey": "premium_monthly",
+        "provider": "stripe",
+        "providerStatus": "active",
+        "status": "active",
+        "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+      }
+    },
+    "description": "The customer cancelled at period end. Access continues: status stays active, and cancelAtPeriodEnd and cancellationReason explain the pending end."
+  },
+  "stripe_subscription_ended": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [
+          {
+            "active": false,
+            "expiresAt": "2026-12-01T09:30:00.000Z",
+            "key": "premium",
+            "metadata": {
+              "channel": "web",
+              "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+              "planKey": null,
+              "productId": "0192f3a1-6b2d-7f40-8c11-2e3f4a5b6c7d",
+              "productKey": "premium_monthly",
+              "provider": "stripe",
+              "source": "subscription",
+              "status": "expired",
+              "storeProductId": "0192f3a1-6b9f-7a52-b3c4-d5e6f7a8b9c0",
+              "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+            }
+          }
+        ],
+        "generatedAt": "2026-12-01T09:30:03.552Z"
+      },
+      "generatedAt": "2026-12-01T09:30:03.552Z",
+      "idempotencyKey": "stripe:subscription:sub_1QZ8xExampleAcme:customer.subscription.deleted:evt_1QcV8Deleted:projection",
+      "jobId": "0192f3a2-0004-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "reason": "provider_webhook",
+      "schemaVersion": 1,
+      "sequence": 4,
+      "subscription": {
+        "cancelAtPeriodEnd": false,
+        "cancellationReason": "cancellation_requested",
+        "channel": "web",
+        "expiresAt": "2026-12-01T09:30:00.000Z",
+        "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+        "planKey": null,
+        "productKey": "premium_monthly",
+        "provider": "stripe",
+        "providerStatus": "cancelled",
+        "status": "expired",
+        "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+      }
+    },
+    "description": "The subscription ended. The entitlement is inactive and keeps its last source, whose status says why it stopped."
+  },
+  "stripe_subscription_purchase": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [
+          {
+            "active": true,
+            "expiresAt": "2026-11-01T09:30:00.000Z",
+            "key": "premium",
+            "metadata": {
+              "channel": "web",
+              "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+              "planKey": null,
+              "productId": "0192f3a1-6b2d-7f40-8c11-2e3f4a5b6c7d",
+              "productKey": "premium_monthly",
+              "provider": "stripe",
+              "source": "subscription",
+              "status": "active",
+              "storeProductId": "0192f3a1-6b9f-7a52-b3c4-d5e6f7a8b9c0",
+              "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+            }
+          }
+        ],
+        "generatedAt": "2026-10-01T09:30:02.114Z"
+      },
+      "generatedAt": "2026-10-01T09:30:02.114Z",
+      "idempotencyKey": "stripe:subscription:sub_1QZ8xExampleAcme:customer.subscription.created:evt_1QZ8yCreated:projection",
+      "jobId": "0192f3a2-0001-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "reason": "provider_webhook",
+      "schemaVersion": 1,
+      "sequence": 1,
+      "subscription": {
+        "cancelAtPeriodEnd": false,
+        "cancellationReason": null,
+        "channel": "web",
+        "expiresAt": "2026-11-01T09:30:00.000Z",
+        "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+        "planKey": null,
+        "productKey": "premium_monthly",
+        "provider": "stripe",
+        "providerStatus": "active",
+        "status": "active",
+        "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+      }
+    },
+    "description": "A new Stripe subscription is active after checkout. Deliveries about a subscription carry the subscription fact and no purchase fact. planKey is null here because this subscription is not on a catalog plan; one that is carries its pinned plan's key."
+  },
+  "stripe_subscription_renewal": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [
+          {
+            "active": true,
+            "expiresAt": "2026-12-01T09:30:00.000Z",
+            "key": "premium",
+            "metadata": {
+              "channel": "web",
+              "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+              "planKey": null,
+              "productId": "0192f3a1-6b2d-7f40-8c11-2e3f4a5b6c7d",
+              "productKey": "premium_monthly",
+              "provider": "stripe",
+              "source": "subscription",
+              "status": "active",
+              "storeProductId": "0192f3a1-6b9f-7a52-b3c4-d5e6f7a8b9c0",
+              "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+            }
+          }
+        ],
+        "generatedAt": "2026-11-01T09:30:04.870Z"
+      },
+      "generatedAt": "2026-11-01T09:30:04.870Z",
+      "idempotencyKey": "stripe:subscription:sub_1QZ8xExampleAcme:customer.subscription.updated:evt_1QaJ2Renewed:projection",
+      "jobId": "0192f3a2-0002-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "reason": "provider_webhook",
+      "schemaVersion": 1,
+      "sequence": 2,
+      "subscription": {
+        "cancelAtPeriodEnd": false,
+        "cancellationReason": null,
+        "channel": "web",
+        "expiresAt": "2026-12-01T09:30:00.000Z",
+        "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+        "planKey": null,
+        "productKey": "premium_monthly",
+        "provider": "stripe",
+        "providerStatus": "active",
+        "status": "active",
+        "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+      }
+    },
+    "description": "The subscription renewed: the entitlement and the subscription fact carry the new period end."
+  },
+  "stripe_trial_ending": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [
+          {
+            "active": true,
+            "expiresAt": "2026-10-15T09:30:00.000Z",
+            "key": "premium",
+            "metadata": {
+              "channel": "web",
+              "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+              "planKey": null,
+              "productId": "0192f3a1-6b2d-7f40-8c11-2e3f4a5b6c7d",
+              "productKey": "premium_monthly",
+              "provider": "stripe",
+              "source": "subscription",
+              "status": "active",
+              "storeProductId": "0192f3a1-6b9f-7a52-b3c4-d5e6f7a8b9c0",
+              "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01",
+              "trialEndsAt": "2026-10-15T09:30:00.000Z",
+              "trialStartsAt": "2026-10-01T09:30:00.000Z"
+            }
+          }
+        ],
+        "generatedAt": "2026-10-12T09:30:01.008Z"
+      },
+      "generatedAt": "2026-10-12T09:30:01.008Z",
+      "idempotencyKey": "stripe:subscription:sub_1QZ8xExampleAcme:customer.subscription.trial_will_end:evt_1QZq3TrialWillEnd:projection",
+      "jobId": "0192f3a2-0006-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "reason": "provider_webhook",
+      "schemaVersion": 1,
+      "sequence": 2,
+      "subscription": {
+        "cancelAtPeriodEnd": false,
+        "cancellationReason": null,
+        "channel": "web",
+        "expiresAt": "2026-10-15T09:30:00.000Z",
+        "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+        "planKey": null,
+        "productKey": "premium_monthly",
+        "provider": "stripe",
+        "providerStatus": "trialing",
+        "status": "active",
+        "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+      },
+      "trial": {
+        "autoRenew": true,
+        "channel": "web",
+        "event": "ending",
+        "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+        "productKey": "premium_monthly",
+        "provider": "stripe",
+        "source": "subscription",
+        "trialEndsAt": "2026-10-15T09:30:00.000Z",
+        "trialStartsAt": "2026-10-01T09:30:00.000Z"
+      }
+    },
+    "description": "The trial ends in about three days (customer.subscription.trial_will_end). Record the trial fact once by its key; it arrives once per trial end."
+  },
+  "stripe_trial_started": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [
+          {
+            "active": true,
+            "expiresAt": "2026-10-15T09:30:00.000Z",
+            "key": "premium",
+            "metadata": {
+              "channel": "web",
+              "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+              "planKey": null,
+              "productId": "0192f3a1-6b2d-7f40-8c11-2e3f4a5b6c7d",
+              "productKey": "premium_monthly",
+              "provider": "stripe",
+              "source": "subscription",
+              "status": "active",
+              "storeProductId": "0192f3a1-6b9f-7a52-b3c4-d5e6f7a8b9c0",
+              "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01",
+              "trialEndsAt": "2026-10-15T09:30:00.000Z",
+              "trialStartsAt": "2026-10-01T09:30:00.000Z"
+            }
+          }
+        ],
+        "generatedAt": "2026-10-01T09:30:02.114Z"
+      },
+      "generatedAt": "2026-10-01T09:30:02.114Z",
+      "idempotencyKey": "stripe:subscription:sub_1QZ8xExampleAcme:customer.subscription.created:evt_1QZ8yTrialing:projection",
+      "jobId": "0192f3a2-0005-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "reason": "provider_webhook",
+      "schemaVersion": 1,
+      "sequence": 1,
+      "subscription": {
+        "cancelAtPeriodEnd": false,
+        "cancellationReason": null,
+        "channel": "web",
+        "expiresAt": "2026-10-15T09:30:00.000Z",
+        "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+        "planKey": null,
+        "productKey": "premium_monthly",
+        "provider": "stripe",
+        "providerStatus": "trialing",
+        "status": "active",
+        "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+      }
+    },
+    "description": "A Stripe subscription started with a trial. status is active while providerStatus is trialing, and the entitlement metadata carries the trial bounds."
+  }
+}

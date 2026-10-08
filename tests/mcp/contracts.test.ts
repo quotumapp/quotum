@@ -69,18 +69,28 @@ describe("MCP contract tools", () => {
 		expect(toolJson(unknown)).toMatchObject({ found: false });
 	});
 
-	it("serves the error inventory and the capability table as resources, not the 1.8 MB contract", async () => {
+	it("serves the small contract documents as resources, not the 1.8 MB contract", async () => {
 		connection = await connectMcp(unreachable);
 		const { resources } = await connection.client.listResources();
 		expect(resources.map((resource) => resource.uri).sort()).toEqual([
 			"quotum://contracts/v1/errors.json",
+			"quotum://contracts/v1/projection-delivery.examples.json",
+			"quotum://contracts/v1/projection-delivery.schema.json",
 			"quotum://contracts/v1/provider-capabilities.json",
 		]);
-		const read = await connection.client.readResource({
-			uri: "quotum://contracts/v1/errors.json",
+		const { client } = connection;
+		const read = async (name: string) => {
+			const result = await client.readResource({ uri: `quotum://contracts/v1/${name}` });
+			return JSON.parse((result.contents[0] as { text: string }).text);
+		};
+		expect(await read("errors.json")).toMatchObject({ schemaVersion: 1, codes: expect.any(Array) });
+		expect(await read("projection-delivery.schema.json")).toMatchObject({
+			title: "Quotum billing_state_v1 projection delivery",
 		});
-		const text = (read.contents[0] as { text: string }).text;
-		expect(JSON.parse(text)).toMatchObject({ schemaVersion: 1, codes: expect.any(Array) });
+		expect(await read("projection-delivery.examples.json")).toHaveProperty(
+			"stripe_subscription_purchase.delivery.schemaVersion",
+			1,
+		);
 	});
 
 	it("omits the contract tools when the contract is not shipped, and hides a missing file's path", async () => {
