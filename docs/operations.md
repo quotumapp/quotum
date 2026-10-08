@@ -40,7 +40,7 @@ The current schema is initialized from these ordered baseline files:
 | --- | --- |
 | [001_platform.sql](../migrations/001_platform.sql) | Organizations, projects, instances, credentials and customer connections |
 | [002_billing_core.sql](../migrations/002_billing_core.sql) | Billing accounts, purchases, subscriptions, entitlements and provider/projection jobs |
-| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup, promotions, plan grants, operator grants, administrative debits, default plans and plan-change carry-over |
+| [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup, promotions, plan grants, operator grants, administrative debits, default plans, plan-change carry-over and Stripe binding adoption receipts |
 | [004_merchant.sql](../migrations/004_merchant.sql) | Merchant identity, authentication, sessions, membership, audit and connection OAuth state |
 <!-- migration-inventory:end -->
 
@@ -291,8 +291,8 @@ they do not extend Stripe's idempotency retention or guarantee recovery after a 
 Provider event replay and subscription reconciliation also renew their claims. Projection delivery
 claims up to 25 jobs per poll from a candidate set bounded by the batch size and delivers five
 concurrently with bounded HTTP timeouts.
-Usage-driven projections are one job per billing account built at delivery, so the backlog is
-bounded by active accounts. Tune intervals and attempt limits with the `BILLING_*` variables listed
+Usage-driven projections are one job per billing account whose payload is built when it is first
+delivered and kept for retries, so the backlog is bounded by active accounts. Tune intervals and attempt limits with the `BILLING_*` variables listed
 in [deployment.md](deployment.md#optional-variables).
 
 Allocations that reset more often than their plan bills (monthly on an annual plan, weekly on a

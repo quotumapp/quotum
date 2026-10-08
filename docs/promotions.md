@@ -5,7 +5,7 @@
 A promotion is an immutable offer with one effect: a `discount` (percent in basis points, or a
 fixed amount per currency, lasting `once`, `repeating` for 1-36 months, or `forever`), a
 `feature_grant` of consumable feature quantities, or a `plan_grant` of a plan for a number of days
-or months. It can target plan or product keys and restrict the channels (`web`, `ios`, `android`)
+or months (at most 730 days or 24 months). It can target plan or product keys and restrict the channels (`web`, `ios`, `android`)
 where a code may be entered. Changing terms means creating a new promotion.
 
 Operators manage promotions with project authentication, `X-Billing-Operator-Key`, and
@@ -19,6 +19,9 @@ Operators manage promotions with project authentication, `X-Billing-Operator-Key
 - `POST /v1/admin/promotions/:promotionKey/codes` adds codes all-or-nothing;
   `GET .../codes` lists them; `POST .../codes/:codeId/deactivate` deactivates one.
 - `POST /v1/admin/promotions/:promotionKey/archive` stops new redemptions.
+- `POST /v1/admin/promotions/:promotionKey/provider-sync` queues every failed provider-side object
+  of the promotion (such as a Stripe coupon or promotion code) for another attempt with its attempt
+  count reset, and records an audit event; it needs `X-Billing-Actor`.
 - `GET /v1/admin/promotions/:promotionKey/redemptions` lists the redemption ledger.
 
 Codes use 3-64 letters, digits, or hyphens and are unique per project instance regardless of
@@ -28,7 +31,7 @@ case. Each code can set a start and expiry, a global cap, a per-customer cap (on
 
 `POST /v1/billing-accounts/:billingAccountId/promotion-codes/validate` lets the trusted backend
 check a code before offering it. It needs only project authentication, never creates a customer
-or takes a use, and returns `200` with `valid` and a `reason` such as `PROMOTION_CODE_EXPIRED`,
+or takes a use, treats an omitted `channel` as `web`, and returns `200` with `valid` and a `reason` such as `PROMOTION_CODE_EXPIRED`,
 `PROMOTION_CODE_EXHAUSTED`, `PROMOTION_CODE_ALREADY_REDEEMED`, or
 `PROMOTION_CODE_NOT_APPLICABLE` for a `target` the promotion does not cover. Unknown codes and codes
 restricted to another account both report `PROMOTION_CODE_NOT_FOUND` without promotion details.
