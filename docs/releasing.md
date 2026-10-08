@@ -51,7 +51,10 @@ the previous release tag (the previous stable tag, or the closest lower tag for 
 grouped by label through [`.github/release.yml`](../.github/release.yml), with a compare link.
 Details and upgrade notes stay in the pull request descriptions. PRs changing baseline migrations
 must name every changed SQL file under `Upgrade notes` and describe the upgrade; `None` fails
-the migration notes check. `bun scripts/release.ts meta vX.Y.Z` lists changed baselines since the
+the migration notes check. A release that changes a baseline since the previous tag opens its
+notes with an `Upgrade requires backup and restore` notice that names the changed files and links
+[upgrade transitions](upgrade-transitions.md) at the released tag, so an operator sees it before
+running the migration job; the generated list follows. `bun scripts/release.ts meta vX.Y.Z` lists changed baselines since the
 previous tag and warns when a patch changes them. `bun scripts/release.ts unreleased` lists the
 same changes for HEAD; set `NEXT_VERSION=X.Y.Z` to also check a planned version. A warning does
 not authorize a populated database reset or bypass checksum verification. Labels come from pull request

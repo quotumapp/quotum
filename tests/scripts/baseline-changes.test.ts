@@ -6,6 +6,7 @@ import {
 	baselineChanges,
 	baselineReleaseWarning,
 	migrationNoteErrors,
+	renderUpgradeNotice,
 } from "../../scripts/lib/release";
 
 describe("baseline migration gates", () => {
@@ -44,6 +45,27 @@ describe("baseline migration gates", () => {
 		);
 		expect(baselineReleaseWarning("v0.14.0", "0.15.0", ["migrations/003.sql"])).toBeUndefined();
 		expect(baselineReleaseWarning("v0.14.0", "0.14.1", [])).toBeUndefined();
+	});
+	it("opens a release's notes with the backup and restore notice only when a baseline changed", () => {
+		const release = { repository: "quotumapp/quotum", tag: "v0.23.0" };
+		expect(renderUpgradeNotice({ ...release, changed: [] })).toBe("");
+
+		const one = renderUpgradeNotice({ ...release, changed: ["migrations/003_metering.sql"] });
+		expect(one.startsWith("## Upgrade requires backup and restore")).toBe(true);
+		expect(one).toContain("changes the baseline migration `migrations/003_metering.sql`.");
+		expect(one).toContain(
+			"[Upgrade transitions](https://github.com/quotumapp/quotum/blob/v0.23.0/docs/upgrade-transitions.md)",
+		);
+		// The generated pull request list follows as its own block.
+		expect(one.endsWith("incremental migrations.\n\n")).toBe(true);
+
+		const several = renderUpgradeNotice({
+			...release,
+			changed: ["migrations/001_a.sql", "migrations/002_b.sql", "migrations/003_c.sql"],
+		});
+		expect(several).toContain(
+			"baseline migrations `migrations/001_a.sql`, `migrations/002_b.sql` and `migrations/003_c.sql`.",
+		);
 	});
 	it("compares git contents including additions, deletions and renames", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "quotum-baselines-"));

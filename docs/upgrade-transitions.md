@@ -8,7 +8,11 @@ Before 1.0 the baseline migrations evolve in place under the
 moves to a changed baseline by restoring its data into a freshly migrated database. The
 [stored job provider identity](#stored-job-provider-identity) section gives that procedure in full;
 the later sections name the steps they reuse and add what their own change needs. A release's pull requests name the baselines it changes under
-`Upgrade notes`.
+`Upgrade notes`, and the release's notes open with an `Upgrade requires backup and restore` notice
+whenever one changed. Releases up to v0.23.0 predate the notice; the sections below cover them. A
+later release without it leaves the baselines alone, so its migration job runs against the
+existing database; its pull requests can still ask for other steps. From 1.0, schema changes
+arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
 ## Upgrading a populated deployment to v0.22.0
 

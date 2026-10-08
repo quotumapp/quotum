@@ -69,7 +69,9 @@ do not create project credentials or alter the stdio credential policy.
 
 1. Read the target version's [GitHub Release](https://github.com/quotumapp/quotum/releases) and
    the descriptions of the pull requests it lists, starting with **Breaking changes**, and the
-   [schema policy](#schema-and-upgrade-policy). Releases up to 0.10.1 are described in the
+   [schema policy](#schema-and-upgrade-policy). A release whose notes open with
+   `Upgrade requires backup and restore` changed a baseline: plan the stopped-service
+   [transition](upgrade-transitions.md) before anything else. Releases up to 0.10.1 are described in the
    [changelog archived at v0.10.1](https://github.com/quotumapp/quotum/blob/v0.10.1/CHANGELOG.md).
    Establish database compatibility before rollout.
 2. Take a backup.
