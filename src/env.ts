@@ -87,6 +87,8 @@ export interface BillingEnv {
 	meteringMaintenancePollIntervalMs: number;
 	/** Runs the usage partition upkeep job; defaults to true. */
 	usagePartitionUpkeep?: boolean;
+	/** Verifies Stripe write permissions during connection validation; defaults to true. */
+	stripeWritePermissionProbes?: boolean;
 	rateLimit: BillingRateLimitEnv;
 	sentry: SentryEnv;
 	/**
@@ -132,6 +134,7 @@ const envSchema = z.object({
 	BILLING_PROJECTION_ALLOWED_NETWORKS: optionalString(),
 	BILLING_PROJECTION_ALLOW_INSECURE_HTTP: z.enum(["true", "false"]).default("false"),
 	BILLING_USAGE_PARTITION_UPKEEP: z.enum(["true", "false"]).default("true"),
+	BILLING_STRIPE_WRITE_PERMISSION_PROBES: z.enum(["true", "false"]).default("true"),
 	BILLING_RATE_LIMIT_WINDOW_MS: positiveIntegerString("BILLING_RATE_LIMIT_WINDOW_MS").default(
 		"60000",
 	),
@@ -233,6 +236,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 			10,
 		),
 		usagePartitionUpkeep: parsed.BILLING_USAGE_PARTITION_UPKEEP === "true",
+		stripeWritePermissionProbes: parsed.BILLING_STRIPE_WRITE_PERMISSION_PROBES === "true",
 		rateLimit: {
 			windowMs: Number.parseInt(parsed.BILLING_RATE_LIMIT_WINDOW_MS, 10),
 			verifyLimit: Number.parseInt(parsed.BILLING_VERIFY_RATE_LIMIT_PER_WINDOW, 10),
@@ -268,6 +272,14 @@ export function loadPostgresPreparedStatements(
 ): boolean {
 	const parsed = envSchema.pick({ BILLING_POSTGRES_PREPARED_STATEMENTS: true }).parse(source);
 	return parsed.BILLING_POSTGRES_PREPARED_STATEMENTS !== "false";
+}
+
+/** Whether an operator command verifies Stripe write permissions, as the server does. */
+export function loadStripeWritePermissionProbes(
+	source: Record<string, string | undefined> = process.env,
+): boolean {
+	const parsed = envSchema.pick({ BILLING_STRIPE_WRITE_PERMISSION_PROBES: true }).parse(source);
+	return parsed.BILLING_STRIPE_WRITE_PERMISSION_PROBES === "true";
 }
 
 export function parseProjectionReceivers(

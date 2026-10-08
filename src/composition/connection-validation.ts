@@ -51,11 +51,14 @@ export interface ConnectionValidationOptions {
 	destinationPolicy?: DestinationPolicy;
 	/** Overrides the receiver lookup and request, for tests. */
 	destinationDependencies?: Omit<DestinationPostDependencies, "policy">;
+	/** `BILLING_STRIPE_WRITE_PERMISSION_PROBES`: verify Stripe write permissions, on by default. */
+	stripeWritePermissionProbes?: boolean;
 }
 
 export function createConnectionValidation({
 	destinationPolicy = publicDestinationPolicy,
 	destinationDependencies = {},
+	stripeWritePermissionProbes = true,
 }: ConnectionValidationOptions = {}): ConnectionValidationPort {
 	return {
 		normalize(kind, environment, input) {
@@ -320,6 +323,7 @@ export function createConnectionValidation({
 						timeout: 10_000,
 						maxNetworkRetries: 0,
 					}),
+					{ writeProbes: stripeWritePermissionProbes },
 				);
 			}
 			try {

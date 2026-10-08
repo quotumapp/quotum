@@ -666,12 +666,26 @@ Write includes the reads used for those resources. OAuth installs are a separate
 | Coupons | Write | Create and read promotion coupons |
 | Promotion Codes | Write | Create, read and deactivate codes |
 
-Validation runs bounded read probes and reports all detected failures in `error.details.checks`
+Validation runs bounded probes and reports all detected failures in `error.details.checks`
 with `check`, `reason`, and, where relevant, `missingPermission` and `httpStatus`.
-`missingPermissions` deduplicates detected missing permissions. Successful reads do not prove write
-access: `unverifiedPermissions` lists write requirements to check in the Dashboard. Validation
-never creates Stripe objects. This recipe covers the manual billing adapter; the Stripe App
-manifest has additional installation/event permissions.
+`missingPermissions` deduplicates detected missing permissions. This recipe covers the manual
+billing adapter; the Stripe App manifest has additional installation/event permissions.
+
+A successful read does not prove write access, so each of the seven write permissions
+(`customer_write`, `checkout_session_write`, `customer_portal_write`, `subscription_write`,
+`invoice_write`, `coupon_write`, `promotion_code_write`) gets a probe of its own: a write that
+cannot succeed. Stripe checks a key's permission before it looks at the request, so it answers 403
+naming the permission when the key lacks it, and 404 or 400 when the key has it. Quotum updates a
+customer, subscription and invoice id that cannot exist, and creates a Checkout Session, portal
+session, coupon and promotion code with a missing or invalid required parameter. Validation never
+creates or changes a Stripe object, but your Stripe request log shows these seven requests as
+failed on every validation.
+
+A 403 fails validation like a missing read permission. A verified permission appears in `checks`
+as passed. A probe that proves nothing, for a rate limit or an outage, leaves its permission in
+`unverifiedPermissions`: check those in the Dashboard. Stripe does not document the order of its
+permission and request checks, so `BILLING_STRIPE_WRITE_PERMISSION_PROBES=false` turns the write
+probes off; `unverifiedPermissions` then lists all seven, as it did before the probes existed.
 
 Projection verification reports the receiver's HTTP status, including 401, 404 and 503, or an
 invalid acknowledgment/challenge reason for an HTTP 200. A status is a diagnostic clue, not proof

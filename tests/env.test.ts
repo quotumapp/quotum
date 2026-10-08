@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { isProductionProjectionUrlSafe, loadEnv, loadPostgresPreparedStatements } from "../src/env";
+import {
+	isProductionProjectionUrlSafe,
+	loadEnv,
+	loadPostgresPreparedStatements,
+	loadStripeWritePermissionProbes,
+} from "../src/env";
 
 const postgresUri = "postgresql://postgres:postgres@127.0.0.1:5432/postgres";
 const operatorApiKey = "billing-operator-key-secret";
@@ -47,6 +52,7 @@ describe("loadEnv", () => {
 			providerReconciliationStaleAfterMs: 5500,
 			meteringMaintenancePollIntervalMs: 7500,
 			usagePartitionUpkeep: false,
+			stripeWritePermissionProbes: true,
 			rateLimit: {
 				windowMs: 6500,
 				verifyLimit: 12,
@@ -390,6 +396,16 @@ describe("projection receiver networks", () => {
 });
 
 describe("loadPostgresPreparedStatements", () => {
+	it("follows BILLING_STRIPE_WRITE_PERMISSION_PROBES as the server does", () => {
+		const off = { BILLING_STRIPE_WRITE_PERMISSION_PROBES: "false" };
+		expect(loadStripeWritePermissionProbes({})).toBe(true);
+		expect(loadStripeWritePermissionProbes(off)).toBe(false);
+		expect(loadEnv({ ...developmentSource, ...off }).stripeWritePermissionProbes).toBe(false);
+		expect(() =>
+			loadStripeWritePermissionProbes({ BILLING_STRIPE_WRITE_PERMISSION_PROBES: "no" }),
+		).toThrow();
+	});
+
 	it("follows BILLING_POSTGRES_PREPARED_STATEMENTS as the server does", () => {
 		expect(loadPostgresPreparedStatements({})).toBe(true);
 		expect(loadPostgresPreparedStatements({ BILLING_POSTGRES_PREPARED_STATEMENTS: "true" })).toBe(
