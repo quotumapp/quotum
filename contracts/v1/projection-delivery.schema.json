@@ -1,0 +1,544 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allOf": [
+    {
+      "not": {
+        "required": [
+          "purchase",
+          "reversal"
+        ]
+      }
+    },
+    {
+      "not": {
+        "required": [
+          "trial",
+          "purchase"
+        ]
+      }
+    },
+    {
+      "not": {
+        "required": [
+          "trial",
+          "reversal"
+        ]
+      }
+    }
+  ],
+  "description": "Body of the signed POST to <projectionUrl>/internal/billing/projections. Ignore fields this schema does not name.",
+  "properties": {
+    "balances": {
+      "description": "Exact decimal strings for each metered feature. A read model: authorize with the metering API.",
+      "items": {
+        "properties": {
+          "available": {
+            "pattern": "^\\d+(?:\\.\\d+)?$",
+            "type": "string"
+          },
+          "featureKey": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "held": {
+            "pattern": "^\\d+(?:\\.\\d+)?$",
+            "type": "string"
+          },
+          "periodEndsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "unlimited": {
+            "const": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "featureKey",
+          "unit",
+          "available",
+          "held",
+          "periodEndsAt"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "billingAccountId": {
+      "description": "Your identifier for the billing account.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "entitlements": {
+      "description": "Every entitlement of the account. Each entry's metadata names its current source.",
+      "properties": {
+        "billingAccountId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "entitlements": {
+          "items": {
+            "properties": {
+              "active": {
+                "type": "boolean"
+              },
+              "expiresAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "key": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "metadata": {
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "key",
+              "active",
+              "expiresAt",
+              "metadata"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "generatedAt": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "billingAccountId",
+        "entitlements",
+        "generatedAt"
+      ],
+      "type": "object"
+    },
+    "generatedAt": {
+      "description": "When the snapshot was computed. Equals entitlements.generatedAt.",
+      "format": "date-time",
+      "type": "string"
+    },
+    "idempotencyKey": {
+      "description": "Stable across retries of one delivery and unique within the project. Deduplicate on projectKey and this key.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "jobId": {
+      "description": "The delivery job. A retry repeats it; do not use it as the identity of a fact or a row.",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "type": "string"
+    },
+    "projectKey": {
+      "description": "Key of the project instance the delivery is for.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "purchase": {
+      "description": "A purchase to record once by transactionId. Never sent with reversal or trial.",
+      "properties": {
+        "channel": {
+          "enum": [
+            "ios",
+            "android",
+            "web"
+          ],
+          "type": "string"
+        },
+        "creditAmount": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "productKey": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "apple",
+            "google",
+            "stripe",
+            "paddle"
+          ],
+          "type": "string"
+        },
+        "purchasedAt": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "purchaseKind": {
+          "enum": [
+            "subscription",
+            "consumable",
+            "non_consumable"
+          ],
+          "type": "string"
+        },
+        "quantity": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "refundableQuantity": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "totalCreditAmount": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transactionId": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "channel",
+        "purchaseKind",
+        "transactionId",
+        "productKey",
+        "creditAmount",
+        "purchasedAt"
+      ],
+      "type": "object"
+    },
+    "reason": {
+      "description": "What caused the delivery.",
+      "enum": [
+        "purchase_verified",
+        "provider_webhook",
+        "expiry_reconciliation",
+        "provider_reconciliation",
+        "usage_changed"
+      ],
+      "type": "string"
+    },
+    "reversal": {
+      "description": "A refund or dispute to record once by transactionId. With a subscription fact it reports a returned subscription payment and reverses nothing. Never sent with purchase or trial.",
+      "properties": {
+        "channel": {
+          "enum": [
+            "ios",
+            "android",
+            "web"
+          ],
+          "type": "string"
+        },
+        "creditAmount": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "originalTransactionId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "productKey": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "apple",
+            "google",
+            "stripe",
+            "paddle"
+          ],
+          "type": "string"
+        },
+        "quantity": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "reason": {
+          "enum": [
+            "refund",
+            "dispute"
+          ],
+          "type": "string"
+        },
+        "reversedAt": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "totalCreditAmount": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transactionId": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "channel",
+        "reason",
+        "transactionId",
+        "originalTransactionId",
+        "productKey",
+        "creditAmount",
+        "reversedAt"
+      ],
+      "type": "object"
+    },
+    "schemaVersion": {
+      "const": 1,
+      "description": "Version of this body's format.",
+      "type": "number"
+    },
+    "sequence": {
+      "description": "Per-account order of snapshots. Skip the snapshot of a lower sequence than one already applied, but still record its facts. Absent means unordered: apply it as current.",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "subscription": {
+      "description": "State of the subscription the delivery is about. Not an inventory of the account's subscriptions.",
+      "properties": {
+        "cancelAtPeriodEnd": {
+          "type": "boolean"
+        },
+        "cancellationReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "channel": {
+          "enum": [
+            "ios",
+            "android",
+            "web"
+          ],
+          "type": "string"
+        },
+        "expiresAt": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "externalSubscriptionId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "planKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "productKey": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "apple",
+            "google",
+            "stripe",
+            "paddle"
+          ],
+          "type": "string"
+        },
+        "providerStatus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "active",
+            "grace_period",
+            "billing_retry",
+            "cancelled",
+            "expired",
+            "refunded",
+            "revoked"
+          ],
+          "type": "string"
+        },
+        "subscriptionId": {
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subscriptionId",
+        "externalSubscriptionId",
+        "provider",
+        "channel",
+        "productKey",
+        "planKey",
+        "status",
+        "providerStatus",
+        "expiresAt",
+        "cancelAtPeriodEnd",
+        "cancellationReason"
+      ],
+      "type": "object"
+    },
+    "trial": {
+      "description": "A trial that is ending or has ended. Never sent with purchase or reversal.",
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "provider"
+              ]
+            },
+            {
+              "required": [
+                "channel"
+              ]
+            },
+            {
+              "required": [
+                "externalSubscriptionId"
+              ]
+            }
+          ]
+        },
+        "required": [
+          "planGrantId",
+          "planKey"
+        ]
+      },
+      "if": {
+        "properties": {
+          "source": {
+            "const": "subscription"
+          }
+        }
+      },
+      "properties": {
+        "autoRenew": {
+          "type": "boolean"
+        },
+        "channel": {
+          "enum": [
+            "ios",
+            "android",
+            "web"
+          ],
+          "type": "string"
+        },
+        "event": {
+          "enum": [
+            "ending",
+            "ended"
+          ],
+          "type": "string"
+        },
+        "externalSubscriptionId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "planGrantId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "planKey": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "productKey": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "apple",
+            "google",
+            "stripe",
+            "paddle"
+          ],
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "subscription",
+            "plan_grant"
+          ],
+          "type": "string"
+        },
+        "trialEndsAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "trialStartsAt": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event",
+        "source",
+        "trialStartsAt",
+        "trialEndsAt",
+        "autoRenew"
+      ],
+      "then": {
+        "not": {
+          "required": [
+            "planGrantId"
+          ]
+        },
+        "required": [
+          "provider",
+          "channel",
+          "externalSubscriptionId",
+          "productKey"
+        ]
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "billingAccountId",
+    "generatedAt",
+    "entitlements",
+    "balances",
+    "reason",
+    "schemaVersion",
+    "projectKey",
+    "jobId",
+    "idempotencyKey"
+  ],
+  "title": "Quotum billing_state_v1 projection delivery",
+  "type": "object"
+}

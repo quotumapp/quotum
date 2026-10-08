@@ -214,80 +214,86 @@ const projectionTrialPayloadSchema = z
 		}
 	});
 
-export const projectionPayloadSchema = z
-	.object({
-		billingAccountId: z.string().min(1),
-		generatedAt: z.iso.datetime({ offset: true }),
-		entitlements: entitlementSnapshotSchema,
-		balances: z.array(
-			z
-				.object({
-					featureKey: z.string().trim().min(1),
-					unit: z.string().trim().min(1),
-					available: z.string().regex(/^\d+(?:\.\d+)?$/),
-					held: z.string().regex(/^\d+(?:\.\d+)?$/),
-					periodEndsAt: z.iso.datetime({ offset: true }).nullable(),
-					unlimited: z.literal(true).optional(),
-				})
-				.strict(),
-		),
-		reason: z.enum(projectionSyncReasons),
-		purchase: z
+/** The stored payload's fields; the delivery contract adds its envelope to the same object. */
+export const projectionPayloadFields = z.object({
+	billingAccountId: z.string().min(1),
+	generatedAt: z.iso.datetime({ offset: true }),
+	entitlements: entitlementSnapshotSchema,
+	balances: z.array(
+		z
 			.object({
-				provider: z.enum(billingProviders),
-				channel: z.enum(billingChannels),
-				purchaseKind: z.enum(productTypes),
-				transactionId: z.string().min(1),
-				productKey: z.string().min(1),
-				creditAmount: z.number().int().nonnegative(),
-				totalCreditAmount: z.number().int().nonnegative().optional(),
-				quantity: z.number().int().positive().optional(),
-				refundableQuantity: z.number().int().nonnegative().optional(),
-				purchasedAt: z.string().min(1),
+				featureKey: z.string().trim().min(1),
+				unit: z.string().trim().min(1),
+				available: z.string().regex(/^\d+(?:\.\d+)?$/),
+				held: z.string().regex(/^\d+(?:\.\d+)?$/),
+				periodEndsAt: z.iso.datetime({ offset: true }).nullable(),
+				unlimited: z.literal(true).optional(),
 			})
-			.optional(),
-		reversal: projectionReversalPayloadSchema.optional(),
-		trial: projectionTrialPayloadSchema.optional(),
-		subscription: projectionSubscriptionSchema.optional(),
-		sequence: z.number().int().nonnegative().optional(),
-	})
-	.superRefine((payload, context) => {
-		if (payload.billingAccountId !== payload.entitlements.billingAccountId) {
-			context.addIssue({
-				code: "custom",
-				message: "Projection payload user mismatch",
-				path: ["entitlements", "billingAccountId"],
-			});
-		}
+			.strict(),
+	),
+	reason: z.enum(projectionSyncReasons),
+	purchase: z
+		.object({
+			provider: z.enum(billingProviders),
+			channel: z.enum(billingChannels),
+			purchaseKind: z.enum(productTypes),
+			transactionId: z.string().min(1),
+			productKey: z.string().min(1),
+			creditAmount: z.number().int().nonnegative(),
+			totalCreditAmount: z.number().int().nonnegative().optional(),
+			quantity: z.number().int().positive().optional(),
+			refundableQuantity: z.number().int().nonnegative().optional(),
+			purchasedAt: z.string().min(1),
+		})
+		.optional(),
+	reversal: projectionReversalPayloadSchema.optional(),
+	trial: projectionTrialPayloadSchema.optional(),
+	subscription: projectionSubscriptionSchema.optional(),
+	sequence: z.number().int().nonnegative().optional(),
+});
 
-		if (payload.generatedAt !== payload.entitlements.generatedAt) {
-			context.addIssue({
-				code: "custom",
-				message: "Projection payload generation time mismatch",
-				path: ["generatedAt"],
-			});
-		}
+/** The rules between a payload's fields, which the object shape alone cannot state. */
+export function refineProjectionPayload(
+	payload: z.infer<typeof projectionPayloadFields>,
+	context: z.RefinementCtx,
+): void {
+	if (payload.billingAccountId !== payload.entitlements.billingAccountId) {
+		context.addIssue({
+			code: "custom",
+			message: "Projection payload user mismatch",
+			path: ["entitlements", "billingAccountId"],
+		});
+	}
 
-		if (payload.purchase !== undefined && payload.reversal !== undefined) {
-			context.addIssue({
-				code: "custom",
-				message: "Projection payload cannot include both purchase and reversal context",
-				path: ["reversal"],
-			});
-		}
+	if (payload.generatedAt !== payload.entitlements.generatedAt) {
+		context.addIssue({
+			code: "custom",
+			message: "Projection payload generation time mismatch",
+			path: ["generatedAt"],
+		});
+	}
 
-		if (
-			payload.trial !== undefined &&
-			(payload.purchase !== undefined || payload.reversal !== undefined)
-		) {
-			context.addIssue({
-				code: "custom",
-				message:
-					"Projection payload cannot include trial context with purchase or reversal context",
-				path: ["trial"],
-			});
-		}
-	});
+	if (payload.purchase !== undefined && payload.reversal !== undefined) {
+		context.addIssue({
+			code: "custom",
+			message: "Projection payload cannot include both purchase and reversal context",
+			path: ["reversal"],
+		});
+	}
+
+	if (
+		payload.trial !== undefined &&
+		(payload.purchase !== undefined || payload.reversal !== undefined)
+	) {
+		context.addIssue({
+			code: "custom",
+			message: "Projection payload cannot include trial context with purchase or reversal context",
+			path: ["trial"],
+		});
+	}
+}
+
+export const projectionPayloadSchema = projectionPayloadFields.superRefine(refineProjectionPayload);
 
 const providers = new Set<BillingProvider>(billingProviders);
 const channels = new Set<BillingChannel>(billingChannels);

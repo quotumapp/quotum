@@ -23,7 +23,12 @@ export interface ContractStore {
 	readDocument(name: ContractDocument): Promise<string>;
 }
 
-export const contractDocuments = ["errors.json", "provider-capabilities.json"] as const;
+export const contractDocuments = [
+	"errors.json",
+	"provider-capabilities.json",
+	"projection-delivery.schema.json",
+	"projection-delivery.examples.json",
+] as const;
 export type ContractDocument = (typeof contractDocuments)[number];
 
 const httpMethods = ["get", "post", "put", "patch", "delete"] as const;

@@ -232,8 +232,11 @@ the server never follows a cursor on its own.
 
 | `find_api_operations`, `get_api_operation` | The generated `/v1` contract: search operations, then one operation with every schema it references. They read `contracts/v1` next to the server and never call the API |
 
-The error inventory and the provider capability table are also served as resources
-(`quotum://contracts/v1/errors.json`, `quotum://contracts/v1/provider-capabilities.json`). The
+The error inventory, the provider capability table and the
+[projection delivery contract](providers.md#delivery-contract) are also served as resources
+(`quotum://contracts/v1/errors.json`, `quotum://contracts/v1/provider-capabilities.json`,
+`quotum://contracts/v1/projection-delivery.schema.json` and
+`quotum://contracts/v1/projection-delivery.examples.json`). The
 1.8 MB OpenAPI document is not, which is what the two contract tools are for. Without a
 `contracts/v1` directory beside `src/` the contract tools and resources are not registered.
 

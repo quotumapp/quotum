@@ -10,6 +10,10 @@ const documentDescriptions = {
 		"Every literal error code the API can return, with the source files that raise it.",
 	"provider-capabilities.json":
 		"Which operations Apple, Google and Stripe support, with support levels and reasons.",
+	"projection-delivery.schema.json":
+		"JSON Schema of the signed billing_state_v1 delivery a projection receiver gets.",
+	"projection-delivery.examples.json":
+		"Example projection deliveries: Stripe subscription purchase, renewal, cancellation, trial, one-time purchase and refund.",
 } as const;
 
 /** Lookups over the generated contract shipped next to the server; they never call the API. */

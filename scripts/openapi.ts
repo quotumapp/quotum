@@ -7,6 +7,8 @@ import {
 	replaceProviderCapabilityBlock,
 } from "../src/composition/provider-capabilities";
 import { createCliBillingLogger } from "../src/observability/logger";
+import { projectionDeliveryJsonSchema } from "../src/projections/contract";
+import { projectionDeliveryExamples } from "../src/projections/delivery-examples";
 import { generateErrorRegistry } from "./openapi-errors";
 
 const logger = createCliBillingLogger();
@@ -58,6 +60,17 @@ async function main(check: boolean): Promise<void> {
 		resolve(root, "contracts/v1/errors.json"),
 		artifactJson(await generateErrorRegistry(root)),
 		{ check, stale: "Error registry is stale. Run bun run openapi:generate." },
+	);
+
+	await syncGeneratedFile(
+		resolve(root, "contracts/v1/projection-delivery.schema.json"),
+		artifactJson(projectionDeliveryJsonSchema()),
+		{ check, stale: "Projection delivery schema is stale. Run bun run openapi:generate." },
+	);
+	await syncGeneratedFile(
+		resolve(root, "contracts/v1/projection-delivery.examples.json"),
+		artifactJson(projectionDeliveryExamples),
+		{ check, stale: "Projection delivery examples are stale. Run bun run openapi:generate." },
 	);
 
 	const capabilities = providerCapabilityContract();

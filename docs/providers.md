@@ -542,6 +542,26 @@ usage receives a new key. The internal coalescing job still uses `usage:<custome
 Deduplicate deliveries by project and key, and compare sequence to prevent out-of-order state updates. [`scripts/projection-receiver.ts`](../scripts/projection-receiver.ts) is a
 reference receiver.
 
+### Delivery contract
+
+The body of a delivery is published in machine-readable form next to the OpenAPI document:
+
+- [`contracts/v1/projection-delivery.schema.json`](../contracts/v1/projection-delivery.schema.json)
+  is its JSON Schema (draft 2020-12), rendered from the schema the projection worker validates a
+  payload with. It covers the envelope the worker adds to the stored job payload
+  (`schemaVersion`, `projectKey`, `jobId`, `idempotencyKey`), the snapshot, and the `purchase`,
+  `reversal`, `trial` and `subscription` facts with the rules between them.
+- [`contracts/v1/projection-delivery.examples.json`](../contracts/v1/projection-delivery.examples.json)
+  holds one example per case, each with a `description` and the `delivery` body: a Stripe
+  subscription's purchase, renewal, scheduled cancellation and end, a trial's start and its
+  ending notice, and a one-time purchase with its refund. The integration lane compares each with
+  the delivery the real flow produces, field for field in structure.
+
+Use the examples as receiver fixtures and the schema to validate what you receive. The schema
+leaves objects open on purpose: a later release may add a field, so ignore the ones you do not
+know instead of rejecting the delivery. Each example is a body only. Sign it yourself to test
+verification, or use `quotum projections check-receiver` for the handshake.
+
 Each entitlement's `metadata` names its source. A subscription source carries `status`,
 `provider`, `channel`, `productId`, `storeProductId`, `subscriptionId`,
 `externalSubscriptionId`, `productKey` and nullable `planKey`, plus `trialStartsAt` and `trialEndsAt`
