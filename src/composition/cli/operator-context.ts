@@ -3,7 +3,11 @@ import { open, stat, unlink } from "node:fs/promises";
 import { SQL } from "bun";
 import { DrizzleQueryError } from "drizzle-orm/errors";
 import { sqlstateOf } from "../../db/postgres-errors";
-import { loadPostgresPreparedStatements, loadProjectionReceivers } from "../../env";
+import {
+	loadPostgresPreparedStatements,
+	loadProjectionReceivers,
+	loadStripeWritePermissionProbes,
+} from "../../env";
 import { loadAuthSecret, merchantPlatformEnabled } from "../../platform/config";
 import { loadConnectionCipher } from "../../platform/connections/cipher";
 import { type ConnectionGate, ConnectionLifecycle } from "../../platform/connections/lifecycle";
@@ -232,7 +236,12 @@ export async function openOperatorContext(
 	const lifecycle = new ConnectionLifecycle({
 		sql,
 		repository,
-		validator: dependencies.validator ?? createConnectionValidation({ destinationPolicy }),
+		validator:
+			dependencies.validator ??
+			createConnectionValidation({
+				destinationPolicy,
+				stripeWritePermissionProbes: loadStripeWritePermissionProbes(env),
+			}),
 		hash: (value) => tokenHash(value, secret),
 		now: () => new Date(),
 	});

@@ -387,6 +387,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		...dependencies.merchant,
 		config: merchantConfig,
 		trustProxyHeaders: env.rateLimit.trustProxyHeaders,
+		stripeWritePermissionProbes: env.stripeWritePermissionProbes,
 		staffRequestScope: sentryRequestScope,
 		merchantRequestScope: merchantSentryScope,
 		mcpRequestScope: mcpSentryScope,

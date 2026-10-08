@@ -64,6 +64,8 @@ export function attachMerchantRuntime(
 		 * forwarded client.
 		 */
 		trustProxyHeaders?: boolean;
+		/** `BILLING_STRIPE_WRITE_PERMISSION_PROBES`; a supplied `connectionValidation` ignores it. */
+		stripeWritePermissionProbes?: boolean;
 	},
 ): QuotumApp {
 	const { config } = options;
@@ -74,7 +76,11 @@ export function attachMerchantRuntime(
 		throw new Error("Merchant email transport is required; tests must inject a capture mailer");
 	const database = merchantAuthDatabase(sql);
 	const repository = createConnectionRepository(persistence);
-	const validator = options.connectionValidation ?? createConnectionValidation();
+	const validator =
+		options.connectionValidation ??
+		createConnectionValidation({
+			stripeWritePermissionProbes: options.stripeWritePermissionProbes,
+		});
 	const oauth = options.stripeOAuth === undefined ? createStripeOAuthPort() : options.stripeOAuth;
 	const connections = new MerchantConnections(
 		store,

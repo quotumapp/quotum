@@ -376,6 +376,11 @@ Defaults in parentheses.
 - `BILLING_USAGE_PARTITION_UPKEEP=true|false` (`true`). Keeps monthly usage partitions a year
   ahead; see [usage partitions](operations.md#usage-partitions). Set `false` only when a role that
   owns `usage_events` creates them instead.
+- `BILLING_STRIPE_WRITE_PERMISSION_PROBES=true|false` (`true`). Stripe connection validation
+  verifies each write permission with a request that cannot succeed; see the
+  [restricted-key recipe](providers.md#manual-stripe-restricted-key-recipe). Set `false` to send
+  read probes only and report the write permissions as unverified. The `quotum connections`
+  commands read it too.
 - `BILLING_RATE_LIMIT_WINDOW_MS` (`60000`), `BILLING_VERIFY_RATE_LIMIT_PER_WINDOW` (`120`),
   `BILLING_WEBHOOK_RATE_LIMIT_PER_WINDOW` (`600`), `BILLING_METERING_RATE_LIMIT_PER_WINDOW`
   (`6000`), `BILLING_ADMIN_RATE_LIMIT_PER_WINDOW` (`60`); see [Rate limits](#rate-limits).
