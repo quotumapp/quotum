@@ -3,6 +3,7 @@ import type { CredentialAccess } from "../../shared/credential-access";
 import {
 	CliUsageError,
 	type CommandOutput,
+	memberOverrideReason,
 	type OperatorContext,
 	type OperatorContextDependencies,
 	openOperatorContext,
@@ -52,7 +53,7 @@ async function credentialsCommand(
 		case "rotate": {
 			const { positionals, options } = parseArguments(
 				args,
-				["access", "credentials-out", "request-key", "actor"],
+				["access", "credentials-out", "request-key", "actor", "member-override-reason"],
 				1,
 			);
 			// No default: rotating the full key replaces the one every backend uses.
@@ -62,6 +63,7 @@ async function credentialsCommand(
 				throw new CliUsageError("--credentials-out <new-file> is required.");
 			const key = requestKey(options);
 			const actor = operatorActor(options, env);
+			const reason = memberOverrideReason(options);
 			return await withContext(env, dependencies, async (context) => {
 				const target = await context.target(positionals[0] ?? "");
 				const file = await reserveSecretFile(credentialsOut);
@@ -69,7 +71,7 @@ async function credentialsCommand(
 					// The key is written inside the rotation's transaction, so a file that cannot be
 					// written rolls the rotation back instead of revoking the old key.
 					const { credentialDisclosed } = await context.lifecycle.rotateCredential(
-						context.gate(target, actor),
+						context.gate(target, actor, { memberOverrideReason: reason }),
 						key,
 						access,
 						(token) =>
@@ -95,17 +97,23 @@ async function credentialsCommand(
 			});
 		}
 		case "revoke": {
-			const { positionals, options } = parseArguments(args, ["access", "request-key", "actor"], 1);
+			const { positionals, options } = parseArguments(
+				args,
+				["access", "request-key", "actor", "member-override-reason"],
+				1,
+			);
 			// Only the read-only key can be withdrawn; the full key is only ever replaced.
 			credentialAccess(options.get("access"), ["read_only"]);
 			const key = requestKey(options);
 			const actor = operatorActor(options, env);
+			const reason = memberOverrideReason(options);
 			return await withContext(env, dependencies, async (context) => {
 				const target = await context.target(positionals[0] ?? "");
+				const gate = context.gate(target, actor, { memberOverrideReason: reason });
 				return {
 					requestKey: key,
 					instance: target.instanceKey,
-					...(await context.lifecycle.revokeCredential(context.gate(target, actor), key)),
+					...(await context.lifecycle.revokeCredential(gate, key)),
 				};
 			});
 		}

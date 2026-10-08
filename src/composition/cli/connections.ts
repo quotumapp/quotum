@@ -3,6 +3,7 @@ import { MerchantError } from "../../platform/security";
 import {
 	CliUsageError,
 	type CommandOutput,
+	memberOverrideReason,
 	type OperatorContext,
 	type OperatorContextDependencies,
 	openOperatorContext,
@@ -72,7 +73,15 @@ async function connectionsCommand(
 		case "draft": {
 			const { positionals, options } = parseArguments(
 				args,
-				["settings", "secrets-file", "secret-out", "expected-revision", "request-key", "actor"],
+				[
+					"settings",
+					"secrets-file",
+					"secret-out",
+					"expected-revision",
+					"request-key",
+					"actor",
+					"member-override-reason",
+				],
 				2,
 			);
 			const [instanceKey = "", kindText = ""] = positionals;
@@ -91,11 +100,12 @@ async function connectionsCommand(
 			const expectedRevision = optionalRevision(options.get("expected-revision"));
 			const key = requestKey(options);
 			const actor = operatorActor(options, env);
+			const reason = memberOverrideReason(options);
 			const settings = await readSettings(settingsPath, stdin);
 			const secrets = secretsSource === undefined ? {} : await readSecrets(secretsSource, stdin);
 			return await withContext(env, dependencies, async (context) => {
 				const target = await context.target(instanceKey);
-				const gate = context.gate(target, actor);
+				const gate = context.gate(target, actor, { memberOverrideReason: reason });
 				const revision =
 					expectedRevision ??
 					(await context.lifecycle.list(gate)).connections.find((row) => row.kind === kind)
@@ -139,19 +149,24 @@ async function connectionsCommand(
 			});
 		}
 		case "validate": {
-			const { positionals, options } = parseArguments(args, ["actor"], 3);
+			const { positionals, options } = parseArguments(args, ["actor", "member-override-reason"], 3);
 			const [instanceKey = "", kindText = "", draftId = ""] = positionals;
 			const kind = connectionKind(kindText);
 			const actor = operatorActor(options, env);
+			const reason = memberOverrideReason(options);
 			return await withContext(env, dependencies, async (context) => {
 				const target = await context.target(instanceKey);
-				return await context.lifecycle.validate(context.gate(target, actor), kind, draftId);
+				return await context.lifecycle.validate(
+					context.gate(target, actor, { memberOverrideReason: reason }),
+					kind,
+					draftId,
+				);
 			});
 		}
 		case "commit": {
 			const { positionals, options } = parseArguments(
 				args,
-				["wait-for-event", "request-key", "actor"],
+				["wait-for-event", "request-key", "actor", "member-override-reason"],
 				3,
 			);
 			const [instanceKey = "", kindText = "", draftId = ""] = positionals;
@@ -159,9 +174,10 @@ async function connectionsCommand(
 			const waitMs = waitDuration(options.get("wait-for-event"));
 			const key = requestKey(options);
 			const actor = operatorActor(options, env);
+			const reason = memberOverrideReason(options);
 			return await withContext(env, dependencies, async (context) => {
 				const target = await context.target(instanceKey);
-				const gate = context.gate(target, actor);
+				const gate = context.gate(target, actor, { memberOverrideReason: reason });
 				// Validation stays fresh for fifteen minutes, so commit always verifies again first.
 				await context.lifecycle.validate(gate, kind, draftId);
 				if (waitMs > 0 && providers.has(kind)) {
@@ -194,7 +210,7 @@ async function connectionsCommand(
 		case "disable": {
 			const { positionals, options } = parseArguments(
 				args,
-				["expected-revision", "request-key", "actor"],
+				["expected-revision", "request-key", "actor", "member-override-reason"],
 				2,
 			);
 			const [instanceKey = "", kindText = ""] = positionals;
@@ -204,11 +220,13 @@ async function connectionsCommand(
 				throw new CliUsageError("--expected-revision <n> is required; see `connections list`.");
 			const key = requestKey(options);
 			const actor = operatorActor(options, env);
+			const reason = memberOverrideReason(options);
 			return await withContext(env, dependencies, async (context) => {
 				const target = await context.target(instanceKey);
+				const gate = context.gate(target, actor, { memberOverrideReason: reason });
 				return {
 					requestKey: key,
-					...(await context.lifecycle.disable(context.gate(target, actor), kind, key, revision)),
+					...(await context.lifecycle.disable(gate, kind, key, revision)),
 				};
 			});
 		}

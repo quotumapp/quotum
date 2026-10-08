@@ -424,7 +424,7 @@ describe("operator connection commands", () => {
 		}
 	});
 
-	it("leaves organizations with members to them while the merchant platform runs", async () => {
+	it("reads organizations with members, and changes them only with a stated reason", async () => {
 		await seed();
 		await new MerchantBrowser(f).signup();
 		await f.sql`
@@ -432,12 +432,48 @@ describe("operator connection commands", () => {
 			SELECT o.id, p.id, 'Owner' FROM platform_organizations o, platform_principals p
 			WHERE o.slug='ops'
 		`;
-		const merchantMode = await credentials(["status", "alpha"], {
-			...env,
-			QUOTUM_MERCHANT_ENABLED: "true",
+		const merchantMode = { ...env, QUOTUM_MERCHANT_ENABLED: "true" };
+		// Reads need no flag.
+		expect((await credentials(["status", "alpha"], merchantMode)).code).toBe(0);
+		expect((await run(runConnectionsCommand, ["list", "alpha"], {}, merchantMode)).code).toBe(0);
+		await withDirectory(async (directory) => {
+			const rotate = (file: string, ...extra: string[]) =>
+				credentials(
+					[
+						"rotate",
+						"alpha",
+						"--access",
+						"full",
+						"--credentials-out",
+						join(directory, file),
+						...extra,
+					],
+					merchantMode,
+				);
+			const refused = await rotate("refused.json");
+			expect(refused.code).toBe(1);
+			expect(refused.stderr).toContain("This organization has members");
+			expect(refused.stderr).toContain("--member-override-reason");
+			expect(await Bun.file(join(directory, "refused.json")).exists()).toBe(false);
+			expect(
+				await f.sql`SELECT 1 FROM platform_audit_events WHERE metadata->>'operator' IS NOT NULL`,
+			).toHaveLength(0);
+
+			const allowed = await rotate(
+				"allowed.json",
+				"--member-override-reason",
+				"owner asked for a rotation",
+			);
+			expect(allowed.code).toBe(0);
+			expect(await Bun.file(join(directory, "allowed.json")).exists()).toBe(true);
 		});
-		expect(merchantMode.code).toBe(1);
-		expect(merchantMode.stderr).toContain("This organization has members");
+		expect(
+			await f.sql`
+				SELECT metadata->>'operator' AS operator, metadata->>'memberOverrideReason' AS reason
+				FROM platform_audit_events WHERE metadata->>'operator' IS NOT NULL
+			`,
+		).toEqual([{ operator: "ops-runbook", reason: "owner asked for a rotation" }]);
+		// Without the merchant platform, members never stand in the way.
 		expect((await credentials(["status", "alpha"])).code).toBe(0);
 	});
 

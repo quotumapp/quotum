@@ -527,8 +527,10 @@ and commit steps as the **Integrations** screens, and audit events name the oper
 
 These commands, and `quotum credentials`, read `QUOTUM_AUTH_SECRET` even in headless mode. It keys
 their request fingerprints the way it does for the merchant platform. While the merchant platform
-runs, they refuse organizations that have members, who manage their own connections. Stripe App
-OAuth needs a merchant session, so it is available only in the merchant application.
+runs, an organization that has members manages its own connections: `quotum connections list` and
+`quotum credentials status` still read it, and any change needs `--member-override-reason <why>`,
+which the audit event records next to the operator. Stripe App OAuth needs a merchant session, so it
+is available only in the merchant application.
 
 ## Projections
 

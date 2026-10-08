@@ -155,4 +155,24 @@ describe("ConnectionLifecycle", () => {
 			],
 		]);
 	});
+
+	it("records why an operator changed an organization its members manage", async () => {
+		const { audit } = await run(
+			{ ...operator, memberOverrideReason: "owner asked for a rotation" },
+			(lifecycle, gate) => lifecycle.rotateCredential(gate, "key-3", "read_only"),
+		);
+		expect(audit).toEqual([
+			[
+				null,
+				"organization-1",
+				"credential.issued",
+				"instance-1",
+				JSON.stringify({
+					access: "read_only",
+					operator: "ops-runbook",
+					memberOverrideReason: "owner asked for a rotation",
+				}),
+			],
+		]);
+	});
 });

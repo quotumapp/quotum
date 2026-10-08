@@ -94,20 +94,41 @@ describe("operatorConnectionGate", () => {
 		expect(statements[0]?.text).toContain("status='active' FOR UPDATE");
 	});
 
-	it("leaves organizations with members to them while the merchant platform runs", async () => {
+	it("lets operators read organizations with members while the merchant platform runs", async () => {
 		const members = { status: "active", has_members: true };
+		const gate = operatorConnectionGate("ops", target, { allowMemberOrganizations: false });
+		await expect(gate.instance(fakeSql(members).sql, false)).resolves.toEqual(instance);
+		// A read still needs an active organization.
 		await expect(
-			operatorConnectionGate("ops", target, { allowMemberOrganizations: false }).instance(
-				fakeSql(members).sql,
-				false,
-			),
-		).rejects.toThrow("This organization has members");
+			gate.instance(fakeSql({ status: "suspended", has_members: true }).sql, false),
+		).rejects.toThrow("This environment is unavailable.");
+	});
+
+	it("leaves changes to organizations with members to them unless the operator gives a reason", async () => {
+		const members = { status: "active", has_members: true };
+		const refused = operatorConnectionGate("ops", target, { allowMemberOrganizations: false });
+		await expect(refused.instance(fakeSql(members).sql, true)).rejects.toThrow(
+			"This organization has members",
+		);
+		await expect(refused.instance(fakeSql(members).sql, true)).rejects.toThrow(
+			"--member-override-reason",
+		);
 		await expect(
 			operatorConnectionGate("ops", target, { allowMemberOrganizations: true }).instance(
 				fakeSql(members).sql,
-				false,
+				true,
 			),
 		).resolves.toEqual(instance);
+		const reasoned = operatorConnectionGate("ops", target, {
+			allowMemberOrganizations: false,
+			memberOverrideReason: "rotating a leaked key for the owner",
+		});
+		await expect(reasoned.instance(fakeSql(members).sql, true)).resolves.toEqual(instance);
+		expect(reasoned.actor).toEqual({
+			kind: "operator",
+			name: "ops",
+			memberOverrideReason: "rotating a leaked key for the owner",
+		});
 	});
 
 	it("checks for members again once it holds the organization lock", async () => {
@@ -119,6 +140,15 @@ describe("operatorConnectionGate", () => {
 			expect.stringContaining("FOR UPDATE"),
 			expect.stringContaining("platform_memberships"),
 		]);
+		// A stated reason covers a member who joined in the meantime.
+		const reasoned = fakeSql({ status: "active", has_members: true });
+		await expect(
+			operatorConnectionGate("ops", target, {
+				allowMemberOrganizations: false,
+				memberOverrideReason: "owner asked",
+			}).lock(reasoned.sql),
+		).resolves.toBeUndefined();
+		expect(reasoned.statements).toHaveLength(1);
 		await expect(gate.lock(fakeSql({ status: "active", has_members: false }).sql)).resolves.toBe(
 			undefined,
 		);

@@ -7,6 +7,7 @@ import { runCredentialsCommand } from "../../../src/composition/cli/credentials"
 import {
 	CliUsageError,
 	CommandReport,
+	memberOverrideReason,
 	openOperatorContext,
 	operatorActor,
 	parseArguments,
@@ -71,6 +72,20 @@ describe("operator command arguments", () => {
 		expect(requestKey(new Map())).toMatch(/^cli-[0-9a-f-]{36}$/);
 		expect(requestKey(new Map([["request-key", "retry-0001"]]))).toBe("retry-0001");
 		expect(() => requestKey(new Map([["request-key", "short"]]))).toThrow(CliUsageError);
+	});
+
+	it("takes an optional reason for changing an organization its members manage", () => {
+		expect(memberOverrideReason(new Map())).toBeUndefined();
+		expect(memberOverrideReason(new Map([["member-override-reason", "  owner asked  "]]))).toBe(
+			"owner asked",
+		);
+		expect(
+			memberOverrideReason(new Map([["member-override-reason", "x".repeat(200)]])),
+		).toHaveLength(200);
+		for (const reason of ["", "   ", "x".repeat(201), "two\nlines", "bell\u0007"])
+			expect(() => memberOverrideReason(new Map([["member-override-reason", reason]]))).toThrow(
+				CliUsageError,
+			);
 	});
 });
 
