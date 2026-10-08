@@ -284,6 +284,34 @@ export function migrationNoteErrors(body: string, changed: readonly string[]): s
 		.map((path) => `Upgrade notes must name ${path}.`);
 }
 
+/**
+ * What a release's notes open with when its baselines changed, or nothing when they did not.
+ * Applied migrations are checksum-verified, so such a release cannot migrate a populated database
+ * in place; the notice says so before the generated pull request list.
+ */
+export function renderUpgradeNotice(input: {
+	repository: string;
+	tag: string;
+	changed: readonly string[];
+}): string {
+	if (!input.changed.length) return "";
+	const files = input.changed.map((path) => `\`${path}\``);
+	const named =
+		files.length === 1
+			? `baseline migration ${files[0]}`
+			: `baseline migrations ${files.slice(0, -1).join(", ")} and ${files.at(-1)}`;
+	const guide = `https://github.com/${input.repository}/blob/${input.tag}/docs/upgrade-transitions.md`;
+	return [
+		"## Upgrade requires backup and restore ⚠️",
+		"",
+		`This release changes the ${named}. Applied migrations are checksum-verified, so \`quotum migrate\` refuses a populated database from an earlier release. Stop the service, take a backup and restore the data into a freshly migrated database, following [Upgrade transitions](${guide}) and the \`Upgrade notes\` of the pull requests below. Recreate disposable databases.`,
+		"",
+		"Baselines change in place until 1.0. From 1.0, upgrades are incremental migrations.",
+		"",
+		"",
+	].join("\n");
+}
+
 export function baselineReleaseWarning(
 	previous: string | undefined,
 	next: string | undefined,

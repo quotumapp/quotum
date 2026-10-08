@@ -36,6 +36,7 @@ jobs:
       previous: ${{ steps.release.outputs.previous }}
       latest: ${{ steps.release.outputs.latest }}
       prerelease: ${{ steps.release.outputs.prerelease }}
+      baseline_changes: ${{ steps.release.outputs.baseline_changes }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -131,7 +132,14 @@ jobs:
           DIGEST: ${{ needs.publish.outputs.digest }}
         run: bun scripts/release.ts image-manifest "$VERSION" --digest "$DIGEST" --out-dir release
 
+      - name: Prepare upgrade notice
+        env:
+          TAG: ${{ github.ref_name }}
+          BASELINE_CHANGES: ${{ needs.publish.outputs.baseline_changes }}
+        run: bun scripts/release.ts upgrade-notice "$TAG" --baselines "$BASELINE_CHANGES" --out-dir release
+
       # Notes are GitHub's generated pull request list; upgrade details live in each pull request.
+      # A release that changes a baseline migration opens with the upgrade notice instead.
       # Assets are attached to a draft before publishing because published releases are immutable.
       - name: Publish GitHub Release
         env:
@@ -156,6 +164,10 @@ jobs:
           fi
           if [ "$PRERELEASE" = "true" ]; then
             args+=(--prerelease)
+          fi
+          # gh prepends --notes to the generated list.
+          if [ -s release/upgrade-notice.md ]; then
+            args+=(--notes "$(cat release/upgrade-notice.md)")
           fi
           gh release create "$TAG" release/openapi.json release/errors.json release/image.json "${args[@]}"
           gh release edit "$TAG" --draft=false --latest="$LATEST"

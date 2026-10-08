@@ -13,6 +13,7 @@ import {
 	releaseMeta,
 	renderImageManifest,
 	renderUnreleasedSummary,
+	renderUpgradeNotice,
 	versionedContract,
 } from "./lib/release";
 
@@ -25,7 +26,8 @@ const usage = `Usage:
   bun scripts/release.ts image-manifest <version> --digest sha256:... [--out-dir dir]
   bun scripts/release.ts pr-migrations       (reads PR_BODY, BASE_SHA, HEAD_SHA)
   bun scripts/release.ts pr-title            (reads PR_TITLE)
-  bun scripts/release.ts unreleased`;
+  bun scripts/release.ts unreleased
+  bun scripts/release.ts upgrade-notice <tag> --baselines a.sql,b.sql [--out-dir dir]`;
 
 function git(...args: string[]): string {
 	const result = Bun.spawnSync(["git", ...args], { stderr: "pipe" });
@@ -95,6 +97,23 @@ function imageManifest(positionals: string[], values: { digest?: string; "out-di
 	logger.info(`Wrote ${join(outDir, "image.json")}`);
 }
 
+/** Writes `upgrade-notice.md`; it is empty when no baseline changed, and the workflow skips it. */
+function upgradeNotice(positionals: string[], values: { baselines?: string; "out-dir"?: string }) {
+	const tag = positionals[0];
+	if (!tag || values.baselines === undefined) {
+		throw new Error(usage);
+	}
+	const outDir = values["out-dir"] ?? "release";
+	const notice = renderUpgradeNotice({
+		repository: repository(),
+		tag,
+		changed: values.baselines.split(",").filter((path) => path !== ""),
+	});
+	mkdirSync(outDir, { recursive: true });
+	writeFileSync(join(outDir, "upgrade-notice.md"), notice);
+	writeStdout(notice === "" ? "No baseline changed; no upgrade notice." : notice);
+}
+
 function prTitle() {
 	const title = process.env.PR_TITLE;
 	if (title === undefined) {
@@ -160,6 +179,7 @@ try {
 	const { positionals, values } = parseArgs({
 		allowPositionals: true,
 		options: {
+			baselines: { type: "string" },
 			digest: { type: "string" },
 			"out-dir": { type: "string" },
 		},
@@ -200,6 +220,9 @@ try {
 			break;
 		case "unreleased":
 			unreleased();
+			break;
+		case "upgrade-notice":
+			upgradeNotice(rest, values);
 			break;
 		default:
 			throw new Error(usage);

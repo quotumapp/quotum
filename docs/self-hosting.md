@@ -177,7 +177,9 @@ to send them plain http. Read the
 
 ## Upgrade
 
-1. Read the target release and the pull requests it lists.
+1. Read the target release and the pull requests it lists. A release that cannot migrate your
+   database in place says so first: its notes open with `Upgrade requires backup and restore` and
+   name the changed baselines.
 2. Take a backup.
 3. Change `QUOTUM_VERSION` to the new digest, then run `docker compose pull` and
    `docker compose up -d`. `migrate` runs before the new API starts.
