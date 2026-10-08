@@ -554,7 +554,9 @@ The body of a delivery is published in machine-readable form next to the OpenAPI
 - [`contracts/v1/projection-delivery.examples.json`](../contracts/v1/projection-delivery.examples.json)
   holds one example per case, each with a `description` and the `delivery` body: a Stripe
   subscription's purchase, renewal, refunded payment, scheduled cancellation and end, a trial's
-  start and its ending notice, and a one-time purchase with its refund. The integration lane compares each with
+  start and its ending notice, a one-time purchase with its refund, a verified App Store
+  subscription, a verified Google Play subscription and consumable, and a usage snapshot with a
+  balance. The integration lane compares each with
   the delivery the real flow produces, field for field in structure.
 
 Use the examples as receiver fixtures and the schema to validate what you receive. The schema

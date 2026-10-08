@@ -1,4 +1,109 @@
 {
+  "apple_subscription_purchase": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [
+          {
+            "active": true,
+            "expiresAt": "2026-11-01T09:30:00.000Z",
+            "key": "premium",
+            "metadata": {
+              "channel": "ios",
+              "externalSubscriptionId": "2000000912345000",
+              "planKey": null,
+              "productId": "0192f3a1-6b2d-7f40-8c11-2e3f4a5b6c7d",
+              "productKey": "premium_monthly",
+              "provider": "apple",
+              "source": "subscription",
+              "status": "active",
+              "storeProductId": "0192f3a1-6b9f-7a52-b3c4-d5e6f7a8b9c0",
+              "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e02"
+            }
+          }
+        ],
+        "generatedAt": "2026-10-01T09:30:02.114Z"
+      },
+      "generatedAt": "2026-10-01T09:30:02.114Z",
+      "idempotencyKey": "apple:2000000912345678:purchase_verified",
+      "jobId": "0192f3a2-000a-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "reason": "purchase_verified",
+      "schemaVersion": 1,
+      "sequence": 1
+    },
+    "description": "An App Store subscription verified through POST /v1/purchases/verify. A store subscription carries no purchase or subscription fact: its state is the entitlement, whose metadata names the provider, the channel and the original transaction as externalSubscriptionId."
+  },
+  "google_consumable_purchase": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [],
+        "generatedAt": "2026-10-03T14:11:27.640Z"
+      },
+      "generatedAt": "2026-10-03T14:11:27.640Z",
+      "idempotencyKey": "google:bmcedkfnhiajoplg.AO-J1OyExampleToken:purchase_verified",
+      "jobId": "0192f3a2-000c-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "purchase": {
+        "channel": "android",
+        "creditAmount": 10,
+        "productKey": "credits_10",
+        "provider": "google",
+        "purchasedAt": "2026-10-03T14:11:25.000Z",
+        "purchaseKind": "consumable",
+        "quantity": 1,
+        "refundableQuantity": 1,
+        "totalCreditAmount": 10,
+        "transactionId": "bmcedkfnhiajoplg.AO-J1OyExampleToken"
+      },
+      "reason": "purchase_verified",
+      "schemaVersion": 1,
+      "sequence": 1
+    },
+    "description": "A Google Play consumable verified through POST /v1/purchases/verify. Record the purchase fact once by transactionId, the purchase token; refundableQuantity is how many of its units a refund can still take back."
+  },
+  "google_subscription_purchase": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [
+          {
+            "active": true,
+            "expiresAt": "2026-11-01T09:30:00.000Z",
+            "key": "premium",
+            "metadata": {
+              "channel": "android",
+              "externalSubscriptionId": "kpfnmhdbajcoelgi.AO-J1OxExampleToken",
+              "planKey": null,
+              "productId": "0192f3a1-6b2d-7f40-8c11-2e3f4a5b6c7d",
+              "productKey": "premium_monthly",
+              "provider": "google",
+              "source": "subscription",
+              "status": "active",
+              "storeProductId": "0192f3a1-6b9f-7a52-b3c4-d5e6f7a8b9c0",
+              "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e03"
+            }
+          }
+        ],
+        "generatedAt": "2026-10-01T09:30:02.114Z"
+      },
+      "generatedAt": "2026-10-01T09:30:02.114Z",
+      "idempotencyKey": "google:kpfnmhdbajcoelgi.AO-J1OxExampleToken:purchase_verified",
+      "jobId": "0192f3a2-000b-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "reason": "purchase_verified",
+      "schemaVersion": 1,
+      "sequence": 1
+    },
+    "description": "A Google Play subscription verified through POST /v1/purchases/verify. Like the App Store case it carries no fact; externalSubscriptionId is the purchase token."
+  },
   "stripe_one_time_purchase": {
     "delivery": {
       "balances": [],
@@ -434,5 +539,32 @@
       }
     },
     "description": "A Stripe subscription started with a trial. status is active while providerStatus is trialing, and the entitlement metadata carries the trial bounds."
+  },
+  "usage_snapshot": {
+    "delivery": {
+      "balances": [
+        {
+          "available": "9.5",
+          "featureKey": "ai_credits",
+          "held": "0",
+          "periodEndsAt": null,
+          "unit": "credit"
+        }
+      ],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [],
+        "generatedAt": "2026-10-04T18:20:11.305Z"
+      },
+      "generatedAt": "2026-10-04T18:20:11.305Z",
+      "idempotencyKey": "usage:0192f3a1-5d10-7e22-9f33-4a5b6c7d8e9f:7",
+      "jobId": "0192f3a2-000d-7a10-8b20-c30d40e50f60",
+      "projectKey": "acme",
+      "reason": "usage_changed",
+      "schemaVersion": 1,
+      "sequence": 7
+    },
+    "description": "Metered usage changed the account's balances. One delivery covers every consume, reservation and confirmation since the previous one. Its key is usage:<customerId>:<sequence>, and a retry repeats the same key and body. Balances are exact decimal strings."
   }
 }

@@ -14,6 +14,7 @@ const externalSubscriptionId = "sub_1QZ8xExampleAcme";
 function snapshot(
 	generatedAt: string,
 	entitlement: { active: boolean; expiresAt: string; metadata: Record<string, unknown> } | null,
+	balances: BillingProjectionInput["balances"] = [],
 ): Pick<BillingProjectionInput, "billingAccountId" | "generatedAt" | "entitlements" | "balances"> {
 	return {
 		billingAccountId,
@@ -23,8 +24,18 @@ function snapshot(
 			entitlements: entitlement === null ? [] : [{ key: "premium", ...entitlement }],
 			generatedAt,
 		},
-		balances: [],
+		balances,
 	};
+}
+
+/** A store subscription's entitlement source: the same fields, with the store's own identifiers. */
+function storeSubscriptionSource(store: {
+	provider: "apple" | "google";
+	channel: "ios" | "android";
+	subscriptionId: string;
+	externalSubscriptionId: string;
+}) {
+	return { ...subscriptionSource("active"), ...store };
 }
 
 function subscriptionSource(status: string, trial: Record<string, string> = {}) {
@@ -71,8 +82,9 @@ const trial = {
 };
 
 /**
- * One delivery per case a receiver handles for a Stripe subscription or one-time purchase,
- * published as `contracts/v1/projection-delivery.examples.json`. The integration lane checks each
+ * One delivery per case a receiver handles: a Stripe subscription or one-time purchase, a verified
+ * App Store or Google Play purchase, and a usage snapshot. Published as
+ * `contracts/v1/projection-delivery.examples.json`. The integration lane checks each
  * against the delivery the real flow produces, so add a case there with its example here. That
  * flow's subscription is not on a catalog plan, hence `planKey: null`; one that is carries its
  * pinned plan's key there, in the entitlement metadata and in the trial fact.
@@ -283,6 +295,96 @@ export const projectionDeliveryExamples: Record<string, ProjectionDeliveryExampl
 				reversedAt: "2026-10-05T08:45:08.000Z",
 			},
 			sequence: 2,
+		},
+	},
+	apple_subscription_purchase: {
+		description:
+			"An App Store subscription verified through POST /v1/purchases/verify. A store subscription carries no purchase or subscription fact: its state is the entitlement, whose metadata names the provider, the channel and the original transaction as externalSubscriptionId.",
+		delivery: {
+			schemaVersion: 1,
+			projectKey,
+			jobId: "0192f3a2-000a-7a10-8b20-c30d40e50f60",
+			idempotencyKey: "apple:2000000912345678:purchase_verified",
+			...snapshot("2026-10-01T09:30:02.114Z", {
+				active: true,
+				expiresAt: "2026-11-01T09:30:00.000Z",
+				metadata: storeSubscriptionSource({
+					provider: "apple",
+					channel: "ios",
+					subscriptionId: "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e02",
+					externalSubscriptionId: "2000000912345000",
+				}),
+			}),
+			reason: "purchase_verified",
+			sequence: 1,
+		},
+	},
+	google_subscription_purchase: {
+		description:
+			"A Google Play subscription verified through POST /v1/purchases/verify. Like the App Store case it carries no fact; externalSubscriptionId is the purchase token.",
+		delivery: {
+			schemaVersion: 1,
+			projectKey,
+			jobId: "0192f3a2-000b-7a10-8b20-c30d40e50f60",
+			idempotencyKey: "google:kpfnmhdbajcoelgi.AO-J1OxExampleToken:purchase_verified",
+			...snapshot("2026-10-01T09:30:02.114Z", {
+				active: true,
+				expiresAt: "2026-11-01T09:30:00.000Z",
+				metadata: storeSubscriptionSource({
+					provider: "google",
+					channel: "android",
+					subscriptionId: "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e03",
+					externalSubscriptionId: "kpfnmhdbajcoelgi.AO-J1OxExampleToken",
+				}),
+			}),
+			reason: "purchase_verified",
+			sequence: 1,
+		},
+	},
+	google_consumable_purchase: {
+		description:
+			"A Google Play consumable verified through POST /v1/purchases/verify. Record the purchase fact once by transactionId, the purchase token; refundableQuantity is how many of its units a refund can still take back.",
+		delivery: {
+			schemaVersion: 1,
+			projectKey,
+			jobId: "0192f3a2-000c-7a10-8b20-c30d40e50f60",
+			idempotencyKey: "google:bmcedkfnhiajoplg.AO-J1OyExampleToken:purchase_verified",
+			...snapshot("2026-10-03T14:11:27.640Z", null),
+			reason: "purchase_verified",
+			purchase: {
+				provider: "google",
+				channel: "android",
+				purchaseKind: "consumable",
+				transactionId: "bmcedkfnhiajoplg.AO-J1OyExampleToken",
+				productKey: "credits_10",
+				creditAmount: 10,
+				totalCreditAmount: 10,
+				quantity: 1,
+				refundableQuantity: 1,
+				purchasedAt: "2026-10-03T14:11:25.000Z",
+			},
+			sequence: 1,
+		},
+	},
+	usage_snapshot: {
+		description:
+			"Metered usage changed the account's balances. One delivery covers every consume, reservation and confirmation since the previous one. Its key is usage:<customerId>:<sequence>, and a retry repeats the same key and body. Balances are exact decimal strings.",
+		delivery: {
+			schemaVersion: 1,
+			projectKey,
+			jobId: "0192f3a2-000d-7a10-8b20-c30d40e50f60",
+			idempotencyKey: "usage:0192f3a1-5d10-7e22-9f33-4a5b6c7d8e9f:7",
+			...snapshot("2026-10-04T18:20:11.305Z", null, [
+				{
+					featureKey: "ai_credits",
+					unit: "credit",
+					available: "9.5",
+					held: "0",
+					periodEndsAt: null,
+				},
+			]),
+			reason: "usage_changed",
+			sequence: 7,
 		},
 	},
 };

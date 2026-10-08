@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { StripeBillingService } from "../../src/providers/stripe/service";
+import { testRequest } from "../helpers/openapi";
 import {
 	deliveryShape,
 	publishedDeliveryExamples,
 	validateDocumentedDelivery,
 } from "../helpers/projection-contract";
+import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createFakeStripeBillingClient,
@@ -20,6 +22,7 @@ import {
 	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
+import { publishAiCreditsCatalog } from "./helpers/metering-catalog";
 import { createRecordingProjectionFetch, runProjectionWorkerOnce } from "./helpers/worker-fixture";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
@@ -44,6 +47,8 @@ function facts(delivery: Delivery) {
 			active,
 			source: metadata.source,
 			status: metadata.status,
+			provider: metadata.provider,
+			channel: metadata.channel,
 		})),
 		subscription: pick(delivery.subscription, [
 			"provider",
@@ -62,6 +67,7 @@ function facts(delivery: Delivery) {
 			"creditAmount",
 			"totalCreditAmount",
 			"quantity",
+			"refundableQuantity",
 		]),
 		reversal: pick(delivery.reversal, [
 			"provider",
@@ -86,6 +92,28 @@ localDescribe("projection delivery contract", () => {
 	afterAll(async () => {
 		await context.sql.close();
 	});
+
+	/** Runs the projection worker and returns the one delivery it sent. */
+	async function deliverQueued(name: string): Promise<Delivery> {
+		const projection = createRecordingProjectionFetch();
+		await runProjectionWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			fetch: projection.fetch,
+		});
+		expect([name, projection.requests.length]).toEqual([name, 1]);
+		return projection.requests[0].body;
+	}
+
+	/** Holds a real delivery to the published schema and to the example of the same name. */
+	function expectPublished(example: string, delivery: Delivery): Delivery {
+		const published = publishedDeliveryExamples[example].delivery;
+		validateDocumentedDelivery(delivery);
+		expect([example, validateDocumentedDelivery.errors ?? []]).toEqual([example, []]);
+		expect([example, deliveryShape(delivery)]).toEqual([example, deliveryShape(published)]);
+		expect([example, facts(delivery)]).toEqual([example, facts(published)]);
+		return delivery;
+	}
 
 	/**
 	 * `deliver` applies one Stripe event, delivers what it queued, and holds it to the published
@@ -112,26 +140,28 @@ localDescribe("projection delivery contract", () => {
 				created,
 				data: { object },
 			});
-			const projection = createRecordingProjectionFetch();
-			await runProjectionWorkerOnce({
-				env: context.env,
-				repository: context.repository,
-				fetch: projection.fetch,
-			});
-			expect([name, projection.requests.length]).toEqual([name, 1]);
-			return projection.requests[0].body;
+			return await deliverQueued(name);
 		};
-		const deliver = async (example: string, type: string, object: Delivery): Promise<Delivery> => {
-			const delivery = await apply(example, type, object);
-			const published = publishedDeliveryExamples[example].delivery;
-
-			validateDocumentedDelivery(delivery);
-			expect([example, validateDocumentedDelivery.errors ?? []]).toEqual([example, []]);
-			expect([example, deliveryShape(delivery)]).toEqual([example, deliveryShape(published)]);
-			expect([example, facts(delivery)]).toEqual([example, facts(published)]);
-			return delivery;
-		};
+		const deliver = async (example: string, type: string, object: Delivery): Promise<Delivery> =>
+			expectPublished(example, await apply(example, type, object));
 		return { apply, deliver };
+	}
+
+	/** Verifies a store purchase through the route and holds its delivery to the example. */
+	async function verifyStorePurchase(
+		example: string,
+		purchase: Delivery,
+		prepare: (fixture: ReturnType<typeof createIntegrationApp>) => Promise<void> = async () => {},
+	): Promise<Delivery> {
+		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
+		await prepare(fixture);
+		const response = await testRequest(fixture.app, "/v1/purchases/verify", {
+			method: "POST",
+			headers: { ...fixture.authHeaders("acme"), "content-type": "application/json" },
+			body: JSON.stringify({ billingAccountId: "integration_user", ...purchase }),
+		});
+		expect([example, response.status]).toEqual([example, 200]);
+		return expectPublished(example, await deliverQueued(example));
 	}
 
 	// capability: subscription.sync
@@ -236,5 +266,74 @@ localDescribe("projection delivery contract", () => {
 		expect((refund.reversal as Delivery).originalTransactionId).toBe(
 			(purchase.purchase as Delivery).transactionId,
 		);
+	});
+
+	// capability: purchase.verify
+	it("publishes what a verified App Store subscription delivers", async () => {
+		const delivery = await verifyStorePurchase(
+			"apple_subscription_purchase",
+			{ provider: "apple", transactionId: "200000000000001" },
+			async ({ app, apple, authHeaders }) => {
+				const token = await testRequest(
+					app,
+					"/v1/billing-accounts/integration_user/providers/apple/account-token",
+					{ headers: authHeaders("acme") },
+				);
+				apple.setAppAccountToken((await token.json()).data.appAccountToken);
+			},
+		);
+
+		expect(delivery.idempotencyKey).toBe("apple:200000000000001:purchase_verified");
+	});
+
+	// capability: purchase.verify
+	it("publishes what a verified Google Play subscription delivers", async () => {
+		const delivery = await verifyStorePurchase("google_subscription_purchase", {
+			provider: "google",
+			purchaseKind: "subscription",
+			purchaseToken: "purchase_token_1",
+		});
+
+		expect(delivery.idempotencyKey).toBe("google:purchase_token_1:purchase_verified");
+	});
+
+	// capability: purchase.verify
+	it("publishes what a verified Google Play consumable delivers", async () => {
+		const delivery = await verifyStorePurchase("google_consumable_purchase", {
+			provider: "google",
+			purchaseKind: "consumable",
+			purchaseToken: "purchase_token_1",
+			productId: "echo_credits_10",
+		});
+
+		expect((delivery.purchase as Delivery).transactionId).toBe("purchase_token_1");
+	});
+
+	it("publishes what a usage snapshot delivers", async () => {
+		const project = integrationProjectContext();
+		await publishAiCreditsCatalog(context.repository);
+		await context.sql`
+			INSERT INTO metering_settings (project_id, projection_usage_debounce_ms)
+			SELECT id, 0 FROM projects WHERE key = 'acme'
+			ON CONFLICT (project_id) DO UPDATE SET projection_usage_debounce_ms = 0
+		`;
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "integration_user",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "credit_grant",
+			sourceKey: "contract-example",
+		});
+		await context.repository.consumeUsage(project, {
+			billingAccountId: "integration_user",
+			featureKey: "model_tokens",
+			quantity: "100",
+			idempotencyKey: "contract-example",
+		});
+
+		const delivery = expectPublished("usage_snapshot", await deliverQueued("usage_snapshot"));
+
+		expect(delivery.idempotencyKey).toMatch(/^usage:[0-9a-f-]{36}:1$/);
+		expect(delivery.sequence).toBe(1);
 	});
 });
