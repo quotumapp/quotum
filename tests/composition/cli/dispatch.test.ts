@@ -80,6 +80,11 @@ describe("quotum command resolution", () => {
 			"composition/cli/merchant-service-principal.ts",
 			["ui-proxy"],
 		],
+		[
+			["organizations", "add-owner", "acme", "--email", "owner@acme.example"],
+			"composition/cli/organizations.ts",
+			["add-owner", "acme", "--email", "owner@acme.example"],
+		],
 		[["mcp"], "mcp/index.ts", []],
 	] as const)("resolves %j to %s", (argv, file, args) => {
 		const resolution = resolveQuotumCommand(argv);
@@ -120,6 +125,8 @@ describe("quotum command resolution", () => {
 			["bootstrap", "--apply", "--credentials-out"],
 			["bootstrap", "--apply", "--credentials-out", " "],
 			["bootstrap", "--check", "--apply"],
+			["organizations"],
+			["organizations", "remove-owner", "acme"],
 			["catalog"],
 			["catalog", "push"],
 			["catalog", "status", "extra"],

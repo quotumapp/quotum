@@ -164,6 +164,22 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		accepts: (args) => ["status", "rotate", "revoke"].includes(args[0] ?? ""),
 	},
 	{
+		path: ["organizations"],
+		file: "composition/cli/organizations.ts",
+		usage: "organizations add-owner <organization> --email <address>",
+		summary: "Make a person who has signed in to the merchant application an organization's owner",
+		environment: "POSTGRES_URI, optional QUOTUM_ACTOR and BILLING_POSTGRES_PREPARED_STATEMENTS",
+		details: [
+			"  organizations add-owner <organization-slug> --email <address>",
+			"      [--actor <name>] [--member-override-reason <why>]",
+			"The person must already have signed in to the merchant application with that address; this",
+			"never creates a sign-in or sends mail. An existing owner is left as is, and any other",
+			"membership is refused. An organization that already has members needs",
+			"--member-override-reason <why>. The audit event names --actor (or QUOTUM_ACTOR) and the reason.",
+		],
+		accepts: (args) => args[0] === "add-owner",
+	},
+	{
 		path: ["merchant", "service-principal"],
 		file: "composition/cli/merchant-service-principal.ts",
 		usage: "merchant service-principal <name>",

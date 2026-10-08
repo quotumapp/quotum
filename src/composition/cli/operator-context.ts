@@ -237,8 +237,7 @@ export async function openOperatorContext(
 	env: Environment,
 	dependencies: OperatorContextDependencies = {},
 ): Promise<OperatorContext> {
-	const postgresUri = env.POSTGRES_URI?.trim();
-	if (!postgresUri) throw new Error("POSTGRES_URI is required");
+	const postgresUri = postgresUriOf(env);
 	const merchantEnabled = merchantPlatformEnabled(env);
 	const destinationPolicy = projectionDestinationPolicy(
 		{ projectionReceivers: loadProjectionReceivers(env) },
@@ -246,10 +245,7 @@ export async function openOperatorContext(
 	);
 	const secret = loadAuthSecret(env);
 	const cipher = loadConnectionCipher(env);
-	// A transaction-mode pooler needs BILLING_POSTGRES_PREPARED_STATEMENTS=false here as well.
-	const prepare = loadPostgresPreparedStatements(env);
-	const client = new SQL(postgresUri, { max: 2, prepare });
-	const sql = merchantSql(client);
+	const { client, sql } = connectOperatorDatabase(postgresUri, env);
 	const repository = new ConnectionRepository(sql, cipher);
 	const lifecycle = new ConnectionLifecycle({
 		sql,
@@ -292,6 +288,31 @@ export async function openOperatorContext(
 			}),
 		close: () => client.close(),
 	};
+}
+
+function postgresUriOf(env: Environment): string {
+	const postgresUri = env.POSTGRES_URI?.trim();
+	if (!postgresUri) throw new Error("POSTGRES_URI is required");
+	return postgresUri;
+}
+
+function connectOperatorDatabase(postgresUri: string, env: Environment) {
+	// A transaction-mode pooler needs BILLING_POSTGRES_PREPARED_STATEMENTS=false here as well.
+	const prepare = loadPostgresPreparedStatements(env);
+	const client = new SQL(postgresUri, { max: 2, prepare });
+	return { client, sql: merchantSql(client) };
+}
+
+/**
+ * The database alone, for an operator command that reads no connection key or auth secret. Like
+ * `openOperatorContext`, it needs `POSTGRES_URI` and honors `BILLING_POSTGRES_PREPARED_STATEMENTS`.
+ */
+export function openOperatorSql(env: Environment): {
+	sql: MerchantSql;
+	close(): Promise<void>;
+} {
+	const { client, sql } = connectOperatorDatabase(postgresUriOf(env), env);
+	return { sql, close: () => client.close() };
 }
 
 export interface CommandOutput {

@@ -59,6 +59,7 @@ deployment has no members to defer to and needs no reason.
 | `quotum catalog format <file> [--write]` | Print a catalog file in the [canonical spelling](catalog.md#canonical-intent), or rewrite it; needs no API or database. |
 | `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play, sandbox Paddle and projections. Changes to an organization with members need `--member-override-reason`. |
 | `quotum credentials status` / `rotate` / `revoke` | Inspect, [rotate](operations.md#project-credentials) or revoke an instance's project API keys. Changes to an organization with members need `--member-override-reason`. |
+| `quotum organizations add-owner <organization> --email <address>` | Hand an organization to a person: [make a merchant user who has signed in an owner](#hand-an-organization-to-an-owner). Refused in headless mode. |
 | `quotum connections rotate-secrets` | [Encryption-key rotation](#encryption-key-rotation). |
 | `quotum merchant service-principal <name>` | The [merchant proxy service principal](#merchant-proxy-service-principal). Refused in headless mode. |
 | `quotum mcp` | The read-only [stdio MCP server](mcp.md#run-over-stdio). |
@@ -259,13 +260,38 @@ bootstrap is declarative, additive and idempotent:
   anything is written.
 - It never updates or deletes a row. It never adds rows or credentials to an organization that has
   members (one onboarded through the merchant application) or is not active, and it does not apply
-  the organization's production limit, which only gates merchant activation.
+  the organization's production limit, which only gates merchant activation. To give an
+  organization it created a person who can see it in the merchant application, [add an
+  owner](#hand-an-organization-to-an-owner).
 - It issues each declared credential once, into the `--credentials-out` file, so every run that
   issues one needs a new path.
 
 `--check` prints the plan (`organizationsToCreate`, `logicalProjectsToCreate`,
 `projectInstancesToCreate`, `credentialsToIssue`, `readOnlyCredentialsToIssue`) and exits `2` while
 `--apply` has work to do, `0` once everything declared exists, and `1` when it refuses.
+
+## Hand an organization to an owner
+
+An organization that `platform:bootstrap` created has no members, and an invitation cannot reach it:
+invitations come from an existing member and never carry the Owner role. When the merchant
+application runs, give the organization a person with:
+
+```sh
+quotum organizations add-owner <organization-slug> --email <address> --actor <you>
+```
+
+The person must already have signed in to the merchant application with that address, which is
+active and verified. The command never creates a sign-in or sends mail; with an unknown address it
+says so, and they sign in once and you run it again. It prints the membership and `added`, which is
+`false` when the person already owned the organization. Nothing else changes: an existing
+membership with another role or status is refused, because the merchant application owns those
+changes, and the organization's member limit applies as it does to invitations.
+
+An organization that already has members needs `--member-override-reason <why>`, as the connection
+and credential commands do. The audit event `membership.operator_owner_added` names `--actor` and
+the reason, and never the address. The command is refused in [headless mode](#headless-mode), where
+no one can sign in. Once the organization has an owner, `quotum connections list` and `quotum
+credentials status` still read it, and changes to it take a reason (see [Operator CLI](#operator-cli)).
 
 ## Merchant proxy service principal
 
