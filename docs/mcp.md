@@ -14,7 +14,10 @@ dispatches through the merchant billing port with browser-authorized identity, w
 
 ## Connect in a browser
 
-Enable the remote transport with `QUOTUM_MCP_ENABLED=true` and
+Browser authorization uses merchant sign-in, so the remote transport needs the merchant console:
+set `QUOTUM_CONSOLE_ENABLED=true`. The default, [headless mode](deployment.md#headless-mode),
+serves no `/mcp` and refuses `QUOTUM_MCP_ENABLED=true` at startup; the stdio server works in both
+modes. With the console on, enable the remote transport with `QUOTUM_MCP_ENABLED=true` and
 `QUOTUM_MCP_PUBLIC_ORIGIN=https://api.example.com`. The latter is the exact public API origin,
 without a path or trailing slash. HTTPS is required (tests may use loopback HTTP). Deploy the
 matching merchant UI and BFF before enabling it; [deployment](deployment.md#remote-mcp) describes
