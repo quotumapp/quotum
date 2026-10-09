@@ -5,6 +5,7 @@ import { loadMerchantConfig } from "../../src/platform/config";
 import {
 	assertCsrf,
 	CSRF_COOKIE,
+	canProposeBillingChanges,
 	capabilitiesFor,
 	maskEmail,
 	randomToken,
@@ -86,6 +87,11 @@ describe("merchant security boundaries", () => {
 		expect(capabilitiesFor("Developer")).not.toContain("catalog.publish.production");
 		for (const role of ["Owner", "Admin"] as const)
 			expect(capabilitiesFor(role)).toContain("catalog.publish.production");
+	});
+	it("lets every role but Viewer connect an MCP client that proposes changes", () => {
+		expect(canProposeBillingChanges("Viewer")).toBe(false);
+		for (const role of ["Owner", "Admin", "Developer", "Operator"] as const)
+			expect(canProposeBillingChanges(role)).toBe(true);
 	});
 	it("binds confirmation to the canonical payload and HTTP method/path", () => {
 		expect(canonicalJson({ b: 2, a: [1, { z: null }] })).toBe('{"a":[1,{"z":null}],"b":2}');

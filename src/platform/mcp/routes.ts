@@ -133,6 +133,7 @@ export function registerMcpRoutes(
 						scope: MerchantScopeSchema,
 						organizationName: z.string(),
 						projectName: z.string(),
+						canPropose: z.boolean(),
 					}),
 				),
 				selection: MerchantScopeSchema.nullable(),

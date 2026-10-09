@@ -14,6 +14,7 @@ import {
 	MCP_SCOPES,
 	MCP_WRITE_SCOPE,
 	McpAuthorizations,
+	scopeList,
 } from "./authorization";
 import { containMcpCodeReplay } from "./code-replay";
 import { isMcpRedirectUri, withMcpRedirectPolicy } from "./redirect-policy";
@@ -51,7 +52,7 @@ export function createMcpAuthProvider(store: MerchantStore) {
 		extensions: [
 			{
 				claims: {
-					accessToken: async ({ ctx, client, user, referenceId, grantType }) => {
+					accessToken: async ({ ctx, client, user, referenceId, grantType, scopes }) => {
 						try {
 							const grant =
 								grantType === "authorization_code" && typeof ctx.body?.code === "string"
@@ -63,7 +64,8 @@ export function createMcpAuthProvider(store: MerchantStore) {
 								!grant ||
 								grant.client_id !== client.clientId ||
 								grant.userId !== user?.id ||
-								grant.project_instance_id !== referenceId
+								grant.project_instance_id !== referenceId ||
+								scopes.some((scope) => !grant.scopes.includes(scope))
 							)
 								throw invalid();
 							return {
@@ -120,6 +122,9 @@ export function createMcpAuthProvider(store: MerchantStore) {
 					await store.sql.begin((tx) =>
 						binding.proof(session.session.id, ctx.body.oauth_query, tx),
 					);
+					// Refuse a consent the code would be refused for before the provider records it.
+					if (ctx.path === "/oauth2/consent" && ctx.body.accept === true)
+						await binding.consentScopes(session.session.id, scopeList(ctx.body.scope));
 				}
 				if (ctx.path === "/oauth2/token") {
 					if (
