@@ -42,7 +42,7 @@ describe("quotum command resolution", () => {
 	});
 
 	it("documents the reason an operator gives for changing a member organization", () => {
-		for (const name of ["connections", "credentials", "environments"]) {
+		for (const name of ["connections", "credentials", "environments", "catalog"]) {
 			const details = quotumCommands.find(
 				(command) => command.path.length === 1 && command.path[0] === name,
 			)?.details;
@@ -68,6 +68,47 @@ describe("quotum command resolution", () => {
 		[["catalog", "provision"], "composition/cli/catalog-provision.ts", []],
 		[["catalog", "push", "catalog.ts"], "composition/cli/catalog.ts", ["push", "catalog.ts"]],
 		[["catalog", "status"], "composition/cli/catalog.ts", ["status"]],
+		[
+			["catalog", "push", "catalog.ts", "--force"],
+			"composition/cli/catalog.ts",
+			["push", "catalog.ts", "--force"],
+		],
+		[
+			["catalog", "status", "--instance", "alpha"],
+			"composition/cli/catalog.ts",
+			["status", "--instance", "alpha"],
+		],
+		[
+			[
+				"catalog",
+				"push",
+				"catalog.ts",
+				"--instance",
+				"alpha",
+				"--actor",
+				"ops",
+				"--member-override-reason",
+				"owner asked",
+				"--force",
+			],
+			"composition/cli/catalog.ts",
+			[
+				"push",
+				"catalog.ts",
+				"--instance",
+				"alpha",
+				"--actor",
+				"ops",
+				"--member-override-reason",
+				"owner asked",
+				"--force",
+			],
+		],
+		[
+			["catalog", "bindings", "adopt", "binding.json", "--instance", "alpha", "--actor", "ops"],
+			"composition/cli/catalog.ts",
+			["bindings", "adopt", "binding.json", "--instance", "alpha", "--actor", "ops"],
+		],
 		[["catalog", "format", "catalog.ts"], "composition/cli/catalog.ts", ["format", "catalog.ts"]],
 		[
 			["catalog", "format", "catalog.ts", "--write"],
@@ -142,6 +183,11 @@ describe("quotum command resolution", () => {
 			["catalog"],
 			["catalog", "push"],
 			["catalog", "status", "extra"],
+			["catalog", "status", "--instance"],
+			["catalog", "status", "--instance", "--actor", "ops"],
+			["catalog", "push", "--force", "catalog.ts"],
+			["catalog", "push", "catalog.ts", "--force", "--force"],
+			["catalog", "format", "catalog.ts", "--instance", "alpha"],
 			["catalog", "provision", "extra"],
 			["catalog", "format"],
 			["catalog", "format", "--write"],

@@ -26,9 +26,12 @@ import type {
 import { ConnectionRepository } from "../../platform/connections/repository";
 import type { MerchantSql } from "../../platform/database";
 import { MerchantError, tokenHash } from "../../platform/security";
+import type { RuntimeConnectionResolver } from "../../projects/connections";
+import type { ProjectInstanceContext } from "../../projects/context";
 import { BillingApiError } from "../../sdk/client";
 import { writeStderr, writeStdout } from "../../shared/cli-output";
 import { createConnectionValidation } from "../connection-validation";
+import { createRuntimeConnectionResolver } from "../connections";
 import { createEnvironmentBillingPort } from "../environment-billing";
 import { merchantSql } from "../merchant-persistence";
 import { PostgresProjectInstanceContextResolver } from "../project-instance-persistence";
@@ -225,6 +228,8 @@ export interface OperatorContextDependencies {
 
 export interface OperatorTarget extends OperatorConnectionTarget {
 	instanceKey: string;
+	/** The resolved instance, for the billing reads and writes that take a project context. */
+	project: ProjectInstanceContext;
 }
 
 export interface OperatorContext {
@@ -233,6 +238,10 @@ export interface OperatorContext {
 	readonly lifecycle: ConnectionLifecycle;
 	/** Reads the published catalog, which environment readiness needs. */
 	readonly billing: EnvironmentBillingPort;
+	/** The billing database on this command's own connection, for the catalog commands. */
+	readonly billingDatabase: TransactionalQueryExecutor;
+	/** Resolves an instance's active provider connection, decrypting its secrets. */
+	readonly connections: RuntimeConnectionResolver;
 	target(instanceKey: string): Promise<OperatorTarget>;
 	gate(
 		target: OperatorTarget,
@@ -274,19 +283,24 @@ export async function openOperatorContext(
 		now: () => new Date(),
 	});
 	const resolver = new PostgresProjectInstanceContextResolver(client);
+	// Built on this command's own connection, which opens only when a command first reads.
+	const billingDatabase = drizzle({
+		client,
+		schema: billingSchema,
+	}) as unknown as TransactionalQueryExecutor;
 	return {
 		sql,
 		repository,
 		lifecycle,
-		// Built on this command's own connection, which opens only when readiness first reads.
 		billing:
 			dependencies.billing ??
 			createEnvironmentBillingPort({
-				repository: new BillingRepository(
-					drizzle({ client, schema: billingSchema }) as unknown as TransactionalQueryExecutor,
-				),
+				repository: new BillingRepository(billingDatabase),
 				resolver,
 			}),
+		billingDatabase,
+		// No Stripe OAuth port: a connection made through the console's OAuth cannot be read here.
+		connections: createRuntimeConnectionResolver(repository, sql, null),
 		async target(instanceKey) {
 			const lookup = await resolver.resolveInstanceKey(instanceKey);
 			if (lookup.kind === "not_found")
@@ -302,6 +316,7 @@ export async function openOperatorContext(
 				platformProjectId: context.logicalProjectId,
 				instanceId: context.projectInstanceId,
 				environment: context.environment,
+				project: context,
 			};
 		},
 		gate: (target, actor, options) =>
