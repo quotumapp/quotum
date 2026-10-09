@@ -116,9 +116,17 @@ function sameTarget(left: CatalogCompatibilityTarget, right: CatalogCompatibilit
 	);
 }
 
-export function createEnvironmentBillingPort(): EnvironmentBillingPort {
-	const repository = new BillingRepository();
-	const resolver = new PostgresProjectInstanceContextResolver();
+/**
+ * The billing reads that environment readiness and promotion need. They use the process database
+ * unless the caller supplies its own, as an operator command that owns its connection does.
+ */
+export function createEnvironmentBillingPort({
+	repository = new BillingRepository(),
+	resolver = new PostgresProjectInstanceContextResolver(),
+}: {
+	repository?: Pick<BillingRepository, "getPublishedCatalog">;
+	resolver?: Pick<PostgresProjectInstanceContextResolver, "resolveInstanceId">;
+} = {}): EnvironmentBillingPort {
 	const context = async (id: string) => {
 		const result = await resolver.resolveInstanceId(id);
 		if (result.kind !== "resolved")

@@ -6,7 +6,10 @@ import type {
 	CatalogProviderBindingIntent,
 	CatalogTopupIntent,
 } from "../../src/catalog/types";
-import { catalogCapabilityReadiness } from "../../src/composition/environment-billing";
+import {
+	catalogCapabilityReadiness,
+	createEnvironmentBillingPort,
+} from "../../src/composition/environment-billing";
 import type { ReadinessConnectionState } from "../../src/platform/connections/ports";
 import {
 	evaluateRuntimeCapability,
@@ -255,5 +258,49 @@ describe("catalog capability readiness", () => {
 				({ provider, operation }) => `${provider}:${operation}`,
 			),
 		).toEqual(["apple:catalog.topup"]);
+	});
+});
+
+describe("createEnvironmentBillingPort", () => {
+	const context = { projectInstanceId: "instance-1" };
+
+	it("reads the published catalog through the repository and resolver it is given", async () => {
+		const reads: unknown[] = [];
+		const port = createEnvironmentBillingPort({
+			resolver: {
+				resolveInstanceId: async (id: string) => ({
+					kind: "resolved",
+					context: { ...context, projectInstanceId: id },
+				}),
+			} as never,
+			repository: {
+				getPublishedCatalog: async (project: unknown) => {
+					reads.push(project);
+					return { revisionId: null, catalog: null };
+				},
+			} as never,
+		});
+		await expect(port.catalogReadiness("instance-1", [])).resolves.toEqual({
+			revisionId: null,
+			ready: false,
+			providers: [],
+			capabilityDetails: [],
+		});
+		expect(reads).toEqual([{ projectInstanceId: "instance-1" }]);
+	});
+
+	it("reports an unresolvable environment as unavailable", async () => {
+		const port = createEnvironmentBillingPort({
+			resolver: { resolveInstanceId: async () => ({ kind: "not_found" }) } as never,
+			repository: {
+				getPublishedCatalog: async () => {
+					throw new Error("Unused");
+				},
+			} as never,
+		});
+		await expect(port.catalogReadiness("missing", [])).rejects.toMatchObject({
+			code: "CONTEXT_UNAVAILABLE",
+			status: 404,
+		});
 	});
 });
