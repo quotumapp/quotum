@@ -122,6 +122,7 @@ async function authorize(
 	scope: MerchantScope = merchantTestScope,
 	beforeConsent?: () => Promise<void>,
 	write = false,
+	consentScope?: string,
 ) {
 	const pending = await signIn(browser, write);
 	const context = await browser.json<{ principal: { email: string }; environments: unknown[] }>(
@@ -144,6 +145,7 @@ async function authorize(
 	const accepted = await browser.native("/api/auth/oauth2/consent", {
 		oauth_query: consent.search.slice(1),
 		accept: true,
+		...(consentScope === undefined ? {} : { scope: consentScope }),
 	});
 	const callback = new URL(accepted.redirect_uri ?? accepted.url);
 	expect(callback.origin + callback.pathname).toBe(redirect);
@@ -171,8 +173,9 @@ async function redeem(
 	browser: OAuthBrowser,
 	scope: MerchantScope = merchantTestScope,
 	write = false,
+	consentScope?: string,
 ) {
-	const code = await authorize(browser, scope, undefined, write);
+	const code = await authorize(browser, scope, undefined, write, consentScope);
 	const response = await token({
 		grant_type: "authorization_code",
 		code: code.code,
@@ -181,7 +184,12 @@ async function redeem(
 	});
 	const result = await response.json();
 	if (!response.ok) throw new Error(`Token failed: ${JSON.stringify(result)}`);
-	return result as { access_token: string; refresh_token: string; expires_in: number };
+	return result as {
+		access_token: string;
+		refresh_token: string;
+		expires_in: number;
+		scope?: string;
+	};
 }
 function rpc(
 	accessToken?: string,
@@ -1224,5 +1232,118 @@ describe("MCP browser-approved writes", () => {
 					body,
 				),
 			).toEqual([]);
+	});
+});
+
+const WRITE_SCOPE = "quotum.billing.write";
+const claimsOf = (accessToken: string) =>
+	JSON.parse(Buffer.from(accessToken.split(".")[1] ?? "", "base64url").toString());
+async function toolNames(accessToken: string) {
+	const reply = await (await rpc(accessToken)).json();
+	return (reply.result.tools as { name: string }[]).map((tool) => tool.name);
+}
+
+describe("MCP consent scopes", () => {
+	it("lets a consent decline change proposals and keeps that through a refresh", async () => {
+		const browser = await owner();
+		const tokens = await redeem(browser, merchantTestScope, true, "quotum.read offline_access");
+		expect(tokens.scope?.split(" ")).toEqual(["quotum.read", "offline_access"]);
+		expect(claimsOf(tokens.access_token).scope.split(" ")).not.toContain(WRITE_SCOPE);
+		const [grant] = await f.sql<
+			{ id: string; scopes: string[] }[]
+		>`SELECT id,scopes FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		expect(grant.scopes).toEqual(["quotum.read", "offline_access"]);
+		expect(await toolNames(tokens.access_token)).not.toContain("prepare_billing_change");
+		await expect(f.mcpChanges.capabilities(grant.id)).rejects.toThrow("write consent");
+		const listed = await browser.json<{ connections: { scopes: string[] }[] }>(
+			"/api/platform/mcp/connections/list",
+			{ scope: merchantTestScope },
+		);
+		expect(listed.connections.map((connection) => connection.scopes)).toEqual([
+			["quotum.read", "offline_access"],
+		]);
+		const refreshed = await (
+			await token({ grant_type: "refresh_token", refresh_token: tokens.refresh_token })
+		).json();
+		expect(claimsOf(refreshed.access_token).scope.split(" ")).not.toContain(WRITE_SCOPE);
+		expect(await toolNames(refreshed.access_token)).not.toContain("prepare_billing_change");
+	});
+
+	it("keeps change proposals when the consent submits everything that was requested", async () => {
+		const browser = await owner();
+		const tokens = await redeem(
+			browser,
+			merchantTestScope,
+			true,
+			`quotum.read offline_access ${WRITE_SCOPE}`,
+		);
+		expect(claimsOf(tokens.access_token).scope.split(" ")).toContain(WRITE_SCOPE);
+		expect(await toolNames(tokens.access_token)).toContain("prepare_billing_change");
+		const [grant] = await f.sql<
+			{ scopes: string[] }[]
+		>`SELECT scopes FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		expect(grant.scopes).toEqual(["quotum.read", "offline_access", WRITE_SCOPE]);
+	});
+
+	it("refuses a consent that drops read or refresh access, or adds a scope", async () => {
+		const browser = await owner();
+		for (const consentScope of [
+			`quotum.read ${WRITE_SCOPE}`,
+			`offline_access ${WRITE_SCOPE}`,
+			`quotum.read offline_access ${WRITE_SCOPE} openid`,
+		])
+			await expect(
+				authorize(browser, merchantTestScope, undefined, true, consentScope),
+			).rejects.toThrow("Only change proposals can be left out");
+		expect(
+			await f.sql`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL OR code_hash IS NOT NULL`,
+		).toHaveLength(0);
+	});
+
+	it("connects a viewer read-only and refuses it change proposals", async () => {
+		const browser = await owner();
+		const pending = await signIn(browser, true);
+		const context = () =>
+			browser.json<{ environments: { canPropose: boolean }[] }>("/api/platform/oauth/context", {
+				oauth_query: pending.query,
+			});
+		const asOwner = await context();
+		expect(asOwner.environments.length).toBeGreaterThan(0);
+		expect(asOwner.environments.every((environment) => environment.canPropose)).toBe(true);
+		await f.sql`UPDATE platform_memberships SET role='Viewer'`;
+		const asViewer = await context();
+		expect(asViewer.environments.length).toBeGreaterThan(0);
+		expect(asViewer.environments.some((environment) => environment.canPropose)).toBe(false);
+		await expect(authorize(browser, merchantTestScope, undefined, true)).rejects.toThrow(
+			"Your role cannot connect with change proposals",
+		);
+		expect(
+			await f.sql`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL OR code_hash IS NOT NULL`,
+		).toHaveLength(0);
+		const tokens = await redeem(browser, merchantTestScope, true, "quotum.read offline_access");
+		expect(await toolNames(tokens.access_token)).not.toContain("prepare_billing_change");
+	});
+
+	it("stops a write grant from proposing once its owner loses the role", async () => {
+		const browser = await owner();
+		await createBillingAccount();
+		await redeem(browser, merchantTestScope, true);
+		const [grant] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		await f.sql`UPDATE platform_memberships SET role='Viewer'`;
+		await expect(
+			f.mcpChanges.prepare(grant.id, {
+				requestKey: "entity-a",
+				reason: "Team setup",
+				action: "entities.write",
+				parameters: ["customer-a"],
+				body: { externalId: "team-a", kind: "team" },
+			}),
+		).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+		const actions = await f.mcpChanges.capabilities(grant.id);
+		expect(actions.length).toBeGreaterThan(0);
+		expect(actions.some((action) => action.available)).toBe(false);
+		expect(await f.sql`SELECT id FROM platform_mcp_changes`).toHaveLength(0);
 	});
 });

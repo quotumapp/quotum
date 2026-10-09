@@ -127,6 +127,19 @@ const roleCapabilities: Record<MerchantRole, readonly MerchantCapability[]> = {
 export function capabilitiesFor(role: MerchantRole): MerchantCapability[] {
 	return [...roleCapabilities[role]];
 }
+/** What the billing change actions an MCP connection may propose require, production included. */
+export const MCP_PROPOSAL_CAPABILITIES: readonly MerchantCapability[] = [
+	"operations.write",
+	"operations.recover",
+	"catalog.publish.sandbox",
+	"catalog.publish.production",
+];
+/** Whether a role could approve at least one change a connection proposes; Viewer cannot. */
+export function canProposeBillingChanges(role: MerchantRole): boolean {
+	return MCP_PROPOSAL_CAPABILITIES.some((capability) =>
+		roleCapabilities[role].includes(capability),
+	);
+}
 export function requireCapability(role: MerchantRole, capability: MerchantCapability): void {
 	if (!roleCapabilities[role].includes(capability))
 		throw new MerchantError("FORBIDDEN", "You do not have permission to perform this action.", 403);

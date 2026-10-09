@@ -51232,6 +51232,9 @@
                         "environments": {
                           "items": {
                             "properties": {
+                              "canPropose": {
+                                "type": "boolean"
+                              },
                               "organizationName": {
                                 "type": "string"
                               },
@@ -51245,7 +51248,8 @@
                             "required": [
                               "scope",
                               "organizationName",
-                              "projectName"
+                              "projectName",
+                              "canPropose"
                             ],
                             "type": "object"
                           },

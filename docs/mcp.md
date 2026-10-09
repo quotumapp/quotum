@@ -22,7 +22,10 @@ the public routes and schema ordering.
 
 Add `https://api.example.com/mcp` to a coding client. Authorization opens the merchant application,
 requires a fresh password plus email OTP or Google sign-in, then asks for one organization,
-project, and environment and explicit consent to the requested scopes. An existing console session does not
+project, and environment and explicit consent to the requested scopes. A client that requests change
+proposals can still be connected read-only: the consent page shows **Propose changes** as a separate
+choice, and leaving it unticked drops only `quotum.billing.write`. A role that cannot approve any
+change, such as Viewer, can only connect read-only. An existing console session does not
 skip sign-in. Sandbox and production require separate authorizations. The displayed identity is
 the fresh sign-in identity, which may differ from the console identity.
 
@@ -42,7 +45,7 @@ environment selection regardless of refreshes. DPoP, client secrets, client cred
 and direct MCP execution of mutations are not supported.
 
 In **Developer setup → MCP connections**, view and revoke your connections for the selected
-environment. Revocation immediately invalidates access tokens, refresh tokens, and cached refresh
+environment; each shows whether it is read-only or can propose changes. Revocation immediately invalidates access tokens, refresh tokens, and cached refresh
 responses for that immutable authorization; reconnecting never revives an older authorization.
 Authorization-code replay, including concurrent redemption, revokes the affected authorization.
 Password reset and principal/membership suspension revoke affected authorizations. Every tool
@@ -92,6 +95,17 @@ older console answers that URL with "Page not found", so deploy the console befo
 on. Clients must request `quotum.billing.write` alongside `quotum.read`
 and `offline_access` and complete fresh consent. Existing grants retain their saved
 scopes; enabling the flag does not upgrade them. Stdio remains read-only, even with a sandbox key.
+
+The consent decides the final scopes, and it can only narrow the request. The browser sends the
+chosen `scope` with the consent; it must be the requested scopes or those minus
+`quotum.billing.write`, because every tool needs `quotum.read` and refreshing needs
+`offline_access`. Anything else is refused as `invalid_grant`. The grant stores the final scopes, the
+token response and access tokens carry them, and the change tools exist only when the grant and the
+token both include the write scope. A role without any capability that a proposed change needs
+(`operations.write`, `operations.recover` or catalog publication) is refused the write scope with
+`FORBIDDEN`; `canPropose` on each environment in the authorization context tells the page which
+roles that is. The role is checked again when a change is prepared and approved, so a member who
+loses the role keeps a connection that can read but can no longer prepare or approve changes.
 
 Write-consented connections gain these tools:
 

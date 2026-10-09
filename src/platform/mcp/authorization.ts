@@ -1,6 +1,6 @@
-import type { MerchantScope } from "../contracts";
+import type { MerchantRole, MerchantScope } from "../contracts";
 import type { MerchantSql } from "../database";
-import { digest, MerchantError, requireCapability } from "../security";
+import { canProposeBillingChanges, digest, MerchantError, requireCapability } from "../security";
 import type { MerchantStore } from "../store";
 
 export const MCP_WRITE_SCOPE = "quotum.billing.write";
@@ -43,7 +43,37 @@ export function grantScopes(stored: unknown): string[] {
 		: [];
 }
 
-/** Continuation signatures/timestamps change between steps; authorization parameters do not. */
+/**
+ * What a consent may grant: everything the client requested, or that minus the proposal scope.
+ * The rest stays because every tool needs `quotum.read` and refreshing needs `offline_access`.
+ * `granted` is the scope list the consent ended with; null accepts the request as made.
+ */
+export function consentedScopes(
+	requested: readonly string[],
+	granted: readonly string[] | null,
+): string[] {
+	if (granted === null) return [...requested];
+	const kept = new Set(granted);
+	if (
+		granted.some((scope) => !requested.includes(scope)) ||
+		requested.some((scope) => scope !== MCP_WRITE_SCOPE && !kept.has(scope))
+	)
+		throw new MerchantError(
+			"INVALID_REQUEST",
+			"Only change proposals can be left out of a consent.",
+		);
+	return requested.filter((scope) => kept.has(scope));
+}
+
+/** A space-separated OAuth `scope` value as a list, or null when it is absent. */
+export function scopeList(value: unknown): string[] | null {
+	return typeof value === "string" ? value.split(" ").filter(Boolean) : null;
+}
+
+/**
+ * Continuation signatures/timestamps change between steps; authorization parameters do not. The
+ * scope is left out: a consent may narrow it, and the grant row holds what was requested.
+ */
 export function authorizationFingerprint(query: string | URLSearchParams): string {
 	const params = typeof query === "string" ? new URLSearchParams(query) : query;
 	return digest(
@@ -54,7 +84,6 @@ export function authorizationFingerprint(query: string | URLSearchParams): strin
 				"state",
 				"code_challenge",
 				"code_challenge_method",
-				"scope",
 				"resource",
 			].map((key) => [key, params.getAll(key).sort()]),
 		),
@@ -124,6 +153,7 @@ export class McpAuthorizations {
 								},
 								organizationName: membership.organizationName,
 								projectName: project.name,
+								canPropose: canProposeBillingChanges(membership.role),
 								instanceId: instance.id,
 							},
 						]
@@ -255,13 +285,42 @@ export class McpAuthorizations {
 		if (grant) await this.revoke(grant.id, grant.principal_id);
 	}
 
+	/**
+	 * The scopes a consent may grant this sign-in's selected environment, or an error. The grant row
+	 * holds what the client requested; only a role that can propose may keep the proposal scope.
+	 */
+	async consentScopes(
+		sessionId: string,
+		granted: string[] | null,
+		tx: MerchantSql = this.store.sql,
+	): Promise<string[]> {
+		const [row] = await tx<
+			{ scopes: unknown; role: MerchantRole | null }[]
+		>`SELECT g.scopes,m.role FROM platform_mcp_authorizations g LEFT JOIN platform_memberships m ON m.principal_id=g.principal_id AND m.organization_id=g.organization_id AND m.status='active' WHERE g.proof_session_id=${sessionId} FOR UPDATE OF g`;
+		if (!row)
+			throw new MerchantError("INVALID_REQUEST", "Restart authorization in your AI client.");
+		const scopes = consentedScopes(grantScopes(row.scopes), granted);
+		if (scopes.includes(MCP_WRITE_SCOPE) && !(row.role && canProposeBillingChanges(row.role)))
+			throw new MerchantError(
+				"FORBIDDEN",
+				"Your role cannot connect with change proposals. Connect with read-only access.",
+				403,
+			);
+		return scopes;
+	}
+
 	/** Seal consent while the browser proof is fresh; the code then owns its own lifetime. */
 	async issueCode(code: string, sessionId: string, query: string, expiresAt: Date) {
 		await this.store.sql.begin(async (tx) => {
 			await this.proof(sessionId, query, tx);
+			const scopes = await this.consentScopes(
+				sessionId,
+				scopeList(new URLSearchParams(query).get("scope")),
+				tx,
+			);
 			const hash = this.tokenHash(code);
 			const rows =
-				await tx`UPDATE platform_mcp_authorizations SET code_hash=${hash} WHERE proof_session_id=${sessionId} AND (code_hash IS NULL OR code_hash=${hash}) RETURNING id`;
+				await tx`UPDATE platform_mcp_authorizations SET code_hash=${hash},scopes=${JSON.stringify(scopes)}::text::jsonb WHERE proof_session_id=${sessionId} AND (code_hash IS NULL OR code_hash=${hash}) RETURNING id`;
 			if (!rows.length)
 				throw new MerchantError("INVALID_REQUEST", "Restart authorization in your AI client.");
 			// The provider requires the session row during code redemption. Its browser proof
