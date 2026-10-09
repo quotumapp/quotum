@@ -98,15 +98,18 @@ so idempotency is preserved.
 
 Sandbox and production instances receive separate project credentials: `sqpk_<secret>` for
 sandbox, `pqpk_<secret>` for production (see [authentication](deployment.md#authentication)). The
-plaintext is disclosed once: at sandbox provisioning, production activation, rotation, or into a
-`platform:bootstrap --credentials-out` file. Replaying the same request returns no credential. A
+plaintext is disclosed once: at sandbox provisioning, production activation (in the merchant
+application, or into the `--credentials-out` file of `quotum environments activate`), rotation, or
+into a `platform:bootstrap --credentials-out` file. Replaying the same request returns no credential. A
 lost response cannot be recovered; rotate instead.
 
 Rotate through merchant management: `POST /api/platform/provisioning/{id}/rotate` for onboarding
 sandbox credentials, or `POST /api/platform/environments/credentials/rotate` for either environment.
 Production rotation requires a fresh step-up grant. Without the merchant application, run
 `quotum credentials rotate <instance> --access full --credentials-out <new-file>` with `--actor`;
-an organization whose members manage it also needs `--member-override-reason <why>`.
+an organization whose members manage it also needs `--member-override-reason <why>`. Rotating, or
+revoking a read-only key, refuses an inactive environment with `ENVIRONMENT_INACTIVE`;
+[activate it](deployment.md#activate-a-production-environment) first.
 It writes the new key in the platform bootstrap's file format and never prints it. If the file
 cannot be written, nothing is rotated. Rotation revokes the previous credential in the same
 transaction, so the replaced key is rejected from the next request. The database clock dates both

@@ -13,7 +13,8 @@ A [headless](deployment.md#headless-mode) deployment (the default; `QUOTUM_CONSO
 
 - the `/v1` API, provider webhooks, every worker and signed projections to your backend;
 - projects and environments declared in a [bootstrap manifest](deployment.md#first-start);
-- connections and project API keys managed with `quotum connections` and `quotum credentials`;
+- connections, project API keys and environment activation managed with `quotum connections`,
+  `quotum credentials` and `quotum environments`;
 - optional [private projection receivers](providers.md#private-receivers-headless-only);
 - the stdio [MCP server](mcp.md).
 
@@ -21,7 +22,6 @@ These features exist only in Quotum Cloud's merchant application:
 
 - `/api/*`, sign-up, onboarding, teams and invitations;
 - step-up confirmation and merchant email;
-- production activation;
 - remote MCP;
 - the Stripe App OAuth install. Headless deployments use Stripe restricted keys instead.
 
@@ -65,8 +65,9 @@ curl -f https://billing.example.com/ready
 
 ## 3. Declare your projects
 
-Write the topology to `platform.json`. Headless deployments have no production activation flow, so
-declare production `active` here:
+Write the topology to `platform.json`. Declare production `active` here: a headless deployment has
+no merchant application to activate it later, and an `inactive` production environment can neither
+hold a project key nor receive a catalog through `/v1`:
 
 ```json
 {
@@ -201,6 +202,7 @@ rely on them.
 
 - `quotum catalog provision` skips instances that already have a published catalog. It does not
   create Apple or Google Play products; create them in those stores.
-- Headless deployments have no production activation flow. Declare production `active` in the
-  bootstrap manifest.
+- Headless deployments have no activation screen or step-up. Declare production `active` in the
+  bootstrap manifest. [`quotum environments activate`](deployment.md#activate-a-production-environment)
+  activates one that is already ready, for example after a merchant application prepared it.
 - Schema baselines evolve in place until 1.0, so upgrades before then can need manual steps.
