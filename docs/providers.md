@@ -520,15 +520,22 @@ and commit steps as the **Integrations** screens, and audit events name the oper
 3. **Verify events (active production only).** An active production provider must deliver an event
    first. Point the provider's webhook at the setup path and send a test event. Then commit with
    `--wait-for-event 10m`, which waits for that event. Sandbox and inactive environments commit
-   without one.
+   without one, but activating an inactive production environment (step 5) needs it, so send the
+   test event before you commit there too.
 4. **Commit.** `quotum connections commit <instance> <kind> <draft-id>` validates again and
    activates the version. Then point the provider's webhook at the regular path
    `/v1/projects/<instance>/webhooks/<provider>`.
+5. **Activate production (only if it is `inactive`).** Run `quotum environments readiness
+   <instance>` until it exits `0`. A validation older than 15 minutes blocks it, so run `quotum
+   connections validate` again first. Then run `quotum environments activate <instance>
+   --credentials-out <new-file>`, which issues the project key; see
+   [Activate a production environment](deployment.md#activate-a-production-environment).
 
-These commands, and `quotum credentials`, read `QUOTUM_AUTH_SECRET` even in headless mode. It keys
-their request fingerprints the way it does for the merchant platform. While the merchant platform
-runs, an organization that has members manages its own connections: `quotum connections list` and
-`quotum credentials status` still read it, and any change needs `--member-override-reason <why>`,
+These commands, and `quotum credentials` and `quotum environments`, read `QUOTUM_AUTH_SECRET` even
+in headless mode. It keys their request fingerprints the way it does for the merchant platform.
+While the merchant platform runs, an organization that has members manages its own connections:
+`quotum connections list` and `quotum credentials status` still read it, and any change needs
+`--member-override-reason <why>`,
 which the audit event records next to the operator. Stripe App OAuth needs a merchant session, so it
 is available only in the merchant application.
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+	activateProjectProduction,
 	BunProjectInstanceStore,
 	PostgresProjectInstanceContextResolver,
 } from "../../src/composition/project-instance-persistence";
@@ -351,5 +352,52 @@ describe("principal project listing", () => {
 	it("returns no projects for a principal without a visible membership", async () => {
 		const store = new BunProjectInstanceStore({ query: async () => [] });
 		await expect(store.forPrincipal(principalId)).resolves.toEqual([]);
+	});
+});
+
+describe("production activation", () => {
+	/** A tagged-template client that records the statement and answers with `rows`. */
+	function recordingClient(rows: { id: string }[]) {
+		const calls: { text: string; values: unknown[] }[] = [];
+		const client = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+			calls.push({ text: strings.join("?"), values });
+			return rows;
+		};
+		return { client: client as never, calls };
+	}
+
+	it("applies the organization's production limit unless the caller waives it", async () => {
+		for (const [options, enforce] of [
+			[undefined, true],
+			[{}, true],
+			[{ enforceProductionLimit: true }, true],
+			[{ enforceProductionLimit: false }, false],
+		] as const) {
+			const { client, calls } = recordingClient([{ id: "instance-1" }]);
+			await expect(
+				activateProjectProduction(client, "instance-1", "organization-1", "7", options),
+			).resolves.toBe(true);
+			expect(calls).toHaveLength(1);
+			// The limit is one predicate that a bound boolean switches off; the rest stays.
+			expect(calls[0]?.text).toContain("NOT ?::boolean OR (SELECT count(*) FROM projects i");
+			expect(calls[0]?.text).toContain("< (SELECT production_limit FROM platform_organizations");
+			expect(calls[0]?.text).toContain("lifecycle_status='inactive'");
+			expect(calls[0]?.values).toEqual([
+				"instance-1",
+				"7",
+				"organization-1",
+				enforce,
+				"organization-1",
+				"organization-1",
+			]);
+		}
+	});
+
+	it("reports whether exactly one instance was activated", async () => {
+		expect(
+			await activateProjectProduction(recordingClient([]).client, "i", "o", "7", {
+				enforceProductionLimit: false,
+			}),
+		).toBe(false);
 	});
 });

@@ -164,6 +164,27 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		accepts: (args) => ["status", "rotate", "revoke"].includes(args[0] ?? ""),
 	},
 	{
+		path: ["environments"],
+		file: "composition/cli/environments.ts",
+		usage: "environments readiness|activate <instance> ...",
+		summary: "Check whether a production environment is ready, or activate it and issue its key",
+		environment:
+			"POSTGRES_URI, QUOTUM_SECRETS_KEY_ID, QUOTUM_SECRETS_KEY_BASE64, QUOTUM_AUTH_SECRET, optional QUOTUM_ACTOR",
+		details: [
+			"  environments readiness <instance>",
+			"  environments activate <instance> --credentials-out <new-file>",
+			"readiness prints the blockers and exits 2 while the environment is not ready. activate runs",
+			"the same checks, then makes an inactive production environment active and writes its",
+			"first project key to --credentials-out, in the platform bootstrap's format, never to stdout.",
+			"A connection validated more than 15 minutes ago, or a provider that has not delivered a",
+			"setup event, blocks it. Activation takes --actor <name> (or QUOTUM_ACTOR) and an optional",
+			"--request-key <key> for safe retries. The organization's production limit applies only",
+			"while the merchant platform runs; changing one whose members manage it needs",
+			"--member-override-reason <why>.",
+		],
+		accepts: (args) => ["readiness", "activate"].includes(args[0] ?? ""),
+	},
+	{
 		path: ["organizations"],
 		file: "composition/cli/organizations.ts",
 		usage: "organizations add-owner <organization> --email <address>",

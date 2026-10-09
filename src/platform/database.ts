@@ -16,10 +16,15 @@ export interface MerchantSql extends PlatformQueryExecutor {
 		forProject(platformProjectId: string): Promise<readonly PlatformProjectInstanceRecord[]>;
 		/** Every project the principal can see, with its instances, in one statement. */
 		forPrincipal(principalId: string): Promise<readonly PlatformProjectWithInstancesRecord[]>;
+		/**
+		 * Activates an inactive production instance whose published catalog is `catalogRevisionId`.
+		 * The organization's production limit applies unless `enforceProductionLimit` is false.
+		 */
 		activateProduction(
 			instanceId: string,
 			organizationId: string,
 			catalogRevisionId: string,
+			options?: { enforceProductionLimit?: boolean },
 		): Promise<boolean>;
 		create(input: CreatePlatformProjectInstanceInput): Promise<PlatformProjectInstanceRecord>;
 	};

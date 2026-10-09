@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { open, stat, unlink } from "node:fs/promises";
 import { SQL } from "bun";
+import { drizzle } from "drizzle-orm/bun-sql";
 import { DrizzleQueryError } from "drizzle-orm/errors";
 import { sqlstateOf } from "../../db/postgres-errors";
+import { BillingRepository } from "../../db/repository";
+import type { TransactionalQueryExecutor } from "../../db/repository/types";
+import * as billingSchema from "../../db/schema";
 import {
 	loadPostgresPreparedStatements,
 	loadProjectionReceivers,
@@ -15,13 +19,17 @@ import {
 	type OperatorConnectionTarget,
 	operatorConnectionGate,
 } from "../../platform/connections/operator-gate";
-import type { ConnectionValidationPort } from "../../platform/connections/ports";
+import type {
+	ConnectionValidationPort,
+	EnvironmentBillingPort,
+} from "../../platform/connections/ports";
 import { ConnectionRepository } from "../../platform/connections/repository";
 import type { MerchantSql } from "../../platform/database";
 import { MerchantError, tokenHash } from "../../platform/security";
 import { BillingApiError } from "../../sdk/client";
 import { writeStderr, writeStdout } from "../../shared/cli-output";
 import { createConnectionValidation } from "../connection-validation";
+import { createEnvironmentBillingPort } from "../environment-billing";
 import { merchantSql } from "../merchant-persistence";
 import { PostgresProjectInstanceContextResolver } from "../project-instance-persistence";
 import { projectionDestinationPolicy } from "../projection-destinations";
@@ -211,6 +219,8 @@ export async function reserveSecretFile(path: string): Promise<SecretFile> {
 export interface OperatorContextDependencies {
 	/** Replaces provider and receiver validation, for tests. */
 	validator?: ConnectionValidationPort;
+	/** Replaces the published-catalog reads that environment readiness uses, for tests. */
+	billing?: EnvironmentBillingPort;
 }
 
 export interface OperatorTarget extends OperatorConnectionTarget {
@@ -221,6 +231,8 @@ export interface OperatorContext {
 	readonly sql: MerchantSql;
 	readonly repository: ConnectionRepository;
 	readonly lifecycle: ConnectionLifecycle;
+	/** Reads the published catalog, which environment readiness needs. */
+	readonly billing: EnvironmentBillingPort;
 	target(instanceKey: string): Promise<OperatorTarget>;
 	gate(
 		target: OperatorTarget,
@@ -266,6 +278,15 @@ export async function openOperatorContext(
 		sql,
 		repository,
 		lifecycle,
+		// Built on this command's own connection, which opens only when readiness first reads.
+		billing:
+			dependencies.billing ??
+			createEnvironmentBillingPort({
+				repository: new BillingRepository(
+					drizzle({ client, schema: billingSchema }) as unknown as TransactionalQueryExecutor,
+				),
+				resolver,
+			}),
 		async target(instanceKey) {
 			const lookup = await resolver.resolveInstanceKey(instanceKey);
 			if (lookup.kind === "not_found")
@@ -287,6 +308,7 @@ export async function openOperatorContext(
 			operatorConnectionGate(actor, target, {
 				allowMemberOrganizations: !merchantEnabled,
 				memberOverrideReason: options?.memberOverrideReason,
+				enforceProductionLimit: merchantEnabled,
 			}),
 		close: () => client.close(),
 	};

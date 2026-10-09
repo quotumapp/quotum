@@ -52,7 +52,10 @@ function fakeSql(
 
 describe("operatorConnectionGate", () => {
 	it("records the operator and resolves the target through the instance port", async () => {
-		const gate = operatorConnectionGate("ops-runbook", target, { allowMemberOrganizations: false });
+		const gate = operatorConnectionGate("ops-runbook", target, {
+			allowMemberOrganizations: false,
+			enforceProductionLimit: false,
+		});
 		expect(gate.actor).toEqual({ kind: "operator", name: "ops-runbook" });
 		expect(gate.environment).toBe("sandbox");
 		const { sql, statements } = fakeSql({ status: "active", has_members: false });
@@ -66,7 +69,10 @@ describe("operatorConnectionGate", () => {
 	});
 
 	it("applies the merchant gate's instance filters", async () => {
-		const gate = operatorConnectionGate("ops", target, { allowMemberOrganizations: false });
+		const gate = operatorConnectionGate("ops", target, {
+			allowMemberOrganizations: false,
+			enforceProductionLimit: false,
+		});
 		for (const candidate of [
 			{ ...instance, environment: "production" as const },
 			{ ...instance, internalProject: true },
@@ -83,7 +89,10 @@ describe("operatorConnectionGate", () => {
 	});
 
 	it("requires an active organization", async () => {
-		const gate = operatorConnectionGate("ops", target, { allowMemberOrganizations: true });
+		const gate = operatorConnectionGate("ops", target, {
+			allowMemberOrganizations: true,
+			enforceProductionLimit: false,
+		});
 		for (const organization of [undefined, { status: "suspended", has_members: false }]) {
 			const { sql, statements } = fakeSql(organization);
 			await expect(gate.instance(sql, false)).rejects.toThrow("This environment is unavailable.");
@@ -96,7 +105,10 @@ describe("operatorConnectionGate", () => {
 
 	it("lets operators read organizations with members while the merchant platform runs", async () => {
 		const members = { status: "active", has_members: true };
-		const gate = operatorConnectionGate("ops", target, { allowMemberOrganizations: false });
+		const gate = operatorConnectionGate("ops", target, {
+			allowMemberOrganizations: false,
+			enforceProductionLimit: false,
+		});
 		await expect(gate.instance(fakeSql(members).sql, false)).resolves.toEqual(instance);
 		// A read still needs an active organization.
 		await expect(
@@ -106,7 +118,10 @@ describe("operatorConnectionGate", () => {
 
 	it("leaves changes to organizations with members to them unless the operator gives a reason", async () => {
 		const members = { status: "active", has_members: true };
-		const refused = operatorConnectionGate("ops", target, { allowMemberOrganizations: false });
+		const refused = operatorConnectionGate("ops", target, {
+			allowMemberOrganizations: false,
+			enforceProductionLimit: false,
+		});
 		await expect(refused.instance(fakeSql(members).sql, true)).rejects.toThrow(
 			"This organization has members",
 		);
@@ -114,14 +129,15 @@ describe("operatorConnectionGate", () => {
 			"--member-override-reason",
 		);
 		await expect(
-			operatorConnectionGate("ops", target, { allowMemberOrganizations: true }).instance(
-				fakeSql(members).sql,
-				true,
-			),
+			operatorConnectionGate("ops", target, {
+				allowMemberOrganizations: true,
+				enforceProductionLimit: false,
+			}).instance(fakeSql(members).sql, true),
 		).resolves.toEqual(instance);
 		const reasoned = operatorConnectionGate("ops", target, {
 			allowMemberOrganizations: false,
 			memberOverrideReason: "rotating a leaked key for the owner",
+			enforceProductionLimit: false,
 		});
 		await expect(reasoned.instance(fakeSql(members).sql, true)).resolves.toEqual(instance);
 		expect(reasoned.actor).toEqual({
@@ -132,7 +148,10 @@ describe("operatorConnectionGate", () => {
 	});
 
 	it("checks for members again once it holds the organization lock", async () => {
-		const gate = operatorConnectionGate("ops", target, { allowMemberOrganizations: false });
+		const gate = operatorConnectionGate("ops", target, {
+			allowMemberOrganizations: false,
+			enforceProductionLimit: false,
+		});
 		// A membership accepted after instance() passed is seen under the lock.
 		const joined = fakeSql({ status: "active", has_members: true });
 		await expect(gate.lock(joined.sql)).rejects.toThrow("This organization has members");
@@ -146,6 +165,7 @@ describe("operatorConnectionGate", () => {
 			operatorConnectionGate("ops", target, {
 				allowMemberOrganizations: false,
 				memberOverrideReason: "owner asked",
+				enforceProductionLimit: false,
 			}).lock(reasoned.sql),
 		).resolves.toBeUndefined();
 		expect(reasoned.statements).toHaveLength(1);
@@ -155,7 +175,10 @@ describe("operatorConnectionGate", () => {
 		// Without the merchant platform, members do not matter and the lock alone is enough.
 		const headless = fakeSql({ status: "active", has_members: true });
 		await expect(
-			operatorConnectionGate("ops", target, { allowMemberOrganizations: true }).lock(headless.sql),
+			operatorConnectionGate("ops", target, {
+				allowMemberOrganizations: true,
+				enforceProductionLimit: false,
+			}).lock(headless.sql),
 		).resolves.toBeUndefined();
 		expect(headless.statements).toHaveLength(1);
 	});

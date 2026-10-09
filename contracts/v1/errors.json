@@ -30,7 +30,7 @@
     {
       "code": "ACTIVATION_CONFLICT",
       "sources": [
-        "src/platform/connections/service.ts"
+        "src/platform/connections/lifecycle.ts"
       ]
     },
     {
@@ -321,8 +321,7 @@
       "code": "CONNECTION_CHANGED",
       "sources": [
         "src/platform/connections/lifecycle.ts",
-        "src/platform/connections/oauth.ts",
-        "src/platform/connections/service.ts"
+        "src/platform/connections/oauth.ts"
       ]
     },
     {
@@ -480,7 +479,7 @@
     {
       "code": "ENVIRONMENT_NOT_READY",
       "sources": [
-        "src/platform/connections/service.ts"
+        "src/platform/connections/lifecycle.ts"
       ]
     },
     {
@@ -668,7 +667,7 @@
         "src/operations/admin.ts",
         "src/platform/app.ts",
         "src/platform/application/billing-port.ts",
-        "src/platform/connections/service.ts",
+        "src/platform/connections/lifecycle.ts",
         "src/platform/mcp/authorization.ts",
         "src/platform/mcp/changes.ts",
         "src/providers/apple/service.ts",

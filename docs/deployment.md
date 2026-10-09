@@ -42,9 +42,9 @@ This is the host operator's tool, not a merchant's: the commands that manage con
 credentials open the database directly and need its connection string and the service's secrets, so
 they belong wherever the service runs. While the merchant platform runs, an organization with
 members is managed by them in the merchant application. Operators may still read it with
-`quotum connections list` and `quotum credentials status`, and change it only by naming the reason
-with `--member-override-reason <why>`, which the audit event records beside `--actor`. A headless
-deployment has no members to defer to and needs no reason.
+`quotum connections list`, `quotum credentials status` and `quotum environments readiness`, and
+change it only by naming the reason with `--member-override-reason <why>`, which the audit event
+records beside `--actor`. A headless deployment has no members to defer to and needs no reason.
 
 | Command | Purpose |
 | --- | --- |
@@ -59,6 +59,7 @@ deployment has no members to defer to and needs no reason.
 | `quotum catalog format <file> [--write]` | Print a catalog file in the [canonical spelling](catalog.md#canonical-intent), or rewrite it; needs no API or database. |
 | `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play, sandbox Paddle and projections. Changes to an organization with members need `--member-override-reason`. |
 | `quotum credentials status` / `rotate` / `revoke` | Inspect, [rotate](operations.md#project-credentials) or revoke an instance's project API keys. Changes to an organization with members need `--member-override-reason`. |
+| `quotum environments readiness` / `activate` | Check whether a production environment is ready, or [activate it](#activate-a-production-environment) and issue its first project key. Changes to an organization with members need `--member-override-reason`. |
 | `quotum organizations add-owner <organization> --email <address>` | Hand an organization to a person: [make a merchant user who has signed in an owner](#hand-an-organization-to-an-owner). Refused in headless mode. |
 | `quotum connections rotate-secrets` | [Encryption-key rotation](#encryption-key-rotation). |
 | `quotum merchant service-principal <name>` | The [merchant proxy service principal](#merchant-proxy-service-principal). Refused in headless mode. |
@@ -67,8 +68,8 @@ deployment has no members to defer to and needs no reason.
 | `quotum init` | Print a newly generated `QUOTUM_SECRETS_KEY_*`, `QUOTUM_AUTH_SECRET` and `BILLING_OPERATOR_API_KEY`. |
 | `quotum version`, `quotum help` | Build version and command list. |
 
-`bootstrap`, `catalog`, `partitions`, `usage scopes`, `connections` and `credentials` report a failure as one line
-on stderr and exit `64` for wrong arguments or `1` otherwise. A missing table reads as "the
+`bootstrap`, `catalog`, `partitions`, `usage scopes`, `connections`, `credentials` and `environments`
+report a failure as one line on stderr and exit `64` for wrong arguments or `1` otherwise. A missing table reads as "the
 database schema is not migrated", and an invalid `BILLING_PLATFORM_BOOTSTRAP_JSON` names the field
 at fault.
 
@@ -146,15 +147,17 @@ API, the provider webhooks and every worker, and nothing else.
   `QUOTUM_MCP_ENABLED=true` is refused at startup. The stdio [MCP server](mcp.md) still works.
 - `QUOTUM_AUTH_SECRET`, `MERCHANT_*` and `QUOTUM_EMAIL_*` become optional for the server, which
   ignores them when set, except that the retired names in the next section are still refused. The
-  `quotum connections` and `quotum credentials` commands still need `QUOTUM_AUTH_SECRET`, which keys
-  their request fingerprints.
+  `quotum connections`, `quotum credentials` and `quotum environments` commands still need
+  `QUOTUM_AUTH_SECRET`, which keys their request fingerprints.
 - Everything else is unchanged: `POSTGRES_URI`, `BILLING_OPERATOR_API_KEY` in production, and the
   `QUOTUM_SECRETS_KEY_*` key, which still decrypts stored connections. Provider webhooks, the
   connection-version verification route and, when `STRIPE_APP_*` is configured, the Stripe App
   event ingress keep working.
 - There are no **Integrations** screens: configure connections with the
   [`quotum connections`](providers.md#headless-connection-setup) commands and manage project API
-  keys with `quotum credentials`.
+  keys with `quotum credentials`. There is no activation screen either: declare production `active`
+  in the bootstrap manifest, or [activate](#activate-a-production-environment) one that is ready
+  with `quotum environments`.
 
 The flag is read at startup and accepts only `true` or `false`; unset or blank means `false`. Set
 `QUOTUM_CONSOLE_ENABLED=true` to enable the merchant console. A headless process logs
@@ -262,9 +265,11 @@ bootstrap is declarative, additive and idempotent:
 - Every row already in the database must be declared with the same name, project, environment and
   lifecycle status. Any other difference, including a row the manifest omits, is refused before
   anything is written.
-- It never updates or deletes a row. It never adds rows or credentials to an organization that has
-  members (one onboarded through the merchant application) or is not active, and it does not apply
-  the organization's production limit, which only gates merchant activation. To give an
+- It never updates or deletes a row, so it cannot activate an environment that exists as
+  `inactive`; [`quotum environments activate`](#activate-a-production-environment) does. It never
+  adds rows or credentials to an organization that has members (one onboarded through the merchant
+  application) or is not active, and it does not apply the organization's production limit, which
+  only gates merchant activation. To give an
   organization it created a person who can see it in the merchant application, [add an
   owner](#hand-an-organization-to-an-owner).
 - It issues each declared credential once, into the `--credentials-out` file, so every run that
@@ -273,6 +278,53 @@ bootstrap is declarative, additive and idempotent:
 `--check` prints the plan (`organizationsToCreate`, `logicalProjectsToCreate`,
 `projectInstancesToCreate`, `credentialsToIssue`, `readOnlyCredentialsToIssue`) and exits `2` while
 `--apply` has work to do, `0` once everything declared exists, and `1` when it refuses.
+
+## Activate a production environment
+
+A production environment is `inactive` until it is activated, and has no project key:
+`quotum credentials rotate` refuses it with `ENVIRONMENT_INACTIVE`. The merchant application
+activates one behind a step-up confirmation. Without it, or when the host operator must act, use
+the operator CLI, which holds the database already and so asks for no step-up:
+
+```sh
+quotum environments readiness <instance>
+quotum environments activate <instance> --credentials-out <new-file> --actor <you>
+```
+
+Both read the settings `quotum connections` does: `POSTGRES_URI`, the `QUOTUM_SECRETS_KEY_*` key
+and `QUOTUM_AUTH_SECRET`.
+
+`readiness` prints every blocker, with the connection it belongs to, and exits `2` while any
+remains and `0` once none does. They are the merchant application's checks:
+
+- an enabled projection connection and at least one enabled provider connection;
+- every enabled connection validated in the last 15 minutes (`quotum connections validate`
+  refreshes it) and every provider connection holding a verified setup event;
+- stored secrets that decrypt, and a published production catalog that binds each enabled provider.
+
+An inactive environment has no key and `/v1` refuses it, so `quotum catalog push` cannot publish
+that catalog. The merchant application publishes it. In a deployment that never ran the console,
+declare production `active` in the bootstrap manifest instead.
+
+`activate` runs the same checks again under the organization's lock, makes the environment
+`active` and writes its first full project key to `--credentials-out`: a new file only you can read,
+in the bootstrap's format, never printed. If the file cannot be written, nothing is activated. While
+a blocker remains it changes nothing, writes no file and exits `2` with the same report.
+
+- The audit event `environment.activated` names `--actor` and no member. An organization with
+  members needs `--member-override-reason <why>`, which the event records.
+- While the merchant platform runs, the organization's production limit applies as it does to
+  merchants and a full limit answers `ACTIVATION_CONFLICT`. A headless deployment has no plan, so
+  the limit does not hold it back.
+- Retrying with the printed `--request-key`, or activating an environment that is already active,
+  answers `credentialDisclosed: false`, writes no file and never replaces a key. Rotate to replace
+  one (see [project credentials](operations.md#project-credentials)).
+- Only production is activated: the command refuses a sandbox environment with exit `64`, and a
+  suspended or deactivated environment is unavailable to it.
+- Then update the bootstrap manifest. Set the instance's `lifecycleStatus` to `active` and
+  `issueCredential` to `true`: bootstrap refuses a database whose status differs from the manifest
+  and one that holds a project key the manifest does not declare. It issues no second key, because
+  the instance already has one.
 
 ## Hand an organization to an owner
 

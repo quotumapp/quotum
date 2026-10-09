@@ -42,7 +42,7 @@ describe("quotum command resolution", () => {
 	});
 
 	it("documents the reason an operator gives for changing a member organization", () => {
-		for (const name of ["connections", "credentials"]) {
+		for (const name of ["connections", "credentials", "environments"]) {
 			const details = quotumCommands.find(
 				(command) => command.path.length === 1 && command.path[0] === name,
 			)?.details;
@@ -79,6 +79,16 @@ describe("quotum command resolution", () => {
 			["merchant", "service-principal", "ui-proxy"],
 			"composition/cli/merchant-service-principal.ts",
 			["ui-proxy"],
+		],
+		[
+			["environments", "readiness", "acme"],
+			"composition/cli/environments.ts",
+			["readiness", "acme"],
+		],
+		[
+			["environments", "activate", "acme", "--credentials-out", "keys.json"],
+			"composition/cli/environments.ts",
+			["activate", "acme", "--credentials-out", "keys.json"],
 		],
 		[
 			["organizations", "add-owner", "acme", "--email", "owner@acme.example"],
@@ -127,6 +137,8 @@ describe("quotum command resolution", () => {
 			["bootstrap", "--check", "--apply"],
 			["organizations"],
 			["organizations", "remove-owner", "acme"],
+			["environments"],
+			["environments", "deactivate", "acme"],
 			["catalog"],
 			["catalog", "push"],
 			["catalog", "status", "extra"],
