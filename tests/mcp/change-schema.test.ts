@@ -30,6 +30,20 @@ describe("remote billing proposal boundary", () => {
 			false,
 		);
 	});
+	it("requires an explicit empty parameter list for actions without path parameters", () => {
+		const names = [
+			"catalog.publish",
+			"contracts.publish",
+			"migrations.publish",
+			"promotions.create",
+		];
+		for (const name of names) {
+			const action = billingChangeActions.find((a) => a.action === name);
+			expect([name, action?.parameters.safeParse([]).success]).toEqual([name, true]);
+			expect([name, action?.parameters.safeParse(["x"]).success]).toEqual([name, false]);
+			expect([name, action?.parameters.safeParse(undefined).success]).toEqual([name, false]);
+		}
+	});
 	it("gates recovery actions and excludes credentials, consuming usage and global reconciliation", () => {
 		const names = billingChangeActions.map((a) => a.action);
 		expect(new Set(names).size).toBe(names.length);

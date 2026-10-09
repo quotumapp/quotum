@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
+import type { McpChangeTools } from "../../src/mcp/change-tools";
 import { createContractStore } from "../../src/mcp/contracts";
 import { createGuardedFetch } from "../../src/mcp/guarded-fetch";
 import { createQuotumMcpServer } from "../../src/mcp/server";
@@ -21,7 +22,10 @@ export interface McpTestConnection {
 }
 
 /** A real MCP client and server linked in memory, over the guarded fetch and a stub billing API. */
-export async function connectMcp(respond: McpTestResponder): Promise<McpTestConnection> {
+export async function connectMcp(
+	respond: McpTestResponder,
+	options: { changes?: McpChangeTools } = {},
+): Promise<McpTestConnection> {
 	const calls: Request[] = [];
 	const logs: string[] = [];
 	const billing = new BillingClient({
@@ -41,6 +45,7 @@ export async function connectMcp(respond: McpTestResponder): Promise<McpTestConn
 		version: "0.0.0-test",
 		log: (line) => logs.push(line),
 		contracts,
+		changes: options.changes,
 	});
 	const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
 	await server.connect(serverTransport);
