@@ -126,7 +126,6 @@ async function catalogCommand(argv: readonly string[], env: Environment): Promis
 		(arg) => arg.startsWith("--") && !(command === "push" && arg === "--force"),
 	);
 	if (unknown !== undefined) throw new CliUsageError(`Unknown option ${unknown}.`);
-	const [file] = rest.filter((arg) => !arg.startsWith("--"));
 	const writes = command !== "status";
 	const client = new BillingClient({
 		baseUrl: requiredEnv(env, "BILLING_BASE_URL"),
@@ -139,20 +138,39 @@ async function catalogCommand(argv: readonly string[], env: Environment): Promis
 				}
 			: {}),
 	});
+	return await runCatalogOperation(client.catalog, command, rest);
+}
+
+/**
+ * The catalog operations a command needs, whether they are served over HTTP by `BillingClient` or
+ * by the database directly.
+ */
+export type CatalogApi = Pick<
+	BillingClient["catalog"],
+	"status" | "preview" | "publish" | "bindings"
+>;
+
+/** Runs one validated `quotum catalog` command against `api`; `rest` is what follows the command. */
+async function runCatalogOperation(
+	api: CatalogApi,
+	command: "status" | "diff" | "push" | "bindings",
+	rest: readonly string[],
+): Promise<unknown> {
+	const [file] = rest.filter((arg) => !arg.startsWith("--"));
 	if (command === "bindings") {
-		if (rest.length === 1 && rest[0] === "list") return await client.catalog.bindings.list();
+		if (rest.length === 1 && rest[0] === "list") return await api.bindings.list();
 		if (rest.length !== 2 || rest[0] !== "adopt")
 			throw new CliUsageError("Use bindings list or bindings adopt <file>.");
 		const input = bindingAdoptionSchema.parse(await Bun.file(rest[1] ?? "").json());
 		const key = `binding:${createHash("sha256").update(JSON.stringify(input)).digest("hex")}`;
-		return await client.catalog.bindings.adopt(input, key);
+		return await api.bindings.adopt(input, key);
 	}
-	if (command === "status") return await client.catalog.status();
+	if (command === "status") return await api.status();
 	if (file === undefined) throw new CliUsageError(`${command} requires a catalog TypeScript file.`);
 	const source = await loadCatalog(file);
-	const current = await client.catalog.status();
+	const current = await api.status();
 	const expectedRevision = expectedRevisionFor(source.expectedRevision, current.revision);
-	const preview = await client.catalog.preview({
+	const preview = await api.preview({
 		expectedRevision,
 		catalog: source.catalog,
 	});
@@ -175,7 +193,7 @@ async function catalogCommand(argv: readonly string[], env: Environment): Promis
 			revision: current.revision,
 			intentHash: current.intentHash,
 		};
-	return await client.catalog.publish({
+	return await api.publish({
 		expectedRevision,
 		previewToken: preview.previewToken,
 		catalog: source.catalog,
