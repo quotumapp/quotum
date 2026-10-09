@@ -40,11 +40,6 @@ bun run test:load --docker --scenarios spread,windows --window-cadence hour \
   --accounts 3000 --concurrency 32 --drain-seconds 180 --out /tmp/quotum-windows.json
 ```
 
-On a laptop container (2026-09-28, diagnostic only) both passes ran about 1,300 consumes per second
-at 31 statements each; opening a window added about 0.8 ms of database time to that one request and
-a heavier p99, and each window row took about 450 bytes. Hourly and monthly limits run the same
-statements.
-
 ## One merchant with many active users
 
 Use `users` to test one merchant project with independent billing accounts, each sending exactly
@@ -114,6 +109,9 @@ share one machine and the container runs Postgres defaults. Quote only figures m
 instance, and record them together with the source revision they were measured against.
 
 ## Reference results
+
+These are the project's baseline figures. Compare a later revision against them on the same
+instance type, and record the revision with any new figures.
 
 Measured on 2026-10-09 against `v0.25.1` (`76dad183`) on one Hetzner Cloud CPX42 in Nuremberg:
 8 shared vCPUs, 16 GB, Ubuntu 24.04, Bun 1.4.2. The service, the load client and PostgreSQL 18.6
