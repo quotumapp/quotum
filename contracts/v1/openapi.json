@@ -51243,12 +51243,20 @@
                               },
                               "scope": {
                                 "$ref": "#/components/schemas/MerchantScope"
+                              },
+                              "status": {
+                                "enum": [
+                                  "active",
+                                  "inactive"
+                                ],
+                                "type": "string"
                               }
                             },
                             "required": [
                               "scope",
                               "organizationName",
                               "projectName",
+                              "status",
                               "canPropose"
                             ],
                             "type": "object"

@@ -4,12 +4,13 @@ import type {
 	BillingChangePreview,
 	BillingChangesPort,
 } from "../application/billing-changes";
+import { allowedOnInactiveEnvironment } from "../application/billing-port";
 import type { MerchantCapability, MerchantScope } from "../contracts";
 import type { MerchantSql } from "../database";
 import { digest, IDLE_MS, MerchantError, requireCapability } from "../security";
 import { canonicalJson, MerchantStepUp, mutationTarget } from "../step-up";
 import type { MerchantIdentity, MerchantStore } from "../store";
-import { MCP_WRITE_SCOPE, McpAuthorizations } from "./authorization";
+import { environmentStatus, MCP_WRITE_SCOPE, McpAuthorizations } from "./authorization";
 
 interface ChangeRow {
 	id: string;
@@ -30,6 +31,14 @@ interface ChangeRow {
 	result: unknown;
 	created_at: Date;
 	expires_at: Date;
+}
+/** What a grant on an environment that is not activated yet gets for anything but the catalog. */
+function inactiveEnvironment() {
+	return new MerchantError(
+		"ENVIRONMENT_INACTIVE",
+		"This environment is not activated yet. Only the catalog can be read and published until it is activated in the Quotum console.",
+		409,
+	);
 }
 export class McpChanges {
 	constructor(
@@ -64,6 +73,7 @@ export class McpChanges {
 			grant,
 			member,
 			scope,
+			environmentStatus: environmentStatus(instance),
 			context: {
 				projectInstanceId: grant.project_instance_id,
 				actor: `merchant:${grant.principal_id}`,
@@ -76,6 +86,8 @@ export class McpChanges {
 	) {
 		const access = await this.access(authorizationId, false);
 		requireCapability(access.member.role, "billing.read");
+		// Every configuration resource lives on the customer side, which an inactive environment lacks.
+		if (access.environmentStatus === "inactive") throw inactiveEnvironment();
 		return this.port.inspect(access.context, input);
 	}
 	async capabilities(authorizationId: string) {
@@ -91,7 +103,15 @@ export class McpChanges {
 			} catch {
 				available = false;
 			}
-			return { ...action, capability, available, approvalRequired: true };
+			const inactive =
+				access.environmentStatus === "inactive" && !allowedOnInactiveEnvironment(action.action);
+			return {
+				...action,
+				capability,
+				available: available && !inactive,
+				...(inactive ? { unavailableReason: "environment_inactive" } : {}),
+				approvalRequired: true,
+			};
 		});
 	}
 	/**
@@ -134,6 +154,8 @@ export class McpChanges {
 		const access = await this.access(authorizationId);
 		const action = this.port.actions.find((a) => a.action === input.action);
 		if (!action) throw new MerchantError("ACTION_REJECTED", "Unsupported billing change.");
+		if (access.environmentStatus === "inactive" && !allowedOnInactiveEnvironment(action.action))
+			throw inactiveEnvironment();
 		const capability =
 			action.action === "catalog.publish" && access.scope.environment === "production"
 				? "catalog.publish.production"

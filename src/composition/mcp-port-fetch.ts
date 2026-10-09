@@ -1,4 +1,8 @@
-import { billingOperation, type MerchantBillingPort } from "../platform/application/billing-port";
+import {
+	allowedOnInactiveEnvironment,
+	billingOperation,
+	type MerchantBillingPort,
+} from "../platform/application/billing-port";
 import type { BillingFetch } from "../sdk/client";
 import { hasUnstorableText, urlHasEncodedNul } from "../shared/input-bounds";
 
@@ -7,6 +11,8 @@ export function createMcpPortFetch(input: {
 	port: MerchantBillingPort;
 	projectInstanceId: string;
 	principalId: string;
+	/** An `inactive` environment (a production not yet activated) serves only the catalog. */
+	environmentStatus?: "active" | "inactive";
 }): BillingFetch {
 	return async (resource, init) => {
 		const request = new Request(resource, init);
@@ -22,6 +28,21 @@ export function createMcpPortFetch(input: {
 			);
 		const operation = billingOperation(request.method, url.pathname);
 		if (!operation) throw new Error("MCP operation has no merchant port mapping");
+		if (
+			input.environmentStatus === "inactive" &&
+			!allowedOnInactiveEnvironment(operation.operation)
+		)
+			return Response.json(
+				{
+					success: false,
+					error: {
+						code: "ENVIRONMENT_INACTIVE",
+						message:
+							"This environment is not activated yet. Only the catalog can be read until it is activated in the Quotum console.",
+					},
+				},
+				{ status: 409 },
+			);
 		const result = await input.port.dispatch({
 			...operation,
 			projectInstanceId: input.projectInstanceId,

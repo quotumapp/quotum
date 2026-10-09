@@ -473,7 +473,9 @@
       "code": "ENVIRONMENT_INACTIVE",
       "sources": [
         "src/app/webhook-routes.ts",
-        "src/platform/connections/lifecycle.ts"
+        "src/composition/mcp-port-fetch.ts",
+        "src/platform/connections/lifecycle.ts",
+        "src/platform/mcp/changes.ts"
       ]
     },
     {

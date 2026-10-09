@@ -55,9 +55,10 @@ import { providerOperationReceipt } from "../billing/provider-operations";
 import { publicOperationLookup } from "../billing/usage-api";
 import type { BillingRepository } from "../db/repository";
 import type { BillingAdminOperations } from "../operations/admin";
-import type {
-	MerchantBillingCommand,
-	MerchantBillingPort,
+import {
+	allowedOnInactiveEnvironment,
+	type MerchantBillingCommand,
+	type MerchantBillingPort,
 } from "../platform/application/billing-port";
 import { isTenantTrafficEligible, type ProjectInstanceContextResolver } from "../projects/context";
 import type { ProviderCapabilityReads } from "../providers/capability-read-types";
@@ -84,13 +85,7 @@ export function createMerchantBillingPort(input: {
 				!(
 					resolved.context.lifecycleStatus === "inactive" &&
 					!resolved.context.internalProject &&
-					[
-						"catalog",
-						"catalog.products",
-						"catalog.store-products",
-						"catalog.preview",
-						"catalog.publish",
-					].includes(command.operation)
+					allowedOnInactiveEnvironment(command.operation)
 				))
 		)
 			throw new BillingError("The selected environment is unavailable", "CONTEXT_UNAVAILABLE", 404);

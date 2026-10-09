@@ -120,6 +120,22 @@ export type MerchantBillingOperation = (
 	| typeof merchantBillingOperations
 	| typeof mcpBillingOperations
 )[number][2];
+/**
+ * What an environment that is not yet activated serves: the catalog, so it can be authored and
+ * published before the first project key exists. Everything else needs an active environment.
+ */
+export const INACTIVE_ENVIRONMENT_OPERATIONS = [
+	"catalog",
+	"catalog.products",
+	"catalog.store-products",
+	"catalog.preview",
+	"catalog.publish",
+] as const satisfies readonly MerchantBillingOperation[];
+
+export function allowedOnInactiveEnvironment(operation: string): boolean {
+	return (INACTIVE_ENVIRONMENT_OPERATIONS as readonly string[]).includes(operation);
+}
+
 export interface MerchantBillingCommand {
 	operation: MerchantBillingOperation;
 	parameters: string[];
