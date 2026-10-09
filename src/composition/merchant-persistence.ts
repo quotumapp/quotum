@@ -29,8 +29,13 @@ export function merchantSql(client: SQL): MerchantSql {
 			forProject: (id: string) => instances.forProject(id),
 			forPrincipal: (id: string) => instances.forPrincipal(id),
 			create: instances.create.bind(instances),
-			activateProduction: (instanceId: string, organizationId: string, catalogRevisionId: string) =>
-				activateProjectProduction(client, instanceId, organizationId, catalogRevisionId),
+			activateProduction: (
+				instanceId: string,
+				organizationId: string,
+				catalogRevisionId: string,
+				options?: { enforceProductionLimit?: boolean },
+			) =>
+				activateProjectProduction(client, instanceId, organizationId, catalogRevisionId, options),
 		},
 	});
 }

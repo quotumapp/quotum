@@ -417,13 +417,18 @@ function verifierMatches(actual: Uint8Array, expected: Uint8Array): boolean {
 	);
 }
 
+/**
+ * Activates one inactive production instance whose published catalog is `catalogRevisionId`. The
+ * organization's `production_limit` applies unless the caller waives it, as a headless operator may.
+ */
 export async function activateProjectProduction(
 	client: SQL,
 	instanceId: string,
 	organizationId: string,
 	catalogRevisionId: string,
+	{ enforceProductionLimit = true }: { enforceProductionLimit?: boolean } = {},
 ): Promise<boolean> {
 	const rows =
-		await client`UPDATE projects SET lifecycle_status='active' WHERE id=${instanceId} AND environment='production' AND lifecycle_status='inactive' AND published_catalog_revision_id=${catalogRevisionId}::bigint AND platform_project_id IN (SELECT id FROM platform_projects WHERE organization_id=${organizationId}) AND (SELECT count(*) FROM projects i JOIN platform_projects p ON p.id=i.platform_project_id WHERE p.organization_id=${organizationId} AND i.environment='production' AND i.lifecycle_status='active') < (SELECT production_limit FROM platform_organizations WHERE id=${organizationId}) RETURNING id`;
+		await client`UPDATE projects SET lifecycle_status='active' WHERE id=${instanceId} AND environment='production' AND lifecycle_status='inactive' AND published_catalog_revision_id=${catalogRevisionId}::bigint AND platform_project_id IN (SELECT id FROM platform_projects WHERE organization_id=${organizationId}) AND (NOT ${enforceProductionLimit}::boolean OR (SELECT count(*) FROM projects i JOIN platform_projects p ON p.id=i.platform_project_id WHERE p.organization_id=${organizationId} AND i.environment='production' AND i.lifecycle_status='active') < (SELECT production_limit FROM platform_organizations WHERE id=${organizationId})) RETURNING id`;
 	return rows.length === 1;
 }

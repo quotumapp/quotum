@@ -46,6 +46,7 @@ function recordingGate(actor: ConnectionActor, hooks: string[]): ConnectionGate 
 	return {
 		actor,
 		environment: "sandbox",
+		enforcesProductionLimit: false,
 		async instance(_sql, write) {
 			hooks.push(`instance:${write}`);
 			return instance;

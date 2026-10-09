@@ -38,6 +38,7 @@ function operatorGate(topology: {
 	return {
 		actor: { kind: "operator", name: "ops-runbook" },
 		environment: "sandbox",
+		enforcesProductionLimit: false,
 		async instance(sql) {
 			const instance = (await sql.instances.forProject(topology.platformProjectId)).find(
 				(candidate) => candidate.environment === "sandbox",
