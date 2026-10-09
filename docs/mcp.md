@@ -87,6 +87,27 @@ the remote MCP and OAuth endpoints; staff, merchant and health routes use their 
 The transport is stateless,
 with current MCP messages and the SDK's older-protocol fallback; it keeps no cross-request session.
 
+## Connect to production before it is activated
+
+A new organization's production environment is `inactive` until it is
+[activated](deployment.md#activate-a-production-environment). The consent page lists it with
+`status: "inactive"` and a connection can target it, so an agent can author the catalog that
+activation requires. Until then the connection:
+
+- reads the published catalog (`get_catalog`) and can propose `catalog.publish`, which the
+  connected merchant approves in the browser with the production step-up of any production change;
+- answers every other read tool, `get_billing_configuration` and every other proposal action with
+  `409 ENVIRONMENT_INACTIVE`. `get_mcp_capabilities` lists those actions as `available: false` with
+  `unavailableReason: "environment_inactive"`.
+
+Activation needs no new consent: every request rechecks the environment, so the same connection
+reaches every tool it was consented to once the environment is active. A suspended, deactivating or
+deactivated environment is refused as before.
+
+Provider connections, the projection receiver, credentials and activation itself are not MCP
+actions. Connect the live provider and the receiver in the merchant application (or with
+`quotum connections`), let the agent author and publish the catalog, then activate.
+
 ## Propose billing changes
 
 Remote writes are separately opt-in: set `QUOTUM_MCP_WRITES_ENABLED=true` only after deploying

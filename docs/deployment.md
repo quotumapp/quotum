@@ -307,7 +307,9 @@ over HTTP. Publish that catalog from the database with
 `quotum catalog push <file> --instance <instance> --actor <you>`, after
 `quotum catalog bindings adopt <file> --instance <instance> --actor <you>` for each Stripe product
 (see [catalog without a project key](catalog.md#without-a-project-key---instance)). The merchant
-application publishes it too. Or declare production `active` in the bootstrap manifest.
+application publishes it too, and a [remote MCP
+connection](mcp.md#connect-to-production-before-it-is-activated) can propose that publication for
+the merchant to approve. Or declare production `active` in the bootstrap manifest.
 
 `activate` runs the same checks again under the organization's lock, makes the environment
 `active` and writes its first full project key to `--credentials-out`: a new file only you can read,
