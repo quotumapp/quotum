@@ -55,7 +55,7 @@ records beside `--actor`. A headless deployment has no members to defer to and n
 | `quotum usage scopes verify --baseline <file> [--json]` | Checks the migrated database against the snapshot; exits `2` when a check fails, and the service must not start until it passes. |
 | `quotum bootstrap --check` / `--apply [--credentials-out <path>]` | The [platform bootstrap](#first-start). |
 | `quotum catalog provision` | Import the store products in `BILLING_CATALOG_IMPORT_JSON`. |
-| `quotum catalog status` / `diff <file>` / `push <file> [--force]` | [Catalog automation](catalog.md) over HTTP. |
+| `quotum catalog status` / `diff <file>` / `push <file> [--force]` / `bindings list` / `adopt <file>` | [Catalog automation](catalog.md) over HTTP. With `--instance <key>` it runs [against the database](catalog.md#without-a-project-key---instance) instead, for an environment that has no project key. |
 | `quotum catalog format <file> [--write]` | Print a catalog file in the [canonical spelling](catalog.md#canonical-intent), or rewrite it; needs no API or database. |
 | `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play, sandbox Paddle and projections. Changes to an organization with members need `--member-override-reason`. |
 | `quotum credentials status` / `rotate` / `revoke` | Inspect, [rotate](operations.md#project-credentials) or revoke an instance's project API keys. Changes to an organization with members need `--member-override-reason`. |
@@ -302,9 +302,12 @@ remains and `0` once none does. They are the merchant application's checks:
   refreshes it) and every provider connection holding a verified setup event;
 - stored secrets that decrypt, and a published production catalog that binds each enabled provider.
 
-An inactive environment has no key and `/v1` refuses it, so `quotum catalog push` cannot publish
-that catalog. The merchant application publishes it. In a deployment that never ran the console,
-declare production `active` in the bootstrap manifest instead.
+An inactive environment has no key and `/v1` refuses it, so `quotum catalog push` cannot reach it
+over HTTP. Publish that catalog from the database with
+`quotum catalog push <file> --instance <instance> --actor <you>`, after
+`quotum catalog bindings adopt <file> --instance <instance> --actor <you>` for each Stripe product
+(see [catalog without a project key](catalog.md#without-a-project-key---instance)). The merchant
+application publishes it too. Or declare production `active` in the bootstrap manifest.
 
 `activate` runs the same checks again under the organization's lock, makes the environment
 `active` and writes its first full project key to `--credentials-out`: a new file only you can read,

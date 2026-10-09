@@ -3,32 +3,46 @@ import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import Stripe from "stripe";
 import type { z } from "zod";
 import { previewSchema } from "../../app/catalog-routes";
-import { bindingAdoptionSchema } from "../../catalog/bindings";
+import { bindingAdoptionSchema, CatalogBindings } from "../../catalog/bindings";
 import { checkNewCatalogIntent } from "../../catalog/control-plane";
 import { type CatalogFileLanguage, catalogFileText } from "../../catalog/format";
 import type { AuthoredCatalogIntent, CatalogAdvisory } from "../../catalog/types";
+import { BillingRepository } from "../../db/repository";
 import { BillingClient } from "../../sdk/client";
 import { writeStderr, writeStdout } from "../../shared/cli-output";
+import { createDirectCatalogApi } from "./direct-catalog";
 import {
 	CliUsageError,
 	type CommandOutput,
+	memberOverrideReason,
+	type OperatorContextDependencies,
+	openOperatorContext,
+	operatorActor,
 	reportOperatorFailure,
 	runOperatorCommand,
 } from "./operator-context";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
+export interface CatalogCommandDependencies extends OperatorContextDependencies {
+	/** Replaces the Stripe client that `bindings adopt` reads prices with, for tests. */
+	stripeClient?: (secretKey: string) => Stripe;
+}
+
 /**
  * Runs `quotum catalog`. `status` is a project-authenticated read; only `diff` and `push`, which
- * preview and publish, need the operator key, and `format` calls no API at all. A failure is one
- * line on stderr.
+ * preview and publish, need the operator key, and `format` calls no API at all. With `--instance`
+ * the commands run against the database instead, with no project key and no `/v1`, which is how an
+ * inactive environment, one `/v1` refuses, is reached. A failure is one line on stderr.
  */
 export async function runCatalogCommand(
 	argv: readonly string[],
 	env: Environment,
 	output: CommandOutput = { stdout: writeStdout, stderr: writeStderr },
+	dependencies: CatalogCommandDependencies = {},
 ): Promise<number> {
 	const [command] = argv;
 	if (command === undefined || command === "help" || command === "--help") {
@@ -36,7 +50,11 @@ export async function runCatalogCommand(
 		return 0;
 	}
 	if (command === "format") return await runCatalogFormat(argv.slice(1), output);
-	return await runOperatorCommand(() => catalogCommand(argv, env), "quotum catalog --help", output);
+	return await runOperatorCommand(
+		() => catalogCommand(argv, env, dependencies),
+		"quotum catalog --help",
+		output,
+	);
 }
 
 /**
@@ -114,19 +132,24 @@ function issuePath(issue: z.core.$ZodIssue): string {
 				.join("");
 }
 
-async function catalogCommand(argv: readonly string[], env: Environment): Promise<unknown> {
-	const [command, ...rest] = argv;
+async function catalogCommand(
+	argv: readonly string[],
+	env: Environment,
+	dependencies: CatalogCommandDependencies,
+): Promise<unknown> {
+	const [command, ...allArguments] = argv;
 	if (command === "provision")
 		throw new CliUsageError(
 			"provision reads the database directly; run `quotum catalog provision` or `bun run catalog:provision`.",
 		);
 	if (command !== "status" && command !== "diff" && command !== "push" && command !== "bindings")
 		throw new CliUsageError(`Unknown catalog command: ${command}.`);
+	const { rest, direct } = takeDirectOptions(allArguments);
 	const unknown = rest.find(
 		(arg) => arg.startsWith("--") && !(command === "push" && arg === "--force"),
 	);
 	if (unknown !== undefined) throw new CliUsageError(`Unknown option ${unknown}.`);
-	const [file] = rest.filter((arg) => !arg.startsWith("--"));
+	if (direct !== null) return await runDirect(direct, command, rest, env, dependencies);
 	const writes = command !== "status";
 	const client = new BillingClient({
 		baseUrl: requiredEnv(env, "BILLING_BASE_URL"),
@@ -139,20 +162,131 @@ async function catalogCommand(argv: readonly string[], env: Environment): Promis
 				}
 			: {}),
 	});
+	return await runCatalogOperation(client.catalog, command, rest);
+}
+
+/** The options that select the database and name who is acting: `--instance` turns them on. */
+const directOptions = ["instance", "actor", "member-override-reason"] as const;
+
+/**
+ * Takes the direct-mode options and their values out of `args`. Like the other operator commands,
+ * each needs a value and may be given once. `--actor` and `--member-override-reason` mean nothing
+ * without `--instance`, so they are refused rather than ignored.
+ */
+function takeDirectOptions(args: readonly string[]): {
+	rest: string[];
+	direct: Map<string, string> | null;
+} {
+	const rest: string[] = [];
+	const options = new Map<string, string>();
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		const name = directOptions.find((option) => arg === `--${option}`);
+		if (name === undefined) {
+			rest.push(arg);
+			continue;
+		}
+		if (options.has(name)) throw new CliUsageError(`${arg} is given more than once.`);
+		const value = args[index + 1];
+		if (value === undefined || value.startsWith("--"))
+			throw new CliUsageError(`${arg} needs a value.`);
+		options.set(name, value);
+		index += 1;
+	}
+	if (!options.has("instance")) {
+		if (options.size > 0)
+			throw new CliUsageError("--actor and --member-override-reason apply only with --instance.");
+		return { rest, direct: null };
+	}
+	return { rest, direct: options };
+}
+
+/**
+ * Runs one command against an instance's database rows: no project key, no `/v1`. The operator is
+ * authorized the way the other operator commands are, by the gate that admits active and inactive
+ * instances of an active organization and makes a change to one that has members name its reason.
+ */
+async function runDirect(
+	options: Map<string, string>,
+	command: "status" | "diff" | "push" | "bindings",
+	rest: readonly string[],
+	env: Environment,
+	dependencies: CatalogCommandDependencies,
+): Promise<unknown> {
+	assertCatalogArguments(command, rest);
+	const instanceKey = options.get("instance") ?? "";
+	// Reads name no one; a change is audited, so it must name the operator.
+	const reads = command === "status" || (command === "bindings" && rest[0] === "list");
+	const operator = reads ? "reader" : operatorActor(options, env);
+	const reason = memberOverrideReason(options);
+	const context = await openOperatorContext(env, dependencies);
+	try {
+		const target = await context.target(instanceKey);
+		const gate = context.gate(target, operator, { memberOverrideReason: reason });
+		const stripeClient =
+			dependencies.stripeClient ??
+			((secretKey: string) => new Stripe(secretKey, { timeout: 10_000, maxNetworkRetries: 0 }));
+		const api = createDirectCatalogApi({
+			repository: new BillingRepository(context.billingDatabase),
+			bindings: new CatalogBindings(context.billingDatabase, context.connections, stripeClient),
+			project: target.project,
+			operator,
+			authorize: async (write) => {
+				await gate.instance(context.sql, write);
+			},
+		});
+		return await runCatalogOperation(api, command, rest);
+	} finally {
+		await context.close();
+	}
+}
+
+/**
+ * The catalog operations a command needs, whether they are served over HTTP by `BillingClient` or
+ * by the database directly.
+ */
+export type CatalogApi = Pick<
+	BillingClient["catalog"],
+	"status" | "preview" | "publish" | "bindings"
+>;
+
+/**
+ * The usage errors that depend only on the arguments, so a run against the database can refuse them
+ * before it connects.
+ */
+function assertCatalogArguments(
+	command: "status" | "diff" | "push" | "bindings",
+	rest: readonly string[],
+): void {
 	if (command === "bindings") {
-		if (rest.length === 1 && rest[0] === "list") return await client.catalog.bindings.list();
-		if (rest.length !== 2 || rest[0] !== "adopt")
+		if (!((rest.length === 1 && rest[0] === "list") || (rest.length === 2 && rest[0] === "adopt")))
 			throw new CliUsageError("Use bindings list or bindings adopt <file>.");
+		return;
+	}
+	if (command !== "status" && rest.every((arg) => arg.startsWith("--")))
+		throw new CliUsageError(`${command} requires a catalog TypeScript file.`);
+}
+
+/** Runs one validated `quotum catalog` command against `api`; `rest` is what follows the command. */
+async function runCatalogOperation(
+	api: CatalogApi,
+	command: "status" | "diff" | "push" | "bindings",
+	rest: readonly string[],
+): Promise<unknown> {
+	assertCatalogArguments(command, rest);
+	const [file] = rest.filter((arg) => !arg.startsWith("--"));
+	if (command === "bindings") {
+		if (rest[0] === "list") return await api.bindings.list();
 		const input = bindingAdoptionSchema.parse(await Bun.file(rest[1] ?? "").json());
 		const key = `binding:${createHash("sha256").update(JSON.stringify(input)).digest("hex")}`;
-		return await client.catalog.bindings.adopt(input, key);
+		return await api.bindings.adopt(input, key);
 	}
-	if (command === "status") return await client.catalog.status();
+	if (command === "status") return await api.status();
 	if (file === undefined) throw new CliUsageError(`${command} requires a catalog TypeScript file.`);
 	const source = await loadCatalog(file);
-	const current = await client.catalog.status();
+	const current = await api.status();
 	const expectedRevision = expectedRevisionFor(source.expectedRevision, current.revision);
-	const preview = await client.catalog.preview({
+	const preview = await api.preview({
 		expectedRevision,
 		catalog: source.catalog,
 	});
@@ -175,7 +309,7 @@ async function catalogCommand(argv: readonly string[], env: Environment): Promis
 			revision: current.revision,
 			intentHash: current.intentHash,
 		};
-	return await client.catalog.publish({
+	return await api.publish({
 		expectedRevision,
 		previewToken: preview.previewToken,
 		catalog: source.catalog,
@@ -260,7 +394,14 @@ Commands:
 
 Environment:
   BILLING_BASE_URL, BILLING_PROJECT_API_KEY (or BILLING_PROJECT_KEY);
-  diff, push and bindings also need BILLING_OPERATOR_API_KEY, and take an optional BILLING_ACTOR`;
+  diff, push and bindings also need BILLING_OPERATOR_API_KEY, and take an optional BILLING_ACTOR
+
+Without a project key (an inactive environment has none, and /v1 refuses it), add --instance and
+run against the database as the operator, for status, diff, push and bindings:
+  quotum catalog <command> ... --instance <key> [--actor <name>] [--member-override-reason <why>]
+  POSTGRES_URI, QUOTUM_SECRETS_KEY_ID, QUOTUM_SECRETS_KEY_BASE64, QUOTUM_AUTH_SECRET; diff, push and
+  bindings adopt also take --actor (or QUOTUM_ACTOR), recorded as operator:<name>. An organization
+  with members needs --member-override-reason for those. BILLING_* are not read.`;
 
 // Last, so every declaration above is initialized before the command runs.
 if (import.meta.main) {

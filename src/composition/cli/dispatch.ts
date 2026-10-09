@@ -24,6 +24,43 @@ export interface QuotumCommand {
 
 const none = (args: readonly string[]) => args.length === 0;
 
+const catalogDirectOptions = ["--instance", "--actor", "--member-override-reason"];
+
+/** `args` without the well-formed `--instance|--actor|--member-override-reason <value>` pairs. */
+function withoutCatalogDirectOptions(args: readonly string[]): string[] {
+	const rest: string[] = [];
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		const value = args[index + 1];
+		if (catalogDirectOptions.includes(arg) && value !== undefined && !value.startsWith("--")) {
+			index += 1;
+			continue;
+		}
+		rest.push(arg);
+	}
+	return rest;
+}
+
+/** Whether `quotum catalog` understands these arguments; `provision` has its own entry. */
+function acceptsCatalog(args: readonly string[]): boolean {
+	if (args[0] === "format")
+		return (
+			(args.length === 2 && args[1] !== "--write") ||
+			(args.length === 3 && args.slice(1).filter((arg) => arg === "--write").length === 1)
+		);
+	const rest = withoutCatalogDirectOptions(args);
+	const [command, file, flag] = rest;
+	return (
+		(command === "bindings" &&
+			((rest.length === 2 && file === "list") || (rest.length === 3 && file === "adopt"))) ||
+		(rest.length === 1 && command === "status") ||
+		(rest.length === 2 && (command === "diff" || command === "push")) ||
+		// `push` takes the flag after the file: a catalog that is already published is left alone
+		// unless it is given.
+		(rest.length === 3 && command === "push" && flag === "--force" && !file?.startsWith("--"))
+	);
+}
+
 export const quotumCommands: readonly QuotumCommand[] = [
 	{
 		path: ["projections"],
@@ -101,19 +138,20 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		path: ["catalog"],
 		file: "composition/cli/catalog.ts",
 		usage:
-			"catalog status | diff <file> | push <file> | format <file> [--write] | provision | bindings list|adopt <file>",
+			"catalog status | diff <file> | push <file> [--force] | format <file> [--write] | provision | bindings list|adopt <file> [--instance <key> ...]",
 		summary: "Read, preview or publish the catalog through the API, or print a file canonically",
 		environment:
-			"BILLING_BASE_URL, BILLING_PROJECT_API_KEY (or BILLING_PROJECT_KEY); diff, push and bindings also BILLING_OPERATOR_API_KEY and optional BILLING_ACTOR; format needs none",
-		accepts: (args) =>
-			(args[0] === "bindings" &&
-				((args.length === 2 && args[1] === "list") ||
-					(args.length === 3 && args[1] === "adopt"))) ||
-			(args.length === 1 && args[0] === "status") ||
-			(args.length === 2 && (args[0] === "diff" || args[0] === "push")) ||
-			(args[0] === "format" &&
-				((args.length === 2 && args[1] !== "--write") ||
-					(args.length === 3 && args.slice(1).filter((arg) => arg === "--write").length === 1))),
+			"BILLING_BASE_URL, BILLING_PROJECT_API_KEY (or BILLING_PROJECT_KEY); diff, push and bindings also BILLING_OPERATOR_API_KEY and optional BILLING_ACTOR; with --instance instead POSTGRES_URI, QUOTUM_SECRETS_KEY_ID, QUOTUM_SECRETS_KEY_BASE64, QUOTUM_AUTH_SECRET and optional QUOTUM_ACTOR; format needs none",
+		details: [
+			"  catalog status|diff <file>|push <file> [--force]|bindings list|bindings adopt <file>",
+			"      [--instance <key> [--actor <name>] [--member-override-reason <why>]]",
+			"--instance runs the command against the database as the operator, with no project key and no",
+			"/v1: an inactive environment has no key and /v1 refuses it. diff, push and bindings adopt take",
+			"--actor (or QUOTUM_ACTOR), recorded as operator:<name>, and an organization whose members",
+			"manage it also needs --member-override-reason <why>. Without --instance the command calls",
+			"the API at BILLING_BASE_URL.",
+		],
+		accepts: acceptsCatalog,
 	},
 	{
 		path: ["connections", "rotate-secrets"],

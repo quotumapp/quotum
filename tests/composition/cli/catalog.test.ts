@@ -456,3 +456,88 @@ describe("catalog command in process", () => {
 		]);
 	});
 });
+
+describe("catalog command with --instance", () => {
+	const captured = () => {
+		const out: string[] = [];
+		const err: string[] = [];
+		return {
+			out,
+			err,
+			output: {
+				stdout: (value: string) => out.push(value),
+				stderr: (value: string) => err.push(value),
+			},
+		};
+	};
+
+	it("rejects the direct options with exit 64 before it touches the database", async () => {
+		for (const [argv, message] of [
+			[["status", "--instance"], "--instance needs a value."],
+			[["status", "--instance", "--actor"], "--instance needs a value."],
+			[["status", "--instance", "a", "--instance", "b"], "--instance is given more than once."],
+			[["status", "--actor", "ops"], "apply only with --instance"],
+			[["status", "--member-override-reason", "why"], "apply only with --instance"],
+			[["diff", "catalog.ts", "--instance", "alpha"], "Name the operator with --actor"],
+			[["push", "catalog.ts", "--instance", "alpha"], "Name the operator with --actor"],
+			[["bindings", "adopt", "b.json", "--instance", "alpha"], "Name the operator with --actor"],
+			[["diff", "catalog.ts", "--instance", "alpha", "--actor", "bad name"], "--actor must be"],
+			[
+				[
+					"diff",
+					"catalog.ts",
+					"--instance",
+					"alpha",
+					"--actor",
+					"ops",
+					"--member-override-reason",
+					" ",
+				],
+				"--member-override-reason must be",
+			],
+			[["status", "--instance", "alpha", "--force"], "Unknown option --force."],
+			[["bindings", "list", "--instance", "alpha", "extra", "--actor", "ops"], "Use bindings list"],
+		] as const) {
+			const result = captured();
+			// No POSTGRES_URI and no BILLING_* are set, so any attempt to connect or call would differ.
+			expect(await runCatalogCommand([...argv], {}, result.output), argv.join(" ")).toBe(64);
+			expect(result.err.join("\n"), argv.join(" ")).toContain(message);
+			expect(result.out).toEqual([]);
+		}
+	});
+
+	it("reads without naming an operator, and needs the database settings", async () => {
+		for (const argv of [
+			["status", "--instance", "alpha"],
+			["bindings", "list", "--instance", "alpha"],
+		]) {
+			const result = captured();
+			// Direct mode never reads BILLING_BASE_URL; the first thing it needs is the database.
+			expect(
+				await runCatalogCommand(argv, { BILLING_BASE_URL: "http://127.0.0.1:1" }, result.output),
+			).toBe(1);
+			expect(result.err).toEqual(["POSTGRES_URI is required"]);
+		}
+	});
+
+	it("takes the operator from QUOTUM_ACTOR as the other operator commands do", async () => {
+		const result = captured();
+		expect(
+			await runCatalogCommand(
+				["diff", "catalog.ts", "--instance", "alpha"],
+				{ QUOTUM_ACTOR: "ops-runbook" },
+				result.output,
+			),
+		).toBe(1);
+		expect(result.err).toEqual(["POSTGRES_URI is required"]);
+	});
+
+	it("documents the direct mode in its help", async () => {
+		const help = captured();
+		expect(await runCatalogCommand(["--help"], {}, help.output)).toBe(0);
+		const text = help.out.join("\n");
+		expect(text).toContain("--instance <key>");
+		expect(text).toContain("operator:<name>");
+		expect(text).toContain("--member-override-reason");
+	});
+});

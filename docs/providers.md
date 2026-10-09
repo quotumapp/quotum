@@ -526,8 +526,11 @@ and commit steps as the **Integrations** screens, and audit events name the oper
    activates the version. Then point the provider's webhook at the regular path
    `/v1/projects/<instance>/webhooks/<provider>`.
 5. **Activate production (only if it is `inactive`).** Run `quotum environments readiness
-   <instance>` until it exits `0`. A validation older than 15 minutes blocks it, so run `quotum
-   connections validate` again first. Then run `quotum environments activate <instance>
+   <instance>` until it exits `0`. It needs a published catalog: publish one with `quotum catalog
+   push <file> --instance <instance>` ([adopt](catalog.md#without-a-project-key---instance) each
+   Stripe product first). A validation older than 15 minutes blocks it, so run `quotum connections
+   validate <instance> <kind> <version-id>` again first, with the `activeVersionId` that `quotum
+   connections list <instance>` shows. Then run `quotum environments activate <instance>
    --credentials-out <new-file>`, which issues the project key; see
    [Activate a production environment](deployment.md#activate-a-production-environment).
 

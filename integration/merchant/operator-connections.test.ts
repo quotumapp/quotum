@@ -1,6 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createSanitizedProcessEnv } from "../../scripts/lib/sanitized-env";
 import {
@@ -17,79 +16,31 @@ import {
 	BunPlatformUnitOfWork,
 	PostgresProjectInstanceContextResolver,
 } from "../../src/composition/project-instance-persistence";
-import { BillingRepository } from "../../src/db/repository";
-import { parsePlatformBootstrapManifest } from "../../src/platform/bootstrap/manifest";
 import { PlatformBootstrapService } from "../../src/platform/bootstrap/service";
 import type { ConnectionValidationPort } from "../../src/platform/connections/ports";
-import { seedIntegrationProjectsAndCatalog } from "../../tests/integration/helpers/catalog-fixtures";
-import { publishAiCreditsCatalog } from "../../tests/integration/helpers/metering-catalog";
 import {
 	MerchantBrowser,
 	merchantFixture,
 	stubConnectionValidation,
 	stubEnvironmentBilling,
 } from "./fixture";
+import {
+	connectProductionInstance,
+	operatorEnv as env,
+	lifecycleStatusOf,
+	publishAiCreditsOnProduction,
+	runOperator,
+	seedOperatorOrganization,
+	operatorTopology as topology,
+	withScratchDirectory,
+} from "./operator-fixture";
 
 const f = merchantFixture();
 beforeEach(() => f.reset());
 afterAll(() => f.sql.close());
 
-/** Settings an operator deployment provides; the key matches the fixture's connection cipher. */
-const env = {
-	POSTGRES_URI: process.env.POSTGRES_URI,
-	QUOTUM_SECRETS_KEY_ID: "test",
-	QUOTUM_SECRETS_KEY_BASE64: Buffer.alloc(32, 7).toString("base64"),
-	QUOTUM_AUTH_SECRET: "operator-connections-test-secret-0123456789",
-	QUOTUM_CONSOLE_ENABLED: "false",
-	QUOTUM_ACTOR: "ops-runbook",
-};
-
-/** The bootstrap manifest of one organization: an active sandbox and a production environment. */
-function topology(
-	production: { lifecycleStatus: "active" | "inactive"; issueCredential: boolean } = {
-		lifecycleStatus: "active",
-		issueCredential: false,
-	},
-) {
-	return parsePlatformBootstrapManifest(
-		JSON.stringify({
-			version: 1,
-			organizations: [
-				{
-					slug: "ops",
-					name: "Operations",
-					projects: [
-						{
-							key: "alpha",
-							name: "Alpha",
-							instances: [
-								{
-									key: "alpha-sandbox",
-									environment: "sandbox",
-									lifecycleStatus: "active",
-									issueCredential: false,
-								},
-								{
-									key: "alpha",
-									environment: "production",
-									...production,
-								},
-							],
-						},
-					],
-				},
-			],
-		}),
-	);
-}
-
-/** One organization with an active sandbox and a production environment, no keys yet. */
-async function seed(productionStatus: "active" | "inactive" = "active"): Promise<void> {
-	await new PlatformBootstrapService(new BunPlatformUnitOfWork(f.client)).apply(
-		topology({ lifecycleStatus: productionStatus, issueCredential: false }),
-		[],
-	);
-}
+const seed = (productionStatus?: "active" | "inactive") =>
+	seedOperatorOrganization(f, productionStatus);
 
 async function instanceId(key: string): Promise<string> {
 	const [row] = await f.sql<{ id: string }[]>`SELECT id FROM projects WHERE key=${key}`;
@@ -97,28 +48,7 @@ async function instanceId(key: string): Promise<string> {
 	return row.id;
 }
 
-type Result = { code: number; stdout: string; stderr: string; json: Record<string, unknown> };
-
-async function run(
-	command:
-		| typeof runConnectionsCommand
-		| typeof runCredentialsCommand
-		| typeof runEnvironmentsCommand,
-	argv: string[],
-	dependencies: ConnectionsCommandDependencies & EnvironmentsCommandDependencies = {},
-	settings: Record<string, string | undefined> = env,
-): Promise<Result> {
-	const out: string[] = [];
-	const err: string[] = [];
-	const code = await command(argv, settings, {
-		validator: stubConnectionValidation(),
-		...dependencies,
-		output: { stdout: (value) => out.push(value), stderr: (value) => err.push(value) },
-	});
-	const stdout = out.join("\n");
-	// A failure prints on stderr only; a report that exits 2 prints JSON like a success.
-	return { code, stdout, stderr: err.join("\n"), json: stdout === "" ? {} : JSON.parse(stdout) };
-}
+const run = runOperator;
 
 const connections = (argv: string[], dependencies?: ConnectionsCommandDependencies) =>
 	run(runConnectionsCommand, argv, dependencies);
@@ -131,14 +61,7 @@ const environments = (
 	dependencies: EnvironmentsCommandDependencies = { billing: stubEnvironmentBilling(() => f.sql) },
 ) => run(runEnvironmentsCommand, argv, dependencies, settings);
 
-async function withDirectory(work: (directory: string) => Promise<void>): Promise<void> {
-	const directory = await mkdtemp(join(tmpdir(), "quotum-operator-connections-"));
-	try {
-		await work(directory);
-	} finally {
-		await rm(directory, { recursive: true, force: true });
-	}
-}
+const withDirectory = withScratchDirectory;
 
 describe("operator connection commands", () => {
 	it("drafts, validates, commits and disables a projection without the merchant platform", async () => {
@@ -581,62 +504,9 @@ describe("operator connection commands", () => {
 	});
 });
 
-/** Drafts, validates and commits a projection and a Stripe connection on the production instance. */
-async function connectProduction(directory: string): Promise<void> {
-	const projection = join(directory, "projection.json");
-	await writeFile(projection, JSON.stringify({ projectionUrl: "https://backend.example/billing" }));
-	const stripe = join(directory, "stripe.json");
-	await writeFile(stripe, JSON.stringify({ checkoutSuccessUrl: "https://shop.example/success" }));
-	const stripeSecrets = {
-		stdin: async () =>
-			new TextEncoder().encode(
-				JSON.stringify({ secretKey: "rk_live_operator", webhookSecret: "whsec_operator" }),
-			),
-	};
-	for (const [kind, args, dependencies] of [
-		["projection", ["--settings", projection, "--secret-out", join(directory, "secret.json")], {}],
-		["stripe", ["--settings", stripe, "--secrets-file", "-"], stripeSecrets],
-	] as const) {
-		const draft = await connections(["draft", "alpha", kind, ...args], dependencies);
-		expect(draft.code).toBe(0);
-		const draftId = String(draft.json.draftId);
-		expect((await connections(["validate", "alpha", kind, draftId])).code).toBe(0);
-		expect((await connections(["commit", "alpha", kind, draftId])).code).toBe(0);
-	}
-}
-
-/** Publishes a catalog on the production instance and returns its revision. */
-async function publishCatalog(): Promise<string> {
-	const resolved = await new PostgresProjectInstanceContextResolver(f.client).resolveInstanceKey(
-		"alpha",
-	);
-	if (resolved.kind !== "resolved") throw new Error("Missing production fixture");
-	await seedIntegrationProjectsAndCatalog(f.client, [
-		{
-			name: "Activation fixture",
-			projectInstanceKey: "alpha",
-			projectionContract: "billing_state_v1",
-			projectionUrl: "https://receiver.example.com",
-			projectionSecret: "synthetic-test-only",
-			apple: null,
-			googlePlay: null,
-			stripe: null,
-		},
-	]);
-	await publishAiCreditsCatalog(new BillingRepository(), resolved.context);
-	const [row] = await f.sql<
-		{ revision: string }[]
-	>`SELECT published_catalog_revision_id::text AS revision FROM projects WHERE key='alpha'`;
-	if (!row) throw new Error("The catalog was not published");
-	return row.revision;
-}
-
-const lifecycleOf = async (key: string) =>
-	(
-		await f.sql<
-			{ status: string }[]
-		>`SELECT lifecycle_status AS status FROM projects WHERE key=${key}`
-	)[0]?.status;
+const connectProduction = connectProductionInstance;
+const publishCatalog = () => publishAiCreditsOnProduction(f);
+const lifecycleOf = (key: string) => lifecycleStatusOf(f, key);
 
 describe("operator environment activation", () => {
 	it("reports what blocks an environment, then activates it into an owner-only file", async () => {

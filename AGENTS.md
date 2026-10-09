@@ -245,7 +245,9 @@ Use Bun `>=1.4.0 <1.5.0`. Docker is required for every Postgres-backed lane.
   stored connection secrets with the active key.
 - `bun run quotum catalog bindings list` and `catalog bindings adopt <file>` inspect/adopt existing
   Stripe products and prices before or after catalog publication; adoption requires operator
-  authentication and records an immutable actor-attributed receipt. `catalog provision` is only
+  authentication and records an immutable actor-attributed receipt. `--instance <key>` runs the
+  catalog commands against the database for an environment with no project key (an inactive one),
+  through `src/composition/cli/direct-catalog.ts`. `catalog provision` is only
   for non-production instances before publication. `quotum projections check-receiver <url>
   --project-key <key> --secret-file <path|->` checks receiver authentication without a connection commit.
 - `bun run mcp` starts the read-only stdio MCP server against `QUOTUM_MCP_BASE_URL` with a
