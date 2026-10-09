@@ -40,7 +40,7 @@ export async function createMerchantTestRuntime(
 			"Merchant test entrypoint requires explicitly enabled test mode and fake providers",
 		);
 	if (!merchantPlatformEnabled())
-		throw new Error("Merchant test entrypoint cannot run with QUOTUM_MERCHANT_ENABLED=false");
+		throw new Error("Merchant test entrypoint requires QUOTUM_CONSOLE_ENABLED=true");
 	const env = loadFixtureEnv();
 	const projectServices: NonNullable<AppDependencies["projectProviderServices"]> = {};
 	const config = loadMerchantConfig();

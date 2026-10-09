@@ -8,7 +8,7 @@ x-quotum: &quotum
   env_file: ${QUOTUM_ENV_FILE:-.env}
   environment:
     POSTGRES_URI: postgres://quotum:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/quotum
-    QUOTUM_MERCHANT_ENABLED: "false"
+    QUOTUM_CONSOLE_ENABLED: false
   init: true
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]

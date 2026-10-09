@@ -53,11 +53,12 @@ bun run migrate
 bun run dev
 ```
 
-The merchant platform is on by default. Its authentication is always on and requires an explicitly
-selected Cloudflare or Resend email sender outside `BILLING_ENV=test`; copy `.env.example` before
-`bun run dev`. The operator owns the `QUOTUM_AUTH_SECRET` and `QUOTUM_EMAIL_*` settings.
-`QUOTUM_MERCHANT_ENABLED=false` runs [headless](docs/deployment.md#headless-mode): `/v1` and workers
-only, with none of those settings. [`deploy/compose`](docs/deployment.md#headless-docker-compose)
+The merchant platform is off by default: unset or `QUOTUM_CONSOLE_ENABLED=false` runs
+[headless](docs/deployment.md#headless-mode), serving `/v1` and workers only, with none of the
+merchant settings. Set `QUOTUM_CONSOLE_ENABLED=true` for the console; its authentication is always
+on and requires an explicitly selected Cloudflare or Resend email sender outside
+`BILLING_ENV=test`, so copy `.env.example` first. The operator owns the `QUOTUM_AUTH_SECRET` and
+`QUOTUM_EMAIL_*` settings. [`deploy/compose`](docs/deployment.md#headless-docker-compose)
 runs it with Postgres in Docker Compose. The fake test entrypoints are not
 production configurations. `/ready` checks database/schema health;
 customer integrations and production activation have separate checks.

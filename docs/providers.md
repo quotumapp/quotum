@@ -126,7 +126,7 @@ For the real runtime, use a separate owner-only regular JSON file outside Git:
 Against a disposable migrated/bootstrap database with a sandbox project and provisioned mapping,
 run `bun src/testing/test-paddle-entrypoint.ts` with `BILLING_ENV=test`,
 `BILLING_TEST_PADDLE_SANDBOX=true`, `BILLING_TEST_PADDLE_CONFIG_FILE`, the normal database settings
-and `QUOTUM_MERCHANT_ENABLED=false`. This guarded entrypoint serves the private API on loopback
+and `QUOTUM_CONSOLE_ENABLED=false`. This guarded entrypoint serves the private API on loopback
 4318 and `/pay` plus the exact Paddle webhook on loopback 4319. Tunnel only 4319. Its injected
 projection transport permits a local test receiver; it does not change production destination rules.
 After testing, cancel test subscriptions, disable the temporary notification destination, remove
@@ -664,8 +664,8 @@ every resolved address is in an approved network. Public receivers always need H
   travel unencrypted. Use it only on a network segment you trust, such as a private container
   network.
 - **Headless only.** Both settings are for headless deployments. The service refuses to start
-  with either of them while the merchant platform is on (`QUOTUM_MERCHANT_ENABLED` is not
-  `false`), because merchants' receivers must stay on public HTTPS.
+  with either of them while the merchant platform is on (`QUOTUM_CONSOLE_ENABLED=true`), because
+  merchants' receivers must stay on public HTTPS.
 
 ## Adding a provider
 
@@ -763,4 +763,4 @@ invalid signature and expired timestamp. Negative authentication checks must ret
 It prints each result, exits nonzero on failure, and sends no billing snapshots. Public HTTPS
 receivers are the default. Headless operators may use the existing
 `BILLING_PROJECTION_ALLOWED_NETWORKS` / `BILLING_PROJECTION_ALLOW_INSECURE_HTTP` policy with
-`QUOTUM_MERCHANT_ENABLED=false`. The reference receiver implements the same handshake.
+`QUOTUM_CONSOLE_ENABLED=false`. The reference receiver implements the same handshake.

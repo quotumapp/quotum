@@ -114,10 +114,10 @@ required value is missing or unsafe for the selected environment.
 | Variable | Purpose |
 | --- | --- |
 | `POSTGRES_URI` | Direct connection string for [PostgreSQL 18 or newer](#postgres). Neon-compatible Postgres works. |
-| `BILLING_ENV` | `development`, `test`, or `production` (default). Production requires the operator key. Projection receivers and Stripe return URLs need HTTPS in every environment; only a headless deployment can approve [private receivers](providers.md#private-receivers-headless-only). The merchant settings below are required in every environment unless `QUOTUM_MERCHANT_ENABLED=false`. |
+| `BILLING_ENV` | `development`, `test`, or `production` (default). Production requires the operator key. Projection receivers and Stripe return URLs need HTTPS in every environment; only a headless deployment can approve [private receivers](providers.md#private-receivers-headless-only). The merchant settings below are required only when `QUOTUM_CONSOLE_ENABLED=true`. |
 | `BILLING_OPERATOR_API_KEY` | Operator credential for catalog publication, replay, reconciliation, and admin metrics. At least 16 characters, separate from project credentials. Required in production. |
 | `QUOTUM_SECRETS_KEY_ID`, `QUOTUM_SECRETS_KEY_BASE64` | Identifier and base64 32-byte AES key that encrypts stored provider and projection connections. Keep the key outside Postgres and its backups. Rotate with `quotum connections rotate-secrets`. |
-| `QUOTUM_MERCHANT_ENABLED` | `true` (default) runs the merchant platform. `false` runs [headless](#headless-mode) and makes every setting below optional. |
+| `QUOTUM_CONSOLE_ENABLED` | `false` (default) runs [headless](#headless-mode): `/v1` and workers only. `true` also serves the merchant console (`/api` sign-in, onboarding, teams and remote MCP) and makes every setting below required. Organizations and projects exist in both modes; the flag only removes the management surface. |
 | `MERCHANT_ORIGIN`, `MERCHANT_PUBLIC_URL` | Merchant origin and public/legal-page URL. Both must be explicitly set to nonblank values in production, including when `BILLING_ENV` is unset. Development and test defaults are `https://app.quotum.dev` and `https://quotum.dev`. The merchant origin must be exact HTTPS outside tests. |
 | `QUOTUM_AUTH_SECRET` | Operator-owned secret for Quotum sessions and token HMACs, at least 32 characters. Never reuse another secret. |
 | `MERCHANT_TERMS_VERSION`, `MERCHANT_PRIVACY_VERSION` | Approved legal document versions. Signup outside test mode refuses draft versions. |
@@ -137,8 +137,8 @@ ready.
 
 ### Headless mode
 
-`QUOTUM_MERCHANT_ENABLED=false` runs Quotum without the merchant platform. It is for operators who run
-Quotum for their own products and have no merchant web application: the process serves the `/v1`
+Headless is the default. Unset, blank, or `QUOTUM_CONSOLE_ENABLED=false` runs Quotum without the
+merchant platform. It is for operators who run Quotum for their own products and have no merchant web application: the process serves the `/v1`
 API, the provider webhooks and every worker, and nothing else.
 
 - `/api/*`, merchant sign-in, onboarding, teams, step-up confirmation and merchant email do not
@@ -156,8 +156,12 @@ API, the provider webhooks and every worker, and nothing else.
   [`quotum connections`](providers.md#headless-connection-setup) commands and manage project API
   keys with `quotum credentials`.
 
-The flag is read at startup and accepts only `true` or `false`; unset or blank means `true`. Switching
-modes needs a restart and no migration.
+The flag is read at startup and accepts only `true` or `false`; unset or blank means `false`. Set
+`QUOTUM_CONSOLE_ENABLED=true` to enable the merchant console. A headless process logs
+`Quotum running headless (/v1 and workers only). Set QUOTUM_CONSOLE_ENABLED=true for the merchant console.`
+at startup. Switching modes needs a restart and no migration. A deployment that served the merchant
+console before this default changed must set the flag; see
+[Console off by default](upgrade-transitions.md#console-off-by-default).
 
 ### Quotum-owned email delivery
 
@@ -532,8 +536,8 @@ project header, it is trusted only from the gateway, which must strip any copy a
 
 `bun run test:stripe-entrypoint` starts the service with an in-memory connection fixture and a
 network-free fake Stripe client. It requires `BILLING_ENV=test`, `BILLING_TEST_FAKE_STRIPE=true`,
-and either `QUOTUM_AUTH_SECRET` with the two legal versions or `QUOTUM_MERCHANT_ENABLED=false`; it
-refuses external provider traffic and keeps merchant mail in memory instead of sending it. It accepts
+and, only when `QUOTUM_CONSOLE_ENABLED=true`, the merchant settings (`QUOTUM_AUTH_SECRET` with the
+two legal versions); by default it runs headless. It refuses external provider traffic and keeps merchant mail in memory instead of sending it. It accepts
 `BILLING_TEST_FAKE_STRIPE_PAYMENT_BEHAVIOR=succeeded|action_required|retryable_failure`,
 `BILLING_TEST_FAKE_STRIPE_DEFAULT_PAYMENT_METHOD=missing`, and
 `BILLING_TEST_FAKE_STRIPE_PRICE_AMOUNTS_JSON` for deterministic worker scenarios. Never set

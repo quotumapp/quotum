@@ -9,7 +9,7 @@ verified production setup. Each step links to the reference that owns the detail
 
 ## What headless includes
 
-A [headless](deployment.md#headless-mode) deployment (`QUOTUM_MERCHANT_ENABLED=false`) has:
+A [headless](deployment.md#headless-mode) deployment (the default; `QUOTUM_CONSOLE_ENABLED=false` is optional) has:
 
 - the `/v1` API, provider webhooks, every worker and signed projections to your backend;
 - projects and environments declared in a [bootstrap manifest](deployment.md#first-start);

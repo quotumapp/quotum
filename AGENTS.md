@@ -43,9 +43,10 @@ How the runtime fits together, and the repository checks that most often reject 
   merchant app. `composeRuntimeApp` there routes setup-only ingress (connection and Stripe App
   events) first, then the remote MCP and OAuth endpoints when enabled, `/api/*` to the merchant
   app and everything else to the staff app. `runtime.app.fetch(request, server)` must receive
-  Bun's server so client-IP limits work. With `QUOTUM_MERCHANT_ENABLED=false` (headless),
-  `loadOptionalMerchantConfig` returns `null` and `attachHeadlessRuntime` mounts only the ingress
-  and the staff app: no `/api/*`, remote MCP or merchant settings.
+  Bun's server so client-IP limits work. Headless is the default (`QUOTUM_CONSOLE_ENABLED` unset
+  or `false`): `loadOptionalMerchantConfig` returns `null` and `attachHeadlessRuntime` mounts only
+  the ingress and the staff app: no `/api/*`, remote MCP or merchant settings. Set the flag to
+  `true` to serve the merchant platform.
 - `/v1/*` is the trusted-backend API (`src/app/*-routes.ts`). The staff app's authentication
   `derive` resolves a project credential (`BILLING_AUTH_MODE=api_key`) or the trusted gateway's
   project header (`gateway`) into `project`, a `ProjectInstanceContext` that every repository call
@@ -216,8 +217,9 @@ with loopback projection delivery. Each throws unless `BILLING_ENV=test` plus it
 Use Bun `>=1.4.0 <1.5.0`. Docker is required for every Postgres-backed lane.
 
 - `bun install --frozen-lockfile`, then `bun run dev` for a hot-reloading server on `PORT`
-  (default 3000). Copy `.env.example` first: merchant authentication and an email sender are
-  required outside `BILLING_ENV=test` unless `QUOTUM_MERCHANT_ENABLED=false` runs headless.
+  (default 3000). Copy `.env.example` first: the default is headless, and merchant authentication
+  and an email sender are required outside `BILLING_ENV=test` only when
+  `QUOTUM_CONSOLE_ENABLED=true`.
   [docs/quickstart.md](docs/quickstart.md) runs a complete local service on the fake Stripe test
   entrypoint.
 - `POSTGRES_URI=... bun run migrate` applies the ordered migrations; `bun run migrate:status`

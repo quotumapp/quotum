@@ -14,6 +14,24 @@ later release without it leaves the baselines alone, so its migration job runs a
 existing database; its pull requests can still ask for other steps. From 1.0, schema changes
 arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
+## Console off by default
+
+`QUOTUM_MERCHANT_ENABLED` is replaced by `QUOTUM_CONSOLE_ENABLED`, and the default flips from on to
+off. The flag only controls the merchant console (`/api/*` sign-in, onboarding and teams, merchant
+email and remote MCP); organizations, projects and `/v1` exist either way, so a process that leaves
+it unset runs [headless](deployment.md#headless-mode). No migration or data move is involved.
+
+- A deployment that serves the console must set `QUOTUM_CONSOLE_ENABLED=true`, next to its existing
+  `MERCHANT_*`, `QUOTUM_AUTH_SECRET` and `QUOTUM_EMAIL_*` settings. Without it the upgraded process
+  answers `/v1` and runs its workers but serves no `/api/*`, and it logs `Quotum running headless`.
+  A deployment that also sets `QUOTUM_MCP_ENABLED=true` refuses to start until the flag is `true`,
+  because remote MCP needs merchant sign-in.
+- A deployment that sets `QUOTUM_MERCHANT_ENABLED` to any value, including `false`, refuses to
+  start with `QUOTUM_MERCHANT_ENABLED has been removed; use QUOTUM_CONSOLE_ENABLED instead`. Rename
+  the variable in the environment, the Compose file and any operator shell that runs
+  `quotum` commands. A headless deployment can also drop it.
+- The guarded test entrypoint `quotum-api/testing/merchant` requires the flag to be `true`.
+
 ## Upgrading a populated deployment to v0.22.0
 
 v0.22.0 adds the common Paddle checkout and changes two baselines relative to v0.21.0:

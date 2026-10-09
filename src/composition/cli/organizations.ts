@@ -42,7 +42,7 @@ async function organizationsCommand(argv: readonly string[], env: Environment): 
 			const reason = memberOverrideReason(options);
 			if (!merchantPlatformEnabled(env))
 				throw new Error(
-					"The merchant platform is off (QUOTUM_MERCHANT_ENABLED=false), so there is no merchant application for an owner to sign in to",
+					"The merchant platform is off (QUOTUM_CONSOLE_ENABLED is not true), so there is no merchant application for an owner to sign in to",
 				);
 			const database = openOperatorSql(env);
 			try {

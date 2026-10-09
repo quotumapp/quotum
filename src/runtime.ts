@@ -40,7 +40,7 @@ import {
 	StoreEventReplayJobRepository,
 } from "./db/repository-domains";
 import type { BillingEnv } from "./env";
-import { createPinoBillingLogger, safelyLogError } from "./observability/logger";
+import { createPinoBillingLogger, safelyLogError, safelyLogInfo } from "./observability/logger";
 import { createInMemoryBillingMetrics } from "./observability/metrics";
 import {
 	createSentryBillingLogger,
@@ -75,7 +75,7 @@ export interface BillingRuntimeDependencies {
 	scheduler?: QuotumRuntimeScheduler;
 	projectionFetch?: ApiProjectProjectionFetch;
 	connections?: RuntimeConnectionResolver;
-	/** `null` runs headless (no merchant platform); omitted reads `QUOTUM_MERCHANT_ENABLED`. */
+	/** `null` runs headless (no merchant platform); omitted reads `QUOTUM_CONSOLE_ENABLED` (headless by default). */
 	merchant?: MerchantRuntimeOptions | null;
 	projectProviderServices?: AppDependencies["projectProviderServices"];
 	sentry?: SentryClientLike;
@@ -110,6 +110,12 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 					config: env.sentry,
 				});
 	const metrics = createInMemoryBillingMetrics();
+	safelyLogInfo(
+		logger,
+		merchantConfig === null
+			? "Quotum running headless (/v1 and workers only). Set QUOTUM_CONSOLE_ENABLED=true for the merchant console."
+			: "Quotum merchant platform enabled (/api and /v1).",
+	);
 	const projectContextResolver =
 		dependencies.projectContextResolver ?? new PostgresProjectInstanceContextResolver();
 	const persistence = merchantSql(sql);

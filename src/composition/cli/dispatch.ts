@@ -31,7 +31,7 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		usage: "projections check-receiver <url> --project-key <key> --secret-file <path|->",
 		summary: "Check receiver handshake and authentication without committing a connection",
 		environment:
-			"optional headless BILLING_PROJECTION_ALLOWED_NETWORKS, BILLING_PROJECTION_ALLOW_INSECURE_HTTP, QUOTUM_MERCHANT_ENABLED",
+			"optional headless BILLING_PROJECTION_ALLOWED_NETWORKS, BILLING_PROJECTION_ALLOW_INSECURE_HTTP, QUOTUM_CONSOLE_ENABLED",
 		accepts: (args) => args[0] === "check-receiver",
 	},
 	{

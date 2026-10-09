@@ -200,8 +200,12 @@ describe("operator command results", () => {
 			"QUOTUM_AUTH_SECRET must be at least 32 characters",
 		);
 		await expect(
-			openOperatorContext({ ...base, BILLING_PROJECTION_ALLOWED_NETWORKS: "10.20.0.0/16" }),
-		).rejects.toThrow("require QUOTUM_MERCHANT_ENABLED=false");
+			openOperatorContext({
+				...base,
+				QUOTUM_CONSOLE_ENABLED: "true",
+				BILLING_PROJECTION_ALLOWED_NETWORKS: "10.20.0.0/16",
+			}),
+		).rejects.toThrow("require QUOTUM_CONSOLE_ENABLED=false");
 		await expect(
 			openOperatorContext({ ...base, BILLING_POSTGRES_PREPARED_STATEMENTS: "no" }),
 		).rejects.toThrow("BILLING_POSTGRES_PREPARED_STATEMENTS");

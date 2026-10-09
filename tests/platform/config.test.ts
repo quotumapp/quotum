@@ -101,37 +101,50 @@ describe("merchant deployment URLs", () => {
 });
 
 describe("headless mode", () => {
-	it("keeps the merchant platform on unless QUOTUM_MERCHANT_ENABLED is exactly false", () => {
-		for (const value of [undefined, "", " \t ", "true", " true "])
-			expect(merchantPlatformEnabled({ QUOTUM_MERCHANT_ENABLED: value })).toBe(true);
-		for (const value of ["false", " false "])
-			expect(merchantPlatformEnabled({ QUOTUM_MERCHANT_ENABLED: value })).toBe(false);
+	it("runs headless unless QUOTUM_CONSOLE_ENABLED is exactly true", () => {
+		for (const value of [undefined, "", " \t ", "false", " false "])
+			expect(merchantPlatformEnabled({ QUOTUM_CONSOLE_ENABLED: value })).toBe(false);
+		for (const value of ["true", " true "])
+			expect(merchantPlatformEnabled({ QUOTUM_CONSOLE_ENABLED: value })).toBe(true);
 		for (const value of ["FALSE", "0", "no", "off"])
-			expect(() => merchantPlatformEnabled({ QUOTUM_MERCHANT_ENABLED: value })).toThrow(
-				"QUOTUM_MERCHANT_ENABLED must be true or false",
+			expect(() => merchantPlatformEnabled({ QUOTUM_CONSOLE_ENABLED: value })).toThrow(
+				"QUOTUM_CONSOLE_ENABLED must be true or false",
 			);
 	});
 
+	it("refuses the retired QUOTUM_MERCHANT_ENABLED name whatever its value", () => {
+		for (const value of ["true", "false", ""]) {
+			const env = { QUOTUM_MERCHANT_ENABLED: value, QUOTUM_CONSOLE_ENABLED: "true" };
+			expect(() => merchantPlatformEnabled(env)).toThrow(
+				"QUOTUM_MERCHANT_ENABLED has been removed; use QUOTUM_CONSOLE_ENABLED instead",
+			);
+			expect(() => loadOptionalMerchantConfig(env)).toThrow(
+				"QUOTUM_MERCHANT_ENABLED has been removed; use QUOTUM_CONSOLE_ENABLED instead",
+			);
+		}
+	});
+
 	it("loads the merchant settings unchanged while the platform is on", () => {
-		expect(loadOptionalMerchantConfig(merchantEnv)).toEqual(loadMerchantConfig(merchantEnv));
-		expect(() => loadOptionalMerchantConfig({ QUOTUM_MERCHANT_ENABLED: "true" })).toThrow(
+		expect(loadOptionalMerchantConfig({ ...merchantEnv, QUOTUM_CONSOLE_ENABLED: "true" })).toEqual(
+			loadMerchantConfig(merchantEnv),
+		);
+		expect(() => loadOptionalMerchantConfig({ QUOTUM_CONSOLE_ENABLED: "true" })).toThrow(
 			"MERCHANT_ORIGIN is required in production",
 		);
 	});
 
 	it("needs no merchant, email or auth settings in headless production", () => {
-		expect(
-			loadOptionalMerchantConfig({ BILLING_ENV: "production", QUOTUM_MERCHANT_ENABLED: "false" }),
-		).toBeNull();
-		expect(loadOptionalMerchantConfig({ QUOTUM_MERCHANT_ENABLED: "false" })).toBeNull();
+		expect(loadOptionalMerchantConfig({ BILLING_ENV: "production" })).toBeNull();
+		expect(loadOptionalMerchantConfig({})).toBeNull();
 		// Leftover merchant settings are ignored rather than half-applied.
 		expect(
-			loadOptionalMerchantConfig({ ...merchantEnv, QUOTUM_MERCHANT_ENABLED: "false" }),
+			loadOptionalMerchantConfig({ ...merchantEnv, QUOTUM_CONSOLE_ENABLED: "false" }),
 		).toBeNull();
+		expect(loadOptionalMerchantConfig({ ...merchantEnv })).toBeNull();
 	});
 
 	it("refuses remote MCP and retired settings in headless mode", () => {
-		const headless = { QUOTUM_MERCHANT_ENABLED: "false" };
+		const headless = {};
 		expect(() => loadOptionalMerchantConfig({ ...headless, QUOTUM_MCP_ENABLED: "true" })).toThrow(
 			"QUOTUM_MCP_ENABLED=true requires the merchant platform",
 		);
