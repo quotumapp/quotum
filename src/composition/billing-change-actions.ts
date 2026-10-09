@@ -28,7 +28,9 @@ import type { MerchantBillingOperation } from "../platform/application/billing-p
 import { bigintIdSchema, hasUnstorableText } from "../shared/input-bounds";
 
 const text = z.string().trim().min(1).max(200);
-const none = z.tuple([]);
+// Not z.tuple([]): it emits `prefixItems: []`, which the 2020-12 meta-schema forbids, so clients
+// drop the whole prepare_billing_change tool.
+const none = z.array(z.string()).max(0);
 const account = z.tuple([text]);
 const accountUuid = z.tuple([text, z.uuid()]);
 const accountId = z.tuple([text, bigintIdSchema()]);
