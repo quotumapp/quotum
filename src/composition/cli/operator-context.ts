@@ -78,7 +78,9 @@ export function operatorActor(options: ParsedArguments["options"], env: Environm
 	return actor;
 }
 
-const memberOverrideReasonPattern = /^[^\p{Cc}]{1,200}$/u;
+// Audit events and terminals show the reason, so control and format characters (bidi overrides,
+// zero-width spaces), unassigned or surrogate code points and line or paragraph separators are out.
+const memberOverrideReasonPattern = /^[^\p{C}\p{Zl}\p{Zp}]{1,200}$/u;
 
 /**
  * Why a change reaches an organization whose members manage it: `--member-override-reason`. Audit

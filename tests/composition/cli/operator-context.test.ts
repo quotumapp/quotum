@@ -87,6 +87,26 @@ describe("operator command arguments", () => {
 				CliUsageError,
 			);
 	});
+
+	it("refuses invisible and direction-changing characters in the reason", () => {
+		for (const reason of [
+			"owner‮asked", // right-to-left override
+			"owner⁦asked", // left-to-right isolate
+			"owner​asked", // zero-width space
+			"owner asked", // line separator
+			"owner asked", // paragraph separator
+			"ownerasked", // private use
+			"owner\uD800asked", // lone surrogate
+		])
+			expect(() => memberOverrideReason(new Map([["member-override-reason", reason]]))).toThrow(
+				"--member-override-reason must be 1-200 printable characters.",
+			);
+	});
+
+	it("keeps ordinary non-ASCII text in the reason", () => {
+		for (const reason of ["владелец ушёл", "所有者已离职", "owner left 👍", "café closed"])
+			expect(memberOverrideReason(new Map([["member-override-reason", reason]]))).toBe(reason);
+	});
 });
 
 describe("operator command secrets", () => {
