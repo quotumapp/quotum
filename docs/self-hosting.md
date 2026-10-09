@@ -188,6 +188,15 @@ to send them plain http. Read the
    [schema policy](operations.md#schema-and-upgrade-policy). Never reset a database that holds
    customer data.
 
+## Sizing
+
+Postgres carries almost all of the load: a metered consume runs about 30 SQL statements. On one
+8 vCPU machine that also ran the load client and Postgres, `v0.25.1` sustained about 600 consumes
+per second across many accounts and about 110 per second against a single account. Give Postgres
+the cores and keep it in the same zone as the API. [Load testing](load-testing.md#reference-results)
+has the method, the full figures and what they leave out; measure at your own revision before you
+rely on them.
+
 ## Known limits
 
 - `quotum catalog provision` skips instances that already have a published catalog. It does not

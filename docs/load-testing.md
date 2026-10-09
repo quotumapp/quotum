@@ -12,6 +12,14 @@ reused target keeps its earlier bootstrap and issues no fresh credential; add `-
 to drop and recreate its `public` schema first. `--docker` explicitly selects a fresh disposable
 container, overriding an environment URI; when combined with `--postgres-uri`, the last selector wins.
 
+The lane's own container keeps its data on a 512 MB tmpfs. A default run of about three and a half
+minutes at up to 128 concurrent requests stopped with `Database operation failed`, and the same
+sequence completed against a Postgres with an 8 GB data directory. For longer runs start your own
+disposable Postgres with a larger data directory and `pg_stat_statements` in
+`shared_preload_libraries` (the lane reports statements per request from it), then pass
+`--postgres-uri` with `--recreate-schema`. A reused database has no container to sample, so its
+Postgres CPU is reported as unavailable.
+
 The lane publishes a metered catalog and grants balances to one hot account and, by default,
 1,000 spread accounts. Scenarios are `hot` (one account, one feature), `spread` (round-robin),
 `reserve` (reserve then confirm), `check`, and `workers-off` (hot and spread with worker polling
@@ -104,3 +112,55 @@ Options: `--duration` and `--warmup` in seconds, `--concurrency 1,8,32,64`, `--a
 Results from a laptop container are shapes, not capacity: the client, the service and Postgres
 share one machine and the container runs Postgres defaults. Quote only figures measured on a sized
 instance, and record them together with the source revision they were measured against.
+
+## Reference results
+
+Measured on 2026-10-09 against `v0.25.1` (`76dad183`) on one Hetzner Cloud CPX42 in Nuremberg:
+8 shared vCPUs, 16 GB, Ubuntu 24.04, Bun 1.4.2. The service, the load client and PostgreSQL 18.6
+ran on that machine. Postgres used default settings with its data on tmpfs, so disk and commit
+latency are not in these figures, and there was no network between the service and the database.
+Each level ran 15 seconds after a 2 second warmup, closed loop, on the lane's fixture of 1,000
+accounts. The table is the mean of two runs on fresh instances; the two runs differed by 2% to 11%.
+
+| Scenario | Concurrency | Requests/s | p50 ms | p99 ms |
+| --- | ---: | ---: | ---: | ---: |
+| One account, one feature (consume) | 1 | 37 | 20.6 | 110 |
+| One account, one feature (consume) | 32 | 110 | 157.8 | 1,046 |
+| 1,000 accounts (consume) | 32 | 604 | 52.7 | 72 |
+| 1,000 accounts (reserve, then confirm) | 32 | 379 | 83.7 | 106 |
+| 1,000 accounts (check) | 1 | 95 | 10.2 | 29 |
+| 1,000 accounts (check) | 32 | 1,051 | 30.0 | 44 |
+
+A reserve iteration is two HTTP calls. An earlier 20 second run of the same metering code at
+concurrency 128 reached about 690 consumes per second across 1,000 accounts (p99 215 ms), 390
+reserve-and-confirm pairs per second and 1,300 checks per second. With one request per account per
+second (`users`), 100 active accounts ran cleanly at p99 68 ms; from 1,000 requested requests per
+second the machine accepted about 650 to 680 per second and the rest were dropped as capacity.
+
+What the figures say about sizing:
+
+- **Postgres does the work.** A consume runs about 30 SQL statements and a check about 15. At
+  saturation the Postgres container peaked near 4.9 of the 8 cores while the Bun service used about
+  half of one core. Size the database for cores first; the API process needs roughly one core per
+  instance for the rates above.
+- **One account is limited by its row lock.** Consumes against a single account and feature
+  serialize on that allocation's row, which a consume holds for several milliseconds. Throughput
+  stays near 110 per second however many requests run at once, and extra concurrency only adds
+  latency. Spreading the same traffic over many accounts is about five times faster. If one
+  customer needs more, send larger quantities per call or reserve and confirm in larger steps.
+- **Keep the database close.** A consume makes several database round trips, some in sequence, so
+  the latency between the service and Postgres adds directly to request latency. Run them in the
+  same region, ideally the same zone.
+- **Projection delivery is a separate, slower stage.** Usage projections are coalesced to one job
+  per active account, so the backlog is bounded by the number of active accounts. After the load
+  stopped, the projection worker delivered about 72 jobs per second to the lane's loopback receiver
+  at every `users` level, so bringing 1,000 accounts' projections current takes about 14 seconds
+  and 10,000 accounts about two minutes twenty seconds. A real receiver adds its own latency. The
+  closed-loop scenarios read the backlog as soon as the load stops, when coalescing leaves about
+  one pending job per active account, so a run over many accounts exits non-zero on the backlog
+  check; the results file is written first.
+
+These figures do not cover a database on its own host or disk, several API instances, failover,
+production admission limits, or provider traffic. Per-request cost changes with every release (the
+statement counts above are for this revision), so measure at the revision you run before you
+size a deployment.
