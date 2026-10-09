@@ -870,15 +870,25 @@ describe("MCP browser-approved writes", () => {
 		await expect(f.mcpChanges.prepare(grant.id, { ...input, reason: "Changed" })).rejects.toThrow(
 			"new request key",
 		);
-		const reviewed = await browser.json<{ status: string }>(
+		const reviewed = await browser.json<{ status: string; body?: unknown }>(
 			`/api/platform/mcp/changes/${change.id}`,
 		);
 		expect(reviewed.status).toBe("pending");
-		const response = await browser.json<{ status: string }>(
+		// The approval page is told what the app asked for. The tool results are not: the agent that
+		// wrote the request has it, and a long one would push a result past the size cap.
+		expect(reviewed.body).toEqual(input.body);
+		expect(change).not.toHaveProperty("body");
+		expect(JSON.parse(prepared.result.content[0].text)).not.toHaveProperty("body");
+		expect(await f.mcpChanges.get(grant.id, change.id)).not.toHaveProperty("body");
+		expect(await f.mcpChanges.list(grant.id)).toEqual([
+			expect.not.objectContaining({ body: expect.anything() }),
+		]);
+		const response = await browser.json<{ status: string; body?: unknown }>(
 			`/api/platform/mcp/changes/${change.id}/approve`,
 			{ requestHash: change.requestHash },
 		);
 		expect(response.status).toBe("completed");
+		expect(response.body).toEqual(input.body);
 		expect(
 			(
 				await browser.json<{ status: string }>(`/api/platform/mcp/changes/${change.id}/approve`, {

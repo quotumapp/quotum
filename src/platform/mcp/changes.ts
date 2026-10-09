@@ -214,7 +214,13 @@ export class McpChanges {
 			return this.view(row);
 		});
 	}
-	private view(row: ChangeRow) {
+	/**
+	 * The change as a client sees it. `body`, the validated request the app proposed, is for the
+	 * approval page only: the page shows what approving applies, while a tool result stays small (a
+	 * catalog's `before` is already the whole published catalog) and the agent that wrote the request
+	 * has it already.
+	 */
+	private view(row: ChangeRow, options: { body?: boolean } = {}) {
 		return {
 			id: row.id,
 			action: row.action,
@@ -226,6 +232,7 @@ export class McpChanges {
 				row.status === "pending" && row.expires_at <= this.store.now() ? "expired" : row.status,
 			before: row.preview.before,
 			after: row.preview.after,
+			...(options.body ? { body: row.body } : {}),
 			result: row.result,
 			expiresAt: row.expires_at.toISOString(),
 			createdAt: row.created_at.toISOString(),
@@ -288,7 +295,7 @@ export class McpChanges {
 			throw new MerchantError("NOT_FOUND", "Change not found.", 404);
 		const access = await this.access(row.authorization_id, false);
 		requireCapability(access.member.role, row.capability);
-		return this.view(await this.recover(row));
+		return this.view(await this.recover(row), { body: true });
 	}
 	private async recover(row: ChangeRow): Promise<ChangeRow> {
 		if (row.status !== "applying" && row.status !== "needs_review") return row;

@@ -46,6 +46,9 @@ export function registerMcpRoutes(
 			status: z.string(),
 			before: z.unknown(),
 			after: z.unknown(),
+			// What the app asked for, as the action's request body: `after` is the preview for an action
+			// that has one, which says what it would do and not what it was asked to do.
+			body: z.unknown().optional(),
 			result: z.unknown(),
 			expiresAt: z.string(),
 			createdAt: z.string(),
