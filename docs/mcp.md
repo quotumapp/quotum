@@ -154,6 +154,16 @@ the grant once the identity is confirmed. The backend rechecks the live session,
 connection and role. The agent must present the URL to the user, never approve it itself. There is
 no MCP execute tool and no arbitrary HTTP passthrough.
 
+The review page reads the change from `GET /api/platform/mcp/changes/{id}`; the approve and reject
+answers carry the same view. Besides `before` and `after`, that view carries `body`, the validated
+request the app proposed. For catalog, contract and migration publication and for commercial actions
+`after` is the domain preview: it says what approving would do (counts, a revision number), not what
+was asked, so only `body` lets the page name the plans and features a catalog publishes. The MCP
+tools leave `body` out of `prepare_billing_change`, `get_billing_change` and `list_billing_changes`:
+the agent that wrote the request has it, and a catalog's `before` already holds the whole published
+catalog, which would push a result toward the size cap. A console built against a contract before
+`body` ignores the field and shows `before` and `after` only.
+
 Proposals expire after at most 15 minutes, capped by domain preview expiry. They are immutable:
 use a new request key and `replacesChangeId` to replace a pending proposal. Reusing a key with changed
 input conflicts. Approval compares the recorded state and domain preview preconditions; stale

@@ -49802,6 +49802,7 @@
                           "type": "string"
                         },
                         "before": {},
+                        "body": {},
                         "createdAt": {
                           "type": "string"
                         },
@@ -50107,6 +50108,7 @@
                           "type": "string"
                         },
                         "before": {},
+                        "body": {},
                         "createdAt": {
                           "type": "string"
                         },
@@ -50412,6 +50414,7 @@
                           "type": "string"
                         },
                         "before": {},
+                        "body": {},
                         "createdAt": {
                           "type": "string"
                         },
