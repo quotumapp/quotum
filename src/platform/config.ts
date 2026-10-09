@@ -10,6 +10,7 @@ const retiredSettings = {
 	MERCHANT_EMAIL_ACCOUNT_ID: "QUOTUM_EMAIL_CLOUDFLARE_ACCOUNT_ID",
 	MERCHANT_EMAIL_API_TOKEN: "QUOTUM_EMAIL_CLOUDFLARE_API_TOKEN",
 	MERCHANT_EMAIL_FROM: "QUOTUM_EMAIL_FROM",
+	QUOTUM_MERCHANT_ENABLED: "QUOTUM_CONSOLE_ENABLED",
 };
 
 function required(env: Record<string, string | undefined>, name: string): string {
@@ -54,11 +55,18 @@ export interface MerchantConfig {
 	email: QuotumEmailConfig | null;
 	testMode: boolean;
 }
+
+function rejectRetiredSetting(
+	env: Record<string, string | undefined>,
+	oldName: keyof typeof retiredSettings,
+): void {
+	if (env[oldName] !== undefined)
+		throw new Error(`${oldName} has been removed; use ${retiredSettings[oldName]} instead`);
+}
+
 function rejectRetiredSettings(env: Record<string, string | undefined>): void {
-	for (const [oldName, newName] of Object.entries(retiredSettings)) {
-		if (env[oldName] !== undefined)
-			throw new Error(`${oldName} has been removed; use ${newName} instead`);
-	}
+	for (const oldName of Object.keys(retiredSettings) as (keyof typeof retiredSettings)[])
+		rejectRetiredSetting(env, oldName);
 }
 
 /** Parses a strict opt-in flag: unset or blank selects the default, anything else must be exact. */
@@ -74,10 +82,6 @@ function booleanSetting(
 }
 
 /**
- * The merchant platform (`/api`, sign-in, onboarding and remote MCP) is on unless
- * `QUOTUM_MERCHANT_ENABLED=false` selects a headless process that serves `/v1` and workers only.
- */
-/**
  * The HMAC key for sessions, request fingerprints and receipts. Operator commands that write the
  * same receipts use it too, so their fingerprints match the merchant platform's.
  */
@@ -87,13 +91,19 @@ export function loadAuthSecret(env: Record<string, string | undefined> = process
 	return secret;
 }
 
+/**
+ * The merchant console (`/api`, sign-in, onboarding and remote MCP) is off unless
+ * `QUOTUM_CONSOLE_ENABLED=true` selects a process that also serves it. Unset or blank runs
+ * headless, serving `/v1` and workers only; organizations and projects exist either way.
+ */
 export function merchantPlatformEnabled(
 	env: Record<string, string | undefined> = process.env,
 ): boolean {
-	return booleanSetting(env, "QUOTUM_MERCHANT_ENABLED", true);
+	rejectRetiredSetting(env, "QUOTUM_MERCHANT_ENABLED");
+	return booleanSetting(env, "QUOTUM_CONSOLE_ENABLED", false);
 }
 
-/** The merchant settings, or `null` for a headless process, which needs none of them. */
+/** The merchant settings, or `null` for a headless process (the default), which needs none of them. */
 export function loadOptionalMerchantConfig(
 	env: Record<string, string | undefined> = process.env,
 ): MerchantConfig | null {

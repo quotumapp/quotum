@@ -14,7 +14,7 @@ async function createServicePrincipal(name: string | undefined): Promise<void> {
 		throw new Error("Usage: quotum merchant service-principal <service-name>");
 	if (!merchantPlatformEnabled())
 		throw new Error(
-			"The merchant platform is off (QUOTUM_MERCHANT_ENABLED=false), so there is no merchant proxy to authorize",
+			"The merchant platform is off (QUOTUM_CONSOLE_ENABLED is not true), so there is no merchant proxy to authorize",
 		);
 	const config = loadMerchantConfig();
 	const connection = createBillingDatabaseConnection(loadEnv());

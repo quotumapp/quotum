@@ -31,17 +31,20 @@ describe("quotum organizations", () => {
 	});
 
 	it("refuses a headless deployment, which has no merchant application to sign in to", async () => {
-		const result = await run(addOwner, {
-			POSTGRES_URI: "postgres://unused.invalid/none",
-			QUOTUM_MERCHANT_ENABLED: "false",
-		});
-		expect(result.code).toBe(1);
-		expect(result.err).toContain("QUOTUM_MERCHANT_ENABLED=false");
-		expect(result.err).toContain("no merchant application");
+		// Headless is the default, so an unset flag is refused like an explicit false.
+		for (const flag of [undefined, "false"]) {
+			const result = await run(addOwner, {
+				POSTGRES_URI: "postgres://unused.invalid/none",
+				QUOTUM_CONSOLE_ENABLED: flag,
+			});
+			expect(result.code).toBe(1);
+			expect(result.err).toContain("QUOTUM_CONSOLE_ENABLED is not true");
+			expect(result.err).toContain("no merchant application");
+		}
 	});
 
 	it("needs POSTGRES_URI", async () => {
-		const result = await run(addOwner);
+		const result = await run(addOwner, { QUOTUM_CONSOLE_ENABLED: "true" });
 		expect(result.code).toBe(1);
 		expect(result.err).toContain("POSTGRES_URI is required");
 	});

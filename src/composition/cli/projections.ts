@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { parseProjectionReceivers } from "../../env";
+import { merchantPlatformEnabled } from "../../platform/config";
 import { createProjectionSignatureHeaders } from "../../projections/http-types";
 import {
 	type DestinationPostDependencies,
@@ -104,7 +105,7 @@ export async function runProjectionsCommand(
 			const result = await checkReceiver(positionals[0] ?? "", projectKey, secret, {
 				policy: projectionDestinationPolicy(
 					{ ...(projectionReceivers === undefined ? {} : { projectionReceivers }) },
-					process.env.QUOTUM_MERCHANT_ENABLED !== "false",
+					merchantPlatformEnabled(process.env),
 				),
 			});
 			passed = result.success;

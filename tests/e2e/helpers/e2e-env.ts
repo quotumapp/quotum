@@ -69,8 +69,10 @@ export function e2eServiceEnv({
 		QUOTUM_SECRETS_KEY_ID: "e2e",
 		QUOTUM_SECRETS_KEY_BASE64: Buffer.alloc(32, 11).toString("base64"),
 		BILLING_OPERATOR_API_KEY: e2eOperatorKey,
-		// The merchant platform is on by default. Test mode keeps mail in memory: the test
-		// entrypoints inject a capture mailer, and no e2e scenario triggers merchant mail.
+		// The merchant platform is off by default; the e2e lane runs the full composition with it on.
+		// Test mode keeps mail in memory: the test entrypoints inject a capture mailer, and no e2e
+		// scenario triggers merchant mail.
+		QUOTUM_CONSOLE_ENABLED: "true",
 		QUOTUM_AUTH_SECRET: e2eMerchantAuthSecret,
 		MERCHANT_TERMS_VERSION: "e2e-2026-09-10",
 		MERCHANT_PRIVACY_VERSION: "e2e-2026-09-10",

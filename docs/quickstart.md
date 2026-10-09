@@ -63,7 +63,7 @@ export POSTGRES_URI="postgres://postgres:postgres@127.0.0.1:5432/quotum"
 BILLING_ENV=test BILLING_TEST_FAKE_STRIPE=true \
 BILLING_OPERATOR_API_KEY=quickstart-operator-key-0001 \
 QUOTUM_SECRETS_KEY_ID=quickstart QUOTUM_SECRETS_KEY_BASE64="$(head -c 32 /dev/zero | base64)" \
-QUOTUM_MERCHANT_ENABLED=false \
+QUOTUM_CONSOLE_ENABLED=false \
 BILLING_TEST_CONNECTIONS_JSON="$(cat examples/quickstart/connections.json)" \
 bun run test:stripe-entrypoint
 ```

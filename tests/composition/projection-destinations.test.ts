@@ -13,7 +13,7 @@ describe("projectionDestinationPolicy", () => {
 	it("approves private receivers only for a headless deployment", () => {
 		expect(projectionDestinationPolicy({ projectionReceivers: receivers }, false)).toBe(receivers);
 		expect(() => projectionDestinationPolicy({ projectionReceivers: receivers }, true)).toThrow(
-			"BILLING_PROJECTION_ALLOWED_NETWORKS and BILLING_PROJECTION_ALLOW_INSECURE_HTTP require QUOTUM_MERCHANT_ENABLED=false",
+			"BILLING_PROJECTION_ALLOWED_NETWORKS and BILLING_PROJECTION_ALLOW_INSECURE_HTTP require QUOTUM_CONSOLE_ENABLED=false",
 		);
 	});
 });

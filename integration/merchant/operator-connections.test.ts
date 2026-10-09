@@ -28,7 +28,7 @@ const env = {
 	QUOTUM_SECRETS_KEY_ID: "test",
 	QUOTUM_SECRETS_KEY_BASE64: Buffer.alloc(32, 7).toString("base64"),
 	QUOTUM_AUTH_SECRET: "operator-connections-test-secret-0123456789",
-	QUOTUM_MERCHANT_ENABLED: "false",
+	QUOTUM_CONSOLE_ENABLED: "false",
 	QUOTUM_ACTOR: "ops-runbook",
 };
 
@@ -432,7 +432,7 @@ describe("operator connection commands", () => {
 			SELECT o.id, p.id, 'Owner' FROM platform_organizations o, platform_principals p
 			WHERE o.slug='ops'
 		`;
-		const merchantMode = { ...env, QUOTUM_MERCHANT_ENABLED: "true" };
+		const merchantMode = { ...env, QUOTUM_CONSOLE_ENABLED: "true" };
 		// Reads need no flag.
 		expect((await credentials(["status", "alpha"], merchantMode)).code).toBe(0);
 		expect((await run(runConnectionsCommand, ["list", "alpha"], {}, merchantMode)).code).toBe(0);

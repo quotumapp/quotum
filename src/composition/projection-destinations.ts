@@ -12,7 +12,7 @@ export function projectionDestinationPolicy(
 	if (env.projectionReceivers === undefined) return publicDestinationPolicy;
 	if (merchantPlatformEnabled)
 		throw new Error(
-			"BILLING_PROJECTION_ALLOWED_NETWORKS and BILLING_PROJECTION_ALLOW_INSECURE_HTTP require QUOTUM_MERCHANT_ENABLED=false",
+			"BILLING_PROJECTION_ALLOWED_NETWORKS and BILLING_PROJECTION_ALLOW_INSECURE_HTTP require QUOTUM_CONSOLE_ENABLED=false",
 		);
 	return env.projectionReceivers;
 }

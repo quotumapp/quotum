@@ -15,7 +15,7 @@ e2eDescribe("E2E headless startup", () => {
 			for (const name of Object.keys(env))
 				if (/^(MERCHANT_|QUOTUM_EMAIL_|QUOTUM_AUTH_SECRET$|QUOTUM_MCP_)/.test(name))
 					delete env[name];
-			env.QUOTUM_MERCHANT_ENABLED = "false";
+			env.QUOTUM_CONSOLE_ENABLED = "false";
 			// Headless operators may approve private projection receivers.
 			env.BILLING_PROJECTION_ALLOWED_NETWORKS = "10.20.0.0/16";
 			env.BILLING_PROJECTION_ALLOW_INSECURE_HTTP = "true";
@@ -63,7 +63,7 @@ e2eDescribe("E2E headless startup", () => {
 		// The runtime reports the refusal through its fatal-error log line.
 		const output = `${await new Response(proc.stdout).text()}${await new Response(proc.stderr).text()}`;
 		expect(output).toContain(
-			"BILLING_PROJECTION_ALLOWED_NETWORKS and BILLING_PROJECTION_ALLOW_INSECURE_HTTP require QUOTUM_MERCHANT_ENABLED=false",
+			"BILLING_PROJECTION_ALLOWED_NETWORKS and BILLING_PROJECTION_ALLOW_INSECURE_HTTP require QUOTUM_CONSOLE_ENABLED=false",
 		);
 	}, 60_000);
 });

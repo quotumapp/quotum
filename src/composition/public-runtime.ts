@@ -16,7 +16,7 @@ export type {
 
 export interface QuotumRuntimeConfig {
 	billing: BillingEnv;
-	/** `null` when `QUOTUM_MERCHANT_ENABLED=false`: the process serves `/v1` and workers only. */
+	/** `null` by default (headless): the process serves `/v1` and workers only. Set `QUOTUM_CONSOLE_ENABLED=true` for `/api`. */
 	merchant: MerchantConfig | null;
 }
 

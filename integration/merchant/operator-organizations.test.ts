@@ -17,7 +17,7 @@ const env = {
 	QUOTUM_SECRETS_KEY_ID: "test",
 	QUOTUM_SECRETS_KEY_BASE64: Buffer.alloc(32, 7).toString("base64"),
 	QUOTUM_AUTH_SECRET: "operator-organizations-test-secret-0123456789",
-	QUOTUM_MERCHANT_ENABLED: "true",
+	QUOTUM_CONSOLE_ENABLED: "true",
 	QUOTUM_ACTOR: "ops-runbook",
 };
 
