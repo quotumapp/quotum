@@ -282,6 +282,41 @@ TypeScript or JavaScript file is written as a module that exports `catalog` and 
 file stays the bare intent. Advice, such as a Stripe price left to Stripe in `providerPriced`, is
 printed on stderr; legacy spellings are simply rewritten.
 
+### Without a project key: `--instance`
+
+An inactive environment, such as a production environment waiting to be
+[activated](deployment.md#activate-a-production-environment), has no project key, and `/v1` refuses
+it. Add `--instance <key>` to run the same commands against the database instead, as the other
+operator commands do:
+
+```sh
+quotum catalog status --instance app
+quotum catalog bindings adopt binding.json --instance app --actor you@example.com
+quotum catalog diff ./billing.catalog.ts --instance app --actor you@example.com
+quotum catalog push ./billing.catalog.ts --instance app --actor you@example.com
+```
+
+It reads the settings `quotum connections` does (`POSTGRES_URI`, the `QUOTUM_SECRETS_KEY_*` key and
+`QUOTUM_AUTH_SECRET`) and ignores `BILLING_BASE_URL` and the keys. The commands are the same and so
+are their files, output and exit codes: `diff` and `push` preview and publish through the repository
+calls the merchant application makes, with the same validation, `expectedRevision` check and
+unchanged-catalog rule, and `bindings list` and `adopt` take the same JSON. Errors keep their codes.
+`--instance` works on active and inactive environments of an active organization, sandbox included.
+
+- `diff` stores a preview, so `diff`, `push` and `bindings adopt` are changes: they take `--actor`
+  (or `QUOTUM_ACTOR`), which the catalog revision and the adoption receipt record as
+  `operator:<name>`. `status` and `bindings list` are reads and name no one.
+- An organization whose members manage it needs `--member-override-reason <why>` for those changes
+  while the merchant platform runs; reads need none.
+- A Stripe-bound plan publishes only once its product is adopted, so adopt first. Adoption reads the
+  instance's Stripe connection, so [commit it](providers.md#headless-connection-setup) first; a
+  connection made through the console's Stripe OAuth cannot be read here and answers
+  `CONNECTION_UNAVAILABLE`. Production Apple and Google store products have no adoption command in
+  either mode (`quotum catalog provision` imports them for non-production instances only).
+- There is no operator key, rate limit or step-up: the operator holds the database already.
+
+Then `quotum environments readiness` and `activate` finish the job.
+
 ## Catalog migrations
 
 An applied catalog migration settles once when the subscription is synchronized. Later updates,
@@ -297,6 +332,8 @@ Use `quotum catalog bindings list` to inspect Stripe mappings, and
 `quotum catalog bindings adopt binding.json` to validate and adopt an existing product and price.
 Both need `BILLING_BASE_URL`, project authentication and `BILLING_OPERATOR_API_KEY`; adoption
 uses `BILLING_ACTOR` (default `catalog-cli`). The instance must have an active Stripe connection.
+An environment that has no project key yet takes `--instance <key>` instead, which needs neither
+(see [Catalog as code](#without-a-project-key---instance)).
 
 ```json
 {

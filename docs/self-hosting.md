@@ -67,7 +67,8 @@ curl -f https://billing.example.com/ready
 
 Write the topology to `platform.json`. Declare production `active` here: a headless deployment has
 no merchant application to activate it later, and an `inactive` production environment can neither
-hold a project key nor receive a catalog through `/v1`:
+hold a project key nor receive a catalog through `/v1` (`quotum catalog --instance` reaches it from
+the database):
 
 ```json
 {
@@ -145,7 +146,9 @@ The field names and event lists for each provider are in
 Declare features, plans and top-ups, and bind them to your provider products. Then preview and
 publish them with `quotum catalog diff <file>` and `quotum catalog push <file>`, which call the
 [catalog API](catalog.md). Both commands need `BILLING_BASE_URL`, a project key and
-the operator key. `quotum catalog status` shows what is live and needs no operator key.
+the operator key. `quotum catalog status` shows what is live and needs no operator key. For an environment you declared
+`inactive`, which has no project key, add `--instance <key> --actor you@example.com` to each command
+instead; see [catalog without a project key](catalog.md#without-a-project-key---instance).
 
 ## 6. Keep backends on a private network (optional)
 
@@ -204,5 +207,6 @@ rely on them.
   create Apple or Google Play products; create them in those stores.
 - Headless deployments have no activation screen or step-up. Declare production `active` in the
   bootstrap manifest. [`quotum environments activate`](deployment.md#activate-a-production-environment)
-  activates one that is already ready, for example after a merchant application prepared it.
+  activates one that is already ready, for example after `quotum catalog ... --instance` or a
+  merchant application prepared it.
 - Schema baselines evolve in place until 1.0, so upgrades before then can need manual steps.
