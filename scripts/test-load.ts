@@ -689,7 +689,7 @@ async function verifyUserAccounting(
 		SELECT claim.idempotency_key AS key, customer.billing_account_id AS account,
 			(event.id IS NOT NULL AND event.customer_id = claim.customer_id
 				AND event.operation = 'consume' AND event.quantity = 1
-				AND event.wallet_quantity = (claim.outcome->>'walletQuantity')::numeric) AS valid
+				AND event.wallet_quantity = (claim.outcome->'rated'->>'value')::numeric) AS valid
 		FROM client_idempotency_claims claim
 		JOIN customers customer ON customer.project_id = claim.project_id AND customer.id = claim.customer_id
 		LEFT JOIN usage_events event ON event.project_id = claim.project_id
@@ -837,7 +837,7 @@ function createClient(baseUrl: string, apiKey: string): LoadClient {
 		async consume(billingAccountId, operationId, timeoutMs) {
 			const { status, data } = await post(
 				`${usage(billingAccountId)}/consume`,
-				{ featureKey: "model_tokens", quantity: "1" },
+				{ featureId: "model_tokens", value: "1" },
 				true,
 				operationId,
 				timeoutMs,
@@ -852,7 +852,7 @@ function createClient(baseUrl: string, apiKey: string): LoadClient {
 		async check(billingAccountId) {
 			const { status, data } = await post(
 				`${usage(billingAccountId)}/check`,
-				{ featureKey: "model_tokens", quantity: "1" },
+				{ featureId: "model_tokens", value: "1" },
 				false,
 			);
 			return { status, denied: data?.allowed === false, ledgerCalls: 1 };
