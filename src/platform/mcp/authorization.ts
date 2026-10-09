@@ -65,6 +65,31 @@ export function consentedScopes(
 	return requested.filter((scope) => kept.has(scope));
 }
 
+/**
+ * Whether a grant may target this environment. An `inactive` environment (a production not yet
+ * activated) is usable so an agent can author its catalog; the tools it reaches there are limited
+ * to the catalog (see `allowedOnInactiveEnvironment`). Suspended, deactivating and deactivated
+ * environments stay refused.
+ */
+export function environmentUsable(instance: {
+	lifecycleStatus: string;
+	environment: string;
+	internalProject: boolean;
+}): boolean {
+	return (
+		(instance.lifecycleStatus === "active" || instance.lifecycleStatus === "inactive") &&
+		!instance.internalProject &&
+		instance.environment !== "internal"
+	);
+}
+
+export type McpEnvironmentStatus = "active" | "inactive";
+
+/** The status of an environment `environmentUsable` accepted. */
+export function environmentStatus(instance: { lifecycleStatus: string }): McpEnvironmentStatus {
+	return instance.lifecycleStatus === "inactive" ? "inactive" : "active";
+}
+
 /** A space-separated OAuth `scope` value as a list, or null when it is absent. */
 export function scopeList(value: unknown): string[] | null {
 	return typeof value === "string" ? value.split(" ").filter(Boolean) : null;
@@ -140,9 +165,7 @@ export class McpAuthorizations {
 			const membership = memberships.find((m) => m.organizationSlug === project.organizationSlug);
 			if (!membership?.capabilities.includes("billing.read")) return [];
 			return project.instances.flatMap((instance) =>
-				instance.lifecycleStatus === "active" &&
-				!instance.internalProject &&
-				instance.environment !== "internal"
+				environmentUsable(instance)
 					? [
 							{
 								scope: {
@@ -153,6 +176,7 @@ export class McpAuthorizations {
 								},
 								organizationName: membership.organizationName,
 								projectName: project.name,
+								status: environmentStatus(instance),
 								canPropose: canProposeBillingChanges(membership.role),
 								instanceId: instance.id,
 							},
@@ -225,8 +249,7 @@ export class McpAuthorizations {
 			(p) => p.key === scope.projectKey && p.organizationSlug === scope.organizationSlug,
 		);
 		const instance = project?.instances.find(
-			(i) =>
-				i.environment === scope.environment && i.lifecycleStatus === "active" && !i.internalProject,
+			(i) => i.environment === scope.environment && environmentUsable(i),
 		);
 		if (!instance)
 			throw new MerchantError(
@@ -258,7 +281,7 @@ export class McpAuthorizations {
 			p.instances.some((i) => i.id === grant.project_instance_id),
 		);
 		const instance = project?.instances.find((i) => i.id === grant.project_instance_id);
-		if (!project || !instance || instance.lifecycleStatus !== "active" || instance.internalProject)
+		if (!project || !instance || !environmentUsable(instance))
 			throw new MerchantError("CONTEXT_UNAVAILABLE", "The environment is unavailable.", 403);
 		const member = await this.store.membership(
 			this.store.sql,
@@ -268,7 +291,12 @@ export class McpAuthorizations {
 		requireCapability(member.role, "billing.read");
 		if (member.organization_id !== grant.organization_id)
 			throw new MerchantError("FORBIDDEN", "The environment is unavailable.", 403);
-		return { ...grant, scopes: grantScopes(grant.scopes), userId: principal.auth_user_id };
+		return {
+			...grant,
+			scopes: grantScopes(grant.scopes),
+			userId: principal.auth_user_id,
+			environmentStatus: environmentStatus(instance),
+		};
 	}
 
 	async byId(id: string) {

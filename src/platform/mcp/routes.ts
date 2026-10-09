@@ -136,6 +136,8 @@ export function registerMcpRoutes(
 						scope: MerchantScopeSchema,
 						organizationName: z.string(),
 						projectName: z.string(),
+						/** `inactive` is a production not yet activated: only its catalog is reachable. */
+						status: z.enum(["active", "inactive"]),
 						canPropose: z.boolean(),
 					}),
 				),

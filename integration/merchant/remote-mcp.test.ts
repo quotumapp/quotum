@@ -1357,3 +1357,148 @@ describe("MCP consent scopes", () => {
 		expect(await f.sql`SELECT id FROM platform_mcp_changes`).toHaveLength(0);
 	});
 });
+
+describe("MCP environments that are not activated yet", () => {
+	const production = { ...merchantTestScope, environment: "production" as const };
+	const catalog = {
+		expectedRevision: null,
+		catalog: {
+			features: [
+				{
+					key: "ai_credits",
+					name: "AI credits",
+					kind: "metered",
+					meterKind: "consumable",
+					unit: "credit",
+					creditScale: 0,
+					filterDimensions: [],
+				},
+			],
+			plans: [],
+			topups: [],
+			rateCards: [],
+		},
+	};
+	const callTool = async (accessToken: string, name: string) => {
+		const reply = await (await rpc(accessToken, "tools/call", { name, arguments: {} })).json();
+		return reply.result as { isError?: boolean; content: { text: string }[] };
+	};
+	const approvedGrant = async () => {
+		const [grant] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		return grant;
+	};
+
+	it("offers the consent screen an inactive production, marked as not activated", async () => {
+		const browser = await owner();
+		const pending = await signIn(browser);
+		const context = await browser.json<{
+			environments: { scope: MerchantScope; status: string }[];
+		}>("/api/platform/oauth/context", { oauth_query: pending.query });
+		expect(
+			context.environments.map(({ scope, status }) => [scope.environment, status]).sort(),
+		).toEqual([
+			["production", "inactive"],
+			["sandbox", "active"],
+		]);
+	});
+
+	it("serves the catalog and refuses every other read until the environment is activated", async () => {
+		const browser = await owner();
+		const tokens = await redeem(browser, production);
+		expect((await callTool(tokens.access_token, "get_catalog")).isError).not.toBe(true);
+		const refused = await callTool(tokens.access_token, "get_project_stats");
+		expect(refused.isError).toBe(true);
+		expect(JSON.parse(refused.content[0]?.text ?? "{}").error).toMatchObject({
+			code: "ENVIRONMENT_INACTIVE",
+			status: 409,
+		});
+		const listed = await browser.json<{ connections: unknown[] }>(
+			"/api/platform/mcp/connections/list",
+			{ scope: production },
+		);
+		expect(listed.connections).toHaveLength(1);
+		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
+		expect((await callTool(tokens.access_token, "get_project_stats")).isError).not.toBe(true);
+	});
+
+	it("proposes only catalog publication, behind step-up, until the environment is activated", async () => {
+		const browser = await owner();
+		await createBillingAccount("production");
+		await redeem(browser, production, true);
+		const grant = await approvedGrant();
+		const actions = await f.mcpChanges.capabilities(grant.id);
+		expect(actions.filter((action) => action.available).map((action) => action.action)).toEqual([
+			"catalog.publish",
+		]);
+		expect(actions.find((action) => action.action === "entities.write")).toMatchObject({
+			available: false,
+			unavailableReason: "environment_inactive",
+		});
+		const entity = {
+			reason: "Team setup",
+			action: "entities.write",
+			parameters: ["customer-a"],
+			body: { externalId: "team-a", kind: "team" },
+		};
+		await expect(
+			f.mcpChanges.prepare(grant.id, { ...entity, requestKey: "entity-early" }),
+		).rejects.toMatchObject({ code: "ENVIRONMENT_INACTIVE", status: 409 });
+		await expect(
+			f.mcpChanges.inspect(grant.id, {
+				resource: "entities",
+				parameters: ["customer-a"],
+				query: {},
+			}),
+		).rejects.toMatchObject({ code: "ENVIRONMENT_INACTIVE", status: 409 });
+		const change = await f.mcpChanges.prepare(grant.id, {
+			requestKey: "catalog-first",
+			reason: "First production catalog",
+			action: "catalog.publish",
+			parameters: [],
+			body: catalog,
+		});
+		expect(change.scope.environment).toBe("production");
+		expect(change.stepUp?.action).toBe("catalog.publish");
+		const denied = await browser.request(`/api/platform/mcp/changes/${change.id}/approve`, {
+			requestHash: change.requestHash,
+		});
+		expect(denied.status).toBe(403);
+		expect((await denied.json()).error.code).toBe("STEP_UP_REQUIRED");
+		expect((await f.mcpChanges.get(grant.id, change.id)).status).toBe("pending");
+		expect(await f.sql`SELECT * FROM billing_administration_receipts`).toHaveLength(0);
+
+		// With a verified step-up grant for this exact proposal, the catalog publishes on the
+		// production that has no project key yet.
+		const [session] = await f.sql<
+			{ id: string; organization_id: string }[]
+		>`SELECT s.id,m.organization_id FROM platform_merchant_sessions s JOIN platform_memberships m ON m.principal_id=s.principal_id WHERE s.revoked_at IS NULL ORDER BY s.created_at DESC LIMIT 1`;
+		if (!session || !change.stepUp) throw new Error("Expected a session and a step-up target");
+		await f.sql`INSERT INTO platform_step_up_grants(session_id,organization_id,scope,action,target,return_to,token_hash,verified_at,expires_at) VALUES(${session.id},${session.organization_id},${JSON.stringify(change.scope)}::text::jsonb,${change.stepUp.action},${change.stepUp.target},'/',${f.store.hash("catalog-step-up")},now(),now()+interval '10 minutes')`;
+		const approved = await browser.request(
+			`/api/platform/mcp/changes/${change.id}/approve`,
+			{ requestHash: change.requestHash },
+			{ headers: { "x-quotum-step-up-grant": "catalog-step-up" } },
+		);
+		expect(approved.status).toBe(200);
+		expect((await approved.json()).data.status).toBe("completed");
+		expect(
+			await f.sql`SELECT r.status FROM catalog_revisions r JOIN projects p ON p.id=r.project_id WHERE p.environment='production'`,
+		).toEqual([{ status: "published" }]);
+
+		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
+		const widened = await f.mcpChanges.capabilities(grant.id);
+		expect(widened.find((action) => action.action === "entities.write")?.available).toBe(true);
+		const prepared = await f.mcpChanges.prepare(grant.id, { ...entity, requestKey: "entity-late" });
+		expect(prepared.status).toBe("pending");
+	});
+
+	it("refuses a grant once its environment is suspended instead of merely not activated", async () => {
+		const browser = await owner();
+		const tokens = await redeem(browser, production);
+		expect((await rpc(tokens.access_token)).status).toBe(200);
+		await f.sql`UPDATE projects SET lifecycle_status='suspended' WHERE environment='production'`;
+		expect((await rpc(tokens.access_token)).status).toBe(403);
+	});
+});

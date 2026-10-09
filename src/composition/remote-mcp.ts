@@ -210,6 +210,7 @@ export function createRemoteMcpApp(options: {
 						port,
 						projectInstanceId: grant.project_instance_id,
 						principalId: grant.principal_id,
+						environmentStatus: grant.environmentStatus,
 					}),
 				}),
 			});
