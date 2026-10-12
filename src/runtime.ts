@@ -16,6 +16,7 @@ import {
 	attachMerchantRuntime,
 	type MerchantRuntimeOptions,
 } from "./composition/merchant-runtime";
+import { platformRetentionJobs } from "./composition/platform-retention";
 import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
 import { projectionDestinationPolicy } from "./composition/projection-destinations";
 import {
@@ -325,6 +326,16 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		runOnce: () => promotionMaintenanceWorker.runOnce(),
 		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
 	});
+
+	// The merchant platform writes rate limits, links, step-up grants and MCP rows that nothing else
+	// prunes. A headless process writes none of them and schedules no sweep.
+	jobs.push(
+		...platformRetentionJobs({
+			merchantEnabled: merchantConfig !== null,
+			executor: persistence,
+			logger,
+		}),
+	);
 
 	const sentry = env.sentry.dsn === null ? undefined : dependencies.sentry;
 	const sentryRequestScope = sentry && createSentryRequestScope(sentry, { service: "billing" });

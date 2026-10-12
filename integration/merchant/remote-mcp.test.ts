@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createRemoteMcpApp } from "../../src/composition/remote-mcp";
 import type { MerchantScope, OnboardingDraftView } from "../../src/platform/contracts";
 import { MCP_GRANT_CLAIM, McpAuthorizations } from "../../src/platform/mcp/authorization";
+import { PlatformRetentionSweep } from "../../src/platform/retention";
 import { CSRF_COOKIE } from "../../src/platform/security";
 import { assertOpenApiResponse } from "../../tests/helpers/openapi";
 import {
@@ -409,6 +410,19 @@ describe("remote MCP browser authorization", () => {
 		payload[MCP_GRANT_CLAIM] = crypto.randomUUID();
 		parts[1] = Buffer.from(JSON.stringify(payload)).toString("base64url");
 		expect((await rpc(parts.join("."))).status).toBe(401);
+	});
+	it("answers a connection the retention sweep removed like an expired one", async () => {
+		const browser = await owner();
+		const tokens = await redeem(browser);
+		await f.sql`UPDATE platform_mcp_authorizations SET expires_at=now()-interval '31 days',created_at=now()-interval '61 days'`;
+		const swept = await new PlatformRetentionSweep(f.sql).runOnce();
+		expect(swept.failures).toEqual([]);
+		expect(swept.deleted.platform_mcp_authorizations).toBe(1);
+		expect(await f.sql`SELECT id FROM platform_mcp_authorizations`).toHaveLength(0);
+		expect((await rpc(tokens.access_token)).status).toBe(401);
+		expect(
+			(await token({ grant_type: "refresh_token", refresh_token: tokens.refresh_token })).status,
+		).toBe(400);
 	});
 	it("invalidates grants permanently on principal or membership suspension", async () => {
 		const browser = await owner();
