@@ -171,6 +171,25 @@ and a later switch carried: the correction takes those back too. A correction's 
 the same rule as consume: it may carry no more decimal places than the meter's `creditScale`, or it
 answers `400 INVALID_REQUEST`.
 
+A correction reaches an allowance that ended while it could still come back, so the balance shows
+what the receipt says:
+
+- A default-plan allowance that a paid base plan, a trial or the catalog's removal of the default
+  plan ended inside its window is resumed, with its use kept, when the default plan returns in that
+  window (see [Default plan](grants.md#default-plan)). A correction lowers its use at once, and the
+  resumed allowance reads the corrected figure. An allowance whose window is over, and a trial's
+  allowance, which nothing resumes, keep what they were spent.
+- When an immediate plan change ended a plan allowance after carrying its unused balance
+  (`carryOver.balances`), a correction of usage spent from it before the switch grows the live
+  `carry_over` allocation by the quantity returned and lowers the ended allowance's use by the same,
+  as if the correction had come before the switch. A return to that version hands the quantity to
+  the resumed allowance. When the switch carried that usage too (`carryOver.usages`), the
+  correction goes to the new allowance, as above, and the carried balance is not credited again.
+- Where no allowance can take the quantity back, the correction is still recorded, and the usage
+  and its charge are still reversed, but the balance does not change, as for any expired
+  allowance: the carry expired or was ended by a return, the switch carried nothing because the
+  allowance had nothing unused, or the allowance expired at the end of its window.
+
 ## Meter limits
 
 A meter limit counts usage in the scope its plan item declares with `allocationScope`:
