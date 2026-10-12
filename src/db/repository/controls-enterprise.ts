@@ -1535,16 +1535,126 @@ export async function readControlClock(executor: QueryExecutor, now?: Date): Pro
 	return clock.current_time instanceof Date ? clock.current_time : new Date(clock.current_time);
 }
 
+/** An effective control without what its window has counted. */
+export type ControlLimit = Omit<EffectiveControl, "consumedValue" | "heldValue" | "remainingValue">;
+
+interface ControlResolutionInput {
+	projectId: string;
+	customerId: string | null;
+	entityId: string | null;
+	now?: Date;
+}
+
+/**
+ * The controls in force for a customer, and an entity of it when given, with the window each has
+ * counted: its usage, the holds open in it and what remains. A window with no row yet answers as
+ * the write that opens it will, from the usage already recorded in it.
+ */
 export async function resolveEffectiveControls(
 	executor: QueryExecutor,
-	input: {
-		projectId: string;
-		customerId: string | null;
-		entityId: string | null;
-		now?: Date;
-	},
+	input: ControlResolutionInput,
 ): Promise<EffectiveControl[]> {
 	const now = await readControlClock(executor, input.now);
+	const winners = await resolveWinningControls(executor, input, now);
+	const windows = await Promise.all(
+		winners.map((row) => {
+			const bounds = controlWindowBounds(row.interval, row.interval_count, now);
+			const scope = {
+				projectId: input.projectId,
+				policyId: String(row.id),
+				customerId: input.customerId,
+				windowStartAt: bounds.start.toISOString(),
+				windowEndAt: bounds.end?.toISOString() ?? null,
+				now,
+			};
+			return executeOne<{ consumed_value: unknown; held_value: unknown }>(
+				executor,
+				drizzleSql`
+			SELECT GREATEST(
+					COALESCE(own.consumed_value, 0),
+					${carriedControlConsumptionSql(scope)},
+					${recordedControlConsumptionSql(scope, drizzleSql`own.id IS NOT NULL`)}
+				)::text AS consumed_value, ${controlIdentityHeldSql(scope)}::text AS held_value
+			FROM (SELECT 1) AS single
+			LEFT JOIN control_windows own ON own.project_id = ${input.projectId}
+				AND own.control_policy_id = ${String(row.id)}::bigint AND own.customer_id = ${input.customerId}
+				AND own.window_start_at = ${bounds.start.toISOString()}
+		`,
+			);
+		}),
+	);
+	return sortControls(
+		winners.map((row, index) => {
+			const window = windows[index] ?? null;
+			const limit = controlLimit(row, now);
+			const consumed = canonicalDecimal(
+				String(window?.consumed_value ?? "0"),
+				"control consumed",
+				9,
+			);
+			const held = canonicalDecimal(String(window?.held_value ?? "0"), "control held", 9);
+			const remaining =
+				decimalToUnits(limit.limitValue, 9) - decimalToUnits(consumed, 9) - decimalToUnits(held, 9);
+			return {
+				...limit,
+				consumedValue: consumed,
+				heldValue: held,
+				remainingValue: unitsToDecimal(remaining > 0n ? remaining : 0n, 9),
+			};
+		}),
+	);
+}
+
+/**
+ * The controls in force, as `resolveEffectiveControls` lists them, without reading their windows.
+ * A write or a hold's settlement reads and locks the windows itself, so it does not pay for the
+ * usage a limit without a window row would count.
+ */
+export async function resolveControlLimits(
+	executor: QueryExecutor,
+	input: ControlResolutionInput,
+): Promise<ControlLimit[]> {
+	const now = await readControlClock(executor, input.now);
+	const winners = await resolveWinningControls(executor, input, now);
+	return sortControls(winners.map((row) => controlLimit(row, now)));
+}
+
+function controlLimit(row: EffectiveControlRow, now: Date): ControlLimit {
+	const bounds = controlWindowBounds(row.interval, row.interval_count, now);
+	return {
+		controlKind: row.control_kind,
+		featureKey: row.feature_key,
+		currency: row.currency,
+		limitValue: canonicalDecimal(String(row.limit_value), "control limit", 9),
+		interval: row.interval,
+		intervalCount: row.interval === "lifetime" ? null : row.interval_count,
+		windowStartAt: bounds.end === null ? null : bounds.start.toISOString(),
+		windowEndAt: bounds.end?.toISOString() ?? null,
+		source: row.source_type,
+		revision: row.revision,
+		policyId: String(row.id),
+	};
+}
+
+/** An entity's control lists before the account's that counts the same usage. */
+function sortControls<T extends ControlLimit>(controls: T[]): T[] {
+	const sortKey = (control: ControlLimit) =>
+		[
+			control.controlKind,
+			control.featureKey ?? "",
+			control.currency ?? "",
+			controlWindowKey(control.interval, control.intervalCount),
+			control.source === "entity" ? "0" : "1",
+		].join(":");
+	return controls.sort((left, right) => sortKey(left).localeCompare(sortKey(right)));
+}
+
+/** The policies in force, one per window of a kind, feature, currency and scope. */
+async function resolveWinningControls(
+	executor: QueryExecutor,
+	input: ControlResolutionInput,
+	now: Date,
+): Promise<EffectiveControlRow[]> {
 	const planDefault = { projectId: input.projectId, customerId: input.customerId, now };
 	// One statement: the active contract is resolved inline so this read can be pipelined.
 	const rows = await executeRows<EffectiveControlRow>(
@@ -1606,70 +1716,7 @@ export async function resolveEffectiveControls(
 		const current = winners.get(identity);
 		if (current === undefined || compareControlRows(row, current) < 0) winners.set(identity, row);
 	}
-	const result: EffectiveControl[] = [];
-	const winnerRows = [...winners.values()];
-	const windows = await Promise.all(
-		winnerRows.map((row) => {
-			const bounds = controlWindowBounds(row.interval, row.interval_count, now);
-			const scope = {
-				projectId: input.projectId,
-				policyId: String(row.id),
-				customerId: input.customerId,
-				windowStartAt: bounds.start.toISOString(),
-				windowEndAt: bounds.end?.toISOString() ?? null,
-				now,
-			};
-			return executeOne<{ consumed_value: unknown; held_value: unknown }>(
-				executor,
-				drizzleSql`
-			SELECT GREATEST(
-					COALESCE(own.consumed_value, 0),
-					${carriedControlConsumptionSql(scope)},
-					${recordedControlConsumptionSql(scope, drizzleSql`own.id IS NOT NULL`)}
-				)::text AS consumed_value, ${controlIdentityHeldSql(scope)}::text AS held_value
-			FROM (SELECT 1) AS single
-			LEFT JOIN control_windows own ON own.project_id = ${input.projectId}
-				AND own.control_policy_id = ${String(row.id)}::bigint AND own.customer_id = ${input.customerId}
-				AND own.window_start_at = ${bounds.start.toISOString()}
-		`,
-			);
-		}),
-	);
-	for (const [index, row] of winnerRows.entries()) {
-		const window = windows[index] ?? null;
-		const bounds = controlWindowBounds(row.interval, row.interval_count, now);
-		const limit = canonicalDecimal(String(row.limit_value), "control limit", 9);
-		const consumed = canonicalDecimal(String(window?.consumed_value ?? "0"), "control consumed", 9);
-		const held = canonicalDecimal(String(window?.held_value ?? "0"), "control held", 9);
-		const remaining =
-			decimalToUnits(limit, 9) - decimalToUnits(consumed, 9) - decimalToUnits(held, 9);
-		result.push({
-			controlKind: row.control_kind,
-			featureKey: row.feature_key,
-			currency: row.currency,
-			limitValue: limit,
-			interval: row.interval,
-			intervalCount: row.interval === "lifetime" ? null : row.interval_count,
-			windowStartAt: bounds.end === null ? null : bounds.start.toISOString(),
-			windowEndAt: bounds.end?.toISOString() ?? null,
-			source: row.source_type,
-			revision: row.revision,
-			policyId: String(row.id),
-			consumedValue: consumed,
-			heldValue: held,
-			remainingValue: unitsToDecimal(remaining > 0n ? remaining : 0n, 9),
-		});
-	}
-	// An entity's control lists before the account's that counts the same usage.
-	const sortKey = (control: EffectiveControl) =>
-		[
-			control.controlKind,
-			control.featureKey ?? "",
-			control.currency ?? "",
-			controlWindowKey(control.interval, control.intervalCount),
-			control.source === "entity" ? "0" : "1",
-		].join(":");
-	return result.sort((left, right) => sortKey(left).localeCompare(sortKey(right)));
+	return [...winners.values()];
 }
 
 /**
@@ -1709,11 +1756,11 @@ export function sameControlWindow(
  * The control with the lowest limit among those that match: an entity can have its own limit and
  * the account's both counting its usage, and a percentage follows the one it reaches first.
  */
-export function tightestControl(
-	controls: readonly EffectiveControl[],
-	matches: (control: EffectiveControl) => boolean,
-): EffectiveControl | undefined {
-	let tightest: EffectiveControl | undefined;
+export function tightestControl<T extends Pick<EffectiveControl, "limitValue">>(
+	controls: readonly T[],
+	matches: (control: T) => boolean,
+): T | undefined {
+	let tightest: T | undefined;
 	for (const control of controls) {
 		if (!matches(control)) continue;
 		if (

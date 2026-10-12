@@ -10,6 +10,7 @@ import {
 import type { BillingProvider } from "../../billing/types";
 import { type ProviderCapabilityLookup, providersImplementing } from "../../providers/capabilities";
 import {
+	type ControlLimit,
 	carriedControlConsumptionSql,
 	chargedToEarlierWindowSql,
 	controlIdentityHeldSql,
@@ -20,7 +21,7 @@ import {
 	openingControlConsumptionSql,
 	readControlClock,
 	recordedControlConsumptionSql,
-	resolveEffectiveControls,
+	resolveControlLimits,
 	sameControlWindow,
 	tightestControl,
 } from "./controls-enterprise";
@@ -98,7 +99,7 @@ async function evaluateControls(
 		mode === "check" || customerId === null
 			? Promise.resolve()
 			: lockCustomerControls(executor, input.projectId, customerId),
-		resolveEffectiveControls(executor, {
+		resolveControlLimits(executor, {
 			projectId: input.projectId,
 			customerId,
 			entityId: input.entityId,
@@ -116,7 +117,7 @@ async function evaluateControls(
 		)
 		.sort((left, right) => (BigInt(left.policyId) < BigInt(right.policyId) ? -1 : 1));
 	const locked: Array<{
-		control: EffectiveControl;
+		control: ControlLimit;
 		windowId: string;
 		consumed: string;
 		held: string;
@@ -362,7 +363,7 @@ export async function confirmControlHolds(
 		ORDER BY hold.control_window_id FOR UPDATE OF control_window, hold
 	`,
 		),
-		resolveEffectiveControls(executor, {
+		resolveControlLimits(executor, {
 			projectId: input.projectId,
 			customerId: input.customerId,
 			entityId: input.entityId,
@@ -891,7 +892,7 @@ export async function recordUsageAlertDelta(
 		const bounds = controlWindowBounds(alert.interval, alert.interval_count, countedAt);
 		let threshold = canonicalDecimal(String(alert.threshold_value), "alert threshold", 9);
 		if (alert.threshold_type === "percentage") {
-			const controls = await resolveEffectiveControls(executor, {
+			const controls = await resolveControlLimits(executor, {
 				projectId: input.projectId,
 				customerId: input.customerId,
 				entityId: alert.entity_id === null ? null : String(alert.entity_id),
