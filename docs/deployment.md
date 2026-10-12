@@ -522,6 +522,37 @@ client's count but never rejects another client. `BILLING_TRUST_PROXY_HEADERS` d
 address counts as the client IP for all of these limits, and for the per-client limits of the
 [remote MCP and OAuth endpoints](mcp.md#connect-in-a-browser), which are kept in the database.
 
+#### Merchant platform limits
+
+The merchant platform (`/api`) keeps its own limits in the database, so replicas share them. They
+are fixed windows that start at the first counted attempt, not `BILLING_RATE_LIMIT_WINDOW_MS`, and
+refuse with `429 RATE_LIMITED`, `Retry-After` and `retryAfter` in the error body. A per-client
+limit counts the address in the `x-quotum-client-ip` header that the console's BFF sends.
+
+- Registration: five sign-ups per client IP per hour, and three per email address per 24 hours,
+  including a Google sign-up for the address. Terms and privacy acceptance (`signup-intent`) is
+  limited to 20 per client IP per hour. The address budget exists to bound verification mail to
+  that address, so a refused sign-up spends none of it. Quotum refuses a missing policy
+  acceptance or an invalid name before the address is charged, and gives the attempt back when
+  the sign-in library refuses (an invalid address, a password outside 12 to 128 characters). A
+  refused request therefore cannot lock someone else's address out of registration; one that
+  sends mail does spend it.
+- Sign-in and recovery: password sign-in is limited to 20 attempts per client IP and five per
+  account in 15 minutes, and a successful sign-in gives its attempt back. Password reset and
+  verification emails are limited to 20 per client IP and three per address per hour each. One-time
+  codes are limited to one per 30 seconds, three per 15 minutes and ten per day for each person.
+- Invitations: 30 per member per hour and 100 per organization per 24 hours. A resend counts as
+  an invitation because it sends mail; an invitation preview that carries a token is limited to 20
+  per client IP per hour, and requests for a replacement link to three per invitation per 24
+  hours.
+- Connection drafts: 30 per member per hour.
+- Step-up challenges: 30 per member per 15 minutes.
+
+The member limits count only work that is stored. They are charged inside the same transaction
+as the work, after authorization and every other refusal, so a replayed idempotency key, a request
+refused as forbidden, stale or duplicate, and a request that fails and rolls back spend nothing.
+The operator CLI holds database access already and has none of these limits.
+
 ### Sentry (optional)
 
 Leave `SENTRY_DSN` unset or blank to disable Sentry; without a DSN the SDK is never initialized.
