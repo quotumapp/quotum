@@ -394,8 +394,9 @@ deleted anything logs `Platform retention sweep deleted expired rows` with the t
 one `{ table, deleted }` entry per table in `tables` and the tables that used every statement
 (`capped`); a run that deleted nothing logs nothing. A failed table logs
 `Platform retention sweep failed` with the table name, and the other tables are still swept. No
-setting or migration is involved; runs after an upgrade work through any existing backlog, up to
-25,000 rows per table each.
+setting is involved; runs after an upgrade work through any existing backlog, up to 25,000 rows per
+table each. Every column a window compares has an index, so a run finds its rows without scanning
+a whole table.
 
 ### Subscription reconciliation retries
 

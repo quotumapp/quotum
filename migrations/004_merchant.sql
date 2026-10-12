@@ -217,6 +217,12 @@ CREATE INDEX platform_step_up_session_idx ON platform_step_up_grants(session_id)
 
 CREATE INDEX platform_step_up_org_idx ON platform_step_up_grants(organization_id);
 
+-- The retention sweep deletes a grant once either instant is past its window. An OR is served only
+-- when both arms have an index, so each column has one.
+CREATE INDEX platform_step_up_expiry_idx ON platform_step_up_grants(expires_at);
+
+CREATE INDEX platform_step_up_consumed_idx ON platform_step_up_grants(consumed_at) WHERE consumed_at IS NOT NULL;
+
 CREATE TABLE platform_service_principals (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	name text NOT NULL UNIQUE,
@@ -266,6 +272,8 @@ CREATE TABLE platform_auth_links (
 
 CREATE INDEX platform_auth_links_expiry_idx ON platform_auth_links(expires_at);
 
+CREATE INDEX platform_auth_links_consumed_idx ON platform_auth_links(consumed_at) WHERE consumed_at IS NOT NULL;
+
 CREATE TABLE platform_idempotency (
 	principal_id uuid NOT NULL REFERENCES platform_principals(id) ON DELETE RESTRICT,
 	key text NOT NULL,
@@ -274,6 +282,10 @@ CREATE TABLE platform_idempotency (
 	created_at timestamptz NOT NULL DEFAULT now(),
 	PRIMARY KEY(principal_id,key)
 );
+
+-- Not partial on result: the claim writes result after the insert, and a column in an index
+-- predicate would make that update a non-HOT one.
+CREATE INDEX platform_idempotency_created_idx ON platform_idempotency(created_at);
 
 CREATE TABLE platform_connection_oauth_states (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -477,6 +489,8 @@ CREATE TABLE platform_mcp_authorizations (
 	CHECK (expires_at > created_at)
 );
 CREATE INDEX platform_mcp_authorizations_owner_idx ON platform_mcp_authorizations(principal_id, project_instance_id);
+CREATE INDEX platform_mcp_authorizations_expiry_idx ON platform_mcp_authorizations(expires_at);
+CREATE INDEX platform_mcp_authorizations_revoked_idx ON platform_mcp_authorizations(revoked_at) WHERE revoked_at IS NOT NULL;
 
 -- Status changes invalidate grants even when no request arrives during the suspension.
 CREATE FUNCTION platform_revoke_mcp_authorizations() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -534,3 +548,4 @@ CREATE TABLE platform_mcp_changes (
  UNIQUE (authorization_id, request_key)
 );
 CREATE INDEX platform_mcp_changes_owner_idx ON platform_mcp_changes(principal_id, project_instance_id, created_at DESC);
+CREATE INDEX platform_mcp_changes_created_idx ON platform_mcp_changes(created_at);
