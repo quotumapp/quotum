@@ -1,6 +1,10 @@
 import { type BillingLogger, safelyLogError, safelyLogInfo } from "../observability/logger";
 import type { PlatformQueryExecutor } from "../platform/persistence/query-executor";
-import { type PlatformRetentionOptions, PlatformRetentionSweep } from "../platform/retention";
+import {
+	PLATFORM_RETENTION_TABLES,
+	type PlatformRetentionOptions,
+	PlatformRetentionSweep,
+} from "../platform/retention";
 import type { QuotumScheduledJob } from "./runtime-lifecycle";
 
 export const PLATFORM_RETENTION_JOB_NAME = "platform_retention";
@@ -36,10 +40,16 @@ export function createPlatformRetentionJob(input: {
 		async runOnce() {
 			const result = await sweep.runOnce();
 			const total = Object.values(result.deleted).reduce((sum, count) => sum + count, 0);
+			// Table names go in values, not keys: the log scrubber drops every key that contains
+			// `authorization`, which would silently omit `platform_mcp_authorizations`.
 			if (total > 0)
 				safelyLogInfo(input.logger, "Platform retention sweep deleted expired rows", {
 					worker: PLATFORM_RETENTION_JOB_NAME,
-					deleted: result.deleted,
+					deleted: total,
+					tables: PLATFORM_RETENTION_TABLES.map((table) => ({
+						table,
+						deleted: result.deleted[table],
+					})),
 					capped: result.capped,
 				});
 			for (const failure of result.failures)

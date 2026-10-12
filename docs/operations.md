@@ -385,11 +385,13 @@ events, memberships, sessions, credentials and connections are never touched.
 
 A run deletes at most 1,000 rows per statement and 25 statements per table, each its own short
 transaction that locks only the rows it removes and skips rows a request holds, so replicas share
-the work and a sweep never blocks a request. A larger backlog drains over later runs; the
-`Platform retention sweep deleted expired rows` log line lists the rows removed per table and the
-tables that used every statement (`capped`). A failed table logs `Platform retention sweep failed`
-with the table name, and the other tables are still swept. No setting or migration is involved;
-runs after an upgrade work through any existing backlog, up to 25,000 rows per table each.
+the work and a sweep never blocks a request. A larger backlog drains over later runs. A run that
+deleted anything logs `Platform retention sweep deleted expired rows` with the total (`deleted`),
+one `{ table, deleted }` entry per table in `tables` and the tables that used every statement
+(`capped`); a run that deleted nothing logs nothing. A failed table logs
+`Platform retention sweep failed` with the table name, and the other tables are still swept. No
+setting or migration is involved; runs after an upgrade work through any existing backlog, up to
+25,000 rows per table each.
 
 ### Recurring billing retries
 
