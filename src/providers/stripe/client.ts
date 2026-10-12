@@ -3,21 +3,11 @@ import Stripe from "stripe";
 import type { StripeBillingEnv } from "../../env";
 import { canonicalJson } from "../../shared/canonical-json";
 
-export const STRIPE_API_VERSION = "2026-08-26.dahlia" as const;
+export const STRIPE_API_VERSION = "2026-09-30.endive" as const;
 
 export interface StripeBillingConfig extends StripeBillingEnv {
 	apiVersion: typeof STRIPE_API_VERSION;
 }
-
-/**
- * Checkout Session create parameters plus the card-only filter hosted setup needs. The pinned API
- * reference documents `allowed_payment_method_types` on Checkout Sessions, while stripe-node
- * 22.6.2 omits it there. Keep this extension narrow until the SDK catches up.
- * https://docs.stripe.com/api/checkout/sessions/create#allowed_payment_method_types
- */
-export type StripeCheckoutSessionCreateParams = Stripe.Checkout.SessionCreateParams & {
-	allowed_payment_method_types?: string[];
-};
 
 interface StripeClientLike {
 	paymentIntents: { retrieve(id: string): Promise<Stripe.PaymentIntent> };
@@ -48,7 +38,7 @@ interface StripeClientLike {
 	checkout: {
 		sessions: {
 			create(
-				params: StripeCheckoutSessionCreateParams,
+				params: Stripe.Checkout.SessionCreateParams,
 				options?: Stripe.RequestOptions,
 			): Promise<Stripe.Checkout.Session>;
 			expire?(sessionId: string): Promise<Stripe.Checkout.Session>;
@@ -231,7 +221,7 @@ export class StripeBillingClient {
 		return paymentMethod?.id ?? null;
 	}
 
-	createCheckoutSession(params: StripeCheckoutSessionCreateParams, idempotencyKey?: string) {
+	createCheckoutSession(params: Stripe.Checkout.SessionCreateParams, idempotencyKey?: string) {
 		return this.stripe.checkout.sessions.create(params, {
 			idempotencyKey: idempotencyKey ?? stripeOperationIdempotencyKey("checkout-sessions:create"),
 		});

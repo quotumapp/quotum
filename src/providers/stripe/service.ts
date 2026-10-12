@@ -80,7 +80,6 @@ import { commercialPreviewProvider } from "../capabilities";
 import { requireNonBlank } from "../validation";
 import { assertAddOnMeterLimitsCombine, assertMeterLimitScopesAgree } from "./add-on-meter-limits";
 import { stripeCapabilities } from "./capabilities";
-import type { StripeCheckoutSessionCreateParams } from "./client";
 import {
 	normalizeStripeCheckoutSession,
 	normalizeStripeCheckoutSessionTermination,
@@ -145,7 +144,7 @@ export interface StripeBillingClientDependency extends PaymentSetupClientDepende
 		linkGeneration?: number;
 	}): Promise<{ id: string }>;
 	createCheckoutSession(
-		params: StripeCheckoutSessionCreateParams,
+		params: Stripe.Checkout.SessionCreateParams,
 		idempotencyKey?: string,
 	): Promise<{ id: string; url: string | null }>;
 	expireCheckoutSession?(sessionId: string): Promise<unknown>;

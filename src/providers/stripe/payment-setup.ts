@@ -6,6 +6,7 @@
  */
 
 import { createHash } from "node:crypto";
+import type Stripe from "stripe";
 import { BillingError } from "../../billing/errors";
 import {
 	type PaymentSetupCard,
@@ -20,7 +21,6 @@ import type {
 	ReservePaymentSetupInput,
 } from "../../db/repository";
 import type { StoreEventReplayProviderResult } from "../../workers/store-event-replay";
-import type { StripeCheckoutSessionCreateParams } from "./client";
 
 /** Leaves an hour of clock and request-latency margin below Stripe's maximum lifetime. */
 export const PAYMENT_SETUP_LIFETIME_MS = 23 * 60 * 60 * 1000;
@@ -50,7 +50,7 @@ const HOSTED_SETUP_PLAN_SUBMIT_MESSAGE =
 
 export interface PaymentSetupClientDependency {
 	createCheckoutSession(
-		params: StripeCheckoutSessionCreateParams,
+		params: Stripe.Checkout.SessionCreateParams,
 		idempotencyKey?: string,
 	): Promise<{ id: string; url: string | null }>;
 	retrieveSetupCheckoutSession?(sessionId: string): Promise<Record<string, unknown>>;
@@ -304,7 +304,7 @@ async function issueHostedSetupLink(
 	const repository = requirePaymentSetupRepository(context.repository);
 	// The row's own expiry is what the provider session was, or will be, created with.
 	const expiresAt = new Date(setup.expires_at);
-	const params: StripeCheckoutSessionCreateParams = {
+	const params: Stripe.Checkout.SessionCreateParams = {
 		customer: setup.provider_customer_id,
 		mode: "setup",
 		currency: setup.currency,
