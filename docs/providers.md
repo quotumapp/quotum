@@ -480,6 +480,38 @@ invoice event may still be on its way. After `BILLING_STORE_EVENT_REPLAY_MAX_ATT
 `GET /v1/admin/store-events?processingStatus=failed` lists them, and
 `POST /v1/admin/store-events/:eventId/replay` tries one again once its cause is fixed.
 
+### Events that contradict a stored identity
+
+A signed Stripe event whose identities disagree with what Quotum stored is acknowledged, not
+refused. The webhook answers `200` with `status: "skipped"`, so Stripe stops redelivering a body
+that no retry can apply. Quotum never reassigns a link to make an event fit: the event's recording
+rolls back as a whole, so no account, customer link, purchase, subscription, balance or delivery
+comes from it, and the event is stored as `skipped` with a `processingError` of
+`<reason>: <detail>`, where the detail names Stripe object ids only. A warning log carries the
+event id, its type and the reason when the event arrives through the webhook route or a replay. An
+event from the Stripe App event inbox is stored the same way and its inbox entry is marked
+processed, without a log line of its own.
+
+| Reason | Meaning |
+| --- | --- |
+| `stripe_customer_linked_to_other_account` | The Stripe customer the event names is linked to a billing account other than the one the event resolves to, for example a Checkout whose `billingAccountId` metadata names another account. |
+| `stripe_account_linked_to_other_customer` | The billing account is already linked to a different Stripe customer; an account has one Stripe customer. |
+| `stripe_purchase_identity_conflict` | The payment is already recorded for another customer or product. |
+| `stripe_subscription_identity_conflict` | The subscription the event describes, or the one its invoice belongs to, is already recorded for another customer or product. |
+| `stripe_event_identity_changed` | The event id was already recorded with another customer, product, payment or event type. |
+
+The first four events are retried by the event replay worker with backoff, and each retry stores
+the reason as `processingError`. An event that is never fixed ends `failed` after
+`BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS` attempts and nothing it carried is applied. Once the
+stored link is corrected, the next retry, or `POST /v1/admin/store-events/:eventId/replay`, applies
+the event from its stored payload.
+
+A `stripe_event_identity_changed` delivery keeps the original event untouched: its stored row stays
+`processed` with the identities it was applied under, and the changed delivery is only logged,
+because recording it would overwrite the first. A provider read made by subscription
+reconciliation has no event id and is never redelivered, so a conflict there still fails the job
+with the same message and the worker retries it with backoff.
+
 Regular provider webhooks use `/v1/projects/:projectKey/webhooks/:provider`. The project key in the
 path is not a secret, so the answer never says whether it exists: an unknown key, and a project
 without a connection for that provider, answer exactly what a request failing that provider's own
