@@ -203,6 +203,10 @@ differs from the proposal's answers `409 ACTION_MISMATCH`.
 Disabling the write flag prevents new proposals and approvals. Existing write-consented connections
 can inspect results and cancel pending proposals while their authorization remains valid.
 
+Finished and abandoned proposals are deleted 30 days after they were created, and a connection's
+record 30 days after it expired or was revoked. A deleted connection answers like a revoked one.
+See [merchant platform retention](operations.md#merchant-platform-retention).
+
 ## Run over stdio
 
 Use a sandbox key as in the [quickstart](quickstart.md#2-create-a-project-and-its-credential), or

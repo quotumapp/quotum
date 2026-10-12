@@ -38,15 +38,16 @@ How the runtime fits together, and the repository checks that most often reject 
 
 - `src/index.ts` -> `src/composition/public-runtime.ts` (`createQuotumRuntime`) ->
   `src/runtime.ts` (`createBillingRuntime`) builds everything: repositories, the provider registry,
-  nine polling workers, shutdown hooks, then the "staff" Elysia app from `src/app.ts`
-  (`createApp`) and, through `attachMerchantRuntime` in `src/composition/merchant-runtime.ts`, the
-  merchant app. `composeRuntimeApp` there routes setup-only ingress (connection and Stripe App
-  events) first, then the remote MCP and OAuth endpoints when enabled, `/api/*` to the merchant
-  app and everything else to the staff app. `runtime.app.fetch(request, server)` must receive
-  Bun's server so client-IP limits work. Headless is the default (`QUOTUM_CONSOLE_ENABLED` unset
-  or `false`): `loadOptionalMerchantConfig` returns `null` and `attachHeadlessRuntime` mounts only
-  the ingress and the staff app: no `/api/*`, remote MCP or merchant settings. Set the flag to
-  `true` to serve the merchant platform.
+  nine polling billing workers (plus the merchant-only `platform_retention` sweep), shutdown hooks,
+  then the "staff" Elysia app from `src/app.ts` (`createApp`) and, through `attachMerchantRuntime`
+  in `src/composition/merchant-runtime.ts`, the merchant app. `composeRuntimeApp` there routes
+  setup-only ingress (connection and Stripe App events) first, then the remote MCP and OAuth
+  endpoints when enabled, `/api/*` to the merchant app and everything else to the staff app.
+  `runtime.app.fetch(request, server)` must receive Bun's server so client-IP limits work.
+  Headless is the default (`QUOTUM_CONSOLE_ENABLED` unset or `false`):
+  `loadOptionalMerchantConfig` returns `null` and `attachHeadlessRuntime` mounts only the ingress
+  and the staff app: no `/api/*`, remote MCP or merchant settings. Set the flag to `true` to serve
+  the merchant platform.
 - `/v1/*` is the trusted-backend API (`src/app/*-routes.ts`). The staff app's authentication
   `derive` resolves a project credential (`BILLING_AUTH_MODE=api_key`) or the trusted gateway's
   project header (`gateway`) into `project`, a `ProjectInstanceContext` that every repository call
@@ -170,7 +171,10 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
 store-event replay, subscription reconciliation, metering maintenance, recurring billing, auto
 top-up, promotion maintenance, provider operation recovery, usage partition upkeep (`src/workers/usage-partition-upkeep.ts`,
 which adds monthly `usage_events` partitions ahead of time; `quotum partitions` runs it on demand),
-plus Stripe App event processing when Apps OAuth is configured.
+plus Stripe App event processing when Apps OAuth is configured and, only when the merchant platform
+is enabled, the `platform_retention` sweep (`src/platform/retention.ts`, wired by
+`src/composition/platform-retention.ts`), which deletes expired rate limits, auth links, completed
+idempotency rows, step-up grants and terminal MCP rows in bounded batches.
 Usage projection jobs retain an immutable payload through retries; their internal coalescing key
 is `usage:<customerId>` and their delivery key includes `:<sequence>`. Drain old workers before
 upgrading this delivery behavior.
