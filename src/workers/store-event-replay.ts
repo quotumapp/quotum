@@ -291,7 +291,6 @@ export class StoreEventReplayWorker {
 		});
 		safelyIncrementBillingMetric(this.metrics, "billing_worker_jobs_total", {
 			worker: "store_event_replay",
-			project: event.project_key,
 			provider: event.provider,
 			result: status,
 		});

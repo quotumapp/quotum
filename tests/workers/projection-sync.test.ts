@@ -142,7 +142,7 @@ describe("ProjectionSyncWorker", () => {
 			'billing_projection_sync_jobs_total{result="succeeded"} 1',
 		);
 		expect(metrics.renderPrometheus()).toContain(
-			'billing_worker_jobs_total{project="acme",result="succeeded",worker="projection_sync"} 1',
+			'billing_worker_jobs_total{result="succeeded",worker="projection_sync"} 1',
 		);
 		expect(infos).toEqual([
 			{

@@ -93,14 +93,14 @@ export class ProjectionHttpClient implements ProjectionDelivery {
 				body,
 			});
 		} catch (error) {
-			this.recordDeliveryMetric(input.projectKey, "failed", "NETWORK");
+			this.recordDeliveryMetric("failed", "NETWORK");
 			throw new Error(
 				`Projection delivery failed for project ${input.projectKey}: ${errorMessage(error)}`,
 			);
 		}
 
 		if (!response.ok) {
-			this.recordDeliveryMetric(input.projectKey, "failed", `HTTP_${response.status}`);
+			this.recordDeliveryMetric("failed", `HTTP_${response.status}`);
 			throw new Error(
 				`Projection delivery failed for project ${input.projectKey} with status ${response.status}`,
 			);
@@ -109,10 +109,10 @@ export class ProjectionHttpClient implements ProjectionDelivery {
 		try {
 			await parseProjectionResponse(response, input.projectKey, this.maxResponseBytes);
 		} catch (error) {
-			this.recordDeliveryMetric(input.projectKey, "failed", "INVALID_RESPONSE");
+			this.recordDeliveryMetric("failed", "INVALID_RESPONSE");
 			throw error;
 		}
-		this.recordDeliveryMetric(input.projectKey, "succeeded", "OK");
+		this.recordDeliveryMetric("succeeded", "OK");
 	}
 
 	async usageDeliveryMode(projectKey: string): Promise<UsageDeliveryMode> {
@@ -128,13 +128,9 @@ export class ProjectionHttpClient implements ProjectionDelivery {
 		return project;
 	}
 
-	private recordDeliveryMetric(
-		projectKey: string,
-		result: "succeeded" | "failed",
-		code: string,
-	): void {
+	/** Public on `/metrics`, so the series carries no project key. */
+	private recordDeliveryMetric(result: "succeeded" | "failed", code: string): void {
 		safelyIncrementBillingMetric(this.metrics, "billing_projection_delivery_total", {
-			project: projectKey,
 			result,
 			code,
 		});

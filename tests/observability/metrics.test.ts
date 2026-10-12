@@ -37,6 +37,14 @@ describe("createInMemoryBillingMetrics", () => {
 		);
 	});
 
+	it("skips labels left undefined", () => {
+		const metrics = createInMemoryBillingMetrics();
+
+		metrics.increment("billing_webhook_failures_total", { provider: "apple", code: undefined });
+
+		expect(metrics.renderPrometheus()).toBe('billing_webhook_failures_total{provider="apple"} 1\n');
+	});
+
 	it("renders unlabeled counters", () => {
 		const metrics = createInMemoryBillingMetrics();
 
@@ -61,7 +69,6 @@ describe("createInMemoryBillingMetrics", () => {
 			code: "STRIPE_WEBHOOK_SIGNATURE_INVALID",
 		});
 		metrics.increment("billing_projection_delivery_total", {
-			project: "acme",
 			result: "succeeded",
 			code: "OK",
 		});
@@ -73,7 +80,7 @@ describe("createInMemoryBillingMetrics", () => {
 			'billing_provider_operations_total{code="STRIPE_WEBHOOK_SIGNATURE_INVALID",operation="webhook",provider="stripe",result="failed"} 1',
 		);
 		expect(metrics.renderPrometheus()).toContain(
-			'billing_projection_delivery_total{code="OK",project="acme",result="succeeded"} 1',
+			'billing_projection_delivery_total{code="OK",result="succeeded"} 1',
 		);
 	});
 

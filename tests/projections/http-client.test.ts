@@ -189,7 +189,7 @@ describe("ProjectionHttpClient", () => {
 			"Projection delivery failed for project globex with status 503",
 		);
 		expect(metrics.renderPrometheus()).toContain(
-			'billing_projection_delivery_total{code="HTTP_503",project="globex",result="failed"} 1',
+			'billing_projection_delivery_total{code="HTTP_503",result="failed"} 1',
 		);
 	});
 
@@ -204,7 +204,7 @@ describe("ProjectionHttpClient", () => {
 		await adapter.deliver(projection);
 
 		expect(metrics.renderPrometheus()).toContain(
-			'billing_projection_delivery_total{code="OK",project="globex",result="succeeded"} 1',
+			'billing_projection_delivery_total{code="OK",result="succeeded"} 1',
 		);
 	});
 

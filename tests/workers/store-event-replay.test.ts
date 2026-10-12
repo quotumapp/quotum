@@ -214,7 +214,7 @@ describe("StoreEventReplayWorker", () => {
 			'billing_store_event_replay_jobs_total{provider="apple",result="processed"} 1',
 		);
 		expect(metrics.renderPrometheus()).toContain(
-			'billing_worker_jobs_total{project="acme",provider="apple",result="processed",worker="store_event_replay"} 1',
+			'billing_worker_jobs_total{provider="apple",result="processed",worker="store_event_replay"} 1',
 		);
 		expect(infos).toEqual([
 			{
