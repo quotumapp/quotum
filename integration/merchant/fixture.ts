@@ -1,3 +1,5 @@
+import { base32 } from "@better-auth/utils/base32";
+import { createOTP } from "@better-auth/utils/otp";
 import { SQL } from "bun";
 import { projectProviderServiceResolver } from "../../src/app/provider-services";
 import { createMerchantBillingPort } from "../../src/composition/merchant-billing";
@@ -68,6 +70,14 @@ export class CaptureMailer implements MerchantMailer {
 		return result;
 	}
 }
+/** The secret behind the base32 string the enrolment route returns for manual entry. */
+export function authenticatorSecret(encoded: string): string {
+	return new TextDecoder().decode(base32.decode(encoded));
+}
+/** An authenticator's code now; `steps` picks a neighbouring 30-second step. */
+export function totpCode(secret: string, steps = 0): Promise<string> {
+	return createOTP(secret, { digits: 6, period: 30 }).hotp(Math.floor(Date.now() / 30_000) + steps);
+}
 export function merchantFixture(
 	options: {
 		now?: () => Date;
@@ -86,6 +96,9 @@ export function merchantFixture(
 	const client = new SQL(process.env.POSTGRES_URI, { max: 10, idleTimeout: 5 });
 	const sql = Object.assign(merchantSql(client), { close: () => client.close() });
 	const mailer = new CaptureMailer();
+	// The authenticator each person enrolled, by email, so a later sign-in can produce a code.
+	const authenticators = new Map<string, string>();
+	const recoveryCodes = new Map<string, string[]>();
 	let timeOffset = 0;
 	let failEnvironment: "sandbox" | "production" | null = null;
 	const store = new MerchantStore(
@@ -150,6 +163,8 @@ export function merchantFixture(
 		auth,
 		app,
 		mailer,
+		authenticators,
+		recoveryCodes,
 		onboarding,
 		advance(ms: number) {
 			timeOffset += ms;
@@ -162,6 +177,8 @@ export function merchantFixture(
 			failEnvironment = null;
 			mailer.messages = [];
 			mailer.fail = false;
+			authenticators.clear();
+			recoveryCodes.clear();
 			await sql`TRUNCATE platform_idempotency,platform_audit_events,platform_policy_acceptances,platform_service_principals,platform_step_up_grants,platform_project_api_credentials,platform_provisioning_steps,platform_provisioning_operations,platform_projects,platform_onboarding_drafts,platform_invitations,platform_memberships,platform_organizations,platform_merchant_sessions,platform_external_identities,platform_principals,platform_auth_users,platform_auth_verifications,platform_auth_rate_limits,platform_rate_limits,platform_auth_links,projects CASCADE`;
 			// TRUNCATE CASCADE also removes public clients seeded by the baseline migration.
 			await sql`INSERT INTO platform_auth_oauth_clients(client_id,name,redirect_uris,scopes,grant_types,response_types,token_endpoint_auth_method,require_p_k_c_e,skip_consent,created_at,updated_at) VALUES
@@ -229,7 +246,8 @@ export class MerchantBrowser {
 			);
 		return result.data ?? result;
 	}
-	async signup(email = "owner@example.com") {
+	/** Registers and verifies the address, leaving the person signed out and without an authenticator. */
+	async register(email = "owner@example.com") {
 		await this.json("/api/platform/config");
 		await this.json("/api/platform/signup-intent", {
 			accepted: true,
@@ -240,16 +258,49 @@ export class MerchantBrowser {
 		await this.json("/api/platform/verify-email", {
 			token: this.fixture.mailer.link("verification", email),
 		});
+		return email;
+	}
+	async signup(email = "owner@example.com") {
+		await this.register(email);
 		return this.login(email);
+	}
+	/**
+	 * Password sign-in plus the second factor, short of exchanging for a session. A first sign-in
+	 * proves the mailbox with the emailed code and then sets up an authenticator; later ones use it.
+	 */
+	async secondFactorSignIn(email: string) {
+		await this.json("/api/auth/sign-in/email", { email, password });
+		const secret = this.fixture.authenticators.get(email);
+		if (secret === undefined) {
+			await this.json("/api/auth/two-factor/send-otp", {});
+			await this.json("/api/auth/two-factor/verify-otp", {
+				code: this.fixture.mailer.otp(email),
+				trustDevice: false,
+			});
+			const setup = await this.json<{ secret: string }>(
+				"/api/platform/second-factor/enrolment",
+				{},
+			);
+			const enrolled = authenticatorSecret(setup.secret);
+			const confirmed = await this.json<{ recoveryCodes: string[] }>(
+				"/api/platform/second-factor/enrolment/confirm",
+				{ code: await totpCode(enrolled) },
+			);
+			this.fixture.authenticators.set(email, enrolled);
+			this.fixture.recoveryCodes.set(email, confirmed.recoveryCodes);
+			return;
+		}
+		// A code works once, and tests sign in far more often than a person would.
+		await this.fixture
+			.sql`UPDATE platform_auth_two_factors SET last_used_step=NULL,failed_verification_count=0,locked_until=NULL WHERE user_id=(SELECT id FROM platform_auth_users WHERE email=${email})`;
+		await this.json("/api/auth/two-factor/verify-totp", {
+			code: await totpCode(secret),
+			trustDevice: false,
+		});
 	}
 	async login(email: string) {
 		await this.json("/api/platform/config");
-		await this.json("/api/auth/sign-in/email", { email, password });
-		await this.json("/api/auth/two-factor/send-otp", {});
-		await this.json("/api/auth/two-factor/verify-otp", {
-			code: this.fixture.mailer.otp(email),
-			trustDevice: false,
-		});
+		await this.secondFactorSignIn(email);
 		await this.json("/api/platform/session/exchange", {});
 		return email;
 	}
@@ -329,12 +380,7 @@ export async function grant(
 		returnTo: "/",
 	});
 	await fixture.sql`DELETE FROM platform_rate_limits`;
-	await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
-	await browser.json("/api/auth/two-factor/send-otp", {});
-	await browser.json("/api/auth/two-factor/verify-otp", {
-		code: fixture.mailer.otp("owner@example.com"),
-		trustDevice: false,
-	});
+	await browser.secondFactorSignIn("owner@example.com");
 	return (
 		await browser.json<{ grant: string }>(`/api/platform/step-up/${challenge.id}/complete`, {})
 	).grant;

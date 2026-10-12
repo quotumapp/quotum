@@ -172,9 +172,9 @@ console before this default changed must set the flag; see
 ### Quotum-owned email delivery
 
 These are service-operator settings, not merchant registration fields or customer integrations.
-Merchants register their recipient email address; Quotum sends verification, password reset, OTP,
-invitation and invite-request messages through the selected adapter. Templates and authentication
-rules are independent of the provider.
+Merchants register their recipient email address; Quotum sends verification, password reset, the
+one-time code that sets up an authenticator, invitation and invite-request messages through the
+selected adapter. Templates and authentication rules are independent of the provider.
 
 Cloudflare example:
 
@@ -204,6 +204,26 @@ responses retry with bounded backoff (250/500 ms, or numeric Retry-After capped 
 Other failures return the sanitized `EMAIL_DELIVERY_FAILED` error. Resend reuses one idempotency key
 within a send's retries; each new send gets a fresh key. Provider acceptance does not establish inbox
 delivery. CI uses synthetic transports and capture mailers, not external inboxes.
+
+### Merchant second factor
+
+Every password sign-in to the merchant application ends with a code from an authenticator app
+(RFC 6238: SHA-1, six digits, 30-second steps) or with one of ten single-use recovery codes. Google
+sign-in relies on Google's own verification at sign-in. Email is not a recurring factor:
+
+- A person with no authenticator yet proves the mailbox with one emailed code, then sets one up and
+  is shown their recovery codes before the session starts. That emailed code is not a sign-in: the
+  session exchange, step-up and MCP authorization all refuse it. Once an authenticator is confirmed,
+  emailed codes are refused with `OTP_NOT_ALLOWED`.
+- A code works once. After it is accepted, only a code from a later 30-second step is, so a code
+  cannot be replayed inside its validity window.
+- Five wrong codes lock the person's second factor for 15 minutes, across authenticator and recovery
+  codes (`ACCOUNT_TEMPORARILY_LOCKED`).
+- Replacing the authenticator and regenerating recovery codes each need a current code. Setting one
+  up on a live session needs a fresh sign-in, never the session cookie alone.
+- Authenticator secrets and recovery codes are stored encrypted with a key derived from
+  `QUOTUM_AUTH_SECRET`, in the authentication library's versioned envelope. Do not change that secret
+  while merchants have authenticators: a changed value makes every stored authenticator unreadable.
 
 ### Upgrade from the merchant-prefixed settings
 
@@ -606,8 +626,10 @@ limit counts the address in the `x-quotum-client-ip` header that the console's B
   sends mail does spend it.
 - Sign-in and recovery: password sign-in is limited to 20 attempts per client IP and five per
   account in 15 minutes, and a successful sign-in gives its attempt back. Password reset and
-  verification emails are limited to 20 per client IP and three per address per hour each. One-time
-  codes are limited to one per 30 seconds, three per 15 minutes and ten per day for each person.
+  verification emails are limited to 20 per client IP and three per address per hour each. Emailed
+  setup codes are limited to one per 30 seconds, three per 15 minutes and ten per day for each
+  person. Authenticator and recovery codes are limited by the five-failure lockout described under
+  [merchant second factor](#merchant-second-factor).
 - Invitations: 30 per member per hour and 100 per organization per 24 hours. A resend counts as
   an invitation because it sends mail; an invitation preview that carries a token is limited to 20
   per client IP per hour, and requests for a replacement link to three per invitation per 24

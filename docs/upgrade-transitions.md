@@ -171,6 +171,34 @@ returns 0; an organization above the cap keeps its projects and only refuses ano
 operator raises its limit. An older image cannot read the new baseline, so a rollback restores the
 pre-upgrade backup.
 
+## Authenticator-app second factor
+
+The merchant baseline adds `pending_secret`, `last_used_step`, `enrolled_at` and
+`backup_codes_remaining` to `platform_auth_two_factors`, and `bootstrap_at` to
+`platform_auth_sessions`. Nothing is backfilled and no other table changes, so a dump from the
+previous release restores as it is: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). Afterwards
+
+```sql
+SELECT count(*) FROM platform_auth_two_factors WHERE verified;
+```
+
+returns 0: every merchant account already has its placeholder row and none has an authenticator.
+
+- A person's next password sign-in proves their mailbox with one emailed code, then sets up an
+  authenticator and is shown their recovery codes before the session starts. From then on the
+  authenticator or a recovery code is the only way in; emailed codes are refused. Sessions that are
+  already open stay open. [Merchant second factor](deployment.md#merchant-second-factor) describes
+  the rules.
+- Google sign-in is unchanged.
+- Roll the merchant console out with this release. A console from before it has no setup screen, so
+  a person with no authenticator could not finish signing in.
+- `@better-auth/utils` is now a direct dependency, at the version the authentication library
+  already required; no setting changes.
+
+An older image cannot read the new baseline, so a rollback restores the pre-upgrade backup and loses
+the authenticators set up since; those people sign in with an emailed code again.
+
 ## Provider customer unlink receipts
 
 The billing core baseline adds the `provider_customer_unlinks` table and its index for the

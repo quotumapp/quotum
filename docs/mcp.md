@@ -24,7 +24,7 @@ matching merchant UI and BFF before enabling it; [deployment](deployment.md#remo
 the public routes and schema ordering.
 
 Add `https://api.example.com/mcp` to a coding client. Authorization opens the merchant application,
-requires a fresh password plus email OTP or Google sign-in, then asks for one organization,
+requires a fresh password plus authenticator code, or Google sign-in, then asks for one organization,
 project, and environment and explicit consent to the requested scopes. A client that requests change
 proposals can still be connected read-only: the consent page shows **Propose changes** as a separate
 choice, and leaving it unticked drops only `quotum.billing.write`. A role that cannot approve any

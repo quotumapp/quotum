@@ -13,6 +13,7 @@ import {
 	password,
 	serviceToken,
 	testConfig,
+	totpCode,
 } from "./fixture";
 
 const origin = "https://api.example.test";
@@ -107,9 +108,10 @@ async function signIn(browser: OAuthBrowser, write = false) {
 	expect(login.pathname).toBe("/sign-in");
 	const oauth_query = login.search.slice(1);
 	await browser.native("/api/auth/sign-in/email", { email, password, oauth_query });
-	await browser.native("/api/auth/two-factor/send-otp", {});
-	const verified = await browser.native("/api/auth/two-factor/verify-otp", {
-		code: f.mailer.otp(email),
+	// A code works once, and these tests authorize far more often than a person would.
+	await f.sql`UPDATE platform_auth_two_factors SET last_used_step=NULL,failed_verification_count=0,locked_until=NULL`;
+	const verified = await browser.native("/api/auth/two-factor/verify-totp", {
+		code: await totpCode(f.authenticators.get(email) ?? ""),
 		trustDevice: false,
 		oauth_query,
 	});

@@ -20,6 +20,7 @@ import type { McpChanges } from "./mcp/changes";
 import { registerMcpRoutes } from "./mcp/routes";
 import { MerchantOnboarding } from "./onboarding";
 import * as responses from "./platform-responses";
+import { registerSecondFactorRoutes } from "./second-factor-routes";
 import {
 	assertCsrf,
 	authRateLimitError,
@@ -65,6 +66,8 @@ export const MERCHANT_AUTH_POST_PATHS = new Set([
 	"/sign-in/social",
 	"/two-factor/send-otp",
 	"/two-factor/verify-otp",
+	"/two-factor/verify-totp",
+	"/two-factor/verify-backup-code",
 	"/send-verification-email",
 	"/request-password-reset",
 	"/reset-password",
@@ -906,6 +909,7 @@ export function createMerchantApp({
 
 	if (connections) registerConnectionRoutes(app, store, connections, stripeOAuth);
 	registerMcpRoutes(app, store, auth, mcpChanges);
+	registerSecondFactorRoutes(app, store, auth);
 
 	return app;
 
@@ -993,6 +997,24 @@ export function createMerchantApp({
 		if (rateLimited !== null) throw rateLimited;
 		const headers = new Headers(response.headers);
 		const payload: unknown = await response.json().catch(() => null);
+		if (
+			path === "/sign-in/email" &&
+			payload &&
+			typeof payload === "object" &&
+			"twoFactorRedirect" in payload &&
+			payload.twoFactorRedirect === true
+		) {
+			// The library lists the methods it has configured, and emailed codes are one of them. Say
+			// what this account can actually use: an authenticator and recovery codes once enrolled,
+			// otherwise the emailed code that leads to setting one up.
+			const methods = "twoFactorMethods" in payload ? payload.twoFactorMethods : null;
+			Object.assign(payload, {
+				twoFactorMethods:
+					Array.isArray(methods) && methods.includes("totp")
+						? ["totp", "backup_code"]
+						: ["email_enrolment"],
+			});
+		}
 		// The library's duplicate-email fast path is generic, but a concurrent insert
 		// can hit its unique constraint instead. Preserve the same non-enumerating result.
 		if (

@@ -43,6 +43,7 @@
 		"@better-auth/cimd": "1.7.7",
 		"@better-auth/mcp": "1.7.7",
 		"@better-auth/oauth-provider": "1.7.7",
+		"@better-auth/utils": "0.4.2",
 		"@googleapis/androidpublisher": "42.2.0",
 		"@modelcontextprotocol/server": "2.3.1",
 		"@prometheus-io/client": "0.16.1",

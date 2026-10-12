@@ -11734,6 +11734,21 @@
               "$ref": "#/components/schemas/MerchantProjectView"
             },
             "type": "array"
+          },
+          "secondFactor": {
+            "properties": {
+              "enrolled": {
+                "type": "boolean"
+              },
+              "recoveryCodesRemaining": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "enrolled",
+              "recoveryCodesRemaining"
+            ],
+            "type": "object"
           }
         },
         "required": [
@@ -11746,6 +11761,7 @@
           "projects",
           "context",
           "onboarding",
+          "secondFactor",
           "csrfToken"
         ],
         "type": "object"
@@ -21621,6 +21637,35 @@
         ],
         "type": "object"
       },
+      "SecondFactorEnrolmentView": {
+        "properties": {
+          "otpauthUri": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "otpauthUri",
+          "secret"
+        ],
+        "type": "object"
+      },
+      "SecondFactorRecoveryCodesView": {
+        "properties": {
+          "recoveryCodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "recoveryCodes"
+        ],
+        "type": "object"
+      },
       "StepUpChallengeView": {
         "properties": {
           "action": {
@@ -25187,7 +25232,11 @@
                   "properties": {
                     "twoFactorMethods": {
                       "items": {
-                        "type": "string"
+                        "enum": [
+                          "totp",
+                          "backup_code",
+                          "email_enrolment"
+                        ]
                       },
                       "type": "array"
                     },
@@ -25202,7 +25251,7 @@
                 }
               }
             },
-            "description": "Continue with email OTP"
+            "description": "Continue with an authenticator code or a recovery code, or with the emailed code that starts setting up an authenticator"
           },
           "400": {
             "content": {
@@ -27192,6 +27241,560 @@
         ]
       }
     },
+    "/api/auth/two-factor/verify-backup-code": {
+      "post": {
+        "description": "Verify a backup code for two-factor authentication",
+        "operationId": "authTwoFactorVerifyBackupCode",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "code": {
+                    "description": "A backup code to verify. Eg: \"123456\"",
+                    "type": "string"
+                  },
+                  "disableSession": {
+                    "description": "If true, the session cookie will not be set.",
+                    "type": "boolean"
+                  },
+                  "oauth_query": {
+                    "description": "Signed OAuth authorization continuation",
+                    "maxLength": 8192,
+                    "type": "string"
+                  },
+                  "trustDevice": {
+                    "description": "If true, the device will be trusted for 30 days. It'll be refreshed on every sign in request within this time. Eg: true",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "user": {
+                          "description": "The authenticated user object",
+                          "properties": {
+                            "createdAt": {
+                              "description": "Timestamp when the user was created",
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            "email": {
+                              "description": "User's email address",
+                              "format": "email",
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "emailVerified": {
+                              "description": "Whether the email is verified",
+                              "type": [
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "id": {
+                              "description": "Unique identifier of the user",
+                              "type": "string"
+                            },
+                            "image": {
+                              "description": "User's profile image URL",
+                              "format": "uri",
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "name": {
+                              "description": "User's name",
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "updatedAt": {
+                              "description": "Timestamp when the user was last updated",
+                              "format": "date-time",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "createdAt",
+                            "updatedAt"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "user"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "redirect": {
+                          "const": true
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "redirect"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Two-factor OTP verified successfully"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          }
+        },
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "summary": "POST /api/auth/two-factor/verify-backup-code",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
     "/api/auth/two-factor/verify-otp": {
       "post": {
         "description": "Verify two factor OTP",
@@ -27736,6 +28339,556 @@
           }
         ],
         "summary": "POST /api/auth/two-factor/verify-otp",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/auth/two-factor/verify-totp": {
+      "post": {
+        "description": "Verify two factor TOTP",
+        "operationId": "authTwoFactorVerifyTotp",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "code": {
+                    "description": "The otp code to verify. Eg: \"012345\"",
+                    "type": "string"
+                  },
+                  "oauth_query": {
+                    "description": "Signed OAuth authorization continuation",
+                    "maxLength": 8192,
+                    "type": "string"
+                  },
+                  "trustDevice": {
+                    "description": "If true, the device will be trusted for 30 days. It'll be refreshed on every sign in request within this time. Eg: true",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "user": {
+                          "description": "The authenticated user object",
+                          "properties": {
+                            "createdAt": {
+                              "description": "Timestamp when the user was created",
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            "email": {
+                              "description": "User's email address",
+                              "format": "email",
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "emailVerified": {
+                              "description": "Whether the email is verified",
+                              "type": [
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "id": {
+                              "description": "Unique identifier of the user",
+                              "type": "string"
+                            },
+                            "image": {
+                              "description": "User's profile image URL",
+                              "format": "uri",
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "name": {
+                              "description": "User's name",
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "updatedAt": {
+                              "description": "Timestamp when the user was last updated",
+                              "format": "date-time",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "createdAt",
+                            "updatedAt"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "user"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "redirect": {
+                          "const": true
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "redirect"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Two-factor OTP verified successfully"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "error_description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuotumError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Authentication or Quotum boundary error"
+          }
+        },
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "summary": "POST /api/auth/two-factor/verify-totp",
         "tags": [
           "authentication"
         ]
@@ -55375,6 +56528,684 @@
           }
         ],
         "summary": "POST /api/platform/provisioning/{id}/rotate",
+        "tags": [
+          "platform"
+        ]
+      }
+    },
+    "/api/platform/second-factor/enrolment": {
+      "post": {
+        "operationId": "postApiPlatformSecondFactorEnrolment",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Step-Up-Grant",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "maxLength": 32,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SecondFactorEnrolmentView"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "POST /api/platform/second-factor/enrolment",
+        "tags": [
+          "platform"
+        ]
+      }
+    },
+    "/api/platform/second-factor/enrolment/confirm": {
+      "post": {
+        "operationId": "postApiPlatformSecondFactorEnrolmentConfirm",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Step-Up-Grant",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "maxLength": 32,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SecondFactorRecoveryCodesView"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "POST /api/platform/second-factor/enrolment/confirm",
+        "tags": [
+          "platform"
+        ]
+      }
+    },
+    "/api/platform/second-factor/recovery-codes": {
+      "post": {
+        "operationId": "postApiPlatformSecondFactorRecoveryCodes",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Quotum-Step-Up-Grant",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "maxLength": 32,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SecondFactorRecoveryCodesView"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "POST /api/platform/second-factor/recovery-codes",
         "tags": [
           "platform"
         ]

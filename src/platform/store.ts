@@ -430,7 +430,22 @@ export class MerchantStore {
 			projects,
 			context: validContext,
 			onboarding: await this.draft(identity.principalId),
+			secondFactor: await this.secondFactorStatus(identity.authUserId),
 			csrfToken: csrf,
+		};
+	}
+	/** Whether the person has an authenticator and how many recovery codes they have left. */
+	async secondFactorStatus(
+		userId: string,
+		executor: MerchantSql = this.sql,
+	): Promise<{ enrolled: boolean; recoveryCodesRemaining: number }> {
+		const [factor] = await executor<
+			{ verified: boolean | null; backup_codes_remaining: number }[]
+		>`SELECT verified,backup_codes_remaining FROM platform_auth_two_factors WHERE user_id=${userId}`;
+		const enrolled = factor?.verified === true;
+		return {
+			enrolled,
+			recoveryCodesRemaining: enrolled ? (factor?.backup_codes_remaining ?? 0) : 0,
 		};
 	}
 	async logout(identity: MerchantIdentity): Promise<void> {

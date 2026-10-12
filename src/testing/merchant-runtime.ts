@@ -1,3 +1,5 @@
+import { createOTP } from "@better-auth/utils/otp";
+import { symmetricDecrypt } from "better-auth/crypto";
 import { SQL } from "bun";
 import { z } from "zod";
 import { bootstrapTestPlatform } from "../../scripts/lib/test-platform-bootstrap";
@@ -12,7 +14,7 @@ import type { QuotumApp, QuotumRuntime } from "../composition/runtime-lifecycle"
 import { createWorkerProviderSelectors } from "../composition/worker-providers";
 import { BillingRepository } from "../db/repository";
 import { ProjectionSyncJobRepository } from "../db/repository-domains";
-import { createMerchantAuth } from "../platform/auth";
+import { createMerchantAuth, type MerchantAuth } from "../platform/auth";
 import { loadMerchantConfig, merchantPlatformEnabled } from "../platform/config";
 import { secureEqual, tokenHash } from "../platform/security";
 import { ProjectionHttpClient } from "../projections/http-client";
@@ -60,6 +62,7 @@ export async function createMerchantTestRuntime(
 	};
 	let runtime: QuotumRuntime | undefined;
 	let control: ReturnType<typeof Bun.serve> | undefined;
+	let merchantAuth: MerchantAuth | undefined;
 	try {
 		const synthetic = merchantTestConnections(database, fixtureConnections(env.connectionFixtures));
 		const otpFixture = createMerchantOtpFixture(database, mailer);
@@ -264,6 +267,34 @@ export async function createMerchantTestRuntime(
 							await database`UPDATE platform_auth_links SET expires_at=now()-interval '1 minute' WHERE token_hash=${tokenHash(token, config.secret)} AND kind=${kind} RETURNING token_hash`;
 						return Response.json({ expired: rows.length === 1 });
 					}
+					if (request.method === "GET" && url.pathname === "/second-factor/code") {
+						// Browser tests cannot read an authenticator app, so they ask for what it would show.
+						const email = z.email().parse(url.searchParams.get("email"));
+						const pending = url.searchParams.get("pending") === "true";
+						const steps = z.coerce
+							.number()
+							.int()
+							.min(-1)
+							.max(1)
+							.parse(url.searchParams.get("steps") ?? 0);
+						const [row] = pending
+							? await database<
+									{ secret: string | null; verified: boolean | null }[]
+								>`SELECT f.pending_secret AS secret,f.verified FROM platform_auth_two_factors f JOIN platform_auth_users u ON u.id=f.user_id WHERE u.email=${email}`
+							: await database<
+									{ secret: string | null; verified: boolean | null }[]
+								>`SELECT f.secret,f.verified FROM platform_auth_two_factors f JOIN platform_auth_users u ON u.id=f.user_id WHERE u.email=${email}`;
+						if (!row?.secret || (!pending && row.verified !== true) || !merchantAuth)
+							return Response.json({ code: "NOT_READY" }, { status: 404 });
+						const secret = await symmetricDecrypt({
+							key: (await merchantAuth.$context).secretConfig,
+							data: row.secret,
+						});
+						const step = Math.floor(Date.now() / 30_000) + steps;
+						return Response.json({
+							code: await createOTP(secret, { digits: 6, period: 30 }).hotp(step),
+						});
+					}
 					if (request.method === "POST" && url.pathname === "/auth/cooldown") {
 						const { email } = z.strictObject({ email: z.email() }).parse(await request.json());
 						const [user] = await database<
@@ -428,10 +459,12 @@ export async function createMerchantTestRuntime(
 					google: { clientId: google.clientId, clientSecret: google.clientSecret },
 				},
 				mailer,
-				createAuth: (store, sender, authDatabase) =>
-					createMerchantAuth(store, sender, authDatabase, {
+				createAuth: (store, sender, authDatabase) => {
+					merchantAuth = createMerchantAuth(store, sender, authDatabase, {
 						googleAuthorizationEndpoint: `http://127.0.0.1:${control?.port}/google/${controlToken}/authorize`,
-					}),
+					});
+					return merchantAuth;
+				},
 			},
 		});
 		synthetic.configure(

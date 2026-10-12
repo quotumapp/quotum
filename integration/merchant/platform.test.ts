@@ -24,7 +24,6 @@ import { createIntegrationBillingEnv } from "../../tests/integration/helpers/loc
 import {
 	MerchantBrowser,
 	merchantFixture,
-	password,
 	serviceToken,
 	grant as stepUpGrant,
 	testConfig,
@@ -1178,7 +1177,7 @@ describe("merchant platform transactions", () => {
 			(await anon.json<InvitationView>("/api/platform/invitations/preview", { token })).status,
 		).toBe("inviter_authority_lost");
 	});
-	it("binds a fresh password+OTP step-up to one session, scope, action, and payload", async () => {
+	it("binds a fresh second-factor step-up to one session, scope, action, and payload", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();
 		await onboard(browser);
@@ -1216,12 +1215,7 @@ describe("merchant platform transactions", () => {
 			(await browser.request(`/api/platform/step-up/${challenge.id}/complete`, {})).status,
 		).toBe(401);
 		await f.sql`DELETE FROM platform_rate_limits`;
-		await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
-		await browser.json("/api/auth/two-factor/send-otp", {});
-		await browser.json("/api/auth/two-factor/verify-otp", {
-			code: f.mailer.otp("owner@example.com"),
-			trustDevice: false,
-		});
+		await browser.secondFactorSignIn("owner@example.com");
 		const previous = browser.cookies.get(SESSION_COOKIE);
 		const complete = await browser.json<{ grant: string }>(
 			`/api/platform/step-up/${challenge.id}/complete`,
@@ -1276,12 +1270,7 @@ describe("merchant platform transactions", () => {
 			request: { method: "POST", path, body, idempotencyKey: "replay-once" },
 		});
 		await f.sql`DELETE FROM platform_rate_limits`;
-		await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
-		await browser.json("/api/auth/two-factor/send-otp", {});
-		await browser.json("/api/auth/two-factor/verify-otp", {
-			code: f.mailer.otp("owner@example.com"),
-			trustDevice: false,
-		});
+		await browser.secondFactorSignIn("owner@example.com");
 		const { grant } = await browser.json<{ grant: string }>(
 			`/api/platform/step-up/${challenge.id}/complete`,
 			{},
