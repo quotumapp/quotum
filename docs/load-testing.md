@@ -12,13 +12,15 @@ reused target keeps its earlier bootstrap and issues no fresh credential; add `-
 to drop and recreate its `public` schema first. `--docker` explicitly selects a fresh disposable
 container, overriding an environment URI; when combined with `--postgres-uri`, the last selector wins.
 
-The lane's own container keeps its data on a 512 MB tmpfs. A default run of about three and a half
-minutes at up to 128 concurrent requests stopped with `Database operation failed`, and the same
-sequence completed against a Postgres with an 8 GB data directory. For longer runs start your own
-disposable Postgres with a larger data directory and `pg_stat_statements` in
-`shared_preload_libraries` (the lane reports statements per request from it), then pass
-`--postgres-uri` with `--recreate-schema`. A reused database has no container to sample, so its
-Postgres CPU is reported as unavailable.
+The lane's own container keeps its data on a 2 GB tmpfs, the same helper the integration lanes
+use (`scripts/lib/postgres-container.ts`). A default run peaks near 560 MB of it. A longer or wider
+run (a higher `--duration` or `--accounts`) can outgrow it: at the earlier 512 MB size a run of
+about three and a half minutes at up to 128 concurrent requests stopped with
+`Database operation failed`, and the same sequence completed against a Postgres with an 8 GB data
+directory. For such runs start your own disposable Postgres with a larger data directory and
+`pg_stat_statements` in `shared_preload_libraries` (the lane reports statements per request from
+it), then pass `--postgres-uri` with `--recreate-schema`. A reused database has no container to
+sample, so its Postgres CPU is reported as unavailable.
 
 The lane publishes a metered catalog and grants balances to one hot account and, by default,
 1,000 spread accounts. Scenarios are `hot` (one account, one feature), `spread` (round-robin),
