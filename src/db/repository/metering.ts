@@ -629,6 +629,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 					projectId,
 					originalUsageEventId: original.id,
 					originalUsageEventRecordedAt: original.recorded_at,
+					customerId: customer.id,
 					correctionUsageEventId: event.id,
 					correctionUsageEventRecordedAt: event.recorded_at,
 					usageReduction: correctionQuantity,

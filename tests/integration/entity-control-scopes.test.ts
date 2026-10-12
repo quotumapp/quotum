@@ -130,6 +130,47 @@ localDescribe("an entity's limit beside the account's", () => {
 		expect(Object.keys(await windows("scopes", "w2"))).toEqual(["account"]);
 	});
 
+	it("starts a first limit from the usage its own scope already recorded", async () => {
+		await account("firsts");
+		await consume("firsts", "30", "f1", "w1");
+		await consume("firsts", "20", "f2", "w2");
+		await consume("firsts", "5", "f3");
+
+		// An entity's limit starts from that entity's usage, not the account's.
+		await limit("firsts", "40", "w1");
+		expect(await windows("firsts", "w1")).toMatchObject({
+			entity: { limit: "40", consumed: "30" },
+		});
+		const refused = await consume("firsts", "11", "f4", "w1");
+		expect(refused).toMatchObject({
+			allowed: false,
+			control: { source: "entity", currentValue: "30" },
+		});
+		expect((await consume("firsts", "10", "f5", "w1")).allowed).toBe(true);
+
+		// The account's limit starts from everything the account recorded, whichever entity it was.
+		await limit("firsts", "100");
+		expect(await windows("firsts", "w2")).toMatchObject({
+			account: { limit: "100", consumed: "65" },
+		});
+		expect(await windows("firsts", "w1")).toMatchObject({
+			account: { consumed: "65" },
+			entity: { consumed: "40" },
+		});
+		const full = await consume("firsts", "36", "f6", "w2");
+		expect(full).toMatchObject({
+			allowed: false,
+			control: { source: "account", currentValue: "65" },
+		});
+		expect((await consume("firsts", "35", "f7", "w2")).allowed).toBe(true);
+		expect((await consume("firsts", "1", "f8", "w2")).allowed).toBe(false);
+		expect(await eventSum("firsts")).toBe(100);
+		expect(await windows("firsts", "w1")).toMatchObject({
+			account: { consumed: "100" },
+			entity: { consumed: "40" },
+		});
+	});
+
 	it("keeps counting an entity in the account's window when its own limit is the looser one", async () => {
 		await account("looser");
 		await limit("looser", "100");

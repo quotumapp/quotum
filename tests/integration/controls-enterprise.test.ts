@@ -228,7 +228,8 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		`;
 		expect(window).toEqual({ window_start_at: day.start, window_end_at: day.end });
 
-		// The account's one usage limit for the feature moves to a two-week window.
+		// The account's one usage limit for the feature moves to a two-week window, which counts the
+		// 3 already recorded in it.
 		const fortnight = await controls.upsertControl(project, {
 			billingAccountId: "cadence-account",
 			controlKind: "usage_limit",
@@ -242,7 +243,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		expect(fortnight).toMatchObject({
 			interval: "week",
 			intervalCount: 2,
-			consumedValue: "0",
+			consumedValue: "3",
 			windowStartAt: weeks.start.toISOString(),
 			windowEndAt: weeks.end.toISOString(),
 		});
@@ -340,6 +341,424 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		expect(await consume("replace-account", "1", "replace:4")).toMatchObject({
 			allowed: false,
 			reason: "control_limit_exceeded",
+		});
+	});
+
+	it("starts a first usage limit from the usage its window already recorded", async () => {
+		const limit = await replaceableLimit("first-limit");
+		// Yesterday's usage is outside today's window; today's 50 are inside it.
+		const yesterday = await consume("first-limit", "40", "first:yesterday");
+		await context.sql`
+			UPDATE usage_events SET recorded_at = recorded_at - interval '1 day'
+			WHERE id = ${yesterday.usageEventId}
+		`;
+		expect(await consume("first-limit", "50", "first:today")).toMatchObject({ allowed: true });
+
+		// The limit answers as a write will, before it has a window of its own.
+		expect(await limit("60")).toMatchObject({
+			limitValue: "60",
+			consumedValue: "50",
+			remainingValue: "10",
+		});
+		expect(await context.sql`SELECT id FROM control_windows`).toHaveLength(0);
+		const check = { billingAccountId: "first-limit", featureKey: "ai_credits", quantity: "11" };
+		expect(await context.repository.checkUsage(project, check)).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+		expect(await consume("first-limit", "11", "first:over")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: {
+				kind: "usage_limit",
+				limitValue: "60",
+				currentValue: "50",
+				requestedValue: "11",
+				remainingValue: "10",
+			},
+		});
+		expect(await consume("first-limit", "10", "first:fit")).toMatchObject({ allowed: true });
+		expect(await consume("first-limit", "1", "first:full")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+
+		// The window opened with the 50 once and counted the 10 on top of them.
+		const windows = await context.sql<Array<{ consumed: string }>>`
+			SELECT consumed_value::text AS consumed FROM control_windows
+		`;
+		expect(windows.map((row) => ({ ...row }))).toEqual([{ consumed: "60.000000000" }]);
+		expect(await limit("60")).toMatchObject({ consumedValue: "60" });
+	});
+
+	it("counts the usage a first limit's window recorded when a hold is placed and confirmed", async () => {
+		const reserve = (account: string, quantity: string, key: string) =>
+			context.repository.reserveUsage(project, {
+				billingAccountId: account,
+				featureKey: "ai_credits",
+				quantity,
+				idempotencyKey: `${account}:${key}`,
+				expiresInSeconds: 300,
+			});
+		const confirm = (
+			account: string,
+			reservationId: string | null,
+			quantity: string,
+			key: string,
+		) =>
+			context.repository.confirmUsageReservation(project, {
+				billingAccountId: account,
+				reservationId: reservationId ?? "",
+				quantity,
+				idempotencyKey: `${account}:${key}`,
+			});
+		const consumed = async (account: string) =>
+			(await context.repository.controlsEnterprise.listEffectiveControls(project, account))[0];
+
+		// A hold is admitted only if it fits what the window recorded.
+		const limitHeld = await replaceableLimit("first-reserve");
+		await consume("first-reserve", "50", "first-reserve:recorded");
+		await limitHeld("60");
+		expect(await reserve("first-reserve", "11", "refused")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+		const fit = await reserve("first-reserve", "10", "fit");
+		expect(fit.allowed).toBe(true);
+		expect(await confirm("first-reserve", fit.reservationId, "10", "confirm")).toMatchObject({
+			allowed: true,
+		});
+		expect(await consumed("first-reserve")).toMatchObject({ consumedValue: "60", heldValue: "0" });
+
+		// A hold taken before the limit existed holds nothing under it, and its confirmation is the
+		// first write that opens the limit's window: it counts on top of the 50 already recorded.
+		const limitLate = await replaceableLimit("first-confirm");
+		await consume("first-confirm", "50", "first-confirm:recorded");
+		const early = await reserve("first-confirm", "11", "early");
+		expect(early.allowed).toBe(true);
+		await limitLate("60");
+		expect(await confirm("first-confirm", early.reservationId, "11", "over")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { limitValue: "60", currentValue: "50", requestedValue: "11" },
+		});
+		expect(await confirm("first-confirm", early.reservationId, "10", "fit")).toMatchObject({
+			allowed: true,
+		});
+		expect(await consumed("first-confirm")).toMatchObject({ consumedValue: "60", heldValue: "0" });
+	});
+
+	it("takes a correction of the usage a first limit started from out of its window", async () => {
+		const limit = await replaceableLimit("first-fix");
+		const first = await consume("first-fix", "30", "first-fix:a");
+		const second = await consume("first-fix", "20", "first-fix:b");
+		const correct = (original: typeof first, quantity: string, key: string) =>
+			context.repository.correctUsage(project, {
+				billingAccountId: "first-fix",
+				originalUsageEventId: original.usageEventId ?? "",
+				originalRecordedAt: new Date(original.recordedAt ?? ""),
+				quantity,
+				idempotencyKey: `first-fix:${key}`,
+				actor: "integration-test",
+				reason: "refund",
+			});
+		const counted = async () =>
+			(await context.repository.controlsEnterprise.listEffectiveControls(project, "first-fix"))[0]
+				?.consumedValue;
+
+		// A correction recorded before the limit has a window is part of what it starts from.
+		await correct(first, "10", "before-window");
+		expect(await limit("60")).toMatchObject({ consumedValue: "40" });
+		expect(await context.sql`SELECT id FROM control_windows`).toHaveLength(0);
+
+		// Once the window exists, corrections of earlier usage lower it too.
+		expect(await consume("first-fix", "5", "first-fix:c")).toMatchObject({ allowed: true });
+		expect(await counted()).toBe("45");
+		await correct(second, "20", "after-window");
+		expect(await counted()).toBe("25");
+		await correct(first, "20", "again");
+		expect(await counted()).toBe("5");
+		expect(await consume("first-fix", "55", "first-fix:d")).toMatchObject({ allowed: true });
+		expect(await consume("first-fix", "1", "first-fix:e")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+	});
+
+	it("starts a plan default only from the usage of the entities it governs", async () => {
+		await seedCatalogMigration(context.sql);
+		const controls = context.repository.controlsEnterprise;
+		for (const [account, entities] of [
+			["migration-stripe", ["bound", "other"]],
+			["migration-apple", ["first", "second"]],
+		] as const) {
+			await context.repository.grantAllocation(project, {
+				billingAccountId: account,
+				featureKey: "ai_credits",
+				quantity: "10000",
+				sourceKind: "credit_grant",
+				sourceKey: `fixture:${account}`,
+			});
+			for (const externalId of entities) {
+				await controls.createEntity(project, {
+					billingAccountId: account,
+					externalId,
+					kind: "team",
+				});
+			}
+		}
+		// The Stripe subscription belongs to one entity; the Apple one covers its whole account.
+		await context.sql`
+			UPDATE subscriptions SET entity_id = entity.id, scope_mode = 'entity'
+			FROM entities entity
+			WHERE subscriptions.external_subscription_id = 'sub_migrate_stripe'
+				AND entity.external_id = 'bound'
+		`;
+		const use = (account: string, quantity: string, key: string, entityId?: string) =>
+			context.repository.consumeUsage(project, {
+				billingAccountId: account,
+				featureKey: "ai_credits",
+				quantity,
+				idempotencyKey: `${account}:${key}`,
+				entityId,
+			});
+		// Usage recorded today, before the plan has a limit.
+		const stripe = {
+			bound: await use("migration-stripe", "5", "bound:early", "bound"),
+			other: await use("migration-stripe", "30", "other:early", "other"),
+		};
+		await use("migration-stripe", "20", "none:early");
+		await use("migration-apple", "30", "first:early", "first");
+		await use("migration-apple", "20", "second:early", "second");
+		await use("migration-apple", "10", "none:early");
+		await addPlanDefaultLimit();
+		const counted = async (account: string, entityId?: string) =>
+			(await controls.listEffectiveControls(project, account, entityId)).map(
+				(control) => control.consumedValue,
+			);
+
+		// The limit governs the bound entity only, so only that entity's 5 start it. The other
+		// entity and the account's own usage are not under it; they are not limited either.
+		expect(await counted("migration-stripe", "bound")).toEqual(["5"]);
+		expect(await counted("migration-stripe", "other")).toEqual([]);
+		expect(await counted("migration-stripe")).toEqual([]);
+		expect(await use("migration-stripe", "95", "bound:fill", "bound")).toMatchObject({
+			allowed: true,
+		});
+		expect(await use("migration-stripe", "1", "bound:over", "bound")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { source: "plan_default", currentValue: "100", requestedValue: "1" },
+		});
+		expect(await use("migration-stripe", "500", "other:free", "other")).toMatchObject({
+			allowed: true,
+		});
+		expect(await use("migration-stripe", "500", "none:free")).toMatchObject({ allowed: true });
+
+		// A correction of usage the limit never counted leaves its window alone.
+		await context.repository.correctUsage(project, {
+			billingAccountId: "migration-stripe",
+			originalUsageEventId: stripe.other.usageEventId ?? "",
+			originalRecordedAt: new Date(stripe.other.recordedAt ?? ""),
+			quantity: "30",
+			idempotencyKey: "migration-stripe:other:correction",
+			actor: "integration-test",
+			reason: "refund",
+		});
+		expect(await counted("migration-stripe", "bound")).toEqual(["100"]);
+		await context.repository.correctUsage(project, {
+			billingAccountId: "migration-stripe",
+			originalUsageEventId: stripe.bound.usageEventId ?? "",
+			originalRecordedAt: new Date(stripe.bound.recordedAt ?? ""),
+			quantity: "5",
+			idempotencyKey: "migration-stripe:bound:correction",
+			actor: "integration-test",
+			reason: "refund",
+		});
+		expect(await counted("migration-stripe", "bound")).toEqual(["95"]);
+
+		// An account-wide subscription puts every entity's usage under the same limit.
+		expect(await counted("migration-apple", "first")).toEqual(["60"]);
+		expect(await counted("migration-apple", "second")).toEqual(["60"]);
+		expect(await use("migration-apple", "41", "second:over", "second")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { source: "plan_default", currentValue: "60", requestedValue: "41" },
+		});
+		expect(await use("migration-apple", "40", "second:fit", "second")).toMatchObject({
+			allowed: true,
+		});
+	});
+
+	it("counts every entity's usage for a plan default an account-wide plan grant carries", async () => {
+		await seedCatalogMigration(context.sql);
+		const controls = context.repository.controlsEnterprise;
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "migration-stripe",
+			featureKey: "ai_credits",
+			quantity: "1000",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:migration-stripe",
+		});
+		for (const externalId of ["bound", "other"]) {
+			await controls.createEntity(project, {
+				billingAccountId: "migration-stripe",
+				externalId,
+				kind: "team",
+			});
+		}
+		await context.sql`
+			UPDATE subscriptions SET entity_id = entity.id, scope_mode = 'entity'
+			FROM entities entity
+			WHERE subscriptions.external_subscription_id = 'sub_migrate_stripe'
+				AND entity.external_id = 'bound'
+		`;
+		for (const [quantity, key, entityId] of [
+			["5", "bound", "bound"],
+			["30", "other", "other"],
+			["20", "none", undefined],
+		] as const) {
+			await context.repository.consumeUsage(project, {
+				billingAccountId: "migration-stripe",
+				featureKey: "ai_credits",
+				quantity,
+				idempotencyKey: `grant:${key}`,
+				entityId,
+			});
+		}
+		await addPlanDefaultLimit();
+		const counted = async (entityId?: string) =>
+			(await controls.listEffectiveControls(project, "migration-stripe", entityId)).map(
+				(control) => control.consumedValue,
+			);
+		expect(await counted("bound")).toEqual(["5"]);
+		expect(await counted("other")).toEqual([]);
+
+		// A trial of the same plan version is account-wide: the limit now governs every entity, and
+		// the usage recorded before it is under it.
+		await context.sql`
+			INSERT INTO plan_grants (
+				project_id, customer_id, plan_id, plan_version_id, plan_kind, origin, status,
+				duration_unit, duration_count, starts_at, ends_at, actor, idempotency_key, request_hash
+			)
+			SELECT version.project_id, customer.id, version.plan_id, version.id, 'base', 'trial',
+				'active', 'day', 14, now() - interval '1 hour', now() + interval '14 days',
+				'integration-test', 'trial-fixture', repeat('a', 64)
+			FROM plan_versions version
+			JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+			JOIN customers customer ON customer.project_id = version.project_id
+				AND customer.billing_account_id = 'migration-stripe'
+			WHERE plan.key = 'migration-plan' AND version.version = 1
+		`;
+		expect(await counted("bound")).toEqual(["55"]);
+		expect(await counted("other")).toEqual(["55"]);
+		expect(await counted()).toEqual(["55"]);
+		expect(
+			await context.repository.consumeUsage(project, {
+				billingAccountId: "migration-stripe",
+				featureKey: "ai_credits",
+				quantity: "46",
+				idempotencyKey: "grant:over",
+				entityId: "other",
+			}),
+		).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { source: "plan_default", currentValue: "55", requestedValue: "46" },
+		});
+	});
+
+	it("counts a confirmation in the longer window of a limit that replaced its hold's", async () => {
+		const limit = await replaceableLimit("late-confirm");
+		await limit("100");
+		const hold = await context.repository.reserveUsage(project, {
+			billingAccountId: "late-confirm",
+			featureKey: "ai_credits",
+			quantity: "40",
+			idempotencyKey: "late-confirm:reserve",
+			expiresInSeconds: 300,
+		});
+		expect(hold.allowed).toBe(true);
+		// The hold was taken in yesterday's daily window, and a monthly limit now replaces the daily.
+		await context.sql`
+			UPDATE control_windows
+			SET window_start_at = window_start_at - interval '1 day',
+				window_end_at = window_end_at - interval '1 day'
+			WHERE customer_id = (SELECT id FROM customers WHERE billing_account_id = 'late-confirm')
+		`;
+		await context.repository.controlsEnterprise.upsertControl(project, {
+			billingAccountId: "late-confirm",
+			controlKind: "usage_limit",
+			featureKey: "ai_credits",
+			limitValue: "100",
+			interval: "month",
+			actor: "integration-test",
+		});
+		expect(
+			await context.repository.confirmUsageReservation(project, {
+				billingAccountId: "late-confirm",
+				reservationId: hold.reservationId ?? "",
+				quantity: "40",
+				idempotencyKey: "late-confirm:confirm",
+			}),
+		).toMatchObject({ allowed: true });
+
+		// The confirmation was charged to yesterday's daily window, which is not the month's, so the
+		// month's window starts from it: 40 are recorded in the month.
+		expect(await consume("late-confirm", "61", "late-confirm:over")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { limitValue: "100", currentValue: "40", requestedValue: "61" },
+		});
+		expect(await consume("late-confirm", "60", "late-confirm:fit")).toMatchObject({
+			allowed: true,
+		});
+	});
+
+	it("counts a confirmation in a lifetime window that replaced its hold's daily one", async () => {
+		const limit = await replaceableLimit("late-lifetime");
+		await limit("100");
+		const hold = await context.repository.reserveUsage(project, {
+			billingAccountId: "late-lifetime",
+			featureKey: "ai_credits",
+			quantity: "40",
+			idempotencyKey: "late-lifetime:reserve",
+			expiresInSeconds: 300,
+		});
+		expect(hold.allowed).toBe(true);
+		// The hold was taken in yesterday's daily window, and a lifetime limit now replaces the daily.
+		await context.sql`
+			UPDATE control_windows
+			SET window_start_at = window_start_at - interval '1 day',
+				window_end_at = window_end_at - interval '1 day'
+			WHERE customer_id = (SELECT id FROM customers WHERE billing_account_id = 'late-lifetime')
+		`;
+		await context.repository.controlsEnterprise.upsertControl(project, {
+			billingAccountId: "late-lifetime",
+			controlKind: "usage_limit",
+			featureKey: "ai_credits",
+			limitValue: "100",
+			interval: "lifetime",
+			actor: "integration-test",
+		});
+		expect(
+			await context.repository.confirmUsageReservation(project, {
+				billingAccountId: "late-lifetime",
+				reservationId: hold.reservationId ?? "",
+				quantity: "40",
+				idempotencyKey: "late-lifetime:confirm",
+			}),
+		).toMatchObject({ allowed: true });
+
+		// A lifetime window has no earlier window the confirmation could have been charged to, so the
+		// 40 recorded count in it whatever the daily window was charged.
+		expect(await consume("late-lifetime", "61", "late-lifetime:over")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { limitValue: "100", currentValue: "40", requestedValue: "61" },
+		});
+		expect(await consume("late-lifetime", "60", "late-lifetime:fit")).toMatchObject({
+			allowed: true,
 		});
 	});
 
@@ -1481,6 +1900,22 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 				interval: "day",
 				actor: "integration-test",
 			});
+	}
+
+	/** The migration plan's first version gets a usage limit of 100 per day on `ai_credits`. */
+	async function addPlanDefaultLimit(): Promise<void> {
+		await context.sql`
+			INSERT INTO control_policies (
+				project_id, source_type, plan_version_id, control_kind, feature_id,
+				limit_value, interval, revision, created_by
+			)
+			SELECT version.project_id, 'plan_default', version.id, 'usage_limit', feature.id, 100,
+				'day', 1, 'integration-test'
+			FROM plan_versions version
+			JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+			JOIN features feature ON feature.project_id = version.project_id AND feature.key = 'ai_credits'
+			WHERE plan.key = 'migration-plan' AND version.version = 1
+		`;
 	}
 
 	async function prepareAutoTopupAccount(billingAccountId: string): Promise<void> {

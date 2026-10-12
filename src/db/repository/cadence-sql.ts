@@ -77,6 +77,20 @@ function cadenceIntervalSql(unitColumn: string, countColumn: string): SQL {
 	return drizzleSql.raw(`(CASE ${unitColumn} ${branches.join(" ")} END)`);
 }
 
+/**
+ * Whether the cadences stored in the `interval` and `interval_count` columns of two control
+ * policies, given by their aliases, produce the same windows: a quarter and three months, or a day
+ * and 24 hours, are one cadence, and a lifetime is only the same as a lifetime.
+ */
+export function sameStoredCadenceSql(left: string, right: string): SQL {
+	const measure = (alias: string, unit: (unit: CadenceUnit) => number | null) =>
+		drizzleSql`(${unitCase(`${alias}.interval`, unit)} * ${drizzleSql.raw(`${alias}.interval_count`)})`;
+	return drizzleSql`(
+		${measure(left, unitMonths)} IS NOT DISTINCT FROM ${measure(right, unitMonths)}
+		AND ${measure(left, unitHours)} IS NOT DISTINCT FROM ${measure(right, unitHours)}
+	)`;
+}
+
 /** A plan item's reset cadence as a Postgres interval, or NULL when the item does not reset. */
 export function resetIntervalSql(itemAlias: string): SQL {
 	return cadenceIntervalSql(`${itemAlias}.reset_interval`, `${itemAlias}.reset_interval_count`);

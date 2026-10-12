@@ -10,12 +10,18 @@ import {
 import type { BillingProvider } from "../../billing/types";
 import { type ProviderCapabilityLookup, providersImplementing } from "../../providers/capabilities";
 import {
+	type ControlLimit,
 	carriedControlConsumptionSql,
+	chargedToEarlierWindowSql,
 	controlIdentityHeldSql,
 	controlIdentityWindowsSql,
+	controlReachSql,
 	controlWindowBounds,
+	eventInControlReachSql,
+	openingControlConsumptionSql,
 	readControlClock,
-	resolveEffectiveControls,
+	recordedControlConsumptionSql,
+	resolveControlLimits,
 	sameControlWindow,
 	tightestControl,
 } from "./controls-enterprise";
@@ -93,7 +99,7 @@ async function evaluateControls(
 		mode === "check" || customerId === null
 			? Promise.resolve()
 			: lockCustomerControls(executor, input.projectId, customerId),
-		resolveEffectiveControls(executor, {
+		resolveControlLimits(executor, {
 			projectId: input.projectId,
 			customerId,
 			entityId: input.entityId,
@@ -111,7 +117,7 @@ async function evaluateControls(
 		)
 		.sort((left, right) => (BigInt(left.policyId) < BigInt(right.policyId) ? -1 : 1));
 	const locked: Array<{
-		control: EffectiveControl;
+		control: ControlLimit;
 		windowId: string;
 		consumed: string;
 		held: string;
@@ -138,17 +144,21 @@ async function evaluateControls(
 			customerId: input.customerId,
 			windowStartAt: bounds.start.toISOString(),
 			windowEndAt: bounds.end?.toISOString() ?? null,
+			now,
 		};
 		if (mode === "check") {
-			// A check reads what the window counted, carried over from a replaced control if this one
-			// has no window yet, as a write would record it, and the open holds in the window
-			// wherever they were placed.
+			// A check reads what the window counted, carried over from a replaced control or counted
+			// from the usage already recorded in it if this one has no window yet, as a write would
+			// record it, and the open holds in the window wherever they were placed.
 			window = await executeOne(
 				executor,
 				drizzleSql`
 				SELECT own.id,
-					GREATEST(COALESCE(own.consumed_value, 0), ${carriedControlConsumptionSql(scope)})::text
-						AS consumed_value,
+					GREATEST(
+						COALESCE(own.consumed_value, 0),
+						${carriedControlConsumptionSql(scope)},
+						${recordedControlConsumptionSql(scope, drizzleSql`own.id IS NOT NULL`)}
+					)::text AS consumed_value,
 					COALESCE((
 						SELECT sum(hold.held_value)
 						FROM reservation_control_holds hold
@@ -166,8 +176,9 @@ async function evaluateControls(
 			`,
 			);
 		} else {
-			// A new window starts from what a replaced control counted in it; a window that fell
-			// behind a control which counted in its place catches up.
+			// A new window starts from what a replaced control counted in it or from the usage already
+			// recorded in it; a window that fell behind a control which counted in its place catches
+			// up.
 			await executeRows(
 				executor,
 				drizzleSql`
@@ -177,7 +188,7 @@ async function evaluateControls(
 				) VALUES (
 					${input.projectId}, ${control.policyId}::bigint, ${input.customerId},
 					${input.entityId}::bigint, ${bounds.start.toISOString()}, ${bounds.end?.toISOString() ?? null},
-					${carriedControlConsumptionSql(scope)}
+					${openingControlConsumptionSql(scope)}
 				) ON CONFLICT (project_id, control_policy_id, customer_id, window_start_at) DO UPDATE
 				SET consumed_value = GREATEST(control_windows.consumed_value, EXCLUDED.consumed_value)
 				WHERE EXCLUDED.consumed_value > control_windows.consumed_value
@@ -352,7 +363,7 @@ export async function confirmControlHolds(
 		ORDER BY hold.control_window_id FOR UPDATE OF control_window, hold
 	`,
 		),
-		resolveEffectiveControls(executor, {
+		resolveControlLimits(executor, {
 			projectId: input.projectId,
 			customerId: input.customerId,
 			entityId: input.entityId,
@@ -413,12 +424,13 @@ export async function confirmControlHolds(
 			) VALUES (
 				${input.projectId}, ${control.policyId}::bigint, ${input.customerId},
 				${input.entityId}::bigint, ${windowStartAt}, ${windowEndAt},
-				${carriedControlConsumptionSql({
+				${openingControlConsumptionSql({
 					projectId: input.projectId,
 					policyId: control.policyId,
 					customerId: input.customerId,
 					windowStartAt,
 					windowEndAt,
+					now,
 				})}
 			) ON CONFLICT (project_id, control_policy_id, customer_id, window_start_at) DO UPDATE
 			SET consumed_value = GREATEST(control_windows.consumed_value, EXCLUDED.consumed_value)
@@ -641,6 +653,8 @@ export async function correctControlConsumption(
 		correctionUsageEventId: string;
 		correctionUsageEventRecordedAt: Date | string;
 		usageReduction: string;
+		/** The customer of the original event. */
+		customerId: string;
 		/** The original event's quantity and how much of it earlier corrections took back. */
 		originalQuantity: string;
 		correctedQuantityBefore: string;
@@ -648,23 +662,8 @@ export async function correctControlConsumption(
 		currency: string | null;
 	},
 ): Promise<void> {
-	const customers = await executeRows<{ customer_id: string }>(
-		executor,
-		drizzleSql`
-		SELECT DISTINCT control_window.customer_id
-		FROM usage_event_control_entries entry
-		JOIN control_windows control_window
-			ON control_window.project_id = entry.project_id
-			AND control_window.id = entry.control_window_id
-		WHERE entry.project_id = ${input.projectId}
-			AND entry.usage_event_id = ${input.originalUsageEventId}
-			AND entry.usage_event_recorded_at = ${new Date(input.originalUsageEventRecordedAt).toISOString()}
-		ORDER BY control_window.customer_id
-	`,
-	);
-	for (const customer of customers) {
-		await lockCustomerControls(executor, input.projectId, customer.customer_id);
-	}
+	const originalRecordedAt = new Date(input.originalUsageEventRecordedAt).toISOString();
+	await lockCustomerControls(executor, input.projectId, input.customerId);
 	// A replaced control's window and its replacement's count the same usage: the replacement
 	// carried what the replaced one had counted. A correction lowers every window that counts it, so
 	// the highest of them stays the window's usage. Each set of such windows is corrected once.
@@ -717,7 +716,7 @@ export async function correctControlConsumption(
 			AND identity_window.window_end_at IS NOT DISTINCT FROM control_window.window_end_at
 		WHERE entry.project_id = ${input.projectId}
 			AND entry.usage_event_id = ${input.originalUsageEventId}
-			AND entry.usage_event_recorded_at = ${new Date(input.originalUsageEventRecordedAt).toISOString()}
+			AND entry.usage_event_recorded_at = ${originalRecordedAt}
 		ORDER BY identity_window.id, (entry.control_window_id = identity_window.id) DESC,
 			entry.control_window_id
 		FOR UPDATE OF identity_window
@@ -729,6 +728,36 @@ export async function correctControlConsumption(
 		decimalToUnits(input.correctedQuantityBefore, 9) -
 		decimalToUnits(input.usageReduction, 9);
 	const corrected = new Set<string>();
+	const lower = async (windowId: string, consumedValue: unknown, reductionUnits: bigint) => {
+		if (reductionUnits === 0n) return;
+		const currentUnits = decimalToUnits(String(consumedValue), 9);
+		const desiredNext = currentUnits - reductionUnits;
+		const nextUnits = desiredNext > 0n ? desiredNext : 0n;
+		const appliedDelta = nextUnits - currentUnits;
+		if (appliedDelta === 0n) return;
+		const renderedNext = unitsToDecimal(nextUnits, 9);
+		const renderedDelta = unitsToDecimal(appliedDelta, 9);
+		await executeOne(
+			executor,
+			drizzleSql`
+			UPDATE control_windows SET consumed_value = ${renderedNext}::numeric, updated_at = now()
+			WHERE project_id = ${input.projectId} AND id = ${windowId}::bigint
+			RETURNING id
+		`,
+		);
+		await executeRows(
+			executor,
+			drizzleSql`
+			INSERT INTO usage_event_control_entries (
+				project_id, usage_event_recorded_at, usage_event_id, control_window_id, value
+			) VALUES (
+				${input.projectId}, ${new Date(input.correctionUsageEventRecordedAt).toISOString()},
+				${input.correctionUsageEventId}, ${windowId}::bigint, ${renderedDelta}::numeric
+			) ON CONFLICT (project_id, usage_event_recorded_at, usage_event_id, control_window_id)
+			DO NOTHING
+		`,
+		);
+	};
 	for (const window of windows) {
 		const windowId = String(window.control_window_id);
 		if (corrected.has(windowId)) continue;
@@ -757,34 +786,51 @@ export async function correctControlConsumption(
 					: 0n;
 			if (heldUnits - reductionUnits > mostUnits) reductionUnits = heldUnits - mostUnits;
 		}
-		if (reductionUnits === 0n) continue;
-		const currentUnits = decimalToUnits(String(window.consumed_value), 9);
-		const desiredNext = currentUnits - reductionUnits;
-		const nextUnits = desiredNext > 0n ? desiredNext : 0n;
-		const appliedDelta = nextUnits - currentUnits;
-		if (appliedDelta === 0n) continue;
-		const renderedNext = unitsToDecimal(nextUnits, 9);
-		const renderedDelta = unitsToDecimal(appliedDelta, 9);
-		await executeOne(
-			executor,
-			drizzleSql`
-			UPDATE control_windows SET consumed_value = ${renderedNext}::numeric, updated_at = now()
-			WHERE project_id = ${input.projectId} AND id = ${windowId}::bigint
-			RETURNING id
-		`,
-		);
-		await executeRows(
-			executor,
-			drizzleSql`
-			INSERT INTO usage_event_control_entries (
-				project_id, usage_event_recorded_at, usage_event_id, control_window_id, value
-			) VALUES (
-				${input.projectId}, ${new Date(input.correctionUsageEventRecordedAt).toISOString()},
-				${input.correctionUsageEventId}, ${windowId}::bigint, ${renderedDelta}::numeric
-			) ON CONFLICT (project_id, usage_event_recorded_at, usage_event_id, control_window_id)
-			DO NOTHING
-		`,
-		);
+		await lower(windowId, window.consumed_value, reductionUnits);
+	}
+	// A usage limit that opened after the usage was recorded counted it from the usage already
+	// recorded in its window (`recordedControlConsumptionSql`), so the event has no entry to find
+	// that window by. The window the usage was recorded in, for the event's feature and entity, is
+	// lowered with the others, unless it is one the event's entries already corrected or a limit
+	// that never counted the event's entity (a plan default of another entity's subscription).
+	const now = await readControlClock(executor);
+	const opened = await executeRows<{
+		control_window_id: string | number | bigint;
+		consumed_value: unknown;
+	}>(
+		executor,
+		drizzleSql`
+		SELECT control_window.id AS control_window_id, control_window.consumed_value::text AS consumed_value
+		FROM usage_events event
+		JOIN control_policies policy
+			ON policy.project_id = event.project_id AND policy.feature_id = event.meter_feature_id
+		${controlReachSql({
+			projectId: input.projectId,
+			customerId: input.customerId,
+			now,
+		})}
+		JOIN control_windows control_window
+			ON control_window.project_id = policy.project_id
+			AND control_window.control_policy_id = policy.id
+			AND control_window.customer_id = event.customer_id
+		WHERE event.project_id = ${input.projectId}
+			AND event.recorded_at = ${originalRecordedAt}
+			AND event.id = ${input.originalUsageEventId}
+			AND policy.control_kind = 'usage_limit'
+			AND (policy.entity_id IS NULL OR policy.entity_id = event.entity_id)
+			AND ${eventInControlReachSql()}
+			AND control_window.window_start_at <= event.recorded_at
+			AND (control_window.window_end_at IS NULL OR control_window.window_end_at > event.recorded_at)
+			AND (event.operation = 'consume' OR NOT ${chargedToEarlierWindowSql()})
+		ORDER BY control_window.id
+		FOR UPDATE OF control_window
+	`,
+	);
+	for (const window of opened) {
+		const windowId = String(window.control_window_id);
+		if (corrected.has(windowId)) continue;
+		corrected.add(windowId);
+		await lower(windowId, window.consumed_value, decimalToUnits(input.usageReduction, 9));
 	}
 }
 
@@ -846,7 +892,7 @@ export async function recordUsageAlertDelta(
 		const bounds = controlWindowBounds(alert.interval, alert.interval_count, countedAt);
 		let threshold = canonicalDecimal(String(alert.threshold_value), "alert threshold", 9);
 		if (alert.threshold_type === "percentage") {
-			const controls = await resolveEffectiveControls(executor, {
+			const controls = await resolveControlLimits(executor, {
 				projectId: input.projectId,
 				customerId: input.customerId,
 				entityId: alert.entity_id === null ? null : String(alert.entity_id),
