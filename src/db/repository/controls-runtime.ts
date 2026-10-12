@@ -14,7 +14,9 @@ import {
 	chargedToEarlierWindowSql,
 	controlIdentityHeldSql,
 	controlIdentityWindowsSql,
+	controlReachSql,
 	controlWindowBounds,
+	eventInControlReachSql,
 	openingControlConsumptionSql,
 	readControlClock,
 	recordedControlConsumptionSql,
@@ -141,6 +143,7 @@ async function evaluateControls(
 			customerId: input.customerId,
 			windowStartAt: bounds.start.toISOString(),
 			windowEndAt: bounds.end?.toISOString() ?? null,
+			now,
 		};
 		if (mode === "check") {
 			// A check reads what the window counted, carried over from a replaced control or counted
@@ -426,6 +429,7 @@ export async function confirmControlHolds(
 					customerId: input.customerId,
 					windowStartAt,
 					windowEndAt,
+					now,
 				})}
 			) ON CONFLICT (project_id, control_policy_id, customer_id, window_start_at) DO UPDATE
 			SET consumed_value = GREATEST(control_windows.consumed_value, EXCLUDED.consumed_value)
@@ -786,7 +790,9 @@ export async function correctControlConsumption(
 	// A usage limit that opened after the usage was recorded counted it from the usage already
 	// recorded in its window (`recordedControlConsumptionSql`), so the event has no entry to find
 	// that window by. The window the usage was recorded in, for the event's feature and entity, is
-	// lowered with the others, unless it is one the event's entries already corrected.
+	// lowered with the others, unless it is one the event's entries already corrected or a limit
+	// that never counted the event's entity (a plan default of another entity's subscription).
+	const now = await readControlClock(executor);
 	const opened = await executeRows<{
 		control_window_id: string | number | bigint;
 		consumed_value: unknown;
@@ -797,6 +803,11 @@ export async function correctControlConsumption(
 		FROM usage_events event
 		JOIN control_policies policy
 			ON policy.project_id = event.project_id AND policy.feature_id = event.meter_feature_id
+		${controlReachSql({
+			projectId: input.projectId,
+			customerId: input.customerId,
+			now,
+		})}
 		JOIN control_windows control_window
 			ON control_window.project_id = policy.project_id
 			AND control_window.control_policy_id = policy.id
@@ -806,6 +817,7 @@ export async function correctControlConsumption(
 			AND event.id = ${input.originalUsageEventId}
 			AND policy.control_kind = 'usage_limit'
 			AND (policy.entity_id IS NULL OR policy.entity_id = event.entity_id)
+			AND ${eventInControlReachSql()}
 			AND control_window.window_start_at <= event.recorded_at
 			AND (control_window.window_end_at IS NULL OR control_window.window_end_at > event.recorded_at)
 			AND (event.operation = 'consume' OR NOT ${chargedToEarlierWindowSql()})

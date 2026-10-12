@@ -1307,14 +1307,97 @@ export function chargedToEarlierWindowSql(): DrizzleSQL {
 	)`;
 }
 
+/** What a plan default is judged against: the customer's subscriptions and grants at `now`. */
+export interface PlanDefaultScope {
+	projectId: string;
+	customerId: string | null;
+	now: Date;
+}
+
+/**
+ * The customer's subscriptions of the plan version of the policy aliased `policy` that still give
+ * access at `now`, as a `FROM` and `WHERE` a caller continues. A subscription can belong to one
+ * entity, so the caller says which entities count.
+ */
+function planDefaultSubscriptionsSql(scope: PlanDefaultScope): DrizzleSQL {
+	return drizzleSql`FROM subscriptions subscription
+		WHERE subscription.project_id = policy.project_id
+			AND subscription.customer_id = ${scope.customerId}
+			AND subscription.plan_version_id = policy.plan_version_id
+			AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+			AND (subscription.expires_at IS NULL OR subscription.expires_at > ${scope.now.toISOString()})`;
+}
+
+/**
+ * Whether an account-wide plan grant carries the default controls of the plan version of the
+ * policy aliased `policy` for every entity of the customer.
+ */
+function planDefaultGrantSql(scope: PlanDefaultScope): DrizzleSQL {
+	return drizzleSql`EXISTS (
+		SELECT 1 FROM plan_grants plan_grant
+		WHERE plan_grant.project_id = policy.project_id
+			AND plan_grant.customer_id = ${scope.customerId}
+			AND plan_grant.plan_version_id = policy.plan_version_id
+			AND plan_grant.origin <> 'default'
+			AND plan_grant.status = 'active'
+			AND plan_grant.starts_at <= ${scope.now.toISOString()}
+			AND (plan_grant.ends_at IS NULL OR plan_grant.ends_at > ${scope.now.toISOString()})
+	)`;
+}
+
+/**
+ * Whether the policy aliased `policy` belongs to the default plan, at the version the customer's
+ * next write applies: a write has caught up first, and a check answers as that write will,
+ * including for an account Quotum has not recorded or the pass has not reached.
+ */
+function planDefaultVersionSql(scope: PlanDefaultScope): DrizzleSQL {
+	return drizzleSql`policy.plan_version_id = ${defaultPlanReadVersionSql(
+		scope.projectId,
+		drizzleSql`${scope.customerId}::uuid`,
+	)}`;
+}
+
+/**
+ * A lateral `reach` for the control policy aliased `policy`: whether it counts the usage of every
+ * entity of the customer (`all_entities`), or only that of `entity_ids`. A plan default reaches
+ * every entity when an account-wide subscription, an account-wide plan grant or the default plan
+ * puts it in force, and otherwise only the entities its plan version's entity-bound subscriptions
+ * belong to, as `resolveEffectiveControls` applies it. Every other source counts all of them.
+ */
+export function controlReachSql(scope: PlanDefaultScope): DrizzleSQL {
+	return drizzleSql`CROSS JOIN LATERAL (
+		SELECT COALESCE(
+				policy.source_type <> 'plan_default'
+				OR EXISTS (SELECT 1 ${planDefaultSubscriptionsSql(scope)}
+					AND subscription.entity_id IS NULL)
+				OR ${planDefaultGrantSql(scope)}
+				OR ${planDefaultVersionSql(scope)},
+				false
+			) AS all_entities,
+			ARRAY(
+				SELECT subscription.entity_id ${planDefaultSubscriptionsSql(scope)}
+					AND subscription.entity_id IS NOT NULL
+			) AS entity_ids
+	) reach`;
+}
+
+/**
+ * Whether the row of `usage_events` aliased `event` is usage the policy counts, beside the `reach`
+ * of `controlReachSql`.
+ */
+export function eventInControlReachSql(): DrizzleSQL {
+	return drizzleSql`(reach.all_entities OR event.entity_id = ANY(reach.entity_ids))`;
+}
+
 /**
  * What the usage already recorded in a usage limit's window counts toward it, for a window that
  * has no row yet: the net quantity of the customer's events for the limit's feature in the
- * window, those of the limit's entity only when it belongs to one. A control cannot see usage
- * that predates it any other way, so a first limit, one with a different cadence than the limit
- * it replaced, and a plan or contract limit that takes effect mid-window start from this count
- * instead of from zero. It is zero for a spend limit, which has no recorded charge to read, and
- * once the window has its row, so the aggregate runs once per window and not per request.
+ * window, those of the limit's entity only when it belongs to one, and those of the entities a
+ * plan default is in force for only. A control cannot see usage that predates it any other way,
+ * so a first limit, one with a different cadence than the limit it replaced, and a plan or
+ * contract limit that takes effect mid-window start from this count instead of from zero. It is
+ * zero for a spend limit, which has no recorded charge to read, and once the window has its row,
+ * so the aggregate runs once per window and not per request.
  *
  * Usage a hold's confirmation charged to an earlier window than the one it was recorded in is
  * not counted again: the window that held it already counted it. Only confirmations and the
@@ -1328,18 +1411,21 @@ export function recordedControlConsumptionSql(
 		customerId: string | null;
 		windowStartAt: string;
 		windowEndAt: string | null;
+		now: Date;
 	},
 	windowExists: DrizzleSQL,
 ): DrizzleSQL {
 	return drizzleSql`CASE WHEN ${windowExists} THEN 0 ELSE COALESCE((
 		SELECT GREATEST(COALESCE(sum(event.quantity), 0), 0)
 		FROM control_policies policy
+		${controlReachSql(input)}
 		JOIN usage_events event
 			ON event.project_id = policy.project_id AND event.meter_feature_id = policy.feature_id
 		WHERE policy.project_id = ${input.projectId} AND policy.id = ${input.policyId}::bigint
 			AND policy.control_kind = 'usage_limit'
 			AND event.customer_id = ${input.customerId}
 			AND (policy.entity_id IS NULL OR event.entity_id = policy.entity_id)
+			AND ${eventInControlReachSql()}
 			AND ${recordedInWindowSql(input.windowStartAt, input.windowEndAt)}
 			AND (event.operation = 'consume' OR NOT ${chargedToEarlierWindowSql()})
 	), 0) END`;
@@ -1356,6 +1442,7 @@ export function openingControlConsumptionSql(input: {
 	customerId: string | null;
 	windowStartAt: string;
 	windowEndAt: string | null;
+	now: Date;
 }): DrizzleSQL {
 	return drizzleSql`GREATEST(
 		${carriedControlConsumptionSql(input)},
@@ -1454,6 +1541,7 @@ export async function resolveEffectiveControls(
 	},
 ): Promise<EffectiveControl[]> {
 	const now = await readControlClock(executor, input.now);
+	const planDefault = { projectId: input.projectId, customerId: input.customerId, now };
 	// One statement: the active contract is resolved inline so this read can be pipelined.
 	const rows = await executeRows<EffectiveControlRow>(
 		executor,
@@ -1476,31 +1564,10 @@ export async function resolveEffectiveControls(
 			AND (policy.expires_at IS NULL OR policy.expires_at > ${now.toISOString()})
 			AND (
 				(policy.source_type = 'plan_default' AND (EXISTS (
-					SELECT 1 FROM subscriptions subscription
-					WHERE subscription.project_id = policy.project_id
-						AND subscription.customer_id = ${input.customerId}
-						AND subscription.plan_version_id = policy.plan_version_id
-						AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-						AND (subscription.expires_at IS NULL OR subscription.expires_at > ${now.toISOString()})
+					SELECT 1 ${planDefaultSubscriptionsSql(planDefault)}
 						AND (subscription.entity_id IS NULL OR subscription.entity_id = ${input.entityId}::bigint)
-				) OR EXISTS (
-					-- An account-wide plan grant carries its pinned version's default controls too.
-					SELECT 1 FROM plan_grants plan_grant
-					WHERE plan_grant.project_id = policy.project_id
-						AND plan_grant.customer_id = ${input.customerId}
-						AND plan_grant.plan_version_id = policy.plan_version_id
-						AND plan_grant.origin <> 'default'
-						AND plan_grant.status = 'active'
-						AND plan_grant.starts_at <= ${now.toISOString()}
-						AND (plan_grant.ends_at IS NULL OR plan_grant.ends_at > ${now.toISOString()})
-				)))
-				-- The default plan's, at the version the account's next write applies: a write has
-				-- caught up first, and a check answers as that write will, including for an account
-				-- Quotum has not recorded or the pass has not reached.
-				OR (policy.source_type = 'plan_default' AND policy.plan_version_id = ${defaultPlanReadVersionSql(
-					input.projectId,
-					drizzleSql`${input.customerId}::uuid`,
-				)})
+				) OR ${planDefaultGrantSql(planDefault)}))
+				OR (policy.source_type = 'plan_default' AND ${planDefaultVersionSql(planDefault)})
 				OR (policy.source_type = 'contract' AND policy.contract_id = (SELECT id FROM active_contract))
 				OR (policy.source_type = 'account' AND policy.customer_id = ${input.customerId})
 				OR (policy.source_type = 'entity' AND policy.customer_id = ${input.customerId}
@@ -1546,6 +1613,7 @@ export async function resolveEffectiveControls(
 				customerId: input.customerId,
 				windowStartAt: bounds.start.toISOString(),
 				windowEndAt: bounds.end?.toISOString() ?? null,
+				now,
 			};
 			return executeOne<{ consumed_value: unknown; held_value: unknown }>(
 				executor,

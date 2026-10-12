@@ -485,6 +485,189 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		});
 	});
 
+	it("starts a plan default only from the usage of the entities it governs", async () => {
+		await seedCatalogMigration(context.sql);
+		const controls = context.repository.controlsEnterprise;
+		for (const [account, entities] of [
+			["migration-stripe", ["bound", "other"]],
+			["migration-apple", ["first", "second"]],
+		] as const) {
+			await context.repository.grantAllocation(project, {
+				billingAccountId: account,
+				featureKey: "ai_credits",
+				quantity: "10000",
+				sourceKind: "credit_grant",
+				sourceKey: `fixture:${account}`,
+			});
+			for (const externalId of entities) {
+				await controls.createEntity(project, {
+					billingAccountId: account,
+					externalId,
+					kind: "team",
+				});
+			}
+		}
+		// The Stripe subscription belongs to one entity; the Apple one covers its whole account.
+		await context.sql`
+			UPDATE subscriptions SET entity_id = entity.id, scope_mode = 'entity'
+			FROM entities entity
+			WHERE subscriptions.external_subscription_id = 'sub_migrate_stripe'
+				AND entity.external_id = 'bound'
+		`;
+		const use = (account: string, quantity: string, key: string, entityId?: string) =>
+			context.repository.consumeUsage(project, {
+				billingAccountId: account,
+				featureKey: "ai_credits",
+				quantity,
+				idempotencyKey: `${account}:${key}`,
+				entityId,
+			});
+		// Usage recorded today, before the plan has a limit.
+		const stripe = {
+			bound: await use("migration-stripe", "5", "bound:early", "bound"),
+			other: await use("migration-stripe", "30", "other:early", "other"),
+		};
+		await use("migration-stripe", "20", "none:early");
+		await use("migration-apple", "30", "first:early", "first");
+		await use("migration-apple", "20", "second:early", "second");
+		await use("migration-apple", "10", "none:early");
+		await addPlanDefaultLimit();
+		const counted = async (account: string, entityId?: string) =>
+			(await controls.listEffectiveControls(project, account, entityId)).map(
+				(control) => control.consumedValue,
+			);
+
+		// The limit governs the bound entity only, so only that entity's 5 start it. The other
+		// entity and the account's own usage are not under it; they are not limited either.
+		expect(await counted("migration-stripe", "bound")).toEqual(["5"]);
+		expect(await counted("migration-stripe", "other")).toEqual([]);
+		expect(await counted("migration-stripe")).toEqual([]);
+		expect(await use("migration-stripe", "95", "bound:fill", "bound")).toMatchObject({
+			allowed: true,
+		});
+		expect(await use("migration-stripe", "1", "bound:over", "bound")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { source: "plan_default", currentValue: "100", requestedValue: "1" },
+		});
+		expect(await use("migration-stripe", "500", "other:free", "other")).toMatchObject({
+			allowed: true,
+		});
+		expect(await use("migration-stripe", "500", "none:free")).toMatchObject({ allowed: true });
+
+		// A correction of usage the limit never counted leaves its window alone.
+		await context.repository.correctUsage(project, {
+			billingAccountId: "migration-stripe",
+			originalUsageEventId: stripe.other.usageEventId ?? "",
+			originalRecordedAt: new Date(stripe.other.recordedAt ?? ""),
+			quantity: "30",
+			idempotencyKey: "migration-stripe:other:correction",
+			actor: "integration-test",
+			reason: "refund",
+		});
+		expect(await counted("migration-stripe", "bound")).toEqual(["100"]);
+		await context.repository.correctUsage(project, {
+			billingAccountId: "migration-stripe",
+			originalUsageEventId: stripe.bound.usageEventId ?? "",
+			originalRecordedAt: new Date(stripe.bound.recordedAt ?? ""),
+			quantity: "5",
+			idempotencyKey: "migration-stripe:bound:correction",
+			actor: "integration-test",
+			reason: "refund",
+		});
+		expect(await counted("migration-stripe", "bound")).toEqual(["95"]);
+
+		// An account-wide subscription puts every entity's usage under the same limit.
+		expect(await counted("migration-apple", "first")).toEqual(["60"]);
+		expect(await counted("migration-apple", "second")).toEqual(["60"]);
+		expect(await use("migration-apple", "41", "second:over", "second")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { source: "plan_default", currentValue: "60", requestedValue: "41" },
+		});
+		expect(await use("migration-apple", "40", "second:fit", "second")).toMatchObject({
+			allowed: true,
+		});
+	});
+
+	it("counts every entity's usage for a plan default an account-wide plan grant carries", async () => {
+		await seedCatalogMigration(context.sql);
+		const controls = context.repository.controlsEnterprise;
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "migration-stripe",
+			featureKey: "ai_credits",
+			quantity: "1000",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:migration-stripe",
+		});
+		for (const externalId of ["bound", "other"]) {
+			await controls.createEntity(project, {
+				billingAccountId: "migration-stripe",
+				externalId,
+				kind: "team",
+			});
+		}
+		await context.sql`
+			UPDATE subscriptions SET entity_id = entity.id, scope_mode = 'entity'
+			FROM entities entity
+			WHERE subscriptions.external_subscription_id = 'sub_migrate_stripe'
+				AND entity.external_id = 'bound'
+		`;
+		for (const [quantity, key, entityId] of [
+			["5", "bound", "bound"],
+			["30", "other", "other"],
+			["20", "none", undefined],
+		] as const) {
+			await context.repository.consumeUsage(project, {
+				billingAccountId: "migration-stripe",
+				featureKey: "ai_credits",
+				quantity,
+				idempotencyKey: `grant:${key}`,
+				entityId,
+			});
+		}
+		await addPlanDefaultLimit();
+		const counted = async (entityId?: string) =>
+			(await controls.listEffectiveControls(project, "migration-stripe", entityId)).map(
+				(control) => control.consumedValue,
+			);
+		expect(await counted("bound")).toEqual(["5"]);
+		expect(await counted("other")).toEqual([]);
+
+		// A trial of the same plan version is account-wide: the limit now governs every entity, and
+		// the usage recorded before it is under it.
+		await context.sql`
+			INSERT INTO plan_grants (
+				project_id, customer_id, plan_id, plan_version_id, plan_kind, origin, status,
+				duration_unit, duration_count, starts_at, ends_at, actor, idempotency_key, request_hash
+			)
+			SELECT version.project_id, customer.id, version.plan_id, version.id, 'base', 'trial',
+				'active', 'day', 14, now() - interval '1 hour', now() + interval '14 days',
+				'integration-test', 'trial-fixture', repeat('a', 64)
+			FROM plan_versions version
+			JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+			JOIN customers customer ON customer.project_id = version.project_id
+				AND customer.billing_account_id = 'migration-stripe'
+			WHERE plan.key = 'migration-plan' AND version.version = 1
+		`;
+		expect(await counted("bound")).toEqual(["55"]);
+		expect(await counted("other")).toEqual(["55"]);
+		expect(await counted()).toEqual(["55"]);
+		expect(
+			await context.repository.consumeUsage(project, {
+				billingAccountId: "migration-stripe",
+				featureKey: "ai_credits",
+				quantity: "46",
+				idempotencyKey: "grant:over",
+				entityId: "other",
+			}),
+		).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { source: "plan_default", currentValue: "55", requestedValue: "46" },
+		});
+	});
+
 	it("keeps an open hold's exposure through a control replacement and settles it once", async () => {
 		const limit = await replaceableLimit("replace-hold");
 		await limit("100");
@@ -1623,6 +1806,22 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 				interval: "day",
 				actor: "integration-test",
 			});
+	}
+
+	/** The migration plan's first version gets a usage limit of 100 per day on `ai_credits`. */
+	async function addPlanDefaultLimit(): Promise<void> {
+		await context.sql`
+			INSERT INTO control_policies (
+				project_id, source_type, plan_version_id, control_kind, feature_id,
+				limit_value, interval, revision, created_by
+			)
+			SELECT version.project_id, 'plan_default', version.id, 'usage_limit', feature.id, 100,
+				'day', 1, 'integration-test'
+			FROM plan_versions version
+			JOIN plans plan ON plan.project_id = version.project_id AND plan.id = version.plan_id
+			JOIN features feature ON feature.project_id = version.project_id AND feature.key = 'ai_credits'
+			WHERE plan.key = 'migration-plan' AND version.version = 1
+		`;
 	}
 
 	async function prepareAutoTopupAccount(billingAccountId: string): Promise<void> {
