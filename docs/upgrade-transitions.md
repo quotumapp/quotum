@@ -57,6 +57,15 @@ it unset runs [headless](deployment.md#headless-mode). No migration or data move
   `quotum` commands. A headless deployment can also drop it.
 - The guarded test entrypoint `quotum-api/testing/merchant` requires the flag to be `true`.
 
+## Provider customer unlink receipts
+
+The billing core baseline adds the `provider_customer_unlinks` table and its index for the
+operator's [Stripe customer unlink](providers.md#unlinking-a-stripe-customer). No existing table
+changes and nothing is backfilled, so a dump from the previous release restores as it is: follow
+steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity). An older
+image cannot read the new baseline, so a rollback restores the pre-upgrade backup, which loses the
+unlinks made since along with their receipts.
+
 ## Upgrading a populated deployment to v0.22.0
 
 v0.22.0 adds the common Paddle checkout and changes two baselines relative to v0.21.0:

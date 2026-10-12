@@ -230,6 +230,9 @@ Operator routes:
 - Operator grants under `/v1/admin/operator-grants` and administrative debits under
   `/v1/admin/administrative-debits`; see
   [Operator grants and administrative debits](grants.md#operator-grants-and-administrative-debits).
+- `POST /v1/admin/provider-customer-unlinks/:billingAccountId` removes an account's Stripe
+  customer link and `GET` on the same path lists the receipts; see
+  [Unlinking a Stripe customer](providers.md#unlinking-a-stripe-customer).
 - `POST /v1/admin/store-events/:eventId/replay`: an event of another project, or none, answers
   `404 NOT_FOUND`; one already processed, or leased by a worker that is still live, answers
   `409 STORE_EVENT_NOT_REPLAYABLE`.
