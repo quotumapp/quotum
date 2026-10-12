@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import type { OnboardingDraftView } from "../../src/platform/contracts";
 import type { PlatformQuery } from "../../src/platform/persistence/query-executor";
 import { PlatformOrganizationRepository } from "../../src/platform/persistence/repositories";
-import { MerchantBrowser, merchantFixture } from "./fixture";
+import { MerchantBrowser, merchantFixture, onboard } from "./fixture";
 
 const f = merchantFixture();
 beforeEach(() => f.reset());
@@ -73,6 +73,41 @@ describe("merchant onboarding races", () => {
 		const draft = await first.json<OnboardingDraftView>("/api/platform/onboarding");
 		expect(draft.organization?.slug).toBe(owned[0]?.slug);
 		expect(await f.sql`SELECT slug FROM platform_organizations ORDER BY slug`).toEqual(owned);
+	});
+
+	it("adds one project when two sessions race for the last slot under the cap", async () => {
+		const first = new MerchantBrowser(f);
+		await onboard(first);
+		const second = new MerchantBrowser(f);
+		await f.sql`DELETE FROM platform_rate_limits`;
+		await second.login("owner@example.com");
+		await f.sql`UPDATE platform_organizations SET project_limit=2 WHERE slug='acme'`;
+
+		let pending: Promise<Response>[] = [];
+		// Both requests wait on the organization lock held here, so the cap count is read by whichever
+		// takes it first and the other sees that project.
+		await f.client.begin(async (tx) => {
+			await tx`SELECT id FROM platform_organizations WHERE slug='acme' FOR UPDATE`;
+			pending = [
+				first.request(
+					"/api/platform/projects",
+					{ organizationSlug: "acme", name: "Project One", key: "project-one" },
+					{ key: "first-session-project" },
+				),
+				second.request(
+					"/api/platform/projects",
+					{ organizationSlug: "acme", name: "Project Two", key: "project-two" },
+					{ key: "second-session-project" },
+				),
+			];
+			await waitForLockWaiters(2);
+		});
+		const outcomes = await Promise.all(pending.map(async (reply) => outcome(await reply)));
+		expect(outcomes.sort()).toEqual([
+			[200, null],
+			[409, "PROJECT_LIMIT_REACHED"],
+		]);
+		expect(await f.sql`SELECT id FROM platform_projects`).toHaveLength(2);
 	});
 
 	it("answers a slug claimed by a concurrent sign-up with 409 SLUG_UNAVAILABLE", async () => {

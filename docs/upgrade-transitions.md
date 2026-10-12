@@ -68,6 +68,25 @@ it unset runs [headless](deployment.md#headless-mode). No migration or data move
   `quotum` commands. A headless deployment can also drop it.
 - The guarded test entrypoint `quotum-api/testing/merchant` requires the flag to be `true`.
 
+## Projects beyond onboarding
+
+The platform baseline adds `platform_organizations.project_limit` (positive, default `5`), and the
+merchant baseline makes `platform_provisioning_operations.draft_id` nullable so a project added to an
+existing organization with [`POST /api/platform/projects`](operations.md#add-a-project) can have an
+operation without an onboarding draft. Both additions admit existing rows, so the move needs no
+manual SQL: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). The data-only restore lists its
+columns, so every organization takes the default limit. Afterwards confirm
+
+```sql
+SELECT count(*) FROM platform_organizations o
+WHERE (SELECT count(*) FROM platform_projects p WHERE p.organization_id = o.id) > o.project_limit;
+```
+
+returns 0; an organization above the cap keeps its projects and only refuses another until an
+operator raises its limit. An older image cannot read the new baseline, so a rollback restores the
+pre-upgrade backup.
+
 ## Provider customer unlink receipts
 
 The billing core baseline adds the `provider_customer_unlinks` table and its index for the

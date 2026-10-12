@@ -10,6 +10,7 @@ CREATE TABLE platform_organizations (
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	member_limit integer NOT NULL DEFAULT 3 CHECK(member_limit > 0),
+	project_limit integer NOT NULL DEFAULT 5 CHECK(project_limit > 0),
 	production_limit integer NOT NULL DEFAULT 1 CHECK(production_limit >= 0),
 	status text NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended','removed')),
 	CONSTRAINT platform_organizations_slug_format_check CHECK (

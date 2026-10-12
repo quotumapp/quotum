@@ -182,5 +182,8 @@ describe("baseline schema files", () => {
 			expect(merchant).toContain(`CREATE TABLE ${table} (`);
 		}
 		expect(merchant).not.toMatch(/CREATE TABLE (?!platform_)/);
+		// A project added to an existing organization has an operation without an onboarding draft.
+		expect(merchant).toMatch(/draft_id uuid UNIQUE REFERENCES platform_onboarding_drafts/u);
+		expect(platform).toContain("project_limit integer NOT NULL DEFAULT 5");
 	});
 });

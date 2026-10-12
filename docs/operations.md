@@ -119,6 +119,21 @@ issues only the declared credential kinds an instance has never held, whether th
 or already exists, so it does not rotate. To add an environment or a project later, extend the
 manifest, review `--check`, and run `--apply` with a new `--credentials-out` path.
 
+### Add a project
+
+An organization that finished onboarding adds a project with `POST /api/platform/projects`, which
+takes `{ organizationSlug, name, key }` and an `Idempotency-Key` header. The caller needs the
+`project.create` capability (Owner, Admin or Developer). The route answers with the same provisioning
+operation as onboarding, so `GET /api/platform/provisioning/{id}`, `/retry`, `/credential` and
+`/rotate` drive the rest. Two refusals are `409`: `PROJECT_KEY_UNAVAILABLE` when the organization
+already has a project with that key, and `PROJECT_LIMIT_REACHED` when it already holds its
+`platform_organizations.project_limit` projects (default 5, counting every project of the
+organization). An operator raises the limit in the database, for example
+`UPDATE platform_organizations SET project_limit = 10 WHERE slug = 'acme'`. The cap also applies to
+the onboarding draft, but not to `platform:bootstrap`, which is an operator command. Production
+activation stays bounded separately by `production_limit` (default 1 active production environment
+per organization), so a second project's production stays inactive until that limit is raised.
+
 ### Read-only credentials
 
 An instance can also hold one [read-only credential](api.md#read-only-credentials) (`sqrk_<secret>`

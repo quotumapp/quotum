@@ -1069,6 +1069,18 @@
       ]
     },
     {
+      "code": "PROJECT_KEY_UNAVAILABLE",
+      "sources": [
+        "src/platform/onboarding.ts"
+      ]
+    },
+    {
+      "code": "PROJECT_LIMIT_REACHED",
+      "sources": [
+        "src/platform/onboarding.ts"
+      ]
+    },
+    {
       "code": "PROJECT_REQUIRED",
       "sources": [
         "src/platform/onboarding.ts"
