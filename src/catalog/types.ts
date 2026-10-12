@@ -131,6 +131,20 @@ export interface CatalogTopupIntent {
 }
 
 /**
+ * A one-time product that sells codes redeemable for a plan grant. It names an existing
+ * `plan_grant` promotion, so the plan, its term and the redemption rules stay with the promotion;
+ * the gift fixes how many codes one purchase yields and how long they stay redeemable.
+ */
+export interface CatalogGiftIntent {
+	key: string;
+	name: string;
+	promotionKey: string;
+	codeCount: number;
+	codeValidDays: number;
+	providerBindings: CatalogProviderBindingIntent[];
+}
+
+/**
  * The plan an account holds while it has no paid base plan: a public, unpriced base plan of this
  * catalog. Its entitlement keys are declared here, since an unpriced plan has no provider product.
  */
@@ -144,9 +158,12 @@ export interface CatalogIntent {
 	plans: CatalogPlanIntent[];
 	topups: CatalogTopupIntent[];
 	rateCards: CatalogRateCardIntent[];
+	/** Absent when the catalog sells no gifts. */
+	gifts?: CatalogGiftIntent[];
 	retiredFeatureKeys?: string[];
 	retiredPlanKeys?: string[];
 	retiredTopupKeys?: string[];
+	retiredGiftKeys?: string[];
 	/** Absent or null when the catalog marks no default plan. */
 	defaultPlan?: CatalogDefaultPlanIntent | null;
 }
@@ -272,6 +289,13 @@ export interface CanonicalCatalog {
 	retiredFeatureKeys: string[];
 	retiredPlanKeys: string[];
 	retiredTopupKeys: string[];
+	/**
+	 * Left out when the catalog sells no gifts, like the two fields below, so a catalog published
+	 * before gifts existed keeps its intent hash.
+	 */
+	gifts?: CatalogGiftIntent[];
+	/** Left out when no gift is retired. */
+	retiredGiftKeys?: string[];
 	/** Left out when the catalog marks no default plan. */
 	defaultPlan?: Required<CatalogDefaultPlanIntent>;
 }
@@ -357,6 +381,16 @@ export interface AuthoredTopupIntent {
 	providerBindings: CatalogProviderBindingIntent[];
 }
 
+/** A gift as an operator writes it: one code per purchase unless `codeCount` says otherwise. */
+export interface AuthoredGiftIntent {
+	key: string;
+	name: string;
+	promotionKey: string;
+	codeCount?: number;
+	codeValidDays: number;
+	providerBindings: CatalogProviderBindingIntent[];
+}
+
 /**
  * A catalog intent as preview and publish accept it during the transition: canonical or legacy
  * spellings, per plan, item and top-up. A legacy {@link CatalogIntent} is one.
@@ -366,9 +400,11 @@ export interface AuthoredCatalogIntent {
 	plans: AuthoredPlanIntent[];
 	topups: AuthoredTopupIntent[];
 	rateCards: CatalogRateCardIntent[];
+	gifts?: AuthoredGiftIntent[];
 	retiredFeatureKeys?: string[];
 	retiredPlanKeys?: string[];
 	retiredTopupKeys?: string[];
+	retiredGiftKeys?: string[];
 	defaultPlan?: CatalogDefaultPlanIntent | null;
 }
 
@@ -408,6 +444,8 @@ export interface CatalogImpact {
 	plansRetired: number;
 	topupOptionsCreated: number;
 	topupsRetired: number;
+	giftOptionsCreated: number;
+	giftsRetired: number;
 	providerBindingsValidated: number;
 	existingSubscriptionsGrandfathered: number;
 	/** Accounts without a paid base plan or an active base plan grant, which hold the default. */

@@ -279,15 +279,28 @@ const topupSchema = z
 	})
 	.strict();
 
+const giftSchema = z
+	.object({
+		key: z.string().trim().min(1).max(120),
+		name: z.string().trim().min(1).max(200),
+		promotionKey: z.string().trim().min(1).max(120),
+		codeCount: z.number().int().min(1).max(100).optional(),
+		codeValidDays: z.number().int().min(1).max(730),
+		providerBindings: z.array(providerBindingSchema).min(1).max(20),
+	})
+	.strict();
+
 const catalogSchema = z
 	.object({
 		features: z.array(featureSchema).min(1).max(100),
 		plans: z.array(planSchema).max(100),
 		topups: z.array(topupSchema).max(100),
 		rateCards: z.array(rateCardSchema).max(100),
+		gifts: z.array(giftSchema).max(100).optional(),
 		retiredFeatureKeys: z.array(z.string().trim().min(1).max(120)).max(100).optional(),
 		retiredPlanKeys: z.array(z.string().trim().min(1).max(120)).max(100).optional(),
 		retiredTopupKeys: z.array(z.string().trim().min(1).max(120)).max(100).optional(),
+		retiredGiftKeys: z.array(z.string().trim().min(1).max(120)).max(100).optional(),
 		defaultPlan: z
 			.object({
 				planKey: z.string().trim().min(1).max(120),

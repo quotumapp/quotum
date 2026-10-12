@@ -36,7 +36,8 @@ export interface CatalogCapabilityEntry {
 
 /**
  * The catalog entries that ask something of their bindings, in catalog order: per plan, the plan
- * itself when it has a trial or is an add-on, then its base price and item prices; then top-ups.
+ * itself when it has a trial or is an add-on, then its base price and item prices; then top-ups
+ * and gifts.
  */
 export function catalogCapabilityTargets(catalog: CatalogIntent): CatalogCapabilityEntry[] {
 	const entries: CatalogCapabilityEntry[] = [];
@@ -69,6 +70,13 @@ export function catalogCapabilityTargets(catalog: CatalogIntent): CatalogCapabil
 			target: { kind: "topup", key: topup.key },
 			construct: { kind: "topup" },
 			bindings: topup.providerBindings,
+		});
+	}
+	for (const gift of catalog.gifts ?? []) {
+		entries.push({
+			target: { kind: "gift", key: gift.key },
+			construct: { kind: "gift" },
+			bindings: gift.providerBindings,
 		});
 	}
 	return entries;
@@ -291,6 +299,7 @@ function inCatalogOrder(
 		}
 	}
 	for (const topup of catalog.topups) position({ kind: "topup", key: topup.key });
+	for (const gift of catalog.gifts ?? []) position({ kind: "gift", key: gift.key });
 	const merged = new Map<string, CatalogProviderCompatibility & { order: number }>();
 	for (const [index, entry] of entries.entries()) {
 		const key = `${position(entry.target)}|${entry.provider}|${entry.productKey ?? ""}`;
@@ -336,6 +345,8 @@ function targetLabel(target: CatalogCompatibilityTarget): string {
 			return `Plan ${target.key} price ${target.priceKey}`;
 		case "topup":
 			return `Top-up ${target.key}`;
+		case "gift":
+			return `Gift ${target.key}`;
 	}
 }
 

@@ -6,7 +6,8 @@ Operators submit one complete intent to `POST /v1/admin/catalog/preview` and the
 `POST /v1/admin/catalog/publish` with the preview token and expected revision; both require project
 and operator authentication plus `X-Billing-Actor`. Provider bindings adopt pre-provisioned store
 products and must all be ready before the active pointer advances. Previously active features,
-plans, and top-ups must be retained or listed explicitly for retirement; omission is not deletion.
+plans, top-ups and gifts must be retained or listed explicitly for retirement; omission is not
+deletion.
 Retiring a plan removes it from new selection without rewriting pinned subscriptions.
 Those subscriptions still hold the plan's features, so a feature cannot be retired while a live
 subscription is pinned to a version that grants it: preview and publish answer
@@ -228,6 +229,44 @@ and a return to the version resumes it with its use kept, as the
 A subscription that already held such an allowance granted per period, before lifetime allowances
 existed, keeps what it has and is not granted another.
 
+## Gifts
+
+A gift is a one-time product that sells codes. A buyer pays once through `checkout_product`, and
+Quotum mints the codes that purchase yields; whoever holds a code redeems it like any other
+[promotion code](promotions.md#plan-grant-codes). A gift names an existing `plan_grant` promotion,
+so the plan, its term and the redemption rules stay with the promotion:
+
+```json
+{
+  "gifts": [
+    {
+      "key": "gift-12m",
+      "name": "One year, as a gift",
+      "promotionKey": "voucher-12m",
+      "codeCount": 2,
+      "codeValidDays": 365,
+      "providerBindings": [{ "productKey": "gift_12m", "provider": "stripe", "channel": "web" }]
+    }
+  ]
+}
+```
+
+- `promotionKey` must name an active promotion that gives a plan. Promotions live outside the
+  catalog and are not versioned, so preview and publish check it against the database, the way
+  they check a binding.
+- `codeCount` (1 to 100, default 1) is how many codes one purchase yields. A "2-pack" is its own
+  gift with its own price; checkout `quantity` is not used.
+- `codeValidDays` (1 to 730) is how long the minted codes can be redeemed after the purchase.
+- `providerBindings` name a product adopted with `kind: "gift"` and bind to Stripe web only. A
+  product cannot be both a top-up and a gift.
+
+A gift is written for every revision like a top-up, and a republished gift applies to purchases
+from then on: the terms a purchase was sold under are kept with it. A gift that is no longer sold
+is listed in `retiredGiftKeys`; its binding stays published so that a checkout already in flight
+still completes with its codes. A catalog that sells no gifts omits `gifts` and `retiredGiftKeys`
+from its canonical intent, so a catalog published before gifts existed keeps its intent hash.
+`impact.giftOptionsCreated` and `impact.giftsRetired` count the gifts a publish writes and retires.
+
 ## Default plan
 
 A catalog may mark one plan as its default with
@@ -349,10 +388,13 @@ An environment that has no project key yet takes `--instance <key>` instead, whi
 }
 ```
 
-`kind` is `subscription` or `topup`; credits are nonnegative integers for subscriptions and
-positive integers for top-ups. The price must be active,
+`kind` is `subscription`, `topup` or `gift`; credits are nonnegative integers for subscriptions and
+positive integers for top-ups. A gift takes neither `credits` (it carries none; `0` is accepted) nor
+an `entitlementKey`, because its product grants the buyer nothing: it is stored as a consumable
+with no credits, and its entitlement key is its product key. The price must be active,
 fixed per-unit, in the instance's environment, and belong to the named active product. Subscriptions
-use licensed recurring prices; top-ups use one-time prices. Metered, tiered, transformed and custom
+use licensed recurring prices; top-ups and gifts use one-time prices, and a top-up or gift price is
+not zero. Metered, tiered, transformed and custom
 amount prices are refused. Amount, currency and cadence are read from Stripe.
 
 Adoption works before or after the first catalog publish. It is additive: an exact repeat returns

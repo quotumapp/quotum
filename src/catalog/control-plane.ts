@@ -64,6 +64,7 @@ import type {
 	CatalogDefaultPlanIntent,
 	CatalogDeprecation,
 	CatalogFeatureIntent,
+	CatalogGiftIntent,
 	CatalogImpact,
 	CatalogIntent,
 	CatalogPlanIntent,
@@ -77,6 +78,10 @@ import type {
 	CatalogTopupIntent,
 	PublishedCatalog,
 } from "./types";
+
+/** The bounds `gift_options` enforces; a gift outside them could not be published. */
+const MAX_GIFT_CODES = 100;
+const MAX_GIFT_VALID_DAYS = 730;
 
 /**
  * An authored intent read every way the control plane needs it. Preview stores and hashes
@@ -442,6 +447,19 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				catalog,
 				topupOptionIds,
 			);
+			const giftOptionIds = await publishGiftOptions(
+				tx,
+				projectState.id,
+				String(revision.id),
+				catalog,
+			);
+			await publishGiftProviderBindings(
+				tx,
+				projectState.id,
+				String(revision.id),
+				catalog,
+				giftOptionIds,
+			);
 			await applyCatalogRetirements(tx, projectState.id, catalog);
 			const activatedRevision = await executeOne<{ published_at: Date | string }>(
 				tx,
@@ -660,6 +678,7 @@ function normalizeCatalog(
 	);
 	const retiredPlanKeys = normalizedRetirementKeys(catalog.retiredPlanKeys, "retired plan key");
 	const retiredTopupKeys = normalizedRetirementKeys(catalog.retiredTopupKeys, "retired top-up key");
+	const retiredGiftKeys = normalizedRetirementKeys(catalog.retiredGiftKeys, "retired gift key");
 	const features = catalog.features.map((feature) => ({
 		...feature,
 		key: normalizedKey(feature.key, "feature key"),
@@ -931,10 +950,56 @@ function normalizeCatalog(
 			`top-up ${topup.key} provider binding`,
 		);
 	}
+	const gifts = (catalog.gifts ?? []).map((gift): CatalogGiftIntent => {
+		for (const binding of gift.providerBindings) {
+			if (binding.provider !== "stripe" || binding.channel !== "web") {
+				throw new InvalidRequestError(
+					`Gift ${gift.key} binds only to Stripe web, not ${binding.provider}/${binding.channel}`,
+				);
+			}
+		}
+		for (const [value, label, min, max] of [
+			[gift.codeCount, "gift code count", 1, MAX_GIFT_CODES],
+			[gift.codeValidDays, "gift code validity in days", 1, MAX_GIFT_VALID_DAYS],
+		] as const) {
+			if (!Number.isInteger(value) || value < min || value > max) {
+				throw new InvalidRequestError(`${label} must be an integer from ${min} to ${max}`);
+			}
+		}
+		return {
+			key: normalizedKey(gift.key, "gift key"),
+			name: requiredText(gift.name, "gift name", 200),
+			promotionKey: requiredText(gift.promotionKey, "gift promotion key", 120),
+			codeCount: gift.codeCount,
+			codeValidDays: gift.codeValidDays,
+			providerBindings: gift.providerBindings
+				.map((binding) => normalizeProviderBinding(binding, capabilities))
+				.sort((left, right) =>
+					providerBindingIdentity(left).localeCompare(providerBindingIdentity(right)),
+				),
+		};
+	});
+	assertUnique(
+		gifts.map(({ key }) => key),
+		"gift key",
+	);
+	assertNoActiveRetirementOverlap(
+		gifts.map(({ key }) => key),
+		retiredGiftKeys,
+		"gift",
+	);
+	for (const gift of gifts) {
+		assertUnique(
+			gift.providerBindings.map(providerBindingIdentity),
+			`gift ${gift.key} provider binding`,
+		);
+	}
+	// One provider product is one catalog entry: a Stripe product cannot be a top-up and a gift.
 	assertUnique(
 		[
 			...plans.flatMap((plan) => allPlanPriceBindings(plan).map(providerBindingIdentity)),
 			...topups.flatMap((topup) => topup.providerBindings.map(providerBindingIdentity)),
+			...gifts.flatMap((gift) => gift.providerBindings.map(providerBindingIdentity)),
 		],
 		"provider product binding",
 	);
@@ -1012,9 +1077,11 @@ function normalizeCatalog(
 		plans,
 		topups,
 		rateCards,
+		gifts,
 		retiredFeatureKeys,
 		retiredPlanKeys,
 		retiredTopupKeys,
+		retiredGiftKeys,
 		// Left out when unset, so a catalog that marks no default keeps its intent hash.
 		...(defaultPlan === null ? {} : { defaultPlan }),
 	};
@@ -1303,9 +1370,13 @@ async function calculateImpact(
 	const currentTopups = new Map(
 		(currentCatalog?.topups ?? []).map((topup) => [topup.key, stableJson(topup)]),
 	);
+	const currentGifts = new Map(
+		(currentCatalog?.gifts ?? []).map((gift) => [gift.key, stableJson(gift)]),
+	);
 	const retiredFeatures = new Set(catalog.retiredFeatureKeys);
 	const retiredPlans = new Set(catalog.retiredPlanKeys);
 	const retiredTopups = new Set(catalog.retiredTopupKeys);
+	const retiredGifts = new Set(catalog.retiredGiftKeys ?? []);
 	// Subscriptions that keep the version they hold while their plan moves on: the live ones on a
 	// plan this revision gives a new version or retires.
 	const leftBehind = [
@@ -1359,11 +1430,16 @@ async function calculateImpact(
 			(topup) => currentTopups.get(topup.key) !== stableJson(topup),
 		).length,
 		topupsRetired: [...currentTopups.keys()].filter((key) => retiredTopups.has(key)).length,
+		giftOptionsCreated: (catalog.gifts ?? []).filter(
+			(gift) => currentGifts.get(gift.key) !== stableJson(gift),
+		).length,
+		giftsRetired: [...currentGifts.keys()].filter((key) => retiredGifts.has(key)).length,
 		providerBindingsValidated: parsed.working.plans
 			.filter((plan) => changedKeys.has(plan.key))
 			.reduce(
 				(total, plan) => total + allPlanPriceBindings(plan).length,
-				catalog.topups.reduce((total, topup) => total + topup.providerBindings.length, 0),
+				catalog.topups.reduce((total, topup) => total + topup.providerBindings.length, 0) +
+					(catalog.gifts ?? []).reduce((total, gift) => total + gift.providerBindings.length, 0),
 			),
 		existingSubscriptionsGrandfathered: Number(grandfathered?.count ?? 0),
 		defaultPlanAccounts: Number(defaultPlanAccounts?.count ?? 0),
@@ -1410,12 +1486,22 @@ async function validateCatalogLifecycle(
 	const activeFeatureKeys = new Set(catalog.features.map(({ key }) => key));
 	const activePlanKeys = new Set(catalog.plans.map(({ key }) => key));
 	const activeTopupKeys = new Set(catalog.topups.map(({ key }) => key));
+	const activeGiftKeys = new Set((catalog.gifts ?? []).map(({ key }) => key));
 	const retiredFeatureKeys = new Set(catalog.retiredFeatureKeys);
 	const retiredPlanKeys = new Set(catalog.retiredPlanKeys);
 	const retiredTopupKeys = new Set(catalog.retiredTopupKeys);
+	const retiredGiftKeys = new Set(catalog.retiredGiftKeys ?? []);
 	assertKnownRetirements(retiredFeatureKeys, new Set(featureRows.map(({ key }) => key)), "feature");
 	assertKnownRetirements(retiredPlanKeys, new Set(planRows.map(({ key }) => key)), "plan");
 	assertKnownRetirements(retiredTopupKeys, new Set(topupRows.map(({ key }) => key)), "top-up");
+	// Only a retirement needs the gifts ever published; a catalog that retires none skips the read.
+	if (retiredGiftKeys.size > 0) {
+		const giftRows = await executeRows<{ key: string }>(
+			executor,
+			drizzleSql`SELECT DISTINCT key FROM gift_options WHERE project_id = ${projectId}`,
+		);
+		assertKnownRetirements(retiredGiftKeys, new Set(giftRows.map(({ key }) => key)), "gift");
+	}
 	for (const row of featureRows) {
 		if (row.active && !activeFeatureKeys.has(row.key) && !retiredFeatureKeys.has(row.key)) {
 			throw new InvalidRequestError(
@@ -1435,6 +1521,13 @@ async function validateCatalogLifecycle(
 		if (!activeTopupKeys.has(topup.key) && !retiredTopupKeys.has(topup.key)) {
 			throw new InvalidRequestError(
 				`Active top-up ${topup.key} must remain in the catalog or be explicitly retired`,
+			);
+		}
+	}
+	for (const gift of currentCatalog?.gifts ?? []) {
+		if (!activeGiftKeys.has(gift.key) && !retiredGiftKeys.has(gift.key)) {
+			throw new InvalidRequestError(
+				`Active gift ${gift.key} must remain in the catalog or be explicitly retired`,
 			);
 		}
 	}
@@ -2229,6 +2322,12 @@ async function assertPublishable(
 			await resolveTopupBinding(executor, projectId, topup, binding);
 		}
 	}
+	for (const gift of catalog.gifts ?? []) {
+		await resolveGiftPromotion(executor, projectId, gift);
+		for (const binding of gift.providerBindings) {
+			await resolveGiftBinding(executor, projectId, gift, binding);
+		}
+	}
 }
 
 /** Refuses a feature whose meter semantics differ from the stored feature of the same key. */
@@ -2502,6 +2601,147 @@ async function publishTopupProviderBindings(
 	}
 }
 
+/**
+ * The promotion a gift sells codes for: it exists, is active and gives a plan. Promotions live
+ * outside the catalog and are not versioned, so this reads the database at preview and again at
+ * publish, like a binding.
+ */
+async function resolveGiftPromotion(
+	executor: QueryExecutor,
+	projectId: string,
+	gift: Pick<CatalogGiftIntent, "key" | "promotionKey">,
+): Promise<{ id: string }> {
+	const promotion = await executeOne<{ id: string; effect_kind: string; status: string }>(
+		executor,
+		drizzleSql`
+			SELECT id, effect_kind, status
+			FROM promotions
+			WHERE project_id = ${projectId} AND key = ${gift.promotionKey}
+		`,
+	);
+	if (promotion === null) {
+		throw new InvalidRequestError(
+			`Gift ${gift.key} names promotion ${gift.promotionKey}, which does not exist`,
+		);
+	}
+	if (promotion.effect_kind !== "plan_grant") {
+		throw new InvalidRequestError(
+			`Gift ${gift.key} must name a plan_grant promotion; ${gift.promotionKey} is ${promotion.effect_kind}`,
+		);
+	}
+	if (promotion.status !== "active") {
+		throw new InvalidRequestError(
+			`Gift ${gift.key} names promotion ${gift.promotionKey}, which is archived`,
+		);
+	}
+	return { id: promotion.id };
+}
+
+/**
+ * The active store product a gift binding names. A gift is a consumable that carries no credits,
+ * which is what tells it from a top-up product.
+ */
+async function resolveGiftBinding(
+	executor: QueryExecutor,
+	projectId: string,
+	gift: Pick<CatalogGiftIntent, "key">,
+	binding: CatalogProviderBindingIntent,
+): Promise<{ id: string }> {
+	const storeProduct = await executeOne<{ id: string }>(
+		executor,
+		drizzleSql`
+			SELECT sp.id
+			FROM store_products sp
+			JOIN products p ON p.project_id = sp.project_id AND p.id = sp.product_id
+			WHERE sp.project_id = ${projectId}
+				AND p.key = ${binding.productKey}
+				AND sp.provider = ${binding.provider}
+				AND sp.channel = ${binding.channel}
+				AND sp.active = true
+				AND p.active = true
+				AND p.type = 'consumable'
+				AND p.credit_amount = 0
+			LIMIT 1
+		`,
+	);
+	if (storeProduct === null) {
+		throw bindingNotReady(
+			`Gift binding ${binding.provider}/${binding.channel}/${binding.productKey} for gift ${gift.key} is not ready: no active credit-free consumable product is mapped`,
+		);
+	}
+	return storeProduct;
+}
+
+async function publishGiftOptions(
+	executor: QueryExecutor,
+	projectId: string,
+	revisionId: string,
+	catalog: CatalogIntent,
+): Promise<Map<string, string>> {
+	const ids = new Map<string, string>();
+	for (const gift of catalog.gifts ?? []) {
+		const promotion = await resolveGiftPromotion(executor, projectId, gift);
+		const row = await executeOne<{ id: string | number | bigint }>(
+			executor,
+			drizzleSql`
+				INSERT INTO gift_options (
+					project_id, catalog_revision_id, key, name, promotion_id, code_count, code_valid_days
+				)
+				VALUES (
+					${projectId}, ${revisionId}::bigint, ${gift.key}, ${gift.name}, ${promotion.id}::uuid,
+					${gift.codeCount}, ${gift.codeValidDays}
+				)
+				RETURNING id
+			`,
+		);
+		if (row === null) throw new Error(`Gift ${gift.key} could not be persisted`);
+		ids.set(gift.key, String(row.id));
+	}
+	return ids;
+}
+
+async function publishGiftProviderBindings(
+	executor: QueryExecutor,
+	projectId: string,
+	revisionId: string,
+	catalog: CatalogIntent,
+	giftOptionIds: Map<string, string>,
+): Promise<void> {
+	for (const gift of catalog.gifts ?? []) {
+		for (const binding of gift.providerBindings) {
+			const storeProduct = await resolveGiftBinding(executor, projectId, gift, binding);
+			await recordProviderAdoption(executor, {
+				projectId,
+				revisionId,
+				provider: binding.provider,
+				channel: binding.channel,
+				action: "adopt_gift",
+				storeProductId: storeProduct.id,
+			});
+			await executeOne(
+				executor,
+				drizzleSql`
+					INSERT INTO provider_gift_bindings (
+						project_id, gift_option_id, store_product_id, provider, channel, status
+					)
+					VALUES (
+						${projectId}, ${requireMap(giftOptionIds, gift.key)}::bigint,
+						${storeProduct.id}, ${binding.provider}, ${binding.channel}, 'published'
+					)
+					ON CONFLICT (project_id, store_product_id) DO UPDATE SET
+						gift_option_id = EXCLUDED.gift_option_id,
+						provider = EXCLUDED.provider,
+						channel = EXCLUDED.channel,
+						status = 'published',
+						error = NULL,
+						updated_at = now()
+					RETURNING id
+				`,
+			);
+		}
+	}
+}
+
 async function recordProviderAdoption(
 	executor: QueryExecutor,
 	input: {
@@ -2509,7 +2749,7 @@ async function recordProviderAdoption(
 		revisionId: string;
 		provider: BillingProvider;
 		channel: "ios" | "android" | "web";
-		action: "adopt_plan" | "adopt_topup" | "adopt_price";
+		action: "adopt_plan" | "adopt_topup" | "adopt_gift" | "adopt_price";
 		storeProductId: string;
 	},
 ): Promise<void> {
@@ -2589,6 +2829,8 @@ async function readPublishedResult(
 			plansRetired: 0,
 			topupOptionsCreated: 0,
 			topupsRetired: 0,
+			giftOptionsCreated: 0,
+			giftsRetired: 0,
 			providerBindingsValidated: 0,
 			existingSubscriptionsGrandfathered: 0,
 			defaultPlanAccounts: 0,

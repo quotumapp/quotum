@@ -11,7 +11,7 @@ export interface QuotumToolDependencies {
 
 const readOnly = { readOnlyHint: true, openWorldHint: false } as const;
 const operationKinds = ["consume", "reserve", "confirm", "release", "correct"] as const;
-const catalogSections = ["features", "plans", "topups", "rateCards"] as const;
+const catalogSections = ["features", "plans", "topups", "gifts", "rateCards"] as const;
 
 // Free-form data a merchant or a provider controls. Left out unless the caller asks, so text an
 // outsider can influence does not reach the model by default.
@@ -297,7 +297,7 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 		{
 			title: "Published catalog",
 			description:
-				"The published catalog with its revision: features, plans with their components and meters, top-ups and rate cards. This is what metering and pricing run on, so it explains a configuration_error or a missing rate. Pass sections to keep a large catalog within the result budget.",
+				"The published catalog with its revision: features, plans with their components and meters, top-ups, gifts and rate cards. This is what metering and pricing run on, so it explains a configuration_error or a missing rate. Pass sections to keep a large catalog within the result budget.",
 			inputSchema: z.object({
 				sections: z.array(z.enum(catalogSections)).min(1).optional(),
 			}),

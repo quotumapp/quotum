@@ -12,6 +12,7 @@ import type {
 	CatalogAdvisory,
 	CatalogDeprecation,
 	CatalogExpiryIntent,
+	CatalogGiftIntent,
 	CatalogIntent,
 	CatalogPlanIntent,
 	CatalogPlanItemIntent,
@@ -324,6 +325,20 @@ export function toWorkingShape(
 		plans,
 		topups,
 		rateCards: authored.rateCards,
+		...(authored.gifts === undefined
+			? {}
+			: {
+					gifts: authored.gifts.map(
+						(gift): CatalogGiftIntent => ({
+							key: gift.key,
+							name: gift.name,
+							promotionKey: gift.promotionKey,
+							codeCount: gift.codeCount ?? 1,
+							codeValidDays: gift.codeValidDays,
+							providerBindings: gift.providerBindings,
+						}),
+					),
+				}),
 		...(authored.retiredFeatureKeys === undefined
 			? {}
 			: { retiredFeatureKeys: authored.retiredFeatureKeys }),
@@ -333,6 +348,9 @@ export function toWorkingShape(
 		...(authored.retiredTopupKeys === undefined
 			? {}
 			: { retiredTopupKeys: authored.retiredTopupKeys }),
+		...(authored.retiredGiftKeys === undefined
+			? {}
+			: { retiredGiftKeys: authored.retiredGiftKeys }),
 		...(authored.defaultPlan === undefined ? {} : { defaultPlan: authored.defaultPlan }),
 	};
 }
@@ -470,6 +488,8 @@ export function canonicalFromWorking(working: CatalogIntent): CanonicalCatalog {
 		}),
 	);
 	const defaultPlan = working.defaultPlan ?? null;
+	const gifts = working.gifts ?? [];
+	const retiredGiftKeys = working.retiredGiftKeys ?? [];
 	return {
 		features: working.features,
 		plans,
@@ -478,6 +498,9 @@ export function canonicalFromWorking(working: CatalogIntent): CanonicalCatalog {
 		retiredFeatureKeys: working.retiredFeatureKeys ?? [],
 		retiredPlanKeys: working.retiredPlanKeys ?? [],
 		retiredTopupKeys: working.retiredTopupKeys ?? [],
+		// Left out when empty, so a catalog published before gifts existed keeps its intent hash.
+		...(gifts.length === 0 ? {} : { gifts }),
+		...(retiredGiftKeys.length === 0 ? {} : { retiredGiftKeys }),
 		...(defaultPlan === null
 			? {}
 			: {

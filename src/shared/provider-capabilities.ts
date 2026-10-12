@@ -651,11 +651,11 @@ export interface RuntimeCapabilityVerdict extends CapabilityVerdict {
 	provider: BillingProvider;
 }
 
-export const catalogCompatibilityTargetKinds = ["plan", "price", "topup"] as const;
+export const catalogCompatibilityTargetKinds = ["plan", "price", "topup", "gift"] as const;
 export type CatalogCompatibilityTargetKind = (typeof catalogCompatibilityTargetKinds)[number];
 
 /**
- * The catalog entry a binding belongs to: `key` is the plan or top-up key, and `priceKey` names
+ * The catalog entry a binding belongs to: `key` is the plan, top-up or gift key, and `priceKey` names
  * the plan's base or item price for a `price` target.
  */
 export type CatalogCompatibilityTarget = {

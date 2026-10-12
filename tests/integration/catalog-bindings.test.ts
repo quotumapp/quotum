@@ -32,7 +32,7 @@ localDescribe("operator binding adoption", () => {
 	afterAll(async () => {
 		await context.sql.close();
 	});
-	function service() {
+	function service(price: Record<string, unknown> = {}) {
 		return new CatalogBindings(
 			context.db as never,
 			{ ...noRuntimeConnections, resolve: async () => ({ secretKey: "test" }) as never },
@@ -49,6 +49,7 @@ localDescribe("operator binding adoption", () => {
 							currency: "usd",
 							type: "recurring",
 							recurring: { interval: "month", interval_count: 1, usage_type: "licensed" },
+							...price,
 						}),
 					},
 					products: {
@@ -85,6 +86,65 @@ localDescribe("operator binding adoption", () => {
 		await context.sql`UPDATE store_products SET updated_at = now() WHERE id = ${result.storeProductId}`;
 		expect(await bindings.adopt(project, input, "operator", "adopt-2")).toEqual(result);
 	});
+	it("adopts a gift as a credit-free consumable without an entitlement key", async () => {
+		const bindings = service({ type: "one_time", recurring: null, unit_amount: 9900 });
+		const project = integrationProjectContext();
+		const gift = {
+			productKey: "gift_12m",
+			name: "One year, as a gift",
+			kind: "gift" as const,
+			externalProductId: input.externalProductId,
+			externalPriceId: input.externalPriceId,
+		};
+
+		const result = await bindings.adopt(project, gift, "operator", "gift-1");
+
+		expect(await bindings.adopt(project, gift, "operator", "gift-1")).toEqual(result);
+		const [row] = await context.sql<
+			Array<{
+				type: string;
+				credit_amount: number;
+				entitlement_key: string;
+				billing_period: string;
+				price_amount: string;
+			}>
+		>`
+			SELECT p.type, p.credit_amount, p.entitlement_key, sp.billing_period, sp.price_amount::text
+			FROM products p JOIN store_products sp ON sp.project_id = p.project_id AND sp.product_id = p.id
+			WHERE p.project_id = ${project.projectInstanceId} AND p.key = 'gift_12m'
+		`;
+		expect(row).toEqual({
+			type: "consumable",
+			credit_amount: 0,
+			entitlement_key: "gift_12m",
+			billing_period: "one_time",
+			price_amount: "9900",
+		});
+	});
+
+	it("refuses a gift priced at zero or on a recurring price", async () => {
+		const project = integrationProjectContext();
+		const gift = {
+			productKey: "gift_12m",
+			name: "One year, as a gift",
+			kind: "gift" as const,
+			externalProductId: input.externalProductId,
+			externalPriceId: input.externalPriceId,
+		};
+
+		await expect(
+			service({ type: "one_time", recurring: null, unit_amount: 0 }).adopt(
+				project,
+				gift,
+				"operator",
+				"free",
+			),
+		).rejects.toMatchObject({ details: { reason: "unsupported_price_shape" } });
+		await expect(service().adopt(project, gift, "operator", "recurring")).rejects.toMatchObject({
+			details: { reason: "unsupported_price_shape" },
+		});
+	});
+
 	it("refuses a live price for a sandbox instance", async () => {
 		await expect(
 			service().adopt(

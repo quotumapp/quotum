@@ -796,7 +796,8 @@
                 "enum": [
                   "plan",
                   "price",
-                  "topup"
+                  "topup",
+                  "gift"
                 ],
                 "type": "string"
               },
@@ -1297,6 +1298,70 @@
                         "unit",
                         "creditScale",
                         "filterDimensions"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "gifts": {
+                    "items": {
+                      "properties": {
+                        "codeCount": {
+                          "type": "number"
+                        },
+                        "codeValidDays": {
+                          "type": "number"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "promotionKey": {
+                          "type": "string"
+                        },
+                        "providerBindings": {
+                          "items": {
+                            "properties": {
+                              "channel": {
+                                "enum": [
+                                  "ios",
+                                  "android",
+                                  "web"
+                                ],
+                                "type": "string"
+                              },
+                              "productKey": {
+                                "type": "string"
+                              },
+                              "provider": {
+                                "enum": [
+                                  "google",
+                                  "apple",
+                                  "stripe",
+                                  "paddle"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "productKey",
+                              "provider",
+                              "channel"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "name",
+                        "promotionKey",
+                        "codeCount",
+                        "codeValidDays",
+                        "providerBindings"
                       ],
                       "type": "object"
                     },
@@ -2310,6 +2375,12 @@
                     "type": "array"
                   },
                   "retiredFeatureKeys": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "retiredGiftKeys": {
                     "items": {
                       "type": "string"
                     },
@@ -12342,6 +12413,12 @@
                   "featuresReused": {
                     "type": "number"
                   },
+                  "giftOptionsCreated": {
+                    "type": "number"
+                  },
+                  "giftsRetired": {
+                    "type": "number"
+                  },
                   "plansCreated": {
                     "type": "number"
                   },
@@ -12370,6 +12447,8 @@
                   "plansRetired",
                   "topupOptionsCreated",
                   "topupsRetired",
+                  "giftOptionsCreated",
+                  "giftsRetired",
                   "providerBindingsValidated",
                   "existingSubscriptionsGrandfathered",
                   "defaultPlanAccounts"
@@ -12511,6 +12590,12 @@
                   "featuresReused": {
                     "type": "number"
                   },
+                  "giftOptionsCreated": {
+                    "type": "number"
+                  },
+                  "giftsRetired": {
+                    "type": "number"
+                  },
                   "plansCreated": {
                     "type": "number"
                   },
@@ -12539,6 +12624,8 @@
                   "plansRetired",
                   "topupOptionsCreated",
                   "topupsRetired",
+                  "giftOptionsCreated",
+                  "giftsRetired",
                   "providerBindingsValidated",
                   "existingSubscriptionsGrandfathered",
                   "defaultPlanAccounts"
@@ -21277,7 +21364,8 @@
                   "enum": [
                     "plan",
                     "price",
-                    "topup"
+                    "topup",
+                    "gift"
                   ],
                   "type": "string"
                 },
@@ -32619,6 +32707,86 @@
                         "minItems": 1,
                         "type": "array"
                       },
+                      "gifts": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "codeCount": {
+                              "maximum": 100,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "codeValidDays": {
+                              "maximum": 730,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "key": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "name": {
+                              "maxLength": 200,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "promotionKey": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "providerBindings": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "channel": {
+                                    "enum": [
+                                      "ios",
+                                      "android",
+                                      "web"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "productKey": {
+                                    "maxLength": 120,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "provider": {
+                                    "enum": [
+                                      "apple",
+                                      "google",
+                                      "stripe",
+                                      "paddle"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "productKey",
+                                  "provider",
+                                  "channel"
+                                ],
+                                "type": "object"
+                              },
+                              "maxItems": 20,
+                              "minItems": 1,
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "name",
+                            "promotionKey",
+                            "codeValidDays",
+                            "providerBindings"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 100,
+                        "type": "array"
+                      },
                       "plans": {
                         "items": {
                           "additionalProperties": false,
@@ -34162,6 +34330,15 @@
                         "type": "array"
                       },
                       "retiredFeatureKeys": {
+                        "items": {
+                          "maxLength": 120,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "type": "array"
+                      },
+                      "retiredGiftKeys": {
                         "items": {
                           "maxLength": 120,
                           "minLength": 1,
@@ -34907,6 +35084,86 @@
                         "minItems": 1,
                         "type": "array"
                       },
+                      "gifts": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "codeCount": {
+                              "maximum": 100,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "codeValidDays": {
+                              "maximum": 730,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "key": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "name": {
+                              "maxLength": 200,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "promotionKey": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "providerBindings": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "channel": {
+                                    "enum": [
+                                      "ios",
+                                      "android",
+                                      "web"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "productKey": {
+                                    "maxLength": 120,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "provider": {
+                                    "enum": [
+                                      "apple",
+                                      "google",
+                                      "stripe",
+                                      "paddle"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "productKey",
+                                  "provider",
+                                  "channel"
+                                ],
+                                "type": "object"
+                              },
+                              "maxItems": 20,
+                              "minItems": 1,
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "name",
+                            "promotionKey",
+                            "codeValidDays",
+                            "providerBindings"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 100,
+                        "type": "array"
+                      },
                       "plans": {
                         "items": {
                           "additionalProperties": false,
@@ -36450,6 +36707,15 @@
                         "type": "array"
                       },
                       "retiredFeatureKeys": {
+                        "items": {
+                          "maxLength": 120,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "type": "array"
+                      },
+                      "retiredGiftKeys": {
                         "items": {
                           "maxLength": 120,
                           "minLength": 1,
@@ -60131,7 +60397,8 @@
                   "kind": {
                     "enum": [
                       "subscription",
-                      "topup"
+                      "topup",
+                      "gift"
                     ],
                     "type": "string"
                   },
@@ -60150,8 +60417,6 @@
                   "productKey",
                   "name",
                   "kind",
-                  "entitlementKey",
-                  "credits",
                   "externalProductId",
                   "externalPriceId"
                 ],
@@ -60482,6 +60747,86 @@
                         },
                         "maxItems": 100,
                         "minItems": 1,
+                        "type": "array"
+                      },
+                      "gifts": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "codeCount": {
+                              "maximum": 100,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "codeValidDays": {
+                              "maximum": 730,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "key": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "name": {
+                              "maxLength": 200,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "promotionKey": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "providerBindings": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "channel": {
+                                    "enum": [
+                                      "ios",
+                                      "android",
+                                      "web"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "productKey": {
+                                    "maxLength": 120,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "provider": {
+                                    "enum": [
+                                      "apple",
+                                      "google",
+                                      "stripe",
+                                      "paddle"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "productKey",
+                                  "provider",
+                                  "channel"
+                                ],
+                                "type": "object"
+                              },
+                              "maxItems": 20,
+                              "minItems": 1,
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "name",
+                            "promotionKey",
+                            "codeValidDays",
+                            "providerBindings"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 100,
                         "type": "array"
                       },
                       "plans": {
@@ -62027,6 +62372,15 @@
                         "type": "array"
                       },
                       "retiredFeatureKeys": {
+                        "items": {
+                          "maxLength": 120,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "type": "array"
+                      },
+                      "retiredGiftKeys": {
                         "items": {
                           "maxLength": 120,
                           "minLength": 1,
@@ -62692,6 +63046,86 @@
                         "minItems": 1,
                         "type": "array"
                       },
+                      "gifts": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "codeCount": {
+                              "maximum": 100,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "codeValidDays": {
+                              "maximum": 730,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "key": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "name": {
+                              "maxLength": 200,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "promotionKey": {
+                              "maxLength": 120,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "providerBindings": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "channel": {
+                                    "enum": [
+                                      "ios",
+                                      "android",
+                                      "web"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "productKey": {
+                                    "maxLength": 120,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "provider": {
+                                    "enum": [
+                                      "apple",
+                                      "google",
+                                      "stripe",
+                                      "paddle"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "productKey",
+                                  "provider",
+                                  "channel"
+                                ],
+                                "type": "object"
+                              },
+                              "maxItems": 20,
+                              "minItems": 1,
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "name",
+                            "promotionKey",
+                            "codeValidDays",
+                            "providerBindings"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 100,
+                        "type": "array"
+                      },
                       "plans": {
                         "items": {
                           "additionalProperties": false,
@@ -64235,6 +64669,15 @@
                         "type": "array"
                       },
                       "retiredFeatureKeys": {
+                        "items": {
+                          "maxLength": 120,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "type": "array"
+                      },
+                      "retiredGiftKeys": {
                         "items": {
                           "maxLength": 120,
                           "minLength": 1,

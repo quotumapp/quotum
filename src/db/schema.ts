@@ -1790,7 +1790,9 @@ export const catalogProviderOperations = pgTable(
 			.references(() => catalogRevisions.id, { onDelete: "restrict" }),
 		provider: text("provider").$type<BillingProvider>().notNull(),
 		channel: text("channel").$type<BillingChannel>().notNull(),
-		action: text("action").$type<"adopt_plan" | "adopt_topup" | "adopt_price">().notNull(),
+		action: text("action")
+			.$type<"adopt_plan" | "adopt_topup" | "adopt_gift" | "adopt_price">()
+			.notNull(),
 		operationKey: text("operation_key").notNull(),
 		storeProductId: uuid("store_product_id")
 			.notNull()
@@ -1821,7 +1823,7 @@ export const catalogProviderOperations = pgTable(
 		),
 		check(
 			"catalog_provider_operations_action_check",
-			sql`((action = ANY (ARRAY['adopt_plan'::text, 'adopt_topup'::text, 'adopt_price'::text])))`,
+			sql`((action = ANY (ARRAY['adopt_plan'::text, 'adopt_topup'::text, 'adopt_gift'::text, 'adopt_price'::text])))`,
 		),
 		foreignKey({
 			name: "catalog_provider_operations_project_revision_fk",

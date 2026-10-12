@@ -159,9 +159,24 @@ export const CanonicalCatalogSchema = z.object({
 			),
 		}),
 	),
+	/** Left out when the catalog sells no gifts. */
+	gifts: z
+		.array(
+			z.object({
+				key: z.string(),
+				name: z.string(),
+				promotionKey: z.string(),
+				codeCount: z.number(),
+				codeValidDays: z.number(),
+				providerBindings: z.array(providerBindingSchema),
+			}),
+		)
+		.optional(),
 	retiredFeatureKeys: z.array(z.string()),
 	retiredPlanKeys: z.array(z.string()),
 	retiredTopupKeys: z.array(z.string()),
+	/** Left out when no gift is retired. */
+	retiredGiftKeys: z.array(z.string()).optional(),
 	defaultPlan: z.object({ planKey: z.string(), entitlementKeys: z.array(z.string()) }).optional(),
 });
 
@@ -193,6 +208,8 @@ export const postV1AdminCatalogPreviewResponse200Schema = z.object({
 			plansRetired: z.number(),
 			topupOptionsCreated: z.number(),
 			topupsRetired: z.number(),
+			giftOptionsCreated: z.number(),
+			giftsRetired: z.number(),
 			providerBindingsValidated: z.number(),
 			existingSubscriptionsGrandfathered: z.number(),
 			defaultPlanAccounts: z.number(),
@@ -244,6 +261,8 @@ export const postV1AdminCatalogPublishResponse200Schema = z.object({
 			plansRetired: z.number(),
 			topupOptionsCreated: z.number(),
 			topupsRetired: z.number(),
+			giftOptionsCreated: z.number(),
+			giftsRetired: z.number(),
 			providerBindingsValidated: z.number(),
 			existingSubscriptionsGrandfathered: z.number(),
 			defaultPlanAccounts: z.number(),
