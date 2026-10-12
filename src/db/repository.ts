@@ -557,7 +557,7 @@ export class BillingRepository {
 		projectId: string,
 		subscriptionId: string,
 		errorMessage: string,
-		nextAttemptAt: Date | null,
+		nextAttemptAt: Date,
 		workerId: string,
 	): Promise<void> {
 		await this.subscriptionReconciliation.markProviderSubscriptionReconciliationFailed(

@@ -23,6 +23,23 @@ export function calculateNextAttemptAt({
 	return new Date(now.getTime() + delay + jitterMs);
 }
 
+/**
+ * Like `calculateNextAttemptAt`, for work that must not be given up on. Once `maxAttempts` attempts
+ * have failed it keeps retrying at the longest delay instead of returning `null`, so an outage
+ * longer than the backoff window cannot park the job for good.
+ */
+export function calculateNextRetryAt({
+	attempts,
+	maxAttempts,
+	now = new Date(),
+	jitterMs = Math.floor(Math.random() * 1000),
+}: CalculateNextAttemptInput): Date {
+	return (
+		calculateNextAttemptAt({ attempts, maxAttempts, now, jitterMs }) ??
+		new Date(now.getTime() + MAX_DELAY_MS + jitterMs)
+	);
+}
+
 export function normalizeWorkerError(error: unknown): string {
 	if (error instanceof Error) {
 		return error.message;

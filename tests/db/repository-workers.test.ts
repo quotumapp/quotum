@@ -299,12 +299,14 @@ describe("BillingRepository workers", () => {
 		);
 
 		expect(database.queries[0]).toContain("provider_reconciliation_attempts");
-		expect(database.queries[0]).toContain("provider_reconciliation_next_attempt_at = COALESCE");
+		expect(database.queries[0]).toMatch(
+			/provider_reconciliation_next_attempt_at = \$\d+::timestamptz/,
+		);
 		expect(database.params[0]).toContain(nextAttemptAt);
 		expect(database.params[0].some((param) => param instanceof Date)).toBe(false);
 	});
 
-	it("binds null for terminal provider reconciliation failures", async () => {
+	it("never parks a failed provider reconciliation at infinity", async () => {
 		const database = new FakeDatabase([[{ id: "subscription-id" }]]);
 		const repository = new BillingRepository(database as never);
 
@@ -312,12 +314,26 @@ describe("BillingRepository workers", () => {
 			"project-id",
 			"subscription-id",
 			"reconciliation failed",
-			null,
+			new Date("2026-01-02T00:00:00.000Z"),
 			"worker-a",
 		);
 
-		expect(database.params[0]).toContain(null);
-		expect(database.params[0].some((param) => param instanceof Date)).toBe(false);
+		expect(database.queries[0]).not.toMatch(/infinity|COALESCE/i);
+	});
+
+	it("claims a reconciliation an earlier release parked at infinity", async () => {
+		const database = new FakeDatabase([[]]);
+		const repository = new BillingRepository(database as never);
+
+		await repository.claimProviderSubscriptionReconciliations(
+			"worker-a",
+			10,
+			new Date("2026-01-01T00:00:00.000Z"),
+		);
+
+		const query = database.queries[0] ?? "";
+		expect(query).toContain("s.provider_reconciliation_next_attempt_at <= now()");
+		expect(query).toContain("s.provider_reconciliation_next_attempt_at = 'infinity'::timestamptz");
 	});
 
 	it("throws when marking a job that is not owned by the worker", async () => {

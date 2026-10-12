@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import fc from "fast-check";
-import { calculateNextAttemptAt, normalizeWorkerError } from "../../src/workers/backoff";
+import {
+	calculateNextAttemptAt,
+	calculateNextRetryAt,
+	normalizeWorkerError,
+} from "../../src/workers/backoff";
 
 describe("projection worker backoff", () => {
 	it("uses capped exponential backoff", () => {
@@ -85,6 +89,43 @@ describe("projection worker backoff", () => {
 					if (later !== null) {
 						expect(later.getTime()).toBeGreaterThanOrEqual(next.getTime());
 					}
+				},
+			),
+		);
+	});
+
+	it("keeps retrying at the longest delay once the attempts are spent", () => {
+		const now = new Date("2026-05-31T00:00:00.000Z");
+		const day = new Date("2026-06-01T00:00:00.000Z");
+		// Before the budget is spent it is the same capped exponential backoff.
+		expect(calculateNextRetryAt({ attempts: 0, maxAttempts: 10, now, jitterMs: 0 })).toEqual(
+			calculateNextAttemptAt({ attempts: 0, maxAttempts: 10, now, jitterMs: 0 }) as Date,
+		);
+		expect(calculateNextRetryAt({ attempts: 8, maxAttempts: 10, now, jitterMs: 0 })).toEqual(
+			new Date("2026-05-31T04:16:00.000Z"),
+		);
+		// The attempt that spends the budget, and every later one, waits 24 hours.
+		for (const attempts of [9, 10, 25, 1100, 100_000]) {
+			expect(calculateNextAttemptAt({ attempts, maxAttempts: 10, now, jitterMs: 0 })).toBeNull();
+			expect(calculateNextRetryAt({ attempts, maxAttempts: 10, now, jitterMs: 0 })).toEqual(day);
+		}
+		expect(calculateNextRetryAt({ attempts: 9, maxAttempts: 10, now, jitterMs: 750 })).toEqual(
+			new Date(day.getTime() + 750),
+		);
+	});
+
+	it("never returns a missing or past retry time", () => {
+		const now = new Date("2026-05-31T00:00:00.000Z");
+		fc.assert(
+			fc.property(
+				fc.integer({ min: 0, max: 5000 }),
+				fc.integer({ min: 1, max: 100 }),
+				fc.integer({ min: 0, max: 999 }),
+				(attempts, maxAttempts, jitterMs) => {
+					const next = calculateNextRetryAt({ attempts, maxAttempts, now, jitterMs });
+					const delay = next.getTime() - now.getTime();
+					expect(delay).toBeGreaterThanOrEqual(60_000);
+					expect(delay).toBeLessThanOrEqual(86_400_000 + jitterMs);
 				},
 			),
 		);

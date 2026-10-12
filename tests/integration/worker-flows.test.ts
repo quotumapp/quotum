@@ -839,6 +839,106 @@ localDescribe("Worker flows integration", () => {
 		expect(row.provider_reconciliation_next_attempt_at).toEqual(expect.any(String));
 		expect(row.provider_reconciliation_locked_by).toBeNull();
 	});
+
+	it("retries a subscription daily after its reconciliation attempts are spent", async () => {
+		const fixture = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		await verifyGoogleSubscription(fixture, {
+			projectKey: "globex",
+			purchaseToken: "purchase_token_stale",
+		});
+		await makeSubscriptionStale(context.sql, "globex", "purchase_token_stale");
+		const now = new Date();
+		const day = 24 * 60 * 60 * 1000;
+		const run = (providers: SubscriptionReconciliationProviders) =>
+			runSubscriptionReconciliationWorkerOnce({
+				env: context.env,
+				repository: context.repository,
+				providers,
+				maxAttempts: 2,
+				now: () => now,
+			});
+
+		// First failure: still inside the backoff window, one minute out.
+		expect((await run(reconciliationOutage())).providerFailed).toBe(1);
+		expect(await readReconciliation(context.sql, "purchase_token_stale")).toMatchObject({
+			attempts: 1,
+			error: "provider outage",
+			finite: true,
+			nextAttemptMs: String(now.getTime() + 60_000),
+		});
+
+		// Second failure spends the budget. It used to store 'infinity'; it must stay a day out.
+		await makeReconciliationDue(context.sql, "purchase_token_stale");
+		expect((await run(reconciliationOutage())).providerFailed).toBe(1);
+		expect(await readReconciliation(context.sql, "purchase_token_stale")).toMatchObject({
+			attempts: 2,
+			error: "provider outage",
+			locked_by: null,
+			finite: true,
+			nextAttemptMs: String(now.getTime() + day),
+		});
+
+		// Nothing is claimed while the day has not passed, even with the provider back.
+		const calls: string[] = [];
+		const recovered = reconciliationProvidersForProject("globex", calls);
+		expect(await run(recovered)).toMatchObject({ providerClaimed: 0, providerProcessed: 0 });
+		expect(calls).toEqual([]);
+
+		// A day later it is claimed again, and a success clears the failure.
+		await makeReconciliationDue(context.sql, "purchase_token_stale");
+		expect(await run(recovered)).toMatchObject({
+			providerClaimed: 1,
+			providerProcessed: 1,
+			providerFailed: 0,
+		});
+		expect(calls).toEqual(["globex:google:purchase_token_stale"]);
+		expect(await readReconciliation(context.sql, "purchase_token_stale")).toMatchObject({
+			attempts: 0,
+			error: null,
+			locked_by: null,
+			finite: true,
+		});
+	});
+
+	it("claims a subscription an earlier release parked at infinity", async () => {
+		const fixture = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		await verifyGoogleSubscription(fixture, {
+			projectKey: "globex",
+			purchaseToken: "purchase_token_stale",
+		});
+		await makeSubscriptionStale(context.sql, "globex", "purchase_token_stale");
+		await context.sql`
+			UPDATE subscriptions
+			SET provider_reconciliation_attempts = 10,
+				provider_reconciliation_error = 'provider outage',
+				provider_reconciliation_next_attempt_at = 'infinity'
+			WHERE external_subscription_id = 'purchase_token_stale'
+		`;
+		expect(await readReconciliation(context.sql, "purchase_token_stale")).toMatchObject({
+			finite: false,
+		});
+
+		const calls: string[] = [];
+		const result = await runSubscriptionReconciliationWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: reconciliationProvidersForProject("globex", calls),
+		});
+
+		expect(result).toMatchObject({ providerClaimed: 1, providerProcessed: 1, providerFailed: 0 });
+		expect(calls).toEqual(["globex:google:purchase_token_stale"]);
+		expect(await readReconciliation(context.sql, "purchase_token_stale")).toMatchObject({
+			attempts: 0,
+			error: null,
+			finite: true,
+		});
+	});
 });
 
 async function verifyGoogleConsumable(
@@ -1251,6 +1351,61 @@ function reconciliationProvidersForProject(
 		},
 		stripe: null,
 	};
+}
+
+function reconciliationOutage(): SubscriptionReconciliationProviders {
+	return {
+		apple: null,
+		google: {
+			async reconcileSubscription() {
+				throw new Error("provider outage");
+			},
+		},
+		stripe: null,
+	};
+}
+
+/** Moves the next attempt into the past, as the passing of the retry delay would. */
+async function makeReconciliationDue(sql: SQL, externalSubscriptionId: string): Promise<void> {
+	await sql`
+		UPDATE subscriptions
+		SET provider_reconciliation_next_attempt_at = now() - INTERVAL '1 minute'
+		WHERE external_subscription_id = ${externalSubscriptionId}
+	`;
+}
+
+async function readReconciliation(
+	sql: SQL,
+	externalSubscriptionId: string,
+): Promise<{
+	attempts: number;
+	error: string | null;
+	locked_by: string | null;
+	finite: boolean;
+	nextAttemptMs: string;
+}> {
+	const [row] = await sql<
+		{
+			attempts: number;
+			error: string | null;
+			locked_by: string | null;
+			finite: boolean;
+			nextAttemptMs: string;
+		}[]
+	>`
+		SELECT provider_reconciliation_attempts AS attempts,
+			provider_reconciliation_error AS error,
+			provider_reconciliation_locked_by AS locked_by,
+			isfinite(provider_reconciliation_next_attempt_at) AS finite,
+			round(extract(epoch FROM provider_reconciliation_next_attempt_at) * 1000)::text
+				AS "nextAttemptMs"
+		FROM subscriptions
+		WHERE external_subscription_id = ${externalSubscriptionId}
+	`;
+	if (row === undefined) {
+		throw new Error(`No subscription ${externalSubscriptionId}`);
+	}
+	return row;
 }
 
 async function expectSubscriptionReconciliationRows(sql: SQL): Promise<void> {
