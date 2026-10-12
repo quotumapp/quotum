@@ -4,6 +4,7 @@ import Stripe from "stripe";
 import { createConnectionEventApp } from "../../src/composition/connection-events";
 import { createStripeAppEvents } from "../../src/composition/stripe-app-events";
 import { closePool } from "../../src/db/client";
+import type { BillingLogger } from "../../src/observability/logger";
 import { StripeAppEvents } from "../../src/platform/connections/stripe-events";
 import {
 	createGoogleOidcTestKeys,
@@ -140,6 +141,142 @@ describe("connection-event webhook verification", () => {
 		expect(after.event_verified_at).toBeNull();
 	});
 
+	it("names why a Stripe setup event was refused without echoing provider text", async () => {
+		const browser = new MerchantBrowser(f);
+		await onboard(browser);
+		const { projectKey, versionId } = await draftStripe(browser);
+		const warnings: Array<{ message: string; context?: Record<string, unknown> }> = [];
+		const logger: BillingLogger = {
+			info() {},
+			warn: (message, context) => {
+				warnings.push({ message, context });
+			},
+			error() {},
+		};
+		const permission = (name: string): StripeFailure => ({
+			status: 403,
+			error: {
+				type: "invalid_request_error",
+				message: `The provided key 'rk_test_synthetic' does not have the required permissions for this endpoint. Having the 'rak_${name}' permission would allow this request to continue.`,
+			},
+		});
+		const refuse = async (
+			event: Record<string, unknown>,
+			options: {
+				canonical?: Record<string, unknown>;
+				account?: StripeFailure;
+				events?: StripeFailure;
+				secret?: string;
+			} = {},
+		) => {
+			const { app } = connectionEventApp([], options.canonical ?? event, {
+				account: options.account,
+				events: options.events,
+				logger,
+			});
+			const header = await stripeTestHeader(
+				JSON.stringify(event),
+				options.secret ?? "whsec_synthetic",
+			);
+			const response = await postStripe(app, projectKey, versionId, event, header);
+			expect(response.status).toBe(400);
+			return await response.json();
+		};
+		const now = Math.floor(Date.now() / 1000);
+		const event = stripeConnectionEvent();
+
+		expect(await refuse(event, { events: permission("event_read") })).toEqual({
+			success: false,
+			reason: "missing_permission",
+			missingPermission: "event_read",
+		});
+		expect(await refuse(event, { account: permission("connected_account_read") })).toEqual({
+			success: false,
+			reason: "missing_permission",
+			missingPermission: "connected_account_read",
+		});
+		expect(
+			await refuse(event, {
+				events: {
+					status: 404,
+					error: {
+						type: "invalid_request_error",
+						code: "resource_missing",
+						message: "No such event: 'evt_conn_1'",
+					},
+				},
+			}),
+		).toEqual({ success: false, reason: "event_not_found" });
+		expect(
+			await refuse(event, {
+				events: {
+					status: 401,
+					error: {
+						type: "authentication_error",
+						message: "Invalid API Key provided: rk_test_synthetic",
+					},
+				},
+			}),
+		).toEqual({ success: false, reason: "authentication_failed" });
+		expect(await refuse(stripeConnectionEvent({ livemode: true }))).toEqual({
+			success: false,
+			reason: "mode_mismatch",
+		});
+		expect(await refuse(stripeConnectionEvent({ account: "acct_other" }))).toEqual({
+			success: false,
+			reason: "account_mismatch",
+		});
+		expect(await refuse(event, { canonical: { ...event, id: "evt_other" } })).toEqual({
+			success: false,
+			reason: "event_mismatch",
+		});
+		expect(await refuse(stripeConnectionEvent({ created: now - 600 }))).toEqual({
+			success: false,
+			reason: "stale_event",
+		});
+		// Younger than the freshness window but older than the draft: it cannot verify this version.
+		expect(await refuse(stripeConnectionEvent({ created: now - 60 }))).toEqual({
+			success: false,
+			reason: "connection_changed",
+		});
+		expect(await refuse(event, { secret: "whsec_other" })).toEqual({
+			success: false,
+			reason: "signature_invalid",
+		});
+
+		expect(warnings.map((warning) => warning.context?.reason)).toEqual([
+			"missing_permission",
+			"missing_permission",
+			"event_not_found",
+			"authentication_failed",
+			"mode_mismatch",
+			"account_mismatch",
+			"event_mismatch",
+			"stale_event",
+			"connection_changed",
+			"signature_invalid",
+		]);
+		expect(warnings[0]).toEqual({
+			message: "Connection event refused",
+			context: {
+				provider: "stripe",
+				versionId,
+				reason: "missing_permission",
+				missingPermission: "event_read",
+				httpStatus: 403,
+				stripeRequestId: "req_synthetic",
+			},
+		});
+		// Neither a log line nor a response carries a key, a secret or Stripe's own text.
+		expect(JSON.stringify(warnings)).not.toContain("rk_test_synthetic");
+		expect(JSON.stringify(warnings)).not.toContain("whsec_");
+		expect(JSON.stringify(warnings)).not.toContain("does not have the required");
+		const [after] = await f.sql<
+			{ event_verified_at: string | null }[]
+		>`SELECT event_verified_at::text FROM platform_connection_versions WHERE id=${versionId}`;
+		expect(after.event_verified_at).toBeNull();
+	});
+
 	it("returns 404 for unknown, mismatched, expired, and retired connection versions", async () => {
 		const browser = new MerchantBrowser(f);
 		await onboard(browser);
@@ -217,15 +354,13 @@ describe("connection-event webhook verification", () => {
 			googleClaims("https://example.test/wrong-aud"),
 			oidc.kid,
 		);
-		expect(
-			(
-				await testRequest(app, webhookPath(projectKey, versionId, "google"), {
-					method: "POST",
-					headers: { "content-type": "application/json", authorization: `Bearer ${wrong}` },
-					body: JSON.stringify(googlePushBody()),
-				})
-			).status,
-		).toBe(400);
+		const refused = await testRequest(app, webhookPath(projectKey, versionId, "google"), {
+			method: "POST",
+			headers: { "content-type": "application/json", authorization: `Bearer ${wrong}` },
+			body: JSON.stringify(googlePushBody()),
+		});
+		expect(refused.status).toBe(400);
+		expect(await refused.json()).toEqual({ success: false, reason: "verification_failed" });
 	});
 
 	it("rejects Apple garbage payloads", async () => {
@@ -233,15 +368,13 @@ describe("connection-event webhook verification", () => {
 		await onboard(browser);
 		const { projectKey, versionId } = await draftApple(browser);
 		const { app } = connectionEventApp([]);
-		expect(
-			(
-				await testRequest(app, webhookPath(projectKey, versionId, "apple"), {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ signedPayload: "garbage" }),
-				})
-			).status,
-		).toBe(400);
+		const refused = await testRequest(app, webhookPath(projectKey, versionId, "apple"), {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ signedPayload: "garbage" }),
+		});
+		expect(refused.status).toBe(400);
+		expect(await refused.json()).toEqual({ success: false, reason: "verification_failed" });
 	});
 });
 
@@ -325,7 +458,24 @@ describe("Stripe App webhook verification", () => {
 	});
 });
 
-function connectionEventApp(fetches: string[], canonicalEvent: Record<string, unknown> = {}) {
+/** A Stripe API refusal the fake answers instead of the account or event. */
+interface StripeFailure {
+	status: number;
+	error: Record<string, unknown>;
+}
+
+function stripeFailureResponse({ status, error }: StripeFailure): Response {
+	return new Response(JSON.stringify({ error }), {
+		status,
+		headers: { "content-type": "application/json", "request-id": "req_synthetic" },
+	});
+}
+
+function connectionEventApp(
+	fetches: string[],
+	canonicalEvent: Record<string, unknown> = {},
+	options: { account?: StripeFailure; events?: StripeFailure; logger?: BillingLogger } = {},
+) {
 	const httpCalls: string[] = [];
 	const fakeFetch = Object.assign(
 		async (input: URL | RequestInfo) => {
@@ -333,11 +483,13 @@ function connectionEventApp(fetches: string[], canonicalEvent: Record<string, un
 			fetches.push(url);
 			if (url.includes("/v1/account")) {
 				httpCalls.push("account");
+				if (options.account) return stripeFailureResponse(options.account);
 				return Response.json({ id: "acct_synthetic", object: "account" });
 			}
 			if (url.includes("/v1/events")) {
 				const id = url.split("/v1/events/")[1]?.split(/[?#]/)[0] ?? canonicalEvent.id;
 				httpCalls.push(`events:${id}`);
+				if (options.events) return stripeFailureResponse(options.events);
 				return Response.json(canonicalEvent);
 			}
 			return Response.json({ error: { message: `unexpected ${url}` } }, { status: 500 });
@@ -349,6 +501,7 @@ function connectionEventApp(fetches: string[], canonicalEvent: Record<string, un
 			createConnectionEventApp(f.connectionRepository, {
 				stripeHttpClient: Stripe.createFetchHttpClient(fakeFetch),
 				googleOidcVerifier: googleVerifier,
+				logger: options.logger,
 			}),
 		),
 		httpCalls: () => [...httpCalls],

@@ -135,7 +135,8 @@ docker compose exec api quotum connections commit app-sandbox projection <draft-
    ```
 
 2. For the active production environment, point the provider's webhook at the printed
-   `setupWebhookPath`, then commit with `--wait-for-event 10m` and send a test event.
+   `setupWebhookPath`, then commit with `--wait-for-event 10m` and send a real event no more than
+   five minutes old. A Stripe production key also needs Events: Read.
 3. Point the webhook at `https://<domain>/v1/projects/<instance>/webhooks/<provider>`.
 
 The field names and event lists for each provider are in

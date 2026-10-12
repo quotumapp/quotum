@@ -390,6 +390,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 			registerBackground,
 			staffRequestScope: sentryRequestScope,
 			trustProxyHeaders: env.rateLimit.trustProxyHeaders,
+			logger,
 		});
 		return { app, jobs, logger };
 	}
@@ -410,6 +411,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		config: merchantConfig,
 		trustProxyHeaders: env.rateLimit.trustProxyHeaders,
 		stripeWritePermissionProbes: env.stripeWritePermissionProbes,
+		logger,
 		staffRequestScope: sentryRequestScope,
 		merchantRequestScope: merchantSentryScope,
 		mcpRequestScope: mcpSentryScope,

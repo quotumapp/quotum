@@ -55,6 +55,19 @@ export interface ConnectionValidationOptions {
 	stripeWritePermissionProbes?: boolean;
 }
 
+/**
+ * Whether validating a Stripe connection must prove Events: Read. A production connection verifies
+ * a signed setup event by retrieving it with its own restricted key before it can be activated.
+ * Sandbox never waits for one, and a Stripe App install verifies its events through the app's own
+ * ingress, so neither is held to the permission.
+ */
+export function requiresEventRead(
+	environment: "sandbox" | "production",
+	settings: Record<string, unknown>,
+): boolean {
+	return environment === "production" && settings.authMethod !== "oauth";
+}
+
 export function createConnectionValidation({
 	destinationPolicy = publicDestinationPolicy,
 	destinationDependencies = {},
@@ -323,7 +336,10 @@ export function createConnectionValidation({
 						timeout: 10_000,
 						maxNetworkRetries: 0,
 					}),
-					{ writeProbes: stripeWritePermissionProbes },
+					{
+						writeProbes: stripeWritePermissionProbes,
+						eventRead: requiresEventRead(environment, input.settings),
+					},
 				);
 			}
 			try {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type Stripe from "stripe";
+import { requiresEventRead } from "../../src/composition/connection-validation";
 import {
 	stripeWritePermissions,
 	validateStripeAccess,
@@ -39,6 +40,7 @@ function client(failures: Record<string, unknown> = {}) {
 			...lists,
 			accounts: { retrieve: probe("account") },
 			customers: { list: probe("customers"), update: probe("customers.update") },
+			events: { list: probe("events") },
 			subscriptions: { list: probe("subscriptions"), update: probe("subscriptions.update") },
 			invoices: { list: probe("invoices"), update: probe("invoices.update") },
 			checkout: { sessions: { list: probe("checkout"), create: probe("checkout.create") } },
@@ -49,9 +51,12 @@ function client(failures: Record<string, unknown> = {}) {
 	};
 }
 
-async function rejection(stripe: Stripe): Promise<{ details: Record<string, unknown> }> {
+async function rejection(
+	stripe: Stripe,
+	options: { eventRead?: boolean } = {},
+): Promise<{ details: Record<string, unknown> }> {
 	try {
-		await validateStripeAccess(stripe);
+		await validateStripeAccess(stripe, options);
 	} catch (error) {
 		return error as { details: Record<string, unknown> };
 	}
@@ -185,5 +190,69 @@ describe("Stripe permission validation", () => {
 			},
 		});
 		expect(JSON.stringify(error)).not.toContain("SECRET");
+	});
+	it("reads Events only when the caller asks for it", async () => {
+		const withoutEvents = client();
+		const plain = await validateStripeAccess(withoutEvents.stripe);
+		expect(withoutEvents.names()).not.toContain("events");
+		expect(plain.checks.map((check) => check.code)).not.toContain("event_read");
+
+		const withEvents = client();
+		const result = await validateStripeAccess(withEvents.stripe, { eventRead: true });
+		expect(withEvents.calls.filter((call) => call.name === "events")).toEqual([
+			{ name: "events", args: [{ limit: 1 }] },
+		]);
+		expect(result.checks).toHaveLength(20);
+		expect(result.checks).toContainEqual({ code: "event_read", passed: true });
+		expect(result.unverifiedPermissions).toEqual([]);
+	});
+	it("fails validation naming Events: Read when the key lacks it", async () => {
+		const named = client({
+			events: {
+				statusCode: 403,
+				message:
+					"The provided key 'rk_live_SECRET' does not have the required permissions for this endpoint. Having the 'rak_event_read' permission would allow this request to continue.",
+			},
+		});
+		const unnamed = client({
+			events: { statusCode: 403, message: "No permissions were named here." },
+		});
+
+		for (const { stripe } of [named, unnamed]) {
+			const error = await rejection(stripe, { eventRead: true });
+			expect(error.details).toEqual({
+				checks: [
+					{
+						check: "event_read",
+						reason: "missing_permission",
+						missingPermission: "event_read",
+						httpStatus: 403,
+					},
+				],
+				missingPermissions: ["event_read"],
+				unverifiedPermissions: [],
+			});
+			expect(JSON.stringify(error)).not.toContain("SECRET");
+		}
+	});
+	it("reports a rate-limited Events probe without naming a permission", async () => {
+		const { stripe } = client({ events: { statusCode: 429 } });
+
+		const error = await rejection(stripe, { eventRead: true });
+
+		expect(error.details.checks).toEqual([
+			{ check: "event_read", reason: "rate_limited", httpStatus: 429 },
+		]);
+		expect(error.details.missingPermissions).toEqual([]);
+	});
+});
+
+describe("requiresEventRead", () => {
+	it("holds only a production restricted key to Events: Read", () => {
+		expect(requiresEventRead("production", {})).toBe(true);
+		expect(requiresEventRead("production", { authMethod: "restricted_key" })).toBe(true);
+		expect(requiresEventRead("production", { authMethod: "oauth" })).toBe(false);
+		expect(requiresEventRead("sandbox", {})).toBe(false);
+		expect(requiresEventRead("sandbox", { authMethod: "oauth" })).toBe(false);
 	});
 });
