@@ -346,7 +346,9 @@ resubscription starts without the previous token's trial.
   `rk_live_` for production) and `stripe.webhookSecret`.
 - `stripe.checkoutSuccessUrl` (must contain `{CHECKOUT_SESSION_ID}`), `stripe.checkoutCancelUrl`,
   `stripe.portalReturnUrl`, and `stripe.allowedReturnOrigins` for request-level overrides.
-- `stripe.taxMode`: `disabled`, `test`, or `registered`.
+- `stripe.taxMode`: `disabled`, `test`, or `registered`. `test` and `registered` turn on
+  automatic tax and business tax ID collection in Checkout, which saves the billing address and
+  the business name the customer enters onto the Stripe customer.
 - `stripe.integrationIdentifier` (defaults to `qfmxzjpa`).
 
 When the deployment enables Stripe Apps OAuth, merchants can authorize the Stripe App defined in

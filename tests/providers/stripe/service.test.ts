@@ -58,6 +58,7 @@ function serviceFixture(
 				accountIdentity?: string | null;
 				connectedAccountId?: string;
 				connectedAccountLivemode?: boolean;
+				taxMode?: "disabled" | "test" | "registered";
 			}
 		>;
 		products?: Record<string, StripeWebStoreProductRow>;
@@ -720,6 +721,68 @@ describe("StripeBillingService", () => {
 			},
 		});
 		expect("payment_intent_data" in checkoutCall.params).toBe(false);
+	});
+
+	// capability: checkout.hosted
+	it.each(["test", "registered"] as const)(
+		"lets Checkout save the business name and address of an existing customer when tax is on (%s)",
+		async (taxMode) => {
+			const { calls, service } = serviceFixture({ config: { taxMode } });
+
+			await service.createCheckoutSession({
+				billingAccountId: "user_1",
+				productKey: "credits_100",
+			});
+
+			const call = calls.at(-1) as { params: Stripe.Checkout.SessionCreateParams };
+			expect(call.params.automatic_tax).toEqual({ enabled: true });
+			expect(call.params.tax_id_collection).toEqual({ enabled: true });
+			// Stripe rejects tax ID collection for an existing customer without name: "auto".
+			expect(call.params.customer_update).toEqual({ address: "auto", name: "auto" });
+		},
+	);
+
+	// capability: checkout.plan
+	it("lets recurring Checkout save the business name of an existing customer when tax is on", async () => {
+		const { calls, service } = serviceFixture({
+			config: { taxMode: "registered" },
+			recurringPlan: {
+				planVersionId: "42",
+				planKey: "pro",
+				name: "Pro",
+				kind: "base",
+				trialDays: null,
+				trialRequiresPaymentMethod: true,
+				trialEndBehavior: "cancel",
+				trialUsed: false,
+				components: [
+					{
+						priceComponentId: "1",
+						priceKey: "base",
+						componentKind: "base",
+						featureKey: null,
+						externalProductId: "prod_pro",
+						externalPriceId: "price_pro",
+						defaultQuantity: 1,
+						minimumQuantity: 1,
+						maximumQuantity: 1,
+						unitAmountMinor: 999,
+						pricingModel: "flat",
+						currency: "USD",
+						billingInterval: "month",
+						billingIntervalCount: 1,
+					},
+				],
+			},
+		});
+
+		await service.createRecurringCheckoutSession({ billingAccountId: "user_1", planKey: "pro" });
+
+		const call = calls.at(-1) as { params: Stripe.Checkout.SessionCreateParams };
+		expect(call.params.mode).toBe("subscription");
+		expect(call.params.automatic_tax).toEqual({ enabled: true });
+		expect(call.params.tax_id_collection).toEqual({ enabled: true });
+		expect(call.params.customer_update).toEqual({ address: "auto", name: "auto" });
 	});
 
 	// capability: catalog.trial
