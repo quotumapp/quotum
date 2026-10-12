@@ -26,6 +26,9 @@ export const operatorKeyPaths = {
 	balanceAdjustments: (path: string): boolean =>
 		path.startsWith("/v1/admin/operator-grants/") ||
 		path.startsWith("/v1/admin/administrative-debits/"),
+	/** Removing a provider customer link, and the receipts of it. */
+	providerCustomerUnlinks: (path: string): boolean =>
+		path.startsWith("/v1/admin/provider-customer-unlinks/"),
 } as const satisfies Record<string, (path: string) => boolean>;
 
 /** Whether a `/v1` path needs the operator key, as the contract documents it. */

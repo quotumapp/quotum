@@ -15,6 +15,7 @@ import type {
 import type { MeteringServiceLike } from "../billing/metering";
 import type { TrialServiceLike } from "../billing/plan-grants";
 import type { PromotionServiceLike } from "../billing/promotions";
+import type { ProviderCustomerUnlinkServiceLike } from "../billing/provider-customer-unlinks";
 import type { ProviderOperationStore } from "../billing/provider-operations";
 import type { UsageApiServiceLike } from "../billing/usage-api";
 import type { WebBillingService } from "../billing/web-provider";
@@ -150,6 +151,7 @@ export interface AppDependencies {
 	promotionService?: PromotionServiceLike;
 	trialService?: TrialServiceLike;
 	balanceAdjustmentService?: BalanceAdjustmentServiceLike;
+	providerCustomerUnlinkService?: ProviderCustomerUnlinkServiceLike;
 	catalogControlPlane?: CatalogControlPlaneLike;
 	catalogBindings?: CatalogBindingsLike;
 	billingInsightsService?: BillingInsightsServiceLike;

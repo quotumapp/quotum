@@ -151,6 +151,29 @@ CREATE TABLE IF NOT EXISTS provider_customers (
 	CONSTRAINT provider_customers_project_customer_fk FOREIGN KEY (project_id, customer_id) REFERENCES customers(project_id, id) ON DELETE CASCADE
 );
 
+-- An operator removed a billing account's provider customer link. The link row is deleted, so this
+-- receipt is its history: which provider customer the account held, since when, who removed it and
+-- why. Rows are only ever inserted.
+CREATE TABLE IF NOT EXISTS provider_customer_unlinks (
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	customer_id UUID NOT NULL,
+	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
+	provider_account_id TEXT,
+	external_customer_id TEXT NOT NULL,
+	linked_at TIMESTAMPTZ NOT NULL,
+	actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),
+	reason TEXT NOT NULL CHECK (char_length(reason) BETWEEN 1 AND 500),
+	idempotency_key TEXT COLLATE "C" NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
+	request_hash TEXT COLLATE "C" NOT NULL CHECK (char_length(request_hash) = 64),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT provider_customer_unlinks_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT provider_customer_unlinks_idempotency_unique
+		UNIQUE (project_id, customer_id, idempotency_key),
+	CONSTRAINT provider_customer_unlinks_project_customer_fk FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS subscriptions (
 	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
@@ -413,6 +436,9 @@ CREATE INDEX IF NOT EXISTS idx_billing_store_products_product_id
 
 CREATE INDEX IF NOT EXISTS idx_billing_provider_customers_customer_id
 	ON provider_customers (customer_id);
+
+CREATE INDEX IF NOT EXISTS idx_billing_provider_customer_unlinks_customer_created
+	ON provider_customer_unlinks (project_id, customer_id, created_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_billing_store_events_customer_id
 	ON store_events (customer_id);

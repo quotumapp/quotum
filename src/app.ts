@@ -10,6 +10,7 @@ import { registerCustomerRoutes } from "./app/customer-routes";
 import { registerInsightsRoutes } from "./app/insights-routes";
 import { registerMeteringRoutes } from "./app/metering-routes";
 import { registerPromotionRoutes } from "./app/promotion-routes";
+import { registerProviderCustomerUnlinkRoutes } from "./app/provider-customer-unlink-routes";
 import { registerProviderOperationRoutes } from "./app/provider-operation-routes";
 import {
 	projectProviderServiceResolver,
@@ -115,6 +116,7 @@ export function createApp({
 	promotionService,
 	trialService,
 	balanceAdjustmentService,
+	providerCustomerUnlinkService,
 	catalogControlPlane,
 	catalogBindings,
 	billingInsightsService,
@@ -630,6 +632,13 @@ export function createApp({
 		app,
 		operatorApiKey: env.operatorApiKey,
 		service: balanceAdjustmentService ?? getRepository().balanceAdjustments,
+		registerPostAuthGuard,
+	});
+	registerProviderCustomerUnlinkRoutes({
+		app,
+		operatorApiKey: env.operatorApiKey,
+		service: providerCustomerUnlinkService ?? getRepository().providerCustomerUnlinks,
+		billingLogger,
 		registerPostAuthGuard,
 	});
 
