@@ -1,7 +1,8 @@
 # Load testing
 
 - Document kind: Current behavior
-- Sources: [load lane](../scripts/test-load.ts).
+- Sources: [load lane](../scripts/test-load.ts), [gates](../scripts/lib/load-gates.ts),
+  [request bodies](../scripts/lib/load-requests.ts).
 
 `bun run test:load` boots the real service and drives metering over HTTP. The default scenarios use
 a closed-loop client; `users` uses a fixed arrival rate. It creates a disposable Postgres container
@@ -26,6 +27,32 @@ The lane publishes a metered catalog and grants balances to one hot account and,
 intervals extended to one hour). `users` and `windows` run only when listed. The last scenario keeps polling idle during short runs; it does
 not permanently disable workers. Keep `workers-off` last in a custom scenario list because later
 scenarios do not restore the normal polling intervals.
+
+## What fails the lane
+
+The fixture grants every account far more than a run spends and the lane sends only bodies the API
+accepts, so a healthy run answers every request `200` with the operation allowed. The lane exits
+non-zero, after it writes `--out`, when any of these hold:
+
+- A response has a status outside `2xx`: `0` (no response, such as a timeout or a refused
+  connection), any `4xx` (a body the API refuses is a `400`; a rate limit is a `429`) or any `5xx`.
+  No status is tolerated.
+- A closed-loop scenario accepted fewer requests than it sent. A request is accepted when it is
+  answered `200` with `allowed: true`. A denial is itself HTTP `200` with `allowed: false`, which the
+  status check cannot see, so it fails here. The table and the JSON report `accepted` out of
+  `requests` and the `denied` count for every scenario.
+- A scenario sent no requests.
+- A `users` level accepted fewer requests than it scheduled, dropped arrivals, or failed durable
+  usage reconciliation.
+- Projection jobs are still pending or processing after a run, in every scenario except
+  `workers-off`.
+- A supplied `--min-rps` or `--max-p99-ms` threshold is missed.
+
+Consume and check send `featureId` and `value`; reserve sends `featureKey`, `quantity` and
+`expiresInSeconds`, and confirm sends `quantity`. The bodies live in
+[`scripts/lib/load-requests.ts`](../scripts/lib/load-requests.ts), and a unit test parses them with
+the routes' own strict schemas, so a contract change fails the unit suite. The lane itself needs
+Docker and minutes and no workflow runs it, so run it after changing a metering route.
 
 ## Short control windows
 
@@ -77,17 +104,19 @@ fixture projection jobs cleared between levels so overload does not carry queued
 next level. These are independent load levels, not a continuous ramp or a durability/failover test. Metering rate
 limits are raised for the fixture; production admission limits are not measured.
 
-Missing arrivals, non-allowed responses, reconciliation failures and leftover projection backlog
-fail the lane, as do supplied `--min-rps`/`--max-p99-ms` thresholds. Results and gate failures are
-written to `--out` **before** a failing exit, so overload evidence is retained. Database connection
+Missing arrivals, any non-`2xx` response, non-allowed responses, reconciliation failures and
+leftover projection backlog fail the lane, as do supplied `--min-rps`/`--max-p99-ms` thresholds (see
+[What fails the lane](#what-fails-the-lane)). Results and gate failures are written to `--out`
+**before** a failing exit, so overload evidence is retained. Database connection
 strings are redacted in reports. A short local run validates behavior under load; use longer runs
 and a separate generator to establish deployment capacity and steady-state worker freshness.
 
 ## Metrics and other options
 
-Results include client latency percentiles, scenario iterations and ledger calls per second,
-Postgres transactions, WAL bytes, dead tuples, sampled lock waits, projection jobs created,
-delivered and left in backlog, and sampled service/container CPU. A successful reserve iteration
+Results include client latency percentiles, the accepted and denied request counts and a count per
+response status, scenario iterations and ledger calls per second, Postgres transactions, WAL bytes,
+dead tuples, sampled lock waits, projection jobs created, delivered and left in backlog, and
+sampled service/container CPU. A successful reserve iteration
 makes two HTTP calls; its client latency covers reserve plus confirm, while server percentiles
 use the confirm operation's histogram. Server percentiles are histogram bucket upper bounds.
 Statement counts and database time per request are aggregate ratios from `pg_stat_statements`,
@@ -97,8 +126,10 @@ container CPU sample.
 
 `--profile [consume|check|reserve]` skips the scenarios, runs fifty sequential requests against the hot
 account after a warmup, and lists every statement they execute with its calls per request, rows
-and mean execution time from `pg_stat_statements`. `--pg-config setting=value` (repeatable) passes
-Postgres settings to the container, for example `synchronous_commit=off` to isolate commit latency.
+and mean execution time from `pg_stat_statements`. It fails when any of those requests is not
+accepted, because a refused request does not run the statements being profiled. `--pg-config
+setting=value` (repeatable) passes Postgres settings to the container, for example
+`synchronous_commit=off` to isolate commit latency.
 
 Options: `--duration` and `--warmup` in seconds, `--concurrency 1,8,32,64`, `--accounts`,
 `--scenarios`, `--out file.json`, `--pg-config setting=value` (container only, repeatable), and
