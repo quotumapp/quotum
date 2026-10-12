@@ -56,6 +56,11 @@ const allowlisted = [
 		reason: "global auto-topup queue claim",
 	},
 	{
+		snippet:
+			"SELECT s.id FROM subscriptions s WHERE s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled', 'expired')",
+		reason: "global provider reconciliation queue claim; the update that follows is by primary key",
+	},
+	{
 		snippet: "FROM store_events se",
 		reason: "admin stats query uses projectFilter in the same template",
 	},

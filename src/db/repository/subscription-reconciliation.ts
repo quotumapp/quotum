@@ -1,4 +1,4 @@
-import { sql as drizzleSql } from "drizzle-orm";
+import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import { trialEndingNoticeLeadMs } from "../../billing/trials";
 import { providersComposing } from "../../providers/capabilities";
 import { RepositoryModule } from "./base";
@@ -16,6 +16,37 @@ import { formatUtcTimestamp, requireNonBlank, requirePositiveLimit } from "./val
 
 /** Providers whose trial-ending notice Quotum composes from recorded bounds, per their declarations. */
 const composedTrialNoticeProviders = providersComposing("trial.ending_notice");
+
+/**
+ * The subscriptions one reconciliation poll claims, oldest attempt first. It is a function of its
+ * own so a test can plan the statement the worker runs. Its status list has to stay inside the
+ * predicate of `idx_billing_subscriptions_provider_reconciliation_due`: Postgres uses a partial
+ * index only when the query implies the predicate, and otherwise every poll scans the table.
+ */
+export function dueProviderReconciliationsSql(limit: number, staleBefore: Date): DrizzleSQL {
+	return drizzleSql`
+		SELECT s.id
+		FROM subscriptions s
+		WHERE s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled', 'expired')
+			AND s.provider IN ('apple', 'google', 'stripe')
+			AND (
+				s.provider_reconciliation_next_attempt_at <= now()
+				OR s.provider_reconciliation_next_attempt_at = 'infinity'::timestamptz
+			)
+			AND (
+				s.provider_reconciled_at IS NULL
+				OR s.provider_reconciled_at <= ${staleBefore.toISOString()}::timestamptz
+				OR s.expires_at <= now() + INTERVAL '1 hour'
+			)
+			AND (
+				s.provider_reconciliation_locked_at IS NULL
+				OR s.provider_reconciliation_locked_at <= now() - INTERVAL '5 minutes'
+			)
+		ORDER BY s.provider_reconciliation_next_attempt_at ASC, s.created_at ASC
+		LIMIT ${limit}
+		FOR UPDATE SKIP LOCKED
+	`;
+}
 
 export class SubscriptionReconciliationBillingRepository extends RepositoryModule {
 	async reconcileExpiredSubscriptions(
@@ -242,28 +273,7 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 		const rows = await executeRows(
 			this.database,
 			drizzleSql`
-			WITH due_subscriptions AS (
-				SELECT s.id
-				FROM subscriptions s
-				WHERE s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled', 'expired')
-					AND s.provider IN ('apple', 'google', 'stripe')
-					AND (
-						s.provider_reconciliation_next_attempt_at <= now()
-						OR s.provider_reconciliation_next_attempt_at = 'infinity'::timestamptz
-					)
-					AND (
-						s.provider_reconciled_at IS NULL
-						OR s.provider_reconciled_at <= ${staleBefore.toISOString()}::timestamptz
-						OR s.expires_at <= now() + INTERVAL '1 hour'
-					)
-					AND (
-						s.provider_reconciliation_locked_at IS NULL
-						OR s.provider_reconciliation_locked_at <= now() - INTERVAL '5 minutes'
-					)
-				ORDER BY s.provider_reconciliation_next_attempt_at ASC, s.created_at ASC
-				LIMIT ${cappedLimit}
-				FOR UPDATE SKIP LOCKED
-			)
+			WITH due_subscriptions AS (${dueProviderReconciliationsSql(cappedLimit, staleBefore)})
 			UPDATE subscriptions s
 			SET
 				provider_reconciliation_locked_at = now(),
