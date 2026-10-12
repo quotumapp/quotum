@@ -33,13 +33,11 @@ import { type BillingLogger, safelyLogInfo } from "../observability/logger";
 import type { BillingAdminOperations } from "../operations/admin";
 import { constantTimeEquals } from "../shared/constant-time-equals";
 import { operationDetail } from "../shared/http";
+import { operatorKeyPaths } from "../shared/operator-key-paths";
 import * as responses from "./contracts/admin-responses";
 import { readOnlyCredentialError } from "./credential-access";
 import { privateProject } from "./request-context";
 import type { BillingElysia, PostAuthGuard } from "./types";
-
-const OPERATOR_PATH_PATTERN =
-	/^\/v1\/admin\/(billing-accounts\/[^/]+\/provider-operations\/[^/]+\/reconcile|store-events\/[^/]+\/replay|projection-jobs\/[^/]+\/retry|subscription-changes\/[^/]+\/retry|usage-invoice-periods\/[^/]+\/retry|usage-invoice-adjustments\/[^/]+\/retry|reconciliation\/subscriptions\/run|metrics)$/;
 
 /** Customer-scoped lists take the customer from the path; a `customerId` query value is ignored. */
 const customerScoped = { customerId: true } as const;
@@ -78,12 +76,7 @@ export function registerAdminRoutes({
 			trustProxyHeaders: rateLimitKeyOptions.trustProxyHeaders,
 		}),
 	);
-	registerPostAuthGuard(
-		operatorApiKeyGuard(
-			operatorApiKey,
-			(p) => OPERATOR_PATH_PATTERN.test(p) || p.startsWith("/v1/admin/catalog/"),
-		),
-	);
+	registerPostAuthGuard(operatorApiKeyGuard(operatorApiKey, operatorKeyPaths.admin));
 
 	app.get(
 		"/v1/admin/metrics",

@@ -58532,6 +58532,16 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -72489,10 +72499,12 @@
         },
         "security": [
           {
+            "operatorKey": [],
             "projectKey": []
           },
           {
-            "gatewayProject": []
+            "gatewayProject": [],
+            "operatorKey": []
           }
         ],
         "summary": "POST /v1/admin/subscription-changes/{changeId}/retry",
@@ -73194,10 +73206,12 @@
         },
         "security": [
           {
+            "operatorKey": [],
             "projectKey": []
           },
           {
-            "gatewayProject": []
+            "gatewayProject": [],
+            "operatorKey": []
           }
         ],
         "summary": "POST /v1/admin/usage-invoice-adjustments/{adjustmentId}/retry",
@@ -73364,10 +73378,12 @@
         },
         "security": [
           {
+            "operatorKey": [],
             "projectKey": []
           },
           {
-            "gatewayProject": []
+            "gatewayProject": [],
+            "operatorKey": []
           }
         ],
         "summary": "POST /v1/admin/usage-invoice-periods/{periodId}/retry",
@@ -78628,6 +78644,16 @@
             "required": true,
             "schema": {
               "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             }
           }

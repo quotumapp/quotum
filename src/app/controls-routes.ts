@@ -4,6 +4,7 @@ import { billingProviders } from "../billing/types";
 import { cadenceUnits, maxCadenceCount } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { bigintIdSchema, decimalDigitsQuery, storableDateTimeSchema } from "../shared/input-bounds";
+import { operatorKeyPaths } from "../shared/operator-key-paths";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/controls-responses";
 import { publicIdSchema } from "./contracts/usage-api";
@@ -133,11 +134,7 @@ export function registerControlsRoutes({
 	service,
 	registerPostAuthGuard,
 }: ControlsRoutesDependencies): void {
-	registerPostAuthGuard(
-		operatorApiKeyGuard(operatorApiKey, (p) =>
-			/^\/v1\/admin\/(contracts|catalog-migrations|auto-topups)\//.test(p),
-		),
-	);
+	registerPostAuthGuard(operatorApiKeyGuard(operatorApiKey, operatorKeyPaths.controls));
 
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/entities",

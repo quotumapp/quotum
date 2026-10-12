@@ -1,6 +1,7 @@
 import { expect, it } from "bun:test";
 import { createApp } from "../../src/app";
 import type { AppDependencies } from "../../src/app/types";
+import { buildDocumentedApps, generateOpenApi } from "../../src/composition/openapi";
 import type { FixtureBillingEnv as BillingEnv } from "../../src/testing/connection-fixtures";
 import { fixtureConnections } from "../../src/testing/connection-fixtures";
 import { testRequest, withOpenApiAssertions } from "../helpers/openapi";
@@ -195,4 +196,36 @@ it("takes a key exactly as sent: inner characters are the caller's, and nothing 
 		});
 	}
 	expect(seen).toEqual([key, key, key, key, key]);
+});
+
+it("lists the Idempotency-Key header in the contract on every route whose handler requires it", async () => {
+	const document = await generateOpenApi("0.0.0-test");
+	const [staff] = buildDocumentedApps();
+	const requiring: string[] = [];
+	const unlisted: string[] = [];
+	for (const route of staff?.routes ?? []) {
+		if (!route.path.startsWith("/v1/")) continue;
+		// The handler's own source: a route calls `requireIdempotencyKey` in the handler, so the
+		// contract rule cannot silently lag behind it. A helper that makes the call elsewhere is not
+		// seen here, which is why the handlers keep the call inline.
+		const handler = (route as { handler?: unknown }).handler;
+		if (typeof handler !== "function" || !handler.toString().includes("requireIdempotencyKey"))
+			continue;
+		const label = `${route.method} ${route.path}`;
+		requiring.push(label);
+		const path = route.path.replace(/:([A-Za-z][A-Za-z0-9]*)/g, "{$1}");
+		const operation = (
+			document.paths?.[path] as Record<string, { parameters?: unknown[] }> | undefined
+		)?.[route.method.toLowerCase()];
+		const header = (operation?.parameters ?? []).find(
+			(parameter) =>
+				(parameter as { in?: string; name?: string }).in === "header" &&
+				(parameter as { name?: string }).name === "Idempotency-Key",
+		) as { required?: boolean } | undefined;
+		if (header?.required !== true) unlisted.push(label);
+	}
+
+	// Guards the detection itself: a refactor that hides the call from the handler must fail here.
+	expect(requiring.length).toBeGreaterThan(10);
+	expect(unlisted).toEqual([]);
 });

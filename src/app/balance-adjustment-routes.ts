@@ -7,6 +7,7 @@ import {
 import { requireIdempotencyKey } from "../billing/idempotency-key";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { decimalDigitsQuery, isBigintId, storableDateTimeSchema } from "../shared/input-bounds";
+import { operatorKeyPaths } from "../shared/operator-key-paths";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/balance-adjustment-responses";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
@@ -17,14 +18,6 @@ export interface BalanceAdjustmentRoutesDependencies {
 	operatorApiKey: string | null;
 	service: BalanceAdjustmentServiceLike;
 	registerPostAuthGuard(guard: PostAuthGuard): void;
-}
-
-/** Operator grants and administrative debits change balances, so both need the operator key. */
-export function isBalanceAdjustmentPath(path: string): boolean {
-	return (
-		path.startsWith("/v1/admin/operator-grants/") ||
-		path.startsWith("/v1/admin/administrative-debits/")
-	);
 }
 
 const accountParams = z.object({ billingAccountId: z.string().trim().min(1).max(200) }).strict();
@@ -77,7 +70,7 @@ export function registerBalanceAdjustmentRoutes({
 	service,
 	registerPostAuthGuard,
 }: BalanceAdjustmentRoutesDependencies): void {
-	registerPostAuthGuard(operatorApiKeyGuard(operatorApiKey, isBalanceAdjustmentPath));
+	registerPostAuthGuard(operatorApiKeyGuard(operatorApiKey, operatorKeyPaths.balanceAdjustments));
 
 	app.post(
 		"/v1/admin/operator-grants/:billingAccountId",

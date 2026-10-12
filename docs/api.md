@@ -90,6 +90,20 @@ bun run openapi:lint
 Generation uses module-owned Zod schemas and needs no database or credentials. CI diffs the contract
 against the base revision; compatible patch releases must not introduce breaking changes.
 
+The contract lists the credentials and headers a client must send, and the runtime enforces the same
+list:
+
+- **Operator key.** `src/shared/operator-key-paths.ts` is the one list of `/v1` paths behind
+  `X-Billing-Operator-Key`. The route modules' operator guards match with it and the documented
+  `operatorKey` security is its union, so add a new operator-only path there, not in a guard.
+  `tests/app/operator-auth.test.ts` sends a request without the key to every `/v1` route and fails
+  when the routes that answer `401` differ from the routes the contract marks.
+- **`Idempotency-Key` and `X-Billing-Actor`.** The generator derives both from the route path and
+  tags (`headerParameters` in `src/composition/openapi.ts`). A handler that calls
+  `requireIdempotencyKey` needs its path added to that rule;
+  `tests/app/idempotency-key-rule.test.ts` fails when the contract does not list the header as
+  required on such a route.
+
 ## Read-only credentials
 
 A project credential is either full (`sqpk_`, `pqpk_`) or read-only (`sqrk_`, `pqrk_`). A read-only

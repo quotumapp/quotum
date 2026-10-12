@@ -167,6 +167,49 @@ describe("operator-key contracts", () => {
 		}
 	});
 
+	it("documents the operator key on exactly the routes the runtime guards", async () => {
+		const document = await generateOpenApi("0.0.0-test");
+		const documented = new Set(
+			operatorKeyRoutes(document).map(({ path, method }) => `${method.toUpperCase()} ${path}`),
+		);
+		expect(documented.size).toBeGreaterThan(0);
+		// Nothing below reaches Postgres: operator routes answer before their handler, and the closed
+		// port makes any handler that does run fail at once instead of touching a local database.
+		const app = operatorTestApp({
+			...env,
+			postgresUri: "postgresql://postgres:postgres@127.0.0.1:1/unused",
+			rateLimit: {
+				...env.rateLimit,
+				verifyLimit: 100_000,
+				webhookLimit: 100_000,
+				adminLimit: 100_000,
+				meteringLimit: 100_000,
+			},
+		});
+		const guarded = new Set<string>();
+		let probed = 0;
+		for (const route of app.routes) {
+			// Provider webhooks authenticate with a signature, not a project credential.
+			if (!route.path.startsWith("/v1/") || route.path.includes("/webhooks/")) continue;
+			probed += 1;
+			const verb = route.method.toUpperCase();
+			const response = await app.handle(
+				new Request(`http://localhost${fillRoutePath(route.path)}`, {
+					method: verb,
+					headers: requestHeaders(verb),
+					body: verb === "GET" ? undefined : "{}",
+				}),
+			);
+			const text = await response.text();
+			if (response.status === 401 && text.includes(unauthorized.error.message))
+				guarded.add(`${verb} ${route.path.replace(/:([A-Za-z][A-Za-z0-9]*)/g, "{$1}")}`);
+		}
+
+		// A route the runtime guards but the contract omits sends generated clients without the key.
+		expect(probed).toBeGreaterThan(80);
+		expect([...guarded].sort()).toEqual([...documented].sort());
+	});
+
 	it("never reaches an operator handler through path variants the guard does not see", async () => {
 		const routes = operatorKeyRoutes(await generateOpenApi("0.0.0-test"));
 		const app = operatorTestApp();
@@ -197,4 +240,9 @@ describe("operator-key contracts", () => {
 
 function fillPath(path: string): string {
 	return path.replace(/\{[A-Za-z][A-Za-z0-9]*\}/g, "00000000-0000-4000-8000-000000000001");
+}
+
+/** A registered route pattern (`:param` placeholders) with every parameter filled in. */
+function fillRoutePath(path: string): string {
+	return path.replace(/:[A-Za-z][A-Za-z0-9]*/g, "00000000-0000-4000-8000-000000000001");
 }
