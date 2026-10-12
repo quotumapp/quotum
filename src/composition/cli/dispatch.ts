@@ -282,6 +282,23 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		accepts: (args) => args[0] === "list",
 	},
 	{
+		path: ["second-factor"],
+		file: "composition/cli/second-factor.ts",
+		usage: "second-factor reset --email <address> --reason <why>",
+		summary: "Clear a merchant's authenticator after they lost it and their recovery codes",
+		environment: "POSTGRES_URI, optional QUOTUM_ACTOR and BILLING_POSTGRES_PREPARED_STATEMENTS",
+		details: [
+			"  second-factor reset --email <address> --reason <why> [--actor <name>]",
+			"Removes the person's authenticator and recovery codes, ends their console sessions and",
+			"coding-client grants, and ends any sign-in in progress. They then sign in with their",
+			"password and the emailed code that proves the mailbox, and set a new authenticator up.",
+			"Confirm who is asking by a channel of your own first: this is the only way back for",
+			"someone who has neither. It sends no mail. The audit event names --actor (or",
+			"QUOTUM_ACTOR) and the reason.",
+		],
+		accepts: (args) => args[0] === "reset",
+	},
+	{
 		path: ["merchant", "service-principal"],
 		file: "composition/cli/merchant-service-principal.ts",
 		usage: "merchant service-principal <name>",

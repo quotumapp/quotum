@@ -64,6 +64,7 @@ records beside `--actor`. A headless deployment has no members to defer to and n
 | `quotum audit list [--organization <slug>] [--action <name>] [--since <time>] [--until <time>] [--limit <n>]` | Read the platform audit trail, newest first, as one JSON page: connection, credential and environment changes and owner hand-offs, with the `--actor` an operator command recorded in `metadata`. `nextBefore` continues the listing with `--before`. Read-only, needs only `POSTGRES_URI`, and works headless. Catalog and promotion history are not in it. |
 | `quotum organizations add-owner <organization> --email <address>` | Hand an organization to a person: [make a merchant user who has signed in an owner](#hand-an-organization-to-an-owner). Refused in headless mode. |
 | `quotum organizations rename <organization> --name <name>` / `quotum projects rename <organization> <project> --name <name>` | [Change a display name](#rename-an-organization-or-project). The slug and keys never change. Works headless. |
+| `quotum second-factor reset --email <address> --reason <why>` | [Reset a merchant's authenticator](#merchant-second-factor) after they lost it and their recovery codes. Refused in headless mode. |
 | `quotum connections rotate-secrets` | [Encryption-key rotation](#encryption-key-rotation). |
 | `quotum merchant service-principal <name>` | The [merchant proxy service principal](#merchant-proxy-service-principal). Refused in headless mode. |
 | `quotum mcp` | The read-only [stdio MCP server](mcp.md#run-over-stdio). |
@@ -173,8 +174,8 @@ console before this default changed must set the flag; see
 
 These are service-operator settings, not merchant registration fields or customer integrations.
 Merchants register their recipient email address; Quotum sends verification, password reset, the
-one-time code that sets up an authenticator, invitation and invite-request messages through the
-selected adapter. Templates and authentication rules are independent of the provider.
+one-time code that sets up an authenticator, security notices, invitation and invite-request
+messages through the selected adapter. Templates and authentication rules are independent of the provider.
 
 Cloudflare example:
 
@@ -227,6 +228,16 @@ sign-in relies on Google's own verification at sign-in. Email is not a recurring
   challenge (`SECOND_FACTOR_REQUIRED`) and sets one up first, which for a Google account needs a
   fresh Google sign-in. A code that signed someone in cannot confirm a challenge in the same
   30-second step, so the console asks for the next code.
+- Someone who has lost both their authenticator and their recovery codes needs an operator:
+  `quotum second-factor reset --email <address> --reason <why> --actor <you>`. Confirm who is asking
+  by a channel of your own first. It clears the authenticator and recovery codes, ends the person's
+  console sessions, coding-client grants and sign-ins in progress, and records the reason and the
+  operator in an audit event. It sends no mail. The person then signs in with their password and the
+  emailed code, and sets a new authenticator up. There is no self-service reset by email on purpose:
+  a mailbox is not an authenticator.
+- A security notice goes to the person's address when an authenticator is set up or replaced, when
+  recovery codes are replaced, and when a recovery code signs someone in. It carries no link or
+  code, and a delivery failure never undoes the change it reports.
 - Authenticator secrets and recovery codes are stored encrypted with a key derived from
   `QUOTUM_AUTH_SECRET`, in the authentication library's versioned envelope. Do not change that secret
   while merchants have authenticators: a changed value makes every stored authenticator unreadable.

@@ -911,7 +911,7 @@ export function createMerchantApp({
 
 	if (connections) registerConnectionRoutes(app, store, connections, stripeOAuth);
 	registerMcpRoutes(app, store, auth, mcpChanges);
-	registerSecondFactorRoutes(app, store, auth);
+	registerSecondFactorRoutes(app, store, auth, mailer);
 
 	return app;
 

@@ -1,3 +1,4 @@
+import { insertPlatformAuditEvent } from "../audit";
 import type { MerchantRole, MerchantScope } from "../contracts";
 import type { MerchantSql } from "../database";
 import { canProposeBillingChanges, digest, MerchantError, requireCapability } from "../security";
@@ -16,7 +17,8 @@ export type McpRevokeReason =
 	| "code_replay"
 	| "refresh_replay"
 	| "issuance_failed"
-	| "password_reset";
+	| "password_reset"
+	| "second_factor_reset";
 
 export interface McpGrant {
 	id: string;
@@ -503,27 +505,39 @@ export class McpAuthorizations {
 
 	/** Every live grant of one person, for a password reset; each leaves its own audit event. */
 	async revokeUser(userId: string) {
-		await this.store.sql.begin(async (tx) => {
-			const revoked = await tx<
-				Pick<
-					McpGrant,
-					"id" | "principal_id" | "organization_id" | "client_id" | "project_instance_id"
-				>[]
-			>`UPDATE platform_mcp_authorizations SET revoked_at=${this.store.now()} WHERE principal_id IN (SELECT id FROM platform_principals WHERE auth_user_id=${userId}) AND revoked_at IS NULL RETURNING id,principal_id,organization_id,client_id,project_instance_id`;
-			await tx`UPDATE platform_auth_oauth_refresh_tokens SET revoked=${this.store.now()},rotation_replay_response=NULL,rotation_replay_expires_at=NULL WHERE user_id=${userId}`;
-			for (const grant of revoked)
-				await this.store.audit(
-					tx,
-					grant.principal_id,
-					grant.organization_id,
-					"mcp.revoked",
-					grant.id,
-					{
-						clientId: grant.client_id,
-						projectInstanceId: grant.project_instance_id,
-						reason: "password_reset" satisfies McpRevokeReason,
-					},
-				);
-		});
+		await this.store.sql.begin((tx) =>
+			revokeMcpAuthorizationsForUser(tx, userId, this.store.now(), "password_reset"),
+		);
 	}
+}
+
+/**
+ * Revokes every grant a person holds for a coding client, and the refresh tokens behind them. Each
+ * grant that ends writes an `mcp.revoked` audit event that says why.
+ */
+export async function revokeMcpAuthorizationsForUser(
+	tx: MerchantSql,
+	userId: string,
+	now: Date,
+	reason: McpRevokeReason,
+): Promise<void> {
+	const revoked = await tx<
+		Pick<
+			McpGrant,
+			"id" | "principal_id" | "organization_id" | "client_id" | "project_instance_id"
+		>[]
+	>`UPDATE platform_mcp_authorizations SET revoked_at=${now} WHERE principal_id IN (SELECT id FROM platform_principals WHERE auth_user_id=${userId}) AND revoked_at IS NULL RETURNING id,principal_id,organization_id,client_id,project_instance_id`;
+	await tx`UPDATE platform_auth_oauth_refresh_tokens SET revoked=${now},rotation_replay_response=NULL,rotation_replay_expires_at=NULL WHERE user_id=${userId}`;
+	for (const grant of revoked)
+		await insertPlatformAuditEvent(tx, {
+			principalId: grant.principal_id,
+			organizationId: grant.organization_id,
+			action: "mcp.revoked",
+			target: grant.id,
+			metadata: {
+				clientId: grant.client_id,
+				projectInstanceId: grant.project_instance_id,
+				reason,
+			},
+		});
 }

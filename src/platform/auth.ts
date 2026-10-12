@@ -6,7 +6,7 @@ import { twoFactor } from "better-auth/plugins/two-factor";
 import { verifyGoogleIdToken } from "better-auth/social-providers";
 import { toDisplayName } from "../shared/input-bounds";
 import type { MerchantEmail, MerchantMailer } from "./email";
-import { linkMessage } from "./email";
+import { linkMessage, securityNotice } from "./email";
 import { createMcpAuthProvider } from "./mcp/auth-provider";
 import { McpAuthorizations } from "./mcp/authorization";
 import {
@@ -415,8 +415,19 @@ export function createMerchantAuth(
 					await store.sql`UPDATE platform_auth_sessions SET bootstrap_at=${store.now()} WHERE id=${data.session.id}`;
 					return;
 				}
-				if (ctx.path === "/two-factor/verify-backup-code")
+				if (ctx.path === "/two-factor/verify-backup-code") {
 					await secondFactor.syncRecoveryCount(data.user.id);
+					// A recovery code is what someone without the authenticator uses, so the person is told.
+					// The notice reports the sign-in; a delivery failure must not undo it.
+					await mailer
+						.send(
+							securityNotice(
+								data.user.email,
+								"a recovery code was used to sign in to your account",
+							),
+						)
+						.catch(() => {});
+				}
 				const provider = method === "password" ? "credential" : "google";
 				const [account] = await store.sql<
 					{ account_id: string }[]

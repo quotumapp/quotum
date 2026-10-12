@@ -2,6 +2,7 @@ import type { Elysia } from "elysia";
 import { z } from "zod";
 import { operationDetail } from "../shared/http";
 import { ACCOUNT_ISSUERS, type MerchantAuth } from "./auth";
+import { type MerchantMailer, securityNotice } from "./email";
 import { SecondFactorEnrolmentViewSchema, SecondFactorRecoveryCodesViewSchema } from "./schemas";
 import { MERCHANT_JSON_PARSE, MerchantError } from "./security";
 import type { MerchantIdentity, MerchantStore } from "./store";
@@ -39,8 +40,16 @@ interface TransientRow {
 	mcp_request_hash: string | null;
 }
 
-export function registerSecondFactorRoutes(app: Elysia, store: MerchantStore, auth: MerchantAuth) {
+export function registerSecondFactorRoutes(
+	app: Elysia,
+	store: MerchantStore,
+	auth: MerchantAuth,
+	mailer: MerchantMailer,
+) {
 	const factor = auth.secondFactor;
+	// A notice reports a change that has happened; a delivery failure never undoes it.
+	const notify = (to: string, event: string) =>
+		mailer.send(securityNotice(to, event)).catch(() => {});
 	const bootstrapRequired = () =>
 		new MerchantError(
 			"SECOND_FACTOR_BOOTSTRAP_REQUIRED",
@@ -149,7 +158,7 @@ export function registerSecondFactorRoutes(app: Elysia, store: MerchantStore, au
 			const actor = await confirmActor(request);
 			const principalId =
 				actor.kind === "member" ? actor.principalId : await principalFor(actor.userId);
-			const { recoveryCodes } = await factor.confirmEnrolment(
+			const { recoveryCodes, replaced } = await factor.confirmEnrolment(
 				actor.userId,
 				input.code,
 				async (tx, info) => {
@@ -172,6 +181,12 @@ export function registerSecondFactorRoutes(app: Elysia, store: MerchantStore, au
 						{ via: actor.kind },
 					);
 				},
+			);
+			await notify(
+				actor.email,
+				replaced
+					? "the authenticator app on your account was replaced"
+					: "an authenticator app was set up on your account",
 			);
 			return { success: true as const, data: { recoveryCodes } };
 		},
@@ -202,6 +217,7 @@ export function registerSecondFactorRoutes(app: Elysia, store: MerchantStore, au
 				"second_factor.recovery_codes_regenerated",
 				identity.authUserId,
 			);
+			await notify(identity.email, "the recovery codes on your account were replaced");
 			return { success: true as const, data: { recoveryCodes } };
 		},
 		{
