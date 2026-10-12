@@ -508,10 +508,12 @@ processed, without a log line of its own.
 | `stripe_event_identity_changed` | The event id was already recorded with another customer, product, payment or event type. |
 
 The first four events are retried by the event replay worker with backoff, and each retry stores
-the reason as `processingError`. An event that is never fixed ends `failed` after
-`BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS` attempts and nothing it carried is applied. Once the
-stored link is corrected, the next retry, or `POST /v1/admin/store-events/:eventId/replay`, applies
-the event from its stored payload.
+the reason as `processingError`. A retry applies the event from its stored payload only when the
+stored identity no longer contradicts it, and Quotum has no operation that changes a stored link:
+a customer link, once written, stays. Such an event therefore ends `failed` after
+`BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS` attempts and nothing it carried is applied. Settle the
+payment in Stripe instead: refund it, or take it again through a Quotum checkout for the intended
+billing account, which uses that account's own Stripe customer.
 
 A `stripe_event_identity_changed` delivery keeps the original event untouched: its stored row stays
 `processed` with the identities it was applied under, and the changed delivery is only logged,
