@@ -21674,11 +21674,14 @@
           "expiresAt": {
             "type": "string"
           },
-          "id": {
+          "factor": {
+            "enum": [
+              "totp"
+            ],
             "type": "string"
           },
-          "method": {
-            "$ref": "#/components/schemas/MerchantAuthMethod"
+          "id": {
+            "type": "string"
           },
           "request": {
             "properties": {
@@ -21717,7 +21720,7 @@
         },
         "required": [
           "id",
-          "method",
+          "factor",
           "action",
           "target",
           "scope",
@@ -58351,8 +58354,17 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": {},
-                "properties": {},
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "maxLength": 32,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
                 "type": "object"
               }
             }

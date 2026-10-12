@@ -174,8 +174,9 @@ pre-upgrade backup.
 ## Authenticator-app second factor
 
 The merchant baseline adds `pending_secret`, `last_used_step`, `enrolled_at` and
-`backup_codes_remaining` to `platform_auth_two_factors`, and `bootstrap_at` to
-`platform_auth_sessions`. Nothing is backfilled and no other table changes, so a dump from the
+`backup_codes_remaining` to `platform_auth_two_factors`, `bootstrap_at` to `platform_auth_sessions`
+and `failed_attempts` to `platform_step_up_grants`. Nothing is backfilled and no other table
+changes, so a dump from the
 previous release restores as it is: follow steps 1, 2, 4 and 6 of
 [stored job provider identity](#stored-job-provider-identity). Afterwards
 
@@ -190,7 +191,9 @@ returns 0: every merchant account already has its placeholder row and none has a
   authenticator or a recovery code is the only way in; emailed codes are refused. Sessions that are
   already open stay open. [Merchant second factor](deployment.md#merchant-second-factor) describes
   the rules.
-- Google sign-in is unchanged.
+- Google sign-in is unchanged, but a Google account sets an authenticator up before its first
+  step-up: a step-up challenge is now confirmed with a code from it, inline, instead of by signing
+  in again. Step-up grants already issued stay valid until they expire.
 - Roll the merchant console out with this release. A console from before it has no setup screen, so
   a person with no authenticator could not finish signing in.
 - `@better-auth/utils` is now a direct dependency, at the version the authentication library

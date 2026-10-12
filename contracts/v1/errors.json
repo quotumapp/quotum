@@ -1603,12 +1603,6 @@
       ]
     },
     {
-      "code": "STEP_UP_IDENTITY_MISMATCH",
-      "sources": [
-        "src/platform/step-up.ts"
-      ]
-    },
-    {
       "code": "STEP_UP_REQUIRED",
       "sources": [
         "src/platform/step-up.ts"

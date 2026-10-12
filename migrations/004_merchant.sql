@@ -221,6 +221,8 @@ CREATE TABLE platform_step_up_grants (
 	expires_at timestamptz NOT NULL,
 	verified_at timestamptz,
 	consumed_at timestamptz,
+	-- Wrong codes entered against this challenge; five end it, so one challenge cannot be guessed at.
+	failed_attempts integer NOT NULL DEFAULT 0,
 	created_at timestamptz NOT NULL DEFAULT now()
 );
 

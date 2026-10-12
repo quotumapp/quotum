@@ -157,7 +157,7 @@ export function createMerchantApp({
 		app.use(requestObservabilityMiddleware);
 	}
 	const team = new MerchantTeam(store, mailer);
-	const stepUp = new MerchantStepUp(store);
+	const stepUp = new MerchantStepUp(store, auth.secondFactor);
 	const current = (request: Request) => store.authenticate(request);
 	const invitationHash = async (request: Request, raw?: string) => {
 		if (raw) return store.hash(raw);
@@ -871,28 +871,30 @@ export function createMerchantApp({
 
 	app.post(
 		"/api/platform/step-up/:id/complete",
-		async ({ params, request, set }) => {
+		async ({ params, body, request, set }) => {
+			const input = postApiPlatformStepUpByIdCompleteBodySchema.parse(body);
 			const result = await stepUp.complete(
 				await current(request),
 				z.uuid().parse(params.id),
-				await transient(request),
+				input.code,
 			);
 			appendSetCookie(set, sessionCookie(result.token));
 			appendSetCookie(set, csrfCookie(result.csrf));
-			clearTransientCookies(set);
 			return {
 				success: true as const,
 				data: { grant: result.grant, expiresAt: result.expiresAt },
 			};
 		},
 		{
-			// This operation never reads a request body.
-			parse: "none",
+			parse: [MERCHANT_JSON_PARSE],
 			...route(
 				"postApiPlatformStepUpByIdComplete",
 				"/api/platform/step-up/:id/complete",
 				{ 200: responses.postApiPlatformStepUpByIdCompleteResponse200Schema },
-				{ params: z.object({ id: z.uuid() }), body: unreadBodySchema },
+				{
+					params: z.object({ id: z.uuid() }),
+					body: postApiPlatformStepUpByIdCompleteBodySchema,
+				},
 			),
 		},
 	);
@@ -1067,6 +1069,11 @@ function redactAuthResponse(value: unknown): unknown {
 			.map(([key, item]) => [key, redactAuthResponse(item)]),
 	);
 }
+
+const postApiPlatformStepUpByIdCompleteBodySchema = z.strictObject({
+	// A six-digit code from the authenticator app, or a recovery code.
+	code: z.string().min(1).max(32),
+});
 
 const postApiPlatformSignupIntentBodySchema = z.strictObject({
 	accepted: z.literal(true),

@@ -164,7 +164,8 @@ export const StepUpChallengeViewSchema = z.object({
 		})
 		.optional(),
 	id: z.string(),
-	method: MerchantAuthMethodSchema,
+	// What confirms the action: a code from the person's authenticator app, or a recovery code.
+	factor: z.literal("totp"),
 	action: z.string(),
 	target: z.string(),
 	scope: MerchantScopeSchema,

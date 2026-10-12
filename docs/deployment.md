@@ -221,6 +221,12 @@ sign-in relies on Google's own verification at sign-in. Email is not a recurring
   codes (`ACCOUNT_TEMPORARILY_LOCKED`).
 - Replacing the authenticator and regenerating recovery codes each need a current code. Setting one
   up on a live session needs a fresh sign-in, never the session cookie alone.
+- A step-up challenge is confirmed inline with a current code (or a recovery code): the console asks
+  for it where the change is reviewed, with no second sign-in. Five wrong codes close that
+  challenge, and they count towards the lockout above. A member with no authenticator cannot open a
+  challenge (`SECOND_FACTOR_REQUIRED`) and sets one up first, which for a Google account needs a
+  fresh Google sign-in. A code that signed someone in cannot confirm a challenge in the same
+  30-second step, so the console asks for the next code.
 - Authenticator secrets and recovery codes are stored encrypted with a key derived from
   `QUOTUM_AUTH_SECRET`, in the authentication library's versioned envelope. Do not change that secret
   while merchants have authenticators: a changed value makes every stored authenticator unreadable.

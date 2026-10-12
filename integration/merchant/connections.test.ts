@@ -390,10 +390,7 @@ async function grant(browser: MerchantBrowser, target: string, action: string) {
 		returnTo: "/",
 	});
 	await f.sql`DELETE FROM platform_rate_limits`;
-	await browser.secondFactorSignIn("owner@example.com");
-	return (
-		await browser.json<{ grant: string }>(`/api/platform/step-up/${challenge.id}/complete`, {})
-	).grant;
+	return browser.completeStepUp(challenge.id);
 }
 it("activates only reviewed production readiness and discloses its credential once", async () => {
 	const browser = new MerchantBrowser(f);

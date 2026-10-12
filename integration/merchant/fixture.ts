@@ -290,13 +290,36 @@ export class MerchantBrowser {
 			this.fixture.recoveryCodes.set(email, confirmed.recoveryCodes);
 			return;
 		}
-		// A code works once, and tests sign in far more often than a person would.
-		await this.fixture
-			.sql`UPDATE platform_auth_two_factors SET last_used_step=NULL,failed_verification_count=0,locked_until=NULL WHERE user_id=(SELECT id FROM platform_auth_users WHERE email=${email})`;
+		await this.resetReplay(email);
 		await this.json("/api/auth/two-factor/verify-totp", {
 			code: await totpCode(secret),
 			trustDevice: false,
 		});
+	}
+	/** A code works once, and tests use far more of them than a person would. */
+	async resetReplay(email: string) {
+		await this.fixture
+			.sql`UPDATE platform_auth_two_factors SET last_used_step=NULL,failed_verification_count=0,locked_until=NULL WHERE user_id=(SELECT id FROM platform_auth_users WHERE email=${email})`;
+	}
+	/** A code the authenticator does not show now, nor one step either side of it. */
+	async wrongCode(email = "owner@example.com") {
+		const secret = this.fixture.authenticators.get(email) ?? "";
+		const shown = new Set([
+			await totpCode(secret, -1),
+			await totpCode(secret),
+			await totpCode(secret, 1),
+		]);
+		return ["000000", "111111", "222222"].find((code) => !shown.has(code)) ?? "";
+	}
+	/** Confirms a step-up challenge with the authenticator's current code and returns the grant. */
+	async completeStepUp(challengeId: string, email = "owner@example.com") {
+		await this.resetReplay(email);
+		const secret = this.fixture.authenticators.get(email) ?? "";
+		const result = await this.json<{ grant: string }>(
+			`/api/platform/step-up/${challengeId}/complete`,
+			{ code: await totpCode(secret) },
+		);
+		return result.grant;
 	}
 	async login(email: string) {
 		await this.json("/api/platform/config");
@@ -380,10 +403,7 @@ export async function grant(
 		returnTo: "/",
 	});
 	await fixture.sql`DELETE FROM platform_rate_limits`;
-	await browser.secondFactorSignIn("owner@example.com");
-	return (
-		await browser.json<{ grant: string }>(`/api/platform/step-up/${challenge.id}/complete`, {})
-	).grant;
+	return browser.completeStepUp(challenge.id);
 }
 
 export function isolatedStripeOAuthPort(): StripeOAuthPort {

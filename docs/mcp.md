@@ -175,8 +175,9 @@ environment administration, global reconciliation and usage consumption are excl
 Every effective change requires the same connected merchant to open the returned URL, review it,
 and choose **Approve and apply**, including in sandbox. Production and sensitive recovery/correction
 actions also require the existing step-up authentication: the console opens a challenge bound to
-`POST /api/platform/mcp/changes/{id}/approve` and the proposal's hash, and sends the approval with
-the grant once the identity is confirmed. The backend rechecks the live session,
+`POST /api/platform/mcp/changes/{id}/approve` and the proposal's hash, asks the merchant for a code
+from their authenticator app (or a recovery code) without leaving the page, and sends the approval
+with the grant once the code is confirmed. The backend rechecks the live session,
 connection and role. The agent must present the URL to the user, never approve it itself. There is
 no MCP execute tool and no arbitrary HTTP passthrough.
 
