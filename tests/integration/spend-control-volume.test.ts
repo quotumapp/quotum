@@ -63,6 +63,41 @@ localDescribe("spend controls over volume-priced overage", () => {
 		}
 	});
 
+	it("starts a first usage limit from the usage recorded and a first spend limit from nothing charged", async () => {
+		const account = "volume-first";
+		await seedOverageSubscriber(context.sql, {
+			account,
+			provider: "stripe",
+			pricingModel: "volume",
+		});
+		await consume(account, "125", "before-limits");
+		const controls = context.repository.controlsEnterprise;
+
+		// The quantity was recorded, so a usage limit counts it. No spend limit saw its charge, and a
+		// charge is not read back from usage: a spend limit counts what is charged under it.
+		expect(
+			await controls.upsertControl(project, {
+				billingAccountId: account,
+				controlKind: "usage_limit",
+				featureKey: overageFeatureKey(account),
+				limitValue: "1000",
+				interval: "month",
+				actor: "integration-test",
+			}),
+		).toMatchObject({ controlKind: "usage_limit", consumedValue: "125" });
+		expect(
+			await controls.upsertControl(project, {
+				billingAccountId: account,
+				controlKind: "spend_limit",
+				featureKey: null,
+				currency: "USD",
+				limitValue: "250",
+				interval: "month",
+				actor: "integration-test",
+			}),
+		).toMatchObject({ controlKind: "spend_limit", consumedValue: "0" });
+	});
+
 	it("records a falling charge as lower exposure and still denies the next real increase", async () => {
 		await seedOverageSubscriber(context.sql, {
 			account: "volume-fall",

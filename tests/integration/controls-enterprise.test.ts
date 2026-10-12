@@ -228,7 +228,8 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		`;
 		expect(window).toEqual({ window_start_at: day.start, window_end_at: day.end });
 
-		// The account's one usage limit for the feature moves to a two-week window.
+		// The account's one usage limit for the feature moves to a two-week window, which counts the
+		// 3 already recorded in it.
 		const fortnight = await controls.upsertControl(project, {
 			billingAccountId: "cadence-account",
 			controlKind: "usage_limit",
@@ -242,7 +243,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		expect(fortnight).toMatchObject({
 			interval: "week",
 			intervalCount: 2,
-			consumedValue: "0",
+			consumedValue: "3",
 			windowStartAt: weeks.start.toISOString(),
 			windowEndAt: weeks.end.toISOString(),
 		});
@@ -338,6 +339,147 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		// Replacing it with the same limit starts nothing over either.
 		expect(await limit("120")).toMatchObject({ consumedValue: "120" });
 		expect(await consume("replace-account", "1", "replace:4")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+	});
+
+	it("starts a first usage limit from the usage its window already recorded", async () => {
+		const limit = await replaceableLimit("first-limit");
+		// Yesterday's usage is outside today's window; today's 50 are inside it.
+		const yesterday = await consume("first-limit", "40", "first:yesterday");
+		await context.sql`
+			UPDATE usage_events SET recorded_at = recorded_at - interval '1 day'
+			WHERE id = ${yesterday.usageEventId}
+		`;
+		expect(await consume("first-limit", "50", "first:today")).toMatchObject({ allowed: true });
+
+		// The limit answers as a write will, before it has a window of its own.
+		expect(await limit("60")).toMatchObject({
+			limitValue: "60",
+			consumedValue: "50",
+			remainingValue: "10",
+		});
+		expect(await context.sql`SELECT id FROM control_windows`).toHaveLength(0);
+		const check = { billingAccountId: "first-limit", featureKey: "ai_credits", quantity: "11" };
+		expect(await context.repository.checkUsage(project, check)).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+		expect(await consume("first-limit", "11", "first:over")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: {
+				kind: "usage_limit",
+				limitValue: "60",
+				currentValue: "50",
+				requestedValue: "11",
+				remainingValue: "10",
+			},
+		});
+		expect(await consume("first-limit", "10", "first:fit")).toMatchObject({ allowed: true });
+		expect(await consume("first-limit", "1", "first:full")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+
+		// The window opened with the 50 once and counted the 10 on top of them.
+		const windows = await context.sql<Array<{ consumed: string }>>`
+			SELECT consumed_value::text AS consumed FROM control_windows
+		`;
+		expect(windows.map((row) => ({ ...row }))).toEqual([{ consumed: "60.000000000" }]);
+		expect(await limit("60")).toMatchObject({ consumedValue: "60" });
+	});
+
+	it("counts the usage a first limit's window recorded when a hold is placed and confirmed", async () => {
+		const reserve = (account: string, quantity: string, key: string) =>
+			context.repository.reserveUsage(project, {
+				billingAccountId: account,
+				featureKey: "ai_credits",
+				quantity,
+				idempotencyKey: `${account}:${key}`,
+				expiresInSeconds: 300,
+			});
+		const confirm = (
+			account: string,
+			reservationId: string | null,
+			quantity: string,
+			key: string,
+		) =>
+			context.repository.confirmUsageReservation(project, {
+				billingAccountId: account,
+				reservationId: reservationId ?? "",
+				quantity,
+				idempotencyKey: `${account}:${key}`,
+			});
+		const consumed = async (account: string) =>
+			(await context.repository.controlsEnterprise.listEffectiveControls(project, account))[0];
+
+		// A hold is admitted only if it fits what the window recorded.
+		const limitHeld = await replaceableLimit("first-reserve");
+		await consume("first-reserve", "50", "first-reserve:recorded");
+		await limitHeld("60");
+		expect(await reserve("first-reserve", "11", "refused")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+		});
+		const fit = await reserve("first-reserve", "10", "fit");
+		expect(fit.allowed).toBe(true);
+		expect(await confirm("first-reserve", fit.reservationId, "10", "confirm")).toMatchObject({
+			allowed: true,
+		});
+		expect(await consumed("first-reserve")).toMatchObject({ consumedValue: "60", heldValue: "0" });
+
+		// A hold taken before the limit existed holds nothing under it, and its confirmation is the
+		// first write that opens the limit's window: it counts on top of the 50 already recorded.
+		const limitLate = await replaceableLimit("first-confirm");
+		await consume("first-confirm", "50", "first-confirm:recorded");
+		const early = await reserve("first-confirm", "11", "early");
+		expect(early.allowed).toBe(true);
+		await limitLate("60");
+		expect(await confirm("first-confirm", early.reservationId, "11", "over")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { limitValue: "60", currentValue: "50", requestedValue: "11" },
+		});
+		expect(await confirm("first-confirm", early.reservationId, "10", "fit")).toMatchObject({
+			allowed: true,
+		});
+		expect(await consumed("first-confirm")).toMatchObject({ consumedValue: "60", heldValue: "0" });
+	});
+
+	it("takes a correction of the usage a first limit started from out of its window", async () => {
+		const limit = await replaceableLimit("first-fix");
+		const first = await consume("first-fix", "30", "first-fix:a");
+		const second = await consume("first-fix", "20", "first-fix:b");
+		const correct = (original: typeof first, quantity: string, key: string) =>
+			context.repository.correctUsage(project, {
+				billingAccountId: "first-fix",
+				originalUsageEventId: original.usageEventId ?? "",
+				originalRecordedAt: new Date(original.recordedAt ?? ""),
+				quantity,
+				idempotencyKey: `first-fix:${key}`,
+				actor: "integration-test",
+				reason: "refund",
+			});
+		const counted = async () =>
+			(await context.repository.controlsEnterprise.listEffectiveControls(project, "first-fix"))[0]
+				?.consumedValue;
+
+		// A correction recorded before the limit has a window is part of what it starts from.
+		await correct(first, "10", "before-window");
+		expect(await limit("60")).toMatchObject({ consumedValue: "40" });
+		expect(await context.sql`SELECT id FROM control_windows`).toHaveLength(0);
+
+		// Once the window exists, corrections of earlier usage lower it too.
+		expect(await consume("first-fix", "5", "first-fix:c")).toMatchObject({ allowed: true });
+		expect(await counted()).toBe("45");
+		await correct(second, "20", "after-window");
+		expect(await counted()).toBe("25");
+		await correct(first, "20", "again");
+		expect(await counted()).toBe("5");
+		expect(await consume("first-fix", "55", "first-fix:d")).toMatchObject({ allowed: true });
+		expect(await consume("first-fix", "1", "first-fix:e")).toMatchObject({
 			allowed: false,
 			reason: "control_limit_exceeded",
 		});

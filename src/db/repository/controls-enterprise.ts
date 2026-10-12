@@ -1205,6 +1205,18 @@ export class ControlsEnterpriseRepository
 }
 
 /**
+ * The events a window counts as its own usage, for a row of `usage_events` aliased `event`:
+ * recorded in the window, and corrections of usage recorded in it whenever they were recorded. An
+ * alert's first count and a control window's first count read the same events.
+ */
+function recordedInWindowSql(start: string, end: string | null): DrizzleSQL {
+	return drizzleSql`event.recorded_at >= ${start}::timestamptz
+		AND COALESCE(event.original_event_recorded_at, event.recorded_at) >= ${start}::timestamptz
+		AND (${end}::timestamptz IS NULL
+			OR COALESCE(event.original_event_recorded_at, event.recorded_at) < ${end}::timestamptz)`;
+}
+
+/**
  * The usage an alert's window has recorded in its scope: consumption recorded in the window, less
  * corrections of that consumption whenever they were recorded. An account's alert counts every
  * entity's usage; an entity's alert counts that entity's.
@@ -1220,8 +1232,6 @@ export async function readAlertWindowUsage(
 		end: Date | null;
 	},
 ): Promise<string> {
-	const start = input.start.toISOString();
-	const end = input.end?.toISOString() ?? null;
 	const row = await executeOne<{ used: unknown }>(
 		executor,
 		drizzleSql`
@@ -1230,10 +1240,7 @@ export async function readAlertWindowUsage(
 			WHERE event.project_id = ${input.projectId} AND event.customer_id = ${input.customerId}
 				AND event.meter_feature_id = ${input.featureId}::bigint
 				AND (${input.entityId}::bigint IS NULL OR event.entity_id = ${input.entityId}::bigint)
-				AND event.recorded_at >= ${start}::timestamptz
-				AND COALESCE(event.original_event_recorded_at, event.recorded_at) >= ${start}::timestamptz
-				AND (${end}::timestamptz IS NULL
-					OR COALESCE(event.original_event_recorded_at, event.recorded_at) < ${end}::timestamptz)
+				AND ${recordedInWindowSql(input.start.toISOString(), input.end?.toISOString() ?? null)}
 		`,
 	);
 	return databaseDecimal(row?.used ?? "0", "alert window usage");
@@ -1270,6 +1277,99 @@ export function carriedControlConsumptionSql(input: {
 			AND sibling_policy.currency IS NOT DISTINCT FROM policy.currency
 			AND sibling_policy.entity_id IS NOT DISTINCT FROM policy.entity_id
 	), 0)`;
+}
+
+/**
+ * Whether the usage of the event `event` was charged to a window, of a control of the same kind,
+ * feature and entity scope as `policy`, that does not contain the time the event was recorded: a
+ * hold's confirmation charges the window the hold was taken in, which can be an earlier one. A
+ * correction follows the event it corrects. For a row of `usage_events` aliased `event` beside a
+ * row of `control_policies` aliased `policy`.
+ */
+export function chargedToEarlierWindowSql(): DrizzleSQL {
+	return drizzleSql`EXISTS (
+		SELECT 1
+		FROM usage_event_control_entries entry
+		JOIN control_windows charged
+			ON charged.project_id = entry.project_id AND charged.id = entry.control_window_id
+		JOIN control_policies charged_policy
+			ON charged_policy.project_id = charged.project_id
+			AND charged_policy.id = charged.control_policy_id
+		WHERE entry.project_id = event.project_id
+			AND entry.usage_event_recorded_at = COALESCE(event.original_event_recorded_at, event.recorded_at)
+			AND entry.usage_event_id = COALESCE(event.original_event_id, event.id)
+			AND charged_policy.control_kind = policy.control_kind
+			AND charged_policy.feature_id = policy.feature_id
+			AND charged_policy.entity_id IS NOT DISTINCT FROM policy.entity_id
+			AND (COALESCE(event.original_event_recorded_at, event.recorded_at) < charged.window_start_at
+				OR (charged.window_end_at IS NOT NULL
+					AND COALESCE(event.original_event_recorded_at, event.recorded_at) >= charged.window_end_at))
+	)`;
+}
+
+/**
+ * What the usage already recorded in a usage limit's window counts toward it, for a window that
+ * has no row yet: the net quantity of the customer's events for the limit's feature in the
+ * window, those of the limit's entity only when it belongs to one. A control cannot see usage
+ * that predates it any other way, so a first limit, one with a different cadence than the limit
+ * it replaced, and a plan or contract limit that takes effect mid-window start from this count
+ * instead of from zero. It is zero for a spend limit, which has no recorded charge to read, and
+ * once the window has its row, so the aggregate runs once per window and not per request.
+ *
+ * Usage a hold's confirmation charged to an earlier window than the one it was recorded in is
+ * not counted again: the window that held it already counted it. Only confirmations and the
+ * corrections of them are looked up, a plain consumption is always charged where it is recorded.
+ * Where a replaced control counted the same window, the larger of the two counts is the usage.
+ */
+export function recordedControlConsumptionSql(
+	input: {
+		projectId: string;
+		policyId: string;
+		customerId: string | null;
+		windowStartAt: string;
+		windowEndAt: string | null;
+	},
+	windowExists: DrizzleSQL,
+): DrizzleSQL {
+	return drizzleSql`CASE WHEN ${windowExists} THEN 0 ELSE COALESCE((
+		SELECT GREATEST(COALESCE(sum(event.quantity), 0), 0)
+		FROM control_policies policy
+		JOIN usage_events event
+			ON event.project_id = policy.project_id AND event.meter_feature_id = policy.feature_id
+		WHERE policy.project_id = ${input.projectId} AND policy.id = ${input.policyId}::bigint
+			AND policy.control_kind = 'usage_limit'
+			AND event.customer_id = ${input.customerId}
+			AND (policy.entity_id IS NULL OR event.entity_id = policy.entity_id)
+			AND ${recordedInWindowSql(input.windowStartAt, input.windowEndAt)}
+			AND (event.operation = 'consume' OR NOT ${chargedToEarlierWindowSql()})
+	), 0) END`;
+}
+
+/**
+ * The count a control window is opened with: what a replaced control counted in the same window,
+ * or the usage already recorded in it, whichever is more. A window that already has its row is
+ * only caught up with the replaced control's count.
+ */
+export function openingControlConsumptionSql(input: {
+	projectId: string;
+	policyId: string;
+	customerId: string | null;
+	windowStartAt: string;
+	windowEndAt: string | null;
+}): DrizzleSQL {
+	return drizzleSql`GREATEST(
+		${carriedControlConsumptionSql(input)},
+		${recordedControlConsumptionSql(
+			input,
+			drizzleSql`EXISTS (
+				SELECT 1 FROM control_windows opened
+				WHERE opened.project_id = ${input.projectId}
+					AND opened.control_policy_id = ${input.policyId}::bigint
+					AND opened.customer_id = ${input.customerId}
+					AND opened.window_start_at = ${input.windowStartAt}::timestamptz
+			)`,
+		)}
+	)`;
 }
 
 /**
@@ -1450,8 +1550,11 @@ export async function resolveEffectiveControls(
 			return executeOne<{ consumed_value: unknown; held_value: unknown }>(
 				executor,
 				drizzleSql`
-			SELECT GREATEST(COALESCE(own.consumed_value, 0), ${carriedControlConsumptionSql(scope)})::text
-				AS consumed_value, ${controlIdentityHeldSql(scope)}::text AS held_value
+			SELECT GREATEST(
+					COALESCE(own.consumed_value, 0),
+					${carriedControlConsumptionSql(scope)},
+					${recordedControlConsumptionSql(scope, drizzleSql`own.id IS NOT NULL`)}
+				)::text AS consumed_value, ${controlIdentityHeldSql(scope)}::text AS held_value
 			FROM (SELECT 1) AS single
 			LEFT JOIN control_windows own ON own.project_id = ${input.projectId}
 				AND own.control_policy_id = ${String(row.id)}::bigint AND own.customer_id = ${input.customerId}
