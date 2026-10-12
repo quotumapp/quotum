@@ -119,6 +119,33 @@ async function balance(billingAccountId: string) {
 	return await context.repository.getMeteringBalance(project, billingAccountId, "ai_credits");
 }
 
+/** A correction of `credits` of what `original` consumed, in the `model_tokens` it was spent in. */
+async function correct(
+	billingAccountId: string,
+	original: Awaited<ReturnType<typeof consume>>,
+	credits: number,
+	key: string,
+) {
+	return await context.repository.correctUsage(project, {
+		billingAccountId,
+		originalUsageEventId: original.usageEventId ?? "",
+		originalRecordedAt: new Date(original.recordedAtExact ?? original.recordedAt ?? ""),
+		quantity: String(credits * 200),
+		idempotencyKey: key,
+		actor: "default-plan-test",
+		reason: "generation was refunded",
+	});
+}
+
+/** The paid subscription lapses and the account falls back to the default plan. */
+async function lapse(billingAccountId: string): Promise<void> {
+	await context.sql`
+		UPDATE subscriptions SET status = 'expired', expires_at = now() - INTERVAL '1 second'
+		WHERE external_subscription_id = ${`sub:${billingAccountId}`}
+	`;
+	await context.repository.recomputeCustomerEntitlements(project, billingAccountId);
+}
+
 async function entitlements(billingAccountId: string) {
 	return (await context.repository.getEntitlementSnapshot(project, billingAccountId)).entitlements;
 }
@@ -340,6 +367,142 @@ localDescribe("default plan", () => {
 			["default", "active"],
 		]);
 		expect(await balance("trial_user")).toMatchObject({ available: "99" });
+	});
+
+	it("gives a correction back to the allowance a paid plan superseded, which the default plan resumes", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		const first = await consume("refunded_user", 10, "spend-1");
+		await consume("refunded_user", 5, "spend-2");
+		await subscribe("refunded_user");
+		expect(await balance("refunded_user")).toMatchObject({ available: "0" });
+
+		// The paid plan holds the account, so the free allowance is closed, and the correction
+		// reaches it anyway: it reads what is left of it once the default plan resumes it.
+		const partial = await correct("refunded_user", first, 4, "fix-1");
+		expect(partial).toMatchObject({ walletQuantity: "-4", deductions: [{ quantity: "-4" }] });
+		expect(await allowanceRows("refunded_user")).toMatchObject([
+			{ consumed: "11.000000000", live: false },
+		]);
+		const rest = await correct("refunded_user", first, 6, "fix-2");
+		expect(await allowanceRows("refunded_user")).toMatchObject([
+			{ consumed: "5.000000000", live: false },
+		]);
+		// The whole event is corrected: another correction of it has nothing left to return.
+		await expect(correct("refunded_user", first, 1, "fix-3")).rejects.toMatchObject({
+			code: "CORRECTION_EXCEEDS_USAGE",
+		});
+		// A replay of a recorded correction answers it again and returns nothing twice.
+		expect(await correct("refunded_user", first, 6, "fix-2")).toMatchObject({
+			usageEventId: rest.usageEventId,
+		});
+		expect(await allowanceRows("refunded_user")).toMatchObject([{ consumed: "5.000000000" }]);
+
+		await lapse("refunded_user");
+
+		expect(await balance("refunded_user")).toMatchObject({
+			granted: "100",
+			consumed: "5",
+			available: "95",
+		});
+		const [resumed] = await allowanceRows("refunded_user");
+		expect(resumed).toMatchObject({ consumed: "5.000000000", live: true });
+	});
+
+	it("gives a correction back to the allowance a trial superseded, which returns when the trial ends", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		const spent = await consume("trial_refund", 10, "spend-1");
+		const started = await context.repository.planGrants.startTrial(project, {
+			billingAccountId: "trial_refund",
+			planKey: "premium",
+			durationDays: 7,
+			metadata: {},
+			idempotencyKey: "trial-refund",
+			actor: null,
+		});
+		expect((await grants("trial_refund")).map((row) => [row.origin, row.status])).toEqual([
+			["default", "superseded"],
+			["trial", "active"],
+		]);
+
+		await correct("trial_refund", spent, 10, "fix-1");
+		await context.repository.planGrants.endTrial(project, {
+			billingAccountId: "trial_refund",
+			trialId: started.trial.id,
+			reason: null,
+			idempotencyKey: "end-refund",
+			actor: null,
+		});
+
+		expect(await balance("trial_refund")).toMatchObject({
+			granted: "100",
+			consumed: "0",
+			available: "100",
+		});
+	});
+
+	it("gives a correction back to an allowance the catalog's removal of the default plan ended", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		const spent = await consume("removed_user", 10, "spend-1");
+		await publish(catalog(null));
+		await runWorker(25);
+		expect((await grants("removed_user")).map((row) => row.status)).toEqual(["ended"]);
+
+		await correct("removed_user", spent, 10, "fix-1");
+		expect(await allowanceRows("removed_user")).toMatchObject([
+			{ consumed: "0.000000000", live: false },
+		]);
+
+		// The plan is marked again inside the window: the account resumes the allowance, whole.
+		await publish(catalog(freePlan(2, "100")));
+		await runWorker(25);
+		expect(await balance("removed_user")).toMatchObject({ consumed: "0", available: "100" });
+	});
+
+	it("leaves the use of a superseded allowance whose window has ended", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		const spent = await consume("past_window", 10, "spend-1");
+		await subscribe("past_window");
+		// The window the usage was spent in is over: no resumption can reach the allowance.
+		await context.sql`
+			UPDATE balance_allocations
+			SET period_start_at = now() - INTERVAL '40 days', period_end_at = now() - INTERVAL '10 days'
+			WHERE plan_grant_id IS NOT NULL
+		`;
+
+		const corrected = await correct("past_window", spent, 10, "fix-1");
+
+		expect(corrected).toMatchObject({ walletQuantity: "-10" });
+		expect(await allowanceRows("past_window")).toMatchObject([{ consumed: "10.000000000" }]);
+	});
+
+	it("leaves a trial's own allowance as the trial ended it, since nothing resumes it", async () => {
+		await publish(catalog(freePlan(1, "100")));
+		await consume("trial_spender", 1, "spend-before-trial");
+		const started = await context.repository.planGrants.startTrial(project, {
+			billingAccountId: "trial_spender",
+			planKey: "premium",
+			durationDays: 7,
+			metadata: {},
+			idempotencyKey: "trial-spender",
+			actor: null,
+		});
+		const underTrial = await consume("trial_spender", 2, "spend-under-trial");
+		await context.repository.planGrants.endTrial(project, {
+			billingAccountId: "trial_spender",
+			trialId: started.trial.id,
+			reason: null,
+			idempotencyKey: "end-spender",
+			actor: null,
+		});
+		const before = await allowanceRows("trial_spender");
+		expect(before.map((row) => Number(row.consumed))).toEqual([1, 2]);
+
+		const corrected = await correct("trial_spender", underTrial, 2, "fix-1");
+
+		// The trial's allowance is gone for good: the correction is recorded, and nothing comes back.
+		expect(corrected).toMatchObject({ walletQuantity: "-2" });
+		expect(await allowanceRows("trial_spender")).toEqual(before);
+		expect(await balance("trial_spender")).toMatchObject({ consumed: "1", available: "99" });
 	});
 
 	it("opens the current window on a confirmation, so its balance counts what the account holds", async () => {

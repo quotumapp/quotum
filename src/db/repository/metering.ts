@@ -48,7 +48,7 @@ import { addCadence, type CadenceUnit } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
 import { requireBillingAccount } from "./billing-accounts";
-import { followCarriedUsage } from "./carry-over";
+import { followCarriedUsage, restoreCarriedBalance } from "./carry-over";
 import type { ControlDenial, UsageAlertRow } from "./controls-runtime";
 import {
 	checkControls,
@@ -62,6 +62,7 @@ import {
 	recordUsageControlEntries,
 	scheduleAutoTopups,
 } from "./controls-runtime";
+import { defaultPlanAllowanceResumableSql } from "./default-plan-sql";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
 import { shrinkKeptLevels } from "./kept-levels";
@@ -1336,7 +1337,16 @@ async function reverseOriginalDeductions(
 			allocation.reversed_at === null &&
 			(allocation.expires_at === null ||
 				new Date(allocation.expires_at).getTime() > new Date(allocation.db_now).getTime());
-		if (eligible) {
+		// A default-plan allowance that its grant's end closed inside its window is resumed, with its
+		// use kept, when the default plan returns in that window, so the correction lands on it now
+		// and the resumed allowance reads what was left after it. A statement of its own reads the
+		// grant, so it sees a supersession that committed while the allocation lock was awaited.
+		const resumes =
+			!eligible &&
+			allocation !== null &&
+			allocation.reversed_at === null &&
+			(await isResumableDefaultAllowance(executor, projectId, deduction.allocationId));
+		if (eligible || resumes) {
 			const updated = await executeOne(
 				executor,
 				drizzleSql`
@@ -1356,7 +1366,7 @@ async function reverseOriginalDeductions(
 		// An immediate plan change may have copied this usage onto the incoming allowance; take the
 		// copy back too, or the customer stays charged for usage that was corrected.
 		if (allocation?.subscription_id != null) {
-			await followCarriedUsage(executor, {
+			const followed = await followCarriedUsage(executor, {
 				projectId,
 				subscriptionId: allocation.subscription_id,
 				allocationId: deduction.allocationId,
@@ -1364,6 +1374,15 @@ async function reverseOriginalDeductions(
 				quantity: rendered,
 				closedSource: !eligible,
 			});
+			// A change that ended the allowance after carrying its unused balance, not its usage,
+			// holds that balance on a carry: the correction grows the carry, so the quantity is not lost.
+			if (!eligible && !followed) {
+				await restoreCarriedBalance(executor, {
+					projectId,
+					allocationId: deduction.allocationId,
+					quantity: rendered,
+				});
+			}
 		}
 		receipt.push({ ...deduction, quantity: negativeDecimal(rendered) });
 		remaining -= restored;
@@ -1372,6 +1391,22 @@ async function reverseOriginalDeductions(
 		throw new Error("Original deduction receipt does not cover the correction quantity");
 	}
 	return receipt;
+}
+
+async function isResumableDefaultAllowance(
+	executor: QueryExecutor,
+	projectId: string,
+	allocationId: string,
+): Promise<boolean> {
+	const row = await executeOne<{ resumable: boolean }>(
+		executor,
+		drizzleSql`
+			SELECT ${defaultPlanAllowanceResumableSql(projectId, drizzleSql`allocation`)} AS resumable
+			FROM balance_allocations allocation
+			WHERE allocation.project_id = ${projectId} AND allocation.id = ${allocationId}::bigint
+		`,
+	);
+	return row?.resumable === true;
 }
 
 async function reverseMeterLimitUsageIfEligible(
