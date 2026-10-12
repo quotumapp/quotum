@@ -78,6 +78,32 @@ No table changes and nothing is backfilled, so a dump from the previous release 
 follow steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity). An
 older image cannot read the new baselines, so a rollback restores the pre-upgrade backup.
 
+## Gift codes
+
+The metering baseline adds the tables a one-time gift purchase mints codes into, and links a code
+to the purchase that minted it:
+
+- `gift_options` and `provider_gift_bindings` hold a gift's terms and its store-product binding
+  for each catalog revision, as `topup_options` and `provider_topup_bindings` do for a top-up;
+- `gift_purchases` holds one row per completed gift purchase, with the terms as sold and, once the
+  purchase is refunded or disputed, when and why;
+- `promotion_codes` gains the nullable `gift_purchase_id` and `gift_ordinal`, the foreign key
+  `promotion_codes_project_gift_purchase_fk`, the unique constraint
+  `promotion_codes_gift_ordinal_unique` that makes minting idempotent by purchase and ordinal, and
+  the checks `promotion_codes_gift_ordinal_check` and `promotion_codes_gift_terms_check`, which
+  require a minted code to be single use, unrestricted and never a hosted Stripe code.
+
+Every existing row satisfies the new constraints and the new tables start empty, so the move needs
+no manual SQL: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). Afterwards
+
+```sql
+SELECT count(*) FROM promotion_codes WHERE gift_purchase_id IS NOT NULL;
+```
+
+returns 0. An older image cannot read the new baselines, so a rollback restores the pre-upgrade
+backup and loses the gift codes minted since.
+
 ## Console off by default
 
 `QUOTUM_MERCHANT_ENABLED` is replaced by `QUOTUM_CONSOLE_ENABLED`, and the default flips from on to
