@@ -143,6 +143,7 @@
         "src/db/repository/balance-adjustments.ts",
         "src/db/repository/billing-accounts.ts",
         "src/db/repository/controls-enterprise.ts",
+        "src/db/repository/customer-erasures.ts",
         "src/db/repository/identities.ts",
         "src/db/repository/insights.ts",
         "src/db/repository/provider-customer-unlinks.ts",
@@ -437,6 +438,30 @@
       ]
     },
     {
+      "code": "CUSTOMER_ERASURE_ACKNOWLEDGEMENT_REQUIRED",
+      "sources": [
+        "src/billing/customer-erasures.ts"
+      ]
+    },
+    {
+      "code": "CUSTOMER_ERASURE_BLOCKED",
+      "sources": [
+        "src/billing/customer-erasures.ts"
+      ]
+    },
+    {
+      "code": "CUSTOMER_ERASURE_NOT_CONFIGURED",
+      "sources": [
+        "src/billing/customer-erasures.ts"
+      ]
+    },
+    {
+      "code": "CUSTOMER_ERASURE_NOT_FOUND",
+      "sources": [
+        "src/billing/customer-erasures.ts"
+      ]
+    },
+    {
       "code": "DRAFT_CHANGED",
       "sources": [
         "src/platform/onboarding.ts"
@@ -583,6 +608,7 @@
         "src/db/repository/apple-promotions.ts",
         "src/db/repository/balance-adjustments.ts",
         "src/db/repository/commercial-actions.ts",
+        "src/db/repository/customer-erasures.ts",
         "src/db/repository/paddle-checkouts.ts",
         "src/db/repository/paddle.ts",
         "src/db/repository/plan-grants.ts",

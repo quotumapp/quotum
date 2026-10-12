@@ -8,9 +8,16 @@ import { type ErasureDigest, type ErasureKeyring, erasureDigests } from "../shar
  * creation paths run their original statements unchanged.
  */
 let configured: ErasureKeyring | null = null;
+let tombstoneDays = 30;
 
-export function configureErasureKeyring(keyring: ErasureKeyring | null): void {
+export function configureErasureKeyring(keyring: ErasureKeyring | null, days = 30): void {
 	configured = keyring;
+	tombstoneDays = days;
+}
+
+/** How long a tombstone written now blocks its id. */
+export function configuredErasureTombstoneDays(): number {
+	return tombstoneDays;
 }
 
 export function configuredErasureKeyring(): ErasureKeyring | null {

@@ -1,3 +1,4 @@
+import { BillingError } from "../billing/errors";
 import { type BillingProvider, isBillingProvider } from "../billing/types";
 import type { StoreEventReplayJobRow } from "../db/repository";
 import {
@@ -80,6 +81,12 @@ export interface StoreEventReplayRepository {
 		eventId: string,
 		errorMessage: string,
 		nextAttemptAt: Date | null,
+		workerId: string,
+	): Promise<void>;
+	/** Ends a job whose account was erased, blanking the payload instead of retrying it. */
+	markStoreEventReplayJobErased?(
+		projectId: string,
+		eventId: string,
 		workerId: string,
 	): Promise<void>;
 	/** Reschedules a job that is waiting, leaving its attempt count untouched. */
@@ -332,6 +339,18 @@ export class StoreEventReplayWorker {
 	}
 
 	private async markFailed(event: StoreEventReplayJobRow, error: unknown): Promise<void> {
+		if (
+			error instanceof BillingError &&
+			error.code === "BILLING_ACCOUNT_ERASED" &&
+			this.repository.markStoreEventReplayJobErased !== undefined
+		) {
+			await this.repository.markStoreEventReplayJobErased(
+				event.project_id,
+				event.id,
+				this.workerId,
+			);
+			return;
+		}
 		const nextAttemptAt = calculateNextAttemptAt({
 			attempts: event.attempts,
 			maxAttempts: this.maxAttempts,

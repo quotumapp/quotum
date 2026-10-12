@@ -38,7 +38,7 @@ How the runtime fits together, and the repository checks that most often reject 
 
 - `src/index.ts` -> `src/composition/public-runtime.ts` (`createQuotumRuntime`) ->
   `src/runtime.ts` (`createBillingRuntime`) builds everything: repositories, the provider registry,
-  nine polling billing workers (plus the merchant-only `platform_retention` sweep), shutdown hooks,
+  ten polling billing workers (plus the merchant-only `platform_retention` sweep), shutdown hooks,
   then the "staff" Elysia app from `src/app.ts` (`createApp`) and, through `attachMerchantRuntime`
   in `src/composition/merchant-runtime.ts`, the merchant app. `composeRuntimeApp` there routes
   setup-only ingress (connection and Stripe App events) first, then the remote MCP and OAuth
@@ -169,7 +169,7 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
 `createBillingRuntime` schedules each worker's `runOnce` with `startPollingRuntime`
 (`src/workers/runtime.ts`) unless a distribution supplies its own scheduler: projection sync,
 store-event replay, subscription reconciliation, metering maintenance, recurring billing, auto
-top-up, promotion maintenance, provider operation recovery, usage partition upkeep (`src/workers/usage-partition-upkeep.ts`,
+top-up, promotion maintenance, customer erasure, provider operation recovery, usage partition upkeep (`src/workers/usage-partition-upkeep.ts`,
 which adds monthly `usage_events` partitions ahead of time; `quotum partitions` runs it on demand),
 plus Stripe App event processing when Apps OAuth is configured and, only when the merchant platform
 is enabled, the `platform_retention` sweep (`src/platform/retention.ts`, wired by

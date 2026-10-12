@@ -47,6 +47,7 @@ const COLLECTIONS = new Set([
 	"changes",
 	"codes",
 	"connections",
+	"customer-erasures",
 	"customers",
 	"entities",
 	"events",

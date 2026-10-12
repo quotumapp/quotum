@@ -125,6 +125,38 @@ export class StoreEventReplayBillingRepository extends RepositoryModule {
 		);
 	}
 
+	/**
+	 * A late event for an erased account. Its payload names the person, so it is blanked rather
+	 * than kept for retry, and it is never claimed again; the event id stays as the dedupe key.
+	 */
+	async markStoreEventReplayJobErased(
+		projectId: string,
+		eventId: string,
+		workerId: string,
+	): Promise<void> {
+		await assertUpdated(
+			this.database,
+			drizzleSql`
+			UPDATE store_events events
+			SET
+				processing_status = 'skipped',
+				processing_error = 'BILLING_ACCOUNT_ERASED',
+				raw_payload = '{"erased":true}'::jsonb,
+				customer_id = NULL,
+				next_attempt_at = 'infinity'::timestamptz,
+				locked_at = NULL,
+				locked_by = NULL,
+				updated_at = now()
+			WHERE events.id = ${eventId}
+				AND events.project_id = ${projectId}
+				AND events.processing_status = 'processing'
+				AND events.locked_by = ${workerId}
+			RETURNING events.id
+		`,
+			`store event replay job ${eventId} is not locked by worker ${workerId}`,
+		);
+	}
+
 	async renewStoreEventReplayJobLease(
 		projectId: string,
 		eventId: string,
