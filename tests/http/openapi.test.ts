@@ -153,6 +153,30 @@ test("documents request bodies, required headers and the named schemas clients i
 	expect(
 		headers(operation("/v1/billing-accounts/{billingAccountId}/trial-eligibility", "get")),
 	).toEqual([]);
+	// Both refuse a request without the key at runtime, so a generated client must be told to send it.
+	expect(
+		headers(
+			operation(
+				"/v1/billing-accounts/{billingAccountId}/promotion-redemptions/{redemptionId}/apple-signatures",
+				"post",
+			),
+		),
+	).toEqual(["Idempotency-Key!"]);
+	expect(headers(operation("/v1/admin/catalog/bindings/adopt", "post"))).toEqual([
+		"X-Billing-Actor!",
+		"Idempotency-Key!",
+	]);
+	// The recurring billing retries sit behind the operator key like the other recovery routes.
+	for (const path of [
+		"/v1/admin/projection-jobs/{jobId}/retry",
+		"/v1/admin/subscription-changes/{changeId}/retry",
+		"/v1/admin/usage-invoice-periods/{periodId}/retry",
+		"/v1/admin/usage-invoice-adjustments/{adjustmentId}/retry",
+	])
+		expect(operation(path, "post").security, path).toEqual([
+			{ projectKey: [], operatorKey: [] },
+			{ gatewayProject: [], operatorKey: [] },
+		]);
 	expect(jsonBody(operation("/v1/purchases/verify", "post"))).toBeDefined();
 	expect(consume.parameters).toContainEqual({
 		in: "header",

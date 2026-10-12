@@ -1403,16 +1403,22 @@ describe("billing app", () => {
 		}
 		expect(calls).toHaveLength(3);
 
-		const invalid = await testRequest(
-			app,
+		// Each id is cast to uuid or bigint in SQL, where a malformed one is a 22P02 or 22003 error and
+		// would answer 500. The operation refuses it first, so none reaches the repository.
+		for (const path of [
+			"/v1/admin/subscription-changes/not-a-uuid/retry",
+			"/v1/admin/subscription-changes/12/retry",
+			"/v1/admin/usage-invoice-periods/not-a-uuid/retry",
+			"/v1/admin/usage-invoice-periods/12/retry",
 			"/v1/admin/usage-invoice-adjustments/not-a-number/retry",
-			{
-				method: "POST",
-				headers,
-			},
-		);
-		expect(invalid.status).toBe(400);
-		expect((await invalid.json()).error.code).toBe("INVALID_REQUEST");
+			"/v1/admin/usage-invoice-adjustments/0/retry",
+			"/v1/admin/usage-invoice-adjustments/9223372036854775808/retry",
+			`/v1/admin/usage-invoice-adjustments/${validProjectionJobId}/retry`,
+		]) {
+			const invalid = await testRequest(app, path, { method: "POST", headers });
+			expect(invalid.status, path).toBe(400);
+			expect((await invalid.json()).error.code, path).toBe("INVALID_REQUEST");
+		}
 		expect(calls).toHaveLength(3);
 	});
 
