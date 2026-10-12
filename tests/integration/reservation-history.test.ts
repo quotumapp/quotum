@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import {
 	allocationRowsSql,
@@ -81,11 +81,10 @@ localDescribe("Reservation history", () => {
 	let projectId: string;
 	let walletFeatureId: string;
 
+	// The statements are read-only, so one seeding serves every test. It writes about 70,000 rows,
+	// which a slow runner needs longer than the lane's default hook timeout for.
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
-	});
-
-	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 		await publishAiCreditsCatalog(context.repository);
 		const project = integrationProjectContext();
@@ -166,7 +165,7 @@ localDescribe("Reservation history", () => {
 		projectId = row?.project ?? "";
 		customerId = row?.customer ?? "";
 		walletFeatureId = row?.wallet ?? "";
-	});
+	}, 180_000);
 
 	afterAll(async () => {
 		await context.sql.close();
