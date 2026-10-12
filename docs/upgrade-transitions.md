@@ -66,6 +66,19 @@ steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-ident
 image cannot read the new baseline, so a rollback restores the pre-upgrade backup, which loses the
 unlinks made since along with their receipts.
 
+## Merchant retention indexes
+
+The merchant baseline indexes the columns the
+[platform retention sweep](operations.md#merchant-platform-retention) compares with its windows:
+`consumed_at` on `platform_auth_links` and `platform_step_up_grants`, `expires_at` on
+`platform_step_up_grants` and `platform_mcp_authorizations`, `revoked_at` on
+`platform_mcp_authorizations`, and `created_at` on `platform_idempotency` and
+`platform_mcp_changes`. A statement that tests two instants joined by `OR` is served only when both
+have an index, so the sweep read the whole of five tables on every run. No table changes and
+nothing is backfilled, so a dump from the previous release restores as it is: follow steps 1, 2, 4
+and 6 of [stored job provider identity](#stored-job-provider-identity). An older image cannot read
+the new baseline, so a rollback restores the pre-upgrade backup.
+
 ## Upgrading a populated deployment to v0.22.0
 
 v0.22.0 adds the common Paddle checkout and changes two baselines relative to v0.21.0:

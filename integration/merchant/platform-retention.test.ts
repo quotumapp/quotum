@@ -1,6 +1,10 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import type { QuotumScheduledJob } from "../../src/composition/runtime-lifecycle";
-import { PlatformRetentionSweep } from "../../src/platform/retention";
+import type {
+	PlatformQuery,
+	PlatformQueryExecutor,
+} from "../../src/platform/persistence/query-executor";
+import { PLATFORM_RETENTION_TABLES, PlatformRetentionSweep } from "../../src/platform/retention";
 import { createBillingRuntime } from "../../src/runtime";
 import { createIntegrationBillingEnv } from "../../tests/integration/helpers/local-postgres";
 import { merchantFixture, testConfig } from "./fixture";
@@ -361,6 +365,94 @@ describe("platform retention sweep", () => {
 		await rateLimit("rate-old", ago(2 * DAY));
 		expect((await sweep().runOnce()).deleted.platform_rate_limits).toBe(1);
 		expect((await sweep().runOnce()).deleted.platform_rate_limits).toBe(0);
+	});
+});
+
+describe("platform retention plans", () => {
+	/** The statements one sweep sends, taken from a run against an executor that deletes nothing. */
+	async function sweepStatements(): Promise<PlatformQuery[]> {
+		const statements: PlatformQuery[] = [];
+		const recorder: PlatformQueryExecutor = {
+			async query<Row>(query: PlatformQuery) {
+				statements.push(query);
+				return [{ deleted: 0 }] as unknown as Row[];
+			},
+		};
+		await new PlatformRetentionSweep(recorder, { now: () => NOW }).runOnce();
+		return statements;
+	}
+
+	/** Rows no window has reached, which is what a sweep finds in steady state. */
+	async function seedLiveRows() {
+		const who = await actor();
+		const live = ago(-DAY);
+		const recent = ago(60 * 60_000);
+		await sql`INSERT INTO platform_rate_limits(key_hash,count,reset_at)
+			SELECT 'rate-' || n, 1, ${live}::timestamptz FROM generate_series(1, 300) n`;
+		await sql`INSERT INTO platform_auth_links(token_hash,kind,expires_at,consumed_at)
+			SELECT 'link-' || n, 'reset', ${live}::timestamptz,
+				CASE WHEN n % 2 = 0 THEN ${recent}::timestamptz END
+			FROM generate_series(1, 300) n`;
+		await sql`INSERT INTO platform_idempotency(principal_id,key,request_hash,result,created_at)
+			SELECT ${who.principalId}, 'key-' || n, 'hash', '{"state":"done"}'::jsonb, ${recent}::timestamptz
+			FROM generate_series(1, 300) n`;
+		await sql`INSERT INTO platform_step_up_grants(session_id,organization_id,scope,action,target,return_to,expires_at,consumed_at)
+			SELECT ${who.sessionId}, ${who.organizationId}, '{}'::jsonb, 'grant-' || n, 'target', '/',
+				${live}::timestamptz, CASE WHEN n % 2 = 0 THEN ${recent}::timestamptz END
+			FROM generate_series(1, 300) n`;
+		await sql`INSERT INTO platform_mcp_authorizations(principal_id,organization_id,project_instance_id,client_id,client_name,created_at,expires_at,revoked_at)
+			SELECT ${who.principalId}, ${who.organizationId}, gen_random_uuid(), 'quotum-claude-code', 'grant-' || n,
+				${recent}::timestamptz, ${live}::timestamptz, CASE WHEN n % 2 = 0 THEN ${recent}::timestamptz END
+			FROM generate_series(1, 300) n`;
+		await sql`INSERT INTO platform_mcp_changes(authorization_id,principal_id,project_instance_id,request_key,request_hash,action,parameters,body,reason,preview,capability,step_up_action,sensitive,scope,status,created_at,expires_at)
+			SELECT a.id, a.principal_id, a.project_instance_id, 'change-' || a.client_name, 'hash', 'catalog.publish', '[]'::jsonb, '{}'::jsonb,
+				'Retention test', '{}'::jsonb, 'catalog.publish', 'catalog.publish', false, '{}'::jsonb, 'completed',
+				${recent}::timestamptz, ${live}::timestamptz
+			FROM platform_mcp_authorizations a`;
+		await sql`ANALYZE platform_rate_limits, platform_auth_links, platform_idempotency,
+			platform_step_up_grants, platform_mcp_authorizations, platform_mcp_changes`;
+	}
+
+	it("reads every table through the indexes on its window columns", async () => {
+		await seedLiveRows();
+		const statements = await sweepStatements();
+		expect(statements).toHaveLength(PLATFORM_RETENTION_TABLES.length);
+
+		// With sequential scans off, a plan names an index only when the statement can use one.
+		const plans = await sql.begin(async (transaction) => {
+			await transaction`SET LOCAL enable_seqscan = off`;
+			const planned: string[] = [];
+			for (const statement of statements) {
+				const rows = await transaction.query<{ "QUERY PLAN": string }>({
+					text: `EXPLAIN (COSTS OFF) ${statement.text}`,
+					values: statement.values,
+				});
+				planned.push(rows.map((row) => row["QUERY PLAN"]).join("\n"));
+			}
+			return planned;
+		});
+
+		// Rows go by either instant of a pair, and an OR is served only when both arms have an index.
+		const expected: Record<(typeof PLATFORM_RETENTION_TABLES)[number], string[]> = {
+			platform_rate_limits: ["platform_rate_limits_reset_idx"],
+			platform_auth_links: ["platform_auth_links_expiry_idx", "platform_auth_links_consumed_idx"],
+			platform_idempotency: ["platform_idempotency_created_idx"],
+			platform_step_up_grants: ["platform_step_up_expiry_idx", "platform_step_up_consumed_idx"],
+			platform_mcp_changes: ["platform_mcp_changes_created_idx"],
+			platform_mcp_authorizations: [
+				"platform_mcp_authorizations_expiry_idx",
+				"platform_mcp_authorizations_revoked_idx",
+			],
+		};
+		for (const table of PLATFORM_RETENTION_TABLES) {
+			const index = statements.findIndex((statement) =>
+				statement.text.includes(`DELETE FROM ${table}`),
+			);
+			expect(index).toBeGreaterThanOrEqual(0);
+			const plan = plans[index] ?? "";
+			for (const name of expected[table]) expect(plan).toContain(name);
+			expect(plan).not.toContain(`Seq Scan on ${table}`);
+		}
 	});
 });
 
