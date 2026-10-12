@@ -31,7 +31,10 @@ bun run test:e2e
 ```
 
 Both runners start their own Docker Postgres, apply migrations, and remove the container when
-they finish.
+they finish. The container keeps its data directory on a 2 GB tmpfs
+(`scripts/lib/postgres-container.ts`), which is RAM-backed and costs memory only for the pages in
+use. An unsharded `bun run test:integration` writes about 570 MB to it; a lane that stops with
+`No space left on device` from Postgres has run out of that tmpfs, not of host disk.
 
 CI gates combined line coverage. It merges the LCOV reports of the unit lane, both integration
 shards and the merchant lane: for each file it keeps the lines every report containing that file
