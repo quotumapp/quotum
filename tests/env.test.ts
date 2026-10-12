@@ -13,6 +13,102 @@ const developmentSource = {
 	BILLING_ENV: "development",
 } as const;
 
+describe("erasure keyring", () => {
+	const key = Buffer.alloc(32, 7).toString("base64");
+	const previous = Buffer.alloc(32, 9).toString("base64");
+
+	it("is absent unless a key is configured", () => {
+		expect(loadEnv(developmentSource).erasure).toBeUndefined();
+	});
+
+	it("parses a current key, a previous key and the tombstone window", () => {
+		const erasure = loadEnv({
+			...developmentSource,
+			BILLING_ERASURE_KEY_ID: "k2",
+			BILLING_ERASURE_KEY_BASE64: key,
+			BILLING_ERASURE_PREVIOUS_KEY_ID: "k1",
+			BILLING_ERASURE_PREVIOUS_KEY_BASE64: previous,
+			BILLING_ERASURE_TOMBSTONE_DAYS: "45",
+		}).erasure;
+
+		expect(erasure?.tombstoneDays).toBe(45);
+		expect(erasure?.keyring.current.id).toBe("k2");
+		expect(erasure?.keyring.previous?.id).toBe("k1");
+	});
+
+	it("defaults the window to thirty days and has no previous key", () => {
+		const erasure = loadEnv({
+			...developmentSource,
+			BILLING_ERASURE_KEY_ID: "k1",
+			BILLING_ERASURE_KEY_BASE64: key,
+		}).erasure;
+
+		expect(erasure?.tombstoneDays).toBe(30);
+		expect(erasure?.keyring.previous).toBeNull();
+	});
+
+	it("rejects half-configured and inconsistent settings", () => {
+		const base = { ...developmentSource };
+		expect(() => loadEnv({ ...base, BILLING_ERASURE_KEY_ID: "k1" })).toThrow(
+			"must be set together",
+		);
+		expect(() => loadEnv({ ...base, BILLING_ERASURE_KEY_BASE64: key })).toThrow(
+			"must be set together",
+		);
+		expect(() =>
+			loadEnv({
+				...base,
+				BILLING_ERASURE_PREVIOUS_KEY_ID: "k0",
+				BILLING_ERASURE_PREVIOUS_KEY_BASE64: previous,
+			}),
+		).toThrow("requires BILLING_ERASURE_KEY_ID");
+		expect(() =>
+			loadEnv({
+				...base,
+				BILLING_ERASURE_KEY_ID: "k1",
+				BILLING_ERASURE_KEY_BASE64: key,
+				BILLING_ERASURE_PREVIOUS_KEY_ID: "k1",
+				BILLING_ERASURE_PREVIOUS_KEY_BASE64: previous,
+			}),
+		).toThrow("must differ");
+	});
+
+	it("rejects short keys, bad ids and a window outside seven to 365 days", () => {
+		const configured = { ...developmentSource, BILLING_ERASURE_KEY_ID: "k1" };
+		expect(() =>
+			loadEnv({ ...configured, BILLING_ERASURE_KEY_BASE64: Buffer.alloc(8).toString("base64") }),
+		).toThrow("at least 32 bytes");
+		expect(() =>
+			loadEnv({
+				...configured,
+				BILLING_ERASURE_KEY_ID: "bad id",
+				BILLING_ERASURE_KEY_BASE64: key,
+			}),
+		).toThrow("erasure key id");
+		for (const days of ["6", "366"])
+			expect(() =>
+				loadEnv({
+					...configured,
+					BILLING_ERASURE_KEY_BASE64: key,
+					BILLING_ERASURE_TOMBSTONE_DAYS: days,
+				}),
+			).toThrow("BILLING_ERASURE_TOMBSTONE_DAYS must be between 7 and 365");
+	});
+
+	it("never echoes key material in an error", () => {
+		try {
+			loadEnv({
+				...developmentSource,
+				BILLING_ERASURE_KEY_ID: "k1",
+				BILLING_ERASURE_KEY_BASE64: "c2hvcnQ=",
+			});
+			throw new Error("expected loadEnv to throw");
+		} catch (error) {
+			expect(String(error)).not.toContain("c2hvcnQ=");
+		}
+	});
+});
+
 describe("loadEnv", () => {
 	it("parses required billing service configuration", () => {
 		const env = loadEnv({

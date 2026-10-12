@@ -3,7 +3,7 @@ import { InvalidRequestError, NotFoundBillingError } from "../../billing/errors"
 import type { BillingAccountRecord } from "../../billing/usage-api";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
-import { applyDefaultPlan } from "./identities";
+import { applyDefaultPlan, assertBillingAccountNotErased } from "./identities";
 import { executeOne } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -39,6 +39,7 @@ export class BillingAccountRepository extends RepositoryModule {
 	async create(project: ProjectInstanceContext, id: string): Promise<BillingAccountRecord> {
 		requireAccountId(id);
 		return this.transaction(async (tx) => {
+			await assertBillingAccountNotErased(tx, project.projectInstanceId, id);
 			const created = await executeOne<{ id: string; billing_account_id: string }>(
 				tx,
 				sql`

@@ -92,7 +92,14 @@ CREATE TABLE IF NOT EXISTS customers (
 	projection_sequence BIGINT NOT NULL DEFAULT 0 CHECK (projection_sequence >= 0),
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-	CONSTRAINT customers_project_id_id_unique UNIQUE (project_id, id)
+	-- Set when an operator erased the account. The row stays as an anonymized subject record so the
+	-- ledger, usage and invoice facts that hang off it keep their referential integrity; its
+	-- external id is rewritten and the contact fields are cleared.
+	erased_at TIMESTAMPTZ,
+	CONSTRAINT customers_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT customers_erased_check CHECK (
+		erased_at IS NULL OR (email IS NULL AND metadata = '{}'::jsonb)
+	)
 );
 
 CREATE TABLE IF NOT EXISTS products (
@@ -172,6 +179,85 @@ CREATE TABLE IF NOT EXISTS provider_customer_unlinks (
 		UNIQUE (project_id, customer_id, idempotency_key),
 	CONSTRAINT provider_customer_unlinks_project_customer_fk FOREIGN KEY (project_id, customer_id)
 		REFERENCES customers(project_id, id) ON DELETE CASCADE
+);
+
+-- An operator erased a billing account. The row is both the durable operation a worker resumes and
+-- the receipt that outlives the account's identity. `subject_id` holds the original external id
+-- only while the scrub runs, because rows without a customer foreign key can be found by nothing
+-- else; it is cleared when the operation completes. `request_hash` is keyed, never a plain hash of
+-- a body that contains the id.
+CREATE TABLE IF NOT EXISTS customer_erasures (
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	customer_id UUID NOT NULL,
+	state TEXT NOT NULL DEFAULT 'running',
+	basis TEXT NOT NULL,
+	reference TEXT,
+	actor TEXT NOT NULL,
+	idempotency_key TEXT COLLATE "C" NOT NULL,
+	request_hash TEXT COLLATE "C",
+	acknowledged TEXT[] NOT NULL DEFAULT '{}',
+	subject_id TEXT,
+	counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+	cursor JSONB NOT NULL DEFAULT '{}'::jsonb,
+	attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+	next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	locked_by TEXT,
+	locked_at TIMESTAMPTZ,
+	last_error TEXT,
+	tombstone_expires_at TIMESTAMPTZ NOT NULL,
+	requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	completed_at TIMESTAMPTZ,
+	CONSTRAINT customer_erasures_project_id_id_unique UNIQUE (project_id, id),
+	-- An account is erased once: its external id is rewritten, so no second request can find it.
+	CONSTRAINT customer_erasures_customer_unique UNIQUE (project_id, customer_id),
+	CONSTRAINT customer_erasures_idempotency_unique UNIQUE (project_id, idempotency_key),
+	-- RESTRICT: the stub row is never deleted, and the receipt must not cascade away with it.
+	CONSTRAINT customer_erasures_project_customer_fk FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT customer_erasures_state_check CHECK (
+		state IN ('requested', 'running', 'verifying', 'completed', 'failed')
+	),
+	CONSTRAINT customer_erasures_basis_check CHECK (
+		basis IN ('data_subject_request', 'merchant_offboarding', 'legal_order', 'other')
+	),
+	CONSTRAINT customer_erasures_reference_check CHECK (
+		reference IS NULL OR char_length(reference) BETWEEN 1 AND 200
+	),
+	CONSTRAINT customer_erasures_actor_check CHECK (char_length(actor) BETWEEN 1 AND 200),
+	CONSTRAINT customer_erasures_idempotency_key_check CHECK (
+		char_length(idempotency_key) BETWEEN 1 AND 255
+	),
+	CONSTRAINT customer_erasures_request_hash_check CHECK (
+		request_hash IS NULL OR char_length(request_hash) BETWEEN 1 AND 128
+	),
+	CONSTRAINT customer_erasures_acknowledged_check CHECK (
+		acknowledged <@ ARRAY['forfeit_paid_balances', 'forfeit_lifetime_purchases']::text[]
+	),
+	CONSTRAINT customer_erasures_subject_check CHECK (
+		(state = 'completed') = (subject_id IS NULL)
+	),
+	CONSTRAINT customer_erasures_completed_check CHECK (
+		(state = 'completed') = (completed_at IS NOT NULL)
+	),
+	CONSTRAINT customer_erasures_counts_check CHECK (jsonb_typeof(counts) = 'object'),
+	CONSTRAINT customer_erasures_cursor_check CHECK (jsonb_typeof(cursor) = 'object')
+);
+
+-- Keeps an erased billing account id from being created again until `expires_at`. The id itself is
+-- never stored: `id_digest` is a keyed digest under the key named by `key_id`, so a database
+-- reader without the key cannot recover or test an id from it.
+CREATE TABLE IF NOT EXISTS customer_erasure_tombstones (
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	key_id TEXT COLLATE "C" NOT NULL CHECK (char_length(key_id) BETWEEN 1 AND 64),
+	id_digest TEXT COLLATE "C" NOT NULL CHECK (char_length(id_digest) BETWEEN 16 AND 128),
+	erasure_id UUID NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	expires_at TIMESTAMPTZ NOT NULL,
+	PRIMARY KEY (project_id, key_id, id_digest),
+	CONSTRAINT customer_erasure_tombstones_expiry_check CHECK (expires_at > created_at),
+	CONSTRAINT customer_erasure_tombstones_erasure_fk FOREIGN KEY (project_id, erasure_id)
+		REFERENCES customer_erasures(project_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -448,6 +534,14 @@ CREATE INDEX IF NOT EXISTS idx_billing_provider_customers_customer_id
 
 CREATE INDEX IF NOT EXISTS idx_billing_provider_customer_unlinks_customer_created
 	ON provider_customer_unlinks (project_id, customer_id, created_at DESC, id DESC);
+
+-- The worker claims the next unfinished erasure that is due.
+CREATE INDEX IF NOT EXISTS idx_customer_erasures_claim
+	ON customer_erasures (next_attempt_at)
+	WHERE state IN ('requested', 'running', 'verifying');
+
+CREATE INDEX IF NOT EXISTS idx_customer_erasure_tombstones_expiry
+	ON customer_erasure_tombstones (expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_billing_store_events_customer_id
 	ON store_events (customer_id);

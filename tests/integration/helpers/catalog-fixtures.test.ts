@@ -8,6 +8,8 @@ import {
 describe("integration catalog fixtures", () => {
 	it("uses public billing tables in dependency reset order", () => {
 		expect(publicBillingTableResetOrder).toEqual([
+			"customer_erasure_tombstones",
+			"customer_erasures",
 			"paddle_checkout_reservations",
 			"provider_operations",
 			"promotion_apple_signature_attempts",

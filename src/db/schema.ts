@@ -237,9 +237,14 @@ export const customers = pgTable(
 		metadata: metadataColumn(),
 		projectionSequence: bigint("projection_sequence", { mode: "number" }).notNull().default(0),
 		...timestampColumns(),
+		erasedAt: timestamp("erased_at", { withTimezone: true }),
 	},
 	(table): PgTableExtraConfigValue[] => [
 		check("customers_projection_sequence_check", sql`((projection_sequence >= 0))`),
+		check(
+			"customers_erased_check",
+			sql`${table.erasedAt} IS NULL OR (${table.email} IS NULL AND ${table.metadata} = '{}'::jsonb)`,
+		),
 		index("idx_billing_customers_billing_account_id_trgm").using(
 			"gin",
 			table.billingAccountId.op("gin_trgm_ops"),
@@ -432,6 +437,128 @@ export const providerCustomerUnlinks = pgTable(
 			table.createdAt.desc(),
 			table.id.desc(),
 		),
+	],
+);
+
+export type CustomerErasureState = "requested" | "running" | "verifying" | "completed" | "failed";
+export type CustomerErasureBasis =
+	| "data_subject_request"
+	| "merchant_offboarding"
+	| "legal_order"
+	| "other";
+export type CustomerErasureAcknowledgement = "forfeit_paid_balances" | "forfeit_lifetime_purchases";
+
+export const customerErasures = pgTable(
+	"customer_erasures",
+	{
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		customerId: uuid("customer_id").notNull(),
+		state: text("state").$type<CustomerErasureState>().notNull().default("running"),
+		basis: text("basis").$type<CustomerErasureBasis>().notNull(),
+		reference: text("reference"),
+		actor: text("actor").notNull(),
+		idempotencyKey: text("idempotency_key").notNull(),
+		requestHash: text("request_hash"),
+		acknowledged: text("acknowledged")
+			.array()
+			.$type<CustomerErasureAcknowledgement[]>()
+			.notNull()
+			.default(sql`'{}'`),
+		subjectId: text("subject_id"),
+		counts: jsonb("counts").$type<Record<string, number>>().notNull().default({}),
+		cursor: jsonb("cursor").$type<Record<string, unknown>>().notNull().default({}),
+		attempts: integer("attempts").notNull().default(0),
+		nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+		lockedBy: text("locked_by"),
+		lockedAt: timestamp("locked_at", { withTimezone: true }),
+		lastError: text("last_error"),
+		tombstoneExpiresAt: timestamp("tombstone_expires_at", { withTimezone: true }).notNull(),
+		requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check("customer_erasures_attempts_check", sql`${table.attempts} >= 0`),
+		check(
+			"customer_erasures_state_check",
+			sql`${table.state} IN ('requested', 'running', 'verifying', 'completed', 'failed')`,
+		),
+		check(
+			"customer_erasures_basis_check",
+			sql`${table.basis} IN ('data_subject_request', 'merchant_offboarding', 'legal_order', 'other')`,
+		),
+		check(
+			"customer_erasures_reference_check",
+			sql`${table.reference} IS NULL OR char_length(${table.reference}) BETWEEN 1 AND 200`,
+		),
+		check("customer_erasures_actor_check", sql`char_length(${table.actor}) BETWEEN 1 AND 200`),
+		check(
+			"customer_erasures_idempotency_key_check",
+			sql`char_length(${table.idempotencyKey}) BETWEEN 1 AND 255`,
+		),
+		check(
+			"customer_erasures_request_hash_check",
+			sql`${table.requestHash} IS NULL OR char_length(${table.requestHash}) BETWEEN 1 AND 128`,
+		),
+		check(
+			"customer_erasures_acknowledged_check",
+			sql`${table.acknowledged} <@ ARRAY['forfeit_paid_balances', 'forfeit_lifetime_purchases']::text[]`,
+		),
+		check(
+			"customer_erasures_subject_check",
+			sql`(${table.state} = 'completed') = (${table.subjectId} IS NULL)`,
+		),
+		check(
+			"customer_erasures_completed_check",
+			sql`(${table.state} = 'completed') = (${table.completedAt} IS NOT NULL)`,
+		),
+		check("customer_erasures_counts_check", sql`jsonb_typeof(${table.counts}) = 'object'`),
+		check("customer_erasures_cursor_check", sql`jsonb_typeof(${table.cursor}) = 'object'`),
+		unique("customer_erasures_project_id_id_unique").on(table.projectId, table.id),
+		unique("customer_erasures_customer_unique").on(table.projectId, table.customerId),
+		unique("customer_erasures_idempotency_unique").on(table.projectId, table.idempotencyKey),
+		foreignKey({
+			name: "customer_erasures_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("restrict"),
+		index("idx_customer_erasures_claim")
+			.on(table.nextAttemptAt)
+			.where(sql`${table.state} IN ('requested', 'running', 'verifying')`),
+	],
+);
+
+export const customerErasureTombstones = pgTable(
+	"customer_erasure_tombstones",
+	{
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		keyId: text("key_id").notNull(),
+		idDigest: text("id_digest").notNull(),
+		erasureId: uuid("erasure_id").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		primaryKey({ columns: [table.projectId, table.keyId, table.idDigest] }),
+		check(
+			"customer_erasure_tombstones_key_id_check",
+			sql`char_length(${table.keyId}) BETWEEN 1 AND 64`,
+		),
+		check(
+			"customer_erasure_tombstones_id_digest_check",
+			sql`char_length(${table.idDigest}) BETWEEN 16 AND 128`,
+		),
+		check("customer_erasure_tombstones_expiry_check", sql`${table.expiresAt} > ${table.createdAt}`),
+		foreignKey({
+			name: "customer_erasure_tombstones_erasure_fk",
+			columns: [table.projectId, table.erasureId],
+			foreignColumns: [customerErasures.projectId, customerErasures.id],
+		}).onDelete("cascade"),
+		index("idx_customer_erasure_tombstones_expiry").on(table.expiresAt),
 	],
 );
 

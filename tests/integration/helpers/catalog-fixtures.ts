@@ -26,6 +26,8 @@ interface SeededStoreProduct {
 }
 
 export const publicBillingTableResetOrder = [
+	"customer_erasure_tombstones",
+	"customer_erasures",
 	"paddle_checkout_reservations",
 	"provider_operations",
 	"promotion_apple_signature_attempts",

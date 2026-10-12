@@ -1,6 +1,8 @@
 import { sql as drizzleSql } from "drizzle-orm";
+import { customerErasureError } from "../../billing/customer-erasures";
 import { NotFoundBillingError } from "../../billing/errors";
 import type { BillingChannel, BillingProvider } from "../../billing/types";
+import { tombstoneDigests } from "../erasure-keyring";
 import { sqlstateOf } from "../postgres-errors";
 import { type DefaultPlanOutcome, reconcileDefaultPlanGrant } from "./default-plan-grants";
 import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
@@ -10,8 +12,45 @@ import type { CustomerIdentityRow, QueryExecutor, StoreProductIdentityRow } from
 import { requireNonBlank, requireStripeCustomerId } from "./validation";
 
 /**
+ * A condition that holds while no live erasure tombstone names the id, or `null` when no erasure
+ * key is configured and there is nothing to match. The tombstone holds a keyed digest, so the
+ * statement carries one `(key id, digest)` pair per configured key.
+ */
+function notErasedCondition(projectId: string, billingAccountId: string) {
+	const digests = tombstoneDigests(projectId, billingAccountId);
+	if (digests.length === 0) return null;
+	const pairs = drizzleSql.join(
+		digests.map((entry) => drizzleSql`(${entry.keyId}, ${entry.digest})`),
+		drizzleSql`, `,
+	);
+	return drizzleSql`NOT EXISTS (
+		SELECT 1 FROM customer_erasure_tombstones
+		WHERE project_id = ${projectId}
+			AND expires_at > now()
+			AND (key_id, id_digest) IN (${pairs})
+	)`;
+}
+
+/** Refuses an id that a live erasure tombstone names. Used by creation paths that insert directly. */
+export async function assertBillingAccountNotErased(
+	executor: QueryExecutor,
+	projectId: string,
+	billingAccountId: string,
+): Promise<void> {
+	const condition = notErasedCondition(projectId, billingAccountId);
+	if (condition === null) return;
+	const row = await executeOne<{ allowed: boolean }>(
+		executor,
+		drizzleSql`SELECT ${condition} AS allowed`,
+	);
+	if (row !== null && row.allowed === false) throw customerErasureError("BILLING_ACCOUNT_ERASED");
+}
+
+/**
  * The customer for a billing account, created when missing. The upsert locks the row for the rest of
- * the transaction. A new account starts on the catalog's default plan, if it marks one.
+ * the transaction. A new account starts on the catalog's default plan, if it marks one. An id that a
+ * live erasure tombstone names is refused with `BILLING_ACCOUNT_ERASED`, for the same reason the
+ * account was erased: a late provider event or a stale write must not bring it back.
  */
 export async function ensureCustomer(
 	executor: QueryExecutor,
@@ -20,11 +59,22 @@ export async function ensureCustomer(
 	email: string | null = null,
 ): Promise<CustomerIdentityRow> {
 	requireNonBlank(billingAccountId, "p_billing_account_id");
+	const notErased = notErasedCondition(projectId, billingAccountId);
 	const row = await executeOne<CustomerIdentityRow & { created: boolean }>(
 		executor,
-		drizzleSql`
+		notErased === null
+			? drizzleSql`
 		INSERT INTO customers (project_id, billing_account_id, email)
 		VALUES (${projectId}, ${billingAccountId}, ${email})
+		ON CONFLICT (project_id, billing_account_id) DO UPDATE SET
+			email = COALESCE(${email}, customers.email),
+			updated_at = now()
+		RETURNING id, billing_account_id, (old.id IS NULL) AS created
+	`
+			: drizzleSql`
+		INSERT INTO customers (project_id, billing_account_id, email)
+		SELECT ${projectId}, ${billingAccountId}, ${email}
+		WHERE ${notErased}
 		ON CONFLICT (project_id, billing_account_id) DO UPDATE SET
 			email = COALESCE(${email}, customers.email),
 			updated_at = now()
@@ -32,6 +82,7 @@ export async function ensureCustomer(
 	`,
 	);
 	if (row === null) {
+		if (notErased !== null) throw customerErasureError("BILLING_ACCOUNT_ERASED");
 		throw new Error(`customer ${billingAccountId} could not be created`);
 	}
 	if (row.created) await applyDefaultPlan(executor, projectId, row);

@@ -33,6 +33,10 @@ import {
 	initializePostgresHealth,
 	sql,
 } from "./db/client";
+import {
+	assertErasureKeyringCoversTombstones,
+	configureErasureKeyring,
+} from "./db/erasure-keyring";
 import { BillingRepository } from "./db/repository";
 import type { TransactionalQueryExecutor } from "./db/repository/types";
 import {
@@ -450,12 +454,15 @@ export function createBillingRuntime(
 			runtimeActive = true;
 			return () => {
 				runtimeActive = false;
+				configureErasureKeyring(null);
 			};
 		},
 		async initialize() {
 			configureDefaultConnection(env);
 			if (dependencies.sentry) initializeSentry(dependencies.sentry, env.sentry);
 			await initializePostgresHealth();
+			configureErasureKeyring(env.erasure?.keyring ?? null);
+			await assertErasureKeyringCoversTombstones(sql, env.erasure?.keyring ?? null);
 		},
 		compose: () => {
 			const composed = composeBillingRuntime(env, dependencies);
