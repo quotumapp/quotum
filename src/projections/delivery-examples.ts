@@ -81,6 +81,27 @@ const trial = {
 	trialEndsAt: "2026-10-15T09:30:00.000Z",
 };
 
+const promotionGrant = {
+	origin: "promotion",
+	planGrantId: "5f0c1d86-7f0e-4e0b-9a55-7d2f0c1e9a10",
+	planKey: "premium",
+	promotionRedemptionId: "0192f3a1-8e00-7b00-9c00-1d2e3f405162",
+	startsAt: "2026-10-01T09:30:00.000Z",
+	endsAt: "2026-10-31T09:30:00.000Z",
+} as const;
+
+/** A promotional plan grant's entitlement source: the grant, its plan and its redemption. */
+function promotionGrantSource(status: string) {
+	return {
+		source: "plan_grant",
+		origin: "promotion",
+		status,
+		planKey: promotionGrant.planKey,
+		planGrantId: promotionGrant.planGrantId,
+		promotionRedemptionId: promotionGrant.promotionRedemptionId,
+	};
+}
+
 /**
  * One delivery per case a receiver handles: a Stripe subscription or one-time purchase, a verified
  * App Store or Google Play purchase, and a usage snapshot. Published as
@@ -364,6 +385,54 @@ export const projectionDeliveryExamples: Record<string, ProjectionDeliveryExampl
 				purchasedAt: "2026-10-03T14:11:25.000Z",
 			},
 			sequence: 1,
+		},
+	},
+	promotion_plan_grant_ending: {
+		description:
+			"The plan a redeemed promotion code gave ends in about three days. Record the planGrant fact once by its key; it arrives once per grant. The entitlement metadata names the grant and its redemption.",
+		delivery: {
+			schemaVersion: 1,
+			projectKey,
+			jobId: "0192f3a2-000e-7a10-8b20-c30d40e50f60",
+			idempotencyKey: `plan_grant_ending:${promotionGrant.planGrantId}:${promotionGrant.endsAt}`,
+			...snapshot(
+				"2026-10-28T09:31:07.412Z",
+				{
+					active: true,
+					expiresAt: promotionGrant.endsAt,
+					metadata: promotionGrantSource("active"),
+				},
+				[
+					{
+						featureKey: "ai_credits",
+						unit: "credit",
+						available: "1000",
+						held: "0",
+						periodEndsAt: promotionGrant.endsAt,
+					},
+				],
+			),
+			reason: "expiry_reconciliation",
+			planGrant: { event: "ending", ...promotionGrant },
+			sequence: 2,
+		},
+	},
+	promotion_plan_grant_ended: {
+		description:
+			"The plan a redeemed promotion code gave reached its end without a paid plan taking over. The entitlement is inactive and the grant's allowance no longer counts. A revoked redemption delivers the same fact with reason usage_changed and the earlier endsAt; a grant a paid subscription replaces sends none.",
+		delivery: {
+			schemaVersion: 1,
+			projectKey,
+			jobId: "0192f3a2-000f-7a10-8b20-c30d40e50f60",
+			idempotencyKey: `expiry_reconciliation:plan_grant:${promotionGrant.planGrantId}:${promotionGrant.endsAt}`,
+			...snapshot("2026-10-31T09:30:41.220Z", {
+				active: false,
+				expiresAt: promotionGrant.endsAt,
+				metadata: promotionGrantSource("expired"),
+			}),
+			reason: "expiry_reconciliation",
+			planGrant: { event: "ended", ...promotionGrant },
+			sequence: 3,
 		},
 	},
 	usage_snapshot: {

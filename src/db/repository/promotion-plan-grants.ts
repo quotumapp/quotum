@@ -1,9 +1,11 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { type PromotionErrorCode, promotionError } from "../../billing/promotions";
+import type { ProjectionPayload } from "../../billing/types";
 import { supersedeDefaultPlanGrant } from "./default-plan-grants";
 import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
 import {
 	activeBaseGrantSql,
+	endedPlanGrantFacts,
 	endPlanGrantInTx,
 	expireCustomerPlanGrants,
 	paidBasePlanSql,
@@ -138,6 +140,7 @@ export async function endPromotionPlanGrantInTx(
 		{ id: grant.customer_id, billing_account_id: grant.billing_account_id },
 		grant.id,
 		"ended",
+		await endedPlanGrantFacts(tx, input.projectId, grant.id, endedAt),
 	);
 }
 
@@ -167,6 +170,7 @@ async function deliverPlanGrantChange(
 	customer: { id: string; billing_account_id: string },
 	grantId: string,
 	change: "started" | "ended",
+	facts: Pick<ProjectionPayload, "planGrant"> = {},
 ): Promise<void> {
 	const snapshot = await recomputeCustomerEntitlements(tx, projectId, customer.billing_account_id);
 	await enqueueProjectionSyncJob(tx, {
@@ -177,6 +181,7 @@ async function deliverPlanGrantChange(
 			billingAccountId: customer.billing_account_id,
 			reason: "usage_changed",
 			entitlements: snapshot,
+			...facts,
 		},
 	});
 }

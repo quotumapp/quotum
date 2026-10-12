@@ -97,9 +97,11 @@ promotion codes. It does not count as the plan's trial: the account can still tr
 and Stripe Checkout still offers the plan's trial. And it has no routes of its own: the redemption
 is its record, and its `planGrant` reports the grant on every read.
 
-The redemption delivers a stored `usage_changed` projection keyed `plan_grant:<id>:started`, and a
-revocation one keyed `plan_grant:<id>:ended`. The expiry delivers `expiry_reconciliation`. None of
-them carries a `trial` fact.
+The redemption delivers a stored `usage_changed` projection keyed `plan_grant:<id>:started`. The
+grant's later events carry a `planGrant` fact, never a `trial` fact: one `ending` notice about
+three days before its end, and `ended` when it expires or its redemption is revoked. A grant that
+a paid subscription supersedes sends none. [Projections](providers.md#projections) lists the
+fact's fields and keys.
 
 ## Default plan
 

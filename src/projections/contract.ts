@@ -36,13 +36,16 @@ export const projectionDeliverySchema = projectionPayloadFields
 		),
 		reason: fields.reason.describe("What caused the delivery."),
 		purchase: fields.purchase.describe(
-			"A purchase to record once by transactionId. Never sent with reversal or trial.",
+			"A purchase to record once by transactionId. Never sent with reversal, trial or planGrant.",
 		),
 		reversal: fields.reversal.describe(
-			"A refund or dispute to record once by transactionId. With a subscription fact it reports a returned subscription payment and reverses nothing. Never sent with purchase or trial.",
+			"A refund or dispute to record once by transactionId. With a subscription fact it reports a returned subscription payment and reverses nothing. Never sent with purchase, trial or planGrant.",
 		),
 		trial: fields.trial.describe(
-			"A trial that is ending or has ended. Never sent with purchase or reversal.",
+			"A trial that is ending or has ended. Never sent with purchase, reversal or planGrant.",
+		),
+		planGrant: fields.planGrant.describe(
+			"A plan grant from a redeemed promotion code that is ending or has ended. Never sent with purchase, reversal or trial.",
 		),
 		subscription: fields.subscription.describe(
 			"State of the subscription the delivery is about. Not an inventory of the account's subscriptions.",
@@ -68,6 +71,9 @@ const factRules: JsonSchema[] = [
 	{ not: { required: ["purchase", "reversal"] } },
 	{ not: { required: ["trial", "purchase"] } },
 	{ not: { required: ["trial", "reversal"] } },
+	{ not: { required: ["planGrant", "purchase"] } },
+	{ not: { required: ["planGrant", "reversal"] } },
+	{ not: { required: ["planGrant", "trial"] } },
 ];
 const trialRule: JsonSchema = {
 	if: { properties: { source: { const: "subscription" } } },

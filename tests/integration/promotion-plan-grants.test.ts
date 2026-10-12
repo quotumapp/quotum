@@ -318,6 +318,17 @@ localDescribe("Promotion plan grants integration", () => {
 		expect(row).toMatchObject({ end_actor: actor, end_reason: "Abuse report" });
 		expect(await projectionJob(context.sql, `plan_grant:${ended.id}:ended`)).toMatchObject({
 			reason: "usage_changed",
+			payload: {
+				planGrant: {
+					event: "ended",
+					origin: "promotion",
+					planGrantId: ended.id,
+					planKey: "premium",
+					promotionRedemptionId: redemption.id,
+					startsAt: ended.startsAt,
+					endsAt: ended.endedAt,
+				},
+			},
 		});
 
 		// The grant's allowance stops with it, and the default plan answers again at once.
@@ -362,14 +373,49 @@ localDescribe("Promotion plan grants integration", () => {
 			(await api.get("/v1/billing-accounts/converter/entitlements")).body.data.entitlements[0],
 		).toMatchObject({ active: true, metadata: { source: "subscription", provider: "apple" } });
 
-		// Past its end the grant reads expired before the worker records it.
+		// No fact follows the conversion: the customer moved to a paid plan.
+		const facts = await context.sql<{ count: string }[]>`
+			SELECT count(*)::text AS count FROM projection_sync_jobs WHERE payload ? 'planGrant'
+		`;
+		expect(facts[0]?.count).toBe("0");
+
+		// Within three days of its end the grant sends one ending notice.
 		const lapsing = (await api.redeem("lapser", { code: "PASS", channel: "web" }, "redeem")).body
 			.data.redemption;
-		await shiftGrant(lapsing.planGrant.id, -31);
+		const grantId = lapsing.planGrant.id;
+		await shiftGrant(grantId, -28);
+		expect((await context.repository.enqueueTrialEndingNotices(25)).noticedTrials).toBe(1);
+		expect((await context.repository.enqueueTrialEndingNotices(25)).noticedTrials).toBe(0);
+		const noticed = await read("lapser", lapsing.id);
+		expect(
+			await projectionJob(context.sql, `plan_grant_ending:${grantId}:${noticed.endsAt}`),
+		).toMatchObject({
+			reason: "expiry_reconciliation",
+			payload: {
+				planGrant: {
+					event: "ending",
+					origin: "promotion",
+					planGrantId: grantId,
+					promotionRedemptionId: lapsing.id,
+					endsAt: noticed.endsAt,
+				},
+			},
+		});
+
+		// Past its end the grant reads expired before the worker records it.
+		await shiftGrant(grantId, -3);
 		expect(await read("lapser", lapsing.id)).toMatchObject({ status: "expired" });
 		expect((await context.repository.reconcilePlanGrants(25)).expiredPlanGrants).toBe(1);
 		const expired = await read("lapser", lapsing.id);
 		expect(expired).toMatchObject({ status: "expired", endedAt: expired.endsAt });
+		expect(
+			(
+				await projectionJob(
+					context.sql,
+					`expiry_reconciliation:plan_grant:${grantId}:${expired.endsAt}`,
+				)
+			)?.payload.planGrant,
+		).toMatchObject({ event: "ended", origin: "promotion", planGrantId: grantId });
 		expect(await activeKeys(api, "lapser")).toEqual([]);
 
 		// Revoking a redemption whose grant is over reverses the redemption and leaves the grant.

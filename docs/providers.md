@@ -589,7 +589,8 @@ Quotum never writes your database. It delivers signed HTTP `billing_state_v1` pr
 the entitlement and exact-string balance snapshot to the connection's projection URL, retrying
 with backoff. Verify `X-Billing-Signature` and `X-Billing-Timestamp`, and treat the projection as a
 read model: authorization decisions must use the metering API. Order snapshots per billing account
-by `sequence`, and record `purchase`, `reversal` and `trial` facts idempotently by their key.
+by `sequence`, and record `purchase`, `reversal`, `trial` and `planGrant` facts idempotently by
+their key.
 Usage deliveries have immutable content and an `idempotencyKey` of
 `usage:<customerId>:<sequence>`; retries retain the payload, sequence and key, and subsequent
 usage receives a new key. The internal coalescing job still uses `usage:<customerId>`.
@@ -604,13 +605,13 @@ The body of a delivery is published in machine-readable form next to the OpenAPI
   is its JSON Schema (draft 2020-12), rendered from the schema the projection worker validates a
   payload with. It covers the envelope the worker adds to the stored job payload
   (`schemaVersion`, `projectKey`, `jobId`, `idempotencyKey`), the snapshot, and the `purchase`,
-  `reversal`, `trial` and `subscription` facts with the rules between them.
+  `reversal`, `trial`, `planGrant` and `subscription` facts with the rules between them.
 - [`contracts/v1/projection-delivery.examples.json`](../contracts/v1/projection-delivery.examples.json)
   holds one example per case, each with a `description` and the `delivery` body: a Stripe
   subscription's purchase, renewal, refunded payment, scheduled cancellation and end, a trial's
   start and its ending notice, a one-time purchase with its refund, a verified App Store
-  subscription, a verified Google Play subscription and consumable, and a usage snapshot with a
-  balance. The integration lane compares each with
+  subscription, a verified Google Play subscription and consumable, a promotional plan grant's
+  ending notice and its end, and a usage snapshot with a balance. The integration lane compares each with
   the delivery the real flow produces, field for field in structure.
 
 Use the examples as receiver fixtures and the schema to validate what you receive. The schema
@@ -648,7 +649,7 @@ Key subscription rows by `(projectKey, subscriptionId)`, or by
 identity. Entitlements select one source per key, so key their cache by account and entitlement key;
 they cannot enumerate every subscription. A `planKey` comes from the pinned version, not today's catalog.
 
-A payload carries at most one of the existing facts: `purchase`, `reversal` or `trial`. A `reversal` with
+A payload carries at most one of the facts `purchase`, `reversal`, `trial` and `planGrant`. A `reversal` with
 `creditAmount: 0` and a `subscription` fact reports a
 [refunded or disputed subscription payment](#refunds-of-subscription-payments); it changes no
 entitlement. A `trial` fact with
@@ -670,8 +671,24 @@ it expires (reason `expiry_reconciliation`) or is ended early (a stored `usage_c
 entitlement metadata, which describes each entitlement's current source, the fact describes the one
 subscription or grant whose trial is ending or has ended.
 
+The plan a [redeemed promotion code](grants.md#promotional-plan-grants) gives is a plan grant too,
+but it is not a trial and reports through its own `planGrant` fact. Its entitlements carry
+`source: "plan_grant"`, `origin: "promotion"`, `status`, `planKey`, `planGrantId` and
+`promotionRedemptionId`. The fact carries `event`, `origin: "promotion"`, `planGrantId`, `planKey`,
+`promotionRedemptionId`, `startsAt` and `endsAt`:
+
+- `event: "ending"` arrives once per grant, about three days before its end (reason
+  `expiry_reconciliation`, key `plan_grant_ending:<id>:<endsAt>`). A grant redeemed that close to
+  its end is announced at the next worker pass.
+- `event: "ended"` arrives when the grant expires (reason `expiry_reconciliation`, key
+  `expiry_reconciliation:plan_grant:<id>:<endsAt>`) or its redemption is revoked (a stored
+  `usage_changed` keyed `plan_grant:<id>:ended`, whose `endsAt` is the moment the grant ended).
+
+A grant that a paid base subscription supersedes sends no fact, since the customer converted.
+
 Each balance reports `periodEndsAt`, the end of its earliest allowance or meter-limit window. A
-plan grant's allowance (a trial's or the default plan's) resets without a delivery, as a meter-limit
+plan grant's allowance (a trial's, a promotional grant's or the default plan's) resets without a
+delivery, as a meter-limit
 window does, so a snapshot's balance holds until its `periodEndsAt`; the next delivery, or a
 balance read, reports the new window. A meter-limited feature an unlimited usage source currently
 lifts carries `unlimited: true`; its `available` still reports the window's finite figure, which
@@ -683,7 +700,7 @@ confirmation since the previous one, is sent after the project's debounce
 (`metering_settings.projection_usage_debounce_ms`, default one second), and carries the state
 current at delivery, so a receiver sees fewer deliveries than usage calls. Payloads carry a
 per-account `sequence`; a receiver that already applied a higher sequence for the account may
-discard the snapshot but should still record any `purchase`, `reversal` or `trial` facts by their key. The
+discard the snapshot but should still record any `purchase`, `reversal`, `trial` or `planGrant` facts by their key. The
 payload schema keeps `sequence` optional; treat a payload without it as unordered and apply it as
 current. Set
 `usageDelivery` to `off` on the projection connection when your backend takes balances from the

@@ -95,6 +95,25 @@ export interface ProjectionTrialPayload {
 	autoRenew: boolean;
 }
 
+export const projectionPlanGrantEvents = ["ending", "ended"] as const;
+export type ProjectionPlanGrantEvent = (typeof projectionPlanGrantEvents)[number];
+
+/**
+ * An event of the plan grant a redeemed promotion code gave: `ending` shortly before its end,
+ * `ended` when it stops without a paid successor, at its end or because its redemption was
+ * revoked. A trial's grant reports through the trial fact instead.
+ */
+export interface ProjectionPlanGrantPayload {
+	event: ProjectionPlanGrantEvent;
+	origin: "promotion";
+	planGrantId: string;
+	planKey: string;
+	promotionRedemptionId: string;
+	startsAt: string;
+	/** When the grant ends, or ended: earlier than its term when a revocation ended it. */
+	endsAt: string;
+}
+
 export const projectionSubscriptionSchema = z.object({
 	subscriptionId: z.string().uuid(),
 	externalSubscriptionId: z.string().min(1),
@@ -141,6 +160,7 @@ export interface ProjectionPayload {
 	};
 	reversal?: ProjectionReversalPayload;
 	trial?: ProjectionTrialPayload;
+	planGrant?: ProjectionPlanGrantPayload;
 	subscription?: ProjectionSubscriptionPayload;
 	/** Per-account order of state snapshots; receivers may ignore a lower value. */
 	sequence?: number;
@@ -214,6 +234,26 @@ const projectionTrialPayloadSchema = z
 		}
 	});
 
+const projectionPlanGrantPayloadSchema = z
+	.object({
+		event: z.enum(projectionPlanGrantEvents),
+		origin: z.literal("promotion"),
+		planGrantId: z.string().min(1),
+		planKey: z.string().min(1),
+		promotionRedemptionId: z.string().min(1),
+		startsAt: z.iso.datetime({ offset: true }),
+		endsAt: z.iso.datetime({ offset: true }),
+	})
+	.superRefine((grant, context) => {
+		if (Date.parse(grant.endsAt) <= Date.parse(grant.startsAt)) {
+			context.addIssue({
+				code: "custom",
+				message: "Plan grant must end after it starts",
+				path: ["endsAt"],
+			});
+		}
+	});
+
 /** The stored payload's fields; the delivery contract adds its envelope to the same object. */
 export const projectionPayloadFields = z.object({
 	billingAccountId: z.string().min(1),
@@ -248,6 +288,7 @@ export const projectionPayloadFields = z.object({
 		.optional(),
 	reversal: projectionReversalPayloadSchema.optional(),
 	trial: projectionTrialPayloadSchema.optional(),
+	planGrant: projectionPlanGrantPayloadSchema.optional(),
 	subscription: projectionSubscriptionSchema.optional(),
 	sequence: z.number().int().nonnegative().optional(),
 });
@@ -289,6 +330,20 @@ export function refineProjectionPayload(
 			code: "custom",
 			message: "Projection payload cannot include trial context with purchase or reversal context",
 			path: ["trial"],
+		});
+	}
+
+	if (
+		payload.planGrant !== undefined &&
+		(payload.purchase !== undefined ||
+			payload.reversal !== undefined ||
+			payload.trial !== undefined)
+	) {
+		context.addIssue({
+			code: "custom",
+			message:
+				"Projection payload cannot include plan grant context with purchase, reversal or trial context",
+			path: ["planGrant"],
 		});
 	}
 }

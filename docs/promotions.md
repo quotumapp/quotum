@@ -228,6 +228,7 @@ refund Stripe purchases instead. A second revocation with another key returns
 
 Revoking a `plan_grant` redemption ends its grant at once, as ending a trial does: access and the
 grant's allowances stop, the account falls back to the default plan when the catalog marks one,
-and a stored `usage_changed` projection keyed `plan_grant:<id>:ended` is delivered. The response's
+and a stored `usage_changed` projection keyed `plan_grant:<id>:ended` is delivered with the
+grant's `ended` [fact](providers.md#projections). The response's
 `reversedAllocations` is empty and `redemption.planGrant.status` is `ended`. A grant that already
 expired or gave way to a paid subscription stays as it is; the redemption still becomes `reversed`.

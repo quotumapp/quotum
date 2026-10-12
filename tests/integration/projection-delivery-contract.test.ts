@@ -42,7 +42,10 @@ function facts(delivery: Delivery) {
 	return {
 		schemaVersion: delivery.schemaVersion,
 		reason: delivery.reason,
-		balances: delivery.balances,
+		// A window's end is a time of the run; whether there is one is part of the shape.
+		balances: (delivery.balances as Delivery[]).map(
+			({ periodEndsAt: _end, ...balance }) => balance,
+		),
 		entitlements: snapshot.entitlements.map(({ active, metadata }) => ({
 			active,
 			source: metadata.source,
@@ -60,6 +63,7 @@ function facts(delivery: Delivery) {
 			"cancellationReason",
 		]),
 		trial: pick(delivery.trial, ["event", "source", "provider", "channel", "autoRenew"]),
+		planGrant: pick(delivery.planGrant, ["event", "origin", "planKey"]),
 		purchase: pick(delivery.purchase, [
 			"provider",
 			"channel",
@@ -307,6 +311,65 @@ localDescribe("projection delivery contract", () => {
 		});
 
 		expect((delivery.purchase as Delivery).transactionId).toBe("purchase_token_1");
+	});
+
+	it("publishes what a promotional plan grant delivers before it ends and when it ends", async () => {
+		const project = integrationProjectContext();
+		await publishAiCreditsCatalog(context.repository);
+		await context.repository.promotions.createPromotion(project, {
+			key: "premium-pass",
+			name: "Premium pass",
+			effect: { kind: "plan_grant", planKey: "premium", durationUnit: "day", durationCount: 30 },
+			codes: [{ code: "PASS" }],
+			actor: "contract-example",
+		});
+		const redeemed = await context.repository.promotions.redeemPromotionCode(project, {
+			billingAccountId: "integration_user",
+			code: "PASS",
+			channel: "web",
+			idempotencyKey: "contract-example",
+			actor: null,
+		});
+		if (redeemed.kind !== "plan_granted") throw new Error("the code gave no plan");
+		const grantId = redeemed.redemption.planGrant?.id ?? "";
+		const age = (days: number) => context.sql`
+			UPDATE plan_grants
+			SET starts_at = starts_at - ${days} * interval '1 day',
+				ends_at = ends_at - ${days} * interval '1 day'
+			WHERE id = ${grantId}::uuid
+		`;
+		// The redemption's own delivery carries no fact; the two after it are the published cases.
+		const started = await deliverQueued("plan grant started");
+		expect([started.idempotencyKey, started.planGrant]).toEqual([
+			`plan_grant:${grantId}:started`,
+			undefined,
+		]);
+
+		await age(28);
+		expect((await context.repository.enqueueTrialEndingNotices(25)).noticedTrials).toBe(1);
+		const ending = expectPublished(
+			"promotion_plan_grant_ending",
+			await deliverQueued("promotion_plan_grant_ending"),
+		);
+		await age(3);
+		expect((await context.repository.reconcilePlanGrants(25)).expiredPlanGrants).toBe(1);
+		const ended = expectPublished(
+			"promotion_plan_grant_ended",
+			await deliverQueued("promotion_plan_grant_ended"),
+		);
+
+		const fact = (delivery: Delivery) => delivery.planGrant as Delivery;
+		expect(ending.idempotencyKey).toBe(`plan_grant_ending:${grantId}:${fact(ending).endsAt}`);
+		expect(ended.idempotencyKey).toBe(
+			`expiry_reconciliation:plan_grant:${grantId}:${fact(ended).endsAt}`,
+		);
+		expect(fact(ended)).toMatchObject({
+			planGrantId: grantId,
+			promotionRedemptionId: redeemed.redemption.id,
+		});
+		expect(Date.parse(String(fact(ended).endsAt)) - Date.parse(String(fact(ended).startsAt))).toBe(
+			30 * 86_400_000,
+		);
 	});
 
 	it("publishes what a usage snapshot delivers", async () => {

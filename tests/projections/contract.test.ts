@@ -37,6 +37,8 @@ describe("projection delivery contract", () => {
 			"apple_subscription_purchase",
 			"google_consumable_purchase",
 			"google_subscription_purchase",
+			"promotion_plan_grant_ended",
+			"promotion_plan_grant_ending",
 			"stripe_one_time_purchase",
 			"stripe_one_time_refund",
 			"stripe_subscription_cancel_scheduled",
@@ -74,7 +76,24 @@ describe("projection delivery contract", () => {
 		const purchase = example("stripe_one_time_purchase");
 		const refund = example("stripe_one_time_refund");
 		const trial = example("stripe_trial_ending");
+		const grant = example("promotion_plan_grant_ending");
 		const cases: Array<[string, Delivery, boolean]> = [
+			["a plan grant with a purchase", { ...grant, purchase: purchase.purchase }, false],
+			["a plan grant with a reversal", { ...grant, reversal: refund.reversal }, false],
+			["a plan grant with a trial", { ...grant, trial: planGrantTrial }, false],
+			[
+				"a plan grant of another origin",
+				{ ...grant, planGrant: { ...(grant.planGrant as Delivery), origin: "trial" } },
+				false,
+			],
+			[
+				"a plan grant without its redemption",
+				{
+					...grant,
+					planGrant: { ...(grant.planGrant as Delivery), promotionRedemptionId: undefined },
+				},
+				false,
+			],
 			["a purchase with a reversal", { ...purchase, reversal: refund.reversal }, false],
 			["a trial with a purchase", { ...trial, purchase: purchase.purchase }, false],
 			["a trial with a reversal", { ...trial, reversal: refund.reversal }, false],
