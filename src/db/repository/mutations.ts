@@ -36,6 +36,12 @@ export async function upsertSubscription(
 		enforceProviderEventOrder?: boolean;
 		/** Current authoritative provider state can shorten access (e.g. immediate cancellation). */
 		replaceExpiresAt?: boolean;
+		/**
+		 * The provider reports the subscription as ended, cancelled outright or expired. A write
+		 * without an event order to enforce lets such a state replace a live one although it ends
+		 * before the stored expiry, which is what an immediate cancellation does.
+		 */
+		providerEnded?: boolean;
 		rawState: Record<string, unknown>;
 		updateProduct: boolean;
 		allowRestoration?: boolean;
@@ -45,7 +51,10 @@ export async function upsertSubscription(
 	const lastProviderEventCreated = input.lastProviderEventCreated ?? 0;
 	const updateIsMonotonic = input.enforceProviderEventOrder
 		? drizzleSql`${lastProviderEventCreated}::bigint >= subscriptions.last_provider_event_created`
-		: subscriptionUpdateIsMonotonicSql(input.allowRestoration ?? false);
+		: subscriptionUpdateIsMonotonicSql(
+				input.allowRestoration ?? false,
+				input.providerEnded ?? false,
+			);
 	const row = await executeOne<{ id: string }>(
 		executor,
 		drizzleSql`
@@ -191,29 +200,56 @@ export async function upsertSubscription(
 	return row.id;
 }
 
-export function subscriptionUpdateIsMonotonicSql(allowRestoration: boolean): DrizzleSQL {
+export function subscriptionUpdateIsMonotonicSql(
+	allowRestoration: boolean,
+	providerEnded = false,
+): DrizzleSQL {
 	const incomingSortAt = drizzleSql`COALESCE(EXCLUDED.expires_at, EXCLUDED.starts_at)`;
 	const currentSortAt = drizzleSql`COALESCE(subscriptions.expires_at, subscriptions.starts_at)`;
+	// An ended state outranks the live state it replaces whatever expiry it carries: an immediate
+	// cancellation ends before the period it was paid through.
+	const endsLiveState = providerEnded
+		? drizzleSql`OR ${subscriptionStatusRankSql(drizzleSql`EXCLUDED.status`)} > ${subscriptionStatusRankSql(drizzleSql`subscriptions.status`)}`
+		: drizzleSql``;
 	return drizzleSql`(${allowRestoration} OR (
 		${incomingSortAt} > ${currentSortAt}
 		OR (
 			${incomingSortAt} IS NOT DISTINCT FROM ${currentSortAt}
 			AND ${subscriptionStatusRankSql(drizzleSql`EXCLUDED.status`)} >= ${subscriptionStatusRankSql(drizzleSql`subscriptions.status`)}
 		)
+		${endsLiveState}
 	))`;
 }
 
+/**
+ * How final a subscription state is. Where two states tie, in expiry or in the second a provider
+ * event was created, the higher rank wins, so an ending is never undone by the live state it ties
+ * with. One table feeds the SQL and the application, so the two never disagree.
+ */
+const subscriptionStatusRanks = {
+	active: 10,
+	grace_period: 20,
+	billing_retry: 30,
+	cancelled: 40,
+	expired: 50,
+	refunded: 60,
+	revoked: 70,
+} as const satisfies Record<SubscriptionStatus, number>;
+
+export function subscriptionStatusRank(status: string): number {
+	return (subscriptionStatusRanks as Record<string, number>)[status] ?? 0;
+}
+
+/** A state that ends the subscription: cancelled, expired, refunded or revoked. */
+export function isEndedSubscriptionStatus(status: string): boolean {
+	return subscriptionStatusRank(status) >= subscriptionStatusRanks.cancelled;
+}
+
 export function subscriptionStatusRankSql(status: DrizzleSQL): DrizzleSQL {
-	return drizzleSql`CASE ${status}
-		WHEN 'active' THEN 10
-		WHEN 'grace_period' THEN 20
-		WHEN 'billing_retry' THEN 30
-		WHEN 'cancelled' THEN 40
-		WHEN 'expired' THEN 50
-		WHEN 'refunded' THEN 60
-		WHEN 'revoked' THEN 70
-		ELSE 0
-	END`;
+	const branches = Object.entries(subscriptionStatusRanks).map(
+		([name, rank]) => `WHEN '${name}' THEN ${rank}`,
+	);
+	return drizzleSql`CASE ${status} ${drizzleSql.raw(branches.join(" "))} ELSE 0 END`;
 }
 
 export function greatestSubscriptionExpiresAtSql(): DrizzleSQL {
