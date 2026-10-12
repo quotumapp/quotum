@@ -53,7 +53,8 @@ How the runtime fits together, and the repository checks that most often reject 
   takes first, plus `credentialAccess`. A read-only credential reaches only routes that opt in
   with `operationDetail({ credentialAccess: "read_only" })`; any other route answers
   `403 READ_ONLY_CREDENTIAL`. Operator-only admin routes additionally require
-  `X-Billing-Operator-Key`, and audited mutations `X-Billing-Actor`.
+  `X-Billing-Operator-Key`, and audited mutations `X-Billing-Actor`. The operator paths live in one
+  list, `src/shared/operator-key-paths.ts`, which both the guards and the documented security read.
 - `/api/*` is the merchant platform (`src/platform/app.ts`): Better Auth sessions, organizations,
   onboarding, provider connections. Merchant billing screens do not call billing code directly;
   they dispatch through `MerchantBillingPort` (`src/platform/application/billing-port.ts`), which
