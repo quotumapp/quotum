@@ -12,6 +12,7 @@ import {
 	NotFoundBillingError,
 	PersistenceConflictError,
 } from "../../billing/errors";
+import { invalidQuantityError, maxLicensedQuantity } from "../../billing/licensed-quantity";
 import {
 	classifySubscriptionChange,
 	defaultChangeTiming,
@@ -1792,6 +1793,9 @@ function normalizeQuantities(value: Record<string, number>): Record<string, numb
 	for (const [key, quantity] of Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) {
 		if (key.trim() === "" || !Number.isSafeInteger(quantity) || quantity < 1) {
 			throw new InvalidRequestError("Licensed quantities must be positive integers");
+		}
+		if (quantity > maxLicensedQuantity) {
+			throw invalidQuantityError(`Quantity for ${key.trim()} cannot exceed ${maxLicensedQuantity}`);
 		}
 		normalized[key.trim()] = quantity;
 	}

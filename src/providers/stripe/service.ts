@@ -20,6 +20,7 @@ import {
 	ProviderUnavailableError,
 } from "../../billing/errors";
 import { parseIdempotencyKey } from "../../billing/idempotency-key";
+import { invalidQuantityError, maxLicensedQuantity } from "../../billing/licensed-quantity";
 import {
 	normalizePaymentSetupCurrency,
 	type PaymentSetupSession,
@@ -2648,6 +2649,9 @@ function normalizedLicensedQuantities(value: Record<string, number>): Record<str
 				400,
 			);
 		}
+		if (quantity > maxLicensedQuantity) {
+			throw invalidQuantityError(`Quantity for ${key} cannot exceed ${maxLicensedQuantity}`);
+		}
 		normalized[key] = quantity;
 	}
 	return normalized;
@@ -2688,8 +2692,11 @@ function recurringCheckoutLines(
 				400,
 			);
 		}
+		// The integer bound holds without a configured maximum, and for a quantity a stored payment
+		// setup carries from before it was checked.
 		if (
 			quantity < component.minimumQuantity ||
+			quantity > maxLicensedQuantity ||
 			(component.maximumQuantity !== null && quantity > component.maximumQuantity)
 		) {
 			throw new BillingError(

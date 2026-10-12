@@ -650,6 +650,7 @@
     {
       "code": "INVALID_QUANTITY",
       "sources": [
+        "src/billing/licensed-quantity.ts",
         "src/providers/stripe/service.ts"
       ]
     },
