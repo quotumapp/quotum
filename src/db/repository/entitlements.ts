@@ -444,6 +444,9 @@ export async function recomputeCustomerEntitlements(
 						'trialStartsAt', to_char(g.starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 						'trialEndsAt', to_char(g.ends_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 					)
+					WHEN g.origin = 'promotion' THEN jsonb_build_object(
+						'promotionRedemptionId', g.promotion_redemption_id
+					)
 					ELSE '{}'::jsonb
 				END AS metadata,
 				3 AS source_priority,

@@ -188,7 +188,10 @@ export async function reconcileDefaultPlanGrant(
 	return { change: "started", grantId: started.id, revision };
 }
 
-/** Supersedes the account's default-plan grant with a trial whose row is inserted afterwards. */
+/**
+ * Supersedes the account's default-plan grant with a trial or promotional grant whose row is
+ * inserted afterwards.
+ */
 export async function supersedeDefaultPlanGrant(
 	executor: QueryExecutor,
 	projectId: string,

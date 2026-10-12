@@ -1103,6 +1103,12 @@
       ]
     },
     {
+      "code": "PROMOTION_BASE_PLAN_ACTIVE",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
       "code": "PROMOTION_CODE_ALREADY_REDEEMED",
       "sources": [
         "src/billing/promotions.ts"
@@ -1200,6 +1206,18 @@
     },
     {
       "code": "PROMOTION_NOT_FOUND",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_PLAN_GRANT_ACTIVE",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
+      "code": "PROMOTION_PLAN_NOT_ELIGIBLE",
       "sources": [
         "src/billing/promotions.ts"
       ]

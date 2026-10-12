@@ -128,6 +128,18 @@ const promotionRedemptionSchema = z.object({
 	providerOfferType: z.string().nullable().optional(),
 	providerTransactionId: z.string().nullable().optional(),
 	lastObservedTransactionId: z.string().nullable().optional(),
+	planGrant: z
+		.object({
+			id: z.string(),
+			planKey: z.string(),
+			planVersion: z.number(),
+			status: z.enum(["active", "expired", "ended", "superseded"]),
+			startsAt: z.string(),
+			endsAt: z.string(),
+			endedAt: z.union([z.null(), z.string()]),
+		})
+		.nullable()
+		.optional(),
 	stripeCheckoutSessionId: z.union([z.null(), z.string()]),
 	externalSubscriptionId: z.union([z.null(), z.string()]),
 	currency: z.union([z.null(), z.string()]),
@@ -272,6 +284,11 @@ export const postV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse
 						}),
 					),
 				}),
+			}),
+			z.object({
+				kind: z.literal("plan_granted"),
+				duplicate: z.boolean(),
+				redemption: promotionRedemptionSchema,
 			}),
 			z.object({
 				kind: z.literal("requires_commercial_action"),

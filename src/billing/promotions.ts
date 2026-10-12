@@ -8,6 +8,7 @@ import {
 import type { AppleOfferInput, ApplePromotionAction } from "./apple-promotions";
 import { canonicalDecimal, positiveDecimal, sha256Hex, stableJson } from "./decimal";
 import { BillingError } from "./errors";
+import type { PlanGrantStatus } from "./plan-grants";
 import type { BillingProvider } from "./types";
 
 export const promotionChannels = ["web", "ios", "android"] as const;
@@ -66,14 +67,6 @@ export type PromotionEffect =
 			durationUnit: "day" | "month";
 			durationCount: number;
 	  };
-
-/**
- * Whether any channel has a redemption path for an effect today. A `plan_grant` is stored but no
- * channel redeems it yet, so validation and redemption both refuse it.
- */
-export function promotionEffectRedeemable(kind: PromotionEffectKind): boolean {
-	return kind !== "plan_grant";
-}
 
 export type PromotionTarget = { kind: "plan"; key: string } | { kind: "product"; key: string };
 
@@ -225,11 +218,25 @@ export interface PromotionCodeRecord {
 	deactivatedAt: string | null;
 }
 
+/** The plan grant a redeemed `plan_grant` code gave, as it stands when the redemption is read. */
+export interface PromotionPlanGrantSummary {
+	id: string;
+	planKey: string;
+	planVersion: number;
+	/** `expired` as soon as the end has passed, even before the worker records it. */
+	status: PlanGrantStatus;
+	startsAt: string;
+	endsAt: string;
+	endedAt: string | null;
+}
+
 export interface PromotionRedemptionRecord {
 	providerObjectId?: string | null;
 	providerOfferType?: string | null;
 	providerTransactionId?: string | null;
 	lastObservedTransactionId?: string | null;
+	/** Null unless the redemption gave a plan grant; absent on results stored before plan grants. */
+	planGrant?: PromotionPlanGrantSummary | null;
 
 	id: string;
 	promotionKey: string;
@@ -385,6 +392,12 @@ export type PromotionRedeemResult =
 			grant: { features: PromotionGrantedFeature[] };
 	  }
 	| {
+			/** The account holds the plan; `redemption.planGrant` names the grant and its term. */
+			kind: "plan_granted";
+			duplicate: boolean;
+			redemption: PromotionRedemptionRecord;
+	  }
+	| {
 			kind: "requires_commercial_action";
 			duplicate: false;
 			redemption: null;
@@ -480,6 +493,22 @@ const promotionErrorDefinitions = [
 		code: "PROMOTION_CODE_CHANNEL_NOT_SUPPORTED",
 		status: 409,
 		message: "Promotion code cannot be redeemed on this channel",
+	},
+	{
+		code: "PROMOTION_PLAN_NOT_ELIGIBLE",
+		status: 409,
+		message:
+			"Only a public base plan without licensed quantities or entity allocations, other than the default plan, can be granted",
+	},
+	{
+		code: "PROMOTION_BASE_PLAN_ACTIVE",
+		status: 409,
+		message: "This billing account already has an active paid base plan",
+	},
+	{
+		code: "PROMOTION_PLAN_GRANT_ACTIVE",
+		status: 409,
+		message: "This billing account already holds a base plan through a trial or a promotion",
 	},
 	{
 		code: "PROMOTION_CODE_ENTRY_CONFLICT",

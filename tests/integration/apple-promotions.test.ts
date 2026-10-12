@@ -548,7 +548,7 @@ localDescribe("Apple subscription promotions", () => {
 			appleOffers: [],
 		});
 	});
-	it("refuses a plan grant code with the redemption error even when an offer is supplied", async () => {
+	it("refuses a plan grant code on iOS, also when an offer is supplied", async () => {
 		const offer = await promotion();
 		await context.repository.promotions.createPromotion(project, {
 			key: "premium_trial",
@@ -579,7 +579,11 @@ localDescribe("Apple subscription promotions", () => {
 				channel: "ios",
 				billingAccountId: "apple_customer",
 			}),
-		).toMatchObject({ valid: false, reason: "PROMOTION_CODE_NOT_APPLICABLE", appleOffers: [] });
+		).toMatchObject({
+			valid: false,
+			reason: "PROMOTION_CODE_CHANNEL_NOT_SUPPORTED",
+			appleOffers: [],
+		});
 		expect(
 			await context.sql`SELECT id FROM promotion_redemptions WHERE project_id = ${project.projectInstanceId}`,
 		).toHaveLength(0);

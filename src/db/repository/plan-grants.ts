@@ -38,7 +38,7 @@ interface PlanGrantRow {
 	billing_account_id: string;
 	plan_key: string;
 	plan_version: number | string;
-	origin: "trial" | "default";
+	origin: "trial" | "default" | "promotion";
 	status: PlanGrantStatus;
 	/** Null only on a default-plan grant, which has no end. */
 	duration_count: number | null;
@@ -48,6 +48,8 @@ interface PlanGrantRow {
 	entitlement_keys: string[];
 	superseded_provider: BillingProvider | null;
 	superseded_external_id: string | null;
+	/** Set only on a promotional grant. */
+	promotion_redemption_id: string | null;
 	end_reason: string | null;
 	actor: string;
 	metadata: Record<string, unknown>;
@@ -59,7 +61,8 @@ interface PlanGrantRow {
 	elapsed: boolean;
 }
 
-interface TrialPlanRow {
+/** A plan's active published public version, with what decides whether it can be granted. */
+export interface GrantablePlanRow {
 	plan_id: string | number | bigint;
 	plan_version_id: string | number | bigint;
 	plan_kind: "base" | "addon";
@@ -118,11 +121,7 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 				return { duplicate: true, trial: toTrialRecord(replay) };
 			}
 			// An elapsed grant the worker has not recorded yet must not block this start.
-			await expirePlanGrantsWhere(
-				tx,
-				drizzleSql`g.project_id = ${projectId} AND g.customer_id = ${customer.id}`,
-				100,
-			);
+			await expireCustomerPlanGrants(tx, projectId, customer.id);
 			const plan = await resolveTrialPlan(tx, projectId, input.planKey);
 			const ineligible =
 				trialPlanIneligibility(plan) ??
@@ -150,22 +149,7 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 						${trialId}::uuid, ${projectId}, ${customer.id}, ${String(plan.plan_id)}::bigint,
 						${String(plan.plan_version_id)}::bigint, ${plan.plan_kind}, 'trial', 'active', 'day',
 						${durationDays}, now(), now() + ${durationDays} * interval '24 hours',
-						COALESCE(
-							(
-								SELECT array_agg(DISTINCT product.entitlement_key)
-								FROM provider_plan_bindings binding
-								JOIN store_products store_product
-									ON store_product.project_id = binding.project_id
-									AND store_product.id = binding.store_product_id
-								JOIN products product
-									ON product.project_id = store_product.project_id
-									AND product.id = store_product.product_id
-								WHERE binding.project_id = ${projectId}
-									AND binding.plan_version_id = ${String(plan.plan_version_id)}::bigint
-									AND binding.status = 'published'
-							),
-							ARRAY[]::text[]
-						),
+						${publishedEntitlementKeysSql(projectId, String(plan.plan_version_id))},
 						${input.actor ?? `billing-account:${input.billingAccountId}`},
 						${jsonb(input.metadata)}, ${idempotencyKey}, ${requestHash}
 					RETURNING id
@@ -224,29 +208,17 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 				}
 				return { duplicate: true, trial: toTrialRecord(grant) };
 			}
-			const ended = await executeOne<{ ended_at: Date | string }>(
-				tx,
-				drizzleSql`
-					UPDATE plan_grants
-					SET
-						status = 'ended',
-						ended_at = now(),
-						end_actor = ${input.actor ?? `billing-account:${input.billingAccountId}`},
-						end_reason = ${input.reason},
-						end_idempotency_key = ${input.idempotencyKey},
-						end_request_hash = ${requestHash},
-						updated_at = now()
-					WHERE project_id = ${projectId}
-						AND id = ${grant.id}
-						AND status = 'active'
-						AND ends_at > now()
-					RETURNING ended_at
-				`,
-			);
-			if (ended === null) {
+			const endedAt = await endPlanGrantInTx(tx, {
+				projectId,
+				grantId: grant.id,
+				actor: input.actor ?? `billing-account:${input.billingAccountId}`,
+				reason: input.reason,
+				idempotencyKey: input.idempotencyKey,
+				requestHash,
+			});
+			if (endedAt === null) {
 				throw trialError("TRIAL_NOT_ACTIVE", { status: toTrialRecord(grant).status });
 			}
-			await clampPlanGrantAllocations(tx, projectId, grant.id);
 			const snapshot = await recomputeCustomerEntitlements(
 				tx,
 				projectId,
@@ -260,7 +232,7 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 					billingAccountId: customer.billing_account_id,
 					reason: "usage_changed",
 					entitlements: snapshot,
-					trial: planGrantTrialFact(grant, "ended", ended.ended_at),
+					trial: planGrantTrialFact(grant, "ended", endedAt),
 				},
 			});
 			return { duplicate: false, trial: await requireTrialRecord(tx, projectId, grant.id) };
@@ -610,8 +582,24 @@ async function resolveTrialPlan(
 	executor: QueryExecutor,
 	projectId: string,
 	planKey: string,
-): Promise<TrialPlanRow> {
-	const plan = await executeOne<TrialPlanRow>(
+): Promise<GrantablePlanRow> {
+	const plan = await readGrantablePlan(executor, projectId, planKey);
+	if (plan === null) {
+		throw new NotFoundBillingError(
+			`Active plan ${planKey} was not found`,
+			"BILLING_PLAN_NOT_FOUND",
+		);
+	}
+	return plan;
+}
+
+/** The plan's active, published, public version, or null when the plan has none. */
+export async function readGrantablePlan(
+	executor: QueryExecutor,
+	projectId: string,
+	planKey: string,
+): Promise<GrantablePlanRow | null> {
+	return await executeOne<GrantablePlanRow>(
 		executor,
 		drizzleSql`
 			SELECT
@@ -647,26 +635,126 @@ async function resolveTrialPlan(
 				AND version.visibility = 'public'
 		`,
 	);
-	if (plan === null) {
-		throw new NotFoundBillingError(
-			`Active plan ${planKey} was not found`,
-			"BILLING_PLAN_NOT_FOUND",
-		);
-	}
-	return plan;
 }
 
-function trialPlanIneligibility(plan: TrialPlanRow): TrialIneligibility | null {
-	return plan.plan_kind !== "base" || plan.unsupported_items || plan.default_plan
-		? "TRIAL_PLAN_NOT_ELIGIBLE"
-		: null;
+/**
+ * Whether a grant cannot hold the plan: only a base plan without licensed quantities or
+ * entity-scoped allocations, other than the catalog's default plan, can be granted.
+ */
+export function planCannotBeGranted(plan: GrantablePlanRow): boolean {
+	return plan.plan_kind !== "base" || plan.unsupported_items || plan.default_plan;
+}
+
+function trialPlanIneligibility(plan: GrantablePlanRow): TrialIneligibility | null {
+	return planCannotBeGranted(plan) ? "TRIAL_PLAN_NOT_ELIGIBLE" : null;
+}
+
+/** Whether the account holds a base plan through a grant with an end: a trial or a promotion. */
+export function activeBaseGrantSql(projectId: string, customerId: DrizzleSQL): DrizzleSQL {
+	return drizzleSql`EXISTS (
+		SELECT 1 FROM plan_grants g
+		WHERE g.project_id = ${projectId}
+			AND g.customer_id = ${customerId}
+			AND g.status = 'active'
+			AND g.plan_kind = 'base'
+			AND g.ends_at > now()
+	)`;
+}
+
+/** Whether a paid base subscription funds the account's plan. */
+export function paidBasePlanSql(projectId: string, customerId: DrizzleSQL): DrizzleSQL {
+	return drizzleSql`EXISTS (
+		SELECT 1 FROM subscriptions s
+		JOIN plan_versions version
+			ON version.project_id = s.project_id AND version.id = s.plan_version_id
+		WHERE s.project_id = ${projectId}
+			AND s.customer_id = ${customerId}
+			AND version.plan_kind = 'base'
+			AND s.status IN ${fundingStatuses}
+			AND (s.expires_at IS NULL OR s.expires_at > now())
+	)`;
+}
+
+/** The entitlement keys of a plan version's published provider bindings, as a grant copies them. */
+export function publishedEntitlementKeysSql(projectId: string, planVersionId: string): DrizzleSQL {
+	return drizzleSql`COALESCE(
+		(
+			SELECT array_agg(DISTINCT product.entitlement_key)
+			FROM provider_plan_bindings binding
+			JOIN store_products store_product
+				ON store_product.project_id = binding.project_id
+				AND store_product.id = binding.store_product_id
+			JOIN products product
+				ON product.project_id = store_product.project_id
+				AND product.id = store_product.product_id
+			WHERE binding.project_id = ${projectId}
+				AND binding.plan_version_id = ${planVersionId}::bigint
+				AND binding.status = 'published'
+		),
+		ARRAY[]::text[]
+	)`;
+}
+
+/**
+ * Records the account's elapsed grants as expired, under the caller's lock on the customer, so one
+ * the worker has not reached cannot block a new grant.
+ */
+export async function expireCustomerPlanGrants(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string,
+): Promise<void> {
+	await expirePlanGrantsWhere(
+		executor,
+		drizzleSql`g.project_id = ${projectId} AND g.customer_id = ${customerId}`,
+		100,
+	);
+}
+
+/**
+ * Ends an active grant before its end and expires its allowances. Returns when it ended, or null
+ * when the grant is no longer active.
+ */
+export async function endPlanGrantInTx(
+	executor: QueryExecutor,
+	input: {
+		projectId: string;
+		grantId: string;
+		actor: string;
+		reason: string | null;
+		idempotencyKey: string;
+		requestHash: string;
+	},
+): Promise<Date | string | null> {
+	const ended = await executeOne<{ ended_at: Date | string }>(
+		executor,
+		drizzleSql`
+			UPDATE plan_grants
+			SET
+				status = 'ended',
+				ended_at = now(),
+				end_actor = ${input.actor},
+				end_reason = ${input.reason},
+				end_idempotency_key = ${input.idempotencyKey},
+				end_request_hash = ${input.requestHash},
+				updated_at = now()
+			WHERE project_id = ${input.projectId}
+				AND id = ${input.grantId}
+				AND status = 'active'
+				AND ends_at > now()
+			RETURNING ended_at
+		`,
+	);
+	if (ended === null) return null;
+	await clampPlanGrantAllocations(executor, input.projectId, input.grantId);
+	return ended.ended_at;
 }
 
 async function customerTrialIneligibility(
 	executor: QueryExecutor,
 	projectId: string,
 	customerId: string,
-	plan: TrialPlanRow,
+	plan: GrantablePlanRow,
 ): Promise<TrialIneligibility | null> {
 	const row = await executeOne<{
 		active_grant: boolean;
@@ -676,24 +764,8 @@ async function customerTrialIneligibility(
 		executor,
 		drizzleSql`
 			SELECT
-				EXISTS (
-					SELECT 1 FROM plan_grants g
-					WHERE g.project_id = ${projectId}
-						AND g.customer_id = ${customerId}::uuid
-						AND g.status = 'active'
-						AND g.plan_kind = 'base'
-						AND g.ends_at > now()
-				) AS active_grant,
-				EXISTS (
-					SELECT 1 FROM subscriptions s
-					JOIN plan_versions version
-						ON version.project_id = s.project_id AND version.id = s.plan_version_id
-					WHERE s.project_id = ${projectId}
-						AND s.customer_id = ${customerId}::uuid
-						AND version.plan_kind = 'base'
-						AND s.status IN ${fundingStatuses}
-						AND (s.expires_at IS NULL OR s.expires_at > now())
-				) AS paid_base,
+				${activeBaseGrantSql(projectId, drizzleSql`${customerId}::uuid`)} AS active_grant,
+				${paidBasePlanSql(projectId, drizzleSql`${customerId}::uuid`)} AS paid_base,
 				${planTrialUsedSql(projectId, drizzleSql`${customerId}::uuid`, drizzleSql`${String(plan.plan_id)}::bigint`)} AS trial_used
 		`,
 	);
@@ -929,6 +1001,7 @@ function planGrantSelect(projectId: string, condition: DrizzleSQL): DrizzleSQL {
 			g.entitlement_keys,
 			superseding.provider AS superseded_provider,
 			superseding.external_subscription_id AS superseded_external_id,
+			g.promotion_redemption_id,
 			g.end_reason,
 			g.actor,
 			g.metadata,
