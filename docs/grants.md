@@ -3,9 +3,11 @@
 - Document kind: Current behavior
 
 A plan grant gives an account a plan's published version without a provider, a payment method or an
-invoice: a [trial](#trials) for a fixed time, or the catalog's [default plan](#default-plan) with no
-end. [Operator grants and administrative debits](#operator-grants-and-administrative-debits) are
-the audited support credit and clawback.
+invoice: a [trial](#trials) for a fixed time, the plan a redeemed
+[promotion code](#promotional-plan-grants) gives for its term, or the catalog's
+[default plan](#default-plan) with no end.
+[Operator grants and administrative debits](#operator-grants-and-administrative-debits) are the
+audited support credit and clawback.
 
 ## Trials
 
@@ -32,7 +34,8 @@ returns `IDEMPOTENCY_CONFLICT`. Only the plan's active, published, public versio
 without licensed quantities or entity-scoped allocations, other than the catalog's default plan,
 can be trialed (`TRIAL_PLAN_NOT_ELIGIBLE`); an unknown plan returns `BILLING_PLAN_NOT_FOUND`. A
 trial supersedes the account's default plan, which returns when the trial ends. An account is
-refused a trial while it has another active base trial (`TRIAL_ALREADY_ACTIVE`) or a funding paid
+refused a trial while it has another active base trial or a running
+[promotional plan grant](#promotional-plan-grants) (`TRIAL_ALREADY_ACTIVE`) or a funding paid
 base subscription (`TRIAL_BASE_PLAN_ACTIVE`), and gets one trial per plan: a plan it trialed
 through Quotum, or through a provider subscription that recorded trial bounds, returns
 `TRIAL_ALREADY_USED`. The error `details` name the `planKey`.
@@ -70,6 +73,34 @@ checkout: Stripe Checkout leaves out a plan's trial for an account that has had 
 credential. Grants carry no channel restriction; follow the store rules for the apps you unlock
 them in.
 
+## Promotional plan grants
+
+A redeemed `plan_grant` promotion code gives the account the promotion's plan for the promotion's
+term, in days or months; [plan grant codes](promotions.md#plan-grant-codes) describes redemption,
+its refusals and revocation. The grant is a plan grant with `origin: "promotion"`, and during its
+term it behaves as a trial does:
+
+- It pins the plan's active published version when the code is redeemed. Its entitlements come
+  from the keys of that version's published provider bindings, with
+  `metadata: { source: "plan_grant", origin: "promotion", status, planKey, planGrantId,
+  promotionRedemptionId }` and the grant's end as `expiresAt`. A paid source for the same key
+  always wins.
+- Allowances, meter limits and plan-default controls follow the trial rules above, in windows
+  anchored at the redemption and clamped to the grant's end.
+- It supersedes the account's default plan, which returns when the grant ends.
+- It ends at `endsAt` (`expired`), when its redemption is revoked (`ended`), or as soon as Quotum
+  records a paid base subscription (`superseded`). Access stops at that moment without waiting
+  for a worker.
+
+It differs from a trial in three ways. The same plan-shape rules apply, but the refusals carry
+promotion codes. It does not count as the plan's trial: the account can still trial the plan later,
+and Stripe Checkout still offers the plan's trial. And it has no routes of its own: the redemption
+is its record, and its `planGrant` reports the grant on every read.
+
+The redemption delivers a stored `usage_changed` projection keyed `plan_grant:<id>:started`, and a
+revocation one keyed `plan_grant:<id>:ended`. The expiry delivers `expiry_reconciliation`. None of
+them carries a `trial` fact.
+
 ## Default plan
 
 When the published catalog marks a default plan (see
@@ -87,10 +118,10 @@ with no end:
   recorded as a trial's are: by the account's first write in each window. An account that never
   spends costs no allowance rows. Its meter limits apply with overage blocked, and its plan-default
   controls apply.
-- A paid base plan from any provider, a funding subscription recorded before plan versions, or a
-  trial supersedes it, and its allowances stop at that moment.
+- A paid base plan from any provider, a funding subscription recorded before plan versions, a
+  trial or a promotional plan grant supersedes it, and its allowances stop at that moment.
 - When the account's last base plan ends (expiry, cancellation at period end, refund, revocation or
-  the end of a trial), it falls back to the default plan. The new grant keeps the anchor of the
+  the end of a trial or a promotional plan grant), it falls back to the default plan. The new grant keeps the anchor of the
   account's previous default-plan grant and takes over what that grant left in the windows still
   running, so falling back within a window resumes it instead of refilling it, and its meter limits
   keep counting the same window. The projection that records the ending also carries the default

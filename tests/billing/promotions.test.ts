@@ -7,7 +7,7 @@ import {
 	normalizePromotionCode,
 	type PromotionCodeAvailability,
 	promotionCodeUnavailability,
-	promotionEffectRedeemable,
+	promotionError,
 } from "../../src/billing/promotions";
 import { maxExpirySeconds } from "../../src/shared/cadence";
 
@@ -271,11 +271,17 @@ describe("promotion terms", () => {
 	});
 });
 
-describe("promotion effect redemption", () => {
-	it("redeems discounts and feature grants but not plan grants", () => {
-		expect(promotionEffectRedeemable("discount")).toBe(true);
-		expect(promotionEffectRedeemable("feature_grant")).toBe(true);
-		expect(promotionEffectRedeemable("plan_grant")).toBe(false);
+describe("plan grant refusals", () => {
+	it("answers each refusal as a conflict with its own code", () => {
+		for (const code of [
+			"PROMOTION_PLAN_NOT_ELIGIBLE",
+			"PROMOTION_BASE_PLAN_ACTIVE",
+			"PROMOTION_PLAN_GRANT_ACTIVE",
+		] as const) {
+			const error = promotionError(code);
+			expect({ code: error.code, status: error.status }).toEqual({ code, status: 409 });
+			expect(error.message).not.toBe("Promotion request failed");
+		}
 	});
 });
 

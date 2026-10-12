@@ -6150,6 +6150,53 @@
                     "null"
                   ]
                 },
+                "planGrant": {
+                  "properties": {
+                    "endedAt": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "endsAt": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "planKey": {
+                      "type": "string"
+                    },
+                    "planVersion": {
+                      "type": "number"
+                    },
+                    "startsAt": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "active",
+                        "expired",
+                        "ended",
+                        "superseded"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "planKey",
+                    "planVersion",
+                    "status",
+                    "startsAt",
+                    "endsAt",
+                    "endedAt"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
                 "promotionCodeId": {
                   "type": [
                     "null",
@@ -9353,6 +9400,53 @@
                   "null"
                 ]
               },
+              "planGrant": {
+                "properties": {
+                  "endedAt": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "endsAt": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "planKey": {
+                    "type": "string"
+                  },
+                  "planVersion": {
+                    "type": "number"
+                  },
+                  "startsAt": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "expired",
+                      "ended",
+                      "superseded"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "planKey",
+                  "planVersion",
+                  "status",
+                  "startsAt",
+                  "endsAt",
+                  "endedAt"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "promotionCodeId": {
                 "type": [
                   "null",
@@ -9564,6 +9658,53 @@
                   ],
                   "type": [
                     "string",
+                    "null"
+                  ]
+                },
+                "planGrant": {
+                  "properties": {
+                    "endedAt": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "endsAt": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "planKey": {
+                      "type": "string"
+                    },
+                    "planVersion": {
+                      "type": "number"
+                    },
+                    "startsAt": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "active",
+                        "expired",
+                        "ended",
+                        "superseded"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "planKey",
+                    "planVersion",
+                    "status",
+                    "startsAt",
+                    "endsAt",
+                    "endedAt"
+                  ],
+                  "type": [
+                    "object",
                     "null"
                   ]
                 },
@@ -12655,6 +12796,53 @@
                     ],
                     "type": [
                       "string",
+                      "null"
+                    ]
+                  },
+                  "planGrant": {
+                    "properties": {
+                      "endedAt": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "endsAt": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "planKey": {
+                        "type": "string"
+                      },
+                      "planVersion": {
+                        "type": "number"
+                      },
+                      "startsAt": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "active",
+                          "expired",
+                          "ended",
+                          "superseded"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "planKey",
+                      "planVersion",
+                      "status",
+                      "startsAt",
+                      "endsAt",
+                      "endedAt"
+                    ],
+                    "type": [
+                      "object",
                       "null"
                     ]
                   },
@@ -16551,6 +16739,53 @@
                           "null"
                         ]
                       },
+                      "planGrant": {
+                        "properties": {
+                          "endedAt": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "endsAt": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "planKey": {
+                            "type": "string"
+                          },
+                          "planVersion": {
+                            "type": "number"
+                          },
+                          "startsAt": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "active",
+                              "expired",
+                              "ended",
+                              "superseded"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "planKey",
+                          "planVersion",
+                          "status",
+                          "startsAt",
+                          "endsAt",
+                          "endedAt"
+                        ],
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
                       "promotionCodeId": {
                         "type": [
                           "null",
@@ -16807,6 +17042,53 @@
                           "null"
                         ]
                       },
+                      "planGrant": {
+                        "properties": {
+                          "endedAt": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "endsAt": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "planKey": {
+                            "type": "string"
+                          },
+                          "planVersion": {
+                            "type": "number"
+                          },
+                          "startsAt": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "active",
+                              "expired",
+                              "ended",
+                              "superseded"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "planKey",
+                          "planVersion",
+                          "status",
+                          "startsAt",
+                          "endsAt",
+                          "endedAt"
+                        ],
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
                       "promotionCodeId": {
                         "type": [
                           "null",
@@ -16927,6 +17209,270 @@
                   "duplicate",
                   "redemption",
                   "grant"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "duplicate": {
+                    "type": "boolean"
+                  },
+                  "kind": {
+                    "enum": [
+                      "plan_granted"
+                    ],
+                    "type": "string"
+                  },
+                  "redemption": {
+                    "properties": {
+                      "actor": {
+                        "type": "string"
+                      },
+                      "amountDiscountMinor": {
+                        "type": [
+                          "null",
+                          "number"
+                        ]
+                      },
+                      "amountSubtotalMinor": {
+                        "type": [
+                          "null",
+                          "number"
+                        ]
+                      },
+                      "amountTotalMinor": {
+                        "type": [
+                          "null",
+                          "number"
+                        ]
+                      },
+                      "appliedAt": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "billingAccountId": {
+                        "type": "string"
+                      },
+                      "channel": {
+                        "enum": [
+                          "web",
+                          "ios",
+                          "android"
+                        ],
+                        "type": "string"
+                      },
+                      "code": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "currency": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "externalSubscriptionId": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "lastObservedTransactionId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "limitViolation": {
+                        "enum": [
+                          "global",
+                          "first_purchase",
+                          "not_applicable",
+                          "inactive",
+                          "expired",
+                          null
+                        ],
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "planGrant": {
+                        "properties": {
+                          "endedAt": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "endsAt": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "planKey": {
+                            "type": "string"
+                          },
+                          "planVersion": {
+                            "type": "number"
+                          },
+                          "startsAt": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "active",
+                              "expired",
+                              "ended",
+                              "superseded"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "planKey",
+                          "planVersion",
+                          "status",
+                          "startsAt",
+                          "endsAt",
+                          "endedAt"
+                        ],
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "promotionCodeId": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "promotionKey": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "enum": [
+                          "quotum",
+                          "stripe",
+                          "apple",
+                          "google",
+                          "paddle"
+                        ],
+                        "type": "string"
+                      },
+                      "providerObjectId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "providerOfferType": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "providerTransactionId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "reason": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "releasedAt": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "reservedUntil": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "reversedAt": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "source": {
+                        "enum": [
+                          "api_redeem",
+                          "commercial_action",
+                          "stripe_hosted_checkout",
+                          "apple_offer",
+                          "google_offer"
+                        ],
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "reserved",
+                          "applied",
+                          "released",
+                          "reversed"
+                        ],
+                        "type": "string"
+                      },
+                      "stripeCheckoutSessionId": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "promotionKey",
+                      "promotionCodeId",
+                      "code",
+                      "billingAccountId",
+                      "channel",
+                      "status",
+                      "provider",
+                      "source",
+                      "stripeCheckoutSessionId",
+                      "externalSubscriptionId",
+                      "currency",
+                      "amountSubtotalMinor",
+                      "amountDiscountMinor",
+                      "amountTotalMinor",
+                      "limitViolation",
+                      "actor",
+                      "reason",
+                      "reservedUntil",
+                      "appliedAt",
+                      "releasedAt",
+                      "reversedAt",
+                      "createdAt"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "duplicate",
+                  "redemption"
                 ],
                 "type": "object"
               },
@@ -78801,6 +79347,53 @@
                               ],
                               "type": [
                                 "string",
+                                "null"
+                              ]
+                            },
+                            "planGrant": {
+                              "properties": {
+                                "endedAt": {
+                                  "type": [
+                                    "null",
+                                    "string"
+                                  ]
+                                },
+                                "endsAt": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "planKey": {
+                                  "type": "string"
+                                },
+                                "planVersion": {
+                                  "type": "number"
+                                },
+                                "startsAt": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "active",
+                                    "expired",
+                                    "ended",
+                                    "superseded"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "planKey",
+                                "planVersion",
+                                "status",
+                                "startsAt",
+                                "endsAt",
+                                "endedAt"
+                              ],
+                              "type": [
+                                "object",
                                 "null"
                               ]
                             },

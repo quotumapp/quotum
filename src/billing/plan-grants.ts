@@ -119,7 +119,7 @@ const trialErrorDefinitions = [
 	{
 		code: "TRIAL_ALREADY_ACTIVE",
 		status: 409,
-		message: "This billing account already has an active base plan trial",
+		message: "This billing account already holds a base plan through a trial or a promotion",
 	},
 	{ code: "TRIAL_NOT_FOUND", status: 404, message: "Trial was not found" },
 	{ code: "TRIAL_NOT_ACTIVE", status: 409, message: "Trial is no longer active" },

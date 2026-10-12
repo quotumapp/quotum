@@ -5231,7 +5231,7 @@ export const planGrants = pgTable(
 		planId: bigint("plan_id", { mode: "number" }).notNull(),
 		planVersionId: bigint("plan_version_id", { mode: "number" }).notNull(),
 		planKind: text("plan_kind").$type<"base" | "addon">().notNull(),
-		origin: text("origin").$type<"trial" | "default">().notNull(),
+		origin: text("origin").$type<"trial" | "default" | "promotion">().notNull(),
 		status: text("status").$type<"active" | "expired" | "ended" | "superseded">().notNull(),
 		durationUnit: text("duration_unit").$type<"day" | "month">(),
 		durationCount: integer("duration_count"),
@@ -5242,6 +5242,7 @@ export const planGrants = pgTable(
 		endingNotifiedAt: timestamp("ending_notified_at", { withTimezone: true }),
 		supersededBySubscriptionId: uuid("superseded_by_subscription_id"),
 		supersededByPlanGrantId: uuid("superseded_by_plan_grant_id"),
+		promotionRedemptionId: uuid("promotion_redemption_id"),
 		actor: text("actor").notNull(),
 		endActor: text("end_actor"),
 		endReason: text("end_reason"),
@@ -5311,6 +5312,10 @@ export const planGrants = pgTable(
 			sql`(((end_idempotency_key IS NULL) = (end_request_hash IS NULL)))`,
 		),
 		check(
+			"plan_grants_promotion_check",
+			sql`(((origin = 'promotion'::text) = (promotion_redemption_id IS NOT NULL)))`,
+		),
+		check(
 			"plan_grants_state_check",
 			sql`((((status = 'active'::text) AND (ended_at IS NULL) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL) AND (end_idempotency_key IS NULL)) OR ((status = 'expired'::text) AND (ends_at IS NOT NULL) AND (ended_at = ends_at) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL)) OR ((status = 'ended'::text) AND (ended_at IS NOT NULL) AND ((ends_at IS NULL) OR (ended_at < ends_at)) AND ((end_idempotency_key IS NOT NULL) OR (origin = 'default'::text)) AND (superseded_by_subscription_id IS NULL) AND (superseded_by_plan_grant_id IS NULL)) OR ((status = 'superseded'::text) AND (ended_at IS NOT NULL) AND (num_nonnulls(superseded_by_subscription_id, superseded_by_plan_grant_id) = 1))))`,
 		),
@@ -5346,6 +5351,11 @@ export const planGrants = pgTable(
 			columns: [table.projectId, table.supersededByPlanGrantId],
 			foreignColumns: [table.projectId, table.id],
 		}),
+		foreignKey({
+			name: "plan_grants_project_promotion_redemption_fk",
+			columns: [table.projectId, table.promotionRedemptionId],
+			foreignColumns: [promotionRedemptions.projectId, promotionRedemptions.id],
+		}),
 		uniqueIndex("idx_billing_plan_grants_one_active_base")
 			.on(table.projectId, table.customerId)
 			.where(sql`${table.status} = 'active' AND ${table.planKind} = 'base'`),
@@ -5370,8 +5380,11 @@ export const planGrants = pgTable(
 		index("idx_billing_plan_grants_superseding_grant")
 			.on(table.projectId, table.supersededByPlanGrantId)
 			.where(sql`${table.supersededByPlanGrantId} IS NOT NULL`),
+		uniqueIndex("idx_billing_plan_grants_promotion_redemption")
+			.on(table.projectId, table.promotionRedemptionId)
+			.where(sql`${table.promotionRedemptionId} IS NOT NULL`),
 		check("plan_grants_plan_kind_check", sql`${table.planKind} IN ('base', 'addon')`),
-		check("plan_grants_origin_check", sql`${table.origin} IN ('trial', 'default')`),
+		check("plan_grants_origin_check", sql`${table.origin} IN ('trial', 'default', 'promotion')`),
 		check(
 			"plan_grants_status_check",
 			sql`${table.status} IN ('active', 'expired', 'ended', 'superseded')`,

@@ -8,6 +8,7 @@ import {
 	unitsToDecimal,
 } from "../../billing/decimal";
 import { PersistenceConflictError } from "../../billing/errors";
+import type { PlanGrantStatus } from "../../billing/plan-grants";
 import {
 	type CommercialPromotion,
 	type CreatePromotionInput,
@@ -23,6 +24,7 @@ import {
 	type PromotionErrorCode,
 	type PromotionLimitViolation,
 	type PromotionListResult,
+	type PromotionPlanGrantSummary,
 	type PromotionProviderObjectRecord,
 	type PromotionRecord,
 	type PromotionRedeemInput,
@@ -39,7 +41,6 @@ import {
 	type PromotionValidation,
 	type PromotionValidationInput,
 	promotionCodeUnavailability,
-	promotionEffectRedeemable,
 	promotionError,
 	promotionQuantity,
 	type StripeCheckoutPromotionFacts,
@@ -54,6 +55,11 @@ import { RepositoryModule } from "./base";
 import { enqueueUsageProjection } from "./entitlements";
 import { ensureCustomer } from "./identities";
 import { lockCustomerRow } from "./invalidations";
+import {
+	endPromotionPlanGrantInTx,
+	grantPromotionPlanInTx,
+	promotionPlanGrantIneligibility,
+} from "./promotion-plan-grants";
 import {
 	PromotionProviderObjectRepository,
 	refreshHostedCodeDesiredStateInTx,
@@ -182,6 +188,15 @@ interface RedemptionRow {
 	reversed_at: Timestamp | null;
 	created_at: Timestamp;
 	cursor_created_at: string;
+	/** The plan grant the redemption gave; null for every other redemption. */
+	plan_grant_id: string | null;
+	plan_grant_plan_key: string | null;
+	plan_grant_plan_version: number | string | null;
+	plan_grant_status: PlanGrantStatus | null;
+	plan_grant_starts_at: Timestamp | null;
+	plan_grant_ends_at: Timestamp | null;
+	plan_grant_ended_at: Timestamp | null;
+	plan_grant_elapsed: boolean | null;
 }
 
 export interface ResolvedPromotionCode {
@@ -559,21 +574,20 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 				channel: input.channel,
 			},
 		);
-		// An effect no channel redeems is refused whatever else is true of the code, the same
-		// answer redemption gives. A code restricted to another account stays hidden first.
-		const effectRefusal =
-			unavailable !== "PROMOTION_CODE_NOT_FOUND" &&
-			!promotionEffectRedeemable(promotion.effect.kind)
-				? "PROMOTION_CODE_NOT_APPLICABLE"
-				: null;
 		const reason =
-			effectRefusal ??
 			unavailable ??
 			(input.channel === "ios" && (promotion.effect.kind !== "discount" || !appleOffers?.length)
 				? "PROMOTION_CODE_CHANNEL_NOT_SUPPORTED"
 				: null) ??
 			targetMismatch(promotion, input.target ?? null) ??
-			(await customerIneligibility(this.database, projectId, input.billingAccountId, code));
+			(await customerIneligibility(this.database, projectId, input.billingAccountId, code)) ??
+			// Last, as in redemption: a code that cannot be used at all answers for the code.
+			(promotion.effect.kind === "plan_grant"
+				? await promotionPlanGrantIneligibility(this.database, projectId, {
+						planKey: promotion.effect.planKey,
+						billingAccountId: input.billingAccountId,
+					})
+				: null);
 		if (reason === "PROMOTION_CODE_NOT_FOUND") {
 			return notFound;
 		}
@@ -798,8 +812,9 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 
 	/**
 	 * Redeems a code a customer entered outside a purchase. A feature grant takes one use and writes
-	 * one reward allocation per item in the same transaction; a discount tells the caller to use a
-	 * commercial action. Replays by idempotency key return the stored result.
+	 * one reward allocation per item in the same transaction; a plan grant takes one use and gives
+	 * the account the plan for its term; a discount tells the caller to use a commercial action.
+	 * Replays by idempotency key return the stored result.
 	 */
 	async redeemPromotionCode(
 		project: ProjectInstanceContext,
@@ -819,11 +834,9 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 			) {
 				throw promotionError("PROMOTION_CODE_NOT_FOUND");
 			}
-			if (!promotionEffectRedeemable(resolved.promotion.effect.kind)) {
-				throw promotionError("PROMOTION_CODE_NOT_APPLICABLE");
-			}
 			if (input.channel === "ios") throw promotionError("PROMOTION_CODE_CHANNEL_NOT_SUPPORTED");
-			if (resolved.promotion.effect.kind === "discount") {
+			const effect = resolved.promotion.effect;
+			if (effect.kind === "discount") {
 				return {
 					kind: "requires_commercial_action",
 					duplicate: false,
@@ -831,9 +844,6 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 					promotion: { key: resolved.promotion.key, effectKind: "discount" },
 					commercialAction: { promotionCode: resolved.code.code },
 				};
-			}
-			if (resolved.promotion.effect.kind !== "feature_grant") {
-				throw promotionError("PROMOTION_CODE_NOT_APPLICABLE");
 			}
 			const customer = await ensureCustomer(tx, projectId, input.billingAccountId);
 			const replay = await executeOne<{
@@ -858,6 +868,7 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 				}
 				return { ...replay.result, duplicate: true } as PromotionRedeemResult;
 			}
+			const actor = input.actor ?? `billing-account:${input.billingAccountId}`;
 			const { redemption } = await reservePromotionRedemptionInTx(tx, projectId, {
 				customerId: customer.id,
 				billingAccountId: input.billingAccountId,
@@ -868,9 +879,25 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 				idempotencyKey,
 				requestHash,
 				reservedUntil: null,
-				effectSnapshot: resolved.promotion.effect,
-				actor: input.actor ?? `billing-account:${input.billingAccountId}`,
+				effectSnapshot: effect,
+				actor,
 			});
+			if (effect.kind === "plan_grant") {
+				// Code limits were checked when the use was taken, so they answer before the plan does.
+				await grantPromotionPlanInTx(tx, {
+					projectId,
+					customer,
+					redemptionId: redemption.id,
+					terms: effect,
+					actor,
+					requestHash,
+				});
+				return await storeRedeemResult(tx, projectId, redemption.id, {
+					kind: "plan_granted",
+					duplicate: false,
+					redemption: toRedemptionRecord(await requireRedemptionRow(tx, projectId, redemption.id)),
+				});
+			}
 			const granted = await executeRows<{
 				id: string | number;
 				feature_key: string;
@@ -902,21 +929,17 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 					) AS feature_key, quantity::text, expires_at
 				`,
 			);
-			if (granted.length !== resolved.promotion.effect.items.length) {
+			if (granted.length !== effect.items.length) {
 				throw new PersistenceConflictError(
 					"A granted feature is no longer active",
 					"PROMOTION_CONFIGURATION_ERROR",
 				);
 			}
 			await enqueueUsageProjection(tx, { projectId, customerId: customer.id });
-			const result: PromotionRedeemResult = {
+			return await storeRedeemResult(tx, projectId, redemption.id, {
 				kind: "granted",
 				duplicate: false,
-				redemption: toRedemptionRecord(
-					(
-						await redemptionRows(tx, projectId, drizzleSql`r.id = ${redemption.id}`, 1)
-					)[0] as RedemptionRow,
-				),
+				redemption: toRedemptionRecord(await requireRedemptionRow(tx, projectId, redemption.id)),
 				grant: {
 					features: granted
 						.map((row) => ({
@@ -927,16 +950,7 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 						}))
 						.sort((left, right) => left.featureKey.localeCompare(right.featureKey)),
 				},
-			};
-			await executeOne(
-				tx,
-				drizzleSql`
-					UPDATE promotion_redemptions SET result = ${jsonb(result)}, updated_at = now()
-					WHERE project_id = ${projectId} AND id = ${redemption.id}
-					RETURNING id
-				`,
-			);
-			return result;
+			});
 		});
 	}
 
@@ -974,7 +988,8 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 
 	/**
 	 * Takes back what a Quotum-granted redemption still gives: unconsumed, unheld quantity of
-	 * allocations that have not expired. Consumed usage stays consumed and the use stays counted.
+	 * allocations that have not expired, and a plan grant that is still running, which ends now.
+	 * Consumed usage stays consumed and the use stays counted.
 	 */
 	async revokePromotionRedemption(
 		project: ProjectInstanceContext,
@@ -1070,6 +1085,14 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 					expired: allocation.expired,
 				});
 			}
+			await endPromotionPlanGrantInTx(tx, {
+				projectId,
+				redemptionId: current.id,
+				actor: input.actor,
+				reason: input.reason,
+				idempotencyKey: input.idempotencyKey,
+				requestHash,
+			});
 			await executeOne(
 				tx,
 				drizzleSql`
@@ -2217,6 +2240,34 @@ export async function requireRedemption(
 	};
 }
 
+async function requireRedemptionRow(
+	executor: QueryExecutor,
+	projectId: string,
+	redemptionId: string,
+): Promise<RedemptionRow> {
+	const [row] = await redemptionRows(executor, projectId, drizzleSql`r.id = ${redemptionId}`, 1);
+	if (row === undefined) throw promotionError("PROMOTION_REDEMPTION_NOT_FOUND");
+	return row;
+}
+
+/** Stores what a redemption returned, so a replay of its idempotency key answers the same. */
+async function storeRedeemResult(
+	tx: QueryExecutor,
+	projectId: string,
+	redemptionId: string,
+	result: PromotionRedeemResult,
+): Promise<PromotionRedeemResult> {
+	await executeOne(
+		tx,
+		drizzleSql`
+			UPDATE promotion_redemptions SET result = ${jsonb(result)}, updated_at = now()
+			WHERE project_id = ${projectId} AND id = ${redemptionId}
+			RETURNING id
+		`,
+	);
+	return result;
+}
+
 async function redemptionRows(
 	executor: QueryExecutor,
 	projectId: string,
@@ -2234,11 +2285,20 @@ async function redemptionRows(
 				r.amount_subtotal_minor, r.amount_discount_minor, r.amount_total_minor,
 				r.limit_violation, r.actor, r.reason, r.request_hash, r.result, r.reserved_until,
 				r.applied_at, r.released_at, r.reversed_at, r.created_at,
-				${cursorTimestamp("r")} AS cursor_created_at
+				${cursorTimestamp("r")} AS cursor_created_at,
+				pg.id AS plan_grant_id, pgp.key AS plan_grant_plan_key,
+				pgv.version AS plan_grant_plan_version, pg.status AS plan_grant_status,
+				pg.starts_at AS plan_grant_starts_at, pg.ends_at AS plan_grant_ends_at,
+				pg.ended_at AS plan_grant_ended_at, pg.ends_at <= now() AS plan_grant_elapsed
 			FROM promotion_redemptions r
 			JOIN promotions p ON p.project_id = r.project_id AND p.id = r.promotion_id
 			JOIN customers cu ON cu.project_id = r.project_id AND cu.id = r.customer_id
 			LEFT JOIN promotion_codes c ON c.project_id = r.project_id AND c.id = r.promotion_code_id
+			LEFT JOIN plan_grants pg
+				ON pg.project_id = r.project_id AND pg.promotion_redemption_id = r.id
+			LEFT JOIN plans pgp ON pgp.project_id = pg.project_id AND pgp.id = pg.plan_id
+			LEFT JOIN plan_versions pgv
+				ON pgv.project_id = pg.project_id AND pgv.id = pg.plan_version_id
 			WHERE r.project_id = ${projectId} AND ${condition}
 			ORDER BY r.created_at DESC, r.id DESC
 			LIMIT ${limit}
@@ -2347,6 +2407,7 @@ function toRedemptionRecord(row: RedemptionRow): PromotionRedemptionRecord {
 		providerOfferType: row.provider_offer_type,
 		providerTransactionId: row.provider_transaction_id,
 		lastObservedTransactionId: row.last_observed_transaction_id,
+		planGrant: planGrantSummary(row),
 
 		id: row.id,
 		promotionKey: row.promotion_key,
@@ -2371,6 +2432,34 @@ function toRedemptionRecord(row: RedemptionRow): PromotionRedemptionRecord {
 		releasedAt: row.released_at === null ? null : toIso(row.released_at),
 		reversedAt: row.reversed_at === null ? null : toIso(row.reversed_at),
 		createdAt: toIso(row.created_at),
+	};
+}
+
+function planGrantSummary(row: RedemptionRow): PromotionPlanGrantSummary | null {
+	if (
+		row.plan_grant_id === null ||
+		row.plan_grant_plan_key === null ||
+		row.plan_grant_status === null ||
+		row.plan_grant_starts_at === null ||
+		row.plan_grant_ends_at === null
+	) {
+		return null;
+	}
+	// Readers stop a grant at its end, so it reads expired before the worker records it.
+	const elapsed = row.plan_grant_status === "active" && row.plan_grant_elapsed === true;
+	return {
+		id: row.plan_grant_id,
+		planKey: row.plan_grant_plan_key,
+		planVersion: Number(row.plan_grant_plan_version),
+		status: elapsed ? "expired" : row.plan_grant_status,
+		startsAt: toIso(row.plan_grant_starts_at),
+		endsAt: toIso(row.plan_grant_ends_at),
+		endedAt:
+			row.plan_grant_ended_at === null
+				? elapsed
+					? toIso(row.plan_grant_ends_at)
+					: null
+				: toIso(row.plan_grant_ended_at),
 	};
 }
 

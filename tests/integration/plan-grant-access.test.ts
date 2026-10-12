@@ -163,6 +163,57 @@ localDescribe("Plan grant access integration", () => {
 		).not.toBe(grant.endsAt.toISOString());
 	});
 
+	it("applies the plan's blocked limits to a grant a promotion code gave", async () => {
+		await context.repository.promotions.createPromotion(project, {
+			key: "premium-pass",
+			name: "Premium pass",
+			effect: { kind: "plan_grant", planKey: "premium", durationUnit: "day", durationCount: 14 },
+			codes: [{ code: "PASS" }],
+			actor: "plan-grant-access",
+		});
+		const redeemed = await context.repository.promotions.redeemPromotionCode(project, {
+			billingAccountId: "promo_user",
+			code: "PASS",
+			channel: "web",
+			idempotencyKey: "redeem",
+			actor: null,
+		});
+		if (redeemed.kind !== "plan_granted") throw new Error("the code gave no plan");
+		const grant = redeemed.redemption.planGrant;
+
+		const check = (quantity: string) =>
+			context.repository.checkUsage(project, {
+				billingAccountId: "promo_user",
+				featureKey: "api_calls",
+				quantity,
+			});
+		expect((await check("100")).allowed).toBe(true);
+		await context.repository.consumeUsage(project, {
+			billingAccountId: "promo_user",
+			featureKey: "api_calls",
+			quantity: "100",
+			idempotencyKey: "promo-consume",
+		});
+		const exhausted = await check("1");
+		expect({
+			allowed: exhausted.allowed,
+			reason: exhausted.reason,
+			granted: exhausted.balance.granted,
+		}).toEqual({ allowed: false, reason: "insufficient_balance", granted: "100" });
+		const [customer] = await context.sql<{ id: string }[]>`
+			SELECT id FROM customers WHERE billing_account_id = 'promo_user'
+		`;
+		const balances = await context.repository.buildUsageProjection(
+			project.projectInstanceId,
+			customer?.id ?? "",
+		);
+		// The limit's window is clamped to the grant's end, as a trial's is.
+		expect(balances.balances.find((row) => row.featureKey === "api_calls")).toMatchObject({
+			available: "0",
+			periodEndsAt: grant?.endsAt,
+		});
+	});
+
 	it("stops an elapsed grant at its end before any sweep marks it", async () => {
 		await seedTrialGrant("elapsed_user", { startsInMs: -15 * 86_400_000, daysLong: 14 });
 

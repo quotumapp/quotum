@@ -2417,10 +2417,11 @@ CREATE INDEX IF NOT EXISTS idx_billing_promotion_audit_events_promotion_created
 	ON promotion_audit_events (project_id, promotion_id, created_at DESC);
 
 -- A plan grant holds a published plan version without a payment provider. It is its own access
--- source, never a subscription. A trial holds its plan for a fixed time; the default plan is held
--- with no end by an account without a paid base plan, and follows the catalog's marker. Its
--- allowances are `reward` allocations linked to it, created for a reset window by the account's
--- first write in it, and none outlives it.
+-- source, never a subscription. A trial holds its plan for a fixed time, as does the grant a
+-- redeemed `plan_grant` promotion code gives; the default plan is held with no end by an account
+-- without a paid base plan, and follows the catalog's marker. Its allowances are `reward`
+-- allocations linked to it, created for a reset window by the account's first write in it, and
+-- none outlives it.
 CREATE TABLE IF NOT EXISTS plan_grants (
 	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
@@ -2429,7 +2430,7 @@ CREATE TABLE IF NOT EXISTS plan_grants (
 	plan_version_id BIGINT NOT NULL,
 	-- The pinned version's kind, kept here so the one-active-base-grant index can use it.
 	plan_kind TEXT NOT NULL CHECK (plan_kind IN ('base', 'addon')),
-	origin TEXT NOT NULL CHECK (origin IN ('trial', 'default')),
+	origin TEXT NOT NULL CHECK (origin IN ('trial', 'default', 'promotion')),
 	status TEXT NOT NULL CHECK (status IN ('active', 'expired', 'ended', 'superseded')),
 	duration_unit TEXT CHECK (duration_unit IN ('day', 'month')),
 	duration_count INTEGER CHECK (duration_count BETWEEN 1 AND 730),
@@ -2443,8 +2444,10 @@ CREATE TABLE IF NOT EXISTS plan_grants (
 	entitlement_keys TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
 	ending_notified_at TIMESTAMPTZ,
 	superseded_by_subscription_id UUID,
-	-- A trial that replaced the default plan.
+	-- A trial or promotional grant that replaced the default plan.
 	superseded_by_plan_grant_id UUID,
+	-- The redemption that gave a promotional grant; revoking it ends the grant.
+	promotion_redemption_id UUID,
 	actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),
 	end_actor TEXT CHECK (end_actor IS NULL OR char_length(end_actor) BETWEEN 1 AND 200),
 	end_reason TEXT CHECK (end_reason IS NULL OR char_length(end_reason) BETWEEN 1 AND 500),
@@ -2477,6 +2480,14 @@ CREATE TABLE IF NOT EXISTS plan_grants (
 	CONSTRAINT plan_grants_project_superseding_grant_fk
 		FOREIGN KEY (project_id, superseded_by_plan_grant_id)
 		REFERENCES plan_grants(project_id, id) DEFERRABLE INITIALLY DEFERRED,
+	-- No action rather than restrict: deleting a customer removes the grant and its redemption in
+	-- one statement, in either order.
+	CONSTRAINT plan_grants_project_promotion_redemption_fk
+		FOREIGN KEY (project_id, promotion_redemption_id)
+		REFERENCES promotion_redemptions(project_id, id),
+	CONSTRAINT plan_grants_promotion_check CHECK (
+		(origin = 'promotion') = (promotion_redemption_id IS NOT NULL)
+	),
 	-- A default-plan grant has no end, duration or caller key; every other grant has all of them.
 	CONSTRAINT plan_grants_term_check CHECK (
 		(origin = 'default' AND plan_kind = 'base' AND ends_at IS NULL AND duration_unit IS NULL
@@ -2537,6 +2548,11 @@ CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_superseding_subscription
 CREATE INDEX IF NOT EXISTS idx_billing_plan_grants_superseding_grant
 	ON plan_grants (project_id, superseded_by_plan_grant_id)
 	WHERE superseded_by_plan_grant_id IS NOT NULL;
+
+-- A redemption gives at most one grant.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_plan_grants_promotion_redemption
+	ON plan_grants (project_id, promotion_redemption_id)
+	WHERE promotion_redemption_id IS NOT NULL;
 
 -- An operator grant gives an account quantity of a consumable feature as a goodwill credit. It is
 -- audited here and takes effect as one `operator` allocation linked to it; it never records a
