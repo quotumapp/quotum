@@ -11,7 +11,8 @@ import type { MerchantIdentity, MerchantStore } from "./store";
 
 interface OperationRow {
 	id: string;
-	draft_id: string;
+	/** Null for a project added to an existing organization, which has no onboarding draft. */
+	draft_id: string | null;
 	logical_project_id: string;
 	status: ProvisioningOperationView["status"];
 	error_code: string | null;
@@ -197,27 +198,87 @@ export class MerchantOnboarding {
 						"Review the latest draft before provisioning.",
 						409,
 					);
-				const [project] = await tx<
-					{ id: string }[]
-				>`INSERT INTO platform_projects(organization_id,name,key) VALUES(${member.organization_id},${draft.project.name},${draft.project.key}) RETURNING id`;
-				if (!project) throw new Error("Project insert failed");
-				const [operation] = await tx<
-					{ id: string }[]
-				>`INSERT INTO platform_provisioning_operations(draft_id,logical_project_id) VALUES(${draft.id},${project.id}) RETURNING id`;
-				if (!operation) throw new Error("Operation insert failed");
-				await tx`INSERT INTO platform_provisioning_steps(operation_id,environment) VALUES(${operation.id},'sandbox'),(${operation.id},'production')`;
+				const operation = await this.provisionProject(tx, identity, member.organization_id, {
+					name: draft.project.name,
+					key: draft.project.key,
+					draftId: draft.id,
+				});
 				await tx`UPDATE platform_onboarding_drafts SET status='provisioning',revision=revision+1 WHERE id=${draft.id}`;
-				await this.store.audit(
-					tx,
-					identity.principalId,
-					member.organization_id,
-					"project.provisioning_started",
-					project.id,
-				);
-				return { id: operation.id };
+				return operation;
 			},
 		);
 		return this.resume(identity, id);
+	}
+	/**
+	 * Adds a project to an organization that already exists, outside the onboarding draft: the
+	 * draft is one per person and names one project, so it cannot describe a second.
+	 */
+	async createProject(
+		identity: MerchantIdentity,
+		key: string,
+		input: { organizationSlug: string; name: string; key: string },
+	): Promise<ProvisioningOperationView> {
+		const { id } = await this.store.idempotent(
+			identity,
+			key,
+			["project.create", input],
+			async (tx) => {
+				// The organization lock serializes this with other creations, so the cap count is exact.
+				const member = await this.store.membership(
+					tx,
+					identity.principalId,
+					input.organizationSlug,
+					true,
+				);
+				requireCapability(member.role, "project.create");
+				return this.provisionProject(tx, identity, member.organization_id, {
+					name: input.name,
+					key: input.key,
+					draftId: null,
+				});
+			},
+		);
+		return this.resume(identity, id);
+	}
+	/**
+	 * Inserts the logical project and its provisioning operation. The caller holds the organization
+	 * lock, so the cap count and the key check cannot interleave with another creation. Onboarding
+	 * and `createProject` both come through here.
+	 */
+	private async provisionProject(
+		tx: MerchantSql,
+		identity: MerchantIdentity,
+		organizationId: string,
+		input: { name: string; key: string; draftId: string | null },
+	): Promise<{ id: string }> {
+		const [projects] = await tx<
+			{ used: number; project_limit: number }[]
+		>`SELECT (SELECT count(*)::int FROM platform_projects WHERE organization_id=${organizationId}) AS used,project_limit FROM platform_organizations WHERE id=${organizationId}`;
+		if (!projects) throw new Error("Organization disappeared");
+		if (projects.used >= projects.project_limit)
+			throw new MerchantError(
+				"PROJECT_LIMIT_REACHED",
+				"The organization has reached its project limit.",
+				409,
+			);
+		const [project] = await tx<
+			{ id: string }[]
+		>`INSERT INTO platform_projects(organization_id,name,key) VALUES(${organizationId},${input.name},${input.key}) ON CONFLICT(organization_id,key) DO NOTHING RETURNING id`;
+		if (!project)
+			throw new MerchantError("PROJECT_KEY_UNAVAILABLE", "Choose a different project key.", 409);
+		const [operation] = await tx<
+			{ id: string }[]
+		>`INSERT INTO platform_provisioning_operations(draft_id,logical_project_id) VALUES(${input.draftId},${project.id}) RETURNING id`;
+		if (!operation) throw new Error("Operation insert failed");
+		await tx`INSERT INTO platform_provisioning_steps(operation_id,environment) VALUES(${operation.id},'sandbox'),(${operation.id},'production')`;
+		await this.store.audit(
+			tx,
+			identity.principalId,
+			organizationId,
+			"project.provisioning_started",
+			project.id,
+		);
+		return { id: operation.id };
 	}
 	private async record(
 		identity: MerchantIdentity,
@@ -306,7 +367,9 @@ export class MerchantOnboarding {
 		}
 		await this.store.sql.begin(async (tx) => {
 			await tx`UPDATE platform_provisioning_operations SET status='succeeded',error_code=NULL,updated_at=${this.store.now()} WHERE id=${id}`;
-			await tx`UPDATE platform_onboarding_drafts SET status='ready',revision=revision+1 WHERE id=${op.draft_id} AND status<>'ready'`;
+			// A project added to an existing organization has no onboarding draft to complete.
+			if (op.draft_id)
+				await tx`UPDATE platform_onboarding_drafts SET status='ready',revision=revision+1 WHERE id=${op.draft_id} AND status<>'ready'`;
 		});
 		return this.view(identity, id);
 	}

@@ -508,6 +508,27 @@ export function createMerchantApp({
 		},
 	);
 
+	app.post(
+		"/api/platform/projects",
+		async ({ body, request }) => ({
+			success: true as const,
+			data: await onboarding.createProject(
+				await current(request),
+				idempotencyKey(request),
+				createProjectBodySchema.parse(body),
+			),
+		}),
+		{
+			parse: [MERCHANT_JSON_PARSE],
+			...route(
+				"createProject",
+				"/api/platform/projects",
+				{ 200: responses.createProjectResponse200Schema },
+				{ body: createProjectBodySchema },
+			),
+		},
+	);
+
 	app.get(
 		"/api/platform/provisioning/:id",
 		async ({ params, request }) => ({
@@ -1043,6 +1064,11 @@ const postApiPlatformOnboardingProjectBodySchema = z.strictObject({
 });
 const postApiPlatformOnboardingProvisionBodySchema = z.strictObject({
 	revision: z.number().int().positive(),
+});
+const createProjectBodySchema = z.strictObject({
+	organizationSlug: slug,
+	name,
+	key: projectKey,
 });
 const postApiPlatformInvitationsPreviewBodySchema = z.strictObject({ token: token.optional() });
 const postApiPlatformInvitationsAcceptBodySchema = z.strictObject({ token: token.optional() });

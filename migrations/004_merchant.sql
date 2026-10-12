@@ -181,7 +181,8 @@ CREATE INDEX platform_drafts_org_idx ON platform_onboarding_drafts(organization_
 
 CREATE TABLE platform_provisioning_operations (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-	draft_id uuid NOT NULL UNIQUE REFERENCES platform_onboarding_drafts(id) ON DELETE RESTRICT,
+	-- Null for a project added to an existing organization, which has no onboarding draft.
+	draft_id uuid UNIQUE REFERENCES platform_onboarding_drafts(id) ON DELETE RESTRICT,
 	logical_project_id uuid NOT NULL UNIQUE REFERENCES platform_projects(id) ON DELETE RESTRICT,
 	status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','provisioning','succeeded','failed','partially_provisioned')),
 	error_code text,

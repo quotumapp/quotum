@@ -260,6 +260,150 @@ describe("merchant platform transactions", () => {
 			context: { environment: "sandbox" },
 		});
 	});
+	it("adds a project to an existing organization outside the onboarding draft", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		const { operation: first } = await onboard(browser);
+		const body = { organizationSlug: "acme", name: "Second Project", key: "second" };
+		const created = await browser.json<ProvisioningOperationView>("/api/platform/projects", body, {
+			key: "create-second",
+		});
+		expect(created).toMatchObject({
+			status: "succeeded",
+			projectKey: "second",
+			organizationSlug: "acme",
+			credentialDelivery: "available",
+		});
+		expect(created.id).not.toBe(first.id);
+		expect(created.steps.map((step) => step.status)).toEqual(["succeeded", "succeeded"]);
+		// The operation belongs to no draft, and the first project's draft is left as it was.
+		expect(
+			await f.sql`SELECT draft_id FROM platform_provisioning_operations WHERE id=${created.id}`,
+		).toEqual([{ draft_id: null }]);
+		expect(await browser.json<OnboardingDraftView>("/api/platform/onboarding")).toMatchObject({
+			status: "ready",
+			operationId: first.id,
+			project: { key: "example" },
+		});
+		const session = await browser.json<MerchantSessionView>("/api/platform/session");
+		expect(session.projects.map(({ key }) => key).sort()).toEqual(["example", "second"]);
+		expect(session.projects.find(({ key }) => key === "second")?.environments).toEqual([
+			{ environment: "production", active: false },
+			{ environment: "sandbox", active: true },
+		]);
+		const credential = await browser.json<{ credential: string }>(
+			`/api/platform/provisioning/${created.id}/credential`,
+			{},
+			{ key: "deliver-second" },
+		);
+		expect(credential.credential).toMatch(/^sqpk_[A-Za-z0-9_-]{43}$/u);
+
+		// The same key answers with the same operation and creates nothing more.
+		expect(
+			(
+				await browser.json<ProvisioningOperationView>("/api/platform/projects", body, {
+					key: "create-second",
+				})
+			).id,
+		).toBe(created.id);
+		expect(await f.sql`SELECT id FROM platform_projects`).toHaveLength(2);
+		expect(await f.sql`SELECT id FROM projects`).toHaveLength(4);
+		const changed = await browser.request(
+			"/api/platform/projects",
+			{ ...body, name: "Renamed Project" },
+			{ key: "create-second" },
+		);
+		expect([changed.status, (await changed.json()).error?.code]).toEqual([
+			409,
+			"IDEMPOTENCY_CONFLICT",
+		]);
+	});
+	it("refuses a project key the organization uses and a project beyond the organization's cap", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		const create = async (key: string, projectKey: string) => {
+			const response = await browser.request(
+				"/api/platform/projects",
+				{ organizationSlug: "acme", name: "Another Project", key: projectKey },
+				{ key },
+			);
+			return [response.status, (await response.json()).error?.code ?? null];
+		};
+		expect(await create("duplicate-key", "example")).toEqual([409, "PROJECT_KEY_UNAVAILABLE"]);
+		expect(await f.sql`SELECT id FROM platform_projects`).toHaveLength(1);
+		// A key is unique within its organization only.
+		const other = new MerchantBrowser(f);
+		await f.sql`DELETE FROM platform_rate_limits`;
+		await other.signup("other@example.com");
+		await other.json("/api/platform/onboarding/organization", { name: "Other", slug: "other-co" });
+		expect(
+			(
+				await other.json<ProvisioningOperationView>("/api/platform/projects", {
+					organizationSlug: "other-co",
+					name: "Example Project",
+					key: "example",
+				})
+			).projectKey,
+		).toBe("example");
+
+		await f.sql`UPDATE platform_organizations SET project_limit=1 WHERE slug='acme'`;
+		expect(await create("over-the-cap", "third")).toEqual([409, "PROJECT_LIMIT_REACHED"]);
+		expect(await f.sql`SELECT key FROM platform_projects`).toHaveLength(2);
+		await f.sql`UPDATE platform_organizations SET project_limit=2 WHERE slug='acme'`;
+		expect(await create("under-the-cap", "third")).toEqual([200, null]);
+	});
+	it("lets only members who may create projects add one", async () => {
+		const owner = new MerchantBrowser(f);
+		await owner.signup();
+		await onboard(owner);
+		const create = async (key: string) => {
+			const response = await owner.request(
+				"/api/platform/projects",
+				{ organizationSlug: "acme", name: "Second Project", key: "second" },
+				{ key },
+			);
+			return [response.status, (await response.json()).error?.code ?? null];
+		};
+		for (const role of ["Viewer", "Operator"]) {
+			await f.sql`UPDATE platform_memberships SET role=${role}`;
+			expect([role, ...(await create(`denied-${role}`))]).toEqual([role, 403, "FORBIDDEN"]);
+		}
+		expect(await f.sql`SELECT id FROM platform_projects`).toHaveLength(1);
+		const stranger = new MerchantBrowser(f);
+		await f.sql`DELETE FROM platform_rate_limits`;
+		await stranger.signup("stranger@example.com");
+		const refused = await stranger.request(
+			"/api/platform/projects",
+			{ organizationSlug: "acme", name: "Second Project", key: "second" },
+			{ key: "stranger-key" },
+		);
+		expect([refused.status, (await refused.json()).error?.code]).toEqual([403, "FORBIDDEN"]);
+		await f.sql`UPDATE platform_memberships SET role='Developer'`;
+		expect(await create("developer-key")).toEqual([200, null]);
+		expect(await f.sql`SELECT id FROM platform_projects`).toHaveLength(2);
+	});
+	it("resumes a project added to an existing organization after a failed environment", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		await onboard(browser);
+		f.failProvisioning("production");
+		const partial = await browser.json<ProvisioningOperationView>("/api/platform/projects", {
+			organizationSlug: "acme",
+			name: "Second Project",
+			key: "second",
+		});
+		expect(partial).toMatchObject({ status: "partially_provisioned", retryable: true });
+		f.failProvisioning(null);
+		const complete = await browser.json<ProvisioningOperationView>(
+			`/api/platform/provisioning/${partial.id}/retry`,
+			{},
+		);
+		expect(complete.status).toBe("succeeded");
+		expect(
+			await f.sql`SELECT i.environment FROM projects i JOIN platform_projects p ON p.id=i.platform_project_id WHERE p.key='second' ORDER BY i.environment`,
+		).toEqual([{ environment: "production" }, { environment: "sandbox" }]);
+	});
 	it("renames the draft's organization when step 1 is revisited before provisioning", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();

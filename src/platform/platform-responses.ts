@@ -60,6 +60,11 @@ export const postApiPlatformOnboardingProvisionResponse200Schema = z.object({
 	data: ProvisioningOperationViewSchema,
 });
 
+export const createProjectResponse200Schema = z.object({
+	success: z.literal(true),
+	data: ProvisioningOperationViewSchema,
+});
+
 export const getApiPlatformProvisioningByIdResponse200Schema = z.object({
 	success: z.literal(true),
 	data: ProvisioningOperationViewSchema,
