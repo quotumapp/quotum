@@ -161,7 +161,7 @@ export interface ProviderSubscriptionReconciliationRepositorySource {
 		projectId: string,
 		subscriptionId: string,
 		errorMessage: string,
-		nextAttemptAt: Date | null,
+		nextAttemptAt: Date,
 		workerId: string,
 	): Promise<void>;
 	renewProviderSubscriptionReconciliationLease?(
@@ -214,7 +214,7 @@ export class ProviderSubscriptionReconciliationRepository
 		projectId: string,
 		subscriptionId: string,
 		errorMessage: string,
-		nextAttemptAt: Date | null,
+		nextAttemptAt: Date,
 		workerId: string,
 	): Promise<void> {
 		await this.source.markProviderSubscriptionReconciliationFailed(

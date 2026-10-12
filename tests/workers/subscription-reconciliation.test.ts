@@ -108,14 +108,14 @@ function createRepository({
 				_projectId: string,
 				subscriptionId: string,
 				error: string,
-				nextAttemptAt: Date | null,
+				nextAttemptAt: Date,
 				workerId: string,
 			) {
 				calls.push({
 					method: "markProviderSubscriptionReconciliationFailed",
 					subscriptionId,
 					error,
-					nextAttemptAt: nextAttemptAt?.toISOString() ?? null,
+					nextAttemptAt: nextAttemptAt.toISOString(),
 					workerId,
 				});
 				if (failError !== undefined) {
@@ -447,7 +447,7 @@ describe("SubscriptionReconciliationWorker", () => {
 		});
 	});
 
-	it("marks max attempts failed without another retry", async () => {
+	it("keeps retrying daily once the attempts are spent", async () => {
 		const { calls, repository } = createRepository({
 			subscriptions: [
 				subscription({
@@ -483,7 +483,7 @@ describe("SubscriptionReconciliationWorker", () => {
 			method: "markProviderSubscriptionReconciliationFailed",
 			subscriptionId: "subscription_final",
 			error: "Apple API unavailable",
-			nextAttemptAt: null,
+			nextAttemptAt: "2026-06-01T00:10:00.000Z",
 			workerId: "worker-a",
 		});
 	});

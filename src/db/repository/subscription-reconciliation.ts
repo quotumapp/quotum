@@ -227,6 +227,11 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 		});
 	}
 
+	/**
+	 * Claims due subscriptions. A failure always schedules a finite next attempt, so `'infinity'`
+	 * only marks a row an earlier release parked after its last attempt; it is claimed like a due
+	 * row, and its next success or failure writes a finite time.
+	 */
 	async claimProviderSubscriptionReconciliations(
 		workerId: string,
 		limit: number,
@@ -242,7 +247,10 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 				FROM subscriptions s
 				WHERE s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled', 'expired')
 					AND s.provider IN ('apple', 'google', 'stripe')
-					AND s.provider_reconciliation_next_attempt_at <= now()
+					AND (
+						s.provider_reconciliation_next_attempt_at <= now()
+						OR s.provider_reconciliation_next_attempt_at = 'infinity'::timestamptz
+					)
 					AND (
 						s.provider_reconciled_at IS NULL
 						OR s.provider_reconciled_at <= ${staleBefore.toISOString()}::timestamptz
@@ -331,13 +339,13 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 		projectId: string,
 		subscriptionId: string,
 		errorMessage: string,
-		nextAttemptAt: Date | null,
+		nextAttemptAt: Date,
 		workerId: string,
 	): Promise<void> {
 		requireNonBlank(errorMessage, "p_error");
 		// Bind as ISO: Bun SQL serializes a raw Date via toString (a locale string) that
 		// Postgres rejects for ::timestamptz; the record* paths already do the same.
-		const nextAttemptAtIso = nextAttemptAt?.toISOString() ?? null;
+		const nextAttemptAtIso = nextAttemptAt.toISOString();
 		await assertUpdated(
 			this.database,
 			drizzleSql`
@@ -345,7 +353,7 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 			SET
 				provider_reconciliation_attempts = s.provider_reconciliation_attempts + 1,
 				provider_reconciliation_error = ${errorMessage},
-				provider_reconciliation_next_attempt_at = COALESCE(${nextAttemptAtIso}::timestamptz, 'infinity'::timestamptz),
+				provider_reconciliation_next_attempt_at = ${nextAttemptAtIso}::timestamptz,
 				provider_reconciliation_locked_at = NULL,
 				provider_reconciliation_locked_by = NULL,
 				updated_at = now()

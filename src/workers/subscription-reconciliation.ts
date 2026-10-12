@@ -17,7 +17,7 @@ import {
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
-import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
+import { calculateNextRetryAt, normalizeWorkerError } from "./backoff";
 import { startLeaseHeartbeat } from "./lease-heartbeat";
 import { resolveClaimedProjectInstance } from "./project-context";
 
@@ -57,7 +57,7 @@ export interface SubscriptionReconciliationRepository {
 		projectId: string,
 		subscriptionId: string,
 		errorMessage: string,
-		nextAttemptAt: Date | null,
+		nextAttemptAt: Date,
 		workerId: string,
 	): Promise<void>;
 	renewProviderSubscriptionReconciliationLease?(
@@ -312,7 +312,9 @@ export class SubscriptionReconciliationWorker {
 		subscription: ProviderSubscriptionReconciliationRow,
 		error: unknown,
 	): Promise<void> {
-		const nextAttemptAt = calculateNextAttemptAt({
+		// Reconciliation is what recovers a lost webhook, so it never parks: after maxAttempts the
+		// subscription is retried once a day for as long as the provider keeps failing.
+		const nextAttemptAt = calculateNextRetryAt({
 			attempts: subscription.provider_reconciliation_attempts,
 			maxAttempts: this.maxAttempts,
 			now: this.now(),

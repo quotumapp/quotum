@@ -397,6 +397,38 @@ one `{ table, deleted }` entry per table in `tables` and the tables that used ev
 setting or migration is involved; runs after an upgrade work through any existing backlog, up to
 25,000 rows per table each.
 
+### Subscription reconciliation retries
+
+The reconciliation worker reads an Apple, Google or Stripe subscription back from the provider when
+it was last reconciled more than `BILLING_PROVIDER_RECONCILIATION_STALE_AFTER_MS` ago or is about to
+expire. That read is what repairs a subscription after a lost provider notification. A read that
+fails keeps its reason in `provider_reconciliation_error`, adds to
+`provider_reconciliation_attempts` and waits before the next one: one minute after the first
+failure, doubling with each. From the failure that reaches
+`BILLING_SUBSCRIPTION_RECONCILIATION_MAX_ATTEMPTS` (default `10`) on, the wait stays at 24 hours,
+so a subscription is read once a day for as long as the provider keeps failing and recovers by
+itself when the provider does. It is never parked. A successful read clears the reason and the
+count. Each poll claims at most 25 subscriptions, which bounds the provider calls a long outage
+causes.
+
+An earlier release parked a subscription whose attempts were spent (next attempt `infinity`) and
+never read it again. Those rows are claimed on the first poll after upgrade and take a finite time
+from their next result; no operator action is needed.
+
+Find subscriptions whose reconciliation is failing with
+`GET /v1/admin/subscriptions?needsAttention=true` (the rows carry `providerReconciliationAttempts`,
+`providerReconciliationError` and `providerReconciliationNextAttemptAt`) or in SQL:
+
+```sql
+SELECT id, provider, status, provider_reconciliation_attempts,
+	provider_reconciliation_error, provider_reconciliation_next_attempt_at
+FROM subscriptions WHERE provider_reconciliation_error IS NOT NULL
+ORDER BY provider_reconciliation_attempts DESC;
+```
+
+`POST /v1/admin/reconciliation/subscriptions/run` runs one pass without waiting for the poll; it
+claims only subscriptions that are due.
+
 ### Recurring billing retries
 
 The recurring billing worker applies due subscription changes and invoices closed usage windows

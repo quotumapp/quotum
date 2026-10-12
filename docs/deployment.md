@@ -469,7 +469,9 @@ Defaults in parentheses.
 - `BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS` (`10`),
   `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` (`5000`), which also paces Stripe App event
   processing when Apps OAuth is configured.
-- `BILLING_SUBSCRIPTION_RECONCILIATION_MAX_ATTEMPTS` (`10`),
+- `BILLING_SUBSCRIPTION_RECONCILIATION_MAX_ATTEMPTS` (`10`; the failure count after which a
+  subscription is retried daily, see
+  [reconciliation retries](operations.md#subscription-reconciliation-retries)),
   `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` (`60000`),
   `BILLING_PROVIDER_RECONCILIATION_STALE_AFTER_MS` (`21600000`).
 - `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` (`60000`), shared by metering maintenance,
