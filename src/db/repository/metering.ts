@@ -130,6 +130,7 @@ import {
 import { openPlanGrantWindows } from "./plan-grant-windows";
 import { catchUpPlanGrants, planGrantsNeedCatchUp } from "./plan-grants";
 import { executeOne, executeRows, jsonb } from "./query";
+import { deleteExpiredRawUsageSql } from "./raw-usage-retention";
 import { materializeDueSubscriptionAllocations } from "./subscription-allocation-periods";
 import type { QueryExecutor } from "./types";
 import {
@@ -812,10 +813,29 @@ export class MeteringBillingRepository extends RepositoryModule {
 		});
 	}
 
-	async runMaintenance(limit: number): Promise<MeteringMaintenanceResult> {
+	/**
+	 * One maintenance pass. The state transitions (reservation expiry, allocation periods,
+	 * rollovers, rollup close, preview expiry) commit in one transaction. Retention then runs as
+	 * its own short transactions, repeated while a batch comes back full and the time budget
+	 * lasts: a backlog drains within a poll, and a sweep that fails or times out cannot roll the
+	 * transitions back.
+	 */
+	async runMaintenance(
+		limit: number,
+		options: { retentionBudgetMs?: number } = {},
+	): Promise<MeteringMaintenanceResult> {
 		if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
 			throw new InvalidRequestError("Metering maintenance limit must be between 1 and 1000");
 		}
+		const transitions = await this.runMaintenanceTransitions(limit);
+		const retention = await this.runRetention(
+			limit,
+			options.retentionBudgetMs ?? RETENTION_BUDGET_MS,
+		);
+		return { ...transitions, ...retention };
+	}
+
+	private async runMaintenanceTransitions(limit: number): Promise<MaintenanceTransitions> {
 		return await this.transaction(async (tx) => {
 			const reservations = await executeRows<{ project_id: string; id: string }>(
 				tx,
@@ -876,9 +896,6 @@ export class MeteringBillingRepository extends RepositoryModule {
 				`,
 			);
 
-			await expireUsageOperationResults(tx, limit);
-			const deletedClientClaims = await deleteExpiredRows(tx, "client_idempotency_claims", limit);
-			const deletedWorkerClaims = await deleteExpiredRows(tx, "worker_delivery_claims", limit);
 			const expiredDrafts = await executeRows<{ id: string }>(
 				tx,
 				drizzleSql`
@@ -897,44 +914,6 @@ export class MeteringBillingRepository extends RepositoryModule {
 					RETURNING drafts.id
 				`,
 			);
-			// An expired preview can never be published; a week later nobody is still looking for
-			// it. Published drafts hold the revisions' intents and are kept.
-			const deletedDrafts = await executeRows<{ id: string }>(
-				tx,
-				drizzleSql`
-					WITH targets AS (
-						SELECT id
-						FROM catalog_drafts
-						WHERE status = 'expired' AND expires_at <= now() - INTERVAL '7 days'
-						ORDER BY expires_at, id
-						LIMIT ${limit}
-						FOR UPDATE SKIP LOCKED
-					)
-					DELETE FROM catalog_drafts drafts
-					USING targets
-					WHERE drafts.id = targets.id
-					RETURNING drafts.id
-				`,
-			);
-			const deletedRawUsage = await executeRows<{ id: string }>(
-				tx,
-				drizzleSql`
-					WITH targets AS (
-						SELECT events.recorded_at, events.id
-						FROM usage_events events
-						LEFT JOIN metering_settings settings ON settings.project_id = events.project_id
-						WHERE events.recorded_at < now() - make_interval(
-							days => COALESCE(settings.raw_usage_retention_days, 400)
-						)
-						ORDER BY events.recorded_at, events.id
-						LIMIT ${limit}
-					)
-					DELETE FROM usage_events events
-					USING targets
-					WHERE events.recorded_at = targets.recorded_at AND events.id = targets.id
-					RETURNING events.id
-				`,
-			);
 
 			return {
 				expiredReservations: reservations.length,
@@ -948,14 +927,93 @@ export class MeteringBillingRepository extends RepositoryModule {
 				),
 				rolledOverAllocations: rollovers.length,
 				closedPeriods: closedPeriods.length,
-				deletedClientClaims,
-				deletedWorkerClaims,
 				expiredCatalogDrafts: expiredDrafts.length,
-				deletedCatalogDrafts: deletedDrafts.length,
-				deletedRawUsageEvents: deletedRawUsage.length,
 			};
 		});
 	}
+
+	/**
+	 * Deletes expired rows in batches of `limit`, each in its own transaction, until a batch is
+	 * not full or `budgetMs` is spent. At least one batch always runs.
+	 */
+	private async runRetention(limit: number, budgetMs: number): Promise<MaintenanceRetention> {
+		const totals: MaintenanceRetention = {
+			deletedClientClaims: 0,
+			deletedWorkerClaims: 0,
+			deletedCatalogDrafts: 0,
+			deletedRawUsageEvents: 0,
+		};
+		const deadline = Date.now() + budgetMs;
+		for (;;) {
+			const batch = await this.transaction((tx) => runRetentionBatch(tx, limit));
+			totals.deletedClientClaims += batch.deletedClientClaims;
+			totals.deletedWorkerClaims += batch.deletedWorkerClaims;
+			totals.deletedCatalogDrafts += batch.deletedCatalogDrafts;
+			totals.deletedRawUsageEvents += batch.deletedRawUsageEvents;
+			if (!batch.full || Date.now() >= deadline) {
+				return totals;
+			}
+		}
+	}
+}
+
+type MaintenanceRetention = Pick<
+	MeteringMaintenanceResult,
+	"deletedClientClaims" | "deletedWorkerClaims" | "deletedCatalogDrafts" | "deletedRawUsageEvents"
+>;
+
+type MaintenanceTransitions = Omit<MeteringMaintenanceResult, keyof MaintenanceRetention>;
+
+/**
+ * How long one maintenance pass keeps draining retention. Well under the default minute-long
+ * poll, so passes do not overlap, and long enough to clear a backlog of a few hundred thousand
+ * rows at the batch size the worker uses.
+ */
+const RETENTION_BUDGET_MS = 20_000;
+
+/** One batch of retention deletes; `full` says a statement hit `limit`, so more may be waiting. */
+async function runRetentionBatch(
+	executor: QueryExecutor,
+	limit: number,
+): Promise<MaintenanceRetention & { full: boolean }> {
+	const expiredResults = await expireUsageOperationResults(executor, limit);
+	const deletedClientClaims = await deleteExpiredRows(executor, "client_idempotency_claims", limit);
+	const deletedWorkerClaims = await deleteExpiredRows(executor, "worker_delivery_claims", limit);
+	// An expired preview can never be published; a week later nobody is still looking for
+	// it. Published drafts hold the revisions' intents and are kept.
+	const deletedDrafts = await executeRows<{ id: string }>(
+		executor,
+		drizzleSql`
+			WITH targets AS (
+				SELECT id
+				FROM catalog_drafts
+				WHERE status = 'expired' AND expires_at <= now() - INTERVAL '7 days'
+				ORDER BY expires_at, id
+				LIMIT ${limit}
+				FOR UPDATE SKIP LOCKED
+			)
+			DELETE FROM catalog_drafts drafts
+			USING targets
+			WHERE drafts.id = targets.id
+			RETURNING drafts.id
+		`,
+	);
+	const deletedRawUsage = await executeRows<{ id: string }>(
+		executor,
+		deleteExpiredRawUsageSql(limit),
+	);
+	return {
+		deletedClientClaims,
+		deletedWorkerClaims,
+		deletedCatalogDrafts: deletedDrafts.length,
+		deletedRawUsageEvents: deletedRawUsage.length,
+		full:
+			expiredResults === limit ||
+			deletedClientClaims === limit ||
+			deletedWorkerClaims === limit ||
+			deletedDrafts.length === limit ||
+			deletedRawUsage.length === limit,
+	};
 }
 
 async function materializeExpiredRollovers(

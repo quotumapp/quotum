@@ -14,6 +14,17 @@ later release without it leaves the baselines alone, so its migration job runs a
 existing database; its pull requests can still ask for other steps. From 1.0, schema changes
 arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
+## Raw usage retention index
+
+The metering baseline adds `idx_billing_usage_invoice_adjustments_event` on
+`usage_invoice_adjustments (usage_event_recorded_at, usage_event_id)`. The foreign key from an
+adjustment to its usage event is checked on every [raw usage](operations.md#usage-partitions)
+retention delete, and the only index on those columns led with `project_id`, so each check
+skip-scanned it once per project. No table changes and nothing is backfilled, so a dump from the
+previous release restores as it is: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). An older image cannot read the new
+baseline, so a rollback restores the pre-upgrade backup.
+
 ## Promotional plan grants
 
 The metering baseline widens `plan_grants` so that a redeemed `plan_grant` promotion code can give

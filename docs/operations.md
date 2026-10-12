@@ -323,6 +323,15 @@ Raw usage is partitioned monthly. Technical retention uses `metering_settings.ra
 (default 400); durable monthly rollups outlive deleted raw rows. This default is not a legal
 retention guarantee or an implemented versioned privacy policy.
 
+The metering maintenance worker deletes expired raw usage per project, in batches of its batch
+size that each commit on their own, and keeps going for up to 20 seconds while batches come back
+full, so a backlog drains within a poll. Expired idempotency claims and stored outcomes, worker
+delivery claims and old catalog previews are swept the same way. Reservation expiry, allocation
+periods, rollovers and rollup close commit first and are not rolled back by a failing sweep.
+A raw usage event that a usage invoice adjustment references is kept past its window: the
+adjustment's foreign key restricts the delete, and the event is the evidence for the invoiced
+amount.
+
 ### Usage partitions
 
 Raw usage (`usage_events`) is partitioned by UTC month of `recorded_at`. The baseline migration
@@ -357,7 +366,9 @@ it stops early with `locked`, `lock_timeout`, `blocked` or `forbidden`. Both rea
   `quotum partitions ensure` with its own `POSTGRES_URI`, for example from a monthly job.
 - `blocked`: rows usually reach the default partition through a data-only restore of usage older
   than the baseline's first partition. Raw-usage retention deletes them after
-  `raw_usage_retention_days`, and upkeep resumes by itself once the default partition is empty.
+  `raw_usage_retention_days`, and upkeep resumes by itself once the default partition is empty
+  (an event that a usage invoice adjustment references is kept, so a restore that put such an
+  event there needs a reviewed plan instead).
   Do not detach or drop `usage_events_default`: other tables reference usage rows through foreign
   keys, so moving rows needs a reviewed maintenance plan.
 
