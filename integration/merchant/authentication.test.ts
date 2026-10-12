@@ -176,6 +176,72 @@ describe("real Better Auth merchant authentication", () => {
 		});
 		expect(await f.sql`SELECT name FROM platform_auth_users`).toEqual([{ name: "Jane Doe" }]);
 	});
+	it("spends an address's signup budget only on a request that can send it mail", async () => {
+		const victim = "victim@example.com";
+		const body = { name: "Victim", email: victim, password };
+		const as = (ip: string) => ({ headers: { "x-quotum-client-ip": ip } });
+		const outcome = async (response: Response) => {
+			const result = await response.json();
+			return [response.status, result.error?.code ?? result.code];
+		};
+		// Someone else, from another address, fails every check that comes before registration.
+		const stranger = new MerchantBrowser(f);
+		await stranger.json("/api/platform/config", undefined, as("192.0.2.99"));
+		const refused: unknown[] = [];
+		for (let attempt = 0; attempt < 3; attempt++)
+			refused.push(
+				await outcome(await stranger.request("/api/auth/sign-up/email", body, as("192.0.2.99"))),
+			);
+		await stranger.json(
+			"/api/platform/signup-intent",
+			{
+				accepted: true,
+				termsVersion: testConfig.termsVersion,
+				privacyVersion: testConfig.privacyVersion,
+			},
+			as("192.0.2.99"),
+		);
+		// The first is refused by Quotum, the others by the sign-in library after the address is
+		// charged; each comes from its own client address, so only the address budget is in play.
+		for (const [ip, refusedBody] of [
+			["192.0.2.98", { ...body, name: "" }],
+			["192.0.2.97", { ...body, password: "short" }],
+			["192.0.2.96", { ...body, termsVersion: "2020-01-01" }],
+		] as const)
+			refused.push(
+				await outcome(await stranger.request("/api/auth/sign-up/email", refusedBody, as(ip))),
+			);
+		expect(refused.slice(0, 4)).toEqual([
+			[400, "POLICY_ACCEPTANCE_REQUIRED"],
+			[400, "POLICY_ACCEPTANCE_REQUIRED"],
+			[400, "POLICY_ACCEPTANCE_REQUIRED"],
+			[400, "INVALID_REQUEST"],
+		]);
+		expect(refused.slice(4).map((result) => (result as unknown[])[0])).toEqual([400, 400]);
+		expect(f.mailer.messages).toHaveLength(0);
+
+		// The address's owner still registers: the refusals spent none of its three daily attempts.
+		const owner = new MerchantBrowser(f);
+		await owner.json("/api/platform/config");
+		await owner.json("/api/platform/signup-intent", {
+			accepted: true,
+			termsVersion: testConfig.termsVersion,
+			privacyVersion: testConfig.privacyVersion,
+		});
+		expect(await outcome(await owner.request("/api/auth/sign-up/email", body))).toEqual([
+			200,
+			undefined,
+		]);
+		expect(f.mailer.messages).toHaveLength(1);
+
+		// Requests that do send mail still spend it: the third attempt of the day is the last.
+		const attempts: unknown[] = [];
+		for (const ip of ["192.0.2.21", "192.0.2.22"])
+			attempts.push((await owner.request("/api/auth/sign-up/email", body, as(ip))).status);
+		const fourth = await owner.request("/api/auth/sign-up/email", body, as("192.0.2.23"));
+		expect([...attempts, fourth.status]).toEqual([200, 200, 429]);
+		expect((await fourth.json()).error.code).toBe("RATE_LIMITED");
+	});
 	it("expires sessions on both idle and absolute limits", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();
