@@ -715,6 +715,53 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		});
 	});
 
+	it("counts a confirmation in a lifetime window that replaced its hold's daily one", async () => {
+		const limit = await replaceableLimit("late-lifetime");
+		await limit("100");
+		const hold = await context.repository.reserveUsage(project, {
+			billingAccountId: "late-lifetime",
+			featureKey: "ai_credits",
+			quantity: "40",
+			idempotencyKey: "late-lifetime:reserve",
+			expiresInSeconds: 300,
+		});
+		expect(hold.allowed).toBe(true);
+		// The hold was taken in yesterday's daily window, and a lifetime limit now replaces the daily.
+		await context.sql`
+			UPDATE control_windows
+			SET window_start_at = window_start_at - interval '1 day',
+				window_end_at = window_end_at - interval '1 day'
+			WHERE customer_id = (SELECT id FROM customers WHERE billing_account_id = 'late-lifetime')
+		`;
+		await context.repository.controlsEnterprise.upsertControl(project, {
+			billingAccountId: "late-lifetime",
+			controlKind: "usage_limit",
+			featureKey: "ai_credits",
+			limitValue: "100",
+			interval: "lifetime",
+			actor: "integration-test",
+		});
+		expect(
+			await context.repository.confirmUsageReservation(project, {
+				billingAccountId: "late-lifetime",
+				reservationId: hold.reservationId ?? "",
+				quantity: "40",
+				idempotencyKey: "late-lifetime:confirm",
+			}),
+		).toMatchObject({ allowed: true });
+
+		// A lifetime window has no earlier window the confirmation could have been charged to, so the
+		// 40 recorded count in it whatever the daily window was charged.
+		expect(await consume("late-lifetime", "61", "late-lifetime:over")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { limitValue: "100", currentValue: "40", requestedValue: "61" },
+		});
+		expect(await consume("late-lifetime", "60", "late-lifetime:fit")).toMatchObject({
+			allowed: true,
+		});
+	});
+
 	it("keeps an open hold's exposure through a control replacement and settles it once", async () => {
 		const limit = await replaceableLimit("replace-hold");
 		await limit("100");

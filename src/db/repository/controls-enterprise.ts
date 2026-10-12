@@ -1286,10 +1286,12 @@ export function carriedControlConsumptionSql(input: {
  * recorded: a hold's confirmation charges the window the hold was taken in, which can be an
  * earlier one, and a correction follows the event it corrects. A window of another cadence is not
  * that window: what a daily window was charged is still recorded in the month that contains it.
+ * A lifetime window has no earlier window, since it spans every time, so nothing is probed for it:
+ * the lookup costs one probe per confirmation and correction in a window that is read whole.
  * For a row of `usage_events` aliased `event` beside a row of `control_policies` aliased `policy`.
  */
 export function chargedToEarlierWindowSql(): DrizzleSQL {
-	return drizzleSql`EXISTS (
+	return drizzleSql`(policy.interval <> 'lifetime' AND EXISTS (
 		SELECT 1
 		FROM usage_event_control_entries entry
 		JOIN control_windows charged
@@ -1307,7 +1309,7 @@ export function chargedToEarlierWindowSql(): DrizzleSQL {
 			AND (COALESCE(event.original_event_recorded_at, event.recorded_at) < charged.window_start_at
 				OR (charged.window_end_at IS NOT NULL
 					AND COALESCE(event.original_event_recorded_at, event.recorded_at) >= charged.window_end_at))
-	)`;
+	))`;
 }
 
 /** What a plan default is judged against: the customer's subscriptions and grants at `now`. */
@@ -1405,8 +1407,8 @@ export function eventInControlReachSql(): DrizzleSQL {
  * Usage a hold's confirmation charged to an earlier window of the same cadence than the one it
  * was recorded in is not counted again: the window that held it already counted it. Only
  * confirmations and the corrections of them are looked up, a plain consumption is always charged
- * where it is recorded. Where a replaced control counted the same window, the larger of the two
- * counts is the usage.
+ * where it is recorded, and a lifetime window has no earlier window to look in. Where a replaced
+ * control counted the same window, the larger of the two counts is the usage.
  */
 export function recordedControlConsumptionSql(
 	input: {
