@@ -440,6 +440,28 @@ checked when that mode is first used. Installing the app happens in the merchant
 the settings present, a [headless](#headless-mode) process still refreshes existing OAuth
 connections and processes app events, including deauthorization.
 
+### Customer erasure keys
+
+Optional. Erasing a billing account rewrites its row to an anonymized stub and leaves a tombstone
+that keeps the original id from being created again for a while, so a late provider event or a
+stale write cannot bring the account back. The tombstone stores a keyed digest, HMAC-SHA256 over
+the project instance and the id, never the id; the key lives in the environment, not in the
+database. The key is separate from `QUOTUM_SECRETS_KEY_BASE64` on purpose: a digest cannot be
+re-keyed without the original id, so it must not change when connection secrets rotate.
+
+| Variable | Purpose |
+| --- | --- |
+| `BILLING_ERASURE_KEY_ID` | Label stored beside each digest: 1 to 64 letters, digits, `.`, `_` or `-`. Set together with the key. |
+| `BILLING_ERASURE_KEY_BASE64` | At least 32 random bytes, base64: `openssl rand -base64 32`. |
+| `BILLING_ERASURE_PREVIOUS_KEY_ID`, `BILLING_ERASURE_PREVIOUS_KEY_BASE64` | The key being retired, as a pair. Must have a different id. |
+| `BILLING_ERASURE_TOMBSTONE_DAYS` | How long a tombstone blocks the id, 7 to 365 (`30`). It applies to tombstones written afterwards. |
+
+Rotate by deploying a new key id with the old pair as the previous key, and keep the previous key
+for at least the tombstone window; digests written under it keep matching until they expire.
+Startup fails when a live tombstone names a key id that is configured as neither the current nor
+the previous key, because the guard could not match it and would let the erased id return without
+an error. With no key configured, nothing is matched and the creation paths run unchanged.
+
 ### Other optional variables
 
 Defaults in parentheses.

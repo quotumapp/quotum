@@ -23,6 +23,25 @@ retention delete, and the only index on those columns led with `project_id`, so 
 skip-scanned it once per project. No table changes and nothing is backfilled, so a dump from the
 previous release restores as it is: follow steps 1, 2, 4 and 6 of
 [stored job provider identity](#stored-job-provider-identity). An older image cannot read the new
+
+## Customer erasure records
+
+The billing core baseline adds what a customer erasure records, and nothing writes it until an
+erasure operation exists:
+
+- `customers.erased_at` and the check `customers_erased_check`, which allows it only on a row whose
+  `email` is null and `metadata` is `{}`;
+- `customer_erasures`, one row per erased account: the durable operation a worker resumes and the
+  receipt that outlives the account's identity, with the restrict foreign key
+  `customer_erasures_project_customer_fk`;
+- `customer_erasure_tombstones`, the keyed digests that keep an erased id from being created again
+  until `expires_at`, with the indexes `idx_customer_erasures_claim` and
+  `idx_customer_erasure_tombstones_expiry`.
+
+Existing customers keep a null `erased_at` and both tables start empty, so the move needs no manual
+SQL: follow steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity).
+Configure the [erasure keys](deployment.md#customer-erasure-keys) before the first erasure; a
+process without them runs the creation paths unchanged. An older image cannot read the new
 baseline, so a rollback restores the pre-upgrade backup.
 
 ## Promotional plan grants

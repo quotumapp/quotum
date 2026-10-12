@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 import { z } from "zod";
 import { type BillingLogLevel, billingLogLevelSchema } from "./observability/log-level";
+import { type ErasureKeyring, erasureKeyFromBase64 } from "./shared/erasure-digest";
 import { type DestinationPolicy, parseAllowedNetworks } from "./shared/safe-http";
 
 export type AppleEnvironmentName = "sandbox" | "production";
@@ -15,6 +16,17 @@ export interface BillingRateLimitEnv {
 	meteringLimit: number;
 	trustProxyHeaders: boolean;
 }
+
+/** Customer erasure settings, present only when an erasure key is configured. */
+export interface ErasureEnv {
+	keyring: ErasureKeyring;
+	/** How long a tombstone keeps the erased billing account id from being created again. */
+	tombstoneDays: number;
+}
+
+export const erasureTombstoneDaysDefault = 30;
+export const erasureTombstoneDaysMin = 7;
+export const erasureTombstoneDaysMax = 365;
 
 export interface SentryEnv {
 	dsn: string | null;
@@ -96,6 +108,8 @@ export interface BillingEnv {
 	 * Composition accepts it only for a headless deployment.
 	 */
 	projectionReceivers?: DestinationPolicy;
+	/** Present only when `BILLING_ERASURE_KEY_ID` and its key are configured. */
+	erasure?: ErasureEnv;
 }
 
 const envSchema = z.object({
@@ -133,6 +147,13 @@ const envSchema = z.object({
 	).default("60000"),
 	BILLING_PROJECTION_ALLOWED_NETWORKS: optionalString(),
 	BILLING_PROJECTION_ALLOW_INSECURE_HTTP: z.enum(["true", "false"]).default("false"),
+	BILLING_ERASURE_KEY_ID: optionalString(),
+	BILLING_ERASURE_KEY_BASE64: optionalString(),
+	BILLING_ERASURE_PREVIOUS_KEY_ID: optionalString(),
+	BILLING_ERASURE_PREVIOUS_KEY_BASE64: optionalString(),
+	BILLING_ERASURE_TOMBSTONE_DAYS: positiveIntegerString("BILLING_ERASURE_TOMBSTONE_DAYS").default(
+		String(erasureTombstoneDaysDefault),
+	),
 	BILLING_USAGE_PARTITION_UPKEEP: z.enum(["true", "false"]).default("true"),
 	BILLING_STRIPE_WRITE_PERMISSION_PROBES: z.enum(["true", "false"]).default("true"),
 	BILLING_RATE_LIMIT_WINDOW_MS: positiveIntegerString("BILLING_RATE_LIMIT_WINDOW_MS").default(
@@ -199,6 +220,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 		parsed.BILLING_PROJECTION_ALLOWED_NETWORKS,
 		parsed.BILLING_PROJECTION_ALLOW_INSECURE_HTTP === "true",
 	);
+	const erasure = parseErasureEnv(parsed);
 
 	return {
 		logLevel: parsed.BILLING_LOG_LEVEL,
@@ -247,6 +269,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 		},
 		sentry,
 		...(projectionReceivers === undefined ? {} : { projectionReceivers }),
+		...(erasure === undefined ? {} : { erasure }),
 	};
 }
 
@@ -382,6 +405,55 @@ function ipv4FromMappedIpv6(value: string): string | null {
 	const high = Number.parseInt(hextets[0] ?? "", 16);
 	const low = Number.parseInt(hextets[1] ?? "", 16);
 	return [high >>> 8, high & 0xff, low >>> 8, low & 0xff].join(".");
+}
+
+/**
+ * The erasure keyring. A key id and its key come as a pair; the previous pair is optional and
+ * must differ from the current id, because a tombstone records only the id of the key that wrote it.
+ */
+function parseErasureEnv(parsed: z.infer<typeof envSchema>): ErasureEnv | undefined {
+	const keyId = parsed.BILLING_ERASURE_KEY_ID;
+	const keyBase64 = parsed.BILLING_ERASURE_KEY_BASE64;
+	const previousId = parsed.BILLING_ERASURE_PREVIOUS_KEY_ID;
+	const previousBase64 = parsed.BILLING_ERASURE_PREVIOUS_KEY_BASE64;
+	if ((keyId === undefined) !== (keyBase64 === undefined)) {
+		throw new Error("BILLING_ERASURE_KEY_ID and BILLING_ERASURE_KEY_BASE64 must be set together");
+	}
+	if ((previousId === undefined) !== (previousBase64 === undefined)) {
+		throw new Error(
+			"BILLING_ERASURE_PREVIOUS_KEY_ID and BILLING_ERASURE_PREVIOUS_KEY_BASE64 must be set together",
+		);
+	}
+	if (keyId === undefined || keyBase64 === undefined) {
+		if (previousId !== undefined) {
+			throw new Error("BILLING_ERASURE_PREVIOUS_KEY_ID requires BILLING_ERASURE_KEY_ID");
+		}
+		return undefined;
+	}
+	if (previousId === keyId) {
+		throw new Error("BILLING_ERASURE_PREVIOUS_KEY_ID must differ from BILLING_ERASURE_KEY_ID");
+	}
+	const tombstoneDays = Number.parseInt(parsed.BILLING_ERASURE_TOMBSTONE_DAYS, 10);
+	if (tombstoneDays < erasureTombstoneDaysMin || tombstoneDays > erasureTombstoneDaysMax) {
+		throw new Error(
+			`BILLING_ERASURE_TOMBSTONE_DAYS must be between ${erasureTombstoneDaysMin} and ${erasureTombstoneDaysMax}`,
+		);
+	}
+	try {
+		return {
+			keyring: {
+				current: erasureKeyFromBase64(keyId, keyBase64),
+				previous:
+					previousId === undefined || previousBase64 === undefined
+						? null
+						: erasureKeyFromBase64(previousId, previousBase64),
+			},
+			tombstoneDays,
+		};
+	} catch (error) {
+		// The parser's messages name the key id and the limit, never the key material.
+		throw new Error(`BILLING_ERASURE_KEY: ${error instanceof Error ? error.message : "invalid"}`);
+	}
 }
 
 function parseOperatorApiKey(value: string | undefined): string | null {

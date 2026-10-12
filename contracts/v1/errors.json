@@ -132,6 +132,12 @@
       ]
     },
     {
+      "code": "BILLING_ACCOUNT_ERASED",
+      "sources": [
+        "src/billing/customer-erasures.ts"
+      ]
+    },
+    {
       "code": "BILLING_ACCOUNT_NOT_FOUND",
       "sources": [
         "src/db/repository/balance-adjustments.ts",
