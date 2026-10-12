@@ -1,5 +1,10 @@
 export interface LoadGateResult {
 	scenario: string;
+	/** Requests the scenario sent, and how many came back 200 with the operation allowed. */
+	requests: number;
+	accepted: number;
+	/** Requests answered 200 with `allowed: false`. */
+	denied: number;
 	statuses: Record<string, number>;
 	rps: number;
 	clientMs: { p99: number };
@@ -14,6 +19,20 @@ export interface LoadGateResult {
 	};
 }
 
+/**
+ * Only a 2xx answer counts as served. A business denial is itself HTTP 200 with `allowed: false`,
+ * so it never passes through here; it is gated by the accepted count instead. A status that does not
+ * parse as a number is not a success.
+ */
+export function isSuccessStatus(status: number): boolean {
+	return status >= 200 && status < 300;
+}
+
+/**
+ * The lane's fixture grants every account far more than a run can spend, so no request is expected
+ * to be denied, rejected or fail: every non-2xx status fails the lane, and so does any closed-loop
+ * request that was not accepted. A scenario that sent nothing measured nothing and fails too.
+ */
 export function evaluateLoadGates(
 	results: readonly LoadGateResult[],
 	options: { minRps?: number; maxP99Ms?: number } = {},
@@ -36,9 +55,18 @@ export function evaluateLoadGates(
 			}
 		}
 		for (const [status, count] of Object.entries(result.statuses)) {
-			const code = Number(status);
-			if ((code === 0 || code >= 500) && count > 0) {
+			if (!isSuccessStatus(Number(status)) && count > 0) {
 				failures.push(`${label} recorded ${count} status ${status} responses`);
+			}
+		}
+		// Arrival-rate levels are gated above, against what was scheduled.
+		if (result.arrivals === undefined) {
+			if (result.requests === 0) {
+				failures.push(`${label} sent no requests`);
+			} else if (result.accepted < result.requests) {
+				failures.push(
+					`${label} accepted ${result.accepted}/${result.requests} requests (${result.denied} denied)`,
+				);
 			}
 		}
 		if (result.scenario !== "workers-off" && result.db.projectionBacklogAfter > 0) {
