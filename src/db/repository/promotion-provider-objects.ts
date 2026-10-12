@@ -1,4 +1,4 @@
-import { sql as drizzleSql } from "drizzle-orm";
+import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import { sha256Hex, stableJson } from "../../billing/decimal";
 import {
 	type PromotionDiscount,
@@ -47,6 +47,44 @@ export interface PromotionMaintenanceCounts {
 	couponsCreated: number;
 	couponsCurrent: number;
 	promotionCodesCreated: number;
+}
+
+/**
+ * The Stripe promotion objects one poll claims, oldest attempt first. It is a function of its own
+ * so a test can plan the statement the worker runs. Its state filter has to stay inside the
+ * predicate of `idx_billing_promotion_provider_objects_due`: Postgres uses a partial index only
+ * when the query implies the predicate, and otherwise every poll scans the table.
+ */
+export function dueStripePromotionObjectsSql(limit: number, staleBefore: Date): DrizzleSQL {
+	return drizzleSql`
+		SELECT o.project_id, o.id
+		FROM promotion_provider_objects o
+		LEFT JOIN promotion_provider_objects parent
+			ON parent.project_id = o.project_id AND parent.id = o.parent_object_id
+		LEFT JOIN promotion_codes c
+			ON c.project_id = o.project_id AND c.id = o.promotion_code_id
+		WHERE o.provider = 'stripe'
+			AND o.next_attempt_at <= now()
+			AND (o.locked_at IS NULL OR o.locked_at < ${staleBefore.toISOString()})
+			AND (
+				o.status = 'pending'
+				OR (
+					o.status = 'ready'
+					AND (o.retire_requested OR o.provider_active IS DISTINCT FROM o.desired_active)
+				)
+			)
+			AND (
+				o.object_kind = 'coupon'
+				OR (
+					o.object_kind = 'promotion_code'
+					AND parent.status = 'ready'
+					AND (c.starts_at IS NULL OR c.starts_at <= now())
+				)
+			)
+		ORDER BY o.next_attempt_at, o.id
+		LIMIT ${limit}
+		FOR UPDATE OF o SKIP LOCKED
+	`;
 }
 
 /**
@@ -153,33 +191,7 @@ export class PromotionProviderObjectRepository extends RepositoryModule {
 				tx,
 				drizzleSql`
 					WITH due AS (
-						SELECT o.project_id, o.id
-						FROM promotion_provider_objects o
-						LEFT JOIN promotion_provider_objects parent
-							ON parent.project_id = o.project_id AND parent.id = o.parent_object_id
-						LEFT JOIN promotion_codes c
-							ON c.project_id = o.project_id AND c.id = o.promotion_code_id
-						WHERE o.provider = 'stripe'
-							AND o.next_attempt_at <= now()
-							AND (o.locked_at IS NULL OR o.locked_at < ${staleBefore.toISOString()})
-							AND (
-								o.status = 'pending'
-								OR (
-									o.status = 'ready'
-									AND (o.retire_requested OR o.provider_active IS DISTINCT FROM o.desired_active)
-								)
-							)
-							AND (
-								o.object_kind = 'coupon'
-								OR (
-									o.object_kind = 'promotion_code'
-									AND parent.status = 'ready'
-									AND (c.starts_at IS NULL OR c.starts_at <= now())
-								)
-							)
-						ORDER BY o.next_attempt_at, o.id
-						LIMIT ${limit}
-						FOR UPDATE OF o SKIP LOCKED
+						${dueStripePromotionObjectsSql(limit, staleBefore)}
 					)
 					UPDATE promotion_provider_objects o
 					SET locked_at = now(), locked_by = ${workerId}, attempts = o.attempts + 1, updated_at = now()

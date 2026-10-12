@@ -532,9 +532,6 @@ export const subscriptions = pgTable(
 			"gin",
 			table.latestTransactionId.op("gin_trgm_ops"),
 		),
-		index("idx_billing_subscriptions_raw_state_order_id")
-			.on(sql`(raw_state ->> 'orderId'::text)`)
-			.where(sql`(raw_state ? 'orderId'::text)`),
 		index("idx_billing_subscriptions_plan_version")
 			.on(table.planVersionId)
 			.where(sql`(plan_version_id IS NOT NULL)`),
@@ -902,7 +899,10 @@ export const purchases = pgTable(
 	(table): PgTableExtraConfigValue[] => [
 		index("idx_billing_purchases_raw_payload_order_id")
 			.on(sql`(raw_payload ->> 'orderId'::text)`)
-			.where(sql`(raw_payload ? 'orderId'::text)`),
+			.where(sql`((raw_payload ->> 'orderId'::text) IS NOT NULL)`),
+		index("idx_billing_purchases_raw_payload_latest_order_id")
+			.on(sql`(raw_payload ->> 'latestOrderId'::text)`)
+			.where(sql`((raw_payload ->> 'latestOrderId'::text) IS NOT NULL)`),
 		index("idx_billing_purchases_original_transaction_id_trgm").using(
 			"gin",
 			table.originalTransactionId.op("gin_trgm_ops"),
@@ -5012,7 +5012,7 @@ export const promotionProviderObjects = pgTable(
 		index("idx_billing_promotion_provider_objects_due")
 			.on(table.nextAttemptAt, table.id)
 			.where(
-				sql`${table.status} = 'pending' OR (${table.status} = 'ready' AND ${table.providerActive} IS DISTINCT FROM ${table.desiredActive})`,
+				sql`${table.status} = 'pending' OR (${table.status} = 'ready' AND (${table.retireRequested} OR ${table.providerActive} IS DISTINCT FROM ${table.desiredActive}))`,
 			),
 	],
 );

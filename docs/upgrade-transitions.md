@@ -61,6 +61,23 @@ previous release restores as it is: follow steps 1, 2, 4 and 6 of
 [stored job provider identity](#stored-job-provider-identity). An older image cannot read the new
 baseline, so a rollback restores the pre-upgrade backup.
 
+## Order id and promotion object indexes
+
+Two baseline indexes could never serve the statement they were built for, because Postgres uses a
+partial index only when the query implies its predicate:
+
+- `idx_billing_promotion_provider_objects_due` (metering baseline) now also covers
+  `retire_requested`, which the Stripe promotion object claim reads;
+- `idx_billing_purchases_raw_payload_order_id` (billing core baseline) is partial on
+  `(raw_payload->>'orderId') IS NOT NULL` instead of `raw_payload ? 'orderId'`, and
+  `idx_billing_purchases_raw_payload_latest_order_id` is new. Google voided-purchase and RTDN
+  events, and the admin purchase list, look purchases up by either order id. The unused
+  `idx_billing_subscriptions_raw_state_order_id` is gone.
+
+No table changes and nothing is backfilled, so a dump from the previous release restores as it is:
+follow steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity). An
+older image cannot read the new baselines, so a rollback restores the pre-upgrade backup.
+
 ## Console off by default
 
 `QUOTUM_MERCHANT_ENABLED` is replaced by `QUOTUM_CONSOLE_ENABLED`, and the default flips from on to
