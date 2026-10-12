@@ -13,16 +13,42 @@ export const bindingAdoptionSchema = z
 	.object({
 		productKey: z.string().trim().min(1).max(120),
 		name: z.string().trim().min(1).max(120),
-		kind: z.enum(["subscription", "topup"]),
-		entitlementKey: z.string().trim().min(1).max(120),
-		credits: z.number().int().nonnegative().max(100_000),
+		kind: z.enum(["subscription", "topup", "gift"]),
+		/** Required except for a gift, whose product grants nothing to the buyer. */
+		entitlementKey: z.string().trim().min(1).max(120).optional(),
+		/** Required except for a gift, which carries no credits. */
+		credits: z.number().int().nonnegative().max(100_000).optional(),
 		externalProductId: z.string().regex(/^prod_[A-Za-z0-9]+$/u),
 		externalPriceId: z.string().regex(/^price_[A-Za-z0-9]+$/u),
 	})
 	.strict()
-	.refine((input) => input.kind === "subscription" || input.credits > 0, {
-		message: "Top-ups require positive credits",
-		path: ["credits"],
+	.superRefine((input, context) => {
+		if (input.kind === "gift") {
+			if (input.credits !== undefined && input.credits !== 0) {
+				context.addIssue({
+					code: "custom",
+					message: "A gift carries no credits",
+					path: ["credits"],
+				});
+			}
+			return;
+		}
+		if (input.entitlementKey === undefined) {
+			context.addIssue({
+				code: "custom",
+				message: "An entitlement key is required",
+				path: ["entitlementKey"],
+			});
+		}
+		if (input.credits === undefined) {
+			context.addIssue({ code: "custom", message: "Credits are required", path: ["credits"] });
+		} else if (input.kind === "topup" && input.credits === 0) {
+			context.addIssue({
+				code: "custom",
+				message: "Top-ups require positive credits",
+				path: ["credits"],
+			});
+		}
 	});
 export type BindingAdoption = z.infer<typeof bindingAdoptionSchema>;
 export const bindingResultSchema = z.object({
@@ -123,7 +149,7 @@ export class CatalogBindings extends RepositoryModule implements CatalogBindings
 			price.transform_quantity ||
 			price.unit_amount === null ||
 			price.unit_amount < 0 ||
-			(input.kind === "topup" && price.unit_amount === 0) ||
+			(input.kind !== "subscription" && price.unit_amount === 0) ||
 			(input.kind === "subscription") !== (price.type === "recurring") ||
 			(price.recurring && price.recurring.usage_type !== "licensed")
 		)
@@ -151,20 +177,23 @@ export class CatalogBindings extends RepositoryModule implements CatalogBindings
 				sql`SELECT id, name, type, entitlement_key, credit_amount, active FROM products WHERE project_id = ${projectId} AND key = ${input.productKey}`,
 			);
 			const type = input.kind === "subscription" ? "subscription" : "consumable";
+			// Nothing reads a consumable's entitlement key, so a gift needs none from the caller.
+			const entitlementKey = input.entitlementKey ?? input.productKey;
+			const credits = input.credits ?? 0;
 			if (
 				existing &&
 				(!existing.active ||
 					existing.name !== input.name ||
 					existing.type !== type ||
-					existing.entitlement_key !== input.entitlementKey ||
-					existing.credit_amount !== input.credits)
+					existing.entitlement_key !== entitlementKey ||
+					existing.credit_amount !== credits)
 			)
 				conflict("product_identity_conflict");
 			const productRow =
 				existing ??
 				(await executeOne<{ id: string }>(
 					tx,
-					sql`INSERT INTO products (project_id, key, name, type, entitlement_key, credit_amount, active) VALUES (${projectId}, ${input.productKey}, ${input.name}, ${type}, ${input.entitlementKey}, ${input.credits}, true) RETURNING id`,
+					sql`INSERT INTO products (project_id, key, name, type, entitlement_key, credit_amount, active) VALUES (${projectId}, ${input.productKey}, ${input.name}, ${type}, ${entitlementKey}, ${credits}, true) RETURNING id`,
 				));
 			if (!productRow) throw new Error("Product insert returned no row");
 			const mapping = await executeOne<{ id: string; product_id: string; active: boolean }>(

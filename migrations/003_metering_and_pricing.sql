@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS catalog_provider_operations (
 		OR (status IN ('pending', 'processing') AND completed_at IS NULL)
 	),
 	CONSTRAINT catalog_provider_operations_action_check CHECK (
-		action IN ('adopt_plan', 'adopt_topup', 'adopt_price')
+		action IN ('adopt_plan', 'adopt_topup', 'adopt_gift', 'adopt_price')
 	)
 );
 

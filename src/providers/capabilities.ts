@@ -113,7 +113,7 @@ export function providersComposing(
 /**
  * A catalog construct whose provider binding must support the operations it requires: an adopted
  * store product, a plan, a price component (the plan's base price when `item` is null, otherwise
- * the priced plan item; the plan's other components decide hybrid pricing) or a top-up.
+ * the priced plan item; the plan's other components decide hybrid pricing), a top-up or a gift.
  */
 export type CatalogCapabilityTarget =
 	| { kind: "product"; productType: ProductType }
@@ -123,7 +123,8 @@ export type CatalogCapabilityTarget =
 			plan: Pick<CatalogPlanIntent, "basePrice" | "items">;
 			item: Pick<CatalogPlanItemIntent, "itemKind" | "price"> | null;
 	  }
-	| { kind: "topup" };
+	| { kind: "topup" }
+	| { kind: "gift" };
 
 /** The provider operations a binding on `target` requires, in contract order. */
 export function requiredOperationsFor(target: CatalogCapabilityTarget): ProviderOperation[] {
@@ -160,6 +161,10 @@ export function requiredOperationsFor(target: CatalogCapabilityTarget): Provider
 		case "topup":
 			required.add("catalog.product.consumable");
 			required.add("catalog.topup");
+			break;
+		case "gift":
+			required.add("catalog.product.consumable");
+			required.add("checkout.hosted");
 			break;
 	}
 	return providerOperations.filter((operation) => required.has(operation));

@@ -74,10 +74,15 @@ export function catalogCapabilityReadiness(
 			}
 		}
 		judged.push(
-			...compatibility.filter(({ target }) => target.kind !== "topup" && target.key === plan.key),
+			...compatibility.filter(
+				({ target }) =>
+					target.kind !== "topup" && target.kind !== "gift" && target.key === plan.key,
+			),
 		);
 	}
-	judged.push(...compatibility.filter(({ target }) => target.kind === "topup"));
+	judged.push(
+		...compatibility.filter(({ target }) => target.kind === "topup" || target.kind === "gift"),
+	);
 	const details = new Map<
 		string,
 		ReadinessCapabilityDetail & { targets: CatalogCompatibilityTarget[] }

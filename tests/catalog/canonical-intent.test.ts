@@ -952,3 +952,120 @@ describe("unlimited usage items", () => {
 		).toBe("normalized");
 	});
 });
+
+describe("gifts", () => {
+	const pro = {
+		key: "pro",
+		name: "Pro",
+		version: 1,
+		basePrice: price("pro-base", [stripe("pro")]),
+		items: [{ itemKind: "access" as const, featureKey: "support" }],
+	};
+	const gift = (overrides: Partial<NonNullable<AuthoredCatalogIntent["gifts"]>[number]> = {}) => ({
+		key: "gift-12m",
+		name: "One year, as a gift",
+		promotionKey: "voucher-12m",
+		codeValidDays: 730,
+		providerBindings: [stripe("gift_12m")],
+		...overrides,
+	});
+
+	it("leaves a catalog without gifts as it was, so its intent hash does not move", () => {
+		const without = parseAuthoredIntent(catalog([pro]));
+		const empty = parseAuthoredIntent(catalog([pro], { gifts: [], retiredGiftKeys: [] }));
+
+		expect(without.canonical).not.toHaveProperty("gifts");
+		expect(without.canonical).not.toHaveProperty("retiredGiftKeys");
+		expect(sha256Hex(stableJson(empty.canonical))).toBe(sha256Hex(stableJson(without.canonical)));
+	});
+
+	it("defaults to one code and reads its own canonical form back unchanged", () => {
+		const parsed = parseAuthoredIntent(catalog([pro], { gifts: [gift()] }));
+
+		expect(parsed.canonical.gifts).toEqual([
+			{
+				key: "gift-12m",
+				name: "One year, as a gift",
+				promotionKey: "voucher-12m",
+				codeCount: 1,
+				codeValidDays: 730,
+				providerBindings: [stripe("gift_12m")],
+			},
+		]);
+		expect(CanonicalCatalogSchema.safeParse(parsed.canonical).success).toBe(true);
+		expect(parseAuthoredIntent(parsed.canonical as AuthoredCatalogIntent).canonical).toEqual(
+			parsed.canonical,
+		);
+		expect(decodeStoredIntent(JSON.parse(JSON.stringify(parsed.canonical)))).toEqual(
+			parsed.canonical,
+		);
+	});
+
+	it("keeps a pack of codes and a retired gift", () => {
+		const parsed = parseAuthoredIntent(
+			catalog([pro], {
+				gifts: [gift({ key: "gift-12m-x2", codeCount: 2 })],
+				retiredGiftKeys: ["gift-6m"],
+			}),
+		);
+
+		expect(parsed.canonical.gifts?.[0]?.codeCount).toBe(2);
+		expect(parsed.canonical.retiredGiftKeys).toEqual(["gift-6m"]);
+	});
+
+	it("accepts a Stripe web gift and refuses anything else", async () => {
+		expect(await previewOutcome(catalog([pro], { gifts: [gift()] }))).toBe("normalized");
+		expect(
+			await previewOutcome(
+				catalog([pro], { gifts: [gift({ providerBindings: [apple("gift_12m")] })] }),
+			),
+		).toBe("Gift gift-12m binds only to Stripe web, not apple/ios");
+		expect(
+			await previewOutcome(
+				catalog([pro], { gifts: [gift({ providerBindings: [stripe("gift_12m"), google("g")] })] }),
+			),
+		).toBe("Gift gift-12m binds only to Stripe web, not google/android");
+	});
+
+	it("bounds the code count and the validity", async () => {
+		for (const [overrides, message] of [
+			[{ codeCount: 0 }, "gift code count must be an integer from 1 to 100"],
+			[{ codeCount: 101 }, "gift code count must be an integer from 1 to 100"],
+			[{ codeCount: 1.5 }, "gift code count must be an integer from 1 to 100"],
+			[{ codeValidDays: 0 }, "gift code validity in days must be an integer from 1 to 730"],
+			[{ codeValidDays: 731 }, "gift code validity in days must be an integer from 1 to 730"],
+		] as const) {
+			expect(await previewOutcome(catalog([pro], { gifts: [gift(overrides)] }))).toBe(message);
+		}
+	});
+
+	it("keeps a gift key, a gift's product and a retirement unambiguous", async () => {
+		expect(
+			await previewOutcome(catalog([pro], { gifts: [gift(), gift({ promotionKey: "other" })] })),
+		).toBe("Duplicate gift key values are not allowed");
+		expect(
+			await previewOutcome(
+				catalog([pro], {
+					topups: [
+						{
+							key: "credits_1000",
+							featureKey: "credits",
+							quantity: "1000",
+							providerBindings: [stripe("gift_12m")],
+						},
+					],
+					gifts: [gift()],
+				}),
+			),
+		).toBe("Duplicate provider product binding values are not allowed");
+		expect(
+			await previewOutcome(catalog([pro], { gifts: [gift()], retiredGiftKeys: ["gift-12m"] })),
+		).toBe("gift gift-12m cannot be active and retired");
+	});
+
+	it("reads a gift the same in the working intent as in the canonical one", () => {
+		const parsed = parseAuthoredIntent(catalog([pro], { gifts: [gift()] }));
+
+		expect(parsed.working.gifts).toEqual(parsed.canonical.gifts);
+	});
+});

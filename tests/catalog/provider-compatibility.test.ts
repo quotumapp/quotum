@@ -821,6 +821,49 @@ describe("catalog provider compatibility assert", () => {
 			{ target: { kind: "topup", key: "pack" }, provider: "google", blocked: ["catalog.topup"] },
 		]);
 	});
+
+	it("gates gift bindings on hosted checkout, which only Stripe offers", () => {
+		const gift = (binding: CatalogProviderBindingIntent) => ({
+			...catalogOf([], []),
+			gifts: [
+				{
+					key: "gift-12m",
+					name: "One year, as a gift",
+					promotionKey: "voucher-12m",
+					codeCount: 1,
+					codeValidDays: 730,
+					providerBindings: [binding],
+				},
+			],
+		});
+		const web = gift(stripe("gift-web"));
+		expect(catalogCapabilityTargets(web)).toEqual([
+			{
+				target: { kind: "gift", key: "gift-12m" },
+				construct: { kind: "gift" },
+				bindings: [stripe("gift-web")],
+			},
+		]);
+		expect(() => assertCatalogProviderCompatibility(web, providerCapabilityCatalog)).not.toThrow();
+
+		const withoutHosted = withSupport("stripe", "checkout.hosted", unsupported);
+		const error = capabilityErrorOf(() => assertCatalogProviderCompatibility(web, withoutHosted));
+		expect(error.message).toBe(
+			"Gift gift-12m cannot bind stripe: checkout.hosted is not supported",
+		);
+		expect(reported(error)).toEqual([
+			{
+				target: { kind: "gift", key: "gift-12m" },
+				provider: "stripe",
+				blocked: ["checkout.hosted"],
+			},
+		]);
+
+		const store = capabilityErrorOf(() =>
+			assertCatalogProviderCompatibility(gift(apple("gift-ios")), providerCapabilityCatalog),
+		);
+		expect(store.message).toContain("Gift gift-12m cannot bind apple");
+	});
 });
 
 class NormalizationSentinel extends Error {}
