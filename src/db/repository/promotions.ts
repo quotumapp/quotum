@@ -16,6 +16,7 @@ import {
 	normalizeCreatePromotionInput,
 	normalizePromotionCode,
 	normalizePromotionCodes,
+	normalizePromotionTermsUpdate,
 	type PromotionChannel,
 	type PromotionCodeAvailability,
 	type PromotionCodeInput,
@@ -38,6 +39,7 @@ import {
 	type PromotionServiceLike,
 	type PromotionStatus,
 	type PromotionTarget,
+	type PromotionTermsUpdate,
 	type PromotionValidation,
 	type PromotionValidationInput,
 	promotionCodeUnavailability,
@@ -62,7 +64,9 @@ import {
 } from "./promotion-plan-grants";
 import {
 	PromotionProviderObjectRepository,
+	reconcileExistingCouponInTx,
 	refreshHostedCodeDesiredStateInTx,
+	stampCouponDiscountInTx,
 } from "./promotion-provider-objects";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -392,6 +396,88 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 		});
 	}
 
+	/**
+	 * Edits a promotion for future redemptions. Earlier redemptions keep the terms they snapshotted,
+	 * and subscriptions keep the coupon terms Stripe copied onto them. A discount change moves the
+	 * promotion to a new Stripe coupon, because coupon terms cannot be edited.
+	 */
+	async updatePromotionTerms(
+		project: ProjectInstanceContext,
+		key: string,
+		input: PromotionTermsUpdate,
+		actor: string,
+	): Promise<PromotionRecord> {
+		return await this.transaction(async (tx) => {
+			const projectId = project.projectInstanceId;
+			const current = await requirePromotion(tx, projectId, drizzleSql`p.key = ${key}`, true);
+			if (current.status !== "active") throw promotionError("PROMOTION_ARCHIVED");
+			const update = normalizePromotionTermsUpdate(current, input);
+			if (update.changed.length === 0) return current;
+			const discountChanged = update.changed.includes("discount");
+			if (discountChanged && (await hasLiveAppleOffer(tx, projectId, current.id))) {
+				throw promotionError("PROMOTION_APPLE_OFFER_LINKED");
+			}
+			if (discountChanged && current.effect.kind === "discount") {
+				// Coupons made before terms were editable name no discount; they were made from this one.
+				await stampCouponDiscountInTx(tx, projectId, current.id, current.effect.discount);
+			}
+			const discount = update.effect.kind === "discount" ? update.effect.discount : null;
+			await executeOne(
+				tx,
+				drizzleSql`
+					UPDATE promotions
+					SET name = ${update.name}, metadata = ${jsonb(update.metadata)},
+						terms_hash = ${update.termsHash},
+						discount_type = ${discount?.type ?? null},
+						percent_off_bps = ${discount?.type === "percent" ? discount.percentOffBps : null},
+						discount_duration = ${discount?.duration ?? null},
+						duration_months = ${discount?.durationMonths ?? null},
+						updated_at = now()
+					WHERE project_id = ${projectId} AND id = ${current.id}
+					RETURNING id
+				`,
+			);
+			if (discountChanged) {
+				await executeRows(
+					tx,
+					drizzleSql`
+						DELETE FROM promotion_discount_amounts
+						WHERE project_id = ${projectId} AND promotion_id = ${current.id}
+						RETURNING promotion_id
+					`,
+				);
+				if (discount?.type === "amount") {
+					for (const amount of discount.amounts) {
+						await executeOne(
+							tx,
+							drizzleSql`
+								INSERT INTO promotion_discount_amounts (
+									project_id, promotion_id, currency, amount_off_minor
+								)
+								VALUES (${projectId}, ${current.id}, ${amount.currency}, ${amount.amountOffMinor})
+								RETURNING promotion_id
+							`,
+						);
+					}
+				}
+				await reconcileExistingCouponInTx(tx, projectId, current.id);
+			}
+			await insertAudit(tx, projectId, {
+				promotionId: current.id,
+				action: "promotion_terms_updated",
+				actor,
+				details: {
+					key,
+					changed: update.changed,
+					before: update.before,
+					after: update.after,
+					termsHash: { before: current.termsHash, after: update.termsHash },
+				},
+			});
+			return await requirePromotion(tx, projectId, drizzleSql`p.id = ${current.id}`);
+		});
+	}
+
 	async addPromotionCodes(
 		project: ProjectInstanceContext,
 		key: string,
@@ -678,6 +764,8 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 	/**
 	 * Rejects a second Quotum discount on a subscription while an earlier one can still apply. A
 	 * merchant's own Stripe discounts are not counted; execution keeps them on the subscription.
+	 * How long a discount lasts is the term the redemption snapshotted, not the promotion's current
+	 * one, which an operator can have changed since.
 	 */
 	async ensureSubscriptionDiscountAvailable(
 		project: ProjectInstanceContext,
@@ -697,10 +785,15 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 						OR (
 							r.status = 'applied'
 							AND (
-								p.discount_duration = 'forever'
+								COALESCE(r.effect_snapshot -> 'discount' ->> 'duration', p.discount_duration) = 'forever'
 								OR (
-									p.discount_duration = 'repeating'
-									AND r.applied_at + make_interval(months => p.duration_months) > now()
+									COALESCE(r.effect_snapshot -> 'discount' ->> 'duration', p.discount_duration) = 'repeating'
+									AND r.applied_at + make_interval(
+										months => COALESCE(
+											(r.effect_snapshot -> 'discount' ->> 'durationMonths')::integer,
+											p.duration_months
+										)
+									) > now()
 								)
 							)
 						)
@@ -2050,6 +2143,27 @@ async function existingCodesMatch(
 	return true;
 }
 
+/** Whether an Apple offer is still linked; its price is set at Apple, not by the promotion. */
+async function hasLiveAppleOffer(
+	executor: QueryExecutor,
+	projectId: string,
+	promotionId: string,
+): Promise<boolean> {
+	const linked = await executeOne<{ id: string }>(
+		executor,
+		drizzleSql`
+			SELECT id
+			FROM promotion_provider_objects
+			WHERE project_id = ${projectId}
+				AND promotion_id = ${promotionId}
+				AND provider = 'apple'
+				AND status <> 'retired'
+			LIMIT 1
+		`,
+	);
+	return linked !== null;
+}
+
 export async function insertAudit(
 	executor: QueryExecutor,
 	projectId: string,
@@ -2059,6 +2173,7 @@ export async function insertAudit(
 		action:
 			| "promotion_created"
 			| "promotion_archived"
+			| "promotion_terms_updated"
 			| "codes_added"
 			| "code_deactivated"
 			| "provider_mapping_added"

@@ -5253,6 +5253,7 @@ export const promotionAuditEvents = pgTable(
 			.$type<
 				| "promotion_created"
 				| "promotion_archived"
+				| "promotion_terms_updated"
 				| "codes_added"
 				| "code_deactivated"
 				| "provider_mapping_added"
@@ -5267,7 +5268,7 @@ export const promotionAuditEvents = pgTable(
 	(table): PgTableExtraConfigValue[] => [
 		check(
 			"promotion_audit_events_action_check",
-			sql`((action = ANY (ARRAY['promotion_created'::text, 'promotion_archived'::text, 'codes_added'::text, 'code_deactivated'::text, 'provider_mapping_added'::text, 'provider_mapping_retired'::text, 'provider_sync_requested'::text])))`,
+			sql`((action = ANY (ARRAY['promotion_created'::text, 'promotion_archived'::text, 'promotion_terms_updated'::text, 'codes_added'::text, 'code_deactivated'::text, 'provider_mapping_added'::text, 'provider_mapping_retired'::text, 'provider_sync_requested'::text])))`,
 		),
 		check(
 			"promotion_audit_events_actor_check",

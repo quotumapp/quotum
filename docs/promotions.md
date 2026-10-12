@@ -2,11 +2,13 @@
 
 - Document kind: Current behavior
 
-A promotion is an immutable offer with one effect: a `discount` (percent in basis points, or a
+A promotion is an offer with one effect: a `discount` (percent in basis points, or a
 fixed amount per currency, lasting `once`, `repeating` for 1-36 months, or `forever`), a
 `feature_grant` of consumable feature quantities, or a `plan_grant` of a plan for a number of days
 or months (at most 730 days or 24 months). It can target plan or product keys and restrict the channels (`web`, `ios`, `android`)
-where a code may be entered. Changing terms means creating a new promotion.
+where a code may be entered. An operator can [change its name, metadata and discount](#changing-a-promotions-terms)
+for later redemptions; its effect kind, targets, channels and grant terms are fixed, so changing
+those means creating a new promotion.
 
 A `plan_grant` gives the account the plan itself, with no provider, payment method or invoice; see
 [plan grant codes](#plan-grant-codes).
@@ -22,6 +24,8 @@ Operators manage promotions with project authentication, `X-Billing-Operator-Key
 - `POST /v1/admin/promotions/:promotionKey/codes` adds codes all-or-nothing;
   `GET .../codes` lists them; `POST .../codes/:codeId/deactivate` deactivates one.
 - `POST /v1/admin/promotions/:promotionKey/archive` stops new redemptions.
+- `POST /v1/admin/promotions/:promotionKey/terms` changes the name, metadata or discount of an active
+  promotion for later redemptions; see [changing a promotion's terms](#changing-a-promotions-terms).
 - `POST /v1/admin/promotions/:promotionKey/provider-sync` queues every failed provider-side object
   of the promotion (such as a Stripe coupon or promotion code) for another attempt with its attempt
   count reset, and records an audit event; it needs `X-Billing-Actor`.
@@ -85,6 +89,43 @@ result with `duplicate: true`, and reusing it for a different code or channel re
 `IDEMPOTENCY_CONFLICT`. Redemption shares the validation rate limit.
 `GET .../promotion-redemptions` and `GET .../promotion-redemptions/:redemptionId` read one
 account's ledger.
+
+### Changing a promotion's terms
+
+`POST /v1/admin/promotions/:promotionKey/terms` takes `name`, `metadata` and `discount`, at least
+one of them, and needs the operator key and `X-Billing-Actor`. `discount` replaces the whole
+discount, as a percentage or fixed amounts with its duration:
+
+```http
+POST /v1/admin/promotions/web-intro/terms
+Content-Type: application/json
+
+{"discount":{"type":"percent","percentOffBps":2500,"duration":"repeating","durationMonths":3}}
+```
+
+It answers with the promotion. An archived promotion answers `PROMOTION_ARCHIVED`, and a
+`discount` on a feature or plan grant promotion answers `PROMOTION_TERMS_INVALID`. Sending the
+stored terms again changes nothing and writes no audit event; a change writes a
+`promotion_terms_updated` event with each changed field before and after. The change reaches later
+redemptions only:
+
+- A redemption keeps the terms it snapshotted, and a subscription keeps the discount Stripe copied
+  onto it from the coupon. The promotion's `redemptionCounts` show how many redemptions that is.
+  An edit does not move those customers to the new terms.
+- Stripe coupon terms cannot change, so a new discount gets a new coupon. Hosted Checkout codes are
+  deactivated and re-created on it, and are unavailable in Stripe for the moments between. A code
+  entered through `promotionCode` uses the new coupon from the next checkout.
+- A preview made before the change carries the old terms hash and fails as stale at execution; ask
+  for a new one.
+- Stripe shows customers the name a coupon was created with, and a coupon keeps it. A renamed
+  promotion shows its new name in Quotum at once and in Stripe from its next coupon, which a
+  discount change creates.
+- A promotion with a linked Apple offer refuses a discount change
+  (`PROMOTION_APPLE_OFFER_LINKED`) because the price is set at Apple. Retire the offer, or create
+  a new promotion.
+- `POST /v1/admin/promotions` compares its body with the stored terms. After a change, replaying the
+  original create body answers `PROMOTION_KEY_CONFLICT`, and a body with the changed terms answers
+  `200`.
 
 ### Plan grant codes
 

@@ -711,6 +711,34 @@ localDescribe("promotion HTTP API", () => {
 			{ billingAccountId: "buyer", code: "LAUNCH", status: "reserved" },
 		]);
 
+		const revised = await testRequest(app, "/v1/admin/promotions/premium-launch/terms", {
+			method: "POST",
+			headers: operator,
+			body: JSON.stringify({
+				discount: {
+					type: "amount",
+					amounts: [{ currency: "usd", amountOffMinor: 400 }],
+					duration: "repeating",
+					durationMonths: 3,
+				},
+			}),
+		});
+		expect(revised.status).toBe(200);
+		expect((await revised.json()).data).toMatchObject({
+			effect: {
+				kind: "discount",
+				discount: { type: "amount", amounts: [{ currency: "USD", amountOffMinor: 400 }] },
+			},
+			redemptionCounts: { reserved: 1 },
+		});
+		const staleCreate = await testRequest(app, "/v1/admin/promotions", {
+			method: "POST",
+			headers: operator,
+			body,
+		});
+		expect(staleCreate.status).toBe(409);
+		expect((await staleCreate.json()).error.code).toBe("PROMOTION_KEY_CONFLICT");
+
 		const deactivated = await testRequest(
 			app,
 			`/v1/admin/promotions/premium-launch/codes/${launch.id}/deactivate`,
@@ -729,6 +757,13 @@ localDescribe("promotion HTTP API", () => {
 		});
 		expect(added.status).toBe(409);
 		expect((await added.json()).error.code).toBe("PROMOTION_ARCHIVED");
+		const lateTerms = await testRequest(app, "/v1/admin/promotions/premium-launch/terms", {
+			method: "POST",
+			headers: operator,
+			body: JSON.stringify({ name: "Too late" }),
+		});
+		expect(lateTerms.status).toBe(409);
+		expect((await lateTerms.json()).error.code).toBe("PROMOTION_ARCHIVED");
 	});
 
 	it("isolates promotions and codes between project instances", async () => {
@@ -934,6 +969,476 @@ localDescribe("promotion Stripe provisioning", () => {
 			{ status: "pending", error: null, attempts: 0 },
 		]);
 		expect(await worker.runOnce()).toMatchObject({ ready: 1 });
+	});
+});
+
+localDescribe("promotion terms updates", () => {
+	beforeAll(async () => {
+		context = await createLocalPostgresContext();
+	});
+
+	beforeEach(async () => {
+		await resetAndSeedIntegrationData(context.sql);
+		await publishAiCreditsCatalog(context.repository);
+	});
+
+	afterAll(async () => {
+		await context.sql.close();
+	});
+
+	const percent = (percentOffBps: number, duration: "once" | "repeating" | "forever" = "once") => ({
+		type: "percent" as const,
+		percentOffBps,
+		duration,
+		durationMonths: duration === "repeating" ? 3 : null,
+	});
+
+	it("changes terms for later redemptions, audits the change and keeps earlier snapshots", async () => {
+		const created = await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({ key: "web-intro", name: "Web intro", codes: [{ code: "WEB-INTRO" }] }),
+		);
+		const code =
+			created.promotion.key === "web-intro" ? await codeIdOf("web-intro", "WEB-INTRO") : "";
+		const customer = await customerId("intro-1");
+		const taken = await context.repository.promotions.reservePromotionRedemption(
+			project,
+			reservation({
+				customerId: customer,
+				billingAccountId: "intro-1",
+				promotionCodeId: code,
+				effectSnapshot: { kind: "discount", promotionKey: "web-intro", discount: percent(2000) },
+			}),
+		);
+		await context.repository.promotions.applyPromotionRedemption(project, {
+			redemptionId: taken.redemption.id,
+			stripeCheckoutSessionId: "cs_intro_1",
+		});
+
+		const updated = await context.repository.promotions.updatePromotionTerms(
+			project,
+			"web-intro",
+			{
+				name: "Web intro 2",
+				metadata: { campaign: "intro" },
+				discount: percent(1500, "repeating"),
+			},
+			"ops@example.com",
+		);
+
+		expect(updated).toMatchObject({
+			key: "web-intro",
+			name: "Web intro 2",
+			status: "active",
+			metadata: { campaign: "intro" },
+			effect: { kind: "discount", discount: percent(1500, "repeating") },
+			codeCounts: { total: 1, active: 1 },
+			redemptionCounts: { reserved: 0, applied: 1, released: 0, reversed: 0 },
+		});
+		expect(updated.termsHash).not.toBe(created.promotion.termsHash);
+		const [snapshot] = await context.sql<Array<{ effect_snapshot: { discount: unknown } }>>`
+			SELECT effect_snapshot FROM promotion_redemptions WHERE id = ${taken.redemption.id}
+		`;
+		expect(snapshot?.effect_snapshot.discount).toEqual(percent(2000));
+		const audit = await context.sql<
+			Array<{ action: string; actor: string; details: Record<string, unknown> }>
+		>`SELECT action, actor, details FROM promotion_audit_events ORDER BY id`;
+		expect(audit.map((row) => row.action)).toEqual([
+			"promotion_created",
+			"codes_added",
+			"promotion_terms_updated",
+		]);
+		expect(audit[2]).toMatchObject({
+			actor: "ops@example.com",
+			details: {
+				key: "web-intro",
+				changed: ["name", "metadata", "discount"],
+				before: { name: "Web intro", metadata: {}, discount: percent(2000) },
+				after: {
+					name: "Web intro 2",
+					metadata: { campaign: "intro" },
+					discount: percent(1500, "repeating"),
+				},
+				termsHash: { before: created.promotion.termsHash, after: updated.termsHash },
+			},
+		});
+
+		const repeated = await context.repository.promotions.updatePromotionTerms(
+			project,
+			"web-intro",
+			{ name: "Web intro 2", discount: percent(1500, "repeating") },
+			"ops@example.com",
+		);
+		expect(repeated).toEqual(updated);
+		const [{ count }] = await context.sql<Array<{ count: number }>>`
+			SELECT count(*)::integer AS count FROM promotion_audit_events
+		`;
+		expect(count).toBe(3);
+	});
+
+	it("hashes an edited promotion like a create with the edited terms", async () => {
+		const original = discountPromotion({
+			key: "web-intro",
+			name: "Web intro",
+			targets: [
+				{ kind: "product", key: "echo_credits_10" },
+				{ kind: "plan", key: "premium" },
+			],
+			metadata: { campaign: "intro" },
+		});
+		await context.repository.promotions.createPromotion(project, original);
+
+		const updated = await context.repository.promotions.updatePromotionTerms(
+			project,
+			"web-intro",
+			{ discount: percent(1000, "forever") },
+			actor,
+		);
+
+		const edited = {
+			...original,
+			effect: { kind: "discount" as const, discount: percent(1000, "forever") },
+		};
+		const replay = await context.repository.promotions.createPromotion(project, edited);
+		expect(replay.created).toBe(false);
+		expect(replay.promotion.termsHash).toBe(updated.termsHash);
+		expect(
+			await captureCode(context.repository.promotions.createPromotion(project, original)),
+		).toBe("PROMOTION_KEY_CONFLICT");
+	});
+
+	it("replaces fixed amounts and switches between a percentage and amounts", async () => {
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({
+				key: "web-intro",
+				effect: {
+					kind: "discount",
+					discount: {
+						type: "amount",
+						amounts: [
+							{ currency: "USD", amountOffMinor: 500 },
+							{ currency: "EUR", amountOffMinor: 450 },
+						],
+						duration: "once",
+						durationMonths: null,
+					},
+				},
+			}),
+		);
+		const amounts = async () =>
+			await context.sql<Array<{ currency: string; amount_off_minor: string }>>`
+				SELECT currency, amount_off_minor::text FROM promotion_discount_amounts ORDER BY currency
+			`;
+
+		const changed = await context.repository.promotions.updatePromotionTerms(
+			project,
+			"web-intro",
+			{
+				discount: {
+					type: "amount",
+					amounts: [
+						{ currency: "usd", amountOffMinor: 700 },
+						{ currency: "GBP", amountOffMinor: 600 },
+					],
+					duration: "once",
+					durationMonths: null,
+				},
+			},
+			actor,
+		);
+		expect(changed.effect).toEqual({
+			kind: "discount",
+			discount: {
+				type: "amount",
+				amounts: [
+					{ currency: "GBP", amountOffMinor: 600 },
+					{ currency: "USD", amountOffMinor: 700 },
+				],
+				duration: "once",
+				durationMonths: null,
+			},
+		});
+		expect(await amounts()).toEqual([
+			{ currency: "GBP", amount_off_minor: "600" },
+			{ currency: "USD", amount_off_minor: "700" },
+		]);
+
+		const toPercent = await context.repository.promotions.updatePromotionTerms(
+			project,
+			"web-intro",
+			{ discount: percent(2500) },
+			actor,
+		);
+		expect(toPercent.effect).toEqual({ kind: "discount", discount: percent(2500) });
+		expect(await amounts()).toEqual([]);
+	});
+
+	it("refuses archived, non-discount and Apple-linked changes", async () => {
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({ key: "web-intro" }),
+		);
+		await context.repository.promotions.createPromotion(project, grantPromotion());
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({ key: "old-intro", name: "Old intro" }),
+		);
+		await context.repository.promotions.archivePromotion(project, "old-intro", actor);
+
+		expect(
+			await captureCode(
+				context.repository.promotions.updatePromotionTerms(
+					project,
+					"old-intro",
+					{ name: "Renamed" },
+					actor,
+				),
+			),
+		).toBe("PROMOTION_ARCHIVED");
+		expect(
+			await captureCode(
+				context.repository.promotions.updatePromotionTerms(
+					project,
+					"missing",
+					{ name: "Renamed" },
+					actor,
+				),
+			),
+		).toBe("PROMOTION_NOT_FOUND");
+		expect(
+			await captureCode(
+				context.repository.promotions.updatePromotionTerms(
+					project,
+					"welcome-credits",
+					{ discount: percent(1000) },
+					actor,
+				),
+			),
+		).toBe("PROMOTION_TERMS_INVALID");
+		const renamed = await context.repository.promotions.updatePromotionTerms(
+			project,
+			"welcome-credits",
+			{ name: "Welcome pack" },
+			actor,
+		);
+		expect(renamed).toMatchObject({ name: "Welcome pack", effect: { kind: "feature_grant" } });
+
+		await context.sql`
+			INSERT INTO promotion_provider_objects (
+				project_id, promotion_id, provider, object_kind, provider_account_id, external_id,
+				product_external_id, status, ready_at
+			)
+			SELECT project_id, id, 'apple', 'apple_promotional_offer', 'com.example.app', 'intro20',
+				'premium_monthly', 'ready', now()
+			FROM promotions WHERE key = 'web-intro'
+		`;
+		expect(
+			await captureCode(
+				context.repository.promotions.updatePromotionTerms(
+					project,
+					"web-intro",
+					{ discount: percent(1000) },
+					actor,
+				),
+			),
+		).toBe("PROMOTION_APPLE_OFFER_LINKED");
+		const nameOnly = await context.repository.promotions.updatePromotionTerms(
+			project,
+			"web-intro",
+			{ name: "Web intro 2" },
+			actor,
+		);
+		expect(nameOnly.name).toBe("Web intro 2");
+		await context.sql`
+			UPDATE promotion_provider_objects
+			SET status = 'retired', desired_active = false, retired_at = now()
+			WHERE provider = 'apple'
+		`;
+		const changed = await context.repository.promotions.updatePromotionTerms(
+			project,
+			"web-intro",
+			{ discount: percent(1000) },
+			actor,
+		);
+		expect(changed.effect).toEqual({ kind: "discount", discount: percent(1000) });
+	});
+
+	it("moves the Stripe coupon to the new terms, re-creates the hosted code and survives a revert", async () => {
+		const stripe = createFakeStripePromotions();
+		const worker = promotionWorker(stripe);
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({
+				key: "premium-intro",
+				name: "Premium intro",
+				targets: [{ kind: "plan", key: "premium" }],
+				codes: [{ code: "HOSTED", hostedCheckoutEnabled: true }, { code: "API" }],
+			}),
+		);
+		await worker.runOnce();
+		await worker.runOnce();
+		const first = await context.repository.promotions.getPromotion(project, "premium-intro");
+		const firstCoupon = first.providerObjects.find((object) => object.objectKind === "coupon");
+		const firstCode = first.providerObjects.find(
+			(object) => object.objectKind === "promotion_code",
+		);
+
+		const updated = await context.repository.promotions.updatePromotionTerms(
+			project,
+			"premium-intro",
+			{ discount: percent(3000) },
+			actor,
+		);
+		expect(
+			updated.providerObjects.filter((object) => object.objectKind === "coupon"),
+		).toMatchObject([
+			{ status: "ready", externalId: firstCoupon?.externalId },
+			{ status: "pending", externalId: null },
+		]);
+		for (let run = 0; run < 3; run += 1) await worker.runOnce();
+
+		const second = await context.repository.promotions.getPromotion(project, "premium-intro");
+		const coupons = second.providerObjects.filter((object) => object.objectKind === "coupon");
+		const codes = second.providerObjects.filter((object) => object.objectKind === "promotion_code");
+		expect(coupons.map((object) => object.status)).toEqual(["ready", "ready"]);
+		expect(codes.map((object) => object.status)).toEqual(["retired", "ready"]);
+		expect(stripe.state.coupons.get(coupons[0]?.externalId ?? "")?.params).toMatchObject({
+			percent_off: 20,
+		});
+		expect(stripe.state.coupons.get(coupons[1]?.externalId ?? "")?.params).toMatchObject({
+			percent_off: 30,
+			applies_to: { products: ["prod_stripe_premium"] },
+		});
+		expect(stripe.state.promotionCodes.get(firstCode?.externalId ?? "")?.active).toBe(false);
+		expect(stripe.state.promotionCodes.get(codes[1]?.externalId ?? "")?.coupon).toBe(
+			coupons[1]?.externalId ?? "missing coupon",
+		);
+
+		await context.repository.promotions.updatePromotionTerms(
+			project,
+			"premium-intro",
+			{ discount: percent(2000) },
+			actor,
+		);
+		for (let run = 0; run < 3; run += 1) await worker.runOnce();
+
+		const third = await context.repository.promotions.getPromotion(project, "premium-intro");
+		const latest = third.providerObjects.filter((object) => object.objectKind === "coupon");
+		expect(latest).toHaveLength(3);
+		expect(stripe.state.coupons.get(latest[2]?.externalId ?? "")?.params).toMatchObject({
+			percent_off: 20,
+		});
+		expect(latest[2]?.externalId).not.toBe(latest[0]?.externalId);
+		const liveCodes = third.providerObjects.filter(
+			(object) => object.objectKind === "promotion_code" && object.status !== "retired",
+		);
+		expect(liveCodes).toHaveLength(1);
+		expect(stripe.state.promotionCodes.get(liveCodes[0]?.externalId ?? "")?.coupon).toBe(
+			latest[2]?.externalId ?? "missing coupon",
+		);
+		expect(stripe.state.coupons.get(latest[0]?.externalId ?? "")?.params).toMatchObject({
+			percent_off: 20,
+		});
+	});
+
+	it("keeps a coupon made before terms were editable on the terms it was made from", async () => {
+		const stripe = createFakeStripePromotions();
+		const worker = promotionWorker(stripe);
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({
+				key: "premium-intro",
+				targets: [{ kind: "plan", key: "premium" }],
+				codes: [{ code: "HOSTED", hostedCheckoutEnabled: true }],
+			}),
+		);
+		// A coupon from before terms were editable has no discount in its record, and is not yet in Stripe.
+		await context.repository.promotionProviders.reconcilePromotionCoupons(10);
+		await context.sql`UPDATE promotion_provider_objects SET applies_to = applies_to - 'discount'`;
+
+		const unchanged = await context.repository.promotionProviders.prepareStripeCoupon(
+			project,
+			(await context.repository.promotions.getPromotion(project, "premium-intro")).id,
+		);
+		const [stamped] = await context.sql<Array<{ applies_to: { discount?: unknown } }>>`
+			SELECT applies_to FROM promotion_provider_objects WHERE object_kind = 'coupon'
+		`;
+		expect(stamped?.applies_to.discount).toEqual(percent(2000));
+		expect(unchanged.status).toBe("pending");
+
+		await context.sql`UPDATE promotion_provider_objects SET applies_to = applies_to - 'discount'`;
+		await context.repository.promotions.updatePromotionTerms(
+			project,
+			"premium-intro",
+			{ discount: percent(3000) },
+			actor,
+		);
+		for (let run = 0; run < 3; run += 1) await worker.runOnce();
+
+		const promotion = await context.repository.promotions.getPromotion(project, "premium-intro");
+		const coupons = promotion.providerObjects.filter((object) => object.objectKind === "coupon");
+		expect(coupons).toHaveLength(2);
+		expect(stripe.state.coupons.get(coupons[0]?.externalId ?? "")?.params).toMatchObject({
+			percent_off: 20,
+		});
+		expect(stripe.state.coupons.get(coupons[1]?.externalId ?? "")?.params).toMatchObject({
+			percent_off: 30,
+		});
+	});
+
+	it("decides stacking from the terms a redemption snapshotted, not the current ones", async () => {
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({
+				key: "web-intro",
+				effect: { kind: "discount", discount: percent(2000, "repeating") },
+				codes: [{ code: "WEB-INTRO" }],
+			}),
+		);
+		const code = await codeIdOf("web-intro", "WEB-INTRO");
+		const take = async (billingAccountId: string, subscription: string, discount: unknown) => {
+			const taken = await context.repository.promotions.reservePromotionRedemption(
+				project,
+				reservation({
+					customerId: await customerId(billingAccountId),
+					billingAccountId,
+					promotionCodeId: code,
+					externalSubscriptionId: subscription,
+					effectSnapshot: { kind: "discount", promotionKey: "web-intro", discount },
+				}),
+			);
+			await context.repository.promotions.applyPromotionRedemption(project, {
+				redemptionId: taken.redemption.id,
+				stripeCheckoutSessionId: `cs_${billingAccountId}`,
+			});
+		};
+		await take("stack-1", "sub_repeating", percent(2000, "repeating"));
+		await take("stack-2", "sub_once", percent(2000, "once"));
+
+		await context.repository.promotions.updatePromotionTerms(
+			project,
+			"web-intro",
+			{ discount: percent(2000, "once") },
+			actor,
+		);
+		expect(
+			await captureCode(
+				context.repository.promotions.ensureSubscriptionDiscountAvailable(project, "sub_repeating"),
+			),
+		).toBe("PROMOTION_STACKING_NOT_ALLOWED");
+
+		await context.repository.promotions.updatePromotionTerms(
+			project,
+			"web-intro",
+			{ discount: percent(2000, "forever") },
+			actor,
+		);
+		expect(
+			await captureCode(
+				context.repository.promotions.ensureSubscriptionDiscountAvailable(project, "sub_once"),
+			),
+		).toBeUndefined();
 	});
 });
 
@@ -2047,6 +2552,43 @@ function reservation(
 		actor: "backend",
 		...overrides,
 	};
+}
+
+async function codeIdOf(promotionKey: string, code: string): Promise<string> {
+	const listed = await context.repository.promotions.listPromotionCodes(project, promotionKey, {
+		limit: 100,
+	});
+	const match = listed.items.find((item) => item.code === code);
+	if (match === undefined) throw new Error(`code ${code} was not found`);
+	return match.id;
+}
+
+function promotionWorker(stripe: ReturnType<typeof createFakeStripePromotions>) {
+	return new PromotionMaintenanceWorker({
+		workerId: "promotion-worker",
+		repository: {
+			releaseExpiredPromotionReservations: (limit) =>
+				context.repository.promotions.releaseExpiredPromotionReservations(limit),
+			reconcilePromotionCoupons: (limit) =>
+				context.repository.promotionProviders.reconcilePromotionCoupons(limit),
+			ensureHostedPromotionCodeObjects: (limit) =>
+				context.repository.promotionProviders.ensureHostedPromotionCodeObjects(limit),
+			claimStripeObjects: (workerId, limit, staleBefore) =>
+				context.repository.promotionProviders.claimStripeObjects(workerId, limit, staleBefore),
+			markStripeObjectOutcome: (projectId, objectId, workerId, outcome) =>
+				context.repository.promotionProviders.markStripeObjectOutcome(
+					projectId,
+					objectId,
+					workerId,
+					outcome,
+				),
+		},
+		projectContextResolver: integrationProjectContextResolver(),
+		adapterForJob: () => ({
+			promotions: { syncObject: async (job) => await syncPromotionStripeObject(stripe, job) },
+		}),
+		logger: { error() {} },
+	});
 }
 
 async function captureCode(promise: Promise<unknown>): Promise<string | undefined> {

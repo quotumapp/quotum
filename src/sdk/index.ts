@@ -37,6 +37,7 @@ export type {
 	PromotionRedeemResult,
 	PromotionRedemptionRecord,
 	PromotionRevokeResult,
+	PromotionTermsUpdate,
 	PromotionValidation,
 } from "../billing/promotions";
 export type {

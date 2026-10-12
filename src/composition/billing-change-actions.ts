@@ -19,6 +19,7 @@ import { correctionBodySchema } from "../app/metering-routes";
 import {
 	addPromotionCodesBodySchema,
 	createPromotionBodySchema,
+	promotionTermsBodySchema,
 	redeemPromotionCodeBodySchema,
 	revokePromotionRedemptionBodySchema,
 } from "../app/promotion-routes";
@@ -88,6 +89,7 @@ export const billingChangeActions: readonly Action[] = [
 	operation("contracts.terminate", accountId, empty, "contracts"),
 	operation("promotions.create", none, createPromotionBodySchema, "promotions"),
 	operation("promotions.archive", account, empty, "promotions.detail"),
+	operation("promotions.terms.update", account, promotionTermsBodySchema, "promotions.detail"),
 	operation("promotions.sync", account, empty, "promotions.detail"),
 	operation("promotions.codes.add", account, addPromotionCodesBodySchema, "promotions.detail"),
 	operation("promotions.codes.deactivate", accountUuid, empty, "promotions.detail"),

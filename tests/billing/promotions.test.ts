@@ -5,7 +5,9 @@ import {
 	discountAppliesNextCycle,
 	normalizeCreatePromotionInput,
 	normalizePromotionCode,
+	normalizePromotionTermsUpdate,
 	type PromotionCodeAvailability,
+	type PromotionRecord,
 	promotionCodeUnavailability,
 	promotionError,
 } from "../../src/billing/promotions";
@@ -268,6 +270,210 @@ describe("promotion terms", () => {
 				),
 			),
 		).toBe("PROMOTION_CODE_CONFLICT");
+	});
+});
+
+describe("promotion terms updates", () => {
+	/** The stored promotion a create produced, as the repository would read it back. */
+	function stored(input: CreatePromotionInput): PromotionRecord {
+		const normalized = normalizeCreatePromotionInput(input);
+		return {
+			id: "11111111-1111-4111-8111-111111111111",
+			key: normalized.key,
+			name: normalized.name,
+			status: "active",
+			effect: normalized.effect,
+			targets: normalized.targets,
+			allowedChannels: normalized.allowedChannels,
+			metadata: normalized.metadata,
+			termsHash: normalized.termsHash,
+			createdBy: "operator@example.com",
+			createdAt: "2026-10-12T00:00:00.000Z",
+			archivedBy: null,
+			archivedAt: null,
+			codeCounts: { total: 0, active: 0 },
+			redemptionCounts: { reserved: 0, applied: 0, released: 0, reversed: 0 },
+			providerObjects: [],
+		};
+	}
+
+	it("hashes an edited promotion like a create with the edited terms", () => {
+		const current = stored(
+			discountInput({
+				targets: [
+					{ kind: "product", key: "credits" },
+					{ kind: "plan", key: "pro" },
+				],
+				metadata: { campaign: "spring" },
+			}),
+		);
+		const update = normalizePromotionTermsUpdate(current, {
+			name: "Spring sale v2",
+			discount: { type: "percent", percentOffBps: 1500, duration: "repeating", durationMonths: 3 },
+		});
+		const created = normalizeCreatePromotionInput(
+			discountInput({
+				name: "Spring sale v2",
+				effect: {
+					kind: "discount",
+					discount: {
+						type: "percent",
+						percentOffBps: 1500,
+						duration: "repeating",
+						durationMonths: 3,
+					},
+				},
+				targets: [
+					{ kind: "plan", key: "pro" },
+					{ kind: "product", key: "credits" },
+				],
+				metadata: { campaign: "spring" },
+			}),
+		);
+
+		expect(update.termsHash).toBe(created.termsHash);
+		expect(update.previousTermsHash).toBe(current.termsHash);
+		expect(update.changed).toEqual(["name", "discount"]);
+		expect(update.before).toEqual({
+			name: "Spring sale",
+			discount: { type: "percent", percentOffBps: 2000, duration: "once", durationMonths: null },
+		});
+	});
+
+	it("reports no change when an edit repeats the stored terms", () => {
+		const current = stored(
+			discountInput({
+				effect: {
+					kind: "discount",
+					discount: {
+						type: "amount",
+						amounts: [
+							{ currency: "usd", amountOffMinor: 500 },
+							{ currency: "eur", amountOffMinor: 450 },
+						],
+						duration: "once",
+						durationMonths: null,
+					},
+				},
+			}),
+		);
+		const update = normalizePromotionTermsUpdate(current, {
+			name: "  Spring sale ",
+			discount: {
+				type: "amount",
+				amounts: [
+					{ currency: "EUR", amountOffMinor: 450 },
+					{ currency: "USD", amountOffMinor: 500 },
+				],
+				duration: "once",
+				durationMonths: null,
+			},
+		});
+
+		expect(update.changed).toEqual([]);
+		expect(update.termsHash).toBe(update.previousTermsHash);
+		expect(update.termsHash).toBe(current.termsHash);
+	});
+
+	it("changes a name or metadata of any promotion but only a discount's discount", () => {
+		const grant = stored(
+			discountInput({
+				effect: {
+					kind: "feature_grant",
+					items: [{ featureKey: "ai_tokens", quantity: "1000", expiresAfterSeconds: null }],
+				},
+			}),
+		);
+
+		const renamed = normalizePromotionTermsUpdate(grant, { name: "Launch credits" });
+		expect(renamed.changed).toEqual(["name"]);
+		expect(renamed.effect).toEqual(grant.effect);
+		expect(
+			errorCode(() =>
+				normalizePromotionTermsUpdate(grant, {
+					discount: { type: "percent", percentOffBps: 500, duration: "once", durationMonths: null },
+				}),
+			),
+		).toBe("PROMOTION_TERMS_INVALID");
+	});
+
+	it("validates the changed terms like a create", () => {
+		const current = stored(discountInput());
+		const invalid = [
+			{},
+			{ name: "   " },
+			{ name: "x".repeat(201) },
+			{ metadata: [] as unknown as Record<string, unknown> },
+			{
+				discount: {
+					type: "percent" as const,
+					percentOffBps: 10_001,
+					duration: "once" as const,
+					durationMonths: null,
+				},
+			},
+			{
+				discount: {
+					type: "percent" as const,
+					percentOffBps: 500,
+					duration: "repeating" as const,
+					durationMonths: null,
+				},
+			},
+			{
+				discount: {
+					type: "percent" as const,
+					percentOffBps: 500,
+					duration: "repeating" as const,
+					durationMonths: 37,
+				},
+			},
+			{
+				discount: {
+					type: "percent" as const,
+					percentOffBps: 500,
+					duration: "once" as const,
+					durationMonths: 3,
+				},
+			},
+			{
+				discount: {
+					type: "amount" as const,
+					amounts: [],
+					duration: "once" as const,
+					durationMonths: null,
+				},
+			},
+		];
+
+		for (const input of invalid) {
+			expect(errorCode(() => normalizePromotionTermsUpdate(current, input))).toBe(
+				"PROMOTION_TERMS_INVALID",
+			);
+		}
+	});
+
+	it("switches between a percentage and fixed amounts", () => {
+		const current = stored(discountInput());
+		const update = normalizePromotionTermsUpdate(current, {
+			discount: {
+				type: "amount",
+				amounts: [{ currency: "usd", amountOffMinor: 500 }],
+				duration: "forever",
+				durationMonths: null,
+			},
+		});
+
+		expect(update.effect).toEqual({
+			kind: "discount",
+			discount: {
+				type: "amount",
+				amounts: [{ currency: "USD", amountOffMinor: 500 }],
+				duration: "forever",
+				durationMonths: null,
+			},
+		});
+		expect(update.changed).toEqual(["discount"]);
 	});
 });
 

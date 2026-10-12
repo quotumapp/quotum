@@ -118,6 +118,28 @@ export interface NormalizedPromotion {
 	actor: string;
 }
 
+/** A change to the terms a promotion allows editing; an absent field stays as it is. */
+export interface PromotionTermsUpdate {
+	name?: string;
+	metadata?: Record<string, unknown>;
+	/** Replaces the whole discount; only a `discount` promotion has one. */
+	discount?: PromotionDiscount;
+}
+
+export type PromotionTermsField = "name" | "metadata" | "discount";
+
+export interface NormalizedPromotionTermsUpdate {
+	name: string;
+	metadata: Record<string, unknown>;
+	effect: PromotionEffect;
+	/** What the stored terms hash to now, and what it becomes; equal when nothing changes. */
+	previousTermsHash: string;
+	termsHash: string;
+	changed: PromotionTermsField[];
+	before: Partial<Record<PromotionTermsField, unknown>>;
+	after: Partial<Record<PromotionTermsField, unknown>>;
+}
+
 export interface PromotionRecord {
 	id: string;
 	key: string;
@@ -310,6 +332,13 @@ export interface PromotionServiceLike {
 		key: string,
 		actor: string,
 	): Promise<PromotionRecord>;
+	/** Changes terms for future redemptions; earlier redemptions keep the terms they were given. */
+	updatePromotionTerms(
+		project: ProjectInstanceContext,
+		key: string,
+		input: PromotionTermsUpdate,
+		actor: string,
+	): Promise<PromotionRecord>;
 	addPromotionCodes(
 		project: ProjectInstanceContext,
 		key: string,
@@ -447,6 +476,12 @@ const promotionErrorDefinitions = [
 		message: "A promotion with this key already exists with different terms",
 	},
 	{ code: "PROMOTION_ARCHIVED", status: 409, message: "Promotion is archived" },
+	{
+		code: "PROMOTION_APPLE_OFFER_LINKED",
+		status: 409,
+		message:
+			"Promotion has a linked Apple offer; its price is set at Apple, so retire the offer before changing the discount",
+	},
 	{ code: "PROMOTION_TERMS_INVALID", status: 400, message: "Promotion terms are invalid" },
 	{ code: "PROMOTION_TARGET_NOT_FOUND", status: 400, message: "Promotion target was not found" },
 	{
@@ -578,10 +613,97 @@ export function normalizeCreatePromotionInput(input: CreatePromotionInput): Norm
 		throw invalidTerms("metadata must be an object");
 	}
 	const codes = normalizePromotionCodes(input.codes ?? [], { effect, allowedChannels });
-	const termsHash = sha256Hex(
-		stableJson({ key, name, effect, targets, allowedChannels, metadata }),
-	);
+	const termsHash = promotionTermsHash({
+		key,
+		name,
+		effect,
+		targets,
+		allowedChannels,
+		metadata,
+	});
 	return { key, name, effect, targets, allowedChannels, metadata, termsHash, codes, actor };
+}
+
+/**
+ * The identity of a promotion's terms: a replayed create answers 200 only when it hashes the same
+ * as the stored promotion, and a preview is bound to it. Create and update share this function so
+ * an edited promotion and a create with the edited terms hash alike.
+ */
+export function promotionTermsHash(terms: {
+	key: string;
+	name: string;
+	effect: PromotionEffect;
+	targets: readonly PromotionTarget[];
+	allowedChannels: readonly PromotionChannel[];
+	metadata: Record<string, unknown>;
+}): string {
+	const { key, name, effect, targets, allowedChannels, metadata } = terms;
+	return sha256Hex(stableJson({ key, name, effect, targets, allowedChannels, metadata }));
+}
+
+/**
+ * Applies an edit to a stored promotion's terms. Targets and channels are never editable, and only
+ * a discount promotion has a discount to replace.
+ */
+export function normalizePromotionTermsUpdate(
+	current: Pick<
+		PromotionRecord,
+		"key" | "name" | "effect" | "targets" | "allowedChannels" | "metadata"
+	>,
+	input: PromotionTermsUpdate,
+): NormalizedPromotionTermsUpdate {
+	if (input.name === undefined && input.metadata === undefined && input.discount === undefined) {
+		throw invalidTerms("name, metadata or discount is required");
+	}
+	const effect = normalizeEffect(current.effect);
+	const targets = normalizeTargets(current.targets, effect.kind);
+	const allowedChannels = normalizeChannels(current.allowedChannels);
+	const name = input.name === undefined ? current.name : requiredText(input.name, "name", 200);
+	const metadata = input.metadata === undefined ? current.metadata : input.metadata;
+	if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+		throw invalidTerms("metadata must be an object");
+	}
+	let nextEffect: PromotionEffect = effect;
+	if (input.discount !== undefined) {
+		if (effect.kind !== "discount") {
+			throw invalidTerms("only discount promotions have discount terms");
+		}
+		nextEffect = { kind: "discount", discount: normalizeDiscount(input.discount) };
+	}
+	const common = { key: current.key, targets, allowedChannels };
+	const previousTermsHash = promotionTermsHash({
+		...common,
+		name: current.name,
+		effect,
+		metadata: current.metadata,
+	});
+	const termsHash = promotionTermsHash({ ...common, name, effect: nextEffect, metadata });
+	const changed: PromotionTermsField[] = [];
+	const before: Partial<Record<PromotionTermsField, unknown>> = {};
+	const after: Partial<Record<PromotionTermsField, unknown>> = {};
+	const record = (field: PromotionTermsField, previous: unknown, next: unknown) => {
+		if (stableJson(previous) === stableJson(next)) return;
+		changed.push(field);
+		before[field] = previous;
+		after[field] = next;
+	};
+	record("name", current.name, name);
+	record("metadata", current.metadata, metadata);
+	record(
+		"discount",
+		effect.kind === "discount" ? effect.discount : null,
+		nextEffect.kind === "discount" ? nextEffect.discount : null,
+	);
+	return {
+		name,
+		metadata,
+		effect: nextEffect,
+		previousTermsHash,
+		termsHash,
+		changed,
+		before,
+		after,
+	};
 }
 
 export function normalizePromotionCodes(

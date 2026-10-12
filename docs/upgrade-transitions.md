@@ -148,6 +148,16 @@ nothing is backfilled, so a dump from the previous release restores as it is: fo
 and 6 of [stored job provider identity](#stored-job-provider-identity). An older image cannot read
 the new baseline, so a rollback restores the pre-upgrade backup.
 
+## Promotion terms audit action
+
+The metering baseline widens the `promotion_audit_events.action` check with
+`promotion_terms_updated`, which an operator's
+[change to a promotion's terms](promotions.md#changing-a-promotions-terms) writes. No table changes
+and nothing is backfilled, so a dump from the previous release restores as it is: follow steps 1,
+2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity). An older image cannot
+read the new baseline, so a rollback restores the pre-upgrade backup, which loses the term changes
+made since along with their audit events.
+
 ## Upgrading a populated deployment to v0.22.0
 
 v0.22.0 adds the common Paddle checkout and changes two baselines relative to v0.21.0:

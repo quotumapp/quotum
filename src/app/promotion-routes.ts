@@ -5,8 +5,10 @@ import { requireIdempotencyKey } from "../billing/idempotency-key";
 import type {
 	CreatePromotionInput,
 	PromotionCodeInput,
+	PromotionDiscount,
 	PromotionEffect,
 	PromotionServiceLike,
+	PromotionTermsUpdate,
 } from "../billing/promotions";
 import type { ApplePromotionRepository } from "../db/repository/apple-promotions";
 import { projectScopedRateLimitGuard, type RateLimiter } from "../http/rate-limit";
@@ -145,6 +147,18 @@ export const createPromotionBodySchema = z
 	})
 	.strict();
 
+/** The terms an operator can change on a promotion; targets, channels and effect kind are fixed. */
+export const promotionTermsBodySchema = z
+	.object({
+		name: z.string().trim().min(1).max(200).optional(),
+		metadata: z.record(z.string(), z.unknown()).optional(),
+		discount: discountBodySchema.optional(),
+	})
+	.strict()
+	.refine((body) => Object.keys(body).length > 0, {
+		message: "name, metadata or discount is required",
+	});
+
 export const addPromotionCodesBodySchema = z
 	.object({ codes: z.array(promotionCodeBodySchema).min(1).max(100) })
 	.strict();
@@ -228,16 +242,18 @@ const accountParams = z.object({ billingAccountId: z.string().trim().min(1).max(
 type EffectBody = z.infer<typeof effectBodySchema>;
 type CodeBody = z.infer<typeof promotionCodeBodySchema>;
 
+type DiscountBody = z.infer<typeof discountBodySchema>;
+
+function discountInput(discount: DiscountBody): PromotionDiscount {
+	return discount.type === "percent"
+		? { ...discount, durationMonths: discount.durationMonths ?? null }
+		: { ...discount, durationMonths: discount.durationMonths ?? null };
+}
+
 export function promotionEffectInput(effect: EffectBody): PromotionEffect {
 	switch (effect.kind) {
 		case "discount":
-			return {
-				kind: "discount",
-				discount:
-					effect.discount.type === "percent"
-						? { ...effect.discount, durationMonths: effect.discount.durationMonths ?? null }
-						: { ...effect.discount, durationMonths: effect.discount.durationMonths ?? null },
-			};
+			return { kind: "discount", discount: discountInput(effect.discount) };
 		case "feature_grant":
 			return {
 				kind: "feature_grant",
@@ -249,6 +265,16 @@ export function promotionEffectInput(effect: EffectBody): PromotionEffect {
 		case "plan_grant":
 			return effect;
 	}
+}
+
+export function promotionTermsUpdateInput(
+	body: z.infer<typeof promotionTermsBodySchema>,
+): PromotionTermsUpdate {
+	return {
+		...(body.name === undefined ? {} : { name: body.name }),
+		...(body.metadata === undefined ? {} : { metadata: body.metadata }),
+		...(body.discount === undefined ? {} : { discount: discountInput(body.discount) }),
+	};
 }
 
 export function promotionCodeInputs(codes: readonly CodeBody[]): PromotionCodeInput[] {
@@ -464,6 +490,33 @@ export function registerPromotionRoutes({
 				path: "/v1/admin/promotions/:promotionKey/archive",
 				responses: {
 					200: responses.postV1AdminPromotionsByPromotionKeyArchiveResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.post(
+		"/v1/admin/promotions/:promotionKey/terms",
+		async ({ body, params, request, project }) => ({
+			success: true,
+			data: await service.updatePromotionTerms(
+				privateProject(project),
+				params.promotionKey,
+				promotionTermsUpdateInput(body),
+				requireActor(request.headers),
+			),
+		}),
+		{
+			parse: [LENIENT_JSON_PARSE],
+			params: promotionParams,
+			body: promotionTermsBodySchema,
+			transform: rejectCallerProjectSelectorBody,
+			detail: operationDetail({
+				operationId: "postV1AdminPromotionsByPromotionKeyTerms",
+				tags: ["promotions"],
+				path: "/v1/admin/promotions/:promotionKey/terms",
+				responses: {
+					200: responses.postV1AdminPromotionsByPromotionKeyTermsResponse200Schema,
 				},
 			}),
 		},

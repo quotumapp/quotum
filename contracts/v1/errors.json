@@ -1111,6 +1111,12 @@
       ]
     },
     {
+      "code": "PROMOTION_APPLE_OFFER_LINKED",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
       "code": "PROMOTION_ARCHIVED",
       "sources": [
         "src/billing/promotions.ts"

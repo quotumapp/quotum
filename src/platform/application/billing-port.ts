@@ -99,6 +99,7 @@ export const merchantBillingOperations = [
 		"promotions.apple-offers.retire",
 	],
 	["POST", "/admin/promotions/:promotionKey/archive", "promotions.archive"],
+	["POST", "/admin/promotions/:promotionKey/terms", "promotions.terms.update"],
 	["POST", "/admin/promotions/:promotionKey/provider-sync", "promotions.sync"],
 	["POST", "/admin/promotion-redemptions/:redemptionId/revoke", "promotions.redemptions.revoke"],
 	["POST", "/admin/promotions/:promotionKey/codes", "promotions.codes.add"],

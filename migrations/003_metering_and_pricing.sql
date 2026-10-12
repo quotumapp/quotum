@@ -2412,6 +2412,7 @@ CREATE TABLE IF NOT EXISTS promotion_audit_events (
 		action IN (
 			'promotion_created',
 			'promotion_archived',
+			'promotion_terms_updated',
 			'codes_added',
 			'code_deactivated',
 			'provider_mapping_added', 'provider_mapping_retired',
