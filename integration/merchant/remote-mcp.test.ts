@@ -230,6 +230,14 @@ function rpc(
 	);
 }
 
+/** Why each MCP grant ended, oldest first, as its `mcp.revoked` audit events record it. */
+async function revocationReasons() {
+	const rows = await f.sql<
+		{ reason: string }[]
+	>`SELECT metadata->>'reason' AS reason FROM platform_audit_events WHERE action='mcp.revoked' ORDER BY created_at`;
+	return rows.map((row) => row.reason);
+}
+
 describe("remote MCP browser authorization", () => {
 	it("lets a consented code outlive browser proof freshness, but never its own expiry", async () => {
 		const browser = await owner();
@@ -300,6 +308,7 @@ describe("remote MCP browser authorization", () => {
 			expect(
 				await f.sql`SELECT id FROM platform_auth_oauth_refresh_tokens WHERE revoked IS NULL`,
 			).toHaveLength(0);
+			expect(await revocationReasons()).toEqual(["issuance_failed"]);
 		} finally {
 			approve.mockRestore();
 		}
@@ -308,7 +317,7 @@ describe("remote MCP browser authorization", () => {
 	it("connects, serves read tools and refreshes after deleting the transient proof", async () => {
 		const browser = await owner();
 		const tokens = await redeem(browser);
-		expect(tokens.expires_in).toBe(900);
+		expect(tokens.expires_in).toBe(3600);
 		const claims = JSON.parse(
 			Buffer.from(tokens.access_token.split(".")[1] ?? "", "base64url").toString(),
 		);
@@ -366,6 +375,7 @@ describe("remote MCP browser authorization", () => {
 		expect(
 			(await token({ grant_type: "refresh_token", refresh_token: next.refresh_token })).status,
 		).toBe(400);
+		expect(await revocationReasons()).toEqual(["user"]);
 		const reconnected = await redeem(browser);
 		expect((await rpc(reconnected.access_token)).status).toBe(200);
 		expect((await rpc(tokens.access_token)).status).toBe(401);
@@ -506,6 +516,7 @@ describe("remote MCP browser authorization", () => {
 			(await token({ grant_type: "refresh_token", refresh_token: sandbox.refresh_token })).status,
 		).toBe(400);
 		expect((await rpc(latest.access_token)).status).toBe(401);
+		expect(await revocationReasons()).toEqual(["refresh_replay"]);
 		expect((await rpc(production.access_token)).status).toBe(200);
 		const productionRefresh = await token({
 			grant_type: "refresh_token",
@@ -524,10 +535,12 @@ describe("remote MCP browser authorization", () => {
 		const newSandbox = await redeem(browser);
 		expect((await revoke(production.refresh_token)).status).toBe(200);
 		expect((await rpc(productionLatest.access_token)).status).toBe(401);
+		expect(await revocationReasons()).toEqual(["refresh_replay", "client"]);
 		expect((await rpc(newSandbox.access_token)).status).toBe(200);
 		expect((await revoke(production.refresh_token)).status).toBe(200);
 		expect((await revoke(newSandbox.access_token)).status).toBe(200);
 		expect((await rpc(newSandbox.access_token)).status).toBe(401);
+		expect(await revocationReasons()).toEqual(["refresh_replay", "client", "client"]);
 		expect((await revoke("unknown-token")).status).toBe(200);
 	});
 	it("requires PKCE and the authorized client/resource, and revokes on code reuse", async () => {
@@ -561,6 +574,7 @@ describe("remote MCP browser authorization", () => {
 		const tokens = await issued.json();
 		expect((await rpc(tokens.access_token)).status).toBe(200);
 		expect((await token(body)).status).toBe(400);
+		expect(await revocationReasons()).toContain("code_replay");
 		expect((await rpc(tokens.access_token)).status).toBe(401);
 		expect(
 			(await token({ grant_type: "refresh_token", refresh_token: tokens.refresh_token })).status,
@@ -664,6 +678,7 @@ describe("remote MCP browser authorization", () => {
 		expect(
 			(await token({ grant_type: "refresh_token", refresh_token: tokens.refresh_token })).status,
 		).toBe(400);
+		expect(await revocationReasons()).toEqual(["password_reset"]);
 	});
 });
 
@@ -1202,7 +1217,7 @@ describe("MCP browser-approved writes", () => {
 		} finally {
 			config.writesEnabled = true;
 		}
-		await new McpAuthorizations(f.store).revoke(grant.id, grant.principal_id);
+		await new McpAuthorizations(f.store).revoke(grant.id, grant.principal_id, "user");
 		await expect(f.mcpChanges.get(grant.id, change.id)).rejects.toThrow();
 	});
 	it("requires step-up in production and keeps approval bound to the connected person", async () => {

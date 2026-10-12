@@ -43,7 +43,7 @@ Callback URIs must use HTTPS or HTTP loopback; private-use schemes are rejected 
 authorization requests and fetched client metadata, including metadata without an application type.
 
 The server uses authorization code with PKCE S256 and the `/mcp` resource indicator. It issues
-15-minute bearer access tokens and rotating refresh tokens. Authorization expires 30 days after
+1-hour bearer access tokens and rotating refresh tokens. Authorization expires 30 days after
 environment selection regardless of refreshes. DPoP, client secrets, client credentials grants,
 and direct MCP execution of mutations are not supported.
 
@@ -53,6 +53,11 @@ responses for that immutable authorization; reconnecting never revives an older 
 Authorization-code replay, including concurrent redemption, revokes the affected authorization.
 Password reset and principal/membership suspension revoke affected authorizations. Every tool
 request and refresh rechecks current principal, membership, environment, and grant access.
+
+A refresh token that was already rotated, presented after its 30-second replay window, also revokes
+the authorization. Each revocation writes an `mcp.revoked` audit event whose `reason` says why a
+client had to sign in again: `user` (Disconnect in the console), `client` (the client's own
+`/oauth/revoke`), `code_replay`, `refresh_replay`, `issuance_failed` or `password_reset`.
 
 Discovery lives on the API origin at `/.well-known/oauth-authorization-server` and
 `/.well-known/oauth-protected-resource/mcp`. The authorization endpoint is on the UI origin, so the

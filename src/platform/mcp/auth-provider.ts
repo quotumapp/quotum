@@ -32,7 +32,9 @@ export function createMcpAuthProvider(store: MerchantStore) {
 		consentPage: "/oauth/consent",
 		scopes: config?.writesEnabled ? [...MCP_SCOPES, MCP_WRITE_SCOPE] : MCP_SCOPES,
 		grantTypes: ["authorization_code", "refresh_token"],
-		accessTokenExpiresIn: 900,
+		// `/mcp` rechecks the grant on every request, so this never delays a revocation; it only
+		// sets how often a client rotates its refresh token.
+		accessTokenExpiresIn: 3600,
 		refreshTokenExpiresIn: 30 * 24 * 60 * 60,
 		codeExpiresIn: 300,
 		allowDynamicClientRegistration: false,
@@ -160,7 +162,7 @@ export function createMcpAuthProvider(store: MerchantStore) {
 						containMcpCodeReplay(
 							ctx,
 							hash,
-							() => binding.revoke(grant.id, grant.principal_id),
+							() => binding.revoke(grant.id, grant.principal_id, "code_replay"),
 							store.now,
 						);
 					} else if (
@@ -171,7 +173,7 @@ export function createMcpAuthProvider(store: MerchantStore) {
 						if (typeof ctx.body.client_id !== "string") throw invalid();
 						const grant = await binding.checkRefresh(ctx.body.refresh_token, ctx.body.client_id);
 						containMcpRefreshInvalidation(ctx, grant, () =>
-							binding.revoke(grant.id, grant.principal_id),
+							binding.revoke(grant.id, grant.principal_id, "refresh_replay"),
 						);
 					} else throw new APIError("BAD_REQUEST", { error: "unsupported_grant_type" });
 				}

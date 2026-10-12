@@ -198,7 +198,7 @@ export function registerMcpRoutes(
 			// A replay only ever affects this immutable grant, including after reconnecting.
 			return {
 				success: true,
-				data: await grants.revoke(input.id, identity.principalId, access.projectInstanceId),
+				data: await grants.revoke(input.id, identity.principalId, "user", access.projectInstanceId),
 			};
 		},
 		route(
