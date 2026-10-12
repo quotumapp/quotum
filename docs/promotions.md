@@ -8,6 +8,9 @@ fixed amount per currency, lasting `once`, `repeating` for 1-36 months, or `fore
 or months (at most 730 days or 24 months). It can target plan or product keys and restrict the channels (`web`, `ios`, `android`)
 where a code may be entered. Changing terms means creating a new promotion.
 
+A `plan_grant` is stored but not redeemable yet: no channel has a redemption path for it, so
+creation accepts it and validation and redemption refuse every code of it, as described below.
+
 Operators manage promotions with project authentication, `X-Billing-Operator-Key`, and
 `X-Billing-Actor` on mutations:
 
@@ -27,14 +30,19 @@ Operators manage promotions with project authentication, `X-Billing-Operator-Key
 Codes use 3-64 letters, digits, or hyphens and are unique per project instance regardless of
 case. Each code can set a start and expiry, a global cap, a per-customer cap (one by default,
 `null` for unlimited), a first-purchase-only rule, and a billing-account restriction. A code marked
-`hostedCheckoutEnabled` cannot carry a per-customer cap or an account restriction.
+`hostedCheckoutEnabled` must belong to a web `discount` promotion and cannot carry a per-customer
+cap or an account restriction (`PROMOTION_HOSTED_CHECKOUT_UNSUPPORTED`), so a `plan_grant` never
+reaches Stripe.
 
 `POST /v1/billing-accounts/:billingAccountId/promotion-codes/validate` lets the trusted backend
 check a code before offering it. It needs only project authentication, never creates a customer
 or takes a use, treats an omitted `channel` as `web`, and returns `200` with `valid` and a `reason` such as `PROMOTION_CODE_EXPIRED`,
 `PROMOTION_CODE_EXHAUSTED`, `PROMOTION_CODE_ALREADY_REDEEMED`, or
-`PROMOTION_CODE_NOT_APPLICABLE` for a `target` the promotion does not cover. Unknown codes and codes
-restricted to another account both report `PROMOTION_CODE_NOT_FOUND` without promotion details.
+`PROMOTION_CODE_NOT_APPLICABLE` for a `target` the promotion does not cover. A code of a
+`plan_grant` promotion always answers `valid: false` with `PROMOTION_CODE_NOT_APPLICABLE`, on every
+channel and whatever else is true of the code, because no channel can redeem it. Unknown codes and
+codes restricted to another account both report `PROMOTION_CODE_NOT_FOUND` without promotion
+details.
 It is rate limited per project and client IP with the purchase-verification limit
 (`BILLING_VERIFY_RATE_LIMIT_PER_WINDOW`), counted separately from verification and shared by every
 billing account the backend validates codes for; see [rate limits](deployment.md#rate-limits).
@@ -72,8 +80,10 @@ allocation per feature. Rewards expire `expiresAfterSeconds` after redemption (a
 seconds, ten years), are spent like any other allocation, and trigger a coalesced `usage_changed` projection. On web and Android a `discount` code takes no use
 and returns `kind: "requires_commercial_action"`; pass it as `promotionCode` to a commercial action.
 On iOS, discount codes require a linked Apple promotional offer and the existing subscription;
-they return a signed StoreKit action, described below. Direct iOS feature or plan grants remain
-unsupported (`PROMOTION_CODE_CHANNEL_NOT_SUPPORTED`). Replaying the key returns the stored
+they return a signed StoreKit action, described below. Direct iOS feature grants remain
+unsupported (`PROMOTION_CODE_CHANNEL_NOT_SUPPORTED`). A `plan_grant` code answers `409`
+`PROMOTION_CODE_NOT_APPLICABLE` on every channel, takes no use and creates no customer, the same
+answer validation gives. Replaying the key returns the stored
 result with `duplicate: true`, and reusing it for a different code or channel returns
 `IDEMPOTENCY_CONFLICT`. Redemption shares the validation rate limit.
 `GET .../promotion-redemptions` and `GET .../promotion-redemptions/:redemptionId` read one
